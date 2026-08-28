@@ -92,6 +92,24 @@ const DOCKER_TARGET_FOR_FLAVOR: Record<AshImageFlavor, string> = {
   cli: 'ci',
 };
 
+/**
+ * Longest string a Docker tag may be.
+ *
+ * From the canonical grammar, `tag := /[\w][\w.-]{0,127}/` — one leading
+ * `[A-Za-z0-9_]` followed by up to 127 more of `[A-Za-z0-9_.-]`, so 128
+ * characters, no `/`, and no leading `.` or `-`.
+ * https://pkg.go.dev/github.com/distribution/reference
+ *
+ * ECR's own API accepts an `imageTag` of up to 300 characters, but that ceiling
+ * never applies: `docker tag` parses the reference on the client and rejects it
+ * before ECR is ever contacted.
+ * https://docs.aws.amazon.com/AmazonECR/latest/APIReference/API_ImageIdentifier.html
+ */
+const DOCKER_TAG_MAX_LENGTH = 128;
+
+/** Hex digits of the ref digest appended to the audit tag. See `sanitizeRefCommand`. */
+const REF_DIGEST_LENGTH = 8;
+
 export interface AshImageBuildProps {
   /** Architecture to build. `arm64` builds natively on ARM CodeBuild compute. */
   readonly platform: AshBuildPlatform;
@@ -334,6 +352,10 @@ export class AshImageBuild extends Construct {
         },
         build: {
           commands: [
+            // First, so a build that cannot compute a usable tag dies in seconds
+            // rather than after twenty minutes of `docker build`.
+            this.sanitizeRefCommand(flavors),
+
             // Write the container scripts next to the cloned Dockerfile so the
             // derived builds can COPY them.
             this.writeFileCommand('ash-src/ash-mcp-entrypoint.sh', MCP_ENTRYPOINT_SCRIPT),
@@ -367,10 +389,91 @@ export class AshImageBuild extends Construct {
     };
   }
 
+  /**
+   * Fold `$ASH_VERSION` into something a Docker tag may hold, once per build.
+   *
+   * WHY THIS EXISTS — A REAL DEPLOYMENT, NOT A HYPOTHETICAL
+   * ------------------------------------------------------
+   * `AshVersion` is a git ref handed to `git clone --branch`, and branch refs
+   * routinely contain a `/`, which a Docker tag may not. Deployed with
+   * `AshVersion=feat/distributed-execute-and-collect`, a CodeBuild run built the
+   * image successfully and then died on the version-qualified tag:
+   *
+   *   docker tag "ash-mcp:local" "<repo-uri>:mcp-arm64-feat/distributed-execute-and-collect"
+   *   Error parsing reference: "<repo-uri>:mcp-arm64-feat/distributed-execute-and-collect"
+   *   Phase complete: BUILD State: FAILED
+   *
+   * The expensive work had already succeeded; the tag threw it away and nothing
+   * reached ECR. `feat/`, `release/`, `dependabot/` and `users/` refs all did
+   * this, so it was the normal case rather than an edge one.
+   *
+   * WHY IT IS SHELL AND NOT A TYPESCRIPT STRING OPERATION
+   * -----------------------------------------------------
+   * `ASH_VERSION` carries `props.ashVersion.valueAsString`, a deploy-time
+   * CloudFormation parameter. At synth time its value is an `Fn::Ref`, so there
+   * is no string to fold. Sanitizing in TypeScript would synthesize cleanly and
+   * then fail in CodeBuild in exactly the same way.
+   *
+   * WHAT IT DOES ABOUT COLLISIONS
+   * -----------------------------
+   * Folding is many-to-one: `feat/x` and `feat-x` land on the same string, and so
+   * do two refs that differ only past the truncation point. The repository is
+   * MUTABLE by design — the moving tag depends on it — so a collision would let
+   * one build silently overwrite another build's audit tag, destroying the one
+   * property that tag exists to provide. The first eight hex digits of the
+   * SHA-256 of the RAW ref are therefore appended: distinct refs get distinct
+   * tags, and the same ref always gets the same tag, so a rebuild republishes
+   * instead of accumulating. Digesting the raw value rather than the folded one
+   * is what makes truncated refs distinguishable. The build echoes the result,
+   * because an operator looking for a rollback target reads it out of the log
+   * rather than recomputing it.
+   *
+   * The digest is appended UNCONDITIONALLY, which is a deliberate cost: a plain
+   * `v3.7.0` now tags as `mcp-arm64-v3.7.0-<digest>` rather than
+   * `mcp-arm64-v3.7.0`. Appending it only when folding changed something was
+   * considered and rejected — it makes the tag's shape depend on the ref, so an
+   * operator cannot predict it, and it is no longer injective, because a branch
+   * literally named `feat-x-<somedigest>` could still collide with a folded
+   * `feat/x`. Nothing in this repository reads the version-qualified tag
+   * programmatically; workloads reference `tagForFlavor`, the moving tag.
+   *
+   * WHY `tr` RATHER THAN `sed`
+   * -------------------------
+   * `AshVersion` declares no `AllowedPattern`, so CloudFormation accepts a value
+   * containing a newline. `sed` substitutes within a line and would pass one
+   * straight through into the tag; `tr` folds it like any other byte.
+   *
+   * The grammar's leading-character rule needs no work here. Every tag this
+   * construct writes is `<flavor>-<platform>-<suffix>`, so the first character
+   * always comes from a flavor name, and a ref like `-foo` or `.hidden` lands
+   * mid-tag where `[\w.-]` allows it. Drop that prefix and this stops being true.
+   */
+  private sanitizeRefCommand(flavors: AshImageFlavor[]): string {
+    // Budget the folded ref against the longest tag this build will compose, so
+    // the result is provably inside the grammar's 128 characters rather than
+    // inside a number someone once guessed. Two hyphens: `<tag>-<ref>-<digest>`.
+    const longestTag = Math.max(...flavors.map((f) => this.tagForFlavor(f).length));
+    const refBudget = DOCKER_TAG_MAX_LENGTH - longestTag - REF_DIGEST_LENGTH - 2;
+
+    return [
+      `ASH_SAFE_REF="$(printf '%s' "\${ASH_VERSION}" | tr -c 'A-Za-z0-9._-' '-' | cut -c1-${refBudget})"`,
+      `ASH_REF_DIGEST="$(printf '%s' "\${ASH_VERSION}" | sha256sum | cut -c1-${REF_DIGEST_LENGTH})"`,
+      '# The digest is what keeps two refs that fold to the same string on separate',
+      '# tags. A pipeline reports only its last command\'s status, so a missing',
+      '# sha256sum would leave it empty and let one build overwrite another\'s audit',
+      '# tag. Fail here instead.',
+      `[ \${#ASH_REF_DIGEST} -eq ${REF_DIGEST_LENGTH} ] || { echo "cannot digest ASH_VERSION" >&2; exit 1; }`,
+      'ASH_VERSION_TAG_SUFFIX="${ASH_SAFE_REF}-${ASH_REF_DIGEST}"',
+      'echo "version-qualified audit tag suffix: ${ASH_VERSION_TAG_SUFFIX}"',
+    ].join('\n');
+  }
+
   private flavorBuildCommands(flavor: AshImageFlavor): string[] {
     const base = `ash-base-${DOCKER_TARGET_FOR_FLAVOR[flavor]}:local`;
     const tag = this.tagForFlavor(flavor);
-    const versionedTag = `${tag}-\${ASH_VERSION}`;
+    // Composed from the folded suffix, never from `$ASH_VERSION` directly — see
+    // `sanitizeRefCommand`. The moving tag above is untouched.
+    const versionedTag = `${tag}-\${ASH_VERSION_TAG_SUFFIX}`;
     const push = [
       `docker tag "ash-${flavor}:local" "\${ASH_ECR_REPOSITORY_URI}:${tag}"`,
       `docker tag "ash-${flavor}:local" "\${ASH_ECR_REPOSITORY_URI}:${versionedTag}"`,
