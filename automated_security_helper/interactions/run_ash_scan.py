@@ -45,7 +45,10 @@ if TYPE_CHECKING:
     # Imported for annotations only. A runtime import here would pull the
     # workspace executor -- and through it core.orchestrator -- into every
     # single-directory scan's import graph.
-    from automated_security_helper.workspace.execution import WorkspaceRunResult
+    from automated_security_helper.workspace.execution import (
+        ProjectScanSettings,
+        WorkspaceRunResult,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -551,38 +554,49 @@ def _resolve_workspace_execution_config(opts: ScanOptions):
         return WorkspaceExecutionConfig()
 
 
-def _run_workspace_mode(opts: ScanOptions, logger) -> "WorkspaceRunResult":
-    """Scan every project in the plan and write the unified workspace results.
+def build_project_scan_settings(opts: ScanOptions) -> "ProjectScanSettings":
+    """Build the per-project settings record a workspace run scans from.
 
-    Returns the run result rather than an ``AshAggregatedResults``, because a
-    workspace run's verdict is per project and is already computed -- handing back
-    a merged model for ``_compute_exit_code`` to re-derive would give two answers
-    to the same question and no rule for which wins.
+    Module-level and public because there are two callers, not one: the CLI's
+    ``_run_workspace_mode`` and the MCP surface in
+    ``automated_security_helper.cli.mcp.workspace``. They assemble their
+    ``ScanOptions`` differently -- one from typer arguments, one from MCP tool
+    parameters -- but the record handed to ``execute_workspace`` has to come from
+    one construction.
+
+    Why it is extracted rather than written twice
+    ---------------------------------------------
+    ``ProjectScanSettings`` has 24 fields and every one of them is optional with a
+    plausible default, so a second construction that omits a field produces a
+    valid record and a scan that runs to completion with a setting the caller
+    never chose. Nothing raises. The two worst omissions are ``config_overrides``,
+    where dropping it silently scans with different configuration, and
+    ``ignore_suppressions``, where the default is the lenient direction.
+
+    What it owns, and why the boundary is here
+    ------------------------------------------
+    Both derived inputs are computed inside: the workspace execution config, via
+    :func:`_resolve_workspace_execution_config`, which supplies
+    ``max_parallel_projects`` and ``project_timeout``; and the ``phases`` list,
+    which is the only field with branching behind it. A builder that took either
+    as an argument would push part of the construction back out to its callers,
+    which is where the duplication started.
+
+    Note what it does *not* own. Setting ``ASH_OFFLINE`` stays with the caller:
+    it mutates process state and has to be unset in a ``finally``, which a
+    builder returning a value cannot do.
+
+    Failure modes
+    -------------
+    An unreadable ASH config at the workspace root does not raise here.
+    ``_resolve_workspace_execution_config`` warns and falls back to the defaults,
+    because these are scheduling knobs -- refusing the whole scan over a typo in
+    one would be a poor trade, and on the MCP path it would surface as an
+    internal error for what is really an operator's config file.
     """
-    from automated_security_helper.workspace.execution import (
-        ProjectScanSettings,
-        execute_workspace,
-    )
-
-    if opts.workspace_plan is None:
-        # The sole caller checks this before dispatching here, so reaching this
-        # branch means a new call site skipped the check. Raised rather than
-        # asserted because `python -O` strips assert, and a missing plan would then
-        # surface much deeper as an unrelated AttributeError inside
-        # execute_workspace. RuntimeError rather than a Workspace*Error, which
-        # would report a caller bug as though the operator's workspace file were
-        # at fault.
-        raise RuntimeError(
-            "_run_workspace_mode requires a resolved workspace plan; "
-            "opts.workspace_plan is None"
-        )
+    from automated_security_helper.workspace.execution import ProjectScanSettings
 
     workspace_config = _resolve_workspace_execution_config(opts)
-
-    _offline_was_set = False
-    if opts.offline:
-        os.environ["ASH_OFFLINE"] = "YES"
-        _offline_was_set = True
 
     phases: List[str] = []
     for phase, name in (
@@ -597,7 +611,7 @@ def _run_workspace_mode(opts: ScanOptions, logger) -> "WorkspaceRunResult":
     if not phases:
         phases = ["convert", "scan", "report"]
 
-    settings = ProjectScanSettings(
+    return ProjectScanSettings(
         output_dir=opts.output_dir,
         phases=tuple(phases),
         enabled_scanners=tuple(opts.scanners or []),
@@ -631,6 +645,40 @@ def _run_workspace_mode(opts: ScanOptions, logger) -> "WorkspaceRunResult":
         project_timeout=workspace_config.project_timeout,
         allow_missing_projects=opts.allow_missing_projects,
     )
+
+
+def _run_workspace_mode(opts: ScanOptions, logger) -> "WorkspaceRunResult":
+    """Scan every project in the plan and write the unified workspace results.
+
+    Returns the run result rather than an ``AshAggregatedResults``, because a
+    workspace run's verdict is per project and is already computed -- handing back
+    a merged model for ``_compute_exit_code`` to re-derive would give two answers
+    to the same question and no rule for which wins.
+    """
+    from automated_security_helper.workspace.execution import execute_workspace
+
+    if opts.workspace_plan is None:
+        # The sole caller checks this before dispatching here, so reaching this
+        # branch means a new call site skipped the check. Raised rather than
+        # asserted because `python -O` strips assert, and a missing plan would then
+        # surface much deeper as an unrelated AttributeError inside
+        # execute_workspace. RuntimeError rather than a Workspace*Error, which
+        # would report a caller bug as though the operator's workspace file were
+        # at fault.
+        raise RuntimeError(
+            "_run_workspace_mode requires a resolved workspace plan; "
+            "opts.workspace_plan is None"
+        )
+
+    # Built before ASH_OFFLINE is set, preserving the order the inline
+    # construction had: the builder reads a config file off disk, and doing that
+    # with the offline flag already in the environment is a different read.
+    settings = build_project_scan_settings(opts)
+
+    _offline_was_set = False
+    if opts.offline:
+        os.environ["ASH_OFFLINE"] = "YES"
+        _offline_was_set = True
 
     try:
         return execute_workspace(opts.workspace_plan, settings)
