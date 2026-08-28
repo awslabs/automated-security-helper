@@ -7,6 +7,7 @@ from automated_security_helper.cli.config import config_app
 from automated_security_helper.cli.dependencies import dependencies_app
 from automated_security_helper.cli.image import build_ash_image_cli_command
 from automated_security_helper.cli.inspect import inspect_app
+from automated_security_helper.cli.merge import merge_command
 from automated_security_helper.cli.plugin import plugin_app
 from automated_security_helper.cli.scan import run_ash_scan_cli_command
 from automated_security_helper.cli.report import report_command
@@ -39,6 +40,14 @@ Any additional arguments passed will be forwarded to ASH inside the container im
 )(build_ash_image_cli_command)
 
 app.command(name="report")(report_command)
+
+app.command(
+    name="merge",
+    help="""Merges the results of a sharded scan into one unified report.
+
+Pass one --results per shard. The command refuses to merge a set of shards that does not reconstruct exactly one whole scan, and its exit code is the verdict for the union — a shard that owned no failing scanner exits 0, so CI must gate on this command rather than on per-shard success.
+""",
+)(merge_command)
 
 
 @app.command(name="mcp", help="Start the ASH MCP server (Model Context Protocol)")
