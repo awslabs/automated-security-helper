@@ -48,7 +48,9 @@ def snyk_sarif(rule_id="javascript/NoHardcodedCredentials", uri="app.js"):
                             "rules": [
                                 {
                                     "id": rule_id,
-                                    "shortDescription": {"text": "Hardcoded credential"},
+                                    "shortDescription": {
+                                        "text": "Hardcoded credential"
+                                    },
                                 }
                             ],
                         }
@@ -132,9 +134,7 @@ def writes_sarif(sarif_text, exit_code=0):
 
     def _side_effect(self, command, **kwargs):
         destination = next(
-            arg.split("=", 1)[1]
-            for arg in command
-            if arg.startswith(SARIF_OUTPUT_FLAG)
+            arg.split("=", 1)[1] for arg in command if arg.startswith(SARIF_OUTPUT_FLAG)
         )
         Path(destination).write_text(sarif_text, encoding="utf-8")
         self.exit_code = max(self.exit_code, exit_code)
@@ -279,9 +279,9 @@ SEVERITY_LADDER = {
 }
 
 
-@pytest.mark.parametrize("threshold, expected", sorted(
-    SEVERITY_LADDER.items(), key=lambda kv: str(kv[0])
-))
+@pytest.mark.parametrize(
+    "threshold, expected", sorted(SEVERITY_LADDER.items(), key=lambda kv: str(kv[0]))
+)
 def test_severity_threshold_translates_to_the_snyk_flag(
     plugin_context, threshold, expected
 ):
@@ -403,9 +403,7 @@ def test_valueless_extra_args_are_emitted_as_bare_flags(plugin_context, tmp_path
     """An extra arg with value None becomes one token, not a token pair."""
     from automated_security_helper.models.core import ToolExtraArg
 
-    scanner = SnykCodeScanner(
-        context=plugin_context, config=SnykCodeScannerConfig()
-    )
+    scanner = SnykCodeScanner(context=plugin_context, config=SnykCodeScannerConfig())
     scanner.args.extra_args.append(ToolExtraArg(key="--json", value=None))
     scanner.args.extra_args.append(ToolExtraArg(key="--org", value="placeholder-org"))
     target = tmp_path / "scan-me"
@@ -647,9 +645,7 @@ def test_unreadable_results_file_is_wrapped_in_scanner_error(
 
     def _write_invalid_json(self, command, **kwargs):
         destination = next(
-            arg.split("=", 1)[1]
-            for arg in command
-            if arg.startswith(SARIF_OUTPUT_FLAG)
+            arg.split("=", 1)[1] for arg in command if arg.startswith(SARIF_OUTPUT_FLAG)
         )
         # json.load() happens before the try block that catches parse errors.
         Path(destination).write_text("{not valid json at all", encoding="utf-8")

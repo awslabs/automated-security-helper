@@ -45,8 +45,10 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secret
 )
 
 # Assembled at runtime so this file contains no contiguous key-shaped literal.
-# The value is AWS's own documentation placeholder.
-PLANTED_KEY = "".join(["AKIA", "IOSFODNN7", "EXAMPLE"])
+# The value is AWS's own documentation placeholder. FLY002 is suppressed on
+# purpose: collapsing this into one string is exactly what must not happen, or
+# ASH's own detect-secrets self-scan reports this file as a finding.
+PLANTED_KEY = "".join(["AKIA", "IOSFODNN7", "EXAMPLE"])  # noqa: FLY002
 EXCLUDE_FILTER_PATH = "detect_secrets.filters.regex.should_exclude_file"
 
 
@@ -130,7 +132,9 @@ def test_execute_scan_stub_raises_not_implemented(scanner):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("baseline_name", [".secrets.baseline", ".ash/.secrets.baseline"])
+@pytest.mark.parametrize(
+    "baseline_name", [".secrets.baseline", ".ash/.secrets.baseline"]
+)
 def test_baseline_is_discovered_in_the_working_directory(
     plugin_context, tmp_path, monkeypatch, baseline_name
 ):
@@ -312,7 +316,11 @@ def test_missing_configured_baseline_warns_and_falls_back(
 
 def test_exclude_patterns_are_compiled_from_a_pattern_list():
     patterns = DetectSecretsScanner._get_baseline_exclude_patterns(
-        {"filters_used": [{"path": EXCLUDE_FILTER_PATH, "pattern": [r"^tests/", r"\.lock$"]}]}
+        {
+            "filters_used": [
+                {"path": EXCLUDE_FILTER_PATH, "pattern": [r"^tests/", r"\.lock$"]}
+            ]
+        }
     )
 
     assert len(patterns) == 2
@@ -337,8 +345,10 @@ def test_filters_other_than_should_exclude_file_are_ignored():
         {
             "filters_used": [
                 {"path": "detect_secrets.filters.heuristic.is_likely_id_string"},
-                {"path": "detect_secrets.filters.regex.should_exclude_secret",
-                 "pattern": [r"^ignored$"]},
+                {
+                    "path": "detect_secrets.filters.regex.should_exclude_secret",
+                    "pattern": [r"^ignored$"],
+                },
             ]
         }
     )
@@ -354,7 +364,11 @@ def test_an_invalid_exclude_pattern_is_warned_about_and_skipped(caplog):
     """One bad regex must not discard the valid patterns beside it."""
     with caplog.at_level(logging.WARNING):
         patterns = DetectSecretsScanner._get_baseline_exclude_patterns(
-            {"filters_used": [{"path": EXCLUDE_FILTER_PATH, "pattern": ["[unclosed", r"^ok/"]}]}
+            {
+                "filters_used": [
+                    {"path": EXCLUDE_FILTER_PATH, "pattern": ["[unclosed", r"^ok/"]}
+                ]
+            }
         )
 
     assert len(patterns) == 1, "the valid pattern should survive"
@@ -367,9 +381,7 @@ def test_file_exclusions_filter_the_matching_paths():
 
     files = ["src/app.py", "tests/test_app.py", "docs/index.md"]
 
-    kept = DetectSecretsScanner._apply_file_exclusions(
-        files, [re.compile(r"^tests/")]
-    )
+    kept = DetectSecretsScanner._apply_file_exclusions(files, [re.compile(r"^tests/")])
 
     assert kept == ["src/app.py", "docs/index.md"]
 
@@ -444,9 +456,7 @@ def test_pre_scan_failure_returns_false(scanner):
     with patch.object(
         DetectSecretsScanner, "_pre_scan", autospec=True, return_value=False
     ):
-        result = scanner.scan(
-            target=scanner.context.work_dir, target_type="converted"
-        )
+        result = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     assert result is False
 
@@ -459,9 +469,7 @@ def test_unsatisfied_dependencies_return_false(scanner):
         DetectSecretsScanner, "_pre_scan", autospec=True, return_value=True
     ):
         scanner.dependencies_satisfied = False
-        result = scanner.scan(
-            target=scanner.context.work_dir, target_type="converted"
-        )
+        result = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     assert result is False
 
@@ -592,9 +600,7 @@ def test_baseline_results_are_loaded_for_a_source_scan(scanner, tmp_path):
     planted = source_with_planted_key(scanner.context.source_dir)
     baseline = tmp_path / "custom.baseline"
     baseline.write_text(
-        json.dumps(
-            baseline_document(plugins=[{"name": "AWSKeyDetector"}])
-        ),
+        json.dumps(baseline_document(plugins=[{"name": "AWSKeyDetector"}])),
         encoding="utf-8",
     )
     scanner.config.options.baseline_file = baseline
@@ -670,9 +676,7 @@ def test_baseline_exclude_patterns_remove_files_before_scanning(scanner, caplog)
     ]
 
     with caplog.at_level(logging.DEBUG):
-        report = scanner.scan(
-            target=scanner.context.work_dir, target_type="converted"
-        )
+        report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     assert report.runs[0].results == [], (
         "the planted key sat in an excluded file and must not be reported"

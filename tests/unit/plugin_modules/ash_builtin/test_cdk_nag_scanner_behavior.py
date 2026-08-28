@@ -30,7 +30,9 @@ import pytest
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.enums import ScannerToolType
-from automated_security_helper.plugin_modules.ash_builtin.scanners import cdk_nag_scanner
+from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+    cdk_nag_scanner,
+)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
     CdkNagPacks,
     CdkNagScanner,
@@ -103,9 +105,7 @@ def cdk_available(monkeypatch, tmp_path):
     fake_node = tmp_path / "bin" / "node"
     fake_node.parent.mkdir(parents=True, exist_ok=True)
     fake_node.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    monkeypatch.setattr(
-        cdk_nag_scanner, "find_executable", lambda name: str(fake_node)
-    )
+    monkeypatch.setattr(cdk_nag_scanner, "find_executable", lambda name: str(fake_node))
     return fake_node
 
 
@@ -120,9 +120,7 @@ def wrapper_double(monkeypatch):
         wrapper_module.run_cdk_nag_against_cfn_template, spec_set=True
     )
     double.return_value = CdkNagWrapperResponse(results={})
-    monkeypatch.setattr(
-        cdk_nag_scanner, "run_cdk_nag_against_cfn_template", double
-    )
+    monkeypatch.setattr(cdk_nag_scanner, "run_cdk_nag_against_cfn_template", double)
     return double
 
 
@@ -164,9 +162,9 @@ def test_missing_cdk_dependencies_fail_validation(scanner, caplog):
         assert scanner.validate_plugin_dependencies() is False
 
     assert scanner.dependencies_satisfied is False
-    assert any(
-        "CDK dependencies" in record.message for record in caplog.records
-    ), f"expected an install hint; got {[r.message for r in caplog.records]}"
+    assert any("CDK dependencies" in record.message for record in caplog.records), (
+        f"expected an install hint; got {[r.message for r in caplog.records]}"
+    )
 
 
 def test_validation_passes_when_cdk_and_node_are_both_present(scanner, cdk_available):
@@ -237,9 +235,7 @@ def test_dependency_flag_is_rechecked_after_pre_scan(
 ):
     with patch.object(CdkNagScanner, "_pre_scan", autospec=True, return_value=True):
         scanner.dependencies_satisfied = False
-        result = scanner.scan(
-            target=scanner.context.work_dir, target_type="converted"
-        )
+        result = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     assert result is False
     wrapper_double.assert_not_called()
@@ -280,7 +276,9 @@ def test_wrapper_findings_become_sarif_results(
 
     assert wrapper_double.call_count == 1
     results = report.runs[0].results
-    assert len(results) == 1, f"expected the wrapper's finding to survive, got {len(results)}"
+    assert len(results) == 1, (
+        f"expected the wrapper's finding to survive, got {len(results)}"
+    )
     assert results[0].ruleId == "AwsSolutions-S1"
 
 
@@ -366,9 +364,7 @@ def test_include_compliant_checks_is_forwarded_to_the_wrapper(
     assert wrapper_double.call_args.kwargs["include_compliant_checks"] is True
 
 
-def test_each_template_is_passed_to_the_wrapper(
-    scanner, cdk_available, wrapper_double
-):
+def test_each_template_is_passed_to_the_wrapper(scanner, cdk_available, wrapper_double):
     """Every candidate template gets its own wrapper invocation."""
     first = scanner.context.work_dir / "bucket.yaml"
     second = scanner.context.work_dir / "queue.json"
@@ -380,9 +376,7 @@ def test_each_template_is_passed_to_the_wrapper(
 
     scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
-    scanned = {
-        call.kwargs["template_path"] for call in wrapper_double.call_args_list
-    }
+    scanned = {call.kwargs["template_path"] for call in wrapper_double.call_args_list}
     assert scanned == {first, second}, f"templates scanned: {scanned}"
 
 
@@ -393,7 +387,9 @@ def test_wrapper_returning_none_does_not_abort_the_other_templates(
     (scanner.context.work_dir / "not-cfn.yaml").write_text(
         "services:\n  web:\n    image: nginx\n", encoding="utf-8"
     )
-    (scanner.context.work_dir / "bucket.yaml").write_text(CFN_TEMPLATE, encoding="utf-8")
+    (scanner.context.work_dir / "bucket.yaml").write_text(
+        CFN_TEMPLATE, encoding="utf-8"
+    )
 
     def _per_template(template_path, **kwargs):
         if template_path.name == "not-cfn.yaml":
@@ -414,8 +410,12 @@ def test_wrapper_exception_does_not_abort_the_other_templates(
     scanner, cdk_available, wrapper_double
 ):
     """A crash scanning one template is recorded and the loop continues."""
-    (scanner.context.work_dir / "explodes.yaml").write_text(CFN_TEMPLATE, encoding="utf-8")
-    (scanner.context.work_dir / "bucket.yaml").write_text(CFN_TEMPLATE, encoding="utf-8")
+    (scanner.context.work_dir / "explodes.yaml").write_text(
+        CFN_TEMPLATE, encoding="utf-8"
+    )
+    (scanner.context.work_dir / "bucket.yaml").write_text(
+        CFN_TEMPLATE, encoding="utf-8"
+    )
 
     def _per_template(template_path, **kwargs):
         if template_path.name == "explodes.yaml":

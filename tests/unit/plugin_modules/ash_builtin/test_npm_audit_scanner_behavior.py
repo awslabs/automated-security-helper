@@ -178,9 +178,7 @@ def emits(*payloads):
     The `npm --version` probe is answered separately so it does not consume a
     payload meant for an audit.
     """
-    remaining = [
-        json.dumps(p) if not isinstance(p, str) else p for p in payloads
-    ]
+    remaining = [json.dumps(p) if not isinstance(p, str) else p for p in payloads]
 
     def _side_effect(self, command, **kwargs):
         if "--version" in command:
@@ -292,9 +290,7 @@ def test_execute_scan_stub_raises_not_implemented(scanner):
 # ---------------------------------------------------------------------------
 
 
-def test_empty_target_returns_an_empty_report(
-    scanner, npm_on_path, subprocess_double
-):
+def test_empty_target_returns_an_empty_report(scanner, npm_on_path, subprocess_double):
     report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     assert report.runs[0].results == []
@@ -308,9 +304,7 @@ def test_pre_scan_failure_returns_false(
     node_project()
 
     with patch.object(NpmAuditScanner, "_pre_scan", autospec=True, return_value=False):
-        result = scanner.scan(
-            target=scanner.context.work_dir, target_type="converted"
-        )
+        result = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     assert result is False
     assert audit_calls(subprocess_double) == []
@@ -323,9 +317,7 @@ def test_dependency_flag_is_rechecked_after_pre_scan(
 
     with patch.object(NpmAuditScanner, "_pre_scan", autospec=True, return_value=True):
         scanner.dependencies_satisfied = False
-        result = scanner.scan(
-            target=scanner.context.work_dir, target_type="converted"
-        )
+        result = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     assert result is False
     assert audit_calls(subprocess_double) == []
@@ -335,7 +327,9 @@ def test_target_without_a_package_json_returns_an_empty_report(
     scanner, npm_on_path, subprocess_double
 ):
     """Only package.json makes a directory a candidate."""
-    (scanner.context.work_dir / "requirements.txt").write_text("flask\n", encoding="utf-8")
+    (scanner.context.work_dir / "requirements.txt").write_text(
+        "flask\n", encoding="utf-8"
+    )
 
     report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
@@ -396,9 +390,17 @@ def test_audit_runs_in_the_lock_files_own_directory(
     assert audit_calls(subprocess_double)[-1].kwargs["cwd"] == nested
 
 
-@pytest.mark.parametrize("missing_binary, lock_name", [("yarn", "yarn.lock"), ("pnpm", "pnpm-lock.yaml")])
+@pytest.mark.parametrize(
+    "missing_binary, lock_name", [("yarn", "yarn.lock"), ("pnpm", "pnpm-lock.yaml")]
+)
 def test_a_missing_yarn_or_pnpm_is_warned_about_and_skipped(
-    scanner, monkeypatch, node_project, subprocess_double, caplog, missing_binary, lock_name
+    scanner,
+    monkeypatch,
+    node_project,
+    subprocess_double,
+    caplog,
+    missing_binary,
+    lock_name,
 ):
     """An absent alternative package manager skips that lock file, loudly.
 
@@ -414,16 +416,16 @@ def test_a_missing_yarn_or_pnpm_is_warned_about_and_skipped(
     )
 
     with caplog.at_level(logging.WARNING):
-        report = scanner.scan(
-            target=scanner.context.work_dir, target_type="converted"
-        )
+        report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     assert audit_calls(subprocess_double) == []
     assert report.runs[0].results == []
     assert any(
         f"{missing_binary} is not installed" in record.message
         for record in caplog.records
-    ), f"expected a missing-{missing_binary} warning; got {[r.message for r in caplog.records]}"
+    ), (
+        f"expected a missing-{missing_binary} warning; got {[r.message for r in caplog.records]}"
+    )
 
 
 def test_a_missing_npm_does_not_take_the_skip_path(
@@ -504,9 +506,7 @@ def test_failed_offline_validation_warns_but_the_scan_continues(
     subprocess_double.side_effect = emits(audit_json())
 
     with caplog.at_level(logging.WARNING):
-        report = scanner.scan(
-            target=scanner.context.work_dir, target_type="converted"
-        )
+        report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     assert any(
         "offline mode validation failed, but continuing" in record.message
@@ -720,9 +720,7 @@ def test_unparseable_audit_output_is_warned_about_and_skipped(
     subprocess_double.side_effect = emits("npm ERR! code ENOLOCK")
 
     with caplog.at_level(logging.WARNING):
-        report = scanner.scan(
-            target=scanner.context.work_dir, target_type="converted"
-        )
+        report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     assert report.runs[0].results == []
     assert any(
@@ -756,9 +754,7 @@ def test_one_packages_failure_does_not_abort_the_others(
     subprocess_double.side_effect = _first_call_explodes
 
     with caplog.at_level(logging.WARNING):
-        report = scanner.scan(
-            target=scanner.context.work_dir, target_type="converted"
-        )
+        report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     assert calls["n"] == 2, "the second package should still have been audited"
     assert [r.ruleId for r in report.runs[0].results] == ["GHSA-2222-2222-2222"]

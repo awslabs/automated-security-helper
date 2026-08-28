@@ -364,7 +364,9 @@ def test_finding_line_number_uses_word_boundary_not_substring(
     )
 
     response = _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
-    region = response.results["AwsSolutions"][0].locations[0].physicalLocation.root.region
+    region = (
+        response.results["AwsSolutions"][0].locations[0].physicalLocation.root.region
+    )
 
     assert region.startLine == BUCKET_DECLARATION_LINE, (
         f"expected the MyDataBucket declaration at line "
@@ -438,7 +440,13 @@ def test_compliant_lines_are_kept_when_requested(cdk_doubles, template_file, out
         # Non-compliant at a lower rule level warns instead of failing.
         ("Non-Compliant", "Warning", "N/A", Level.warning, Kind.informational),
         # A suppression with a stated reason is routed to human review.
-        ("Suppressed", "Error", "Accepted risk, tracked separately", Level.none, Kind.review),
+        (
+            "Suppressed",
+            "Error",
+            "Accepted risk, tracked separately",
+            Level.none,
+            Kind.review,
+        ),
         # A suppression with no stated reason is not review-worthy.
         ("Suppressed", "Error", "N/A", Level.none, Kind.informational),
     ],
@@ -500,8 +508,8 @@ def test_multiple_packs_are_keyed_separately(cdk_doubles, template_file, outdir)
     cdk_doubles.reports[f"AwsSolutions-{STACK_NAME}-NagReport.json"] = _report_payload(
         [_nag_line(rule_id="AwsSolutions-S1")]
     )
-    cdk_doubles.reports[f"HIPAA.Security-{STACK_NAME}-NagReport.json"] = _report_payload(
-        [_nag_line(rule_id="HIPAA.Security-S3BucketLoggingEnabled")]
+    cdk_doubles.reports[f"HIPAA.Security-{STACK_NAME}-NagReport.json"] = (
+        _report_payload([_nag_line(rule_id="HIPAA.Security-S3BucketLoggingEnabled")])
     )
 
     response = _run(

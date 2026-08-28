@@ -163,7 +163,9 @@ def test_uv_missing_but_bandit_on_path_falls_back_to_direct_execution(
         BanditScanner, "_validate_uv_tool_availability", lambda self: False
     )
     monkeypatch.setattr(
-        bandit_scanner, "get_uv_tool_command", lambda command: [str(tmp_path / "bandit")]
+        bandit_scanner,
+        "get_uv_tool_command",
+        lambda command: [str(tmp_path / "bandit")],
     )
 
     assert scanner.validate_plugin_dependencies() is True
@@ -307,7 +309,9 @@ def test_failed_installation_still_succeeds_if_the_resolver_finds_bandit(
         BanditScanner, "_install_uv_tool", lambda self, timeout, retry_config: False
     )
     monkeypatch.setattr(
-        bandit_scanner, "get_uv_tool_command", lambda command: [str(tmp_path / "bandit")]
+        bandit_scanner,
+        "get_uv_tool_command",
+        lambda command: [str(tmp_path / "bandit")],
     )
 
     assert scanner.validate_plugin_dependencies() is True
@@ -322,7 +326,6 @@ def test_resolver_is_asked_about_the_scanners_own_command(scanner, monkeypatch):
 
     def _resolver(command):
         asked.append(command)
-        return None
 
     monkeypatch.setattr(bandit_scanner, "get_uv_tool_command", _resolver)
 

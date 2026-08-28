@@ -285,9 +285,7 @@ def test_unsatisfied_dependencies_returns_false(scanner, subprocess_double):
         autospec=True,
         return_value=False,
     ):
-        result = scanner.scan(
-            target=scanner.context.work_dir, target_type="converted"
-        )
+        result = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     assert result is False
     subprocess_double.assert_not_called()
@@ -304,9 +302,7 @@ def test_dependency_flag_is_rechecked_after_pre_scan(scanner, subprocess_double)
 
     with patch.object(CfnNagScanner, "_pre_scan", autospec=True, return_value=True):
         scanner.dependencies_satisfied = False
-        result = scanner.scan(
-            target=scanner.context.work_dir, target_type="converted"
-        )
+        result = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     assert result is False
     subprocess_double.assert_not_called()
