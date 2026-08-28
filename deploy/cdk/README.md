@@ -39,6 +39,50 @@ repository. Consuming it by `Fn::ImportValue` was considered and rejected, becau
 a console launch of the AgentCore template would then fail with an unresolved
 export and no hint about which stack to deploy first.
 
+## Launching a committed template
+
+The CloudFormation console launch flow reads the template from an S3 URL, so it
+works for all five. Scripting `create-stack` does not: CloudFormation caps an
+inline `--template-body` at **51,200 bytes**, and three of these templates are
+larger than that. Upload those to a bucket and launch by URL, where the ceiling is
+1 MB.
+<https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-limits.html>
+
+| Template | Size | Scripted launch |
+| --- | --- | --- |
+| `AshCodeCommitGate` | ~48 KB | `--template-body` |
+| `AshAgentCore` | ~49 KB | `--template-body` |
+| `AshImagePipeline` | ~66 KB | `--template-url` only |
+| `AshFargate` | ~71 KB | `--template-url` only |
+| `AshDistributedPipeline` | ~127 KB | `--template-url` only |
+
+The two under the cap launch directly:
+
+```sh
+aws cloudformation create-stack \
+  --stack-name ash-agentcore \
+  --template-body file://deploy/cdk/templates/AshAgentCore.template.json \
+  --capabilities CAPABILITY_IAM
+```
+
+The other three need one upload first. Any bucket in the same region works:
+
+```sh
+aws s3 cp deploy/cdk/templates/AshFargate.template.json \
+  "s3://${YOUR_BUCKET}/ash/AshFargate.template.json"
+
+aws cloudformation create-stack \
+  --stack-name ash-fargate \
+  --template-url "https://${YOUR_BUCKET}.s3.${AWS_REGION}.amazonaws.com/ash/AshFargate.template.json" \
+  --capabilities CAPABILITY_IAM
+```
+
+Sizes are pinned by `test/ash-template-size.test.ts`, which fails if a template
+crosses the cap in either direction — so this table cannot quietly go stale.
+`AshDistributedPipeline` will not come under the cap by trimming: it is large
+because it emits one CodeBuild action per shard, which is the target's whole
+purpose.
+
 ## Shared parameter surface
 
 These names are a contract. A Terraform mirror of the same targets under

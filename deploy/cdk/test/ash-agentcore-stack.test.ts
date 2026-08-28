@@ -10,7 +10,7 @@ import { App, Stack } from 'aws-cdk-lib';
 import { Capture, Match, Template } from 'aws-cdk-lib/assertions';
 
 import { AshAgentCoreStack } from '../lib/ash-agentcore-stack';
-import { ASH_PARAMETER_NAMES } from '../lib/ash-config';
+import { ASH_PARAMETER_NAMES, DEFAULT_REBUILD_SCHEDULE } from '../lib/ash-config';
 
 function synth(): Template {
   const app = new App({ analyticsReporting: false });
@@ -156,7 +156,14 @@ describe('AgentCore runtime contract', () => {
   });
 
   test('the rebuild runs on the parameterized schedule', () => {
-    template.hasParameter(ASH_PARAMETER_NAMES.rebuildSchedule, { Default: 'rate(1 day)' });
+    // The default is referenced rather than spelled out here. This test is about
+    // the rule reading the parameter; what the default may and may not be is
+    // pinned in ash-image-build-scheduling.test.ts, which is also where the
+    // reason lives — a rate() default fired on rule creation and raced the
+    // bootstrap build.
+    template.hasParameter(ASH_PARAMETER_NAMES.rebuildSchedule, {
+      Default: DEFAULT_REBUILD_SCHEDULE,
+    });
     template.hasResourceProperties('AWS::Events::Rule', {
       ScheduleExpression: { Ref: ASH_PARAMETER_NAMES.rebuildSchedule },
     });

@@ -69,8 +69,34 @@ export const ASH_PARAMETER_NAMES = {
  */
 export const DEFAULT_ASH_VERSION = 'v3.7.0';
 
-/** Default cadence for the scheduled rebuild that keeps the image patched. */
-export const DEFAULT_REBUILD_SCHEDULE = 'rate(1 day)';
+/**
+ * Default cadence for the scheduled rebuild that keeps the image patched.
+ *
+ * WHY THIS IS A CRON EXPRESSION AND NOT `rate(1 day)`
+ * --------------------------------------------------
+ * It was `rate(1 day)`, and that made every deployment run two image builds at
+ * once. EventBridge is explicit that "a rate expression starts when you create
+ * the scheduled event rule, and then it runs on a defined schedule", so the rule
+ * fires as soon as CloudFormation creates it — observed on a real stack as a
+ * scheduled build starting 43 seconds after the rule was created, while the
+ * bootstrap build begun 14 seconds earlier was still running.
+ * https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-scheduled-rule-pattern.html
+ *
+ * Two concurrent ARM64 LARGE builds is the smaller half of the problem. Both push
+ * the same moving tag to the same MUTABLE repository, so which image the workload
+ * ends up running is decided by whichever build finishes last — and only the
+ * bootstrap build reports to CloudFormation, so the stack cannot see the other
+ * one at all.
+ *
+ * A cron expression has no such anchor: it fires at the times it names and
+ * nothing else, so a freshly created rule does not fire. 06:00 UTC daily keeps
+ * the original intent — patches picked up about once a day.
+ *
+ * `rate()` is still accepted, and still fires on creation. What stops that being
+ * a race is the dependency in `ash-image-build.ts`, which withholds the rule
+ * until the bootstrap build has finished.
+ */
+export const DEFAULT_REBUILD_SCHEDULE = 'cron(0 6 * * ? *)';
 
 /**
  * The port AgentCore Runtime requires, and the default everywhere else so the
@@ -278,9 +304,11 @@ export function rebuildSchedule(scope: Stack): CfnParameter {
     minLength: 1,
     description:
       'EventBridge schedule expression for the image rebuild, for example ' +
-      '"rate(1 day)" or "cron(0 6 * * ? *)". The rebuild repulls the base image and ' +
+      '"cron(0 6 * * ? *)" or "rate(1 day)". The rebuild repulls the base image and ' +
       'scanner tools so a long-lived deployment keeps getting OS and scanner ' +
-      'patches without a stack update.',
+      'patches without a stack update. Note that a rate() expression starts when ' +
+      'the rule is created, so it also rebuilds once at deployment; a cron() ' +
+      'expression only fires at the times it names.',
   });
 }
 
