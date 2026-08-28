@@ -181,34 +181,51 @@ parameter — it builds images and runs no workload.
 
 ## AgentCore: the contract, and why stateless is the default
 
-Verified against
-[the MCP protocol contract](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-mcp-protocol-contract.html):
-streamable-http transport, host `0.0.0.0`, port `8000`, ARM64 container,
-`POST /mcp`. The platform adds its own `Mcp-Session-Id` header, and the same page
-states that "in stateless mode, servers must support stateless operation so as to
-not reject platform generated `Mcp-Session-Id` header."
+The container's shape is confirmed by two successful deployments: streamable-http
+transport, host `0.0.0.0`, port `8000`, ARM64 container, `POST /mcp`. Change any of
+those and the runtime does not come up. The deployed template was byte-identical to
+the committed `templates/AshAgentCore.template.json`, so this applies to what ships
+here.
 
-The same page also says to "use stateless mode (`stateless_http=True`) for
-compatibility with AWS's session management and load balancing", and that in
-stateless mode the platform "generates the `Mcp-Session-Id` and includes it in the
-request to your MCP server" — which the server "must accept ... (do not reject
-it)".
+Session handling is a different matter, and this section is labeled because we have
+been wrong about it three times — first too confident, then too cautious, then too
+trusting of the documentation.
 
-Measured against ASH directly: given a session id the server never issued, ASH's
-MCP returns HTTP 404 "Session not found" in stateful mode and HTTP 200 in
-stateless mode. Hence `McpStatelessHttp` defaults to `true`.
+**Measured**, against two live runtimes. A stateful runtime completes `initialize`,
+`tools/list` and `tools/call` successfully. Sessions are genuinely enforced, so
+that pass is not vacuous: no session id returns 400, and two differently shaped
+fabricated ids each return 404. AgentCore returns a **fresh** `Mcp-Session-Id` on
+essentially every response, while only the id issued at `initialize` stays valid —
+so a client that follows AgentCore's own affinity guidance and adopts the returned
+id takes a 404 on its third call. Stateless is immune, because it ignores session
+ids entirely. That is why `McpStatelessHttp` defaults to `true`.
 
-Being precise about the limit of that argument, because it decides whether you may
-set `false`: AgentCore **does** support
+**Claimed by AWS documentation, and not verified by us:** that in stateless mode
+the platform generates the `Mcp-Session-Id`, includes it in the request to your
+server, and routes on it to the same microVM. Treat that as unconfirmed. The
+affinity guidance on
+[that same page](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-mcp-protocol-contract.html)
+is precisely what we measured to break a stateful server, so the page is not a
+reliable authority on this point.
+
+**Not determined:** what the container actually sees per request. Telling "an id is
+injected and silently adopted" apart from "nothing is injected" needs the inbound
+headers logged inside the image, which nobody has done. It does not change the
+default either way.
+
+So stateful is **not impossible** here — AgentCore does support
 [stateful MCP servers](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/mcp-stateful-features.html),
-which is what enables elicitation, sampling and progress notifications. In that
-mode the client sends `initialize` with no session id and the platform returns
-one, so it is not the platform injecting an id into a server that never issued it.
-Stateful is therefore not impossible here — it is unsupportable, which is a weaker
-claim. It needs every client to omit the session id on initialize, and nothing in
-this stack controls the clients. There is also no template-level switch:
-`ProtocolConfiguration` is a plain string taking `MCP | HTTP | A2A | AGUI`, so the
-mode lives in the container's own invocation.
+which is what enables elicitation, sampling and progress notifications. It is
+unsupportable, which is a weaker claim: it needs every client to avoid rotating the
+session id, and nothing in this stack controls the clients. There is also no
+template-level switch — `ProtocolConfiguration` is a plain string taking
+`MCP | HTTP | A2A | AGUI`, so the mode lives in the container's own invocation.
+
+Session affinity is not incidental to this target. AgentCore routing on that header
+to the same microVM is what lets on-disk per-session state survive across separate
+`InvokeAgentRuntime` calls — observed as a scan's state persisting across 18
+progress calls — which anything that delivers source in chunks and then scans it
+depends on.
 
 `AgentRuntimeArtifact.ContainerConfiguration` has exactly one property,
 `ContainerUri`. There is no `Command`, `EntryPoint` or `Args`, so the MCP

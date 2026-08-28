@@ -1,19 +1,26 @@
 /**
  * ASH's MCP server on Amazon Bedrock AgentCore Runtime.
  *
- * EVERY CONSTRAINT IN THIS FILE IS A CONTRACT, NOT A PREFERENCE
- * ------------------------------------------------------------
- * AgentCore's MCP protocol contract fixes the container's shape. Verified at
- * https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-mcp-protocol-contract.html:
+ * THE CONTAINER'S SHAPE IS A CONTRACT, NOT A PREFERENCE
+ * ----------------------------------------------------
+ * Confirmed by two successful deployments — change any of these and the runtime
+ * does not come up:
  *
  * - streamable-http transport is required.
  * - Host `0.0.0.0`, port `8000`, ARM64 container.
  * - `POST /mcp`.
+ *
+ * The same page also says the following about sessions. These are QUOTED, not
+ * verified by us, and the session-handling half of that page is where we have been
+ * wrong three times — see the labelled split below before relying on either:
+ *
  * - "Platform automatically adds `Mcp-Session-Id` header for session isolation.
  *   In stateless mode, servers must support stateless operation so as to not
  *   reject platform generated `Mcp-Session-Id` header."
  * - "By default, use stateless mode (`stateless_http=True`) for compatibility
  *   with AWS's session management and load balancing."
+ *
+ * https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-mcp-protocol-contract.html
  *
  * WHY `McpStatelessHttp` DEFAULTS TO `true`
  * ----------------------------------------
@@ -44,16 +51,28 @@
  * A docs-following MCP client therefore fails against a stateful runtime.
  * Stateless is immune because it ignores session ids entirely.
  *
- * WHICH PART IS WHICH, BECAUSE THIS HAS BEEN WRONG IN BOTH DIRECTIONS
- * -----------------------------------------------------------------
- * - DOCUMENTED by AWS: that the platform supplies an `Mcp-Session-Id` and routes
- *   on it. The contract page states this for stateless mode specifically.
- * - MEASURED against two live runtimes: the round trip above, the three controls,
- *   and the id rotation.
- * - NOT SEPARATED: whether an injected id is silently adopted by a stateful server
- *   or whether nothing is injected on that path. Telling those apart needs header
- *   logging inside the container, so it needs an image change. It does not affect
- *   the default either way.
+ * WHICH PART IS WHICH — READ THIS BEFORE TRUSTING ANY OF IT
+ * -------------------------------------------------------
+ * This claim has now been wrong in three different directions: first too
+ * confident that the platform injects an id a stateful server rejects, then too
+ * cautious in calling the mechanism unknown, then too trusting of the
+ * documentation. So the labels below are load-bearing. If this comment ever reads
+ * as though we know the mechanism, it will foreclose the next person's check
+ * exactly as the original wrong version did.
+ *
+ * - MEASURED, against two live runtimes: the round trip above, the three controls
+ *   proving sessions are enforced, and the id rotation on essentially every
+ *   response.
+ * - CLAIMED BY AWS DOCUMENTATION, and NOT verified by us: that in stateless mode
+ *   the platform generates the `Mcp-Session-Id`, includes it in the request to the
+ *   server, and routes on it to the same microVM. Treat this as unconfirmed rather
+ *   than settled — the affinity guidance on that same page is what we measured to
+ *   break a stateful server on the third call, so the page is not a reliable
+ *   authority on this specific point.
+ * - NOT DETERMINED: what the container actually sees per request. Distinguishing
+ *   "an id is injected and silently adopted" from "nothing is injected" needs the
+ *   inbound headers logged inside the image, which is a change nobody has made. It
+ *   does not affect the default either way.
  *
  * WHY SESSION AFFINITY IS LOAD-BEARING HERE, NOT INCIDENTAL
  * -------------------------------------------------------
