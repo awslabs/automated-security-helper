@@ -837,6 +837,106 @@ def mcp_diff_scan_results(before_path: str, after_path: str) -> Dict[str, Any]:
     return {"new": new, "resolved": resolved, "severity_changed": severity_changed}
 
 
+#: Scanner plugin packages that ship inside ASH but are not loaded by
+#: ``load_internal_plugins()``, which imports ``ash_builtin`` only.
+#:
+#: These are package paths, not the module paths inside them, because
+#: ``ASH_SCANNERS`` is declared in each package's ``__init__``. That list is what
+#: ``load_additional_plugin_modules`` returns, and pointing at
+#: ``ash_ferret_plugins.ferret_scanner`` instead imports the scanner but returns
+#: nothing, since the leaf module declares no ``ASH_SCANNERS``. Measured: the leaf
+#: paths yield 0 scanners, the package paths yield 3.
+_VENDORED_SCANNER_PLUGIN_PACKAGES = (
+    "automated_security_helper.plugin_modules.ash_ferret_plugins",
+    "automated_security_helper.plugin_modules.ash_snyk_plugins",
+    "automated_security_helper.plugin_modules.ash_trivy_plugins",
+)
+
+
+def _discover_external_scanner_plugin_packages() -> list:
+    """Package paths for installed distributions matching the ash plugin namespace.
+
+    Deliberately returns only what installed metadata claims. Loading the vendored
+    packages as well is the caller's job: the two sources find different scanners,
+    so treating either one as the complete set loses the other.
+    """
+    try:
+        from importlib.metadata import packages_distributions
+
+        pkg_dist = packages_distributions()
+    except Exception:
+        # packages_distributions() reads installed metadata, which can be missing
+        # or unreadable in a frozen or vendored install. Discovery coming back
+        # empty is not fatal, and must not be: the vendored packages are loaded
+        # either way.
+        pkg_dist = {}
+
+    return [
+        f"automated_security_helper.plugin_modules.{top_level}"
+        for top_level, dists in pkg_dist.items()
+        if any(d.startswith("ash_") and d.endswith("_plugins") for d in dists)
+    ]
+
+
+def _loaded_scanner_classes() -> list:
+    """Every scanner class ASH ships, taken from what the loaders report loading.
+
+    Why this does not call ``ash_plugin_manager.plugin_modules("scanner")``
+    ---------------------------------------------------------------------
+    That method memoises its resolved class list into ``_resolved_plugins`` and
+    never invalidates it, so the first resolve in a process decides the answer for
+    every later one. Registration is not what breaks: measured here, the registry
+    held all 13 scanners while the memo, built before the vendored packages were
+    loaded, kept serving the 10 it was created with. Any earlier resolve is
+    enough -- a CLI command, another test, an in-flight scan -- which is how a
+    caller asking an ASH server which scanners it has got an answer three short,
+    with nothing logged and no error raised.
+
+    Two alternatives were rejected. Clearing the memo breaks callers that depend
+    on it holding still: ``workspace.execution.prewarm_plugin_registry`` exists so
+    the resolved set is frozen once, up front, for a whole workspace run, and
+    clearing it from an MCP tool can resize the registry under a scan thread that
+    is mid-iteration -- the ``dictionary changed size during iteration`` failure
+    prewarming was added to close. Reading ``plugin_library`` directly instead
+    fails the sweep in ``tests/unit/workspace/test_project_isolation.py``, which
+    forbids reaching into the manager's registry from outside the class that owns
+    it, because that is the shape the original defect arrived in.
+
+    What is left is the loaders' own return values. Both
+    ``load_internal_plugins`` and ``load_additional_plugin_modules`` return the
+    ``ASH_SCANNERS`` each package declares, which is a public result, is fixed per
+    package rather than accumulated per process, and touches no shared state at
+    all. Nothing here can be stale, and nothing here can perturb a running scan.
+    """
+    from automated_security_helper.plugins.loader import (
+        load_additional_plugin_modules,
+        load_internal_plugins,
+    )
+
+    # Load both sources rather than choosing between them. Metadata discovery and
+    # the vendored list find different packages, so picking one on whether
+    # discovery happened to return anything drops whatever the winner does not
+    # cover: install any ash_*_plugins distribution and discovery wins, taking
+    # ferret, snyk and trivy out of the answer. Loading both is safe because
+    # import_module is cached and register_plugin_module skips names already
+    # registered, so the result does not depend on the order either.
+    package_paths = _discover_external_scanner_plugin_packages()
+    package_paths.extend(_VENDORED_SCANNER_PLUGIN_PACKAGES)
+
+    internal = load_internal_plugins()
+    # load_additional_plugin_modules logs a warning when a package fails to
+    # import, which the bare `except ImportError: pass` this replaces did not: a
+    # scanner missing because its package is broken now leaves a trace.
+    external = load_additional_plugin_modules(package_paths)
+
+    scanner_classes: list = []
+    for cls in list(internal.get("scanners", [])) + list(external.get("scanners", [])):
+        if cls not in scanner_classes:
+            scanner_classes.append(cls)
+
+    return scanner_classes
+
+
 def mcp_list_scanners() -> list:
     """Return per-scanner metadata for all registered ASH scanners.
 
@@ -847,46 +947,9 @@ def mcp_list_scanners() -> list:
       offline_strategy: OfflineStrategy enum value string
       enabled: whether the scanner is enabled in the default config
     """
-    from automated_security_helper.plugins import ash_plugin_manager
-    from automated_security_helper.plugins.loader import load_internal_plugins, load_additional_plugin_modules
     from automated_security_helper.config.default_config import get_default_config
 
-    load_internal_plugins()
-
-    # Discover external plugin modules via importlib.metadata: any installed package
-    # whose top-level name matches the ash plugin namespace pattern is imported so its
-    # @ash_scanner_plugin decorators fire and register the scanner into ash_plugin_manager.
-    import importlib as _importlib
-    try:
-        from importlib.metadata import packages_distributions
-        _pkg_dist = packages_distributions()
-    except Exception:
-        _pkg_dist = {}
-
-    _external_mods: list[str] = []
-    for _top_level, _dists in _pkg_dist.items():
-        if any(
-            d.startswith("ash_") and d.endswith("_plugins")
-            for d in _dists
-        ):
-            _external_mods.append(f"automated_security_helper.plugin_modules.{_top_level}")
-
-    if _external_mods:
-        load_additional_plugin_modules(_external_mods)
-    else:
-        # Fallback: import well-known external plugin modules directly so their decorators fire.
-        # TODO: replace with entry-points once external packages declare 'ash.plugins' group.
-        for _mod in (
-            "automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner",
-            "automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner",
-            "automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner",
-        ):
-            try:
-                _importlib.import_module(_mod)
-            except ImportError:
-                pass
-
-    scanner_classes = ash_plugin_manager.plugin_modules("scanner")
+    scanner_classes = _loaded_scanner_classes()
     default_config = get_default_config()
 
     results = []
