@@ -220,7 +220,11 @@ failed to load. The merge action is where it surfaces, not where it broke.
 
 Setting `shardCount` higher than the number of enabled scanners is wasteful rather
 than broken. The surplus shards are assigned no scanners, still record provenance
-and still merge; they just cost a CodeBuild start each.
+and still merge; they just cost a CodeBuild start each. That was measured at 50
+shards over a 5-scanner tree — 45 empty assignments, all 50 stamped, merged
+findings identical to one unsharded scan — and `ash merge` carries a regression
+test at that same ceiling, so it is a supported configuration rather than one that
+happens to work.
 
 `version` is a git ref, not a distribution version, because ASH is installed from
 its repository. It defaults to a pinned release tag, so two runs of the same
