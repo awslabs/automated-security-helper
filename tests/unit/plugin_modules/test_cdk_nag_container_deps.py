@@ -21,7 +21,7 @@ version of this file: the tests asserted the buggy behavior.
 
 import re
 import sys
-from importlib.metadata import packages_distributions
+from importlib.metadata import PackageNotFoundError, packages_distributions
 from pathlib import Path
 from unittest.mock import patch
 
@@ -116,7 +116,9 @@ def scanner_context(tmp_path):
 
 
 @pytest.fixture
-def install_commands_when_cdk_missing(scanner_context):
+def install_commands_when_cdk_missing(
+    scanner_context: PluginContext,
+) -> list[list[str]]:
     """The commands emitted when the CDK dependencies are not importable."""
     with patch.object(cdk_nag_scanner_module, "_CDK_AVAILABLE", False):
         scanner = CdkNagScanner(context=scanner_context)
@@ -126,7 +128,9 @@ def install_commands_when_cdk_missing(scanner_context):
 class TestCdkNagInstallationCommands:
     """get_installation_commands must install the CDK packages, and only those."""
 
-    def test_installs_the_real_cdk_packages(self, install_commands_when_cdk_missing):
+    def test_installs_the_real_cdk_packages(
+        self, install_commands_when_cdk_missing: list[list[str]]
+    ) -> None:
         """Exactly one pip install command, naming each package the extra declares."""
         pip_cmds = [
             cmd
@@ -144,8 +148,8 @@ class TestCdkNagInstallationCommands:
         )
 
     def test_never_installs_ash_by_distribution_name(
-        self, install_commands_when_cdk_missing
-    ):
+        self, install_commands_when_cdk_missing: list[list[str]]
+    ) -> None:
         """No command may name ASH's own distribution.
 
         This is the supply-chain guard. ASH is not published to any package
@@ -164,8 +168,8 @@ class TestCdkNagInstallationCommands:
             )
 
     def test_requirements_carry_no_pep508_markers(
-        self, install_commands_when_cdk_missing
-    ):
+        self, install_commands_when_cdk_missing: list[list[str]]
+    ) -> None:
         """Install targets must be bare requirements, with any marker stripped.
 
         pip evaluates markers with ``extra`` undefined, so an argument that kept
@@ -178,7 +182,9 @@ class TestCdkNagInstallationCommands:
                 "silently skip it and report success."
             )
 
-    def test_no_pip_install_when_cdk_available(self, scanner_context):
+    def test_no_pip_install_when_cdk_available(
+        self, scanner_context: PluginContext
+    ) -> None:
         """When _CDK_AVAILABLE is True, must NOT emit a CDK install command."""
         with patch.object(cdk_nag_scanner_module, "_CDK_AVAILABLE", True):
             scanner = CdkNagScanner(context=scanner_context)
@@ -191,7 +197,9 @@ class TestCdkNagInstallationCommands:
                     f"got: {commands}"
                 )
 
-    def test_validate_deps_fails_when_cdk_unavailable(self, scanner_context, caplog):
+    def test_validate_deps_fails_when_cdk_unavailable(
+        self, scanner_context: PluginContext, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """validate_plugin_dependencies must fail, and must not advertise ASH's name."""
         with patch.object(cdk_nag_scanner_module, "_CDK_AVAILABLE", False):
             scanner = CdkNagScanner(context=scanner_context)
@@ -214,7 +222,7 @@ class TestCdkNagInstallationCommands:
 class TestCdkExtraResolution:
     """_cdk_extra_requirements must track pyproject.toml, not a stale copy."""
 
-    def test_resolves_from_installed_metadata(self):
+    def test_resolves_from_installed_metadata(self) -> None:
         """The extra is read from metadata, bounds included."""
         requirements = _cdk_extra_requirements()
 
@@ -225,7 +233,7 @@ class TestCdkExtraResolution:
             any(op in req for op in (">=", "==", "~=")) for req in requirements
         ), f"Requirements should carry version bounds: {requirements}"
 
-    def test_fallback_matches_installed_metadata(self):
+    def test_fallback_matches_installed_metadata(self) -> None:
         """The hardcoded fallback must not drift from the declared extra.
 
         The fallback is a copy of [project.optional-dependencies] cdk. Comparing
@@ -253,7 +261,7 @@ class TestCdkExtraResolution:
             "[project.optional-dependencies] cdk in pyproject.toml"
         )
 
-    def test_falls_back_when_metadata_is_unreadable(self):
+    def test_falls_back_when_distribution_is_not_found(self) -> None:
         """An uninstalled checkout must still get a usable requirement list.
 
         Returning nothing here would make `ash dependencies install` exit 0
@@ -264,7 +272,62 @@ class TestCdkExtraResolution:
         ):
             assert _cdk_extra_requirements() == _CDK_EXTRA_FALLBACK_REQUIREMENTS
 
-    def test_fallback_names_no_ash_distribution(self):
+    @pytest.mark.parametrize(
+        "raised",
+        [PackageNotFoundError("automated-security-helper"), OSError("no perms")],
+    )
+    def test_falls_back_when_metadata_read_raises(self, raised: Exception) -> None:
+        """The except branch must reach the fallback, not propagate.
+
+        Separate from the not-found case above: that one returns an empty mapping
+        and never enters the except block, so without this test the handler is
+        present but unexecuted. Both exception types are covered because catching
+        only one of them would let the other escape into
+        `ash dependencies install` as an unhandled traceback.
+        """
+        with patch.object(
+            cdk_nag_scanner_module, "packages_distributions", side_effect=raised
+        ):
+            assert _cdk_extra_requirements() == _CDK_EXTRA_FALLBACK_REQUIREMENTS
+
+    def test_returns_empty_when_extra_was_removed(self) -> None:
+        """A distribution declaring no cdk extra means there is nothing to install.
+
+        Distinct from the unreadable-metadata case, which must fall back. Here the
+        metadata is readable and authoritative, so honoring it beats installing
+        the stale hardcoded pins.
+        """
+        with patch.object(
+            cdk_nag_scanner_module,
+            "packages_distributions",
+            return_value={"automated_security_helper": ["automated-security-helper"]},
+        ):
+            with patch.object(
+                cdk_nag_scanner_module, "requires", return_value=["requests>=2.28.0"]
+            ):
+                assert _cdk_extra_requirements() == []
+
+    def test_skips_distributions_declaring_nothing(self) -> None:
+        """A distribution whose requires() is None is skipped, not treated as empty.
+
+        importlib.metadata returns None rather than [] for a distribution with no
+        declared requirements. Without the skip, the first such name would short
+        circuit the search and hide a later distribution that does declare the
+        extra.
+        """
+        with patch.object(
+            cdk_nag_scanner_module,
+            "packages_distributions",
+            return_value={"automated_security_helper": ["ghost-dist", "real-dist"]},
+        ):
+            with patch.object(
+                cdk_nag_scanner_module,
+                "requires",
+                side_effect=[None, ["cdk-nag>=3.0.2,<4.0.0; extra == 'cdk'"]],
+            ):
+                assert _cdk_extra_requirements() == ["cdk-nag>=3.0.2,<4.0.0"]
+
+    def test_fallback_names_no_ash_distribution(self) -> None:
         """The fallback list is an install target too, so the same rule applies."""
         flattened = _scannable(_CDK_EXTRA_FALLBACK_REQUIREMENTS)
         for name in _self_referential_names():
