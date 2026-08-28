@@ -1,0 +1,77 @@
+{
+  "name": "ash-cdk-constructs",
+  "version": "0.1.0",
+  "description": "CDK Pipelines constructs for running an Automated Security Helper (ASH) scan, with optional shard fan-out and a merge step that owns the pass/fail verdict.",
+  "license": "Apache-2.0",
+  "stability": "experimental",
+  "private": true,
+  "author": {
+    "name": "Amazon Web Services",
+    "url": "https://aws.amazon.com",
+    "organization": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/awslabs/automated-security-helper.git",
+    "directory": "deploy/cdk-constructs"
+  },
+  "homepage": "https://github.com/awslabs/automated-security-helper",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "scripts": {
+    "build": "jsii",
+    "watch": "jsii --watch",
+    "test": "jest",
+    "generate:buildspec": "node lib/buildspec-cli.js write",
+    "check:buildspec": "node lib/buildspec-cli.js check",
+    "buildspec": "npm run build && npm run generate:buildspec"
+  },
+  "jsii": {
+    "outdir": "dist",
+    "versionFormat": "full",
+    "targets": {
+      "python": {
+        "distName": "ash-cdk-constructs",
+        "module": "ash_cdk_constructs"
+      },
+      "java": {
+        "package": "io.github.awslabs.ash.cdk",
+        "maven": {
+          "groupId": "io.github.awslabs.ash",
+          "artifactId": "ash-cdk-constructs"
+        }
+      },
+      "dotnet": {
+        "namespace": "Awslabs.Ash.Cdk",
+        "packageId": "Awslabs.Ash.Cdk"
+      },
+      "go": {
+        "moduleName": "github.com/awslabs/automated-security-helper",
+        "packageName": "ashcdk"
+      }
+    },
+    "tsc": {
+      "outDir": "lib",
+      "rootDir": "src"
+    },
+    "excludeTypescript": [
+      "test"
+    ]
+  },
+  "peerDependencies": {
+    "aws-cdk-lib": "^2.267.0",
+    "constructs": "^10.8.1"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/node": "^22.19.0",
+    "aws-cdk-lib": "2.267.0",
+    "constructs": "10.8.1",
+    "jest": "^30.5.0",
+    "jsii": "^6.0.11",
+    "jsii-pacmak": "^1.140.0",
+    "jsii-rosetta": "^6.0.12",
+    "ts-jest": "^29.4.12",
+    "typescript": "~5.9.3"
+  }
+}
