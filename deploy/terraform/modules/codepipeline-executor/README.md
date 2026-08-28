@@ -58,6 +58,24 @@ different verdict than `ash scan` for identical findings.
 `min_severity` maps directly onto `ash merge --min-severity` for the same reason:
 one implementation of "does this breach".
 
+### `min_severity` is a floor, so lower is stricter
+
+The name reads like a tolerance, but ASH tests
+`rank(finding) >= rank(min_severity)`, which inverts the direction:
+
+| `min_severity` | Fails the pipeline on | |
+|---|---|---|
+| `low` | low, medium, high | strictest |
+| `medium` | medium, high | |
+| `high` | high only | laxest |
+
+`critical` and `high` share a rank in ASH's ladder, so they cannot be
+distinguished here.
+
+The default is `low`, matching ASH. On a gate the surprise has to run toward
+failing a build for something you did not care about, never toward passing a build
+that had findings. Raise it deliberately if that is what you want.
+
 **Shard coverage is also ASH's check, not ours.** `merge_shard_results` raises
 `ShardCoverageError` when the shard space is not fully covered and exits 1, with
 the message being explicit that unknown findings are not the same as no findings.
@@ -137,7 +155,7 @@ work it does is idempotent.
 | `base_config_ssm_parameter_arn` | — | `string` | `null` | Scopes `ssm:GetParameter`. |
 | `name_prefix` | — | `string` | `"ash-scan"` | |
 | `source_branch` | — | `string` | `"main"` | |
-| `min_severity` | — | `string` | `"high"` | Passed to `ash merge --min-severity`. ASH evaluates it. |
+| `min_severity` | — | `string` | `"low"` | Passed to `ash merge --min-severity`. A floor, so lower is stricter — see below. |
 | `fail_on_findings` | — | `bool` | `true` | Passed explicitly so a base config cannot disable the gate. |
 | `enable_eventbridge_trigger` | — | `bool` | `true` | Preferred over polling. |
 | `build_compute_type` | — | `string` | `BUILD_GENERAL1_LARGE` | Scanners are CPU-bound. |

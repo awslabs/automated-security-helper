@@ -175,7 +175,7 @@ deploy/terraform/tests/validate-inputs.sh
 
 Variable validation is evaluated *before* Terraform initializes the provider or
 needs credentials, so a plan carrying a deliberately invalid value fails on the
-rule's own `error_message` and never reaches AWS. The script exercises 17 cases
+rule's own `error_message` and never reaches AWS. The script exercises 19 cases
 across all five modules in **both** directions — an invalid value must produce the
 message, and a valid one must not — because a check that only ever feeds in the
 failing value cannot tell "the rule fired" apart from "plan failed for an unrelated

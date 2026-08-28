@@ -46,9 +46,15 @@ WORK_ROOT = pathlib.Path("/tmp/ash-gate")  # noqa: S108 - the only writable path
 
 RESULTS_FILENAME = "ash_aggregated_results.json"
 
-#: Threshold handed to `ash scan --min-severity`. A point on ASH's severity
-#: ladder, evaluated by ASH; this module never compares against it.
-DEFAULT_MIN_SEVERITY = "high"
+#: Threshold handed to `ash scan --min-severity`, evaluated by ASH; this module
+#: never compares against it.
+#:
+#: A FLOOR on what counts as actionable, so a lower value is a stricter gate --
+#: ASH tests `rank(finding) >= rank(min_severity)`, so "low" admits every level
+#: and "high" admits only one. Matches ASH's own default for that reason: on a
+#: gate, the surprise must run toward a build failing over something unimportant,
+#: never toward one passing with findings.
+DEFAULT_MIN_SEVERITY = "low"
 
 #: Exit codes `ash scan` uses, via _compute_exit_code.
 EXIT_CLEAN = 0
@@ -289,7 +295,10 @@ def build_comment(
                 lines += [f"{counts['suppressed']} finding(s) suppressed by configuration.", ""]
 
         # The threshold is stated, not applied here: ASH decided the verdict above.
-        lines.append(f"Threshold: {min_severity} and higher is actionable.")
+        lines.append(
+            f"Threshold: findings ranked at or above `{min_severity}` are "
+            "actionable; anything lower is listed but does not fail the gate."
+        )
 
     comment = "\n".join(lines)
     if len(comment) > max_chars:

@@ -53,7 +53,11 @@ module "ash_scan_pipeline" {
   # Handed to `ash merge --min-severity`. ASH computes the verdict and this module
   # propagates its exit code, so the pipeline can never disagree with what
   # `ash scan` would say about the same findings.
-  min_severity = "high"
+  #
+  # This is a floor on what counts as actionable, so "low" is the STRICTEST
+  # setting -- every severity fails the pipeline. "high" would be the laxest,
+  # ignoring low and medium findings entirely.
+  min_severity = "low"
 
   tags = {
     Project = "ash-example"

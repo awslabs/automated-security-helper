@@ -71,26 +71,43 @@ variable "min_severity" {
     Lowest severity that counts as actionable for the pipeline's verdict, passed
     straight through to `ash merge --min-severity`.
 
-    A threshold on ASH's own severity ladder, not a set: "high" means high and
-    critical are actionable, and everything below is reported but not blocking.
+    This is a FLOOR on what counts as actionable, so a lower value is a stricter
+    gate. ASH compares `rank(finding) >= rank(min_severity)`, which makes the
+    direction the opposite of what the name suggests:
+
+      min_severity = "low"       low, medium and high findings all fail   strictest
+      min_severity = "medium"    medium and high fail; low is ignored
+      min_severity = "high"      only high fails; low and medium ignored  laxest
+
+    Note "critical" and "high" share a rank in ASH's ladder, so they cannot be
+    distinguished here.
+
+    Defaults to "low", matching ASH, because on a security gate the surprise has
+    to run toward failing a build for something you did not care about, never
+    toward passing a build that had findings. Raise it deliberately if that is
+    what you want.
 
     The comparison is made by ASH, never here. `ash merge` routes its exit code
     through the same _compute_exit_code that `ash scan` uses, so a merged verdict
     and a scanned verdict cannot disagree about the same findings. Re-deriving the
     threshold in this module would be a third copy of a severity table that has
     already drifted once in this codebase.
-
-    Note this default is stricter than ASH's own, which is "low". A pipeline whose
-    purpose is gating should not fail on every informational finding by default,
-    so the module chooses "high" and states the difference rather than inheriting
-    it silently.
   EOT
   type        = string
-  default     = "high"
+  default     = "low"
 
+  # Restricted to the values ASH's ladder actually ranks. ASH does not validate
+  # this option itself -- it does `_SEVERITY_RANK.get(min_severity.lower(), 1)`,
+  # so an unrecognized value silently becomes rank 1, which is "low". A typo would
+  # therefore produce a working pipeline gating at a threshold nobody chose. This
+  # validation is what turns that into an error.
+  #
+  # "info" is deliberately not accepted: ASH has no such rank, so it would be
+  # silently reinterpreted as "low". "none" is not accepted either, because rank 0
+  # skips the severity filter path entirely rather than meaning "everything".
   validation {
-    condition     = contains(["critical", "high", "medium", "low", "info"], lower(var.min_severity))
-    error_message = "min_severity must be one of: critical, high, medium, low, info."
+    condition     = contains(["critical", "high", "medium", "low"], lower(var.min_severity))
+    error_message = "min_severity must be one of: critical, high, medium, low. ASH ranks no other value and would silently treat it as \"low\"."
   }
 }
 

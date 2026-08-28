@@ -119,9 +119,18 @@ run_case "shard_count 8 -> allowed" mustnot \
 run_case "min_severity outside ASH's ladder -> refused" must \
   "min_severity must be one of" \
   "$MODULES/codepipeline-executor" "${EXEC_BASE[@]}" -var min_severity=catastrophic
+# ASH ranks no "info" level and does `_SEVERITY_RANK.get(value, 1)`, so it would
+# silently treat info as "low" — a gate running at a threshold nobody chose. This
+# validation is the only thing that turns that into an error.
+run_case "min_severity info -> refused (ASH ranks no such level)" must \
+  "min_severity must be one of" \
+  "$MODULES/codepipeline-executor" "${EXEC_BASE[@]}" -var min_severity=info
 run_case "min_severity high -> allowed" mustnot \
   "min_severity must be one of" \
   "$MODULES/codepipeline-executor" "${EXEC_BASE[@]}" -var min_severity=high
+run_case "min_severity low (the default) -> allowed" mustnot \
+  "min_severity must be one of" \
+  "$MODULES/codepipeline-executor" "${EXEC_BASE[@]}" -var min_severity=low
 
 echo
 echo "### ash-image-pipeline"

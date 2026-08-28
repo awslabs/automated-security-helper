@@ -46,7 +46,11 @@ module "ash_pr_gate" {
 
   # Handed to `ash scan --min-severity`. ASH computes the verdict from its own
   # severity ladder; the handler reports it rather than recomputing it.
-  min_severity = "high"
+  #
+  # This is a floor on what counts as actionable, so "low" is the STRICTEST
+  # setting -- every severity fails the gate. "high" would be the laxest,
+  # ignoring low and medium findings entirely.
+  min_severity = "low"
 
   # Scan only what the pull request changes. This is what keeps a real repository
   # inside Lambda's hard 900 second ceiling, since it scales with the size of the

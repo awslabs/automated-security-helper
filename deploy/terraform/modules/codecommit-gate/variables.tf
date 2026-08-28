@@ -77,25 +77,42 @@ variable "min_severity" {
     Lowest severity that counts as actionable for the gate, passed straight
     through to `ash scan --min-severity`.
 
-    A threshold on ASH's severity ladder, not a set: "high" means high and critical
-    are actionable, and everything below is still shown in the pull-request comment
-    but does not fail the gate.
+    This is a FLOOR on what counts as actionable, so a lower value is a stricter
+    gate. ASH compares `rank(finding) >= rank(min_severity)`, which makes the
+    direction the opposite of what the name suggests:
+
+      min_severity = "low"       low, medium and high findings all fail   strictest
+      min_severity = "medium"    medium and high fail; low is ignored
+      min_severity = "high"      only high fails; low and medium ignored  laxest
+
+    Note "critical" and "high" share a rank in ASH's ladder, so they cannot be
+    distinguished here. Findings below the threshold still appear in the
+    pull-request comment; they just do not fail the gate.
+
+    Defaults to "low", matching ASH, because on a security gate the surprise has
+    to run toward failing a pull request for something you did not care about,
+    never toward passing one that had findings. Raise it deliberately if that is
+    what you want.
 
     The comparison is made by ASH, never in the handler. `ash scan` routes its exit
     code through _compute_exit_code, the same function `ash merge` uses, so this
     gate's verdict cannot disagree with a scan's over identical findings.
-
-    Note this default is stricter than ASH's own, which is "low". A gate that failed
-    every pull request over an informational finding would not survive contact with
-    a real repository, so the module chooses "high" and states the difference rather
-    than inheriting it silently.
   EOT
   type        = string
-  default     = "high"
+  default     = "low"
 
+  # Restricted to the values ASH's ladder actually ranks. ASH does not validate
+  # this option itself -- it does `_SEVERITY_RANK.get(min_severity.lower(), 1)`,
+  # so an unrecognized value silently becomes rank 1, which is "low". A typo would
+  # therefore produce a working gate at a threshold nobody chose. This validation
+  # is what turns that into an error.
+  #
+  # "info" is deliberately not accepted: ASH has no such rank, so it would be
+  # silently reinterpreted as "low". "none" is not accepted either, because rank 0
+  # skips the severity filter path entirely rather than meaning "everything".
   validation {
-    condition     = contains(["critical", "high", "medium", "low", "info"], lower(var.min_severity))
-    error_message = "min_severity must be one of: critical, high, medium, low, info."
+    condition     = contains(["critical", "high", "medium", "low"], lower(var.min_severity))
+    error_message = "min_severity must be one of: critical, high, medium, low. ASH ranks no other value and would silently treat it as \"low\"."
   }
 }
 
