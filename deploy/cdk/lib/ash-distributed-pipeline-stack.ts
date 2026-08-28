@@ -38,6 +38,22 @@
  * pulls them back. Shard count is then bounded by CodeBuild concurrency rather
  * than by an artifact limit.
  *
+ * WHY THOSE S3 TRANSFERS GO THROUGH boto3 AND NOT THE AWS CLI
+ * ----------------------------------------------------------
+ * Every buildspec below runs with the ASH image as its CodeBuild ENVIRONMENT
+ * image, and THE ASH IMAGE SHIPS NO AWS CLI. It does depend on boto3, declared in
+ * ASH's pyproject.toml `dependencies`, so `python3` is the only AWS API client
+ * guaranteed to be present. An earlier version of this stack used `aws s3 cp` and
+ * `aws ssm get-parameter` here, and a deployed pipeline failed every shard
+ * identically at post_build with `aws: not found` and exit status 127 — after the
+ * scan had already succeeded, so the results existed and were thrown away.
+ *
+ * The constraint is NOT true of the image build in stage one. That project runs on
+ * a CodeBuild managed image, which does carry the CLI, and its
+ * `aws ecr get-login-password` is correct. The rule is per-image, not per-repo,
+ * which is why `deploy/cdk/test/ash-no-aws-cli.test.ts` classifies projects by
+ * `Environment.Image` rather than grepping for a string.
+ *
  * WHY THE IMAGE BUILD IS THE FIRST STAGE
  * --------------------------------------
  * The shard and merge actions use the ASH image as their CodeBuild ENVIRONMENT
@@ -80,7 +96,11 @@ import {
   ashSynthesizer,
   ashOfflineMode, ashVersion, rebuildSchedule, resolveShardCount,
 } from './ash-config';
-import { ASH_MATERIALIZED_CONFIG_PATH } from './ash-container-scripts';
+import {
+  ASH_MATERIALIZED_CONFIG_PATH,
+  ASH_S3_SYNC_PATH,
+  MATERIALIZE_S3_SYNC_COMMAND,
+} from './ash-container-scripts';
 import { AshImageBuild } from './ash-image-build';
 import {
   suppressCodeBuildRoleWildcards,
@@ -345,7 +365,11 @@ export class AshDistributedPipelineStack extends Stack {
       buildSpec: codebuild.BuildSpec.fromObject({
         version: '0.2',
         phases: {
-          pre_build: { commands: [MATERIALIZE_CONFIG_COMMAND] },
+          // The S3 helper is written here rather than in post_build because a
+          // build whose scan failed still reaches post_build, and a helper that
+          // only existed on the success path would turn a scan failure into a
+          // second, misleading failure about a missing file.
+          pre_build: { commands: [MATERIALIZE_CONFIG_COMMAND, MATERIALIZE_S3_SYNC_COMMAND] },
           build: {
             commands: [
               'echo "Scanning shard ${ASH_SHARD_INDEX} of ${ASH_SHARD_COUNT}"',
@@ -387,9 +411,12 @@ export class AshDistributedPipelineStack extends Stack {
           },
           post_build: {
             commands: [
-              // Under errexit: a failed upload must fail the shard.
-              'aws s3 cp --recursive --only-show-errors ./ash-shard-output ' +
-                '"s3://${ASH_RESULTS_BUCKET}/${ASH_RESULTS_PREFIX}/shard-${ASH_SHARD_INDEX}/"',
+              // Under errexit: a failed upload must fail the shard. The helper
+              // raises rather than exiting 0 on a failed transfer, so errexit sees
+              // it — the same property `aws s3 cp` had here.
+              `python3 ${ASH_S3_SYNC_PATH} upload ./ash-shard-output ` +
+                '"$ASH_RESULTS_BUCKET" ' +
+                '"${ASH_RESULTS_PREFIX}/shard-${ASH_SHARD_INDEX}"',
               // Reaching here means ASH produced results and they uploaded, so the
               // shard has done its job. The pass/fail verdict on those findings is
               // the merge action's to make, never this shard's: a shard runs a
@@ -442,8 +469,13 @@ export class AshDistributedPipelineStack extends Stack {
           pre_build: {
             commands: [
               MATERIALIZE_CONFIG_COMMAND,
-              'aws s3 cp --recursive --only-show-errors ' +
-                '"s3://${ASH_RESULTS_BUCKET}/${ASH_RESULTS_PREFIX}/" ./shard-results/',
+              MATERIALIZE_S3_SYNC_COMMAND,
+              // The helper strips the prefix from each key, so a shard's object at
+              // <prefix>/shard-2/ash_aggregated_results.json lands at
+              // ./shard-results/shard-2/ash_aggregated_results.json — the layout
+              // the completeness check below and `ash merge` both expect.
+              `python3 ${ASH_S3_SYNC_PATH} download ` +
+                '"$ASH_RESULTS_BUCKET" "$ASH_RESULTS_PREFIX" ./shard-results',
               [
                 '# Refuse to merge a partial result set. The test is for ASH\'s',
                 '# aggregated results FILE, not merely for a shard directory: an',
@@ -497,9 +529,12 @@ export class AshDistributedPipelineStack extends Stack {
           post_build: {
             commands: [
               // Publish the merged report even when the merge failed the build, so
-              // the findings that caused the failure are readable.
-              'aws s3 cp --recursive --only-show-errors ./ash-merged-output ' +
-                '"s3://${ASH_RESULTS_BUCKET}/${ASH_RESULTS_PREFIX}/merged/" || true',
+              // the findings that caused the failure are readable. `|| true` is
+              // kept: this must not convert a merge verdict into an upload error,
+              // in either direction.
+              `python3 ${ASH_S3_SYNC_PATH} upload ./ash-merged-output ` +
+                '"$ASH_RESULTS_BUCKET" ' +
+                '"${ASH_RESULTS_PREFIX}/merged" || true',
             ],
           },
         },
@@ -523,11 +558,20 @@ export class AshDistributedPipelineStack extends Stack {
  * phase's shell, so the path is always set and only the FILE is conditional.
  * That is safe because ASH's `get_default_config` tests the path for existence
  * before reading it and falls through to its defaults when it is absent.
+ *
+ * THE READ IS THE SAME ONE THE ENTRYPOINT MAKES, DELIBERATELY. Character for
+ * character the same `python3 -c` as `MCP_ENTRYPOINT_SCRIPT`, for two reasons.
+ * The ASH image has no AWS CLI, so `aws ssm get-parameter` exits 127 here — this
+ * branch was latent rather than correct, reached only by adopters who supply a
+ * base config, because `AshBaseConfigYaml` defaults empty and the else branch runs
+ * when it does. And `sys.stdout.write` reproduces the parameter value exactly,
+ * where `--output text` appends a newline, so a config materialized by a buildspec
+ * and one materialized by the entrypoint cannot differ.
  */
 const MATERIALIZE_CONFIG_COMMAND = `if [ -n "\${ASH_BASE_CONFIG_SSM_PARAMETER:-}" ]; then
   mkdir -p "$(dirname "$ASH_CONFIG")"
-  aws ssm get-parameter --name "$ASH_BASE_CONFIG_SSM_PARAMETER" --with-decryption \\
-    --query Parameter.Value --output text > "$ASH_CONFIG"
+  python3 -c "import os, sys, boto3; sys.stdout.write(boto3.client('ssm').get_parameter(Name=os.environ['ASH_BASE_CONFIG_SSM_PARAMETER'], WithDecryption=True)['Parameter']['Value'])" \\
+    > "$ASH_CONFIG"
 else
   echo "No ASH base configuration supplied; ASH will use its built-in defaults."
 fi`;

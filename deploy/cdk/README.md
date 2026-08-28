@@ -175,6 +175,21 @@ through pipeline artifacts. A CodeBuild pipeline action accepts
 [1 to 5 input artifacts](https://docs.aws.amazon.com/codepipeline/latest/userguide/reference-action-artifacts.html),
 so an artifact per shard cannot express a six-way split at all.
 
+Those transfers use `boto3`, not `aws s3 cp`, and that is not a style preference.
+The shard and merge actions run with the ASH image as their CodeBuild environment
+image — which is what puts `ash` directly on `PATH` with no Docker-in-Docker — and
+**the ASH image installs no AWS CLI.** It does depend on `boto3`, so `python3` is
+the only AWS API client guaranteed to be present. An `aws` invocation in these
+buildspecs exits 127 at runtime, after the scan has already succeeded, and takes
+the results with it. The same constraint shapes the MCP entrypoint in
+`lib/ash-container-scripts.ts`, and `test/ash-no-aws-cli.test.ts` enforces it for
+every project whose environment image is the ASH image.
+
+The image build in stage one is the exception and is unaffected: it runs on a
+CodeBuild managed image, which does ship the CLI, and it needs
+`aws ecr get-login-password` to push. So do the two operator commands below —
+they run on your workstation, not in the image.
+
 Because the split is over scanners rather than files, a shard count above the
 number of enabled scanners produces empty shards and no extra parallelism. Check
 `ash plugin list` for the pinned version before raising it.
