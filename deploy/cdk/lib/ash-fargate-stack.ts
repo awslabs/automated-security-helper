@@ -58,7 +58,7 @@ import { Construct } from 'constructs';
 import {
   ashSynthesizer,
   ashImageTag,
-  ashOfflineMode, ashVersion, diagnosticLogGroupProps, MCP_PORT, rebuildSchedule,
+  ashOfflineMode, ashVersion, diagnosticLogGroupProps, mcpIngressCidr, MCP_PORT, rebuildSchedule,
 } from './ash-config';
 import { AshImageBuild } from './ash-image-build';
 import {
@@ -83,6 +83,7 @@ export class AshFargateStack extends Stack {
     const version = ashVersion(this);
     const offline = ashOfflineMode(this);
     const schedule = rebuildSchedule(this);
+    const ingressCidr = mcpIngressCidr(this);
     const config = new AshRuntimeConfig(this, 'Config', { includeMcpParameters: true });
 
     // One customer-managed key per stack, shared by every CodeBuild project here.
@@ -295,29 +296,57 @@ export class AshFargateStack extends Stack {
      * described the endpoint as "reachable from inside the VPC or over a
      * peered/VPN path". It was reachable from nowhere.
      *
-     * WHAT WAS REJECTED, AND WHY NOT JUST OPEN IT TO THE VPC
-     * ----------------------------------------------------
-     * - Ingress from this VPC's CIDR: rejected as the appearance of a fix. This
-     *   stack creates its OWN VPC and puts nothing in it but the ASH tasks, so
-     *   that rule would admit a range containing no clients. Every real consumer
-     *   arrives from somewhere else — a peered VPC, a VPN, a transit gateway —
-     *   and none of those are inside this CIDR. It would widen access without
-     *   making the endpoint usable.
-     * - A new `McpIngressCidr` parameter: rejected here, though it is the right
-     *   shape eventually. The parameter surface in `ash-config.ts` is a contract
-     *   shared with the Terraform mirror under `deploy/terraform/`, and adding a
-     *   name on one side only desynchronizes the two. That is a change to make
-     *   across both implementations at once, not half of one.
+     * SO THE POSTURE STAYS CLOSED, AND `McpIngressCidr` IS THE WAY TO OPEN IT
+     * ---------------------------------------------------------------------
+     * `open: false` is kept, and the parameter defaults to empty, so an adopter
+     * who sets nothing gets exactly the behaviour above — no ingress rule, nothing
+     * reachable, and no new rule appearing on an update of an existing stack.
+     * Setting it adds one rule for that CIDR on the listener port.
      *
-     * So the posture stays closed and the stack instead tells the adopter exactly
-     * what to run, via the `McpSecurityGroupId` output. Being closed is
-     * defensible; being closed while claiming otherwise is not.
+     * Both halves are needed and neither is sufficient. Correcting the output text
+     * without a parameter leaves the adopter with an accurate message and no way to
+     * act on it, which is the same documented-but-unreachable defect wearing
+     * different clothes. Adding the parameter without correcting the output leaves
+     * the stack claiming a reachability it does not have until someone sets it.
+     *
+     * REJECTED: defaulting to this VPC's CIDR. The stack creates its own VPC and
+     * puts nothing in it but the ASH tasks, so that rule would admit a range
+     * containing no clients while still widening access. Real consumers arrive from
+     * a peered VPC, a VPN or a transit gateway, none of which fall inside it.
+     *
+     * REJECTED: an `IPeer` list or a comma-separated CIDR list. One CIDR covers the
+     * common case, and `McpSecurityGroupId` is still an output, so an adopter
+     * needing several sources authorizes the rest against that group directly —
+     * which is also how to use `--source-group` instead of a CIDR.
      */
     const listener = loadBalancer.addListener('Listener', {
       port: 80,
       protocol: elbv2.ApplicationProtocol.HTTP,
       open: false,
     });
+
+    /**
+     * `Fn::If` on the rule's existence, not on its CIDR.
+     *
+     * `McpIngressCidr` is a deploy-time parameter, so the choice cannot be made at
+     * synth time. Emitting the rule unconditionally with a conditional CIDR was
+     * rejected: there is no CIDR value that means "no access", and `0.0.0.0/32`
+     * would be a real rule that merely looks inert. Gating the RESOURCE on the
+     * condition means the empty default emits no ingress rule at all, which is
+     * what preserves the closed posture byte for byte.
+     */
+    const ingressSupplied = new CfnCondition(this, 'McpIngressCidrSupplied', {
+      expression: Fn.conditionNot(Fn.conditionEquals(ingressCidr.valueAsString, '')),
+    });
+    const ingressRule = new ec2.CfnSecurityGroupIngress(this, 'McpIngress', {
+      groupId: loadBalancer.connections.securityGroups[0].securityGroupId,
+      ipProtocol: 'tcp',
+      fromPort: 80,
+      toPort: 80,
+      cidrIp: ingressCidr.valueAsString,
+      description: 'MCP clients allowed by McpIngressCidr.',
+    });
+    ingressRule.cfnOptions.condition = ingressSupplied;
 
     listener.addTargets('Mcp', {
       port: MCP_PORT,
@@ -370,10 +399,10 @@ export class AshFargateStack extends Stack {
 
     new CfnOutput(this, 'McpEndpoint', {
       description:
-        'MCP endpoint, once you allow traffic to it. The load balancer is internal AND ' +
-        'its security group has no ingress rule on deployment, so this address is not ' +
-        'reachable from anywhere yet — see McpSecurityGroupId. Append the McpMountPath ' +
-        'value. The listener is plain HTTP.',
+        'MCP endpoint. The load balancer is internal, and reachable only from the range ' +
+        'given in McpIngressCidr. If you left that empty there is NO ingress rule, so ' +
+        'this address is not reachable from anywhere — set McpIngressCidr, or authorize ' +
+        'McpSecurityGroupId directly. Append the McpMountPath value. Plain HTTP.',
       value: Fn.join('', ['http://', loadBalancer.loadBalancerDnsName]),
     });
     new CfnOutput(this, 'McpSecurityGroupId', {

@@ -42,11 +42,12 @@ describe('parameter names are the contract', () => {
     // Spelled out rather than derived, so that changing ASH_PARAMETER_NAMES
     // requires changing this list too and cannot happen by accident.
     //
-    // `AshImageTag` was added deliberately, and adding it here is the deliberate
-    // half. It lets a workload pin the image it pulls instead of tracking the
-    // moving tag. Like every name in this list it is part of the surface the
-    // Terraform mirror under `deploy/terraform/` is expected to match, so it still
-    // needs adding there.
+    // Two names were added deliberately, and adding them here is the deliberate
+    // half. `AshImageTag` lets a workload pin the image it pulls instead of
+    // tracking the moving tag. `McpIngressCidr` is what opens the Fargate load
+    // balancer, which is created with no ingress rule at all. Like every name in
+    // this list both are part of the surface the Terraform mirror under
+    // `deploy/terraform/` is expected to match, so both still need adding there.
     expect(Object.values(ASH_PARAMETER_NAMES).sort()).toEqual(
       [
         'AshBaseConfigYaml',
@@ -56,6 +57,7 @@ describe('parameter names are the contract', () => {
         'CodeCommitRepositoryArn',
         'McpAllowedHost',
         'McpAuthHeaderName',
+        'McpIngressCidr',
         'McpAuthHeaderValue',
         'McpMountPath',
         'McpStatelessHttp',

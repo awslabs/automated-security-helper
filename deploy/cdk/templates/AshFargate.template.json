@@ -22,6 +22,12 @@
    "Description": "EventBridge schedule expression for the image rebuild, for example \"cron(0 6 * * ? *)\" or \"rate(1 day)\". The rebuild repulls the base image and scanner tools so a long-lived deployment keeps getting OS and scanner patches without a stack update. Note that a rate() expression starts when the rule is created, so it also rebuilds once at deployment; a cron() expression only fires at the times it names.",
    "MinLength": 1
   },
+  "McpIngressCidr": {
+   "Type": "String",
+   "Default": "",
+   "AllowedPattern": "^$|^(\\d{1,3}\\.){3}\\d{1,3}/\\d{1,2}$",
+   "Description": "CIDR allowed to reach the MCP load balancer on port 80. Leave empty and NO ingress rule is created, so the endpoint is reachable from nowhere — the default, and unchanged from before this parameter existed. Set it to the range your MCP clients come from, for example 10.1.0.0/16, or x.x.x.x/32 for one host. A CIDR is required; a bare address is rejected."
+  },
   "AshBaseConfigYaml": {
    "Type": "String",
    "Default": "",
@@ -125,6 +131,18 @@
      "Fn::Equals": [
       {
        "Ref": "McpAllowedHost"
+      },
+      ""
+     ]
+    }
+   ]
+  },
+  "McpIngressCidrSupplied": {
+   "Fn::Not": [
+    {
+     "Fn::Equals": [
+      {
+       "Ref": "McpIngressCidr"
       },
       ""
      ]
@@ -2211,11 +2229,33 @@
    "Metadata": {
     "aws:cdk:path": "AshFargate/Service/SecurityGroup/from AshFargateLoadBalancerSecurityGroupCDCEE5AE:8000"
    }
+  },
+  "McpIngress": {
+   "Type": "AWS::EC2::SecurityGroupIngress",
+   "Properties": {
+    "CidrIp": {
+     "Ref": "McpIngressCidr"
+    },
+    "Description": "MCP clients allowed by McpIngressCidr.",
+    "FromPort": 80,
+    "GroupId": {
+     "Fn::GetAtt": [
+      "LoadBalancerSecurityGroupA28D6DD7",
+      "GroupId"
+     ]
+    },
+    "IpProtocol": "tcp",
+    "ToPort": 80
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshFargate/McpIngress"
+   },
+   "Condition": "McpIngressCidrSupplied"
   }
  },
  "Outputs": {
   "McpEndpoint": {
-   "Description": "MCP endpoint, once you allow traffic to it. The load balancer is internal AND its security group has no ingress rule on deployment, so this address is not reachable from anywhere yet — see McpSecurityGroupId. Append the McpMountPath value. The listener is plain HTTP.",
+   "Description": "MCP endpoint. The load balancer is internal, and reachable only from the range given in McpIngressCidr. If you left that empty there is NO ingress rule, so this address is not reachable from anywhere — set McpIngressCidr, or authorize McpSecurityGroupId directly. Append the McpMountPath value. Plain HTTP.",
    "Value": {
     "Fn::Join": [
      "",

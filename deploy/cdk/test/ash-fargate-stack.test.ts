@@ -139,20 +139,68 @@ describe('the MCP endpoint is closed until the adopter opens it', () => {
     expect(albs[0].Properties.SecurityGroups).toHaveLength(1);
   });
 
-  test('no security group in the stack opens the listener port to anything', () => {
-    // `open: false` is the whole point. If a rule for port 80 appears here, the
-    // posture changed and the outputs and README below are no longer true.
+  test('no ingress is baked into a security group unconditionally', () => {
+    // `open: false` is still the posture. The only port-80 ingress in the stack is
+    // the McpIngressCidr rule, which is gated on a condition (asserted below).
+    // An inline rule on the group itself could not be gated and would open the
+    // endpoint for everyone.
     for (const [, sg] of albSecurityGroups()) {
       const ingress = sg.Properties.SecurityGroupIngress ?? [];
       for (const rule of ingress) {
         expect(rule.FromPort).not.toBe(80);
       }
     }
-    template.resourcePropertiesCountIs(
-      'AWS::EC2::SecurityGroupIngress',
-      Match.objectLike({ FromPort: 80 }),
-      0,
+  });
+
+  test('the McpIngressCidr rule exists but is conditional, so empty means closed', () => {
+    /*
+     * The parameter is deploy-time, so the rule cannot be included or excluded at
+     * synth time. Gating the RESOURCE on a condition is what makes the empty
+     * default emit no rule at all. Emitting it unconditionally with a conditional
+     * CIDR would be wrong: no CIDR value means "no access", and 0.0.0.0/32 would
+     * be a real rule that merely looked inert.
+     */
+    const rules = Object.entries<any>(
+      template.findResources('AWS::EC2::SecurityGroupIngress'),
+    ).filter(([, r]) => r.Properties.FromPort === 80);
+    expect(rules).toHaveLength(1);
+
+    const [, rule] = rules[0];
+    expect(rule.Condition).toBeDefined();
+
+    const condition = template.toJSON().Conditions[rule.Condition];
+    const expression = JSON.stringify(condition);
+    // Present exactly when the parameter is non-empty.
+    expect(expression).toContain('Fn::Not');
+    expect(expression).toContain(ASH_PARAMETER_NAMES.mcpIngressCidr);
+    expect(expression).toContain('""');
+
+    // The rule targets the load balancer's group and carries the parameter, not a
+    // literal CIDR someone might have hardcoded.
+    const albs = Object.values<any>(
+      template.findResources('AWS::ElasticLoadBalancingV2::LoadBalancer'),
     );
+    expect(JSON.stringify(rule.Properties.GroupId)).toBe(
+      JSON.stringify(albs[0].Properties.SecurityGroups[0]),
+    );
+    expect(rule.Properties.CidrIp).toEqual({ Ref: ASH_PARAMETER_NAMES.mcpIngressCidr });
+  });
+
+  test('McpIngressCidr defaults to empty and rejects a bare address', () => {
+    const param = template.toJSON().Parameters[ASH_PARAMETER_NAMES.mcpIngressCidr];
+    expect(param).toBeDefined();
+    // Empty default is what preserves the pre-existing closed posture, including
+    // for an update of an already-deployed stack.
+    expect(param.Default).toBe('');
+
+    // A bare address silently becoming a /32 nobody intended is the mistake the
+    // pattern exists to stop.
+    const pattern = new RegExp(param.AllowedPattern);
+    expect(pattern.test('')).toBe(true);
+    expect(pattern.test('10.1.0.0/16')).toBe(true);
+    expect(pattern.test('10.0.0.5/32')).toBe(true);
+    expect(pattern.test('10.0.0.5')).toBe(false);
+    expect(pattern.test('not-a-cidr')).toBe(false);
   });
 
   test('McpEndpoint does not claim to be reachable, and points at the fix', () => {
@@ -163,6 +211,9 @@ describe('the MCP endpoint is closed until the adopter opens it', () => {
     expect(description).not.toContain('so reachable from inside the VPC');
     expect(description).toContain('not');
     expect(description).toContain('McpSecurityGroupId');
+    // And it names the parameter that actually opens it, so the message is
+    // actionable rather than merely accurate.
+    expect(description).toContain(ASH_PARAMETER_NAMES.mcpIngressCidr);
   });
 
   test('McpSecurityGroupId gives the adopter something to act on', () => {

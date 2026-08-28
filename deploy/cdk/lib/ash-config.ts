@@ -56,6 +56,7 @@ export const ASH_PARAMETER_NAMES = {
   mcpAuthHeaderValue: 'McpAuthHeaderValue',
   mcpMountPath: 'McpMountPath',
   mcpAllowedHost: 'McpAllowedHost',
+  mcpIngressCidr: 'McpIngressCidr',
   rebuildSchedule: 'RebuildSchedule',
   shardCount: 'ShardCount',
   codeCommitRepositoryArn: 'CodeCommitRepositoryArn',
@@ -386,6 +387,52 @@ export function mcpAllowedHost(scope: Stack): CfnParameter {
       'Comma-separated Host header values to accept, passed to ASH as repeated ' +
       '--allowed-host flags. Keeps DNS-rebinding protection enabled while admitting ' +
       'a known proxy or load balancer hostname. Leave empty to accept any Host.',
+  });
+}
+
+/**
+ * CIDR allowed to reach the Fargate load balancer, or empty for no ingress.
+ *
+ * WHY AN EMPTY DEFAULT RATHER THAN THE VPC CIDR
+ * -------------------------------------------
+ * The listener is created with `open: false`, so the load balancer's security
+ * group has allow-all egress and NO ingress rule. Empty here preserves that
+ * exactly: today's secure-by-default posture is unchanged for anyone who does not
+ * set it, and an existing stack sees no new rule on update.
+ *
+ * Defaulting to the stack's own VPC CIDR was rejected as the appearance of a fix.
+ * The Fargate stack creates its own VPC and puts nothing in it but the ASH tasks,
+ * so that rule would admit a range containing no clients while still widening
+ * access. Real consumers arrive from a peered VPC, a VPN or a transit gateway,
+ * none of which fall inside it.
+ *
+ * WHY A PARAMETER AT ALL, HAVING PREVIOUSLY DECLINED ONE
+ * ----------------------------------------------------
+ * Correcting the `McpEndpoint` output to admit the endpoint is closed left the
+ * adopter with an accurate message and no way to act on it. An output that
+ * describes a reachable endpoint, or documentation that describes an action, with
+ * no parameter that performs it is the same documented-but-unreachable defect in
+ * a different costume. So the honest posture needs both halves: say it is closed,
+ * and provide the switch.
+ *
+ * CONTRACT NOTE: this is a new name in the shared parameter surface, so the
+ * Terraform mirror under `deploy/terraform/` needs the same one to stay in step.
+ *
+ * The pattern permits only a CIDR, not a bare address, so `10.0.0.5` is rejected
+ * at parameter validation rather than silently becoming a /32 nobody intended.
+ * Use `x.x.x.x/32` to admit a single host.
+ */
+export function mcpIngressCidr(scope: Stack): CfnParameter {
+  return new CfnParameter(scope, ASH_PARAMETER_NAMES.mcpIngressCidr, {
+    type: 'String',
+    default: '',
+    allowedPattern: '^$|^(\\d{1,3}\\.){3}\\d{1,3}/\\d{1,2}$',
+    description:
+      'CIDR allowed to reach the MCP load balancer on port 80. Leave empty and NO ' +
+      'ingress rule is created, so the endpoint is reachable from nowhere — the ' +
+      'default, and unchanged from before this parameter existed. Set it to the range ' +
+      'your MCP clients come from, for example 10.1.0.0/16, or x.x.x.x/32 for one ' +
+      'host. A CIDR is required; a bare address is rejected.',
   });
 }
 

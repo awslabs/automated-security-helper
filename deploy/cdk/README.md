@@ -101,7 +101,8 @@ change for adopters and desynchronizes the two implementations.
 | `AshBaseConfigYaml` | empty | An ASH configuration document. See the size note below. |
 | `McpStatelessHttp` | `true` | Keep `true` on AgentCore, and behind any load balancer with more than one replica. See below for what is measured and what is inferred. |
 | `McpMountPath` | `/mcp` | AgentCore routes only `/mcp`, so change this only for Fargate. |
-| `McpAllowedHost` | empty | Comma-separated `Host` values, passed as repeated `--allowed-host`. On Fargate, empty means the ALB DNS name. |
+| `McpAllowedHost` | empty | Comma-separated `Host` values, passed as repeated `--allowed-host`, lower-cased because load balancers lower-case the `Host` they forward. On Fargate, empty means the ALB DNS name. |
+| `McpIngressCidr` | empty | Fargate only. CIDR allowed to reach the load balancer on port 80. Empty creates **no** ingress rule, so the endpoint is reachable from nowhere. See below. |
 | `McpAuthHeaderName` | empty | Header ASH requires on every request. Must satisfy `^$|^[A-Za-z][A-Za-z0-9_-]{0,255}$`. |
 | `McpAuthHeaderValue` | empty | `NoEcho`. Stored in Secrets Manager; the container gets the ARN, never the value. |
 | `RebuildSchedule` | `rate(1 day)` | EventBridge schedule expression for the image rebuild. |
@@ -396,24 +397,34 @@ here rather than to a variant.
 - **The Fargate listener is HTTP, not HTTPS.** A certificate ARN would be needed,
   and the shared parameter surface has no slot for one. The load balancer is
   internal by default to match.
-- **The Fargate endpoint is unreachable until you open it.** The listener is created
-  closed, so the load balancer's security group has allow-all egress and **no
-  ingress rule at all** — the endpoint is reachable from nowhere on deployment, not
-  even from inside the VPC. This is deliberate for an endpoint that accepts source
-  code and returns findings about it, but it does mean the stack is not usable the
-  moment it finishes. The `McpSecurityGroupId` output names the group to authorize:
+- **The Fargate endpoint is closed until you open it.** The listener is created
+  closed, so on deployment the load balancer's security group has allow-all egress
+  and **no ingress rule at all** — reachable from nowhere, not even from inside the
+  VPC. That is deliberate for an endpoint that accepts source code and returns
+  findings about it, but it does mean the stack is not usable the moment it
+  finishes. Set `McpIngressCidr` to the range your clients come from:
+
+  ```sh
+  # At deploy time, or on an update of an existing stack.
+  ParameterKey=McpIngressCidr,ParameterValue=10.1.0.0/16
+  ```
+
+  Leaving it empty creates no rule, which is the default and is unchanged from
+  before the parameter existed. A CIDR is required — a bare address is rejected at
+  parameter validation rather than silently becoming a `/32` nobody intended; use
+  `x.x.x.x/32` for a single host. For several sources, or to allow a client's
+  security group rather than a CIDR, authorize the `McpSecurityGroupId` output
+  directly:
 
   ```sh
   aws ec2 authorize-security-group-ingress --group-id <McpSecurityGroupId> \
-    --protocol tcp --port 80 --cidr <your-client-cidr>
+    --protocol tcp --port 80 --source-group <client-sg-id>
   ```
 
-  Prefer `--source-group` over `--cidr` when the client has its own security group.
-  Opening the stack's own VPC CIDR instead was rejected: this stack creates its own
+  Defaulting to the stack's own VPC CIDR was rejected: this stack creates its own
   VPC and puts nothing in it but the ASH tasks, so that rule would admit a range
-  with no clients in it while still widening access. A parameter for the allowed
-  CIDR is the right long-term shape, but it belongs to the shared parameter contract
-  and has to land in the Terraform mirror at the same time.
+  with no clients in it while still widening access. Real consumers arrive from a
+  peered VPC, a VPN or a transit gateway, none of which fall inside it.
 - **An unused Secrets Manager secret is created even with auth disabled.** The
   alternative was a CloudFormation Condition gating the resource, which makes every
   IAM grant that mentions its ARN an invalid template. Costs a few cents a month.
