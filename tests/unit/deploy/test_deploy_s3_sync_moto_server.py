@@ -118,7 +118,9 @@ def helper(request, tmp_path: pathlib.Path) -> Helper:
         )
         return Helper(label="cdk-template", path=path, log_prefix="ash-s3-sync")
 
-    assert TERRAFORM_S3_SYNC.is_file(), f"missing Terraform helper at {TERRAFORM_S3_SYNC}"
+    assert TERRAFORM_S3_SYNC.is_file(), (
+        f"missing Terraform helper at {TERRAFORM_S3_SYNC}"
+    )
     return Helper(label="terraform", path=TERRAFORM_S3_SYNC, log_prefix="ash_s3_sync")
 
 
@@ -138,7 +140,9 @@ def run_helper(
 def keys_under(s3, bucket: str, prefix: str) -> list[str]:
     """Every key under a prefix, following pagination."""
     found: list[str] = []
-    for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
+    for page in s3.get_paginator("list_objects_v2").paginate(
+        Bucket=bucket, Prefix=prefix
+    ):
         found.extend(o["Key"] for o in page.get("Contents", []))
     return sorted(found)
 
@@ -152,7 +156,11 @@ class TestMotoEndpointIsActuallyUsed:
     """Prove the tests reach moto, and reach it BECAUSE of the endpoint variable."""
 
     def test_endpoint_variable_is_load_bearing(
-        self, helper: Helper, child_env: dict[str, str], bucket: str, tmp_path: pathlib.Path
+        self,
+        helper: Helper,
+        child_env: dict[str, str],
+        bucket: str,
+        tmp_path: pathlib.Path,
     ):
         """Repointing AWS_ENDPOINT_URL away from moto must break the upload.
 
@@ -227,8 +235,12 @@ class TestRoundTrip:
         """
         source = tmp_path / "out"
         (source / "reports").mkdir(parents=True)
-        (source / "reports" / "ash.summary.md").write_text("# summary\n", encoding="utf-8")
-        (source / "ash_aggregated_results.json").write_text('{"findings": []}', encoding="utf-8")
+        (source / "reports" / "ash.summary.md").write_text(
+            "# summary\n", encoding="utf-8"
+        )
+        (source / "ash_aggregated_results.json").write_text(
+            '{"findings": []}', encoding="utf-8"
+        )
         # A byte that is not valid UTF-8, so the helper is shown to move bytes
         # rather than decoded text.
         (source / "raw.bin").write_bytes(b"\x00\xff\xfe binary")
@@ -256,7 +268,11 @@ class TestRoundTrip:
         ) == {"findings": []}
 
     def test_empty_directories_are_not_recreated(
-        self, helper: Helper, child_env: dict[str, str], bucket: str, tmp_path: pathlib.Path
+        self,
+        helper: Helper,
+        child_env: dict[str, str],
+        bucket: str,
+        tmp_path: pathlib.Path,
     ):
         """A documented limitation, pinned so it cannot change unnoticed.
 
@@ -269,14 +285,20 @@ class TestRoundTrip:
         (source / "full").mkdir()
         (source / "full" / "f.txt").write_text("f", encoding="utf-8")
 
-        assert run_helper(
-            helper, ["upload", str(source), bucket, "run"], child_env
-        ).returncode == 0
+        assert (
+            run_helper(
+                helper, ["upload", str(source), bucket, "run"], child_env
+            ).returncode
+            == 0
+        )
 
         destination = tmp_path / "back"
-        assert run_helper(
-            helper, ["download", bucket, "run", str(destination)], child_env
-        ).returncode == 0
+        assert (
+            run_helper(
+                helper, ["download", bucket, "run", str(destination)], child_env
+            ).returncode
+            == 0
+        )
 
         assert (destination / "full" / "f.txt").is_file()
         assert not (destination / "empty").exists()
@@ -305,7 +327,9 @@ class TestPagination:
             s3.put_object(Bucket=bucket, Key=f"run/part-{i:05d}.json", Body=b"{}")
 
         destination = tmp_path / "back"
-        result = run_helper(helper, ["download", bucket, "run", str(destination)], child_env)
+        result = run_helper(
+            helper, ["download", bucket, "run", str(destination)], child_env
+        )
         assert result.returncode == 0, result.stderr
 
         assert f"downloaded {total} file(s)" in result.stdout, result.stdout
@@ -333,7 +357,9 @@ class TestPathContainment:
         s3.put_object(Bucket=bucket, Key="run/legitimate.txt", Body=b"fine")
 
         destination = tmp_path / "sandbox" / "back"
-        result = run_helper(helper, ["download", bucket, "run", str(destination)], child_env)
+        result = run_helper(
+            helper, ["download", bucket, "run", str(destination)], child_env
+        )
 
         assert result.returncode == 2, (
             f"expected exit 2 from the containment guard, got {result.returncode}. "
@@ -363,7 +389,9 @@ class TestPathContainment:
         s3.put_object(Bucket=bucket, Key="run/nested/../kept.txt", Body=b"kept")
 
         destination = tmp_path / "back"
-        result = run_helper(helper, ["download", bucket, "run", str(destination)], child_env)
+        result = run_helper(
+            helper, ["download", bucket, "run", str(destination)], child_env
+        )
 
         assert result.returncode == 0, result.stderr
         assert (destination / "kept.txt").read_bytes() == b"kept"
@@ -371,7 +399,11 @@ class TestPathContainment:
 
 class TestEmptyAndMissing:
     def test_download_of_a_missing_prefix_writes_nothing_and_succeeds(
-        self, helper: Helper, child_env: dict[str, str], bucket: str, tmp_path: pathlib.Path
+        self,
+        helper: Helper,
+        child_env: dict[str, str],
+        bucket: str,
+        tmp_path: pathlib.Path,
     ):
         """An absent prefix is not an error, and produces no files.
 
@@ -402,14 +434,21 @@ class TestEmptyAndMissing:
         s3.put_object(Bucket=bucket, Key="run/folder/real.txt", Body=b"real")
 
         destination = tmp_path / "back"
-        result = run_helper(helper, ["download", bucket, "run", str(destination)], child_env)
+        result = run_helper(
+            helper, ["download", bucket, "run", str(destination)], child_env
+        )
 
         assert result.returncode == 0, result.stderr
         assert "downloaded 1 file(s)" in result.stdout, result.stdout
         assert (destination / "folder" / "real.txt").read_bytes() == b"real"
 
     def test_upload_of_an_empty_directory_uploads_nothing(
-        self, helper: Helper, child_env: dict[str, str], bucket: str, s3, tmp_path: pathlib.Path
+        self,
+        helper: Helper,
+        child_env: dict[str, str],
+        bucket: str,
+        s3,
+        tmp_path: pathlib.Path,
     ):
         """An empty output directory is what a shard that died early leaves."""
         source = tmp_path / "out"
@@ -424,7 +463,11 @@ class TestEmptyAndMissing:
 
 class TestArgumentHandling:
     def test_upload_rejects_a_source_that_is_not_a_directory(
-        self, helper: Helper, child_env: dict[str, str], bucket: str, tmp_path: pathlib.Path
+        self,
+        helper: Helper,
+        child_env: dict[str, str],
+        bucket: str,
+        tmp_path: pathlib.Path,
     ):
         missing = tmp_path / "not-there"
         result = run_helper(helper, ["upload", str(missing), bucket, "run"], child_env)
@@ -450,7 +493,9 @@ class TestArgumentHandling:
         let the shard report success having uploaded nothing.
         """
         result = run_helper(helper, args, child_env)
-        assert result.returncode == 2, f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        assert result.returncode == 2, (
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
         assert "Traceback" not in result.stderr, result.stderr
 
 
@@ -493,7 +538,11 @@ class TestCommittedBuildspecCommands:
         env.update(extra_env)
 
         setup = subprocess.run(
-            ["sh", "-c", materialize], capture_output=True, text=True, env=env, timeout=120
+            ["sh", "-c", materialize],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=120,
         )
         assert setup.returncode == 0, setup.stderr
         assert helper_path.is_file(), "the heredoc did not write the helper"
@@ -581,7 +630,12 @@ class TestCommittedBuildspecCommands:
 
         assert result.returncode == 0, f"{result.stdout!r} {result.stderr!r}"
         for shard in range(4):
-            landed = workdir / "shard-results" / f"shard-{shard}" / "ash_aggregated_results.json"
+            landed = (
+                workdir
+                / "shard-results"
+                / f"shard-{shard}"
+                / "ash_aggregated_results.json"
+            )
             assert landed.is_file(), f"shard {shard} did not land at {landed}"
             assert json.loads(landed.read_text(encoding="utf-8")) == {"shard": shard}
 
@@ -632,8 +686,15 @@ class TestCommittedBuildspecCommands:
             "expected `|| true` to mask the failure; a non-zero status here means "
             "the masking is gone and this test should be deleted"
         )
-        # The failure is real -- it is only the exit status that hides it.
-        assert "Traceback" in result.stderr or "ash" in result.stderr.lower(), result.stderr
+        # The failure is real -- it is only the exit status that hides it. Named
+        # precisely, because a looser assertion here would be vacuous: the helper
+        # prints its own name on SUCCESS too, so testing for "ash" on stderr would
+        # pass even if the upload had somehow worked.
+        assert "NoSuchBucket" in result.stderr, result.stderr
+        assert "uploaded" not in result.stdout, (
+            f"the helper reported an upload against a bucket that does not exist: "
+            f"{result.stdout!r}"
+        )
 
     def test_every_shard_and_merge_project_materializes_the_helper(self):
         """All five projects write the helper before any phase uses it.
@@ -663,7 +724,9 @@ class TestCommittedBuildspecCommands:
         offenders: list[str] = []
         for logical_id, spec in projects_containing(template, HELPER_MARKER).items():
             for phase in ("pre_build", "build", "post_build"):
-                for command in spec.get("phases", {}).get(phase, {}).get("commands", []):
+                for command in (
+                    spec.get("phases", {}).get(phase, {}).get("commands", [])
+                ):
                     for line in command.splitlines():
                         stripped = line.strip()
                         if stripped.startswith("#"):
