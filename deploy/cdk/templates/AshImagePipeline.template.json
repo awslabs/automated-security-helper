@@ -86,8 +86,8 @@
    "Properties": {
     "RetentionInDays": 30
    },
-   "UpdateReplacePolicy": "Delete",
-   "DeletionPolicy": "Delete",
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain",
    "Metadata": {
     "aws:cdk:path": "AshImagePipeline/Arm64/BuildLogs/Resource"
    }
@@ -593,8 +593,8 @@
    "Properties": {
     "RetentionInDays": 30
    },
-   "UpdateReplacePolicy": "Delete",
-   "DeletionPolicy": "Delete",
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain",
    "Metadata": {
     "aws:cdk:path": "AshImagePipeline/Amd64/BuildLogs/Resource"
    }

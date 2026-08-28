@@ -71,6 +71,7 @@ import * as kms from 'aws-cdk-lib/aws-kms';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
 
+import { diagnosticLogGroupProps } from './ash-config';
 import { suppressCodeBuildRoleWildcards, suppressLambdaLogWildcard, suppressUnevaluableRules } from './ash-nag-suppressions';
 import { MCP_ENTRYPOINT_SCRIPT, CODECOMMIT_GATE_HANDLER, ASH_MATERIALIZED_CONFIG_PATH } from './ash-container-scripts';
 
@@ -192,10 +193,10 @@ export class AshImageBuild extends Construct {
       ],
     });
 
-    const logGroup = new logs.LogGroup(this, 'BuildLogs', {
-      retention: logs.RetentionDays.ONE_MONTH,
-      removalPolicy: RemovalPolicy.DESTROY,
-    });
+    // Retained on purpose: these logs are the only account of why an image build
+    // failed, and a failed build rolls the stack back. See
+    // `diagnosticLogGroupProps`.
+    const logGroup = new logs.LogGroup(this, 'BuildLogs', diagnosticLogGroupProps());
 
     this.project = new codebuild.Project(this, 'Build', {
       description:
@@ -338,10 +339,10 @@ export class AshImageBuild extends Construct {
   private addBootstrap(props: AshImageBuildProps): CustomResource {
     // Its own log group, so the role can be scoped to exactly one group instead
     // of carrying the AWS managed AWSLambdaBasicExecutionRole.
-    const starterLogs = new logs.LogGroup(this, 'BootstrapStarterLogs', {
-      retention: logs.RetentionDays.ONE_MONTH,
-      removalPolicy: RemovalPolicy.DESTROY,
-    });
+    // Retained: this is where a build that never STARTED is explained, which
+    // `concurrentBuildLimit` gives a real trigger — CodeBuild refuses a colliding
+    // StartBuild rather than queueing it. See `diagnosticLogGroupProps`.
+    const starterLogs = new logs.LogGroup(this, 'BootstrapStarterLogs', diagnosticLogGroupProps());
     const starterRole = new iam.Role(this, 'BootstrapStarterRole', {
       assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
       description:

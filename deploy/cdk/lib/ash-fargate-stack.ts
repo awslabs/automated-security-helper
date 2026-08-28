@@ -57,7 +57,7 @@ import { Construct } from 'constructs';
 
 import {
   ashSynthesizer,
-  ashOfflineMode, ashVersion, MCP_PORT, rebuildSchedule,
+  ashOfflineMode, ashVersion, diagnosticLogGroupProps, MCP_PORT, rebuildSchedule,
 } from './ash-config';
 import { AshImageBuild } from './ash-image-build';
 import {
@@ -115,10 +115,11 @@ export class AshFargateStack extends Stack {
       flowLogs: {
         Vpc: {
           destination: ec2.FlowLogDestination.toCloudWatchLogs(
-            new logs.LogGroup(this, 'VpcFlowLogs', {
-              retention: logs.RetentionDays.ONE_MONTH,
-              removalPolicy: RemovalPolicy.DESTROY,
-            }),
+            // Retained for the same reason, one step removed: forensics you
+            // delete on teardown are not forensics. This is the highest-volume
+            // group of the set, but retention is finite so its events still age
+            // out on the same schedule.
+            new logs.LogGroup(this, 'VpcFlowLogs', diagnosticLogGroupProps()),
           ),
           trafficType: ec2.FlowLogTrafficType.ALL,
         },
@@ -130,10 +131,16 @@ export class AshFargateStack extends Stack {
       containerInsightsV2: ecs.ContainerInsights.ENABLED,
     });
 
-    const logGroup = new logs.LogGroup(this, 'TaskLogs', {
-      retention: logs.RetentionDays.ONE_MONTH,
-      removalPolicy: RemovalPolicy.DESTROY,
-    });
+    /**
+     * Retained, and this is the group the whole policy exists for.
+     *
+     * A deployment that trips the ECS circuit breaker rolls back, and the
+     * container stderr saying why lived here — so rollback destroyed the evidence
+     * for the rollback. The ECS-owned container-insights group survives but
+     * carries only performance metrics, no stderr. See
+     * `diagnosticLogGroupProps`.
+     */
+    const logGroup = new logs.LogGroup(this, 'TaskLogs', diagnosticLogGroupProps());
 
     const taskDefinition = new ecs.FargateTaskDefinition(this, 'TaskDefinition', {
       // ASH runs several scanners concurrently. 2 vCPU / 4 GiB is the smallest

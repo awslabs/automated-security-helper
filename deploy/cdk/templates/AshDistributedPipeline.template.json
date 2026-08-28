@@ -146,8 +146,8 @@
    "Properties": {
     "RetentionInDays": 30
    },
-   "UpdateReplacePolicy": "Delete",
-   "DeletionPolicy": "Delete",
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain",
    "Metadata": {
     "aws:cdk:path": "AshDistributedPipeline/Image/BuildLogs/Resource"
    }

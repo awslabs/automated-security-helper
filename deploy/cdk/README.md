@@ -288,20 +288,27 @@ zero-based index, both shard flags always passed together, `--results` repeatabl
 and accepting a file or a directory. It will fail at pipeline run time until those
 land. Nothing else here depends on them.
 
-## What is NOT verified, because nothing was deployed
+## What is NOT verified
 
-No AWS mutation was performed. `cdk synth` and `cdk-nag` only. Everything below is
-therefore unverified, and the AgentCore items are the ones most worth checking
-first:
+Most of what follows was originally unverified because nothing had been deployed.
+Two AgentCore deployments have since closed the first two items, and they are kept
+here as settled rather than deleted, so the next reader can see what was actually
+checked instead of re-testing it.
 
-1. **That AgentCore accepts this exact property combination.** The property *shape*
-   is verified against the CloudFormation resource reference and against the L1
-   types in `aws-cdk-lib` 2.267.0. Whether the service accepts `PUBLIC` network
-   mode with `MCP` protocol and this role's permission set is not.
-2. **That the derived ARM64 image satisfies AgentCore's container probe.** The
-   image binds `0.0.0.0:8000` and serves `POST /mcp`, but whether AgentCore's own
-   readiness check passes against ASH's MCP server is untested.
-3. **That a scheduled rebuild rolls into a running workload.** It does not, on any
+**Now confirmed by deployment:**
+
+- **AgentCore accepts this property combination.** `PUBLIC` network mode with `MCP`
+  protocol and this role's permission set creates a working runtime.
+- **The derived ARM64 image satisfies AgentCore's container probe.** ASH's MCP
+  server binds `0.0.0.0:8000`, serves `POST /mcp`, and passes the readiness check.
+
+The deployed template was byte-identical to the committed
+`templates/AshAgentCore.template.json`, so that evidence applies to what ships
+here rather than to a variant.
+
+**Still unverified:**
+
+1. **That a scheduled rebuild rolls into a running workload.** It does not, on any
    target. The rebuild replaces what the moving tag points at, which patches the
    *repository*. AgentCore pins a runtime version at create time, ECS does not
    redeploy on a tag change, and Lambda resolves the image at update time. Rolling
@@ -311,6 +318,17 @@ first:
    Lambda it is straightforward, but for AgentCore it would require guessing at
    `UpdateAgentRuntime` CLI semantics, and a guessed API is worse than a documented
    gap.
+
+   Worth knowing if that bothers you: because the tag is mutable and nothing
+   promotes it, there is no defined moment at which a running workload adopts a
+   rebuilt image — a task replaced for any unrelated reason picks up whatever the
+   tag points at now. Every build also pushes a second, version-qualified tag,
+   `<flavor>-<platform>-<folded-ref>-<sha256-prefix>`, which is stable for a given
+   `AshVersion` and is not republished by a rebuild of a different ref. Pointing a
+   workload at that tag instead of the moving one pins what it runs, at the cost of
+   a stack update to take a patch. The build echoes the computed tag into its log.
+   The stacks do not expose this as a parameter; it is a deliberate gap, noted here
+   rather than half-built.
 4. **That the ASH image builds at all under these build arguments.** No Docker
    daemon was available, so no image was built. The derived Dockerfiles assume
    `awslambdaric` publishes a wheel for `linux/amd64` CPython 3.12 (no compiler is
@@ -369,6 +387,17 @@ first:
   `emptyOnDelete` synthesize asset-backed custom resources, which need a staging
   bucket and therefore `cdk bootstrap`, and these templates are meant to launch from
   the console. Deleting a stack leaves the repository and buckets behind.
+- **Log groups are `RETAIN`, so they outlive the stack.** A Fargate deployment that
+  tripped the ECS circuit breaker rolled back and took its own `TaskLogs` group with
+  it, destroying the container stderr that explained the rollback. Every log group in
+  these stacks is now retained for that reason, which makes each one a teardown
+  residual: `TaskLogs` and `VpcFlowLogs` (Fargate), `ScanLogs` (gate), and
+  `BuildLogs` plus `BootstrapStarterLogs` per image build — twelve groups across the
+  five stacks. None pins a physical name, so a re-created stack gets a fresh group
+  rather than colliding with the old one, and repeated deploy/rollback cycles
+  accumulate one group per attempt. Retention stays at 30 days, so a residual group
+  stops holding anything after a month; sweep the empty groups with
+  `aws logs delete-log-group` when you tear an environment down.
 - **Two CloudFormation spec warnings on every synth are false positives.** `cdk
   synth` reports an empty `SecretString` and an empty `RequestHeaderAllowlist`
   entry. The validator resolves each parameter to its default and then evaluates the

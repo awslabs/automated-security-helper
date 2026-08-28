@@ -226,8 +226,8 @@
    "Properties": {
     "RetentionInDays": 30
    },
-   "UpdateReplacePolicy": "Delete",
-   "DeletionPolicy": "Delete",
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain",
    "Metadata": {
     "aws:cdk:path": "AshFargate/Image/BuildLogs/Resource"
    }
@@ -686,8 +686,8 @@
    "Properties": {
     "RetentionInDays": 30
    },
-   "UpdateReplacePolicy": "Delete",
-   "DeletionPolicy": "Delete",
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain",
    "Metadata": {
     "aws:cdk:path": "AshFargate/Image/BootstrapStarterLogs/Resource"
    }
@@ -885,8 +885,8 @@
    "Properties": {
     "RetentionInDays": 30
    },
-   "UpdateReplacePolicy": "Delete",
-   "DeletionPolicy": "Delete",
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain",
    "Metadata": {
     "aws:cdk:path": "AshFargate/VpcFlowLogs/Resource"
    }
@@ -1416,8 +1416,8 @@
    "Properties": {
     "RetentionInDays": 30
    },
-   "UpdateReplacePolicy": "Delete",
-   "DeletionPolicy": "Delete",
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain",
    "Metadata": {
     "aws:cdk:path": "AshFargate/TaskLogs/Resource"
    }

@@ -38,7 +38,8 @@
  *   `resolveShardCount` for the full reasoning.
  */
 
-import { CfnParameter, DefaultStackSynthesizer, IStackSynthesizer, Stack } from 'aws-cdk-lib';
+import { CfnParameter, DefaultStackSynthesizer, IStackSynthesizer, RemovalPolicy, Stack } from 'aws-cdk-lib';
+import * as logs from 'aws-cdk-lib/aws-logs';
 
 /**
  * Canonical parameter names, shared with the Terraform mirror.
@@ -416,6 +417,55 @@ export function toAgentCoreName(raw: string): string {
   const folded = raw.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^[^a-zA-Z]+/, '');
   const seeded = folded.length > 0 ? folded : 'ash';
   return seeded.slice(0, 48);
+}
+
+/**
+ * Retention and removal policy for a log group that holds diagnostic evidence.
+ *
+ * WHY THIS EXISTS — A REAL DEPLOYMENT, NOT A HYPOTHETICAL
+ * ------------------------------------------------------
+ * A Fargate stack failed with "ECS Deployment Circuit Breaker was triggered" and
+ * rolled back. The container stderr explaining WHY was in the stack's own
+ * `TaskLogs` group, and rollback had already deleted it — CloudFormation removes
+ * everything a failed create made. The only surviving group was the ECS-owned
+ * `containerinsights/.../performance` one, which carries no stderr. So the single
+ * artifact that explains a failed deployment was guaranteed to be gone by the
+ * time anyone went looking for it.
+ *
+ * That is a property of every log group in these stacks, not just that one. The
+ * image build's logs explain a failed image build; the bootstrap starter's logs
+ * explain a build that never started — a path that now has a real trigger, since
+ * `concurrentBuildLimit` makes CodeBuild refuse a colliding StartBuild.
+ *
+ * WHY A SHARED FUNCTION RATHER THAN THE LITERAL AT EACH CALL SITE
+ * -------------------------------------------------------------
+ * Because the same class of defect was already half-present and invisible. The
+ * CodeCommit gate's `ScanLogs` was the only group that did NOT pass a
+ * `removalPolicy`, so it inherited CDK's `RETAIN` default and survived rollback,
+ * while the four groups that explicitly asked for `DESTROY` did not. Nothing in
+ * the source showed that split — it was only visible by reading `DeletionPolicy`
+ * out of the synthesized template. Routing every group through one function means
+ * the policy is stated once, and a new log group either uses it or visibly does
+ * not.
+ *
+ * TWO CONSEQUENCES, BOTH DELIBERATE
+ * --------------------------------
+ * - Retained groups survive `cdk destroy`, so they are teardown residuals. None
+ *   of these groups sets `logGroupName`, so CloudFormation assigns each a fresh
+ *   physical name; a re-created stack therefore gets a NEW group rather than
+ *   colliding with the old one, and repeated deploy/rollback cycles accumulate
+ *   one group per attempt. They are listed in the README alongside the ECR
+ *   repositories and buckets that are retained for the same reason.
+ * - Retention stays finite. `ONE_MONTH` is what every group here already used, so
+ *   this is not a new value; keeping it bounded means a retained group stops
+ *   costing anything for storage once its events age out, rather than
+ *   accumulating indefinitely the way `RetentionDays.INFINITE` would.
+ */
+export function diagnosticLogGroupProps(): Pick<logs.LogGroupProps, 'retention' | 'removalPolicy'> {
+  return {
+    retention: logs.RetentionDays.ONE_MONTH,
+    removalPolicy: RemovalPolicy.RETAIN,
+  };
 }
 
 /**
