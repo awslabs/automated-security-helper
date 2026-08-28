@@ -12,12 +12,24 @@ from automated_security_helper.core.enums import ExecutionPhase
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils.log import ASH_LOGGER
 
-#: A reporter for this format exists but was not selected -- it is disabled in
-#: config, its dependencies are unsatisfied, or ``--python-based-plugins-only``
-#: excluded it. Distinguished from :data:`FORMAT_NO_REPORTER` because the two send
-#: the operator somewhere different: this one is a config or environment change,
-#: and the other will not work however it is configured.
-FORMAT_REPORTER_UNAVAILABLE = "reporter-unavailable"
+#: The reporter for this format is switched off in configuration. This is the
+#: common case and the one an operator can fix in a line: ``yaml`` and ``spdx``
+#: both ship ``enabled: bool = False``, so asking for either produces nothing
+#: until the config says otherwise. Verified by measurement rather than inferred
+#: -- enabling each one produces ``ash.yaml`` and ``ash.spdx.json`` respectively.
+FORMAT_REPORTER_DISABLED = "reporter-disabled"
+
+#: The reporter's own dependency check refused. Distinct from
+#: :data:`FORMAT_REPORTER_DISABLED` because it sends the operator somewhere
+#: entirely different -- to credentials, a network, or an install -- rather than
+#: to the config file. Conflating the two told an operator with no AWS credentials
+#: that they had disabled a reporter they had never touched.
+FORMAT_REPORTER_DEPENDENCIES = "reporter-dependencies-unsatisfied"
+
+#: ``--python-based-plugins-only`` excluded the reporter. Its own category because
+#: the fix is to drop that flag, not to change any configuration or install
+#: anything -- the reporter is enabled and its dependencies are fine.
+FORMAT_REPORTER_NOT_PYTHON = "reporter-non-python-excluded"
 
 #: No reporter produces this format at all. ``ExportFormat`` carries members that
 #: name no reporter -- ``aggregated`` and ``dict`` are internal result shapes
@@ -27,11 +39,66 @@ FORMAT_REPORTER_UNAVAILABLE = "reporter-unavailable"
 #: asking for one produces nothing.
 FORMAT_NO_REPORTER = "no-reporter"
 
+#: What to tell the operator for each cause, and where to send them. Keyed by
+#: reason so that adding a reason without a message is a ``KeyError`` at the point
+#: of logging rather than a diagnosis that silently prints nothing -- the failure
+#: mode this whole module exists to prevent.
+_FORMAT_REASON_MESSAGES = {
+    FORMAT_REPORTER_DISABLED: (
+        "its reporter is disabled in the configuration. Set "
+        "'reporters.{fmt}.enabled: true' in the ASH config, or pass "
+        "--config-overrides reporters.{fmt}.enabled=true, to get this report."
+    ),
+    FORMAT_REPORTER_DEPENDENCIES: (
+        "its reporter's dependencies are not satisfied. It is enabled, but its "
+        "own dependency check refused -- typically missing credentials, no "
+        "network, or an uninstalled tool. Check that reporter's requirements."
+    ),
+    FORMAT_REPORTER_NOT_PYTHON: (
+        "--python-based-plugins-only excluded its reporter, which has non-Python "
+        "dependencies. Drop that flag to get this report."
+    ),
+    FORMAT_NO_REPORTER: (
+        "no reporter produces it. The format is accepted by --output-formats but "
+        "has no reporter behind it."
+    ),
+}
+
+
+def _excluded_reporter_reason(instance: object, python_only: bool) -> str:
+    """Why ``filter_enabled_plugins`` dropped this reporter.
+
+    Determined by elimination rather than by re-running the checks, and the order
+    matters. ``validate_plugin_dependencies`` performs IO for some reporters --
+    ``SecurityHubReporter`` and ``BedrockSummaryReporter`` call AWS inside it -- so
+    calling it a second time here would put a duplicate live API round trip on
+    every scan that names an unproducible format. The two cheap, side-effect-free
+    conditions are therefore tested first, and anything left over is attributed to
+    the dependency check, which is the only remaining reason
+    ``filter_enabled_plugins`` drops an instance.
+
+    Attributing the remainder by elimination also covers the case where the
+    dependency check *raised*: ``filter_enabled_plugins`` swallows the exception
+    and skips the reporter, and "dependencies are not satisfied" is the honest
+    thing to tell an operator about a check that blew up.
+    """
+    config = getattr(instance, "config", None)
+    if config is not None and getattr(config, "enabled", True) is False:
+        return FORMAT_REPORTER_DISABLED
+    if python_only:
+        try:
+            if not instance.is_python_only():
+                return FORMAT_REPORTER_NOT_PYTHON
+        except Exception:  # noqa: BLE001 -- a broken check must not break reporting
+            pass
+    return FORMAT_REPORTER_DEPENDENCIES
+
 
 def unsatisfied_output_formats(
     output_formats: Iterable[object],
     selected_instances: Sequence[object],
     all_instances: Sequence[object],
+    python_based_plugins_only: bool = False,
 ) -> Dict[str, str]:
     """Requested formats that will produce no report, and why.
 
@@ -46,73 +113,81 @@ def unsatisfied_output_formats(
     :func:`~automated_security_helper.base.reporter_plugin.reporter_matches_requested_formats`
     was merely its most common cause.
 
-    The two reasons are reported separately on purpose. Collapsing them into one
-    "no report for X" message would tell an operator who asked for ``yaml`` --
-    which ships ``enabled: False`` -- that ASH cannot produce yaml, when in fact
-    they need one line of config. Naming the cause is the difference between an
-    actionable message and a misleading one.
+    Every cause is reported as its own reason, and that granularity is the point.
+    Collapsing them would tell an operator who asked for ``yaml`` -- which ships
+    ``enabled: False`` -- that ASH cannot produce yaml, when in fact one line of
+    config fixes it. The four reasons send the operator to four different places:
+    the config file, their credentials or install, the flag they passed, or nowhere
+    because nothing can produce that format.
 
     Args:
         output_formats: What the operator asked for. Empty yields an empty result:
             no explicit request means nothing was asked for and denied.
         selected_instances: Reporters that survived every filter and will run.
         all_instances: Every reporter that could be constructed, before the
-            enabled/dependency/python-only filters. Supplies the evidence that a
-            format's reporter exists but was excluded.
+            enabled/dependency/python-only filters. Supplies both the evidence that
+            a format's reporter exists and the instance whose state names the cause.
+        python_based_plugins_only: Whether ``--python-based-plugins-only`` was
+            passed. Needed to tell a reporter excluded by that flag from one whose
+            dependencies are genuinely unsatisfied.
 
     Returns:
-        Format name -> one of :data:`FORMAT_REPORTER_UNAVAILABLE` or
-        :data:`FORMAT_NO_REPORTER`. Empty when every requested format will be
-        produced, which is the normal case.
+        Format name -> the reason it will produce nothing, one of the four
+        ``FORMAT_*`` constants. Empty when every requested format will be produced,
+        which is the normal case.
     """
     requested = [str(getattr(fmt, "value", fmt)) for fmt in output_formats or []]
     if not requested:
         return {}
 
-    def names(instances: Sequence[object]) -> set:
-        return {
-            str(name)
-            for name in (reporter_format_name(inst) for inst in instances)
-            if name is not None
-        }
-
-    selected_names = names(selected_instances)
-    known_names = names(all_instances)
+    selected_names = {
+        str(name)
+        for name in (reporter_format_name(inst) for inst in selected_instances)
+        if name is not None
+    }
+    # Keyed by name so the reason can be read off the excluded instance itself
+    # rather than guessed from the format string.
+    known_by_name = {
+        str(reporter_format_name(inst)): inst
+        for inst in all_instances
+        if reporter_format_name(inst) is not None
+    }
 
     unsatisfied: Dict[str, str] = {}
     for fmt in requested:
         if fmt in selected_names:
             continue
+        instance = known_by_name.get(fmt)
         unsatisfied[fmt] = (
-            FORMAT_REPORTER_UNAVAILABLE if fmt in known_names else FORMAT_NO_REPORTER
+            _excluded_reporter_reason(instance, python_based_plugins_only)
+            if instance is not None
+            else FORMAT_NO_REPORTER
         )
     return unsatisfied
 
 
 def _log_unsatisfied_output_formats(unsatisfied: Dict[str, str]) -> None:
-    """Warn, once per format, that a requested format produces nothing.
+    """Tell the operator, once per format, that a requested format produces nothing.
 
-    Warning rather than raising. A run that was asked for ``markdown,asff`` must
-    still write the markdown report; failing the whole scan over one unproducible
-    format would cost the operator every other report and, for ``ash scan``, the
-    findings verdict along with it. The case where *nothing* was produced is
-    additionally reported by the caller's existing "no enabled reporters" warning.
+    Logged at ERROR, not WARNING, and the reason is ``--quiet``. ``--quiet`` maps
+    the console to ERROR level, and it is what CI uses -- so at WARNING these
+    messages reached ``ash.log`` and nothing else. A CI job that asked for
+    ``markdown`` and expects to upload ``reports/ash.summary.md`` would get an
+    empty directory and a clean console, which is the exact silence this diagnosis
+    exists to break. ERROR is a statement about the operator's request not being
+    honoured, and it does not change the exit code: that stays a verdict about the
+    code under scan.
+
+    Not raised, either. A run asked for ``markdown,asff`` must still write the
+    markdown report; failing the whole scan over one unproducible format would cost
+    the operator every other report and, for ``ash scan``, the findings verdict
+    along with it.
     """
     for fmt, reason in sorted(unsatisfied.items()):
-        if reason == FORMAT_REPORTER_UNAVAILABLE:
-            ASH_LOGGER.warning(
-                f"No report will be written for requested format '{fmt}': its "
-                f"reporter is present but not active. It is disabled in the "
-                f"configuration, its dependencies are unsatisfied, or "
-                f"--python-based-plugins-only excluded it. Enable it under "
-                f"'reporters' in the ASH config to get this report."
-            )
-        else:
-            ASH_LOGGER.warning(
-                f"No report will be written for requested format '{fmt}': no "
-                f"reporter produces it. The format is accepted by --output-formats "
-                f"but has no reporter behind it."
-            )
+        detail = _FORMAT_REASON_MESSAGES[reason].format(fmt=fmt)
+        ASH_LOGGER.error(
+            f"No report will be written for requested format '{fmt}': {detail}"
+        )
 
 
 class ReportPhase(EnginePhase):
@@ -234,6 +309,7 @@ class ReportPhase(EnginePhase):
                 output_formats=output_formats,
                 selected_instances=enabled_reporters,
                 all_instances=all_reporter_instances,
+                python_based_plugins_only=python_based_plugins_only,
             )
         )
 

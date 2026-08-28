@@ -61,8 +61,11 @@ from automated_security_helper.base.reporter_plugin import (
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.enums import ExportFormat
 from automated_security_helper.core.phases.report_phase import (
+    _FORMAT_REASON_MESSAGES,
     FORMAT_NO_REPORTER,
-    FORMAT_REPORTER_UNAVAILABLE,
+    FORMAT_REPORTER_DEPENDENCIES,
+    FORMAT_REPORTER_DISABLED,
+    FORMAT_REPORTER_NOT_PYTHON,
     ReportPhase,
     unsatisfied_output_formats,
 )
@@ -111,7 +114,10 @@ EXPECTED_REPORTS: Dict[ExportFormat, List[str]] = {
 #: dropped by the enabled/dependency filter before the format filter is even
 #: consulted. Repairing the format matching cannot make them emit, and a message
 #: claiming ASH has no yaml reporter would be false -- the operator needs one line
-#: of config, not a different tool.
+#: of config, not a different tool. Established by measurement rather than read off
+#: the config: enabling each one produces ``ash.yaml`` and ``ash.spdx.json``, which
+#: is also what rules out a third bug in those two reporters. That experiment is
+#: kept as :func:`test_disabled_reporters_emit_once_enabled`.
 #:
 #: The other four name no reporter at all. ``aggregated`` and ``dict`` are
 #: internal result shapes rather than report formats, ``asff`` is the payload the
@@ -122,8 +128,17 @@ UNPRODUCIBLE: Dict[ExportFormat, str] = {
     ExportFormat.DICT: FORMAT_NO_REPORTER,
     ExportFormat.ASFF: FORMAT_NO_REPORTER,
     ExportFormat.CUSTOM: FORMAT_NO_REPORTER,
-    ExportFormat.YAML: FORMAT_REPORTER_UNAVAILABLE,
-    ExportFormat.SPDX: FORMAT_REPORTER_UNAVAILABLE,
+    ExportFormat.YAML: FORMAT_REPORTER_DISABLED,
+    ExportFormat.SPDX: FORMAT_REPORTER_DISABLED,
+}
+
+#: Reporters that ship switched off, and the file each writes once enabled. Their
+#: being disabled is the entire reason ``--output-formats yaml`` produces nothing,
+#: so it is asserted rather than assumed -- if a future release enables one of
+#: these, this table and :data:`EXPECTED_REPORTS` must move together.
+DISABLED_BY_DEFAULT = {
+    "yaml": "ash.yaml",
+    "spdx": "ash.spdx.json",
 }
 
 #: Reporters whose extension differs from their name. Selecting on extension
@@ -147,20 +162,34 @@ NAME_DIFFERS_FROM_EXTENSION = {
 
 
 def _run_report_phase(
-    tmp_path: Path, requested: Optional[Sequence[object]]
+    tmp_path: Path,
+    requested: Optional[Sequence[object]],
+    config_overrides: Optional[Sequence[str]] = None,
 ) -> List[str]:
     """Run the real report phase for ``requested`` and return the filenames written.
 
     ``requested`` is passed straight through as ``cli_output_formats``, so a test
     can hand it plain strings or ``ExportFormat`` members and exercise the same
     normalisation production does.
+
+    ``config_overrides`` goes through the production ``apply_config_overrides``
+    rather than mutating a config object by hand, so a test that enables a
+    disabled reporter proves the operator's documented escape hatch works and not
+    merely that the attribute is writable.
     """
     output_dir = tmp_path / "out"
+    config = AshConfig()
+    if config_overrides:
+        from automated_security_helper.config.resolve_config import (
+            apply_config_overrides,
+        )
+
+        config = apply_config_overrides(config, list(config_overrides))
     context = PluginContext(
         source_dir=tmp_path,
         output_dir=output_dir,
         work_dir=output_dir / "work",
-        config=AshConfig(),
+        config=config,
     )
     ash_plugin_manager.set_context(context)
     load_plugins(plugin_context=context)
@@ -220,18 +249,48 @@ def _reporter_instances(tmp_path: Path) -> List[object]:
     list(EXPECTED_REPORTS),
     ids=[fmt.value for fmt in EXPECTED_REPORTS],
 )
-def test_requested_format_writes_expected_files(export_format, tmp_path):
-    """Naming one format writes exactly the files that format is responsible for.
+def test_requested_format_writes_expected_files(export_format, tmp_path, caplog):
+    """Naming one format writes its files, or says why it wrote none.
 
-    This is the assertion whose absence let the bug ship. Both halves matter: the
-    expected file must appear (selection works) and no *other* file may appear (a
-    format request is still a filter, not a suggestion).
+    This is the assertion whose absence let the bug ship, and it has three parts.
+    The expected file must appear (selection works). No *other* file may appear (a
+    format request is a filter, not a suggestion). And a format that writes nothing
+    must name itself and its cause in the log.
+
+    That third part is what keeps this table honest. An earlier version asserted
+    only the file set, which meant a format expected to write nothing passed while
+    being completely silent -- the suite went green with two formats in exactly the
+    state this whole change exists to eliminate. Asserting the diagnostic here, in
+    the same test as the file set, means no format can be added to
+    :data:`EXPECTED_REPORTS` with an empty expectation and no explanation.
     """
-    written = _run_report_phase(tmp_path, [export_format.value])
+    with caplog.at_level(logging.ERROR):
+        written = _run_report_phase(tmp_path, [export_format.value])
 
     assert written == EXPECTED_REPORTS[export_format], (
         f"--output-formats {export_format.value} wrote {written}, expected "
         f"{EXPECTED_REPORTS[export_format]}"
+    )
+
+    if EXPECTED_REPORTS[export_format]:
+        assert "No report will be written" not in caplog.text, (
+            f"format {export_format.value} produced a file but was also reported "
+            f"as unproducible"
+        )
+        return
+
+    # Produced nothing, so it owes the operator an explanation naming the format.
+    expected_diagnostic = (
+        f"No report will be written for requested format '{export_format.value}'"
+    )
+    assert expected_diagnostic in caplog.text, (
+        f"--output-formats {export_format.value} wrote no file and emitted no "
+        f"diagnostic naming it; this is the silent failure the fix exists to "
+        f"prevent. Log was: {caplog.text!r}"
+    )
+    assert UNPRODUCIBLE[export_format] in _FORMAT_REASON_MESSAGES, (
+        f"{export_format.value} is recorded with reason "
+        f"{UNPRODUCIBLE[export_format]!r}, which has no operator-facing message"
     )
 
 
@@ -374,18 +433,94 @@ def test_no_request_diagnoses_nothing(tmp_path):
 
 
 def test_disabled_reporter_is_not_reported_as_missing(tmp_path):
-    """``yaml`` is diagnosed as inactive, never as nonexistent.
+    """``yaml`` is diagnosed as disabled, never as nonexistent.
 
-    The distinction is the point of splitting the two reasons. Told that ASH has
-    no yaml reporter, an operator would go looking for a plugin; told it is
-    disabled, they edit one line of config.
+    The distinction is the point of splitting the reasons. Told that ASH has no
+    yaml reporter, an operator would go looking for a plugin; told it is disabled,
+    they edit one line of config.
     """
     instances = _reporter_instances(tmp_path)
 
     diagnosis = unsatisfied_output_formats(["yaml"], [], instances)
 
-    assert diagnosis == {"yaml": FORMAT_REPORTER_UNAVAILABLE}
+    assert diagnosis == {"yaml": FORMAT_REPORTER_DISABLED}
     assert diagnosis["yaml"] != FORMAT_NO_REPORTER
+
+
+def test_python_only_exclusion_is_distinguished_from_a_broken_dependency(tmp_path):
+    """A reporter excluded by ``--python-based-plugins-only`` says so.
+
+    Three ways a present reporter can be inactive, and they route the operator to
+    three different places: the config file, the flag they passed, or their
+    credentials and installs. A reporter that is enabled and not python-only is
+    attributed to the flag when the flag is set, and to its dependency check when
+    it is not -- the latter by elimination, which is what avoids a second
+    ``validate_plugin_dependencies`` call and the live AWS round trip that would
+    come with it for some reporters.
+    """
+
+    class _NonPython:
+        class config:  # noqa: N801 -- a stand-in for a config object
+            name = "markdown"
+            extension = "summary.md"
+            enabled = True
+
+        def is_python_only(self):
+            return False
+
+    instance = _NonPython()
+
+    assert unsatisfied_output_formats(
+        ["markdown"], [], [instance], python_based_plugins_only=True
+    ) == {"markdown": FORMAT_REPORTER_NOT_PYTHON}
+
+    # Same instance, flag not set: the exclusion cannot be the flag's doing, so the
+    # only remaining reason is the dependency check.
+    assert unsatisfied_output_formats(
+        ["markdown"], [], [instance], python_based_plugins_only=False
+    ) == {"markdown": FORMAT_REPORTER_DEPENDENCIES}
+
+
+def test_a_disabled_reporter_outranks_the_other_causes(tmp_path):
+    """Disabled is reported even for a reporter that is also non-Python.
+
+    The cheap, side-effect-free condition is tested first on purpose. An operator
+    whose reporter is switched off needs to hear that, and checking it first is also
+    what keeps this diagnosis off any code path that performs IO.
+    """
+
+    class _DisabledAndNonPython:
+        class config:  # noqa: N801 -- a stand-in for a config object
+            name = "markdown"
+            extension = "summary.md"
+            enabled = False
+
+        def is_python_only(self):
+            return False
+
+    assert unsatisfied_output_formats(
+        ["markdown"], [], [_DisabledAndNonPython()], python_based_plugins_only=True
+    ) == {"markdown": FORMAT_REPORTER_DISABLED}
+
+
+@pytest.mark.parametrize("name,filename", sorted(DISABLED_BY_DEFAULT.items()))
+def test_disabled_reporters_emit_once_enabled(name, filename, tmp_path):
+    """The decisive experiment: enabling the reporter produces its file.
+
+    This is what separates "ships disabled" from "the reporter is broken". If
+    ``yaml`` still wrote nothing with ``reporters.yaml.enabled=true``, the
+    diagnostic would be papering over a third defect rather than reporting a
+    configuration state. It writes ``ash.yaml``, so it is not.
+
+    It also pins the filename for these two, which the main table cannot: they are
+    absent from a default run, so ``EXPECTED_REPORTS`` has nothing to assert about
+    the name they would use.
+    """
+    written = _run_report_phase(
+        tmp_path, [name], config_overrides=[f"reporters.{name}.enabled=true"]
+    )
+
+    assert written == [filename]
 
 
 def test_unproducible_format_warns_on_the_operators_log(tmp_path, caplog):
@@ -395,7 +530,7 @@ def test_unproducible_format_warns_on_the_operators_log(tmp_path, caplog):
     never emits it, so this drives the whole phase and reads the log rather than
     calling the helper.
     """
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.ERROR):
         written = _run_report_phase(tmp_path, ["asff"])
 
     assert written == []
@@ -403,14 +538,49 @@ def test_unproducible_format_warns_on_the_operators_log(tmp_path, caplog):
     assert "no reporter produces it" in caplog.text
 
 
-def test_mixed_request_writes_what_it_can_and_warns_about_the_rest(tmp_path, caplog):
+@pytest.mark.parametrize(
+    "export_format",
+    sorted(UNPRODUCIBLE, key=lambda f: f.value),
+    ids=[fmt.value for fmt in sorted(UNPRODUCIBLE, key=lambda f: f.value)],
+)
+def test_the_diagnostic_survives_quiet(export_format, tmp_path, caplog):
+    """Logged at ERROR, so ``--quiet`` cannot suppress it.
+
+    This is a real defect that shipped in the first version of this fix. The
+    diagnostic was at WARNING, and ``--quiet`` maps the console to ERROR level --
+    so on the exact invocation CI uses, every one of these messages went to
+    ``ash.log`` and nowhere the operator would look. A scan asked for ``markdown``
+    that writes nothing, prints nothing, and exits 0 is the original bug wearing a
+    different hat.
+
+    Asserted on the record's level rather than on the rendered text, because the
+    text is identical at any level and would pass while suppressed.
+    """
+    caplog.set_level(logging.ERROR)
+    _run_report_phase(tmp_path, [export_format.value])
+
+    diagnostics = [
+        record
+        for record in caplog.records
+        if "No report will be written" in record.getMessage()
+    ]
+    assert diagnostics, f"no diagnostic emitted for {export_format.value}"
+    for record in diagnostics:
+        assert record.levelno >= logging.ERROR, (
+            f"diagnostic for {export_format.value} logged at "
+            f"{record.levelname}, which --quiet suppresses"
+        )
+
+
+def test_mixed_request_writes_what_it_can_and_reports_the_rest(tmp_path, caplog):
     """One unproducible format must not cost the operator their other reports.
 
-    Warning rather than raising is a deliberate choice: erroring on ``asff`` here
-    would discard the markdown report the same command asked for, and for
-    ``ash scan`` the findings verdict along with it.
+    Logging rather than raising is a deliberate choice: erroring out on ``asff``
+    here would discard the markdown report the same command asked for, and for
+    ``ash scan`` the findings verdict along with it. ERROR is the log level, not an
+    exit code -- the exit code stays a verdict about the code under scan.
     """
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.ERROR):
         written = _run_report_phase(tmp_path, ["markdown", "asff"])
 
     assert written == ["ash.summary.md"]
