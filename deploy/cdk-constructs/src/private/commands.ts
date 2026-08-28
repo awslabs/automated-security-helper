@@ -231,6 +231,12 @@ export function scanCommands(
  * found a critical issue. Letting a shard fail the build would also stop the
  * merge from ever running, which would replace the aggregate verdict with a
  * partial one. The merge step is the only step allowed to fail on findings.
+ *
+ * No `--min-severity` here, deliberately. On `ash scan` that option changes only
+ * that scan's exit code, and a shard's exit code is discarded by design, so
+ * passing it would read as if it set the severity floor while having no effect
+ * on anything. The floor belongs on the command that owns the verdict, which is
+ * `mergeCommands`.
  */
 export function shardScanCommands(
   options: ShardCommandOptions,
@@ -247,8 +253,6 @@ export function shardScanCommands(
     shellArg(options.shardIndex),
     '--shard-count',
     shellArg(options.shardCount),
-    '--min-severity',
-    options.severityThreshold,
     '--no-fail-on-findings',
     ...options.extraScanArguments,
   ];
@@ -259,13 +263,21 @@ export function shardScanCommands(
  * Render the merge, which reduces every shard's partial results to one report
  * and one exit code.
  *
- * `--results` is repeated once per shard and accepts a file or a directory.
- * This command's exit code is the pipeline's verdict, so `ash merge` must exit
- * non-zero when the merged findings breach the configured threshold.
+ * One `--results` per shard, each a directory. Passing a single parent directory
+ * holding every shard is refused by `ash merge`, on the grounds that it would
+ * make the merged set depend on whatever else happens to be in the tree,
+ * including a previous merged report.
+ *
+ * This command's exit code is the pipeline's verdict, which is also why
+ * `--min-severity` is passed here and nowhere else: the severity floor has to
+ * reach the command that decides pass or fail. It is passed explicitly rather
+ * than left to the shards' recorded configuration, so the floor a pipeline gates
+ * on is visible in the command line that applies it.
  */
 export function mergeCommands(
   resultsPaths: string[],
   outputDirectory: string,
+  severityThreshold: ASHSeverityThreshold,
   install: InstallOptions,
 ): string[] {
   if (resultsPaths.length === 0) {
@@ -276,6 +288,7 @@ export function mergeCommands(
     argv.push('--results', shellArg(results));
   }
   argv.push('--output-dir', shellArg(outputDirectory));
+  argv.push('--min-severity', severityThreshold);
   return [argv.join(' ')];
 }
 

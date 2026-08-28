@@ -11,7 +11,7 @@ import {
   mergeCommands,
   shellArg,
 } from '../src/private/commands';
-import { ASHInstallMode } from '../src';
+import { ASHInstallMode, ASHSeverityThreshold } from '../src';
 import { scalar, toYaml } from '../src/private/yaml';
 
 const PACKAGE_ROOT = path.resolve(__dirname, '..');
@@ -121,6 +121,49 @@ describe('generated buildspecs install ASH from git, not by name', () => {
   });
 });
 
+describe('environment variables are referenced, not just named', () => {
+  test.each(generatedBuildspecs().map((s) => s.filename))(
+    '%s never passes a bare variable name as an argument value',
+    (filename) => {
+      // A dropped `$` turns "$ASH_OUTPUT_DIR" into "ASH_OUTPUT_DIR", which is a
+      // valid shell word, so the build succeeds and writes to a directory
+      // literally named ASH_OUTPUT_DIR. Nothing else in the pipeline notices.
+      const contents = generatedBuildspecs().find((s) => s.filename === filename)!.contents;
+      const commands: string[] = [];
+      for (const line of contents.split('\n')) {
+        const match = line.match(/^\s+- '(.*)'$/);
+        if (match) commands.push(match[1]);
+      }
+
+      expect(commands.length).toBeGreaterThan(0);
+      for (const command of commands) {
+        // An option value that is a quoted ASH_* token with no leading $.
+        expect(command).not.toMatch(/--[a-z-]+ "ASH_[A-Z_]+"/);
+      }
+    },
+  );
+
+  test.each(generatedBuildspecs().map((s) => s.filename))(
+    '%s declares a default for every ASH_ variable it dereferences',
+    (filename) => {
+      const contents = generatedBuildspecs().find((s) => s.filename === filename)!.contents;
+      const declared = new Set(
+        [...contents.matchAll(/^ {4}(ASH_[A-Z_]+):/gm)].map((m) => m[1]),
+      );
+      const referenced = new Set(
+        [...contents.matchAll(/\$(ASH_[A-Z_]+)/g)].map((m) => m[1]),
+      );
+
+      expect(referenced.size).toBeGreaterThan(0);
+      for (const name of referenced) {
+        // An undeclared variable expands to empty, which silently changes the
+        // command rather than failing it.
+        expect(declared).toContain(name);
+      }
+    },
+  );
+});
+
 describe('verdict ownership in the generated buildspecs', () => {
   function contentsOf(filename: string): string {
     return generatedBuildspecs().find((s) => s.filename === filename)!.contents;
@@ -183,21 +226,24 @@ describe('the env-driven merge loop matches the literal merge command', () => {
     const literal = mergeCommands(
       ['out/shard-0', 'out/shard-1', 'out/shard-2'],
       '.ash/ash_output',
+      ASHSeverityThreshold.LOW,
       { mode: ASHInstallMode.PIP, sourceRepository: DEFAULT_ASH_REPOSITORY },
     )[0];
 
     expect(literal).toBe(
       'ash merge --results "out/shard-0" --results "out/shard-1" ' +
-        '--results "out/shard-2" --output-dir ".ash/ash_output"',
+        '--results "out/shard-2" --output-dir ".ash/ash_output" --min-severity low',
     );
 
     const loop = mergeLoopCommands().join('\n');
     expect(loop).toContain('--results "$shard_dir"');
-    expect(loop).toContain('ash merge "$@" --output-dir "$ASH_OUTPUT_DIR"');
+    expect(loop).toContain(
+      'ash merge "$@" --output-dir "$ASH_OUTPUT_DIR" --min-severity "$ASH_MIN_SEVERITY"',
+    );
   });
 
   test('mergeCommands refuses an empty results list', () => {
-    expect(() => mergeCommands([], 'out', PIP_INSTALL)).toThrow(
+    expect(() => mergeCommands([], 'out', ASHSeverityThreshold.LOW, PIP_INSTALL)).toThrow(
       /at least one results path/,
     );
   });
@@ -224,7 +270,7 @@ describe('shellArg', () => {
 
   test('a rejected value cannot reach the rendered command', () => {
     expect(() =>
-      mergeCommands(['out; rm -rf $HOME'], 'out', PIP_INSTALL),
+      mergeCommands(['out; rm -rf $HOME'], 'out', ASHSeverityThreshold.LOW, PIP_INSTALL),
     ).toThrow(/Refusing to build a shell command/);
   });
 });

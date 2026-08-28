@@ -438,6 +438,7 @@ export class ASHScanStep extends pipelines.Step implements pipelines.ICodePipeli
           commands: mergeCommands(
             resultsPaths,
             this.outputDirectory,
+            this.severityThreshold,
             this.installOptions(),
           ),
         },

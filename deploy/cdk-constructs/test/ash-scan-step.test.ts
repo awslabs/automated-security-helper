@@ -230,12 +230,52 @@ describe('severityThreshold', () => {
     [ASHSeverityThreshold.MEDIUM, 'medium'],
     [ASHSeverityThreshold.LOW, 'low'],
     [ASHSeverityThreshold.NONE, 'none'],
-  ])('renders %s as --min-severity %s', (threshold, expected) => {
+  ])('renders %s as --min-severity %s on an unsharded scan', (threshold, expected) => {
     const { actions } = synthesizeWithStep({ severityThreshold: threshold });
 
     expect(ashActions(actions)[0].commands.join('\n')).toContain(
       `--min-severity ${expected}`,
     );
+  });
+
+  test('reaches the merge action when sharded, because merge owns the verdict', () => {
+    const { actions } = synthesizeWithStep({
+      shardCount: 3,
+      severityThreshold: ASHSeverityThreshold.MEDIUM,
+    });
+    const merge = ashActions(actions).find((a) => a.name.endsWith('Merge'))!;
+
+    expect(merge.commands.join('\n')).toContain('--min-severity medium');
+  });
+
+  test('is absent from shard commands, where it would have no effect', () => {
+    const { actions } = synthesizeWithStep({
+      shardCount: 3,
+      severityThreshold: ASHSeverityThreshold.MEDIUM,
+    });
+    const shards = ashActions(actions).filter((a) => a.name.includes('Shard'));
+
+    // On `ash scan`, --min-severity changes only that scan's exit code, and a
+    // shard's exit code is discarded by design. Passing it to a shard would read
+    // as if it set the floor while changing nothing; the floor goes to merge.
+    expect(shards).toHaveLength(3);
+    for (const shard of shards) {
+      expect(shard.commands.join('\n')).not.toContain('--min-severity');
+    }
+  });
+
+  test.each([
+    ASHSeverityThreshold.CRITICAL,
+    ASHSeverityThreshold.MEDIUM,
+    ASHSeverityThreshold.NONE,
+  ])('a non-default floor of %s is never silently dropped', (threshold) => {
+    // The regression this guards: the floor used to go only to the shards, whose
+    // exit codes are discarded, so a user asking for MEDIUM silently got whatever
+    // the shards' recorded config said.
+    const { actions } = synthesizeWithStep({ shardCount: 2, severityThreshold: threshold });
+    const verdictAction = ashActions(actions).find((a) => a.name.endsWith('Merge'))!;
+
+    expect(verdictAction.commands.join('\n')).toContain(`--min-severity ${threshold}`);
   });
 });
 

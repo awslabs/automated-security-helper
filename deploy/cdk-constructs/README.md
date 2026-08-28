@@ -201,6 +201,27 @@ Windows for a file nobody edited.
 `CRITICAL` and `HIGH` are equivalent: SARIF does not distinguish the two levels,
 so ASH treats them as one.
 
+`severityThreshold` is applied to whichever action owns the verdict: the scan
+itself when unsharded, and the merge action when sharded. It is deliberately not
+passed to shards. On `ash scan` that option changes only that scan's exit code,
+and a shard's exit code is discarded by design, so a floor passed to a shard would
+look like it was set while having no effect on anything.
+
+### Triaging a failed merge
+
+`ash merge` refuses results whose `metadata.shard` provenance is missing, which is
+how it distinguishes one shard of several from a whole unsharded scan. Provenance
+is recorded only when a scan runs with both `--shard-index` and `--shard-count`,
+and it is skipped when the scan registered no scanners at all. So a merge action
+failing with "no shard provenance found" usually means the fault is upstream in a
+shard, not in the merge: either a shard ran `ash scan` without both flags, or a
+shard's container registered zero scanners, for instance because a scanner plugin
+failed to load. The merge action is where it surfaces, not where it broke.
+
+Setting `shardCount` higher than the number of enabled scanners is wasteful rather
+than broken. The surplus shards are assigned no scanners, still record provenance
+and still merge; they just cost a CodeBuild start each.
+
 `version` is a git ref, not a distribution version, because ASH is installed from
 its repository. It defaults to a pinned release tag, so two runs of the same
 pipeline definition scan with the same ASH; pointing it at a branch gives that up.

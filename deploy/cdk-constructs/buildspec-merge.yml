@@ -19,6 +19,7 @@ env:
   variables:
     ASH_OUTPUT_DIR: '.ash/ash_output'
     ASH_VERSION: v3.7.0
+    ASH_MIN_SEVERITY: low
     ASH_SHARD_RESULTS: ''
 phases:
   install:
@@ -29,7 +30,7 @@ phases:
   build:
     commands:
       - 'if [ -z "$ASH_SHARD_RESULTS" ]; then echo "ASH_SHARD_RESULTS is empty; refusing to report a verdict for zero shards." >&2; exit 1; fi'
-      - 'set --; for shard_dir in $ASH_SHARD_RESULTS; do set -- "$@" --results "$shard_dir"; done; ash merge "$@" --output-dir "$ASH_OUTPUT_DIR"'
+      - 'set --; for shard_dir in $ASH_SHARD_RESULTS; do set -- "$@" --results "$shard_dir"; done; ash merge "$@" --output-dir "$ASH_OUTPUT_DIR" --min-severity "$ASH_MIN_SEVERITY"'
 artifacts:
   base-directory: '$ASH_OUTPUT_DIR'
   files:

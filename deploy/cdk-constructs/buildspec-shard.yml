@@ -31,7 +31,7 @@ phases:
       - 'python3 -m pip install --no-cache-dir --disable-pip-version-check "git+https://github.com/awslabs/automated-security-helper.git@$ASH_VERSION"'
   build:
     commands:
-      - 'ash scan --source-dir "$ASH_SOURCE_DIR" --output-dir "$ASH_OUTPUT_DIR" --shard-index "$ASH_SHARD_INDEX" --shard-count "$ASH_SHARD_COUNT" --min-severity low --no-fail-on-findings'
+      - 'ash scan --source-dir "$ASH_SOURCE_DIR" --output-dir "$ASH_OUTPUT_DIR" --shard-index "$ASH_SHARD_INDEX" --shard-count "$ASH_SHARD_COUNT" --no-fail-on-findings'
 artifacts:
   base-directory: '$ASH_OUTPUT_DIR'
   files:

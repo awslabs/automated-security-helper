@@ -38,6 +38,7 @@ const SHARD_INDEX_VAR = 'ASH_SHARD_INDEX';
 const SHARD_COUNT_VAR = 'ASH_SHARD_COUNT';
 const SHARD_RESULTS_VAR = 'ASH_SHARD_RESULTS';
 const VERSION_VAR = 'ASH_VERSION';
+const MIN_SEVERITY_VAR = 'ASH_MIN_SEVERITY';
 
 /**
  * How the standalone buildspecs install ASH.
@@ -184,6 +185,7 @@ export function mergeBuildspec(): YamlMap {
       variables: {
         [OUTPUT_DIR_VAR]: '.ash/ash_output',
         [VERSION_VAR]: DEFAULT_ASH_REF,
+        [MIN_SEVERITY_VAR]: ASHSeverityThreshold.LOW,
         [SHARD_RESULTS_VAR]: '',
       },
     },
@@ -217,7 +219,8 @@ export function mergeLoopCommands(): string[] {
       `echo "${SHARD_RESULTS_VAR} is empty; refusing to report a verdict for zero shards." >&2; ` +
       'exit 1; fi',
     `set --; for shard_dir in $${SHARD_RESULTS_VAR}; do set -- "$@" --results "$shard_dir"; done; ` +
-      `ash merge "$@" --output-dir ${shellArg(`$${OUTPUT_DIR_VAR}`)}`,
+      `ash merge "$@" --output-dir ${shellArg(`$${OUTPUT_DIR_VAR}`)} ` +
+      `--min-severity ${shellArg(`$${MIN_SEVERITY_VAR}`)}`,
   ];
 }
 
