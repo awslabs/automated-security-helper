@@ -1,6 +1,21 @@
 /**
  * ASH's MCP server on Amazon Bedrock AgentCore Runtime.
  *
+ * WHAT THIS TARGET SCANS
+ * ----------------------
+ * Nothing, until a caller sends it something. The runtime holds no copy of any
+ * repository, this template mounts no filesystem into it, and the only way in is
+ * `bedrock-agentcore:InvokeAgentRuntime`. The source tree arrives over MCP: either
+ * the runtime clones it (`set_source_git`) or the caller uploads it in chunks
+ * (`set_source_zip_chunk` / `set_source_zip_finalize`), after which `run_ash_scan`
+ * with no `source_dir` scans what was delivered.
+ *
+ * That is why `networkMode` is `PUBLIC` and why no `filesystemConfigurations` are
+ * set. The service does offer up to five of them, but the bring-your-own S3
+ * Files/EFS types need a VPC-mode runtime and the managed types start empty, so
+ * none of them removes the need to deliver the source. See deploy/cdk/README.md,
+ * "What this target can scan, and how you give it something".
+ *
  * EVERY CONSTRAINT IN THIS FILE IS A CONTRACT, NOT A PREFERENCE
  * ------------------------------------------------------------
  * AgentCore's MCP protocol contract fixes the container's shape. Verified at
