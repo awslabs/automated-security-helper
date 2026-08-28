@@ -35,7 +35,7 @@
     "true",
     "false"
    ],
-   "Description": "Handle each streamable-HTTP request independently instead of binding it to a server-held session. Must stay true on AgentCore, which injects its own Mcp-Session-Id that a stateful server rejects with 404. Also required behind a load balancer that may route consecutive requests to different replicas."
+   "Description": "Handle each streamable-HTTP request independently instead of binding it to a server-held session. Keep true on AgentCore: AWS documents stateless as the default there and requires the server not to reject the platform-generated Mcp-Session-Id, and ASH in stateful mode answers 404 to a session id it did not issue. AgentCore does support stateful servers, but only when clients omit the session id on initialize, which this stack cannot enforce. Also keep true behind a load balancer that may route requests to different replicas."
   },
   "McpMountPath": {
    "Type": "String",

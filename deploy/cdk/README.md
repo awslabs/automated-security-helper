@@ -48,13 +48,17 @@ larger than that. Upload those to a bucket and launch by URL, where the ceiling 
 1 MB.
 <https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-limits.html>
 
-| Template | Size | Scripted launch |
-| --- | --- | --- |
-| `AshCodeCommitGate` | ~48 KB | `--template-body` |
-| `AshAgentCore` | ~49 KB | `--template-body` |
-| `AshImagePipeline` | ~66 KB | `--template-url` only |
-| `AshFargate` | ~71 KB | `--template-url` only |
-| `AshDistributedPipeline` | ~127 KB | `--template-url` only |
+| Template | Scripted launch |
+| --- | --- |
+| `AshCodeCommitGate` | `--template-body` |
+| `AshAgentCore` | `--template-body` |
+| `AshImagePipeline` | `--template-url` only |
+| `AshFargate` | `--template-url` only |
+| `AshDistributedPipeline` | `--template-url` only |
+
+Byte counts are deliberately not repeated here — they change with every template
+change and nothing would catch it if this table went stale. Run
+`wc -c templates/*.template.json` for the current numbers.
 
 The two under the cap launch directly:
 
@@ -94,7 +98,7 @@ change for adopters and desynchronizes the two implementations.
 | `AshVersion` | `v3.7.0` | Git ref cloned and built. Not a PyPI version. |
 | `AshOfflineMode` | `NO` | `YES`/`NO`, forwarded to the ASH Dockerfile's `OFFLINE` build argument. The spelling is the Dockerfile's; a boolean would build an image that stayed online. |
 | `AshBaseConfigYaml` | empty | An ASH configuration document. See the size note below. |
-| `McpStatelessHttp` | `true` | Must stay `true` on AgentCore. See below. |
+| `McpStatelessHttp` | `true` | Keep `true` on AgentCore, and behind any load balancer with more than one replica. See below for what is measured and what is inferred. |
 | `McpMountPath` | `/mcp` | AgentCore routes only `/mcp`, so change this only for Fargate. |
 | `McpAllowedHost` | empty | Comma-separated `Host` values, passed as repeated `--allowed-host`. On Fargate, empty means the ALB DNS name. |
 | `McpAuthHeaderName` | empty | Header ASH requires on every request. Must satisfy `^$|^[A-Za-z][A-Za-z0-9_-]{0,255}$`. |
@@ -140,11 +144,27 @@ streamable-http transport, host `0.0.0.0`, port `8000`, ARM64 container,
 states that "in stateless mode, servers must support stateless operation so as to
 not reject platform generated `Mcp-Session-Id` header."
 
+The same page also says to "use stateless mode (`stateless_http=True`) for
+compatibility with AWS's session management and load balancing", and that in
+stateless mode the platform "generates the `Mcp-Session-Id` and includes it in the
+request to your MCP server" — which the server "must accept ... (do not reject
+it)".
+
 Measured against ASH directly: given a session id the server never issued, ASH's
 MCP returns HTTP 404 "Session not found" in stateful mode and HTTP 200 in
-stateless mode. Deploying stateful on AgentCore produces a runtime that fails
-every request, and the failure reads like a client bug rather than a configuration
-one. Hence `McpStatelessHttp` defaults to `true`.
+stateless mode. Hence `McpStatelessHttp` defaults to `true`.
+
+Being precise about the limit of that argument, because it decides whether you may
+set `false`: AgentCore **does** support
+[stateful MCP servers](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/mcp-stateful-features.html),
+which is what enables elicitation, sampling and progress notifications. In that
+mode the client sends `initialize` with no session id and the platform returns
+one, so it is not the platform injecting an id into a server that never issued it.
+Stateful is therefore not impossible here — it is unsupportable, which is a weaker
+claim. It needs every client to omit the session id on initialize, and nothing in
+this stack controls the clients. There is also no template-level switch:
+`ProtocolConfiguration` is a plain string taking `MCP | HTTP | A2A | AGUI`, so the
+mode lives in the container's own invocation.
 
 `AgentRuntimeArtifact.ContainerConfiguration` has exactly one property,
 `ContainerUri`. There is no `Command`, `EntryPoint` or `Args`, so the MCP

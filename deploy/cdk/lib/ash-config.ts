@@ -195,16 +195,50 @@ export function ashVersion(scope: Stack): CfnParameter {
 /**
  * Whether the MCP server treats each streamable-HTTP request independently.
  *
- * WHY THE DEFAULT IS `true`: AgentCore injects its own `Mcp-Session-Id` header.
- * Measured against ASH directly, a session id the server never issued yields
- * HTTP 404 "Session not found" in stateful mode and HTTP 200 in stateless mode.
- * AWS documents the same requirement: "In stateless mode, servers must support
- * stateless operation so as to not reject platform generated Mcp-Session-Id
- * header."
+ * WHY THE DEFAULT IS `true`, SEPARATED INTO WHAT IS MEASURED AND WHAT IS NOT
+ * -------------------------------------------------------------------------
+ * An earlier version of this comment justified the default by asserting that
+ * AgentCore "injects its own `Mcp-Session-Id` that a stateful server rejects with
+ * 404". That is stronger than the evidence, and it is worth being precise,
+ * because an adopter reads this to decide whether they may set `false`.
+ *
+ * MEASURED, against ASH directly rather than through AgentCore: given a session
+ * id the server never issued, ASH's MCP server returns HTTP 404 "Session not
+ * found" in stateful mode and HTTP 200 in stateless mode. Controls confirmed both
+ * servers start and that the stateful one issues an id of its own.
+ *
+ * DOCUMENTED by AWS, quoting the MCP protocol contract:
+ * - "By default, use stateless mode (`stateless_http=True`) for compatibility
+ *   with AWS's session management and load balancing."
+ * - "In stateless mode, servers must support stateless operation so as to not
+ *   reject platform generated `Mcp-Session-Id` header."
+ * - In stateless mode specifically, "Platform generates the `Mcp-Session-Id` and
+ *   includes it in the request to your MCP server" and "Your MCP server must
+ *   accept the platform-provided session ID (do not reject it)."
  * https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-mcp-protocol-contract.html
  *
- * The same reasoning applies behind any load balancer that may route
- * consecutive requests to different replicas.
+ * ALSO DOCUMENTED, and the reason the old claim was too strong: AgentCore
+ * supports stateful MCP servers too. In that mode "the client sends the
+ * initialize request without an `Mcp-Session-Id` header" and the platform returns
+ * one — which is not the platform injecting an id into a server that never issued
+ * it. Stateful mode is what enables elicitation, sampling and progress
+ * notifications.
+ * https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/mcp-stateful-features.html
+ *
+ * NOT ESTABLISHED, and not establishable from here: that this deployment could
+ * safely run stateful on AgentCore. `AWS::BedrockAgentCore::Runtime` exposes no
+ * property for the choice — `ProtocolConfiguration` is a plain string whose
+ * allowed values are `MCP | HTTP | A2A | AGUI` — so the mode is a property of the
+ * container's own invocation, and making it work depends on every client omitting
+ * the session id on initialize. This stack does not control the clients.
+ * https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-bedrockagentcore-runtime.html
+ *
+ * So `true` is the right default because AWS names it the default, because ASH
+ * measurably 404s an id it did not issue, and because nothing here can guarantee
+ * the client behaviour stateful mode needs. Not because stateful is impossible.
+ *
+ * Independently of AgentCore, `true` is also what makes the server correct behind
+ * any load balancer that may route consecutive requests to different replicas.
  */
 export function mcpStatelessHttp(scope: Stack): CfnParameter {
   return new CfnParameter(scope, ASH_PARAMETER_NAMES.mcpStatelessHttp, {
@@ -213,9 +247,12 @@ export function mcpStatelessHttp(scope: Stack): CfnParameter {
     allowedValues: ['true', 'false'],
     description:
       'Handle each streamable-HTTP request independently instead of binding it to a ' +
-      'server-held session. Must stay true on AgentCore, which injects its own ' +
-      'Mcp-Session-Id that a stateful server rejects with 404. Also required behind ' +
-      'a load balancer that may route consecutive requests to different replicas.',
+      'server-held session. Keep true on AgentCore: AWS documents stateless as the ' +
+      'default there and requires the server not to reject the platform-generated ' +
+      'Mcp-Session-Id, and ASH in stateful mode answers 404 to a session id it did ' +
+      'not issue. AgentCore does support stateful servers, but only when clients ' +
+      'omit the session id on initialize, which this stack cannot enforce. Also keep ' +
+      'true behind a load balancer that may route requests to different replicas.',
   });
 }
 

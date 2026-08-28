@@ -74,9 +74,9 @@ describe('AgentCore runtime contract', () => {
   });
 
   test('stateless HTTP defaults to true', () => {
-    // AgentCore injects its own Mcp-Session-Id. A stateful ASH answers 404 to a
-    // session it never issued, so this default is the difference between a
-    // working runtime and one that fails every request.
+    // AWS names stateless the default for AgentCore, and ASH in stateful mode
+    // answers 404 to a session id it never issued. Both are checked in the
+    // description test below; this one is about the wiring.
     template.hasParameter(ASH_PARAMETER_NAMES.mcpStatelessHttp, {
       Default: 'true',
       AllowedValues: ['true', 'false'],
@@ -86,6 +86,33 @@ describe('AgentCore runtime contract', () => {
         ASH_MCP_STATELESS: { Ref: ASH_PARAMETER_NAMES.mcpStatelessHttp },
       }),
     });
+  });
+
+  test('the stateless description claims only what was measured', () => {
+    /*
+     * The description used to assert that AgentCore "injects its own
+     * Mcp-Session-Id that a stateful server rejects with 404", presented as the
+     * reason the parameter must stay true. AWS documents AgentCore as supporting
+     * stateful MCP servers, where the client sends initialize with no session id
+     * and the platform returns one — not the platform injecting an id into a
+     * server that never issued it. The measured half (ASH 404s an id it did not
+     * issue) is solid; the AgentCore half was over-specified.
+     *
+     * Asserting the absence of the old framing is what keeps this a regression
+     * test. A test that only checked the new wording would pass just as happily
+     * if someone reinstated the old claim alongside it.
+     */
+    const description: string = template.toJSON().Parameters.McpStatelessHttp.Description;
+
+    expect(description).not.toContain('Must stay true');
+    expect(description).not.toContain('injects its own');
+    expect(description).not.toContain('rejects with 404');
+
+    // What is actually supportable: AWS's documented default, ASH's measured
+    // behavior, and the reason stateful is not merely a free choice here.
+    expect(description).toContain('AWS documents stateless as the default');
+    expect(description).toContain('404');
+    expect(description).toContain('omit the session id on initialize');
   });
 
   test('the entrypoint passes the stateless flag in both directions', () => {

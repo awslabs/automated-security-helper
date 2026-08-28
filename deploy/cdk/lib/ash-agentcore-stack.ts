@@ -12,12 +12,18 @@
  * - "Platform automatically adds `Mcp-Session-Id` header for session isolation.
  *   In stateless mode, servers must support stateless operation so as to not
  *   reject platform generated `Mcp-Session-Id` header."
+ * - "By default, use stateless mode (`stateless_http=True`) for compatibility
+ *   with AWS's session management and load balancing."
  *
- * That last point is why `McpStatelessHttp` defaults to `true`. Measured against
- * ASH directly: given a session id the server never issued, ASH's MCP returns
- * HTTP 404 "Session not found" in stateful mode and HTTP 200 in stateless mode.
- * Deploying stateful here produces a runtime that fails every request, and the
- * failure looks like a client bug rather than a configuration one.
+ * That is why `McpStatelessHttp` defaults to `true`, and measured against ASH
+ * directly: given a session id the server never issued, ASH's MCP returns HTTP
+ * 404 "Session not found" in stateful mode and HTTP 200 in stateless mode.
+ *
+ * Note what this does NOT say. AgentCore also supports stateful MCP servers, so
+ * stateful is not forbidden here — it is unsupportable, which is a different
+ * claim. Stateful mode requires clients to send `initialize` with no session id,
+ * and this stack controls no clients. `mcpStatelessHttp` in `ash-config.ts`
+ * separates the measured part from the inferred part in full.
  *
  * WHY THE ENTRYPOINT IS BAKED INTO THE IMAGE
  * ------------------------------------------
