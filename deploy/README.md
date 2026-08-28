@@ -159,20 +159,30 @@ every pull request and fails if the result differs from what is committed, so a 
 artifact is a red build rather than something an adopter discovers at launch time.
 
 The gate also runs `terraform fmt -check -recursive`, initializes and validates every
-Terraform module and example, and requires that the CDK app register cdk-nag as a
-validation plugin so that unsuppressed findings fail synth. Suppress a cdk-nag finding
-in the construct, with a reason:
+Terraform module and example, and requires that the CDK app register cdk-nag as a CDK
+Aspect so that every stack is scanned. Suppress a cdk-nag finding next to the resource,
+with a reason:
 
 ```js
-Validations.of(scope).acknowledge({
-  id: 'AwsSolutions::AwsSolutions-S1',
-  reason: 'Access logs are centralized in a dedicated logging account bucket.',
-});
+NagSuppressions.addResourceSuppressions(scope, [
+  {
+    id: 'AwsSolutions-S1',
+    reason: 'Access logs are centralized in a dedicated logging account bucket.',
+  },
+]);
 ```
 
-An acknowledged rule is not reported and does not fail the build. Note that
-acknowledgements live in the construct and do not appear in the emitted template, so
-the template is not the place to look for them.
+A suppressed rule is reported as `Suppressed` alongside its reason and does not fail the
+build. cdk-nag is pinned at **2.38.2**, where the pack is an Aspect — registered with
+`Aspects.of(app).add(new AwsSolutionsChecks(...))`, not with
+`Validations.of(app).addPlugins(...)`, which is the cdk-nag 3.x API and rejects an
+Aspect. See `deploy/cdk/README.md` for the version boundary and what has to change if
+the pin moves.
+
+On 2.x a suppression is serialized into the emitted template as
+`Metadata.cdk_nag.rules_to_suppress` on the resource it applies to, so the committed
+templates do carry a record of every one. The reason string travels with it, which
+means an incorrect reason is public — write it for a reviewer, not to silence output.
 
 ## Constraints and assumptions
 
