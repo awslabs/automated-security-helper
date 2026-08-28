@@ -7,6 +7,11 @@
  * failure below should send the reader back to a specific thing to re-check.
  */
 
+import { execFileSync } from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+
 import {
   ASH_MATERIALIZED_CONFIG_PATH,
   ASH_S3_SYNC_PATH,
@@ -245,6 +250,110 @@ describe('S3 sync materialization command', () => {
     execFileSync('sh', ['-c', script], { stdio: 'pipe' });
     expect(fs.readFileSync(target, 'utf8')).toBe(ASH_S3_SYNC_SCRIPT);
   });
+});
+
+describe('the CDK and Terraform copies of the S3 helper have not diverged', () => {
+  // deploy/cdk and deploy/terraform each carry their own copy, because the two
+  // trees are independently consumable. They are behaviourally identical and must
+  // stay that way, but they legitimately differ in docstring and log prefix, so a
+  // byte comparison cannot be the test.
+  //
+  // Normalizing both sides before comparing would be worse than no test: a
+  // normalization permissive enough to excuse a docstring difference also excuses
+  // a logic change, so it would launder drift instead of catching it.
+  //
+  // So the EXACT diff is pinned. It excuses the differences that exist today and
+  // nothing else. Any new difference, in either copy, fails this and sends a human
+  // to read it: prose means regenerate the fixture, logic means the copies have
+  // diverged and one is wrong.
+  const terraformCopy = path.resolve(
+    __dirname,
+    '../../terraform/modules/codepipeline-executor/files/ash_s3_sync.py',
+  );
+  const fixture = path.join(__dirname, 'fixtures/ash-s3-sync-vs-terraform.diff');
+  const REGENERATE = 'cd deploy/cdk && ./scripts/gen-s3-sync-diff-fixture.sh';
+
+  // deploy/terraform lands independently of deploy/cdk -- ash-iac-drift.yml gates
+  // each tree on its own marker file. On a ref where it is absent this reports a
+  // gap rather than passing silently, because "nothing to compare" and "the copies
+  // agree" must not look alike.
+  const present = fs.existsSync(terraformCopy);
+  const maybe = present ? test : test.skip;
+
+  test('the Terraform copy is present to compare against', () => {
+    if (!present) {
+      console.warn(
+        `${terraformCopy} is absent on this ref, so the divergence check below did ` +
+          'NOT run. The Terraform tree has not landed. This is a gap, not a pass.',
+      );
+    }
+    expect(true).toBe(true);
+  });
+
+  maybe('the difference between them is exactly the expected diff', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ash-s3-drift-'));
+    const cdkCopy = path.join(dir, 'cdk.py');
+    fs.writeFileSync(cdkCopy, ASH_S3_SYNC_SCRIPT);
+
+    // Built exactly as scripts/gen-s3-sync-diff-fixture.sh builds it, labels
+    // included, so the fixture and this assertion cannot disagree about how the
+    // comparison is made. diff exits 1 when the files differ, which is the normal
+    // case here, so a non-zero status is read rather than thrown on.
+    let actual: string;
+    try {
+      actual = execFileSync(
+        'diff',
+        [
+          '-u',
+          '--label',
+          'cdk/ash-container-scripts.ts:ASH_S3_SYNC_SCRIPT',
+          '--label',
+          'terraform/codepipeline-executor/files/ash_s3_sync.py',
+          cdkCopy,
+          terraformCopy,
+        ],
+        { encoding: 'utf8' },
+      );
+    } catch (error) {
+      const result = error as { status?: number; stdout?: string };
+      // 2 means diff itself failed (unreadable file), which is not a verdict.
+      if (result.status !== 1) {
+        throw error;
+      }
+      actual = result.stdout ?? '';
+    }
+
+    const expected = fs.readFileSync(fixture, 'utf8');
+    if (actual !== expected) {
+      throw new Error(
+        'The CDK and Terraform copies of the S3 sync helper differ in a way the ' +
+          'fixture does not account for.\n\n' +
+          'Read the diff below. If every new line is docstring or log-prefix text, ' +
+          `regenerate the fixture: ${REGENERATE}\n` +
+          'If any new line changes behaviour -- the upload loop, the pagination, the ' +
+          'traversal guard, the argument dispatch -- then the two copies have ' +
+          'diverged and one of them is wrong. Fix that instead of regenerating.\n\n' +
+          `--- expected (${path.relative(process.cwd(), fixture)}) ---\n${expected}\n` +
+          `--- actual ---\n${actual}`,
+      );
+    }
+  });
+
+  maybe('the fixture is not empty, so this comparison is not vacuous', () => {
+    // An empty fixture would make the assertion above pass against two files
+    // that had both been emptied, or against a diff invocation that silently
+    // produced nothing.
+    expect(fs.readFileSync(fixture, 'utf8').length).toBeGreaterThan(0);
+  });
+
+  // DELIBERATELY NOT TESTED HERE: whether the changed lines are "only prose".
+  // A classifier over diff lines was tried and removed. It cannot reliably tell
+  // an English sentence from Python -- it rejected the real docstring line
+  // "...deployment targets; see" because of the semicolon -- and every fix moves
+  // the false positive somewhere else. The exact diff above is already exact; a
+  // fallible classifier layered on top adds no strength and costs trust in the
+  // suite. The control for a careless regeneration is a human reading the diff
+  // the failure message prints, which is what it asks them to do.
 });
 
 describe('MCP entrypoint script is valid shell', () => {
