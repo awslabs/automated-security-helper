@@ -97,6 +97,14 @@ class ScanOptions(BaseModel):
     min_severity: str = "low"
     changed_files_only: bool = False
     base_ref: str = "origin/main"
+    # One shard of a split scan, or both None for an ordinary whole scan. Left
+    # unvalidated here on purpose: ScanPhase._execute_phase is the single place
+    # that refuses an unusable pair, so a second rule in this model could drift
+    # from it and start rejecting a selection the scan phase would have accepted
+    # (or the reverse). The CLI validates early for the operator's benefit; that
+    # is presentation, not the contract.
+    shard_index: Optional[int] = None
+    shard_count: Optional[int] = None
     mode: RunMode = RunMode.local
     show_summary: bool = True
     log_level: AshLogLevel = AshLogLevel.INFO
@@ -258,6 +266,24 @@ def _run_container_mode(
     logger,
     resolved_fail_on_findings: Optional[bool] = None,
 ) -> AshAggregatedResults:
+    """Run the scan inside the ASH container image and read its results back.
+
+    Sharding is forwarded into the container rather than warned about and dropped,
+    which is how ``--changed-files-only`` immediately above is handled. The two
+    look alike and are not. Dropping ``--changed-files-only`` widens the scan: the
+    operator asked for less and got more, which is wasteful but never reports a
+    finding that is not there and never hides one that is. Dropping a shard
+    selection widens it the same way, but every shard would then scan the whole
+    repository, and because merging deliberately does not deduplicate (see
+    ``SarifReport.merge_sarif_report``) an n-shard matrix would report every
+    finding n times. That is a wrong report, and the n-1 phantom copies of each
+    real issue land on a reviewer.
+
+    Forwarding is also cheap and complete: the container entrypoint is this same
+    CLI, so ``--shard-index``/``--shard-count`` mean exactly what they mean on the
+    host, and the provenance stamp survives the read-back below because
+    ``metadata.shard`` is a declared field of ``ReportMetadata``.
+    """
     if opts.changed_files_only:
         logger.warning(
             "--changed-files-only is not supported in container mode; performing full scan"
@@ -308,6 +334,8 @@ def _run_container_mode(
         container_network=opts.container_network,
         workspace_relative_file=_workspace_relative_file(opts),
         allow_missing_projects=opts.allow_missing_projects,
+        shard_index=opts.shard_index,
+        shard_count=opts.shard_count,
     )
 
     if opts.debug:
@@ -447,6 +475,8 @@ def _run_local_mode(opts: ScanOptions, logger) -> tuple[AshAggregatedResults, Op
             python_based_plugins_only=opts.python_based_plugins_only,
             ignore_suppressions=opts.ignore_suppressions,
             ash_plugin_modules=opts.ash_plugin_modules or [],
+            shard_index=opts.shard_index,
+            shard_count=opts.shard_count,
             metadata=None,
         )
         _config_fail_on_findings: Optional[bool] = getattr(
@@ -575,6 +605,25 @@ def _run_workspace_mode(opts: ScanOptions, logger) -> "WorkspaceRunResult":
         raise RuntimeError(
             "_run_workspace_mode requires a resolved workspace plan; "
             "opts.workspace_plan is None"
+        )
+
+    if opts.shard_index is not None or opts.shard_count is not None:
+        # Same reasoning as the missing-plan check above: the CLI refuses this
+        # combination with an operator-facing message (see
+        # cli.scan._validate_shard_options), so reaching here means a programmatic
+        # caller passed both. Raised rather than ignored because ProjectScanSettings
+        # has no shard fields, so ignoring is not a degraded mode -- it is every
+        # shard scanning every project with every scanner, and a merge multiplying
+        # each finding by the shard count. RuntimeError rather than
+        # ShardSelectionError, which would report a caller bug as though the
+        # operator's shard arguments were at fault; theirs are fine, the
+        # combination is not.
+        raise RuntimeError(
+            "Sharding is not supported in workspace mode, and workspace mode "
+            "cannot silently ignore it: every shard would scan every project in "
+            "full and the merged report would count each finding once per shard. "
+            "Scan the workspace whole, or scan one project per job with "
+            "source_dir and shard that."
         )
 
     workspace_config = _resolve_workspace_execution_config(opts)
@@ -952,6 +1001,8 @@ def run_ash_scan(
     min_severity: str = "low",
     changed_files_only: bool = False,
     base_ref: str = "origin/main",
+    shard_index: int | None = None,
+    shard_count: int | None = None,
     mode: RunMode = RunMode.local,
     show_summary: bool = True,
     log_level: AshLogLevel = AshLogLevel.INFO,
@@ -1012,6 +1063,8 @@ def run_ash_scan(
         min_severity=min_severity,
         changed_files_only=changed_files_only,
         base_ref=base_ref,
+        shard_index=shard_index,
+        shard_count=shard_count,
         mode=mode,
         show_summary=show_summary,
         log_level=log_level,

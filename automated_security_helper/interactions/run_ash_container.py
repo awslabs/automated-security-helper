@@ -550,10 +550,17 @@ def _assemble_run_command(
     container_network: str = "bridge",
     workspace_relative_file: str | None = None,
     allow_missing_projects: bool = False,
+    shard_index: int | None = None,
+    shard_count: int | None = None,
 ) -> List[str]:
     """Assemble the full `docker run` command list.
 
     Args:
+        shard_index: Zero-based shard index, or None for an unsharded scan.
+        shard_count: Total shard count, or None. Emitted as a pair or not at all:
+            the in-container CLI refuses a lone flag, so emitting one without the
+            other would turn a host-side selection into a container-side usage
+            error with no obvious cause.
         workspace_relative_file: In workspace mode, the workspace definition's
             path relative to *source_dir* -- which is the workspace root, and is
             what gets mounted at ``/src``. The in-container invocation then uses
@@ -680,6 +687,20 @@ def _assemble_run_command(
             ["--strategy", strategy.value if hasattr(strategy, "value") else str(strategy)]
         )
 
+    # Both or neither, and not via the ASH_SHARD_* environment variables: this
+    # command forwards only a fixed set of variables into the container, so a
+    # matrix that set the env vars on the host would otherwise get an unsharded
+    # container scan while every job believed it was one shard of several.
+    if shard_index is not None and shard_count is not None:
+        ash_args.extend(
+            [
+                "--shard-index",
+                str(shard_index),
+                "--shard-count",
+                str(shard_count),
+            ]
+        )
+
     ash_args.append("--no-show-summary")
 
     cmd.extend(ash_args)
@@ -751,6 +772,8 @@ def run_ash_container(
     container_network: str = "bridge",
     workspace_relative_file: str | None = None,
     allow_missing_projects: bool = False,
+    shard_index: int | None = None,
+    shard_count: int | None = None,
 ):
     """Build and run the ASH container image.
 
@@ -776,6 +799,11 @@ def run_ash_container(
             rather than a project, and the container resolves the workspace and
             scans each project below the single /src mount.
         allow_missing_projects: Passed through to the in-container invocation.
+        shard_index: Zero-based shard index, forwarded to the in-container
+            invocation. Forwarded rather than dropped because dropping it would
+            have every shard scan the whole repository, and merging does not
+            deduplicate -- see _run_container_mode's docstring.
+        shard_count: Total shard count, forwarded alongside shard_index.
 
     Returns:
         CompletedProcess: The result of the container execution
@@ -994,6 +1022,8 @@ def run_ash_container(
             container_network=container_network,
             workspace_relative_file=workspace_relative_file,
             allow_missing_projects=allow_missing_projects,
+            shard_index=shard_index,
+            shard_count=shard_count,
         )
 
         return _execute_container(run_cmd, debug=debug)
