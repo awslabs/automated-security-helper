@@ -9,6 +9,7 @@ from pydantic import AnyUrl, BaseModel, ConfigDict, Field, PrivateAttr, field_va
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
 from automated_security_helper.core.enums import ExportFormat, ScannerStatus
+from automated_security_helper.core.sharding import ShardAssignment
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.models.workspace import WorkspaceResults
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
@@ -336,6 +337,25 @@ class ReportMetadata(BaseModel):
         Dict[str, Any],
         Field(default_factory=dict, description="Discrepancy report for ASH execution"),
     ]
+    # Declared, rather than left to ride on this model's extra="allow". Three
+    # things follow from declaring it that an extra key does not give:
+    # model_json_schema() carries it, so the committed AshAggregatedResults.json
+    # documents the shape `ash merge` reads; a malformed shard block is refused at
+    # model_validate_json time instead of surfacing as an AttributeError inside
+    # merge; and it round-trips as a ShardAssignment rather than as a bare dict,
+    # so verify_shard_coverage can be handed it directly.
+    shard: Annotated[
+        ShardAssignment | None,
+        Field(
+            default=None,
+            description=(
+                "Which shard of a split scan produced these results, and which "
+                "scanners it was responsible for. Absent when the scan was not "
+                "sharded, which is how a whole-repository scan is told apart from "
+                "one shard of several."
+            ),
+        ),
+    ] = None
 
     @field_validator("project_name")
     @classmethod

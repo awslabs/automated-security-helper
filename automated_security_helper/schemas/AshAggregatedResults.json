@@ -13516,6 +13516,18 @@
           "description": "Unique identifier for the report",
           "title": "Report Id"
         },
+        "shard": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ShardAssignment"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Which shard of a split scan produced these results, and which scanners it was responsible for. Absent when the scan was not sharded, which is how a whole-repository scan is told apart from one shard of several."
+        },
         "summary_stats": {
           "$ref": "#/$defs/SummaryStats",
           "default": {
@@ -17094,6 +17106,38 @@
       ],
       "title": "Severity",
       "type": "string"
+    },
+    "ShardAssignment": {
+      "additionalProperties": false,
+      "description": "What one shard was actually asked to run.\n\nRecorded on each shard's results so ``ash merge`` can verify coverage from the\nresult files alone, without being told out of band how many shards to expect.\nTaking the expected count as a merge argument would mean an operator who\nchanged their matrix in one place and not the other gets a silently short\nmerge.\n\n``assigned_scanners`` is the assignment, not the outcome. A scanner listed\nhere that failed or was disabled by config still appears; the scanner's own\nstatus in the results says what became of it. Conflating the two would make a\nlegitimately-disabled scanner look like a coverage gap.",
+      "properties": {
+        "assigned_scanners": {
+          "description": "Scanner names this shard was responsible for running.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Assigned Scanners",
+          "type": "array"
+        },
+        "shard_count": {
+          "description": "Total number of shards the scan was split across.",
+          "minimum": 1,
+          "title": "Shard Count",
+          "type": "integer"
+        },
+        "shard_index": {
+          "description": "Zero-based index of this shard within the run.",
+          "minimum": 0,
+          "title": "Shard Index",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "shard_index",
+        "shard_count"
+      ],
+      "title": "ShardAssignment",
+      "type": "object"
     },
     "Signatories": {
       "additionalProperties": false,

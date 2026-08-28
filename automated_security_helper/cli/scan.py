@@ -19,8 +19,10 @@ from automated_security_helper.core.enums import (
 )
 from automated_security_helper.core.exceptions import (
     ASHConfigValidationError,
+    ShardSelectionError,
     WorkspaceDefinitionError,
 )
+from automated_security_helper.core.sharding import validate_shard_selection
 from automated_security_helper.interactions.run_ash_scan import (
     run_ash_scan,
 )
@@ -47,6 +49,60 @@ def _fail_workspace(
     """
     typer.echo(message, err=True)
     raise typer.Exit(code)
+
+
+def _fail_shard_selection(message: str) -> NoReturn:
+    """Report a shard-selection refusal and exit 1.
+
+    Exit 1, and deliberately not the 2 that click gives a ``typer.BadParameter``:
+    ASH already spends 2 on "actionable findings were found", so a usage error
+    exiting 2 would be read by a CI gate as a scan that found problems. 1 is ASH's
+    generic error code, which a pipeline treats as "this job produced no scan" --
+    the truth here.
+
+    Written with ``typer.echo`` rather than the Rich ``print`` imported above, for
+    the same reason as :func:`_fail_workspace`: these messages quote
+    operator-supplied values.
+    """
+    typer.echo(message, err=True)
+    raise typer.Exit(1)
+
+
+def _validate_shard_options(
+    shard_index: int | None,
+    shard_count: int | None,
+    workspace: str | None,
+) -> None:
+    """Refuse an unusable shard selection, or one that workspace mode cannot honour.
+
+    Called before workspace resolution and before any cwd-based default is
+    applied. Every case here means the operator's CI matrix is wrong, and the scan
+    they are about to pay for would cover part of the repository while reporting
+    itself as a whole one.
+
+    The workspace conflict is checked first. When both problems are present,
+    telling the operator the pair is unavailable in workspace mode saves them from
+    fixing a missing ``--shard-count`` that would then be rejected anyway.
+    """
+    if workspace is not None and (shard_index is not None or shard_count is not None):
+        _fail_shard_selection(
+            "--shard-index/--shard-count cannot be combined with --workspace. "
+            "Both spread one scan over more compute, but along different axes, and "
+            "only sharding is recombinable: it partitions the scanners and stamps "
+            "the partition onto the results so 'ash merge' can prove the shards "
+            "reconstruct exactly one whole scan. Workspace mode's unified results "
+            "file is assembled from the per-project payloads and carries none of "
+            "each project's scan metadata, so a sharded workspace run would write "
+            "results that merge has no provenance to verify coverage from -- and "
+            "an unverifiable partial scan reads as a clean one. Either scan the "
+            "workspace whole on one executor, or give each CI job one project via "
+            "--source-dir and shard that."
+        )
+
+    try:
+        validate_shard_selection(shard_index, shard_count)
+    except ShardSelectionError as exc:
+        _fail_shard_selection(str(exc))
 
 
 def _handle_workspace_mode(
@@ -316,6 +372,22 @@ def run_ash_scan_cli_command(
             envvar="ASH_BASE_REF",
         ),
     ] = "origin/main",
+    shard_index: Annotated[
+        Optional[int],
+        typer.Option(
+            "--shard-index",
+            help="Zero-based index of this shard when one scan is split across several executors. Requires --shard-count. A 3-way split uses indices 0, 1 and 2. Each shard runs a disjoint subset of the scanners and records which ones in its results; recombine them with 'ash merge'.",
+            envvar="ASH_SHARD_INDEX",
+        ),
+    ] = None,
+    shard_count: Annotated[
+        Optional[int],
+        typer.Option(
+            "--shard-count",
+            help="Total number of shards this scan is split across. Requires --shard-index. Balance is by scanner count rather than scanner cost, so counts above about four buy little: wall clock is bounded by the slowest single scanner.",
+            envvar="ASH_SHARD_COUNT",
+        ),
+    ] = None,
     ### WORKSPACE-RELATED OPTIONS
     workspace: Annotated[
         str | None,
@@ -435,6 +507,8 @@ def run_ash_scan_cli_command(
     if version:
         typer.echo(f"awslabs/automated-security-helper v{get_ash_version()}")
         raise typer.Exit()
+
+    _validate_shard_options(shard_index, shard_count, workspace)
 
     # Workspace mode is handled before any cwd-based default is applied, because
     # --workspace and --source-dir are mutually exclusive and defaulting
@@ -599,6 +673,8 @@ def run_ash_scan_cli_command(
         min_severity=min_severity,
         changed_files_only=changed_files_only,
         base_ref=base_ref,
+        shard_index=shard_index,
+        shard_count=shard_count,
         mode=mode or RunMode.local,
         show_summary=show_summary,
         simple=simple

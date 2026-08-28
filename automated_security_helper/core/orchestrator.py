@@ -159,6 +159,29 @@ class ASHScanOrchestrator(BaseModel):
         ),
     ]
 
+    shard_index: Annotated[
+        Optional[int],
+        Field(
+            None,
+            description=(
+                "Zero-based index of this shard when one scan is split across "
+                "several executors. Requires shard_count. Carried through to the "
+                "scan phase, which owns both the validation and the partition -- "
+                "see core.sharding for why the split cannot be computed above it."
+            ),
+        ),
+    ] = None
+
+    shard_count: Annotated[
+        Optional[int],
+        Field(
+            None,
+            description=(
+                "Total number of shards the scan is split across. Requires shard_index."
+            ),
+        ),
+    ] = None
+
     show_summary: Annotated[
         bool,
         Field(
@@ -304,6 +327,8 @@ class ASHScanOrchestrator(BaseModel):
             ash_plugin_modules=self.ash_plugin_modules,
             output_formats=[f.value for f in self.output_formats] or None,
             asharp_model=exec_engine_params.get("asharp_model"),
+            shard_index=self.shard_index,
+            shard_count=self.shard_count,
         )
 
         self._apply_metadata()
