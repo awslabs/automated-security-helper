@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+"""Default container CMD: launch ``ash mcp`` with flags taken from the environment.
+
+Amazon Bedrock AgentCore Runtime cannot override a container's command, so the
+MCP flags for that target have to come from somewhere other than argv. Reading
+them from environment variables here means the transport, port, mount path,
+stateless mode, and Host allowlist are all deploy-time settings on every target
+rather than image-build-time settings on one of them.
+
+Defaults match the AgentCore container contract (streamable-http on 0.0.0.0:8000
+at POST /mcp, stateless), because that is the one target that cannot express
+anything else. The other three targets set these variables explicitly.
+
+Why stateless defaults to true: AgentCore injects its own ``Mcp-Session-Id``
+header on every request, including the first. A stateful MCP server rejects a
+session id it never issued with 404 "Session not found"; a stateless server
+accepts it and returns 200. The platform contract states the server must accept
+the platform-provided session id rather than reject it.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import sys
+
+DEFAULT_TRANSPORT = "streamable-http"
+DEFAULT_HOST = "0.0.0.0"  # noqa: S104 - the AgentCore contract requires this bind
+DEFAULT_PORT = "8000"
+DEFAULT_MOUNT_PATH = "/mcp"
+DEFAULT_STATELESS = "true"
+
+TRUE_VALUES = {"1", "true", "yes", "on"}
+FALSE_VALUES = {"0", "false", "no", "off"}
+
+
+def _fail(message: str) -> None:
+    print(f"ash-mcp-serve: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def _env(name: str, default: str) -> str:
+    value = os.environ.get(name)
+    if value is None or value.strip() == "":
+        return default
+    return value.strip()
+
+
+def _env_bool(name: str, default: str) -> bool:
+    raw = _env(name, default).lower()
+    if raw in TRUE_VALUES:
+        return True
+    if raw in FALSE_VALUES:
+        return False
+    _fail(
+        f"{name}={raw!r} is not a boolean; use one of "
+        f"{sorted(TRUE_VALUES | FALSE_VALUES)}"
+    )
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
+def _split_hosts(raw: str) -> list[str]:
+    """Split a Host allowlist on commas and whitespace, dropping empties."""
+    separated = raw.replace(",", " ")
+    return [host for host in separated.split() if host]
+
+
+def build_argv() -> list[str]:
+    transport = _env("ASH_MCP_TRANSPORT", DEFAULT_TRANSPORT)
+
+    argv = [
+        "ash",
+        "mcp",
+        "--transport",
+        transport,
+        "--host",
+        _env("ASH_MCP_HOST", DEFAULT_HOST),
+        "--port",
+        _env("ASH_MCP_PORT", DEFAULT_PORT),
+        "--mount-path",
+        _env("ASH_MCP_MOUNT_PATH", DEFAULT_MOUNT_PATH),
+    ]
+
+    # ash rejects --stateless-http on any transport other than streamable-http,
+    # so emit the flag only where it is accepted instead of passing it always
+    # and having the server refuse to start under --transport stdio or sse.
+    if transport == "streamable-http":
+        stateless = _env_bool("ASH_MCP_STATELESS_HTTP", DEFAULT_STATELESS)
+        argv.append("--stateless-http" if stateless else "--no-stateless-http")
+
+    header_name = _env("ASH_MCP_AUTH_HEADER_NAME", "")
+    header_value = _env("ASH_MCP_AUTH_HEADER_VALUE", "")
+    if header_name and not header_value:
+        _fail(
+            "ASH_MCP_AUTH_HEADER_NAME is set but no value was resolved. Set "
+            "ASH_MCP_AUTH_HEADER_VALUE, or point ASH_MCP_AUTH_SECRET_ARN at a "
+            "Secrets Manager secret so ash-container-init can resolve it."
+        )
+    if header_value and not header_name:
+        _fail(
+            "an MCP auth header value was resolved but "
+            "ASH_MCP_AUTH_HEADER_NAME is unset, so nothing would be checked."
+        )
+    if header_name:
+        argv += ["--auth-header-name", header_name]
+        argv += ["--auth-header-value", header_value]
+
+    # Repeatable flag. Passing the known proxy or load balancer hostname keeps
+    # the MCP SDK's DNS-rebinding protection on: without it, protection is
+    # active only when --host is loopback, which it never is behind a proxy.
+    for host in _split_hosts(_env("ASH_MCP_ALLOWED_HOSTS", "")):
+        argv += ["--allowed-host", host]
+
+    return argv
+
+
+def main() -> None:
+    argv = build_argv()
+
+    if shutil.which(argv[0]) is None:
+        _fail(f"{argv[0]!r} is not on PATH; this image is not an ASH image")
+
+    # Redacts the auth header value only; every other flag is safe to log and
+    # is worth logging, because a wrong port or mount path is otherwise
+    # invisible until a client times out.
+    printable = list(argv)
+    if "--auth-header-value" in printable:
+        printable[printable.index("--auth-header-value") + 1] = "***"
+    print(f"ash-mcp-serve: exec {' '.join(printable)}", file=sys.stderr)
+
+    try:
+        os.execvp(argv[0], argv)
+    except OSError as exc:
+        _fail(f"could not exec {argv[0]!r}: {exc}")
+
+
+if __name__ == "__main__":
+    main()

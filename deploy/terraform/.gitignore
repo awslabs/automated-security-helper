@@ -1,0 +1,29 @@
+# Terraform working directories and state.
+#
+# The repository's root .gitignore does not cover these, and `terraform init`
+# writes provider binaries and vendored registry modules into .terraform/, which
+# must not be committed.
+
+# Provider plugins and downloaded registry modules.
+.terraform/
+
+# Dependency lock files. Deliberately not committed: these are reusable modules
+# whose provider constraints are expressed with `~>` in each versions.tf, and a
+# committed lock file would pin consumers to whatever provider build happened to
+# be current on the machine that ran init.
+.terraform.lock.hcl
+
+# State, plans, and variable files that may carry account-specific or sensitive
+# values. Nothing here should ever be applied from the repository, but these
+# patterns keep an accident from becoming a commit.
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+*.tfvars
+*.tfvars.json
