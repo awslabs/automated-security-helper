@@ -281,8 +281,6 @@ The ASH MCP server provides these tools:
 
 | Tool | Description | Use Case |
 |------|-------------|----------|
-| `scan_directory` | Perform a complete security scan | One-time scans with full results |
-| `scan_directory_with_progress` | Start a scan with real-time progress tracking | Long-running scans with progress monitoring |
 | `get_scan_progress` | Get current progress of a running scan | Monitor scan status and partial results |
 | `get_scan_results` | Get final results of a completed scan | Retrieve complete scan results |
 | `list_active_scans` | List all active and recent scans | Manage multiple concurrent scans |
@@ -295,6 +293,21 @@ The ASH MCP server provides these tools:
 | `get_config` | Get the resolved ASH config (defaults plus user overrides merged) | Confirm what configuration a scan will actually use |
 | `diff_scan_results` | Compare two `ash_aggregated_results.json` files and return a structured diff | Detect newly introduced or resolved findings between scans |
 | `suggest_suppression` | Build a paste-ready `AshSuppression` entry for a finding | Draft a correctly-shaped suppression without hand-writing YAML |
+| `list_scanners` | List every registered scanner with its metadata | See what will run, and under what name, before scanning |
+| `validate_config` | Validate a config file or an inline config string against the schema | Catch a malformed `.ash.yaml` without starting a scan |
+| `list_profiles` | List the config profiles the operator registered at startup | Discover which named configs a deployment offers |
+| `set_source_git` | Clone a repository into the session workspace and make it the scan target | Scan a repo when the client and server share no filesystem |
+| `set_source_zip_chunk` | Upload one base64 chunk (max 1 MiB) of a zipped source tree | Ship a working tree to a remote server without git access |
+| `set_source_zip_finalize` | Verify the uploaded zip's sha256, extract it, and make it the scan target | Complete a chunked upload before scanning |
+| `clear_source` | Delete the session's delivered source tree and workspace | Reclaim space or replace the delivered tree |
+
+The last four matter only on a network transport, where the client has no path on
+the server to name. Deliver a tree with them, then call `run_ash_scan` with no
+`source_dir` and it scans what you delivered. Each takes its session from the
+transport's `Mcp-Session-Id` header rather than from an argument, so one client
+cannot name another's workspace. See
+[the streamable-HTTP guide](docs/content/docs/mcp/streamable-http.md) for the
+limits and the security boundary.
 
 ### Usage Examples
 

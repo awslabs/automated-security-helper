@@ -241,6 +241,105 @@ name with hyphens stripped, because the property is matched against
 hyphens are removed. CloudFormation intrinsics cannot truncate, so a longer name is
 rejected by AgentCore at create time.
 
+## What this target can scan, and how you give it something
+
+The runtime holds no copy of your code, and you cannot mount one into it from this
+stack. Nothing is reachable except `bedrock-agentcore:InvokeAgentRuntime`, and the
+container's filesystem starts with no source in it. **You send the tree over the
+protocol.** Three MCP tools do that:
+
+- `set_source_git(url, ref?, ssh_key_id?, depth?)` — the runtime clones a
+  repository itself. It needs egress to your git host, which `PUBLIC` network mode
+  provides for a public one; a private host needs a VPC-mode runtime this stack
+  does not configure.
+- `set_source_zip_chunk` / `set_source_zip_finalize` — you upload a zipped working
+  tree in chunks of at most 1 MiB and finalize it with its sha256. Nothing outside
+  the runtime has to be reachable, which makes this the path that works from a
+  laptop or a CI runner with no shared network.
+- `clear_source` — deletes what you delivered.
+
+Then call `run_ash_scan` with no `source_dir` and it scans what you delivered.
+Scanning writes an output tree inside the target directory, so the target has to be
+writable — a delivered tree is, because the runtime created it.
+
+Sizing follows from the upload limits rather than from AgentCore: 100 MiB zipped,
+500 MiB extracted, 50000 files. A repository past those has to arrive by
+`set_source_git` instead.
+
+Two consequences worth knowing before you deploy:
+
+- **Deliver first.** `run_ash_scan` with no `source_dir` and no delivered tree is
+  **refused** with `error_type: no_source_delivered`, naming the delivery tools to
+  call. It does not fall back to the container's working directory, which holds
+  none of your code and would have produced a clean-looking scan of the wrong
+  tree. You get an error, not a false green.
+- **On this target, pass `source_dir` explicitly.** `set_source_zip_finalize` and
+  `set_source_git` both return the path they wrote to. Capture it and hand it back
+  to `run_ash_scan(source_dir=...)` rather than relying on the no-argument form.
+
+  The no-argument form finds the delivered tree by session id, and the session id
+  comes from the `Mcp-Session-Id` request header. That is dependable on stdio and
+  on Fargate. On AgentCore it is not established, and the reason is worth stating
+  rather than glossing:
+
+  The [protocol contract](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-mcp-protocol-contract.html)
+  says the platform generates the header, includes it in the request to your
+  server, and routes requests carrying it to the same microVM — and it tells
+  clients to capture the id from the response and reuse it. Measured against two
+  live runtimes in `us-west-2`, following that guidance literally fails: the
+  platform mints a *fresh* id on nearly every response and honors only the one
+  returned by `initialize`, so `initialize` -> adopt A -> call with A -> adopt B ->
+  call with B answers `404 Session not found`. Reuse the id from `initialize`, not
+  from the latest response.
+
+  What has not been measured is what the *container* sees per request. So whether
+  the header ASH reads is stable across two calls in one AgentCore session is an
+  open question. If it is stable, the no-argument form works. If the platform
+  rotates it per request, the upload lands under one session directory and the scan
+  looks under another.
+
+  That case is **refused, not guessed at**: the scan sees that some other session
+  holds a delivered tree while yours does not, and returns
+  `error_type: session_source_mismatch` saying the id is probably not stable and
+  to pass `source_dir` instead. It reports the *count* of other delivering
+  sessions, never their ids or paths, so the diagnostic does not disclose one
+  caller's session to another. Passing `source_dir` explicitly sidesteps the
+  question entirely, which is why it remains the recommendation — but if you
+  forget, you get a specific error rather than a scan of the wrong tree.
+
+  **You can settle it in two calls.** Every tool that resolves a session echoes the
+  id it resolved back in its response, so no log dive or image change is needed:
+
+  ```
+  # same runtime-session-id on both invocations
+  clear_source()  -> {"success": true, "session_id": "..."}
+  clear_source()  -> {"success": true, "session_id": "..."}
+  ```
+
+  Equal ids mean the header is stable and the no-argument `run_ash_scan` form is
+  safe on this target. Different ids mean it rotates, and passing `source_dir`
+  explicitly is mandatory rather than merely advisable. `clear_source` is the safe
+  probe because it is idempotent and a session that delivered nothing still
+  succeeds. If you run this, please record the result here.
+
+  Passing it explicitly is permitted on this stack because
+  `ASH_MCP_ALLOWED_ROOTS` is unset (see below), so the workspace path is not
+  refused. If you do set an allowlist, include the workspace root you configure.
+
+Neither `ASH_MCP_WORKSPACE_ROOT` nor `ASH_MCP_ALLOWED_ROOTS` is set by this stack.
+The workspace therefore lands under `$HOME/.cache/ash-mcp/<session-id>/`, which is
+writable in the runtime, and scan targets fall back to ASH's default refusal list
+rather than an allowlist. If you set `ASH_MCP_ALLOWED_ROOTS` to bound the scan
+surface, note that it *replaces* that default list — but a session's own workspace
+stays permitted, so delivered trees keep working without being named in it.
+
+If you need shared, pre-populated storage rather than per-caller delivery,
+AgentCore does support it: `AWS::BedrockAgentCore::Runtime` takes up to five
+[`FilesystemConfigurations`](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-filesystem-configurations.html)
+(managed session storage, or a bring-your-own S3 Files or EFS access point). This
+stack configures none, because the BYO types require a VPC-mode runtime and the
+managed types start empty, so neither removes the need to deliver the source.
+
 ## `--host` and DNS-rebinding protection
 
 ASH's `--host` does more than choose an interface. The MCP SDK enables
