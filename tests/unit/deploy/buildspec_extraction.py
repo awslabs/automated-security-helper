@@ -39,9 +39,19 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 
 CDK_TEMPLATE_DIR = REPO_ROOT / "deploy" / "cdk" / "templates"
 
-DISTRIBUTED_PIPELINE_TEMPLATE = (
-    CDK_TEMPLATE_DIR / "AshDistributedPipeline.template.json"
-)
+# Deliberately NO per-template constant. There was one -- pointing at
+# AshDistributedPipeline -- and it is what made six tests go red when the flavor
+# gating moved the MCP entrypoint to the stacks that build the mcp flavor. Naming a
+# template hard-codes a deployment decision into a test that does not care which
+# stack emits the thing it asserts about. Use the marker constants below with
+# templates_with_plain_buildspec_marker / templates_with_joined_buildspec_marker.
+
+# Markers that identify each injected script inside a rendered buildspec.
+S3_SYNC_MARKER = "ash-s3-sync.py"
+MCP_ENTRYPOINT_MARKER = "ash-mcp-entrypoint.sh"
+GATE_HANDLER_MARKER = "ash_gate_handler.py"
+SSM_PARAMETER_MARKER = "ASH_BASE_CONFIG_SSM_PARAMETER"
+SECRETS_MARKER = "get_secret_value"
 
 TERRAFORM_S3_SYNC = (
     REPO_ROOT
@@ -58,6 +68,123 @@ CODEBUILD_PROJECT = "AWS::CodeBuild::Project"
 # The path the buildspec writes the helper to inside the build container. Tests
 # rewrite this to a per-test temporary path; see rewrite_helper_path.
 CONTAINER_HELPER_PATH = "/tmp/ash-s3-sync.py"
+
+
+def all_template_paths() -> list[pathlib.Path]:
+    """Every committed CDK template, sorted."""
+    paths = sorted(CDK_TEMPLATE_DIR.glob("*.template.json"))
+    if not paths:
+        raise AssertionError(
+            f"no committed CDK templates under {CDK_TEMPLATE_DIR}. These tests "
+            f"exercise the rendered templates, so there is nothing to test without "
+            f"them."
+        )
+    return paths
+
+
+def _joined_buildspec_texts(template: dict) -> list[str]:
+    """Every `Fn::Join` CodeBuild buildspec, reassembled into decodable JSON text.
+
+    Non-raising, and deliberately separate from `joined_buildspec_document`: that
+    one reports where a marker went when it cannot find it, and building that report
+    means walking every template. Having the report call back into a raising lookup
+    would recurse forever.
+    """
+    texts: list[str] = []
+    for resource in template.get("Resources", {}).values():
+        if resource.get("Type") != CODEBUILD_PROJECT:
+            continue
+        spec = resource.get("Properties", {}).get("Source", {}).get("BuildSpec")
+        if not isinstance(spec, dict) or "Fn::Join" not in spec:
+            continue
+        delimiter, parts = spec["Fn::Join"]
+        texts.append(
+            delimiter.join(
+                part if isinstance(part, str) else "CFN_SUBSTITUTION_PLACEHOLDER"
+                for part in parts
+            )
+        )
+    return texts
+
+
+def _marker_locations(marker: str) -> dict[str, tuple[int, int]]:
+    """For every template, how many plain and Fn::Join buildspecs carry `marker`."""
+    found: dict[str, tuple[int, int]] = {}
+    for path in all_template_paths():
+        template = load_template(path)
+        plain = len(projects_containing(template, marker))
+        joined = sum(1 for text in _joined_buildspec_texts(template) if marker in text)
+        found[path.name.replace(".template.json", "")] = (plain, joined)
+    return found
+
+
+def _marker_report(marker: str) -> str:
+    """Human-readable map of where a marker actually lives right now.
+
+    WHY THIS EXISTS: the first time a lane changed which scripts land in which
+    template, these tests failed with "no buildspec contains marker X" and no hint
+    about where X had gone. Diagnosing that took far longer than it should have.
+    Every failure path that cannot find a marker prints this, so the next reader
+    sees the answer in the error rather than having to go looking for it.
+    """
+    lines = [f"where {marker!r} actually appears in the committed templates:"]
+    for name, (plain, joined) in sorted(_marker_locations(marker).items()):
+        if plain or joined:
+            lines.append(
+                f"    {name}: plain-string buildspecs={plain}, Fn::Join={joined}"
+            )
+    if len(lines) == 1:
+        lines.append("    nowhere -- no committed template emits it at all")
+    return "\n".join(lines)
+
+
+def templates_with_plain_buildspec_marker(marker: str) -> dict[str, dict]:
+    """Templates having a PLAIN-STRING CodeBuild buildspec that carries `marker`.
+
+    Selecting the template by content rather than by filename, for the same reason
+    resources are selected by content rather than by logical id. Which template
+    emits which script is a deployment decision that changes: the flavor gating
+    made each stack receive only the scripts for the flavors it builds, so the MCP
+    entrypoint left AshDistributedPipeline and the S3 helper stayed. A test naming
+    a file goes red on that change even though nothing it asserts is wrong. A test
+    that finds the emitting template follows it.
+    """
+    found = {
+        path.name.replace(".template.json", ""): load_template(path)
+        for path in all_template_paths()
+    }
+    matching = {
+        name: template
+        for name, template in found.items()
+        if projects_containing(template, marker)
+    }
+    if not matching:
+        raise AssertionError(
+            f"no committed template has a plain-string CodeBuild buildspec "
+            f"containing {marker!r}, so there is nothing for this test to exercise.\n"
+            f"{_marker_report(marker)}"
+        )
+    return matching
+
+
+def templates_with_joined_buildspec_marker(marker: str) -> dict[str, dict]:
+    """Templates having an `Fn::Join` CodeBuild buildspec that carries `marker`.
+
+    The image builds assemble their buildspec from template parameters, so the
+    scripts they write into the image live here rather than in a plain string.
+    """
+    matching: dict[str, dict] = {}
+    for path in all_template_paths():
+        template = load_template(path)
+        if any(marker in text for text in _joined_buildspec_texts(template)):
+            matching[path.name.replace(".template.json", "")] = template
+    if not matching:
+        raise AssertionError(
+            f"no committed template has an Fn::Join CodeBuild buildspec containing "
+            f"{marker!r}, so there is nothing for this test to exercise.\n"
+            f"{_marker_report(marker)}"
+        )
+    return matching
 
 
 def load_template(path: pathlib.Path) -> dict:
@@ -215,17 +342,7 @@ def joined_buildspec_document(template: dict, marker: str) -> dict:
     asserts across a substitution boundary, and a stand-in that looked like a real
     bucket or ARN would let a test appear to check a resolved value.
     """
-    for resource in template.get("Resources", {}).values():
-        if resource.get("Type") != CODEBUILD_PROJECT:
-            continue
-        spec = resource.get("Properties", {}).get("Source", {}).get("BuildSpec")
-        if not isinstance(spec, dict) or "Fn::Join" not in spec:
-            continue
-        delimiter, parts = spec["Fn::Join"]
-        rebuilt = delimiter.join(
-            part if isinstance(part, str) else "CFN_SUBSTITUTION_PLACEHOLDER"
-            for part in parts
-        )
+    for rebuilt in _joined_buildspec_texts(template):
         if marker not in rebuilt:
             continue
         try:
@@ -236,7 +353,8 @@ def joined_buildspec_document(template: dict, marker: str) -> dict:
                 f"once its Ref parts were replaced: {exc}"
             ) from exc
     raise AssertionError(
-        f"no Fn::Join CodeBuild buildspec in this template contains {marker!r}"
+        f"no Fn::Join CodeBuild buildspec in this template contains {marker!r}.\n"
+        f"{_marker_report(marker)}"
     )
 
 

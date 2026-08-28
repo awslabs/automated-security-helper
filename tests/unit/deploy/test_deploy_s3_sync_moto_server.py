@@ -4,10 +4,15 @@ WHAT IS UNDER TEST
 ------------------
 Two copies of one helper, deliberately kept behaviorally identical:
 
-  - the CDK copy, extracted from the committed
-    `deploy/cdk/templates/AshDistributedPipeline.template.json` and materialized
-    by executing the buildspec's own quoted heredoc
+  - the CDK copy, extracted from whichever committed template under
+    `deploy/cdk/templates/` actually emits it, and materialized by executing that
+    buildspec's own quoted heredoc
   - the Terraform copy, `deploy/terraform/.../files/ash_s3_sync.py`, on disk
+
+The emitting template is found by content, not named. Which stack carries which
+injected script is a deployment decision that has already moved once: the flavor
+gating gave each stack only the scripts for the flavors it builds. A test that
+names the file goes red on that change while asserting nothing wrong.
 
 Every behavior test is parametrized across both, so "these two are the same
 helper" stops being a comment and becomes a measurement. The two are separate
@@ -44,14 +49,13 @@ from dataclasses import dataclass
 import pytest
 
 from tests.unit.deploy.buildspec_extraction import (
-    DISTRIBUTED_PIPELINE_TEMPLATE,
     TERRAFORM_S3_SYNC,
     heredoc_body,
     helper_invocation,
-    load_template,
     projects_containing,
     rewrite_helper_path,
     sole_command_containing,
+    templates_with_plain_buildspec_marker,
 )
 
 # The buildspec commands are POSIX shell destined for a Linux build container.
@@ -77,9 +81,26 @@ class Helper:
     log_prefix: str
 
 
+def _sharded_pipeline_template() -> dict:
+    """The committed template that emits the S3 sync helper.
+
+    Found by content rather than by filename. Which stack carries which injected
+    script is a deployment decision that has already moved once -- the flavor gating
+    gave each stack only the scripts for the flavors it builds -- and a test naming
+    the file goes red on that change while asserting nothing wrong.
+    """
+    matching = templates_with_plain_buildspec_marker(HELPER_MARKER)
+    assert len(matching) == 1, (
+        f"expected exactly one template with plain-string buildspecs emitting "
+        f"{HELPER_MARKER!r}; found {sorted(matching)}. If the helper is now shared "
+        f"by several stacks, these tests should be parametrized over them."
+    )
+    return next(iter(matching.values()))
+
+
 def _shard_buildspec() -> dict:
     """The buildspec of one shard project from the committed template."""
-    template = load_template(DISTRIBUTED_PIPELINE_TEMPLATE)
+    template = _sharded_pipeline_template()
     projects = projects_containing(template, HELPER_MARKER)
     # Four shards plus the merge. Asserted so that a template which stops
     # rendering the helper fails here, rather than leaving the tests below to
@@ -94,7 +115,7 @@ def _shard_buildspec() -> dict:
 
 
 def _merge_buildspec() -> dict:
-    template = load_template(DISTRIBUTED_PIPELINE_TEMPLATE)
+    template = _sharded_pipeline_template()
     projects = projects_containing(template, HELPER_MARKER)
     merge_ids = [i for i in projects if "Merge" in i]
     assert len(merge_ids) == 1, f"expected exactly one merge project, found {merge_ids}"
@@ -704,7 +725,7 @@ class TestCommittedBuildspecCommands:
         shard. CodeBuild phases of one build share a filesystem, so pre_build
         covers a later post_build -- but only if pre_build actually has the write.
         """
-        template = load_template(DISTRIBUTED_PIPELINE_TEMPLATE)
+        template = _sharded_pipeline_template()
         projects = projects_containing(template, HELPER_MARKER)
         assert len(projects) == 5, sorted(projects)
 
@@ -720,7 +741,7 @@ class TestCommittedBuildspecCommands:
         buildspec is caught too. Matching is on word boundaries because
         `ASH_RESULTS_BUCKET` and `aws_region` contain the letters.
         """
-        template = load_template(DISTRIBUTED_PIPELINE_TEMPLATE)
+        template = _sharded_pipeline_template()
         offenders: list[str] = []
         for logical_id, spec in projects_containing(template, HELPER_MARKER).items():
             for phase in ("pre_build", "build", "post_build"):

@@ -2,8 +2,8 @@
 
 WHAT IS UNDER TEST
 ------------------
-One line of the container entrypoint, taken from the committed
-`AshDistributedPipeline.template.json`:
+One line of the container entrypoint, taken from every committed template under
+`deploy/cdk/templates/` that actually emits it:
 
     ASH_AUTH_VALUE=$(python3 -c "... get_secret_value(...)['SecretString'] ...")
 
@@ -20,6 +20,22 @@ inside a command string, inside an `Fn::Join` buildspec -- three nestings, each 
 its own quoting. `joined_buildspec_document` decodes it properly rather than
 guessing at escaping levels, and if that decoding ever breaks these tests fail
 loudly instead of matching nothing.
+
+WHY EVERY EMITTING TEMPLATE, RATHER THAN ONE NAMED FILE
+------------------------------------------------------
+These tests originally named AshDistributedPipeline. Then the flavor gating landed:
+each stack now receives only the scripts for the flavors it actually builds, and
+since that stack declares `flavors: ['cli']` the MCP entrypoint correctly left it.
+Six tests went red asserting true things about a template that no longer carried
+the subject.
+
+So the template is discovered by content, the same way resources are discovered by
+content rather than by CDK logical id. `templates_with_joined_buildspec_marker`
+returns every template that emits the entrypoint and the tests are parametrized
+across all of them -- which is strictly stronger than naming one: the scripts are
+supposed to be identical in every stack that gets them, and a refactor that
+distributes them per-flavor is exactly the change that could leave one stale. The
+count therefore varies with how many stacks build the mcp flavor, by design.
 
 WHAT IS NOT COVERED HERE, AND WHY
 ---------------------------------
@@ -47,11 +63,11 @@ import subprocess
 import pytest
 
 from tests.unit.deploy.buildspec_extraction import (
-    DISTRIBUTED_PIPELINE_TEMPLATE,
+    MCP_ENTRYPOINT_MARKER,
     heredoc_body,
     joined_buildspec_document,
-    load_template,
     sole_command_containing,
+    templates_with_joined_buildspec_marker,
 )
 
 pytestmark = pytest.mark.skipif(
@@ -73,10 +89,21 @@ ENTRYPOINT_DESTINATION = "ash-src/ash-mcp-entrypoint.sh"
 SECRET_VALUE = "hdr-${not-expanded}-`not-run`-a1b2c3"
 
 
-def entrypoint_script() -> str:
-    """The MCP entrypoint shell script, as the image build writes it."""
-    template = load_template(DISTRIBUTED_PIPELINE_TEMPLATE)
-    buildspec = joined_buildspec_document(template, SECRET_MARKER)
+def emitting_templates() -> dict[str, dict]:
+    """Every committed template that writes the MCP entrypoint into its image."""
+    return templates_with_joined_buildspec_marker(MCP_ENTRYPOINT_MARKER)
+
+
+@pytest.fixture(params=sorted(emitting_templates()))
+def stack(request) -> str:
+    """The name of one stack that emits the MCP entrypoint."""
+    return request.param
+
+
+def entrypoint_script(stack: str) -> str:
+    """The MCP entrypoint shell script, as `stack`'s image build writes it."""
+    template = emitting_templates()[stack]
+    buildspec = joined_buildspec_document(template, MCP_ENTRYPOINT_MARKER)
     command = sole_command_containing(
         buildspec,
         "build",
@@ -84,26 +111,31 @@ def entrypoint_script() -> str:
     )
     body = heredoc_body(command, delimiter=ENTRYPOINT_HEREDOC_DELIMITER)
     assert "ash mcp" in body, (
-        "the extracted heredoc body does not invoke `ash mcp`, so the extraction "
-        "matched a different heredoc than the MCP entrypoint"
+        f"{stack}: the extracted heredoc body does not invoke `ash mcp`, so the "
+        f"extraction matched a different heredoc than the MCP entrypoint"
     )
     return body
 
 
-def secret_read_line() -> str:
-    """The single entrypoint line that resolves the secret."""
-    matches = [ln for ln in entrypoint_script().splitlines() if SECRET_MARKER in ln]
+def secret_read_line(stack: str) -> str:
+    """The single line of `stack`'s entrypoint that resolves the secret."""
+    matches = [
+        ln for ln in entrypoint_script(stack).splitlines() if SECRET_MARKER in ln
+    ]
     assert len(matches) == 1, (
-        f"expected exactly one entrypoint line reading the secret, found "
+        f"{stack}: expected exactly one entrypoint line reading the secret, found "
         f"{len(matches)}: {matches}"
     )
     return matches[0].strip()
 
 
 def run_secret_read(
-    child_env: dict[str, str], secret_id: str | None, captured: pathlib.Path
+    stack: str,
+    child_env: dict[str, str],
+    secret_id: str | None,
+    captured: pathlib.Path,
 ) -> subprocess.CompletedProcess:
-    """Run the committed assignment, then write what it captured.
+    """Run `stack`'s committed assignment, then write what it captured.
 
     The `printf` is this test's, not the deployment's -- the entrypoint keeps the
     value in a shell variable and passes it to `ash` as an argument, so observing
@@ -117,7 +149,8 @@ def run_secret_read(
         env["ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN"] = secret_id
 
     script = (
-        f"set -eu\n{secret_read_line()}\nprintf '%s' \"$ASH_AUTH_VALUE\" > {captured}\n"
+        f"set -eu\n{secret_read_line(stack)}\n"
+        f"printf '%s' \"$ASH_AUTH_VALUE\" > {captured}\n"
     )
     return subprocess.run(
         ["sh", "-c", script], capture_output=True, text=True, env=env, timeout=120
@@ -135,7 +168,7 @@ def secretsmanager(moto_endpoint: str):
 
 class TestSecretRead:
     def test_the_secret_value_is_read_byte_exact(
-        self, child_env, secretsmanager, unique_name, tmp_path: pathlib.Path
+        self, stack, child_env, secretsmanager, unique_name, tmp_path: pathlib.Path
     ):
         """The captured value equals the SecretString exactly."""
         created = secretsmanager.create_secret(
@@ -143,13 +176,13 @@ class TestSecretRead:
         )
         captured = tmp_path / "captured"
 
-        result = run_secret_read(child_env, created["ARN"], captured)
+        result = run_secret_read(stack, child_env, created["ARN"], captured)
 
         assert result.returncode == 0, result.stderr
         assert captured.read_bytes() == SECRET_VALUE.encode("utf-8")
 
     def test_the_arn_comes_from_the_environment(
-        self, child_env, secretsmanager, unique_name, tmp_path: pathlib.Path
+        self, stack, child_env, secretsmanager, unique_name, tmp_path: pathlib.Path
     ):
         """An ARN, not a name, because that is what the template passes.
 
@@ -165,11 +198,13 @@ class TestSecretRead:
         captured = tmp_path / "captured"
 
         assert wanted["ARN"].startswith("arn:aws:secretsmanager:"), wanted["ARN"]
-        assert run_secret_read(child_env, wanted["ARN"], captured).returncode == 0
+        assert (
+            run_secret_read(stack, child_env, wanted["ARN"], captured).returncode == 0
+        )
         assert captured.read_text(encoding="utf-8") == "the-right-secret"
 
     def test_an_absent_secret_fails_the_entrypoint(
-        self, child_env, unique_name, tmp_path: pathlib.Path
+        self, stack, child_env, unique_name, tmp_path: pathlib.Path
     ):
         """A missing secret must not resolve to an empty value.
 
@@ -180,7 +215,7 @@ class TestSecretRead:
         captured = tmp_path / "captured"
 
         result = run_secret_read(
-            child_env, f"ash/mcp/{unique_name('absent')}", captured
+            stack, child_env, f"ash/mcp/{unique_name('absent')}", captured
         )
 
         assert result.returncode != 0, (
@@ -191,7 +226,7 @@ class TestSecretRead:
         assert not captured.exists(), "nothing should have been captured"
 
     def test_command_substitution_strips_a_trailing_newline(
-        self, child_env, secretsmanager, unique_name, tmp_path: pathlib.Path
+        self, stack, child_env, secretsmanager, unique_name, tmp_path: pathlib.Path
     ):
         """DOCUMENTS A BEHAVIOR, does not endorse it.
 
@@ -206,32 +241,70 @@ class TestSecretRead:
         )
         captured = tmp_path / "captured"
 
-        assert run_secret_read(child_env, created["ARN"], captured).returncode == 0
+        assert (
+            run_secret_read(stack, child_env, created["ARN"], captured).returncode == 0
+        )
         assert captured.read_bytes() == b"value-with-newline"
 
 
 class TestReadShape:
-    def test_the_read_uses_boto3_and_writes_without_a_newline(self):
+    def test_at_least_one_stack_emits_the_entrypoint(self):
+        """The parametrization must not be able to cover nothing.
+
+        Every other test here is parametrized over the templates that emit the
+        entrypoint. If that set were ever empty, those tests would not fail -- they
+        would simply not be generated, and the suite would go green having checked
+        nothing. This is the assertion that turns that into a red.
+
+        It is not a count: how many stacks build the mcp flavor is a deployment
+        decision, and pinning the number would make every flavor change a false
+        failure. Only "at least one" is invariant.
+        """
+        emitting = sorted(emitting_templates())
+        assert emitting, "no committed template emits the MCP entrypoint"
+        # Named in the output so a reviewer can see WHICH stacks were covered, and
+        # notice if one they expected is missing.
+        print(f"stacks emitting the MCP entrypoint: {emitting}")
+
+    def test_the_read_uses_boto3_and_writes_without_a_newline(self, stack):
         """The same shape as the SSM read, for the same reason.
 
         The ASH image ships no AWS CLI, so `aws secretsmanager get-secret-value`
         would exit 127 at container start. `sys.stdout.write` rather than `print`
         because print appends a newline, which `--output text` also does.
         """
-        line = secret_read_line()
+        line = secret_read_line(stack)
 
         payload = (
             "sys.stdout.write(boto3.client('secretsmanager').get_secret_value("
             "SecretId=os.environ['ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN'])['SecretString'])"
         )
         assert payload in line, (
-            f"the entrypoint's secret read is no longer the expected one-liner.\n"
-            f"expected: {payload!r}\nactual:   {line!r}"
+            f"{stack}: the entrypoint's secret read is no longer the expected "
+            f"one-liner.\nexpected: {payload!r}\nactual:   {line!r}"
         )
         assert "print(" not in line, line
         assert "aws secretsmanager" not in line, line
 
-    def test_the_entrypoint_never_shells_out_to_the_aws_cli(self):
+    def test_every_stack_emits_the_identical_entrypoint(self):
+        """The script must not drift between the stacks that write it.
+
+        The flavor gating distributes these scripts per-stack. That is the change
+        most likely to leave one stack with a stale copy, and a per-stack test
+        cannot see it -- each would pass against its own version. Comparing the
+        extracted text across stacks is what catches it.
+        """
+        scripts = {
+            name: entrypoint_script(name) for name in sorted(emitting_templates())
+        }
+        distinct = set(scripts.values())
+        assert len(distinct) == 1, (
+            f"the MCP entrypoint differs between stacks that emit it, so at least "
+            f"one carries a stale copy. Lengths per stack: "
+            f"{ {n: len(s) for n, s in scripts.items()} }"
+        )
+
+    def test_the_entrypoint_never_shells_out_to_the_aws_cli(self, stack):
         """No `aws` anywhere in the script, not just on the secret line.
 
         The entrypoint runs at container start in the ASH image. A single `aws`
@@ -240,11 +313,11 @@ class TestReadShape:
         """
         offenders = [
             line.strip()
-            for line in entrypoint_script().splitlines()
+            for line in entrypoint_script(stack).splitlines()
             if not line.strip().startswith("#")
             and (line.strip().startswith("aws ") or " aws " in f" {line.strip()} ")
         ]
         assert offenders == [], (
-            f"the ASH image ships no AWS CLI, so these exit 127 at container "
-            f"start: {offenders}"
+            f"{stack}: the ASH image ships no AWS CLI, so these exit 127 at "
+            f"container start: {offenders}"
         )

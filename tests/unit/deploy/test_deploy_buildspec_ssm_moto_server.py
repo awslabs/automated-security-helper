@@ -40,6 +40,7 @@ records that.
 
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import subprocess
@@ -48,11 +49,12 @@ from collections.abc import Callable
 import pytest
 
 from tests.unit.deploy.buildspec_extraction import (
-    DISTRIBUTED_PIPELINE_TEMPLATE,
-    joined_buildspec_text,
-    load_template,
+    MCP_ENTRYPOINT_MARKER,
+    joined_buildspec_document,
     projects_containing,
     sole_command_containing,
+    templates_with_joined_buildspec_marker,
+    templates_with_plain_buildspec_marker,
 )
 
 pytestmark = pytest.mark.skipif(
@@ -78,8 +80,20 @@ CONFIG_YAML = "\n".join(
 
 
 def ssm_command() -> str:
-    """The committed pre_build SSM command from a shard project."""
-    template = load_template(DISTRIBUTED_PIPELINE_TEMPLATE)
+    """The committed pre_build SSM command from a shard project.
+
+    The template is found by content -- whichever one emits the S3 sync helper is
+    the sharded pipeline -- rather than by filename. Which stack carries which
+    script is a deployment decision that has already moved once: the flavor gating
+    made each stack receive only the scripts for the flavors it builds. A test that
+    named the file went red on that change while asserting nothing wrong.
+    """
+    matching = templates_with_plain_buildspec_marker(HELPER_MARKER)
+    assert len(matching) == 1, (
+        f"expected exactly one template with plain-string buildspecs emitting "
+        f"{HELPER_MARKER!r}, found {sorted(matching)}"
+    )
+    template = next(iter(matching.values()))
     projects = projects_containing(template, HELPER_MARKER)
     assert len(projects) == 5, sorted(projects)
     shard_ids = sorted(i for i in projects if "Shard" in i)
@@ -316,6 +330,15 @@ class TestOneReadEverywhere:
         the difference shows up as a scan that behaves differently depending on
         which target ran it.
 
+        WHY THIS COMPARES ACROSS TEMPLATES: it used to read both halves out of one
+        template, because every stack's image build wrote every script. The flavor
+        gating ended that -- each stack now gets only the scripts for the flavors it
+        builds, so the buildspec read lives in the sharded pipeline and the
+        entrypoint read lives in the stacks that build the mcp flavor, and NO single
+        template carries both any more. The invariant did not change; its scope did.
+        Measured, not assumed: the stack with the most entrypoint copies has zero
+        plain-string buildspecs.
+
         WHAT IS COMPARED, AND WHY NOT THE WHOLE LINE: the entrypoint script is a
         JSON string nested inside the image build's own JSON buildspec, so its
         double quotes arrive as `\\"` and its newlines as literal `\\n`. The
@@ -326,10 +349,19 @@ class TestOneReadEverywhere:
         meaning: the client, the operation, the parameter name, the decryption
         flag, and the `sys.stdout.write` that makes the value byte-exact.
         """
-        template = load_template(DISTRIBUTED_PIPELINE_TEMPLATE)
-
         buildspec_command = ssm_command()
-        entrypoint_text = joined_buildspec_text(template, "get_parameter")
+
+        # The entrypoint half, from every stack that emits it. Asserted non-empty so
+        # a gating change that removed the entrypoint everywhere fails here rather
+        # than making this comparison silently trivial.
+        entrypoint_stacks = templates_with_joined_buildspec_marker(
+            MCP_ENTRYPOINT_MARKER
+        )
+        assert entrypoint_stacks, "no committed template emits the MCP entrypoint"
+        entrypoint_texts = {
+            name: json.dumps(joined_buildspec_document(template, MCP_ENTRYPOINT_MARKER))
+            for name, template in sorted(entrypoint_stacks.items())
+        }
 
         payload = (
             "sys.stdout.write(boto3.client('ssm').get_parameter("
@@ -346,14 +378,22 @@ class TestOneReadEverywhere:
             f"the buildspec's SSM read is no longer the expected one-liner.\n"
             f"expected payload: {payload!r}\nactual command: {buildspec_command!r}"
         )
-        assert payload in entrypoint_text, (
-            "the MCP entrypoint's SSM read has drifted from the buildspec's, so the "
-            "two can now produce different configs for the same parameter.\n"
-            f"expected payload: {payload!r}"
+        # Every emitting stack, not just one: the gating distributes these scripts
+        # per-stack, which is exactly the change that can leave one behind.
+        drifted = [
+            name for name, text in entrypoint_texts.items() if payload not in text
+        ]
+        assert drifted == [], (
+            f"the MCP entrypoint's SSM read has drifted from the buildspec's in "
+            f"{drifted}, so those targets can now produce a different config than "
+            f"the pipeline does for the same parameter.\n"
+            f"expected payload: {payload!r}\n"
+            f"stacks checked: {sorted(entrypoint_texts)}"
         )
 
         # `print()` would append a newline where `sys.stdout.write` does not, and
         # `--output text` is the CLI form with the same defect.
         assert "print(" not in payload
         assert "--output text" not in buildspec_command
-        assert "--output text" not in entrypoint_text
+        for name, text in entrypoint_texts.items():
+            assert "--output text" not in text, name
