@@ -5,17 +5,25 @@ detail-type, scoped to one repository. The handler clones the pull request's
 source branch, runs an ASH scan over it, and posts the outcome back to the pull
 request with `PostCommentForPullRequest`.
 
-Three outcomes are distinguished, and keeping them apart is the point of reading
-the results file rather than trusting the exit code alone:
+The verdict is `ash scan`'s exit code, not a judgment made here:
 
-*   **pass** - the scan completed and reported no actionable findings.
-*   **findings** - the scan completed and reported actionable findings.
-*   **error** - the scan did not complete, so nothing is known either way.
+*   **0 -> pass** - no actionable findings at or above the configured severity.
+*   **2 -> findings** - actionable findings at or above it.
+*   **anything else -> error** - the scan did not complete, so nothing is known
+    either way. ASH returns 1 from ``_compute_exit_code`` when it produced no
+    results at all.
 
-An exit code on its own conflates the second and third cases: a crashed scan and
-a scan that found real problems both exit non-zero. Reporting "no findings" for a
-scan that never ran would be the worst failure this handler could have, so the
-presence and parseability of the results file is what separates them.
+Severity counts are read from the results file too, but only to render the comment
+table. They are deliberately not compared against a threshold here. ASH routes
+that comparison through ``_compute_exit_code``, the same function `ash merge` uses,
+so a gate verdict and a scan verdict cannot disagree about identical findings. A
+severity table reimplemented in this handler would be another copy of the one that
+``automated_security_helper/utils/severity_ladder.py`` exists to consolidate, and
+when it drifted this gate would pass pull requests that `ash scan` fails.
+
+Reporting "no findings" for a scan that never ran would be the worst failure this
+handler could have, so an unrecognized exit code is reported as unknown rather
+than folded into either real outcome.
 """
 
 from __future__ import annotations
@@ -38,9 +46,13 @@ WORK_ROOT = pathlib.Path("/tmp/ash-gate")  # noqa: S108 - the only writable path
 
 RESULTS_FILENAME = "ash_aggregated_results.json"
 
-#: Severities that make a pull request fail. Overridable so a repository can gate
-#: on CRITICAL only while still reporting the rest.
-DEFAULT_BLOCKING_SEVERITIES = ("critical", "high")
+#: Threshold handed to `ash scan --min-severity`. A point on ASH's severity
+#: ladder, evaluated by ASH; this module never compares against it.
+DEFAULT_MIN_SEVERITY = "high"
+
+#: Exit codes `ash scan` uses, via _compute_exit_code.
+EXIT_CLEAN = 0
+EXIT_FINDINGS = 2
 
 #: The PostCommentForPullRequest API reference documents no maximum for the
 #: content field, so this is defensive rather than a documented constraint: a
@@ -51,11 +63,9 @@ DEFAULT_MAX_COMMENT_CHARS = 10000
 TRUE_VALUES = {"1", "true", "yes", "on"}
 
 
-def _env_list(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+def _env_str(name: str, default: str) -> str:
     raw = os.environ.get(name, "").strip()
-    if not raw:
-        return default
-    return tuple(part.strip().lower() for part in raw.replace(",", " ").split() if part)
+    return raw or default
 
 
 def _env_int(name: str, default: int) -> int:
@@ -164,8 +174,14 @@ def clone_source(repository_name: str, branch: str, commit: str, region: str) ->
     return source_dir
 
 
-def run_scan(source_dir: pathlib.Path) -> tuple[int, pathlib.Path, str]:
-    """Run ASH over the checked-out tree. Returns exit code, output dir, and log tail."""
+def run_scan(
+    source_dir: pathlib.Path, min_severity: str, fail_on_findings: bool
+) -> tuple[int, pathlib.Path, str]:
+    """Run ASH over the checked-out tree. Returns exit code, output dir, and log tail.
+
+    The threshold is handed to ASH rather than applied afterwards, so the exit code
+    that comes back is already the verdict.
+    """
     output_dir = WORK_ROOT / "out"
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -176,9 +192,13 @@ def run_scan(source_dir: pathlib.Path) -> tuple[int, pathlib.Path, str]:
         str(source_dir),
         "--output-dir",
         str(output_dir),
-        # The verdict comes from the results file below, not from this exit code,
-        # so findings must not abort the run before the report is written.
-        "--no-fail-on-findings",
+        "--min-severity",
+        min_severity,
+        # Passed explicitly rather than left to ASH's default, which falls back to
+        # the scan configuration. A base config carrying fail_on_findings: false
+        # would otherwise make every pull request pass while findings were still
+        # being reported in the comment.
+        "--fail-on-findings" if fail_on_findings else "--no-fail-on-findings",
     ]
 
     extra = os.environ.get("ASH_SCAN_EXTRA_ARGS", "").strip()
@@ -187,18 +207,20 @@ def run_scan(source_dir: pathlib.Path) -> tuple[int, pathlib.Path, str]:
 
     result = _run(argv)
     log_tail = (result.stderr or result.stdout or "").strip()[-4000:]
-    if result.returncode != 0:
-        LOGGER.warning("ash scan exited %d", result.returncode)
+    LOGGER.info("ash scan exited %d", result.returncode)
     return result.returncode, output_dir, log_tail
 
 
 def read_severity_counts(output_dir: pathlib.Path) -> dict[str, int] | None:
-    """Read per-severity counts from the aggregated results file.
+    """Read per-severity counts for the comment table. Display only.
 
-    Returns None when the file is absent or unparseable, which the caller treats
-    as an error outcome rather than as a clean scan. ASH's results model permits
-    extra fields and has carried severity counts both nested under
-    severity_counts and flat on summary_stats, so both shapes are accepted.
+    These counts never decide the outcome — `ash scan`'s exit code does. So None
+    here means "no table in the comment", not "error": a scan can legitimately
+    exit 0 while this returns None if the report shape changes, and downgrading a
+    clean verdict over a missing table would be its own false signal.
+
+    ASH's results model permits extra fields and has carried severity counts both
+    nested under severity_counts and flat on summary_stats, so both are accepted.
     """
     results_path = output_dir / RESULTS_FILENAME
     if not results_path.is_file():
@@ -231,7 +253,8 @@ def read_severity_counts(output_dir: pathlib.Path) -> dict[str, int] | None:
 def build_comment(
     outcome: str,
     counts: dict[str, int] | None,
-    blocking: tuple[str, ...],
+    min_severity: str,
+    scan_exit: int,
     source_commit: str,
     log_tail: str,
     max_chars: int,
@@ -242,12 +265,17 @@ def build_comment(
         lines += [
             "**The scan did not complete, so this pull request has not been assessed.**",
             "",
-            "This is not a pass. Treat it as an unknown result and check the Lambda logs.",
+            f"This is not a pass. `ash scan` exited {scan_exit}; treat the result as "
+            "unknown and check the Lambda logs.",
         ]
         if log_tail:
             lines += ["", "<details><summary>Scan log tail</summary>", "", "```", log_tail, "```", "", "</details>"]
     else:
-        verdict = "found blocking findings" if outcome == "findings" else "found no blocking findings"
+        verdict = (
+            f"found actionable findings at or above {min_severity}"
+            if outcome == "findings"
+            else f"found no actionable findings at or above {min_severity}"
+        )
         lines += [f"Scanned `{source_commit[:12]}` and {verdict}.", ""]
 
         if counts:
@@ -255,13 +283,13 @@ def build_comment(
             if reported:
                 lines += ["| Severity | Count |", "| --- | --- |"]
                 for severity in reported:
-                    marker = " (blocking)" if severity in blocking else ""
-                    lines.append(f"| {severity.capitalize()}{marker} | {counts[severity]} |")
+                    lines.append(f"| {severity.capitalize()} | {counts[severity]} |")
                 lines.append("")
             if counts.get("suppressed"):
                 lines += [f"{counts['suppressed']} finding(s) suppressed by configuration.", ""]
 
-        lines.append(f"Severities that block: {', '.join(blocking)}.")
+        # The threshold is stated, not applied here: ASH decided the verdict above.
+        lines.append(f"Threshold: {min_severity} and higher is actionable.")
 
     comment = "\n".join(lines)
     if len(comment) > max_chars:
@@ -272,7 +300,8 @@ def build_comment(
 
 def handler(event: dict, context: object) -> dict:  # noqa: ARG001 - Lambda signature
     region = os.environ["AWS_REGION"]
-    blocking = _env_list("ASH_BLOCKING_SEVERITIES", DEFAULT_BLOCKING_SEVERITIES)
+    min_severity = _env_str("ASH_MIN_SEVERITY", DEFAULT_MIN_SEVERITY)
+    fail_on_findings = _env_bool("ASH_FAIL_ON_FINDINGS", default=True)
     max_chars = _env_int("ASH_MAX_COMMENT_CHARS", DEFAULT_MAX_COMMENT_CHARS)
     manage_approval = _env_bool("ASH_MANAGE_APPROVAL_STATE")
 
@@ -289,26 +318,31 @@ def handler(event: dict, context: object) -> dict:  # noqa: ARG001 - Lambda sign
 
     log_tail = ""
     counts: dict[str, int] | None = None
+    # Sentinel for "the scan never got far enough to produce an exit code". Not a
+    # code ASH uses, so it cannot be mistaken for a real verdict.
+    scan_exit = -1
     try:
         source_dir = clone_source(
             parsed["repository_name"], parsed["source_branch"], parsed["source_commit"], region
         )
-        _, output_dir, log_tail = run_scan(source_dir)
+        scan_exit, output_dir, log_tail = run_scan(source_dir, min_severity, fail_on_findings)
         counts = read_severity_counts(output_dir)
     except Exception as exc:  # noqa: BLE001 - any failure here is an error outcome
         LOGGER.exception("scan failed")
         log_tail = f"{log_tail}\n{exc}".strip()
-        counts = None
 
-    if counts is None:
-        outcome = "error"
-    elif any(counts.get(severity, 0) > 0 for severity in blocking):
+    # ASH's exit code is the verdict. Note the counts read above are not consulted:
+    # comparing them against min_severity here would be a second implementation of
+    # a judgment ASH already made, free to drift from it.
+    if scan_exit == EXIT_CLEAN:
+        outcome = "pass"
+    elif scan_exit == EXIT_FINDINGS:
         outcome = "findings"
     else:
-        outcome = "pass"
+        outcome = "error"
 
     comment = build_comment(
-        outcome, counts, blocking, parsed["source_commit"], log_tail, max_chars
+        outcome, counts, min_severity, scan_exit, parsed["source_commit"], log_tail, max_chars
     )
 
     codecommit.post_comment_for_pull_request(
@@ -337,7 +371,7 @@ def handler(event: dict, context: object) -> dict:  # noqa: ARG001 - Lambda sign
         else:
             LOGGER.info("outcome %s: leaving approval state unchanged", outcome)
 
-    return {"outcome": outcome, "severityCounts": counts or {}}
+    return {"outcome": outcome, "scanExitCode": scan_exit, "severityCounts": counts or {}}
 
 
 if __name__ == "__main__":  # pragma: no cover - local smoke test

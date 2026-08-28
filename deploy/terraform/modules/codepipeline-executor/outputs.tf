@@ -38,9 +38,14 @@ output "merged_results_location_template" {
   value       = "s3://${aws_s3_bucket.artifacts.bucket}/${var.results_prefix}/<pipeline-execution-id>/merged/"
 }
 
-output "blocking_severities" {
-  description = "Severities the merge action treats as failing the pipeline."
-  value       = [for severity in var.blocking_severities : lower(severity)]
+output "min_severity" {
+  description = "Threshold passed to `ash merge --min-severity`. ASH evaluates it; this module does not."
+  value       = var.min_severity
+}
+
+output "fail_on_findings" {
+  description = "Whether `--fail-on-findings` is passed to `ash merge`, making actionable findings fail the pipeline."
+  value       = var.fail_on_findings
 }
 
 output "shard_log_group_name" {

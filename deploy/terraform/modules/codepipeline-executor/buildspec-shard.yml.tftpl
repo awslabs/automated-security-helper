@@ -83,15 +83,13 @@ phases:
 
   post_build:
     commands:
+      # No completion marker is written. `ash merge` establishes shard coverage
+      # from the shard_index and shard_count recorded inside each shard's own
+      # results and raises ShardCoverageError when the space is not fully
+      # covered, which is stronger than a marker file this buildspec invented:
+      # it cannot disagree with what the shard actually scanned.
       - |
         set -eu
         KEY_PREFIX="$RESULTS_PREFIX/$PIPELINE_EXECUTION_ID/shard-$SHARD_INDEX"
         python3 ash_s3_sync.py upload ash_output "$RESULTS_BUCKET" "$KEY_PREFIX"
-
-        # A marker written last, after the results are already uploaded. The merge
-        # action requires one marker per shard, so a partial upload cannot pass
-        # for a complete shard.
-        mkdir -p marker
-        printf 'shard=%s count=%s exit=0\n' "$SHARD_INDEX" "$SHARD_COUNT" > marker/shard.complete
-        python3 ash_s3_sync.py upload marker "$RESULTS_BUCKET" "$KEY_PREFIX"
         echo "uploaded shard $SHARD_INDEX to s3://$RESULTS_BUCKET/$KEY_PREFIX/"

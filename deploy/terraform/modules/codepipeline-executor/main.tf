@@ -32,8 +32,6 @@ locals {
   use_base_config = var.base_config_ssm_parameter_name != null
   use_kms         = var.kms_key_arn != null
 
-  blocking_severities = join(",", [for severity in var.blocking_severities : lower(severity)])
-
   shard_indices = range(var.shard_count)
 
   results_arn_prefix = "${aws_s3_bucket.artifacts.arn}/${var.results_prefix}"
@@ -48,8 +46,7 @@ locals {
   })
 
   merge_buildspec = templatefile("${path.module}/buildspec-merge.yml.tftpl", {
-    s3_sync_b64        = filebase64("${path.module}/files/ash_s3_sync.py")
-    verdict_script_b64 = filebase64("${path.module}/files/ash_merge_verdict.py")
+    s3_sync_b64 = filebase64("${path.module}/files/ash_s3_sync.py")
   })
 
   common_build_environment_variables = [
@@ -434,9 +431,17 @@ resource "aws_codebuild_project" "merge" {
       }
     }
 
+    # Passed straight through to `ash merge --min-severity`. The threshold is
+    # evaluated by ASH, not compared here, so there is exactly one
+    # implementation of "does this breach".
     environment_variable {
-      name  = "BLOCKING_SEVERITIES"
-      value = local.blocking_severities
+      name  = "MIN_SEVERITY"
+      value = var.min_severity
+    }
+
+    environment_variable {
+      name  = "FAIL_ON_FINDINGS"
+      value = var.fail_on_findings ? "true" : "false"
     }
   }
 

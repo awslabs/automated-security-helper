@@ -44,9 +44,10 @@ quota.
 
 A shard that happens to own no findings exits 0. Gating on shard exit codes would
 therefore report a clean scan whenever the findings landed in a different shard.
-Shards run with `--no-fail-on-findings` and fail only on a real crash; the merge
-action forms the verdict from the merged results.
+Shards run with `--no-fail-on-findings` and fail only on a real crash.
 
-The merge action also refuses to merge a partial result set. If any shard's
-completion marker is missing it fails rather than producing a confident verdict
-over part of the codebase.
+The verdict is `ash merge`'s own exit code, propagated unchanged: 0 clean, 2
+findings at or above `min_severity`, 1 refused because shard coverage was
+incomplete. Nothing in the module recomputes it — ASH shares that calculation with
+`ash scan`, so the pipeline cannot reach a different conclusion than a plain scan
+about the same findings.

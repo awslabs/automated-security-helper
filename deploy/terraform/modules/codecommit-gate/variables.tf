@@ -72,21 +72,47 @@ variable "trigger_events" {
   }
 }
 
-variable "blocking_severities" {
+variable "min_severity" {
   description = <<-EOT
-    Severities that make a pull request fail the gate. Everything else is still
-    reported in the comment, just not treated as blocking.
+    Lowest severity that counts as actionable for the gate, passed straight
+    through to `ash scan --min-severity`.
+
+    A threshold on ASH's severity ladder, not a set: "high" means high and critical
+    are actionable, and everything below is still shown in the pull-request comment
+    but does not fail the gate.
+
+    The comparison is made by ASH, never in the handler. `ash scan` routes its exit
+    code through _compute_exit_code, the same function `ash merge` uses, so this
+    gate's verdict cannot disagree with a scan's over identical findings.
+
+    Note this default is stricter than ASH's own, which is "low". A gate that failed
+    every pull request over an informational finding would not survive contact with
+    a real repository, so the module chooses "high" and states the difference rather
+    than inheriting it silently.
   EOT
-  type        = list(string)
-  default     = ["critical", "high"]
+  type        = string
+  default     = "high"
 
   validation {
-    condition = length(setsubtract(
-      [for severity in var.blocking_severities : lower(severity)],
-      ["critical", "high", "medium", "low", "info"]
-    )) == 0
-    error_message = "blocking_severities may contain only: critical, high, medium, low, info."
+    condition     = contains(["critical", "high", "medium", "low", "info"], lower(var.min_severity))
+    error_message = "min_severity must be one of: critical, high, medium, low, info."
   }
+}
+
+variable "fail_on_findings" {
+  description = <<-EOT
+    Pass `--fail-on-findings` to `ash scan`, so findings at or above min_severity
+    produce the "findings" outcome.
+
+    Passed explicitly rather than left to ASH's default, which falls back to the
+    scan configuration. A base config carrying `fail_on_findings: false` would
+    otherwise make every pull request report as passing while findings were still
+    listed in the comment.
+
+    Set false for a comment-only gate that reports but never blocks.
+  EOT
+  type        = bool
+  default     = true
 }
 
 variable "create_approval_rule_template" {

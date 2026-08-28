@@ -26,45 +26,60 @@ Fixed, and the module holds to it exactly:
 - `--results` is **repeatable** and accepts a **file or a directory**. The merge
   action passes one directory per shard.
 
-## The merge action owns the verdict
-
-This is the most important property here, and the reason the module is shaped the
-way it is.
+## ASH owns the verdict, not this module
 
 **A shard that happens to own no findings exits 0.** So a shard's exit code says
 nothing about the scan as a whole. Gating the pipeline on shard exit codes would
 report a clean scan every time the findings landed in some other shard — a false
 pass, which is the worst failure a security gate can have.
 
-So:
+So shards run with `--no-fail-on-findings` and findings never fail a shard action.
+A shard *does* fail on a real crash: with that flag in effect a non-zero exit means
+a genuine failure rather than findings, so it is safe to propagate, and failing
+there stops the pipeline before anything forms a verdict from incomplete data.
 
-- Shards run with `--no-fail-on-findings`, so findings never fail a shard action.
-- A shard *does* fail on a real crash. With `--no-fail-on-findings` in effect, a
-  non-zero exit means a genuine failure rather than findings, so it is safe to
-  propagate — and failing there stops the pipeline instead of letting the merge
-  action form a verdict from incomplete data.
-- The merge action computes pass or fail from the **merged** results.
+The verdict is `ash merge`'s exit code, propagated unchanged:
 
-The merge action also **refuses to merge a partial result set**. Each shard writes
-a completion marker after its results are already uploaded; the merge action
-requires one marker per shard and fails loudly if any is missing. Without that
-check, a shard whose upload never landed would simply be absent, and a verdict
-over some of the shards would look identical to a verdict over all of them.
+| Exit | Meaning |
+|---|---|
+| 0 | No actionable findings at or above `min_severity` |
+| 1 | Refused to merge — shard coverage incomplete, so findings are **unknown** |
+| 2 | Actionable findings at or above `min_severity` |
 
-It **refuses to run on zero shards** as well. `shard_count` is validated at
-`>= 1` in Terraform, but `SHARD_COUNT` reaches the buildspec as an environment
-variable and can be overridden at the project or action level. At zero the marker
-loop would check nothing, `ash merge` would receive no `--results` at all, and the
-verdict step would report a clean scan for a scan that never ran. The merge
-buildspec therefore validates the value is a positive integer before doing
-anything else.
+**Nothing in this module re-derives that judgment**, and that is deliberate. ASH
+routes the merged verdict through `_compute_exit_code`, the same function
+`ash scan` uses, specifically so a merged verdict and a scanned verdict cannot
+disagree about the same findings. A severity comparison written into a buildspec
+would be a third copy of a table that has already drifted once in this codebase —
+`automated_security_helper/utils/severity_ladder.py` exists because of that
+drift — and the next time it drifted, this pipeline would silently report a
+different verdict than `ash scan` for identical findings.
 
-The verdict itself is computed by a small script from the merged results file,
-not from `ash merge`'s exit code. The shard flag contract fixes `--shard-index`,
-`--shard-count`, `--results`, and `--output-dir`; it does not specify a gating
-flag on `merge`, so depending on one would be depending on unpromised behavior.
-A missing or unparseable merged results file exits 2 and is reported as unknown,
-never as a pass.
+`min_severity` maps directly onto `ash merge --min-severity` for the same reason:
+one implementation of "does this breach".
+
+**Shard coverage is also ASH's check, not ours.** `merge_shard_results` raises
+`ShardCoverageError` when the shard space is not fully covered and exits 1, with
+the message being explicit that unknown findings are not the same as no findings.
+That is stronger than anything this buildspec could do, because it reads the
+`shard_index` and `shard_count` recorded *inside* each shard's own results rather
+than trusting an external count or a marker file. An earlier version of this
+module uploaded per-shard completion markers and checked them in shell; that was
+removed as a duplicate.
+
+One check does remain in the buildspec, because it is about the buildspec's own
+input rather than about results: it **refuses to run on zero shards**.
+`shard_count` is validated at `>= 1` in Terraform, but `SHARD_COUNT` reaches the
+buildspec as an environment variable overridable at the project or action level,
+below that validation. At zero, no `--results` would be passed at all.
+
+`--fail-on-findings` is passed explicitly rather than left to ASH's default, which
+falls back to the scan configuration. A base config carrying
+`fail_on_findings: false` would otherwise make this pipeline green on every run
+while still finding things.
+
+The merged report is uploaded to S3 **before** the exit code is propagated, since a
+threshold breach is exactly when someone wants the report.
 
 ## Why results travel through S3
 
@@ -122,7 +137,8 @@ work it does is idempotent.
 | `base_config_ssm_parameter_arn` | — | `string` | `null` | Scopes `ssm:GetParameter`. |
 | `name_prefix` | — | `string` | `"ash-scan"` | |
 | `source_branch` | — | `string` | `"main"` | |
-| `blocking_severities` | — | `list(string)` | `["critical","high"]` | Evaluated on merged results. |
+| `min_severity` | — | `string` | `"high"` | Passed to `ash merge --min-severity`. ASH evaluates it. |
+| `fail_on_findings` | — | `bool` | `true` | Passed explicitly so a base config cannot disable the gate. |
 | `enable_eventbridge_trigger` | — | `bool` | `true` | Preferred over polling. |
 | `build_compute_type` | — | `string` | `BUILD_GENERAL1_LARGE` | Scanners are CPU-bound. |
 | `build_environment_type` | — | `string` | `LINUX_CONTAINER` | Must match the image architecture. |
@@ -139,7 +155,7 @@ work it does is idempotent.
 
 `pipeline_name`, `pipeline_arn`, `shard_count`, `shard_project_name`,
 `merge_project_name`, `artifact_bucket_name`, `results_prefix`,
-`merged_results_location_template`, `blocking_severities`,
+`merged_results_location_template`, `min_severity`, `fail_on_findings`,
 `shard_log_group_name`, `merge_log_group_name`, `pipeline_role_arn`,
 `shard_role_arn`, `merge_role_arn`.
 
@@ -151,9 +167,9 @@ would need multiple stages, which serializes them and defeats the purpose.
 
 **Sharding splits by scanner, not by file.** ASH's partitioning assigns whole
 scanners to shards, so `shard_count` beyond the number of enabled scanners leaves
-shards with nothing to do. They still cost a CodeBuild start and still upload a
-completion marker, so nothing breaks — they are simply wasted. Size
-`shard_count` against the number of scanners your configuration enables.
+shards with nothing to do. They still cost a CodeBuild start and still upload an
+empty result set, so nothing breaks — they are simply wasted. Size `shard_count`
+against the number of scanners your configuration enables.
 
 **One shard project, N actions.** Adding a shard adds an action, not a project.
 The index arrives as a per-action `EnvironmentVariables` override. Note that

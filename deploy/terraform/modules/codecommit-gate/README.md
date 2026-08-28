@@ -49,17 +49,29 @@ schedule exists to prevent.
 
 ## Three outcomes, and why the exit code is not enough
 
-| Outcome | Meaning | Comment says |
-|---|---|---|
-| `pass` | Scan completed, no blocking findings | No blocking findings |
-| `findings` | Scan completed, blocking findings present | The severity table, marking which block |
-| `error` | Scan did not complete | Explicitly **not** a pass, with the log tail |
+The verdict is `ash scan`'s exit code, mapped directly:
 
-An exit code alone cannot separate the last two: a crashed scan and a scan that
-found real problems both exit non-zero. The handler distinguishes them by whether
-the aggregated results file exists and parses. Reporting "no findings" for a scan
-that never ran would be the worst thing this gate could do, so the absence of
-results is reported as unknown rather than clean.
+| `ash scan` exit | Outcome | Comment says |
+|---|---|---|
+| 0 | `pass` | No actionable findings at or above `min_severity` |
+| 2 | `findings` | Actionable findings, plus the severity table |
+| anything else | `error` | Explicitly **not** a pass, with the exit code and log tail |
+
+**The handler does not compare severities to reach that verdict.** It hands
+`--min-severity` to ASH and reports what ASH decided. `ash scan` routes its exit
+code through `_compute_exit_code` — the same function `ash merge` uses — so this
+gate cannot disagree with a scan, or with the `codepipeline-executor` module, about
+identical findings. A severity table reimplemented here would be another copy of
+the one `automated_security_helper/utils/severity_ladder.py` exists to consolidate,
+and when it drifted this gate would pass pull requests that `ash scan` fails.
+
+Severity counts *are* read from the results file, but only to render the comment
+table. A missing table never downgrades a clean verdict.
+
+ASH returns 1 from `_compute_exit_code` when it produced no results at all, so a
+crashed scan lands in `error` rather than being mistaken for either real outcome.
+Reporting "no findings" for a scan that never ran would be the worst thing this
+gate could do.
 
 For the same reason, when `manage_approval_state` is on, approval is only ever set
 to `APPROVE`, and only on `pass`. An `error` leaves the approval state untouched
@@ -78,7 +90,8 @@ security judgment.
 | `base_config_ssm_parameter_arn` | — | `string` | `null` | Scopes `ssm:GetParameter`. |
 | `name_prefix` | — | `string` | `"ash-pr-gate"` | |
 | `trigger_events` | — | `list(string)` | created + source branch updated | The two that change what would merge. |
-| `blocking_severities` | — | `list(string)` | `["critical","high"]` | Others are reported, not blocking. |
+| `min_severity` | — | `string` | `"high"` | Passed to `ash scan --min-severity`. ASH evaluates it. |
+| `fail_on_findings` | — | `bool` | `true` | Passed explicitly so a base config cannot disable the gate. |
 | `create_approval_rule_template` | — | `bool` | `false` | Changes your repository's settings. |
 | `manage_approval_state` | — | `bool` | `false` | Only ever approves, only on a clean scan. |
 | `approval_rule_approvals_required` | — | `number` | `1` | Template only. |
@@ -136,10 +149,13 @@ checkout would be scanned alongside the current one.
 `max_comment_chars` is a guard against a rejected call losing the result, not
 enforcement of a published limit.
 
-**The severity-count parse tolerates two shapes.** ASH's results model permits
-extra fields and has carried severity counts both nested under `severity_counts`
-and flat on `summary_stats`. The handler accepts either and treats "neither
-present" as an `error` outcome rather than as zero findings.
+**The severity-count parse is display-only and tolerates two shapes.** ASH's
+results model permits extra fields and has carried severity counts both nested
+under `severity_counts` and flat on `summary_stats`. The handler accepts either,
+and if it finds neither it simply omits the table from the comment. That is safe
+precisely because these counts do not decide anything — the verdict is already
+`ash scan`'s exit code, so a report-shape change costs a table, not a correct
+pass or fail.
 
 ## What is first-party and what is not
 

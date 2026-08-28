@@ -50,9 +50,10 @@ module "ash_scan_pipeline" {
   base_config_ssm_parameter_name = module.ash_image.base_config_ssm_parameter_name
   base_config_ssm_parameter_arn  = module.ash_image.base_config_ssm_parameter_arn
 
-  # Evaluated by the merge action against the merged results, never against an
-  # individual shard's exit code.
-  blocking_severities = ["critical", "high"]
+  # Handed to `ash merge --min-severity`. ASH computes the verdict and this module
+  # propagates its exit code, so the pipeline can never disagree with what
+  # `ash scan` would say about the same findings.
+  min_severity = "high"
 
   tags = {
     Project = "ash-example"

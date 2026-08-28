@@ -44,7 +44,9 @@ module "ash_pr_gate" {
   # Must match the base image architecture.
   lambda_architecture = "x86_64"
 
-  blocking_severities = ["critical", "high"]
+  # Handed to `ash scan --min-severity`. ASH computes the verdict from its own
+  # severity ladder; the handler reports it rather than recomputing it.
+  min_severity = "high"
 
   # Scan only what the pull request changes. This is what keeps a real repository
   # inside Lambda's hard 900 second ceiling, since it scales with the size of the

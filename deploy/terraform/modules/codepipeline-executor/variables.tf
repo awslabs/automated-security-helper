@@ -66,21 +66,49 @@ variable "shard_count" {
   }
 }
 
-variable "blocking_severities" {
+variable "min_severity" {
   description = <<-EOT
-    Severities that fail the pipeline, evaluated by the merge action against the
-    merged results. Everything else is still reported.
+    Lowest severity that counts as actionable for the pipeline's verdict, passed
+    straight through to `ash merge --min-severity`.
+
+    A threshold on ASH's own severity ladder, not a set: "high" means high and
+    critical are actionable, and everything below is reported but not blocking.
+
+    The comparison is made by ASH, never here. `ash merge` routes its exit code
+    through the same _compute_exit_code that `ash scan` uses, so a merged verdict
+    and a scanned verdict cannot disagree about the same findings. Re-deriving the
+    threshold in this module would be a third copy of a severity table that has
+    already drifted once in this codebase.
+
+    Note this default is stricter than ASH's own, which is "low". A pipeline whose
+    purpose is gating should not fail on every informational finding by default,
+    so the module chooses "high" and states the difference rather than inheriting
+    it silently.
   EOT
-  type        = list(string)
-  default     = ["critical", "high"]
+  type        = string
+  default     = "high"
 
   validation {
-    condition = length(setsubtract(
-      [for severity in var.blocking_severities : lower(severity)],
-      ["critical", "high", "medium", "low", "info"]
-    )) == 0
-    error_message = "blocking_severities may contain only: critical, high, medium, low, info."
+    condition     = contains(["critical", "high", "medium", "low", "info"], lower(var.min_severity))
+    error_message = "min_severity must be one of: critical, high, medium, low, info."
   }
+}
+
+variable "fail_on_findings" {
+  description = <<-EOT
+    Pass `--fail-on-findings` to `ash merge`, so actionable findings at or above
+    min_severity fail the pipeline.
+
+    Defaults to true and is passed explicitly rather than left to ASH's own
+    default, which falls back to the scan configuration. A base config carrying
+    `fail_on_findings: false` would otherwise make this pipeline report success on
+    every run while still finding things — a gate that does not gate, with nothing
+    in the logs saying so.
+
+    Set false only for a reporting-only pipeline that is deliberately not a gate.
+  EOT
+  type        = bool
+  default     = true
 }
 
 variable "enable_eventbridge_trigger" {

@@ -28,8 +28,6 @@ locals {
   gate_image_uri = "${aws_ecr_repository.gate.repository_url}:${var.image_tag}"
   ecr_registry   = split("/", aws_ecr_repository.gate.repository_url)[0]
 
-  blocking_severities = [for severity in var.blocking_severities : lower(severity)]
-
   buildspec = templatefile("${path.module}/buildspec.yml.tftpl", {
     gate_dockerfile_b64 = filebase64("${path.module}/files/gate.Dockerfile")
     handler_b64         = filebase64("${path.module}/files/ash_pr_gate.py")
@@ -392,7 +390,10 @@ resource "aws_lambda_function" "gate" {
 
   environment {
     variables = {
-      ASH_BLOCKING_SEVERITIES   = join(",", local.blocking_severities)
+      # Handed to `ash scan --min-severity`. ASH evaluates the threshold; the
+      # handler only reports what ASH decided.
+      ASH_MIN_SEVERITY          = var.min_severity
+      ASH_FAIL_ON_FINDINGS      = var.fail_on_findings ? "true" : "false"
       ASH_MAX_COMMENT_CHARS     = tostring(var.max_comment_chars)
       ASH_MANAGE_APPROVAL_STATE = var.manage_approval_state ? "true" : "false"
       ASH_SCAN_EXTRA_ARGS       = var.ash_scan_extra_args
