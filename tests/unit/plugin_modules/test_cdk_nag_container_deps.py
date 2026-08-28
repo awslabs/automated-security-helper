@@ -22,7 +22,6 @@ version of this file: the tests asserted the buggy behavior.
 import re
 import sys
 from importlib.metadata import PackageNotFoundError, packages_distributions
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
