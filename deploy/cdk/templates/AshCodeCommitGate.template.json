@@ -63,6 +63,11 @@
     "none"
    ],
    "Description": "Severity at or above which findings fail the gate. Findings below it are still reported in the comment. ASH treats critical and high as equivalent because SARIF does not distinguish them."
+  },
+  "AshImageTag": {
+   "Type": "String",
+   "Default": "",
+   "Description": "ECR tag the workload pulls. Empty tracks the moving tag, which every rebuild republishes, so a replaced task adopts the newest image at no defined moment. Pin the build's version-qualified tag instead; its digest is only known after a build, so deploy empty, read the tag, then set this on a stack update."
   }
  },
  "Conditions": {
@@ -72,6 +77,18 @@
      "Fn::Equals": [
       {
        "Ref": "AshBaseConfigYaml"
+      },
+      ""
+     ]
+    }
+   ]
+  },
+  "ImageImageTagPinned430B439C": {
+   "Fn::Not": [
+    {
+     "Fn::Equals": [
+      {
+       "Ref": "AshImageTag"
       },
       ""
      ]
@@ -1056,7 +1073,16 @@
         {
          "Ref": "ImageRepositoryD8036990"
         },
-        ":lambda-amd64"
+        ":",
+        {
+         "Fn::If": [
+          "ImageImageTagPinned430B439C",
+          {
+           "Ref": "AshImageTag"
+          },
+          "lambda-amd64"
+         ]
+        }
        ]
       ]
      }

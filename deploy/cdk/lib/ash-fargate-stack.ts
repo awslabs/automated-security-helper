@@ -57,6 +57,7 @@ import { Construct } from 'constructs';
 
 import {
   ashSynthesizer,
+  ashImageTag,
   ashOfflineMode, ashVersion, diagnosticLogGroupProps, MCP_PORT, rebuildSchedule,
 } from './ash-config';
 import { AshImageBuild } from './ash-image-build';
@@ -99,6 +100,7 @@ export class AshFargateStack extends Stack {
       ashVersion: version,
       offlineMode: offline,
       rebuildSchedule: schedule,
+      imageTag: ashImageTag(this),
       encryptionKey,
     });
 
@@ -167,7 +169,7 @@ export class AshFargateStack extends Stack {
     const container = taskDefinition.addContainer('Ash', {
       image: ecs.ContainerImage.fromEcrRepository(
         image.repository,
-        image.tagForFlavor('mcp'),
+        image.workloadTagForFlavor('mcp'),
       ),
       logging: ecs.LogDrivers.awsLogs({ streamPrefix: 'ash-mcp', logGroup }),
       // A scanner that dies takes the server's usefulness with it, so let ECS

@@ -109,6 +109,7 @@ import { Construct } from 'constructs';
 
 import {
   ashSynthesizer,
+  ashImageTag,
   ashOfflineMode, ashVersion, rebuildSchedule,
 } from './ash-config';
 import { AshImageBuild } from './ash-image-build';
@@ -147,6 +148,7 @@ export class AshAgentCoreStack extends Stack {
       ashVersion: version,
       offlineMode: offline,
       rebuildSchedule: schedule,
+      imageTag: ashImageTag(this),
       encryptionKey,
     });
 

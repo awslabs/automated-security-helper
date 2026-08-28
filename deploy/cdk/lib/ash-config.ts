@@ -50,6 +50,7 @@ export const ASH_PARAMETER_NAMES = {
   ashOfflineMode: 'AshOfflineMode',
   ashBaseConfigYaml: 'AshBaseConfigYaml',
   ashVersion: 'AshVersion',
+  ashImageTag: 'AshImageTag',
   mcpStatelessHttp: 'McpStatelessHttp',
   mcpAuthHeaderName: 'McpAuthHeaderName',
   mcpAuthHeaderValue: 'McpAuthHeaderValue',
@@ -190,6 +191,60 @@ export function ashVersion(scope: Stack): CfnParameter {
       'ASH git ref (tag, branch, or commit) to build the image from, for example ' +
       'v3.7.0. Pinning a tag makes the build reproducible; the scheduled rebuild ' +
       'still repulls base-image and OS patches for that same ASH revision.',
+  });
+}
+
+/**
+ * The ECR tag the WORKLOAD pulls, as opposed to the tag the build pushes.
+ *
+ * THE PROBLEM THIS EXISTS FOR
+ * ---------------------------
+ * A mutable tag consumed by a running workload has no defined moment at which
+ * the workload adopts a new image. Every build republishes the moving tag
+ * (`mcp-arm64` and friends), so a task replaced for any unrelated reason — a
+ * scaling event, a host failure, an ECS redeploy — silently picks up whatever the
+ * tag points at then. Nothing promotes the image and nothing announces the swap.
+ *
+ * Leaving this empty keeps that behaviour, which is what every existing
+ * deployment already has. Setting it pins the workload to one immutable-in-practice
+ * reference instead.
+ *
+ * THE WRINKLE, STATED PLAINLY: YOU CANNOT PIN ON THE FIRST DEPLOY
+ * -------------------------------------------------------------
+ * The value worth pinning is the version-qualified audit tag the build also
+ * pushes, `<flavor>-<platform>-<folded-ref>-<sha256-prefix>`. Its digest is
+ * computed inside CodeBuild from the raw `AshVersion`, so it does not exist and
+ * cannot be predicted at create time. The workflow is therefore: deploy with this
+ * empty, read the tag out of ECR or the build log, then set it on a stack update.
+ * Pinning a tag that does not exist yet fails workload creation rather than
+ * waiting for it.
+ *
+ * WHAT WAS REJECTED
+ * -----------------
+ * - Defaulting this to the audit tag: impossible for the reason above, and it
+ *   would make the first deploy of every stack fail.
+ * - Having the stack compute the digest at synth time so the tag were knowable:
+ *   `AshVersion` is a deploy-time parameter, so at synth time it is an `Fn::Ref`
+ *   with no string to hash. This is the same constraint that put the folding in
+ *   the buildspec rather than in TypeScript.
+ * - Resolving a digest by calling ECR from a custom resource: that reintroduces
+ *   the lookup-at-deploy machinery these templates avoid, to save one manual read.
+ *
+ * CONTRACT NOTE: this is a new name in the shared parameter surface, so the
+ * Terraform mirror under `deploy/terraform/` needs the same one to stay in step.
+ */
+export function ashImageTag(scope: Stack): CfnParameter {
+  return new CfnParameter(scope, ASH_PARAMETER_NAMES.ashImageTag, {
+    type: 'String',
+    default: '',
+    // Kept short on purpose: this text is inlined into four templates, two of
+    // which sit close to CloudFormation's 51,200-byte inline limit. The full
+    // workflow is in deploy/cdk/README.md under "Pinning the image a workload runs".
+    description:
+      'ECR tag the workload pulls. Empty tracks the moving tag, which every rebuild ' +
+      'republishes, so a replaced task adopts the newest image at no defined moment. ' +
+      "Pin the build's version-qualified tag instead; its digest is only known after " +
+      'a build, so deploy empty, read the tag, then set this on a stack update.',
   });
 }
 

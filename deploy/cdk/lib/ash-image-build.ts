@@ -60,7 +60,7 @@
  * source configuration.
  */
 
-import { Aws, CfnParameter, CustomResource, Duration, RemovalPolicy } from 'aws-cdk-lib';
+import { Aws, CfnCondition, CfnParameter, CustomResource, Duration, Fn, RemovalPolicy } from 'aws-cdk-lib';
 import * as codebuild from 'aws-cdk-lib/aws-codebuild';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as events from 'aws-cdk-lib/aws-events';
@@ -135,6 +135,13 @@ export interface AshImageBuildProps {
   /** Rebuild cadence. */
   readonly rebuildSchedule: CfnParameter;
   /**
+   * Optional tag override for the WORKLOAD's image reference.
+   *
+   * Only pass this from a stack that actually runs a workload. It deliberately
+   * does NOT affect what the build pushes — see `workloadTagForFlavor`.
+   */
+  readonly imageTag?: CfnParameter;
+  /**
    * Run a build during stack creation and make it gate the workload.
    *
    * Leave this on for any stack whose workload cannot be created against an
@@ -166,6 +173,9 @@ export class AshImageBuild extends Construct {
   public readonly bootstrap?: CustomResource;
 
   private readonly platform: AshBuildPlatform;
+  /** Set only when the stack supplied an `imageTag` parameter. */
+  private readonly imageTagParameter?: CfnParameter;
+  private readonly imageTagCondition?: CfnCondition;
 
   constructor(scope: Construct, id: string, props: AshImageBuildProps) {
     super(scope, id);
@@ -173,6 +183,15 @@ export class AshImageBuild extends Construct {
 
     if (props.flavors.length === 0) {
       throw new Error('AshImageBuild needs at least one flavor to build.');
+    }
+
+    // The condition is created once here rather than per flavor, so a stack with
+    // several flavors pins them together rather than emitting one condition each.
+    if (props.imageTag) {
+      this.imageTagParameter = props.imageTag;
+      this.imageTagCondition = new CfnCondition(this, 'ImageTagPinned', {
+        expression: Fn.conditionNot(Fn.conditionEquals(props.imageTag.valueAsString, '')),
+      });
     }
 
     // RETAIN, deliberately. `emptyOnDelete` would make CDK synthesize an
@@ -316,12 +335,43 @@ export class AshImageBuild extends Construct {
   /**
    * The image URI a workload should reference, for one flavor.
    *
-   * This is the MOVING tag, so a scheduled rebuild replaces what the tag points
-   * at. See the note in the README about what that does and does not roll out
-   * on its own.
+   * Follows `workloadTagForFlavor`, so it is the moving tag unless the stack
+   * supplied an `imageTag` parameter and the adopter set it.
    */
   public imageUriForFlavor(flavor: AshImageFlavor): string {
-    return this.repository.repositoryUriForTag(this.tagForFlavor(flavor));
+    return this.repository.repositoryUriForTag(this.workloadTagForFlavor(flavor));
+  }
+
+  /**
+   * The tag a WORKLOAD should pull. Distinct from `tagForFlavor` on purpose.
+   *
+   * WHY THE BUILD AND THE WORKLOAD MUST NOT SHARE ONE ACCESSOR
+   * ---------------------------------------------------------
+   * `tagForFlavor` is what the buildspec tags and pushes, and what
+   * `sanitizeRefCommand` measures to budget the folded ref against the 128-character
+   * Docker tag limit. Both need a real string. If the override leaked into either,
+   * the build would push to a tag derived from an `Fn::If` — so the moving tag would
+   * stop being published at all, and the length budget would be computed from a
+   * token's placeholder rather than the tag.
+   *
+   * So the override applies here and nowhere else: the build always publishes both
+   * the moving tag and the version-qualified one, and this decides which of them the
+   * workload pulls.
+   *
+   * `Fn::If` rather than a synth-time choice, because `AshImageTag` is a deploy-time
+   * parameter. When no parameter was supplied — `AshImagePipeline`, which has no
+   * workload — this returns the plain moving tag and emits no condition.
+   */
+  public workloadTagForFlavor(flavor: AshImageFlavor): string {
+    const moving = this.tagForFlavor(flavor);
+    if (!this.imageTagCondition || !this.imageTagParameter) {
+      return moving;
+    }
+    return Fn.conditionIf(
+      this.imageTagCondition.logicalId,
+      this.imageTagParameter.valueAsString,
+      moving,
+    ).toString();
   }
 
   /** The moving tag for a flavor, for example `mcp-arm64`. */

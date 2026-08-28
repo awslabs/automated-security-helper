@@ -71,6 +71,7 @@ import {
   ashOfflineMode,
   ashSynthesizer,
   ashVersion,
+  ashImageTag,
   codeCommitRepositoryArn,
   diagnosticLogGroupProps,
   rebuildSchedule,
@@ -142,6 +143,7 @@ export class AshCodeCommitGateStack extends Stack {
       ashVersion: version,
       offlineMode: offline,
       rebuildSchedule: schedule,
+      imageTag: ashImageTag(this),
       encryptionKey,
     });
 
@@ -177,7 +179,7 @@ export class AshCodeCommitGateStack extends Stack {
       // synth time and push it through a bootstrap staging bucket. The image has
       // to be built in the adopter's account by the CodeBuild project.
       code: lambda.DockerImageCode.fromEcr(image.repository, {
-        tagOrDigest: image.tagForFlavor('lambda'),
+        tagOrDigest: image.workloadTagForFlavor('lambda'),
       }),
       // 900 seconds is Lambda's maximum, not a tuned value. A gate that needs
       // more cannot run on Lambda at all.

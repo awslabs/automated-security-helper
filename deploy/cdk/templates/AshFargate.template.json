@@ -59,6 +59,11 @@
    "Default": "",
    "Description": "Expected value of McpAuthHeaderName. Stored in Secrets Manager; the container is given the secret's ARN and resolves it at start, so the value is never written into a task definition or a runtime environment variable.",
    "NoEcho": true
+  },
+  "AshImageTag": {
+   "Type": "String",
+   "Default": "",
+   "Description": "ECR tag the workload pulls. Empty tracks the moving tag, which every rebuild republishes, so a replaced task adopts the newest image at no defined moment. Pin the build's version-qualified tag instead; its digest is only known after a build, so deploy empty, read the tag, then set this on a stack update."
   }
  },
  "Conditions": {
@@ -98,6 +103,18 @@
         ""
        ]
       }
+     ]
+    }
+   ]
+  },
+  "ImageImageTagPinned430B439C": {
+   "Fn::Not": [
+    {
+     "Fn::Equals": [
+      {
+       "Ref": "AshImageTag"
+      },
+      ""
      ]
     }
    ]
@@ -1645,7 +1662,16 @@
          {
           "Ref": "ImageRepositoryD8036990"
          },
-         ":mcp-amd64"
+         ":",
+         {
+          "Fn::If": [
+           "ImageImageTagPinned430B439C",
+           {
+            "Ref": "AshImageTag"
+           },
+           "mcp-amd64"
+          ]
+         }
         ]
        ]
       },

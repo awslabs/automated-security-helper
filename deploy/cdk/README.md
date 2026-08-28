@@ -96,6 +96,7 @@ change for adopters and desynchronizes the two implementations.
 | Parameter | Default | Notes |
 | --- | --- | --- |
 | `AshVersion` | `v3.7.0` | Git ref cloned and built. Not a PyPI version. |
+| `AshImageTag` | empty | ECR tag the **workload** pulls. Empty tracks the moving tag. Not offered by `AshImagePipeline`, which runs no workload. See below. |
 | `AshOfflineMode` | `NO` | `YES`/`NO`, forwarded to the ASH Dockerfile's `OFFLINE` build argument. The spelling is the Dockerfile's; a boolean would build an image that stayed online. |
 | `AshBaseConfigYaml` | empty | An ASH configuration document. See the size note below. |
 | `McpStatelessHttp` | `true` | Keep `true` on AgentCore, and behind any load balancer with more than one replica. See below for what is measured and what is inferred. |
@@ -134,6 +135,48 @@ mirror can expose it as a real variable. Re-synthesize to change it:
 npx cdk synth -c shardCount=8
 ./scripts/synth-templates.sh
 ```
+
+## Pinning the image a workload runs
+
+**The problem:** a mutable tag consumed by a running workload has no defined moment
+at which the workload adopts a new image. Every build republishes the moving tag
+(`mcp-arm64` and friends), so a task replaced for any unrelated reason — a scaling
+event, a host failure, an ECS redeploy — silently picks up whatever the tag points
+at then. Nothing promotes the image and nothing announces the swap.
+
+`AshImageTag` is the way out. Leave it empty, the default, and the workload tracks
+the moving tag exactly as before. Set it and the workload pulls that tag instead.
+It changes only what the workload pulls: every build still pushes both the moving
+tag and the version-qualified one, so pinning never stops an image being published.
+
+**You cannot pin on the first deploy, and that is not a bug.** The tag worth
+pinning is the version-qualified one, `<flavor>-<platform>-<folded-ref>-<digest>`,
+whose digest is computed inside CodeBuild from the raw `AshVersion`. It does not
+exist and cannot be predicted before a build has run. So the workflow is three
+steps, in this order:
+
+```sh
+# 1. Deploy with AshImageTag empty. The build publishes both tags.
+
+# 2. Read the tag it produced. It is also echoed in the CodeBuild log.
+aws ecr list-images --repository-name <EcrRepositoryUri's last path segment> \
+  --query 'imageIds[?starts_with(imageTag, `mcp-arm64-`)].imageTag' --output text
+
+# 3. Pin it on a stack update.
+aws cloudformation update-stack --stack-name <your-stack> \
+  --use-previous-template --parameters \
+    ParameterKey=AshImageTag,ParameterValue=mcp-arm64-v3.7.0-1a2b3c4d \
+    ParameterKey=AshVersion,UsePreviousValue=true
+```
+
+Pinning a tag that does not exist yet fails workload creation rather than waiting
+for it. On `AshDistributedPipeline` the reference resolves per build rather than at
+deploy, so an unproduced tag fails the shard projects when they start instead.
+
+The trade is the obvious one: a pinned workload stops taking rebuilt images, so it
+no longer picks up base-image and scanner patches until you move the pin. Unpin by
+setting the parameter back to empty. `AshImagePipeline` does not take this
+parameter — it builds images and runs no workload.
 
 ## AgentCore: the contract, and why stateless is the default
 
@@ -319,16 +362,7 @@ here rather than to a variant.
    `UpdateAgentRuntime` CLI semantics, and a guessed API is worse than a documented
    gap.
 
-   Worth knowing if that bothers you: because the tag is mutable and nothing
-   promotes it, there is no defined moment at which a running workload adopts a
-   rebuilt image — a task replaced for any unrelated reason picks up whatever the
-   tag points at now. Every build also pushes a second, version-qualified tag,
-   `<flavor>-<platform>-<folded-ref>-<sha256-prefix>`, which is stable for a given
-   `AshVersion` and is not republished by a rebuild of a different ref. Pointing a
-   workload at that tag instead of the moving one pins what it runs, at the cost of
-   a stack update to take a patch. The build echoes the computed tag into its log.
-   The stacks do not expose this as a parameter; it is a deliberate gap, noted here
-   rather than half-built.
+   Use `AshImageTag` if that bothers you. See below.
 4. **That the ASH image builds at all under these build arguments.** No Docker
    daemon was available, so no image was built. The derived Dockerfiles assume
    `awslambdaric` publishes a wheel for `linux/amd64` CPython 3.12 (no compiler is
