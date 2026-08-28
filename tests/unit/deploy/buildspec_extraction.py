@@ -39,7 +39,9 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 
 CDK_TEMPLATE_DIR = REPO_ROOT / "deploy" / "cdk" / "templates"
 
-DISTRIBUTED_PIPELINE_TEMPLATE = CDK_TEMPLATE_DIR / "AshDistributedPipeline.template.json"
+DISTRIBUTED_PIPELINE_TEMPLATE = (
+    CDK_TEMPLATE_DIR / "AshDistributedPipeline.template.json"
+)
 
 TERRAFORM_S3_SYNC = (
     REPO_ROOT

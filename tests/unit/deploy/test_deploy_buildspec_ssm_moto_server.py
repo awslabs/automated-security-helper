@@ -43,6 +43,7 @@ from __future__ import annotations
 import os
 import pathlib
 import subprocess
+from collections.abc import Callable
 
 import pytest
 
@@ -106,7 +107,7 @@ def run_ssm_command(
 
 
 @pytest.fixture
-def secure_parameter(ssm, unique_name) -> "callable[[str], str]":
+def secure_parameter(ssm, unique_name) -> Callable[[str], str]:
     """Put a SecureString parameter in moto and return its name."""
 
     def _put(value: str) -> str:
@@ -189,7 +190,9 @@ class TestDecryption:
         hard-coding moto's marker format.
         """
         name = secure_parameter(CONFIG_YAML)
-        undecrypted = ssm.get_parameter(Name=name, WithDecryption=False)["Parameter"]["Value"]
+        undecrypted = ssm.get_parameter(Name=name, WithDecryption=False)["Parameter"][
+            "Value"
+        ]
         assert undecrypted != CONFIG_YAML, (
             "moto returned identical values with and without decryption, so this "
             "test can no longer distinguish the two and needs a different control"
@@ -217,7 +220,11 @@ class TestDecryption:
 
         name = f"/{unique_name('ash/base-config-cmk')}"
         ssm.put_parameter(
-            Name=name, Value=CONFIG_YAML, Type="SecureString", KeyId=key_id, Overwrite=True
+            Name=name,
+            Value=CONFIG_YAML,
+            Type="SecureString",
+            KeyId=key_id,
+            Overwrite=True,
         )
 
         config = tmp_path / "ash-config" / ".ash.yaml"

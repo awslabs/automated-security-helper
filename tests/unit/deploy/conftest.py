@@ -45,7 +45,7 @@ import os
 import pathlib
 import sys
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
 import boto3
 import pytest
@@ -74,7 +74,9 @@ def _aws_isolation(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
     # Neither file exists, so a developer's ~/.aws cannot supply a profile,
     # a role_arn or a real key to these tests.
     monkeypatch.setenv("AWS_CONFIG_FILE", str(absent / "no-such-config"))
-    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(absent / "no-such-credentials"))
+    monkeypatch.setenv(
+        "AWS_SHARED_CREDENTIALS_FILE", str(absent / "no-such-credentials")
+    )
     monkeypatch.delenv("AWS_PROFILE", raising=False)
     # An EC2 or CodeBuild host would otherwise offer instance-role credentials.
     monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
@@ -130,7 +132,7 @@ def ssm(moto_endpoint: str):
 
 
 @pytest.fixture
-def unique_name() -> "callable[[str], str]":
+def unique_name() -> Callable[[str], str]:
     """Build a name no other test in this process will use.
 
     Required rather than tidy: the moto backend is shared across every server and
