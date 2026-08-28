@@ -385,6 +385,49 @@ class TestReadsTheAuthoritativeSignals:
             "MISSING scanner"
         )
 
+    def test_error_fires_when_every_summary_stats_counter_says_nothing_is_wrong(
+        self, tmp_path
+    ):
+        """The case that separates this fix from a ``summary_stats``-keyed one.
+
+        ERROR scanners are absent from every ``summary_stats`` counter -- not
+        ``failed``, not ``passed``, not ``missing``, not ``skipped``. Measured
+        twice on different infrastructure. A 4-shard pipeline with two arms and
+        one variable changed (shard 3's scanners forced into ERROR)::
+
+            arm A (control) merge exit 2  actionable=16 failed=1 passed=9 missing=0
+            arm B (broken)  merge exit 0  actionable=0  failed=0 passed=8 missing=0
+
+        Arm A proves the tree really holds 16 critical findings, so arm B's zero
+        is a loss. Arm A accounts for 10 scanners, arm B for 8.
+
+        Reproduced locally by a different mechanism -- ``UV_CACHE_DIR`` pointed at
+        a path whose parent is not a directory, which fails uv tool installs --
+        giving ``bandit=ERROR checkov=ERROR`` with
+        ``passed=0 failed=0 missing=0 skipped=8`` and a default ``ash scan`` exit
+        of 0.
+
+        So this model sets ``missing`` to 0 deliberately. A gate keyed on
+        ``summary_stats.missing`` reads 0 and returns 0; the per-scanner read
+        returns 1. Every other test here would pass under either implementation.
+        """
+        model = self._model_with("bandit", ScannerStatus.ERROR, "PASSED")
+        model.metadata.summary_stats.passed = 0
+        model.metadata.summary_stats.failed = 0
+        model.metadata.summary_stats.missing = 0
+        model.metadata.summary_stats.skipped = 8
+
+        assert model.metadata.summary_stats.missing == 0, (
+            "the fixture must present a clean missing counter, or this test cannot "
+            "distinguish the two implementations"
+        )
+
+        opts = _opts(tmp_path, fail_on_incomplete_scanners=True)
+        assert _compute_exit_code(model, opts) == 1, (
+            "an ERROR scanner must fail the gate even when every summary_stats "
+            "counter reads clean; ERROR appears in none of them"
+        )
+
     def test_error_is_reachable_at_all_which_summary_stats_cannot_express(self):
         """ERROR has no counter in ``SummaryStats``, so the gate cannot use one.
 

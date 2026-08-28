@@ -493,12 +493,79 @@ def selftest():
         print("               advisory only -- it reads False on missing scanners.")
         return 1
 
+    # The case that separates a real fix from an apparent one. ERROR scanners are
+    # absent from EVERY summary_stats counter -- not failed, not passed, not
+    # missing, not skipped -- so a checker or a fix keyed on summary_stats.missing
+    # reads 0 here and reports green over two scanners that ran and failed.
+    #
+    # MEASURED twice, on different infrastructure and by different mechanisms.
+    # A 4-shard CodePipeline run with shard 3's scanners forced into ERROR:
+    #   arm A (control) merge exit 2, actionable=16, failed=1 passed=9 missing=0
+    #   arm B (broken)  merge exit 0, actionable=0,  failed=0 passed=8 missing=0
+    # Arm A proves the tree really holds 16 critical findings, so arm B's zero is a
+    # loss and not an empty scan. 8 of 10 scanners accounted for; the two ERROR
+    # ones appear in no counter.
+    # Reproduced locally with UV_CACHE_DIR=/dev/null/<name>, which fails uv tool
+    # installs with "Not a directory (os error 20)":
+    #   scanner_results: bandit=ERROR checkov=ERROR, 8 SKIPPED
+    #   summary_stats:   passed=0 failed=0 missing=0 skipped=8
+    # Note chmod 500 does NOT work as a mechanism when the process runs as root,
+    # which CodeBuild does -- root bypasses ordinary permission bits and the arm
+    # silently becomes a no-op.
+    #
+    # missing is deliberately 0 here. The earlier understated case still had
+    # missing=4, so a missing-keyed checker passes it for the wrong reason; only a
+    # case where the two signals DISAGREE can tell the two implementations apart.
+    errored = {
+        "scanner_results": {
+            "bandit": {"status": "ERROR", "dependencies_satisfied": True},
+            "checkov": {"status": "ERROR", "dependencies_satisfied": True},
+            "grype": {"status": "SKIPPED", "dependencies_satisfied": True},
+        },
+        "metadata": {
+            "summary_stats": {
+                "passed": 0,
+                "failed": 0,
+                "missing": 0,
+                "skipped": 8,
+                "actionable": 0,
+                "total": 0,
+            },
+            "validation_summary": {
+                "execution_completion_validation": {
+                    "expected_count": 2,
+                    "completed_count": 2,
+                    "missing_count": 0,
+                    "completion_rate": 1.0,
+                    "has_issues": False,
+                }
+            },
+        },
+    }
+    f5 = Failures()
+    assert_integrity(errored, clean_case, invariants, f5)
+    if not f5.items:
+        print("SELFTEST FAIL: checker accepted a payload with bandit in ERROR while")
+        print("               summary_stats.missing was 0. ERROR is absent from every")
+        print("               summary_stats counter, so a checker keyed on")
+        print("               summary_stats.missing cannot see it. Iterate")
+        print("               scanner_results[*].status and treat ERROR and MISSING")
+        print("               as faults.")
+        return 1
+    if not any("ERROR" in item for item in f5.items):
+        print("SELFTEST FAIL: the ERROR payload was rejected, but not for being in")
+        print("               ERROR. The rejection has to come from the per-scanner")
+        print(f"               status check. Reasons given: {f5.items}")
+        return 1
+
     print("SELFTEST PASS")
     print("  rejects all-MISSING")
     print("  rejects empty (fail-closed)")
     print("  accepts sharded/SKIPPED (does not break sharding)")
     print("  rejects missing=4 with has_issues=False (not keyed on has_issues)")
+    print("  rejects ERROR with missing=0 (not keyed on summary_stats at all)")
     print(f"  primary rejection reason: {f4.items[0]}")
+    print(f"  ERROR-case rejection reason: {f5.items[0]}")
     return 0
 
 

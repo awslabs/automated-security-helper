@@ -109,10 +109,37 @@ faults and one `SKIPPED` scanner (accepted, and `SKIPPED` correctly not counted
 as a fault). Without the last two, an assertion that rejected every input would
 have looked correct on the first.
 
-## If you are writing the fix, key on `summary_stats.missing`
+## If you are writing the fix, key on per-scanner `scanner_results[*].status`
 
-Not on `validation_summary.*.has_issues`. That field looks like the signal for
-this and is not. Measured on 2026-08-28, on a run with four scanner tools absent:
+Treat both `ERROR` and `MISSING` as verdict-affecting. Not on
+`validation_summary.*.has_issues`, and **not on any `summary_stats` counter**.
+
+An earlier revision of this section said to key on `summary_stats.missing`. That
+is wrong for `ERROR` scanners, which are absent from *every* `summary_stats`
+counter — not `failed`, not `passed`, not `missing`, not `skipped`. Measured on a
+4-shard pipeline, two arms, one variable changed:
+
+```
+arm A (control): merge exit 2  actionable=16 failed=1 passed=9 missing=0 skipped=0
+arm B (broken):  merge exit 0  actionable=0  failed=0 passed=8 missing=0 skipped=0
+```
+
+Arm A proves the tree really holds 16 critical findings, so arm B's zero is a
+loss. Arm A's `failed + passed` is 10, every scanner accounted for; arm B's is 8.
+The two `ERROR` scanners are in no counter, and `missing` reads 0.
+
+Reproduced locally by a different mechanism with
+`UV_CACHE_DIR=/dev/null/<name>`, which fails uv tool installs with "Not a
+directory (os error 20)": `bandit=ERROR checkov=ERROR` with
+`passed=0 failed=0 missing=0 skipped=8`, default `ash scan` exiting 0.
+
+`summary_stats.missing` is still a correct signal *for MISSING* and is fine as a
+corroborating check. It is simply not sufficient. `--selftest` has a dedicated
+case with a scanner in `ERROR` while `summary_stats.missing` is 0, which a
+`summary_stats`-keyed checker cannot pass.
+
+The rest of this section is about a second field, which is wrong in a different
+way. Measured on 2026-08-28, on a run with four scanner tools absent:
 
 ```
 summary_stats                   -> missing: 4
@@ -144,8 +171,9 @@ selected — it is the mechanism sharding uses to exclude scanners. It must keep
 exiting 0. `MISSING` means selected but its dependencies were absent. `ERROR`
 means it ran and failed. Only the latter two are faults. A checker that required
 `skipped == 0` would fail every sharded run, get disabled as noisy, and protect
-nothing. `assert_case.py` asserts on `summary_stats.missing` and never on
-`skipped`. An early probe of this defect used a bogus scanner name, which produces
+nothing. `assert_case.py` asserts on the per-scanner status and on
+`summary_stats.missing`, and never on `skipped`. An early probe of this defect used
+a bogus scanner name, which produces
 `SKIPPED` rather than `MISSING` and was therefore the wrong experiment.
 
 **bandit grades by argument, not by call.** `subprocess.call("ls", shell=True)` on

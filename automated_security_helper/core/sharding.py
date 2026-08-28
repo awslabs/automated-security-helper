@@ -249,6 +249,26 @@ def verify_shard_coverage(assignments: Sequence[ShardAssignment]) -> None:
     would otherwise yield a well-formed report that is quietly missing whole
     scanners, or that counts some findings twice.
 
+    What this does NOT check, and where that check lives
+    ----------------------------------------------------
+    This function answers "did every shard report", not "did every shard report
+    something". It takes ``ShardAssignment`` objects, which by design hold the
+    assignment and not the outcome, so it cannot see a scanner's status at all: a
+    shard that is present, index-correct and carrying a valid assignment passes
+    every check below while having run nothing.
+
+    That gap is real and is covered by ``cli.merge._verify_shard_contributions``,
+    which refuses a shard that owned scanners and completed none of them. It lives
+    there rather than here for two reasons. It needs the shard *results*, not just
+    their assignments, and every other results-reading check
+    (``_collect_assignments``, ``_verify_scanner_union``) is already in that
+    module. And it is gated behind ``--fail-on-incomplete-scanners`` rather than
+    unconditional, because four of the ten default scanners report MISSING on a
+    machine without their tools installed -- whereas every condition below is
+    wrong in any environment. A function whose six checks are unconditional and
+    whose seventh depends on a flag would be harder to reason about than one that
+    consistently answers a narrower question.
+
     Args:
         assignments: One entry per shard result being merged.
 

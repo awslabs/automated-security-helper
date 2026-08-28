@@ -12,20 +12,66 @@ make it impossible to tell an author's recording from an adopter's.
 
 ## What changed on adoption, and what did not
 
-`expected.json` is byte-identical to the standalone original (md5
-`533ed34f599cd98d9e6fc36bb5d54234`). Every provenance label, the
-`known_defect.expected_to_fail` flag, and the advisory-only demotion of
-`validation_summary.*.has_issues` are exactly as written. Nothing was promoted
-from `specified` to `measured` here, including the values measured below — see
-"Left for the author" at the end.
+Every provenance label and the `known_defect.expected_to_fail` flag are exactly as
+written. Nothing was promoted from `specified` to `measured` here, including the
+values measured below — see "Left for the author" at the end.
 
-One file was changed: `assert_case.py` was run through `ruff format` (v0.11.8, the
-version pinned in the repository's `.pre-commit-config.yaml`). Whitespace only. The
-alternative — leaving it unformatted — was rejected because the repository's
-`ruff-format` pre-commit hook would rewrite it on whoever's commit next touched
-this tree, attributing the churn to them. Behaviour was verified unchanged after
-formatting: `--selftest` still passes all four cases, and `--replay` produces
+Two substantive changes, both to correct guidance that measurement showed was
+wrong. Neither touches an expectation, a label, or a flag.
+
+**`fix_must_key_on` no longer says `summary_stats.missing`.** It now requires
+iterating per-scanner `scanner_results[*].status` and treating both `ERROR` and
+`MISSING` as verdict-affecting. The old guidance was wrong for `ERROR` scanners,
+and a fix written to it would have passed the exact case this fixture exists to
+close. `README.md` gained the same correction. The advisory-only demotion of
+`validation_summary.*.has_issues` is untouched and still load-bearing.
+
+**`--selftest` gained a fifth case:** a scanner in `ERROR` while
+`summary_stats.missing` is 0, requiring rejection, and additionally requiring that
+the rejection reason mention `ERROR` so it must come from the per-scanner branch
+rather than the counter check. The four pre-existing cases are unchanged. Without
+this case a `summary_stats`-keyed checker passes the whole selftest, because every
+other case has `missing` above zero — the same agreeing-signals blind spot that
+produced the wrong guidance in the first place.
+
+`assert_case.py` was also run through `ruff format` (v0.11.8, the version pinned in
+the repository's `.pre-commit-config.yaml`). The alternative — leaving it
+unformatted — was rejected because the repository's `ruff-format` pre-commit hook
+would rewrite it on whoever's commit next touched this tree, attributing the churn
+to them. Behaviour was verified unchanged after formatting: `--replay` produced
 byte-identical output to the pre-format run.
+
+## Why `summary_stats` is not sufficient — measured here
+
+`ERROR` scanners are absent from **every** `summary_stats` counter. Reproduced
+locally with `UV_CACHE_DIR=/dev/null/<name>`, which fails uv tool installs with
+"Not a directory (os error 20)":
+
+```
+scanner_results: bandit=ERROR  checkov=ERROR  detect-secrets=PASSED
+                 cdk-nag/cfn-nag/grype/syft=MISSING  npm-audit/opengrep/semgrep=SKIPPED
+summary_stats:   passed=1 failed=0 missing=4 skipped=3   -> 8 of 10 scanners
+```
+
+The two `ERROR` scanners are in no counter. Then the discriminating case, with the
+four tool-less scanners excluded so `missing` is genuinely 0:
+
+```
+scanner_results: bandit=ERROR  checkov=ERROR  (8 SKIPPED)
+summary_stats:   passed=0 failed=0 missing=0 skipped=8
+ash scan default                        -> exit 0   <- false green, with ERROR
+ash scan --fail-on-incomplete-scanners  -> exit 1   <- names both ERROR scanners
+```
+
+A gate keyed on `summary_stats.missing` reads 0 there and exits 0. This is the same
+mechanism the author measured on a 4-shard pipeline (arm A control: merge exit 2,
+`actionable=16`, 10 scanners accounted for; arm B broken: merge exit 0,
+`actionable=0`, 8 accounted for), so it is confirmed on two independent
+infrastructures by two different mechanisms.
+
+`chmod 500` is not a usable mechanism when the process runs as root — root bypasses
+ordinary permission bits and the arm silently becomes a no-op, which reads as a
+result and is not one.
 
 `.ash/.ash.yaml` gained an `ignore_paths` entry for `cases/**`. Without it the
 repository's own ASH scan reports `cases/vulnerable/src/vulnerable.py`'s bandit
@@ -91,14 +137,19 @@ asserts, confirmed here through a live scan rather than a replay.
 
 ## What the fix keys on
 
-`expected.json` requires `metadata.summary_stats.missing` and/or per-scanner
-`scanner_results.<name>.status`, and forbids `validation_summary.*.has_issues`. The
-fix reads the **per-scanner status**, via `get_unified_scanner_metrics` — the same
-function that computes `summary_stats.missing`, so the two cannot disagree. Reading
-the per-scanner status additionally covers `ERROR`, which `summary_stats` cannot
-express: it has `passed`/`failed`/`missing`/`skipped` and no error counter.
-`tests/unit/interactions/test_fail_on_incomplete_scanners.py` pins both the field
-precedence and the immunity to `has_issues`.
+The fix reads the **per-scanner status**, via `get_unified_scanner_metrics`. That is
+the same function that computes `summary_stats.missing`, so the corroborating
+counter cannot disagree with the gate for `MISSING` — and reading one level
+upstream additionally covers `ERROR`, which `summary_stats` structurally cannot
+express: it carries `passed`/`failed`/`missing`/`skipped` and no error counter.
+
+`tests/unit/interactions/test_fail_on_incomplete_scanners.py` pins four properties
+that a plausible-but-wrong implementation would fail: the `scanner_results` versus
+`additional_reports` precedence, immunity to a clean `has_issues` block, the absence
+of an error counter on `SummaryStats`, and an `ERROR` scanner firing the gate while
+every `summary_stats` counter reads clean. That last one was verified to
+discriminate: on the same model, a `summary_stats.missing`-keyed gate finds no
+faults and the implemented gate returns `[('bandit', 'ERROR')]`.
 
 ## Known gaps preserved
 
