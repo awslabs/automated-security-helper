@@ -26,6 +26,7 @@ from automated_security_helper.core.enums import (
     ExecutionStrategy,
     ExportFormat,
     RunMode,
+    ScannerStatus,
 )
 from automated_security_helper.core.exceptions import (
     ASHConfigValidationError,
@@ -93,6 +94,12 @@ class ScanOptions(BaseModel):
     debug: bool = False
     color: bool = True
     fail_on_findings: Optional[bool] = None
+    # Fail when a selected scanner did not complete. None means "not set on the
+    # command line", which defers to the config file and then to off. Kept
+    # separate from fail_on_findings rather than folded into it because the two
+    # answer different questions: whether anything was found, and whether the
+    # scanners that were supposed to look actually ran.
+    fail_on_incomplete_scanners: Optional[bool] = None
     ignore_suppressions: bool = False
     min_severity: str = "low"
     changed_files_only: bool = False
@@ -151,6 +158,96 @@ class ScanOptions(BaseModel):
 _SEVERITY_RANK = {"critical": 3, "high": 3, "medium": 2, "low": 1, "none": 0}
 _SARIF_LEVEL_TO_SEVERITY = {"error": "high", "warning": "medium", "note": "low"}
 
+# ---------------------------------------------------------------------------
+# Scanner completeness
+#
+# The two statuses that mean "this scanner was selected and did not complete".
+# Derived from ScannerStatus rather than spelled as literals so a member added to
+# the enum surfaces here as a decision to make instead of silently defaulting to
+# "complete".
+#
+# SKIPPED is deliberately absent, and the distinction is load-bearing rather than
+# a nicety. SKIPPED means the scanner was not selected, and that is the mechanism
+# sharding uses to divide work: core.sharding.exclusions_for_shard excludes every
+# scanner the other shards own, so each shard of an n-way split records n-1
+# scanner sets as SKIPPED. Treating SKIPPED as incomplete would fail every shard
+# of a perfectly healthy sharded scan. Operator-level --exclude-scanners lands in
+# the same place, and an excluded scanner is one the operator said not to run.
+#
+# PASSED and FAILED both mean the scanner ran to completion; FAILED already
+# carries its verdict through the finding count.
+_INCOMPLETE_SCANNER_STATUSES = frozenset(
+    {ScannerStatus.ERROR.value, ScannerStatus.MISSING.value}
+)
+
+
+def incomplete_scanners(
+    results: Optional[AshAggregatedResults],
+) -> List[tuple[str, str]]:
+    """(name, status) for every scanner that was selected and did not complete.
+
+    Read through ``get_unified_scanner_metrics`` rather than off
+    ``results.scanner_results`` directly, so the gate and the report cannot
+    disagree: that function is what every reporter and the metrics table already
+    use, and it is where excluded-versus-missing precedence is decided.
+
+    Known limitation, measured rather than assumed. An allowlist narrowing --
+    ``--scanners bandit`` -- does not mark the unselected scanners as excluded, so
+    a scanner whose tool is absent still reports MISSING and will trip this gate
+    even though the operator did not ask for it. An explicit
+    ``--exclude-scanners`` does mark them, landing them at SKIPPED, which does
+    not trip it. Combining this gate with an allowlist therefore wants
+    ``--exclude-scanners`` (or the tools installed). Filtering here against
+    ``opts.scanners`` was considered and rejected: it would make the exit code
+    disagree with the status the report prints for the same scanner, and it has
+    no counterpart in ``ash merge``, which has no scanner selection to consult.
+
+    Args:
+        results: The aggregated results, or None when the scan produced none.
+
+    Returns:
+        Pairs in scanner-name order, empty when every selected scanner completed.
+    """
+    if results is None:
+        return []
+    return [
+        (metric.scanner_name, metric.status)
+        for metric in get_unified_scanner_metrics(asharp_model=results)
+        if metric.status in _INCOMPLETE_SCANNER_STATUSES
+    ]
+
+
+def _resolve_fail_on_incomplete_scanners(
+    results: Optional[AshAggregatedResults],
+    opts: ScanOptions,
+    config_value: Optional[bool],
+) -> bool:
+    """Whether the completeness gate is on, highest-precedence source first.
+
+    1. The command line, when the operator passed either form of the flag.
+    2. ``results.ash_config`` -- the config the scan actually ran under, so a
+       ``--config-overrides`` change to the field is honoured. Accepted only when
+       it is genuinely a ``bool``: this attribute is reached by ``getattr`` on
+       whatever object the caller supplied, and a partially-built model or a test
+       double would otherwise contribute a truthy non-answer.
+    3. *config_value* -- read from the config file before the scan, which is what
+       container mode has to fall back on and what ``ash merge`` passes from the
+       config carried in the shard results.
+    4. Off, so an environment that has always exited 0 with a missing tool keeps
+       doing so.
+    """
+    if opts.fail_on_incomplete_scanners is not None:
+        return opts.fail_on_incomplete_scanners
+
+    resolved_config = getattr(results, "ash_config", None)
+    from_results = getattr(resolved_config, "fail_on_incomplete_scanners", None)
+    if isinstance(from_results, bool):
+        return from_results
+
+    if config_value is not None:
+        return config_value
+    return False
+
 
 def _severity_filters_finding(result, min_sev_rank: int) -> bool:
     """Return True when *result* meets the minimum severity threshold."""
@@ -167,12 +264,16 @@ def _severity_filters_finding(result, min_sev_rank: int) -> bool:
 # Helper: resolve final AshLogLevel
 # ---------------------------------------------------------------------------
 
-def _resolve_config_fail_on_findings(opts: ScanOptions) -> Optional[bool]:
-    """Read fail_on_findings from the YAML config file, without loading the full orchestrator.
+def _load_config_file(opts: ScanOptions):
+    """Load the config file a scan of *opts* would use, or None.
 
-    Returns None when no config file is found or when the field is absent.
-    Used by both container and local mode so that YAML overrides are honoured
-    regardless of execution path.
+    Extracted so the two exit-code fields read from one place. Duplicating the
+    candidate search was the alternative, and it would let the two fields be read
+    from different files the moment the search changed in one copy.
+
+    Returns None when no config file is found or when it cannot be parsed --
+    parsing failures surface later through the orchestrator's own validation with
+    a message that names the problem, so swallowing them here loses nothing.
     """
     from automated_security_helper.config.ash_config import AshConfig
 
@@ -193,10 +294,31 @@ def _resolve_config_fail_on_findings(opts: ScanOptions) -> Optional[bool]:
         return None
 
     try:
-        cfg = AshConfig.from_file(Path(config_path_str))
-        return getattr(cfg, "fail_on_findings", None)
+        return AshConfig.from_file(Path(config_path_str))
     except Exception:
         return None
+
+
+def _resolve_config_fail_on_findings(opts: ScanOptions) -> Optional[bool]:
+    """Read fail_on_findings from the YAML config file, without loading the full orchestrator.
+
+    Returns None when no config file is found or when the field is absent.
+    Used by both container and local mode so that YAML overrides are honoured
+    regardless of execution path.
+    """
+    return getattr(_load_config_file(opts), "fail_on_findings", None)
+
+
+def _resolve_config_fail_on_incomplete_scanners(opts: ScanOptions) -> Optional[bool]:
+    """Read fail_on_incomplete_scanners from the YAML config file.
+
+    The sibling of :func:`_resolve_config_fail_on_findings`, and needed for the
+    same reason: container mode has to know the value before it builds the
+    container's command line, so it cannot wait for the orchestrator to resolve
+    the config. Returns None when there is no config file to read, which the
+    caller distinguishes from a file that sets the field to False.
+    """
+    return getattr(_load_config_file(opts), "fail_on_incomplete_scanners", None)
 
 
 def _resolve_log_level(opts: ScanOptions) -> AshLogLevel:
@@ -265,6 +387,7 @@ def _run_container_mode(
     opts: ScanOptions,
     logger,
     resolved_fail_on_findings: Optional[bool] = None,
+    resolved_fail_on_incomplete_scanners: Optional[bool] = None,
 ) -> AshAggregatedResults:
     """Run the scan inside the ASH container image and read its results back.
 
@@ -294,6 +417,11 @@ def _run_container_mode(
     # user mutates the config file between the host read and the container's own read.
     effective_fail_on_findings = (
         opts.fail_on_findings if opts.fail_on_findings is not None else resolved_fail_on_findings
+    )
+    effective_fail_on_incomplete_scanners = (
+        opts.fail_on_incomplete_scanners
+        if opts.fail_on_incomplete_scanners is not None
+        else resolved_fail_on_incomplete_scanners
     )
 
     container_result = run_ash_container(
@@ -327,6 +455,7 @@ def _run_container_mode(
         existing_results=opts.existing_results,
         python_based_plugins_only=opts.python_based_plugins_only,
         fail_on_findings=effective_fail_on_findings,
+        fail_on_incomplete_scanners=effective_fail_on_incomplete_scanners,
         ash_revision_to_install=opts.ash_revision_to_install,
         custom_containerfile=opts.custom_containerfile,
         custom_build_arg=opts.custom_build_arg,
@@ -764,18 +893,56 @@ def _print_workspace_summary(
 # which reads result.suppressions reliably through the Pydantic field accessor
 # (not a stale __dict__ key). The disk-re-read was masking the issue rather
 # than fixing it. Using in-memory results only is both correct and faster.
+#
+# Two independent questions, in this order:
+#
+#   1. Did the scanners that were supposed to run actually run? Gated by
+#      fail_on_incomplete_scanners, default off, exit 1.
+#   2. Did they find anything actionable? Gated by fail_on_findings, default on,
+#      exit 2.
+#
+# Deriving the verdict from finding counts alone -- which is what this function
+# did -- cannot tell "nothing was wrong" from "nothing was checked", because both
+# produce zero findings. Measured on this tree: a scan with four of ten scanners
+# MISSING exits 0, and a deployed run with five MISSING or ERROR reported a clean
+# scan of a repository a working scan flags at HIGH.
 # ---------------------------------------------------------------------------
 
 def _compute_exit_code(
     results: Optional[AshAggregatedResults],
     opts: ScanOptions,
     config_fail_on_findings: Optional[bool] = None,
+    config_fail_on_incomplete_scanners: Optional[bool] = None,
 ) -> int:
     if results is None:
         logging.getLogger(__name__).error(
             "ASH scan produced no results — scan may have crashed"
         )
         return 1
+
+    # Checked before the fail_on_findings resolution below, and deliberately so.
+    # An operator who runs with findings-gating off has said "do not fail me for
+    # what you find"; they have not said "do not tell me the scanners never ran".
+    # Placing this after the `not final_fail_on_findings` early return would make
+    # the gate dead for exactly the people who turned findings-gating off.
+    #
+    # 1 rather than 2, and 1 in preference to 2 when both hold. 1 is ASH's "error
+    # during execution" code, and an incomplete scan is that: the findings that
+    # were reported are real but the set is known to be partial. Reporting 2 would
+    # tell a reviewer that clearing the listed findings clears the scan, when some
+    # scanners contributed nothing. `ash merge` already uses 1 for its coverage
+    # refusals on the same reasoning -- the findings are unknown, which is not the
+    # same as "no findings".
+    if _resolve_fail_on_incomplete_scanners(
+        results, opts, config_fail_on_incomplete_scanners
+    ):
+        incomplete = incomplete_scanners(results)
+        if incomplete:
+            logging.getLogger(__name__).error(
+                "Scan incomplete: %s",
+                ", ".join(f"{name} ({status})" for name, status in incomplete),
+            )
+            return 1
 
     final_fail_on_findings: bool
     if opts.fail_on_findings is not None:
@@ -997,6 +1164,7 @@ def run_ash_scan(
     debug: bool = False,
     color: bool = True,
     fail_on_findings: bool | None = None,
+    fail_on_incomplete_scanners: bool | None = None,
     ignore_suppressions: bool = False,
     min_severity: str = "low",
     changed_files_only: bool = False,
@@ -1059,6 +1227,7 @@ def run_ash_scan(
         debug=debug,
         color=color,
         fail_on_findings=fail_on_findings,
+        fail_on_incomplete_scanners=fail_on_incomplete_scanners,
         ignore_suppressions=ignore_suppressions,
         min_severity=min_severity,
         changed_files_only=changed_files_only,
@@ -1100,9 +1269,17 @@ def run_ash_scan(
         return workspace_result
 
     config_fail_on_findings: Optional[bool] = _resolve_config_fail_on_findings(opts)
+    config_fail_on_incomplete_scanners: Optional[bool] = (
+        _resolve_config_fail_on_incomplete_scanners(opts)
+    )
     results: Optional[AshAggregatedResults]
     if opts.mode == RunMode.container:
-        results = _run_container_mode(opts, logger, resolved_fail_on_findings=config_fail_on_findings)
+        results = _run_container_mode(
+            opts,
+            logger,
+            resolved_fail_on_findings=config_fail_on_findings,
+            resolved_fail_on_incomplete_scanners=config_fail_on_incomplete_scanners,
+        )
     else:
         results, _local_config_fof = _run_local_mode(opts, logger)
         # _run_local_mode resolves config via the live orchestrator; prefer that
@@ -1130,7 +1307,12 @@ def run_ash_scan(
             sys.exit(exit_code)
         return results
 
-    exit_code = _compute_exit_code(results, opts, config_fail_on_findings)
+    exit_code = _compute_exit_code(
+        results,
+        opts,
+        config_fail_on_findings,
+        config_fail_on_incomplete_scanners,
+    )
 
     if opts.show_summary:
         scanner_metrics = get_unified_scanner_metrics(asharp_model=results) if results else []
@@ -1154,7 +1336,32 @@ def run_ash_scan(
             )
 
     if exit_code == 1:
-        print("[bold red]ERROR (1) Exiting due to exception during ASH scan[/bold red]")
+        # An incomplete scan and a crash share exit 1, so the message has to be
+        # chosen from the cause rather than the code. Printing "an exception
+        # occurred" for a run whose scanners simply were not installed sends the
+        # operator looking for a traceback that does not exist.
+        _incomplete = (
+            incomplete_scanners(results)
+            if _resolve_fail_on_incomplete_scanners(
+                results, opts, config_fail_on_incomplete_scanners
+            )
+            else []
+        )
+        if _incomplete:
+            print(
+                "\n[bold red]ERROR (1) Exiting because the scan was incomplete: "
+                f"{len(_incomplete)} selected scanner(s) did not run[/bold red]"
+            )
+            for _name, _status in _incomplete:
+                print(f"  [red]{_name}: {_status}[/red]")
+            print(
+                "[yellow]ERROR means the scanner ran and failed; MISSING means its "
+                "dependencies were unavailable. Install the missing tools, exclude "
+                "the scanners with --exclude-scanners, or drop "
+                "--fail-on-incomplete-scanners to accept a partial scan.[/yellow]"
+            )
+        else:
+            print("[bold red]ERROR (1) Exiting due to exception during ASH scan[/bold red]")
 
     if exit_code != 0:
         sys.exit(exit_code)

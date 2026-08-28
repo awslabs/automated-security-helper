@@ -1326,6 +1326,12 @@
           "title": "Fail On Findings",
           "type": "boolean"
         },
+        "fail_on_incomplete_scanners": {
+          "default": false,
+          "description": "Whether to exit with a non-zero code when a selected scanner did not complete -- status ERROR (ran and failed) or MISSING (dependencies unavailable, never ran). SKIPPED scanners are not selected and never trip this. Independent of fail_on_findings: one answers 'was anything found', this one answers 'did what I asked for actually run'. Defaults to False so that environments legitimately lacking a scanner's tool keep their current exit codes.",
+          "title": "Fail On Incomplete Scanners",
+          "type": "boolean"
+        },
         "global_settings": {
           "$ref": "#/$defs/AshConfigGlobalSettingsSection",
           "default": {
@@ -1335,6 +1341,7 @@
                 "allowed_paths": [],
                 "denied_paths": [
                   "/fail_on_findings",
+                  "/fail_on_incomplete_scanners",
                   "/global_settings/ignore_paths",
                   "/global_settings/suppressions",
                   "/reporters/bedrock-summary-reporter/options/aws_*",
@@ -1679,6 +1686,7 @@
               "allowed_paths": [],
               "denied_paths": [
                 "/fail_on_findings",
+                "/fail_on_incomplete_scanners",
                 "/global_settings/ignore_paths",
                 "/global_settings/suppressions",
                 "/reporters/bedrock-summary-reporter/options/aws_*",
@@ -1726,6 +1734,7 @@
             "allowed_paths": [],
             "denied_paths": [
               "/fail_on_findings",
+              "/fail_on_incomplete_scanners",
               "/global_settings/ignore_paths",
               "/global_settings/suppressions",
               "/reporters/bedrock-summary-reporter/options/aws_*",
@@ -15700,6 +15709,7 @@
         "denied_paths": {
           "default": [
             "/fail_on_findings",
+            "/fail_on_incomplete_scanners",
             "/global_settings/ignore_paths",
             "/global_settings/suppressions",
             "/reporters/bedrock-summary-reporter/options/aws_*",

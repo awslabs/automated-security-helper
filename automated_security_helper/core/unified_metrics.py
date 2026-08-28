@@ -77,7 +77,35 @@ class ScannerMetrics(ScannerSeverityCount):
     @computed_field
     @property
     def passed(self) -> bool:
-        """True when the scanner did not produce actionable failures."""
+        """True when the scanner did not produce actionable failures.
+
+        MISSING counts as passed, which reads wrong and is deliberate. Three
+        reasons it was left alone when the exit code was taught to distinguish an
+        incomplete scan from a clean one:
+
+        1. It is not the mechanism. ``run_ash_scan._compute_exit_code`` never
+           reads this field; it derives the verdict from finding counts and, when
+           ``fail_on_incomplete_scanners`` is set, from the statuses directly.
+           Flipping this would change report text while leaving the exit code
+           exactly as it was.
+        2. The unambiguous answer is already adjacent. Every consumer reaches this
+           through ``ReportContentEmitter.get_scanner_results()``, whose dict
+           carries ``status`` and ``dependencies_missing`` in the same row. Nothing
+           has to infer completeness from a boolean named ``passed``.
+        3. Changing it would move report output on the default path. As a
+           ``computed_field`` it is serialized, and ``flatjson_reporter`` puts
+           ``get_scanner_results()`` into ``ash.flat.json`` verbatim, so every
+           environment with a missing scanner tool -- four of ten on a stock
+           workstation -- would see these rows flip true to false. The behaviour is
+           also asserted on purpose in three places, including
+           ``tests/unit/models/test_severity_counts_typed.py`` and
+           ``tests/integration/test_scanner_statistics_flow.py``.
+
+        So read this as "produced no actionable findings", not as "ran and was
+        clean". For "did the scanners I selected actually run", use
+        ``run_ash_scan.incomplete_scanners`` or the ``status`` field. Making the
+        field mean the stricter thing is a report-schema change, not a bug fix.
+        """
         return self.status in ("PASSED", "SKIPPED", "MISSING")
 
 

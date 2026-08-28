@@ -19,6 +19,7 @@ These parameters are available across multiple ASH commands:
 | `--container-uid` | UID to use for the container user | |  | `scan` |
 | `--custom-build-arg` | Custom build arguments to pass to the container build | |  | `scan` |
 | `--custom-containerfile` | Path to a custom container definition (e.g. | |  | `scan` |
+| `--fail-on-incomplete-scanners` | Exit 1 when a selected scanner did not complete (`ERROR` or `MISSING`). Off by default; see [An incomplete scan is not a clean scan](#an-incomplete-scan-is-not-a-clean-scan). | |  | `scan` |
 | `--formats` | The output formats to use (comma-separated). | |  | `scan` |
 | `--min-severity` | Minimum severity to trigger non-zero exit code (critical, high, medium, low, none). | |  | `scan` |
 | `--progress` | Show progress of each job live in the console. Defaults to True. | |  | `scan` |
@@ -356,6 +357,7 @@ ash merge --results <file-or-dir> [--results ...] --output-dir <dir> [options]
 | `--output-formats`     | Comma-separated report formats to generate                                    | The formats the scan's own configuration asks for |                      |
 | `--min-severity`       | Minimum severity that counts as actionable for the exit code                  | `low`                                             |                      |
 | `--fail-on-findings`   | Exit non-zero when the merged report has actionable findings                   | The scan configuration's value, then `True`       |                      |
+| `--fail-on-incomplete-scanners` | Refuse the merge when a shard completed none of the scanners it owned, and exit 1 when any scanner in the union is `ERROR` or `MISSING` | The scan configuration's value, then `False` | |
 | `--log-level`          | Set the log level                                                             | `INFO`                                            |                      |
 | `--verbose`, `-v`      | Enable verbose logging                                                        | `False`                                           |                      |
 | `--debug`, `-d`        | Enable debug logging                                                          | `False`                                           |                      |
@@ -378,6 +380,14 @@ Coverage is verified before anything is merged, so a bad set of shards fails wit
 - a scanner appears in some shard's results but no shard was assigned it — the executors resolved different scanner sets, so no shard ran it and the union has a hole
 - the shard that owned a scanner recorded no result for it, leaving another shard's skip marker as the only trace
 
+With `--fail-on-incomplete-scanners`, one more:
+
+- a shard owned at least one scanner and completed none of them — every scanner it was asked to run came back `ERROR`, came back `MISSING`, or produced no entry at all
+
+That is the distributed form of the false-clean exit code, and none of the checks above can see it: they read shard indices and scanner names, never a status. A shard whose every scanner was `MISSING` satisfies all of them, contributes no findings because it ran nothing, and merges into a report that reads as a complete scan of the whole tree. The refusal happens before the merged report is written, so a downstream job that consumes the artifact rather than the exit code cannot pick up a partial report either.
+
+This one check is opt-in while the rest are unconditional. The others describe a set of shards that cannot reconstruct one scan whatever the environment; this one describes an environment — four of the ten default scanners are `MISSING` on a machine without their tools — so refusing by default would break merges that have nothing wrong with them. A shard that owned nothing is never an offender: a shard count above the scanner count leaves surplus shards with an empty assignment, and a shard asked to run nothing cannot have failed to run it.
+
 An unstamped results file is refused rather than treated as "probably the only shard". A whole unsharded scan and one shard of five are indistinguishable without that record, and guessing would let `ash merge` accept a single scan as a complete merge of a five-way split.
 
 The merged output carries no shard provenance of its own; it records `merged_shard_count` and `merged_shard_indices` instead. Copying the base shard's assignment through would make the merged file look like shard 0 of n, so a second `ash merge` over an output directory would accept it and report a whole scan as one fifth of itself.
@@ -387,7 +397,7 @@ The merged output carries no shard provenance of its own; it records `merged_sha
 | Code | Meaning                                                                       |
 |------|-------------------------------------------------------------------------------|
 | 0    | The shards reconstructed one whole scan and the union has no actionable findings |
-| 1    | The merge was refused — the scan's findings are unknown, not absent            |
+| 1    | The merge was refused, or a scanner in the union did not complete — the scan's findings are unknown, not absent |
 | 2    | The union has findings at or above `--min-severity`                            |
 
 Codes 1 and 2 are genuinely different situations. Code 2 means the merge succeeded and the union failed the threshold. Code 1 means no verdict was reached at all, which a CI gate must not read as a clean scan.
@@ -1029,6 +1039,49 @@ ASH returns the following exit codes:
 Code 4 is distinct from code 2 on purpose. Code 2 means a scan ran and found
 issues; code 4 means the workspace definition could not be used and no project
 was scanned at all.
+
+### An incomplete scan is not a clean scan
+
+By default the exit code is derived from finding counts alone, so a run where no
+scanner managed to start exits 0 — the same code as a clean scan, because no
+scanner produced any finding. A machine without cdk-nag, cfn-nag, grype and syft
+installed reports those four as `MISSING` and still exits 0.
+
+`--fail-on-incomplete-scanners` (config: `fail_on_incomplete_scanners: true`)
+makes that case exit 1 and prints which scanners did not run:
+
+```console
+$ ash scan --fail-on-incomplete-scanners
+ERROR (1) Exiting because the scan was incomplete: 4 selected scanner(s) did not run
+  cdk-nag: MISSING
+  cfn-nag: MISSING
+  grype: MISSING
+  syft: MISSING
+```
+
+Two statuses count as incomplete:
+
+- `ERROR` — the scanner ran and failed.
+- `MISSING` — the scanner's dependencies were unavailable, so it never ran.
+
+`SKIPPED` does not. A skipped scanner is one you did not select, which is also
+how sharding divides work between executors: each shard excludes the scanners its
+siblings own, and those land as `SKIPPED`. Gating on `SKIPPED` would fail every
+shard of a healthy sharded scan.
+
+The flag is off by default and turning it on is the only behaviour change. Two
+things to know before you enable it:
+
+- It takes precedence over `--fail-on-findings`. A run with both actionable
+  findings and an incomplete scanner exits 1, not 2, because clearing the
+  findings that were reported would not make the scan complete.
+- It is independent of `--fail-on-findings` in the other direction too:
+  `fail_on_findings: false` still reports an incomplete scan, since it says
+  nothing about whether the scanners ran.
+- `--scanners` does not mark the scanners it leaves out as excluded, so one whose
+  tool is absent still reports `MISSING` and will trip the gate even though you
+  did not ask for it. Narrow a gated run with `--exclude-scanners` instead, which
+  does mark them, or install the missing tools.
 
 `ash merge` uses the same vocabulary over the union of a sharded run: `0` clean,
 `1` the merge was refused so the union's findings are unknown, `2` findings at or

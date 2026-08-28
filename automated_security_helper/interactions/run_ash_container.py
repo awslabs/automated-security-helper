@@ -536,6 +536,9 @@ def _assemble_run_command(
     python_based_plugins_only: bool,
     cleanup: bool,
     inspect: bool,
+    # See fail_on_incomplete_scanners at the end of this signature: its sibling,
+    # kept there rather than here only because it needs a default and every
+    # parameter between the two has none.
     fail_on_findings: bool | None,
     phases: List,
     scanners: List[str],
@@ -552,10 +555,17 @@ def _assemble_run_command(
     allow_missing_projects: bool = False,
     shard_index: int | None = None,
     shard_count: int | None = None,
+    fail_on_incomplete_scanners: bool | None = None,
 ) -> List[str]:
     """Assemble the full `docker run` command list.
 
     Args:
+        fail_on_incomplete_scanners: Whether the in-container scan should fail
+            when a selected scanner did not complete, or None for unset. Defaults
+            to None so that the many existing callers -- most of them tests
+            building a command from a kwargs helper -- keep working; a required
+            parameter here buys nothing, because the host recomputes the verdict
+            from the results it reads back either way.
         shard_index: Zero-based shard index, or None for an unsharded scan.
         shard_count: Total shard count, or None. Emitted as a pair or not at all:
             the in-container CLI refuses a lone flag, so emitting one without the
@@ -657,6 +667,15 @@ def _assemble_run_command(
         ash_args.append("--fail-on-findings")
     elif fail_on_findings is not None:
         ash_args.append("--no-fail-on-findings")
+    # Forwarded so the in-container scan reaches the same verdict the host will.
+    # The host recomputes the exit code from the results it reads back, so a
+    # dropped flag would not change the final code -- but it would make the
+    # container print a clean summary for a scan the host then fails, and the
+    # container's log is what an operator reads first.
+    if fail_on_incomplete_scanners:
+        ash_args.append("--fail-on-incomplete-scanners")
+    elif fail_on_incomplete_scanners is not None:
+        ash_args.append("--no-fail-on-incomplete-scanners")
 
     for phase in phases:
         ash_args.extend(["--phases", phase.value if hasattr(phase, "value") else str(phase)])
@@ -756,6 +775,7 @@ def run_ash_container(
     debug: bool = False,
     color: bool = True,
     fail_on_findings: bool | None = None,
+    fail_on_incomplete_scanners: bool | None = None,
     # Container-specific args
     build: bool = True,
     run: bool = True,
@@ -1009,6 +1029,7 @@ def run_ash_container(
             cleanup=cleanup,
             inspect=inspect,
             fail_on_findings=fail_on_findings,
+            fail_on_incomplete_scanners=fail_on_incomplete_scanners,
             phases=phases,
             scanners=scanners,
             exclude_scanners=exclude_scanners,
