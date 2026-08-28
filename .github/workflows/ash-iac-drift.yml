@@ -642,7 +642,28 @@ jobs:
           # -printf is GNU find, which is what ubuntu-latest ships. %h is the
           # containing directory, so this yields every directory holding at
           # least one .tf file, modules and examples alike.
-          mapfile -t dirs < <(find deploy/terraform -type f -name '*.tf' -printf '%h\n' | sort -u)
+          #
+          # .terraform/ is excluded because terraform init vendors registry
+          # modules into it, and a vendored module ships its own examples and
+          # test fixtures. Those are third-party code this repo neither owns nor
+          # can fix, and several do not validate standalone -- measured: a
+          # vendored example requiring a "hashicorp/testing" provider fails init
+          # with a provider that does not exist in the registry. Without this
+          # exclusion the job goes red on somebody else's fixtures.
+          #
+          # On a clean checkout .terraform/ does not exist when this runs, so the
+          # exclusion matters for a tree that has one committed. Not relying on
+          # .gitignore to prevent that: the repo root ignore file does not cover
+          # .terraform/, so whether it is ignored depends on a file another
+          # directory owns, and a gate should not be one deleted line away from
+          # scanning vendored code.
+          #
+          # No matching exclusion on the fmt check above: terraform fmt -recursive
+          # skips dot-directories on its own. Measured on 1.12.1 with deliberately
+          # misformatted HCL under .terraform/ -- exit 0, no output. If that ever
+          # changes, the symptom is self-diagnosing, a failing fmt check naming a
+          # path under .terraform/.
+          mapfile -t dirs < <(find deploy/terraform -type f -name '*.tf' -not -path '*/.terraform/*' -printf '%h\n' | sort -u)
 
           # An empty list here would let the loop below validate nothing and
           # exit 0. The discover job already proved at least one .tf exists, so
