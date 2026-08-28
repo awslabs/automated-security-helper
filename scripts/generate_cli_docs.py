@@ -437,6 +437,7 @@ def generate_cli_docs() -> str:
     from automated_security_helper.cli.scan import run_ash_scan_cli_command
     from automated_security_helper.cli.image import build_ash_image_cli_command
     from automated_security_helper.cli.report import report_command
+    from automated_security_helper.cli.merge import merge_command
     from automated_security_helper.cli.config import config_app
     from automated_security_helper.cli.inspect import inspect_app
     from automated_security_helper.cli.main import _mcp_wrapper, get_genai_guide
@@ -479,6 +480,10 @@ def generate_cli_docs() -> str:
 
     # report command
     sections.append(render_command_section("report", report_command))
+
+    # merge command
+    sections.append(render_command_section("merge", merge_command,
+        "Merges the results of a sharded scan into one unified report."))
 
     # mcp command
     sections.append(render_command_section("mcp", _mcp_wrapper,
