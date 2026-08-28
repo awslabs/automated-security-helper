@@ -79,10 +79,6 @@ Failure modes and known limitations
   and per-project scanner fractions cannot be summed into a workspace fraction --
   the monitor's scanner estimate only ever grows and is capped below 1.0, so the
   sum would never reach completion.
-* ``ScanRegistry`` accepts only LOW/MEDIUM/HIGH/CRITICAL as a threshold, while an
-  ASH config may declare ALL. A project declaring ALL is registered at the
-  registry's default rather than refused; the real threshold is in the response
-  and in the workspace payload, which is where it is read from.
 """
 
 from __future__ import annotations
@@ -131,7 +127,7 @@ from automated_security_helper.workspace.execution import (
     WorkspaceRunResult,
     execute_workspace,
 )
-from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
+from automated_security_helper.workspace.plan import WorkspacePlan
 from automated_security_helper.workspace.resolver import resolve_workspace
 
 _logger = ASH_LOGGER
@@ -144,11 +140,11 @@ ProgressReporter = Callable[..., Awaitable[None]]
 #: what ``clean_output`` removes, and what the progress monitor watches for.
 AGGREGATED_RESULTS_FILENAME = "ash_aggregated_results.json"
 
-#: Thresholds ``ScanRegistry.register_scan`` accepts. An ASH config may also
-#: declare "ALL", which the registry rejects, so it is normalised away rather than
-#: allowed to refuse a whole workspace scan over a per-project setting.
-_REGISTRY_SEVERITY_THRESHOLDS = frozenset({"LOW", "MEDIUM", "HIGH", "CRITICAL"})
-_REGISTRY_DEFAULT_SEVERITY_THRESHOLD = "MEDIUM"
+#: What a project registers under when its plan carries no threshold at all.
+#: Matches ``ScanRegistry.register_scan``'s own default. Reachable only for a
+#: hand-built plan, which ``workspace/plan.py`` documents can exist; every plan
+#: ``resolve_workspace`` produces gives each active project a threshold.
+_UNSTATED_SEVERITY_THRESHOLD = "MEDIUM"
 
 #: Exception class to exit code. Ordered and explicit rather than a single
 #: ``except Exception``: reporting an ASH bug as exit 4 would send the operator to
@@ -417,31 +413,6 @@ def _prepare_project_outputs(
     return outputs
 
 
-def _registry_severity_threshold(project: ProjectPlan) -> str:
-    """The project's gate threshold, in the vocabulary the registry accepts.
-
-    ``ScanRegistry`` validates against LOW/MEDIUM/HIGH/CRITICAL, while an ASH
-    config may declare ALL. Passing ALL through would raise out of
-    ``register_scan`` and fail the whole workspace scan, which is a wildly
-    disproportionate response to one project asking to report everything -- so it
-    falls back to the registry's own default. The threshold the scan is actually
-    judged against is unaffected; it lives on the plan and in the workspace
-    payload, which is where consumers read it.
-    """
-    declared = project.gate_threshold
-    if declared and declared.upper() in _REGISTRY_SEVERITY_THRESHOLDS:
-        return declared.upper()
-    if declared:
-        _logger.debug(
-            "MCP workspace scan: project %r declares severity threshold %r, which "
-            "the scan registry cannot express; registering at %s instead.",
-            project.key,
-            declared,
-            _REGISTRY_DEFAULT_SEVERITY_THRESHOLD,
-        )
-    return _REGISTRY_DEFAULT_SEVERITY_THRESHOLD
-
-
 def _register_projects(
     plan: WorkspacePlan, project_outputs: Dict[str, Path]
 ) -> Dict[str, str]:
@@ -456,6 +427,10 @@ def _register_projects(
     already has an active scan, which a workspace sharing a project with another
     in-flight scan will hit; leaving the entries made before that point behind
     would block those directories for a scan that never ran.
+
+    The threshold registered is the project's own, verbatim -- including "ALL".
+    ``get_scan_progress`` echoes this value back, so substituting anything else
+    would report a scan at a threshold it is not being judged against.
     """
     registry = get_scan_registry()
     registered: Dict[str, str] = {}
@@ -464,7 +439,9 @@ def _register_projects(
             registered[project.key] = registry.register_scan(
                 directory_path=project.path,
                 output_directory=str(project_outputs[project.key]),
-                severity_threshold=_registry_severity_threshold(project),
+                severity_threshold=(
+                    project.gate_threshold or _UNSTATED_SEVERITY_THRESHOLD
+                ),
                 config_path=project.config_source,
             )
     except Exception:

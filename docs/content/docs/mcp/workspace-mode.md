@@ -156,7 +156,6 @@ The CLI's `ash --workspace --mode container` works by running `ash --workspace` 
 
 - **The scan is synchronous.** `run_ash_workspace_scan` returns when the whole workspace is done. It runs off the event loop so the server stays responsive to other sessions, and it emits progress notifications, but there is no early-return-with-a-handle form the way `run_ash_scan` has. For a large workspace, make sure your client's tool timeout accommodates the full run.
 - **Two spellings of one directory are a refusal, not a de-duplication.** A definition listing both `proj` and `proj/` is refused. De-duplicating silently would change what you asked for, and an operator who wrote two entries meant something by it.
-- **A project that declares `severity_threshold: ALL` registers at `MEDIUM`.** The scan registry's vocabulary is LOW/MEDIUM/HIGH/CRITICAL and cannot express `ALL`. The threshold the scan is actually judged against is unaffected — it is in `projects[].severity_threshold` in the response and in the workspace payload, which is where consumers read it. Only the registry entry's own metadata is coarser.
 - **A failed project writes no results file, so it never counts as complete in the progress stream.** Progress stops short rather than reaching the total. The verdict is in the return value, not in the progress notifications; progress is a liveness signal.
 
 ## Related documentation
