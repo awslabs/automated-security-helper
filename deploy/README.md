@@ -35,6 +35,38 @@ Every target builds the ASH container image into your own ECR repository as part
 deployment. None of them pull a prebuilt image, because there is no public one to
 pull. See [Trust and the container image](#trust-and-the-container-image).
 
+## What deploying actually costs you
+
+Building the image per deployment is the price of there being no public one, and it
+has consequences worth knowing before the first `create-stack` rather than after:
+
+- The first deployment includes a container build. It is slow — minutes, and longer
+  with `AshOfflineMode` enabled, which vendors scanner rulesets into the image.
+- Two of the targets cannot create their workload until that build finishes, so the
+  build gates stack creation rather than running alongside it. A stack that looks
+  stuck early on is usually waiting on the build.
+- `RebuildSchedule` patches the **repository**. Rolling a newly built image into an
+  already-running workload is a further step, documented per target — a rebuild
+  alone does not update a running service.
+- Deleting a stack leaves the ECR repository and the artifact buckets behind, on
+  purpose. An image that took twenty minutes to build should not vanish because a
+  rollback removed the stack that referenced it. Deleting them is a deliberate,
+  separate action.
+
+## Which tool, and where the detail lives
+
+`cdk/` holds the CDK apps and the synthesized templates in `cdk/templates/`. You can
+launch a template straight from the CloudFormation console without running `cdk` at
+all. `terraform/` mirrors the same targets with the same parameter names.
+
+The canonical parameter names live in `cdk/lib/ash-config.ts` and are treated as a
+contract: renaming one is a breaking change for adopters.
+
+Per-target detail, the verified service contracts, and the explicit list of things
+that were **not** verified without deploying are in `cdk/README.md` and
+`terraform/README.md`. Read the limitations before deploying; several of them change
+how a target should be configured.
+
 ## Shared parameters
 
 The CDK parameter names are given here. Terraform uses the same names in snake

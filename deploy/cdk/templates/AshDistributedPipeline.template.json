@@ -1,0 +1,4297 @@
+{
+ "Description": "Sharded ASH scan on CodePipeline: builds the ASH image, fans the scan across N CodeBuild jobs, then merges the shard results into a single verdict.",
+ "Parameters": {
+  "AshVersion": {
+   "Type": "String",
+   "Default": "v3.7.0",
+   "Description": "ASH git ref (tag, branch, or commit) to build the image from, for example v3.7.0. Pinning a tag makes the build reproducible; the scheduled rebuild still repulls base-image and OS patches for that same ASH revision.",
+   "MinLength": 1
+  },
+  "AshOfflineMode": {
+   "Type": "String",
+   "Default": "NO",
+   "AllowedValues": [
+    "YES",
+    "NO"
+   ],
+   "Description": "Build the ASH image in offline mode, vendoring scanner rulesets and tools into the image so scans need no network egress. Forwarded to the ASH Dockerfile's OFFLINE build argument. Offline images are larger and slower to build."
+  },
+  "RebuildSchedule": {
+   "Type": "String",
+   "Default": "rate(1 day)",
+   "Description": "EventBridge schedule expression for the image rebuild, for example \"rate(1 day)\" or \"cron(0 6 * * ? *)\". The rebuild repulls the base image and scanner tools so a long-lived deployment keeps getting OS and scanner patches without a stack update.",
+   "MinLength": 1
+  },
+  "AshBaseConfigYaml": {
+   "Type": "String",
+   "Default": "",
+   "Description": "Optional ASH configuration document (YAML). Stored in an SSM parameter and written to .ash/.ash.yaml inside the container at start. Leave empty to use ASH's built-in defaults. CloudFormation caps this at 4096 bytes; for a larger config, deploy empty and edit the SSM parameter afterwards (Advanced tier, 8 KB).",
+   "MaxLength": 4096
+  }
+ },
+ "Conditions": {
+  "ConfigHasBaseConfigA7D225A9": {
+   "Fn::Not": [
+    {
+     "Fn::Equals": [
+      {
+       "Ref": "AshBaseConfigYaml"
+      },
+      ""
+     ]
+    }
+   ]
+  }
+ },
+ "Resources": {
+  "ConfigBaseConfig623C762C": {
+   "Type": "AWS::SSM::Parameter",
+   "Properties": {
+    "Description": "ASH base configuration document, written to the container at start and applied through ASH_CONFIG. Edit here to change the deployment-wide config without a stack update; the next container start picks it up.",
+    "Tier": "Advanced",
+    "Type": "String",
+    "Value": {
+     "Fn::If": [
+      "ConfigHasBaseConfigA7D225A9",
+      {
+       "Ref": "AshBaseConfigYaml"
+      },
+      "# No ASH base configuration was supplied at deployment time."
+     ]
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Config/BaseConfig/Resource"
+   }
+  },
+  "ConfigMcpAuthHeaderSecret99D04B65": {
+   "Type": "AWS::SecretsManager::Secret",
+   "Properties": {
+    "Description": "Expected value of McpAuthHeaderName. The container is handed this ARN and resolves the value at start, so the secret never enters a task definition or a runtime environment-variable map.",
+    "SecretString": "ash-mcp-auth-disabled"
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete",
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Config/McpAuthHeaderSecret/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Automatic rotation would break authentication rather than improve it. ASH resolves this value once at container start and compares every request against it, so a rotated secret leaves running tasks validating the old value while callers send the new one, with no signal. The value is a shared secret the adopter also configures on the calling side, so any change has to be coordinated with callers regardless. Rotate by updating the secret and restarting the tasks.",
+       "id": "AwsSolutions-SMG4"
+      }
+     ]
+    }
+   }
+  },
+  "EncryptionKey1B843E66": {
+   "Type": "AWS::KMS::Key",
+   "Properties": {
+    "Description": "Encrypts ASH CodeBuild project output for this stack.",
+    "EnableKeyRotation": true,
+    "KeyPolicy": {
+     "Statement": [
+      {
+       "Action": "kms:*",
+       "Effect": "Allow",
+       "Principal": {
+        "AWS": {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":iam::",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":root"
+          ]
+         ]
+        }
+       },
+       "Resource": "*"
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain",
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/EncryptionKey/Resource"
+   }
+  },
+  "ImageRepositoryD8036990": {
+   "Type": "AWS::ECR::Repository",
+   "Properties": {
+    "ImageScanningConfiguration": {
+     "ScanOnPush": true
+    },
+    "ImageTagMutability": "MUTABLE",
+    "LifecyclePolicy": {
+     "LifecyclePolicyText": "{\"rules\":[{\"rulePriority\":1,\"description\":\"Keep the ten most recent images; older rebuilds are unreachable.\",\"selection\":{\"tagStatus\":\"any\",\"countType\":\"imageCountMoreThan\",\"countNumber\":10},\"action\":{\"type\":\"expire\"}}]}"
+    }
+   },
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain",
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Image/Repository/Resource"
+   }
+  },
+  "ImageBuildLogsBC6BBB2A": {
+   "Type": "AWS::Logs::LogGroup",
+   "Properties": {
+    "RetentionInDays": 30
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete",
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Image/BuildLogs/Resource"
+   }
+  },
+  "ImageBuildRole1BB51BF0": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "codebuild.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Image/Build/Role/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "ImageBuildRoleDefaultPolicy3DC330B3": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "ImageBuildLogsBC6BBB2A",
+         "Arn"
+        ]
+       }
+      },
+      {
+       "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":logs:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":log-group:/aws/codebuild/",
+           {
+            "Ref": "ImageBuild31565E2D"
+           },
+           ":*"
+          ]
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":logs:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":log-group:/aws/codebuild/",
+           {
+            "Ref": "ImageBuild31565E2D"
+           }
+          ]
+         ]
+        }
+       ]
+      },
+      {
+       "Action": [
+        "codebuild:BatchPutCodeCoverages",
+        "codebuild:BatchPutTestCases",
+        "codebuild:CreateReport",
+        "codebuild:CreateReportGroup",
+        "codebuild:UpdateReport"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":codebuild:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":report-group/",
+          {
+           "Ref": "ImageBuild31565E2D"
+          },
+          "-*"
+         ]
+        ]
+       }
+      },
+      {
+       "Action": [
+        "kms:Decrypt",
+        "kms:Encrypt",
+        "kms:GenerateDataKey*",
+        "kms:ReEncrypt*"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "EncryptionKey1B843E66",
+         "Arn"
+        ]
+       }
+      },
+      {
+       "Action": [
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:BatchGetImage",
+        "ecr:CompleteLayerUpload",
+        "ecr:GetDownloadUrlForLayer",
+        "ecr:InitiateLayerUpload",
+        "ecr:PutImage",
+        "ecr:UploadLayerPart"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "ImageRepositoryD8036990",
+         "Arn"
+        ]
+       }
+      },
+      {
+       "Action": "ecr:GetAuthorizationToken",
+       "Effect": "Allow",
+       "Resource": "*"
+      },
+      {
+       "Action": [
+        "s3:GetBucket*",
+        "s3:GetObject*",
+        "s3:List*"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "Artifacts82DD59A1",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "Artifacts82DD59A1",
+             "Arn"
+            ]
+           },
+           "/*"
+          ]
+         ]
+        }
+       ]
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "ImageBuildRoleDefaultPolicy3DC330B3",
+    "Roles": [
+     {
+      "Ref": "ImageBuildRole1BB51BF0"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Image/Build/Role/DefaultPolicy/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "ImageBuild31565E2D": {
+   "Type": "AWS::CodeBuild::Project",
+   "Properties": {
+    "Artifacts": {
+     "Type": "NO_ARTIFACTS"
+    },
+    "Cache": {
+     "Type": "NO_CACHE"
+    },
+    "Description": "Builds the ASH amd64 image (cli) into this account's ECR repository. ASH publishes no public image, so this build is what makes the deployment possible.",
+    "EncryptionKey": {
+     "Fn::GetAtt": [
+      "EncryptionKey1B843E66",
+      "Arn"
+     ]
+    },
+    "Environment": {
+     "ComputeType": "BUILD_GENERAL1_LARGE",
+     "EnvironmentVariables": [
+      {
+       "Name": "ASH_ECR_REPOSITORY_URI",
+       "Type": "PLAINTEXT",
+       "Value": {
+        "Fn::Join": [
+         "",
+         [
+          {
+           "Fn::Select": [
+            4,
+            {
+             "Fn::Split": [
+              ":",
+              {
+               "Fn::GetAtt": [
+                "ImageRepositoryD8036990",
+                "Arn"
+               ]
+              }
+             ]
+            }
+           ]
+          },
+          ".dkr.ecr.",
+          {
+           "Fn::Select": [
+            3,
+            {
+             "Fn::Split": [
+              ":",
+              {
+               "Fn::GetAtt": [
+                "ImageRepositoryD8036990",
+                "Arn"
+               ]
+              }
+             ]
+            }
+           ]
+          },
+          ".",
+          {
+           "Ref": "AWS::URLSuffix"
+          },
+          "/",
+          {
+           "Ref": "ImageRepositoryD8036990"
+          }
+         ]
+        ]
+       }
+      },
+      {
+       "Name": "ASH_VERSION",
+       "Type": "PLAINTEXT",
+       "Value": {
+        "Ref": "AshVersion"
+       }
+      },
+      {
+       "Name": "ASH_OFFLINE",
+       "Type": "PLAINTEXT",
+       "Value": {
+        "Ref": "AshOfflineMode"
+       }
+      },
+      {
+       "Name": "ASH_REPOSITORY_URL",
+       "Type": "PLAINTEXT",
+       "Value": "https://github.com/awslabs/automated-security-helper.git"
+      },
+      {
+       "Name": "ASH_BUILD_PLATFORM",
+       "Type": "PLAINTEXT",
+       "Value": "amd64"
+      },
+      {
+       "Name": "ASH_BUILD_FLAVORS",
+       "Type": "PLAINTEXT",
+       "Value": "cli"
+      }
+     ],
+     "Image": "aws/codebuild/amazonlinux-x86_64-standard:5.0",
+     "ImagePullCredentialsType": "CODEBUILD",
+     "PrivilegedMode": true,
+     "Type": "LINUX_CONTAINER"
+    },
+    "LogsConfig": {
+     "CloudWatchLogs": {
+      "GroupName": {
+       "Ref": "ImageBuildLogsBC6BBB2A"
+      },
+      "Status": "ENABLED"
+     }
+    },
+    "ServiceRole": {
+     "Fn::GetAtt": [
+      "ImageBuildRole1BB51BF0",
+      "Arn"
+     ]
+    },
+    "Source": {
+     "BuildSpec": {
+      "Fn::Join": [
+       "",
+       [
+        "{\n  \"version\": \"0.2\",\n  \"phases\": {\n    \"pre_build\": {\n      \"commands\": [\n        \"echo \\\"Building ASH ${ASH_VERSION} for ${ASH_BUILD_PLATFORM}: ${ASH_BUILD_FLAVORS}\\\"\",\n        \"aws ecr get-login-password --region ",
+        {
+         "Ref": "AWS::Region"
+        },
+        " | docker login --username AWS --password-stdin ",
+        {
+         "Ref": "AWS::AccountId"
+        },
+        ".dkr.ecr.",
+        {
+         "Ref": "AWS::Region"
+        },
+        ".",
+        {
+         "Ref": "AWS::URLSuffix"
+        },
+        "\",\n        \"git clone --depth 1 --branch \\\"${ASH_VERSION}\\\" \\\"${ASH_REPOSITORY_URL}\\\" ash-src\"\n      ]\n    },\n    \"build\": {\n      \"commands\": [\n        \"cat > ash-src/ash-mcp-entrypoint.sh <<'ASH_CDK_EOF'\\n#!/bin/sh\\n# Entrypoint for the ASH MCP server. Generated by the ASH CDK deployment\\n# targets; see deploy/cdk/lib/ash-container-scripts.ts.\\nset -eu\\n\\n# Materialize the deployment-wide ASH config, when one was supplied. Written to\\n# a fixed path and exported through ASH_CONFIG so it applies to every scan this\\n# process runs, not just scans of one directory.\\nif [ -n \\\"${ASH_BASE_CONFIG_SSM_PARAMETER:-}\\\" ]; then\\n  mkdir -p \\\"$(dirname \\\"${ASH_CONFIG:-/tmp/ash-config/.ash.yaml}\\\")\\\"\\n  python3 -c \\\"import os, sys, boto3; sys.stdout.write(boto3.client('ssm').get_parameter(Name=os.environ['ASH_BASE_CONFIG_SSM_PARAMETER'], WithDecryption=True)['Parameter']['Value'])\\\" \\\\\\n    > \\\"${ASH_CONFIG:-/tmp/ash-config/.ash.yaml}\\\"\\nelse\\n  # No config supplied. Unset ASH_CONFIG so ASH does not log a missing-file\\n  # notice on every scan and falls through to its built-in defaults.\\n  unset ASH_CONFIG || true\\nfi\\n\\n# Resolve the shared secret from its ARN. The ARN travels in the environment;\\n# the value never does, so it stays out of the template, the task definition and\\n# the runtime's environment-variable map.\\nASH_AUTH_VALUE=\\\"\\\"\\nif [ -n \\\"${ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN:-}\\\" ]; then\\n  ASH_AUTH_VALUE=$(python3 -c \\\"import os, sys, boto3; sys.stdout.write(boto3.client('secretsmanager').get_secret_value(SecretId=os.environ['ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN'])['SecretString'])\\\")\\nfi\\n\\nset -- ash mcp --transport streamable-http \\\\\\n  --host \\\"${ASH_MCP_HOST:-0.0.0.0}\\\" \\\\\\n  --port \\\"${ASH_MCP_PORT:-8000}\\\" \\\\\\n  --mount-path \\\"${ASH_MCP_MOUNT_PATH:-/mcp}\\\"\\n\\n# --stateless-http is spelled as a paired flag, so state the intent explicitly\\n# rather than relying on ASH's default staying put.\\nif [ \\\"${ASH_MCP_STATELESS:-true}\\\" = \\\"true\\\" ]; then\\n  set -- \\\"$@\\\" --stateless-http\\nelse\\n  set -- \\\"$@\\\" --no-stateless-http\\nfi\\n\\n# --allowed-host is repeatable. Split the comma-separated value so DNS-rebinding\\n# protection stays ON with one flag per known proxy hostname, instead of being\\n# relaxed wholesale by binding a non-loopback host.\\nif [ -n \\\"${ASH_MCP_ALLOWED_HOST:-}\\\" ]; then\\n  ASH_SAVED_IFS=$IFS\\n  IFS=,\\n  for ash_host in ${ASH_MCP_ALLOWED_HOST}; do\\n    if [ -n \\\"$ash_host\\\" ]; then\\n      set -- \\\"$@\\\" --allowed-host \\\"$ash_host\\\"\\n    fi\\n  done\\n  IFS=$ASH_SAVED_IFS\\nfi\\n\\n# Both halves are required: a header name with no value would make ASH compare\\n# against an empty secret.\\nif [ -n \\\"${ASH_MCP_AUTH_HEADER_NAME:-}\\\" ] && [ -n \\\"$ASH_AUTH_VALUE\\\" ]; then\\n  set -- \\\"$@\\\" --auth-header-name \\\"${ASH_MCP_AUTH_HEADER_NAME}\\\" --auth-header-value \\\"$ASH_AUTH_VALUE\\\"\\nelif [ -n \\\"${ASH_MCP_AUTH_HEADER_NAME:-}\\\" ]; then\\n  echo \\\"ash-mcp-entrypoint: McpAuthHeaderName was set but no secret value resolved; refusing to start an unauthenticated server that the deployment expected to authenticate.\\\" >&2\\n  exit 64\\nfi\\n\\nexec \\\"$@\\\"\\n\\nASH_CDK_EOF\",\n        \"cat > ash-src/ash_gate_handler.py <<'ASH_CDK_EOF'\\n# ASH one-shot CodeCommit pull-request gate.\\n# Generated by the ASH CDK deployment targets; see\\n# deploy/cdk/lib/ash-container-scripts.ts.\\nimport os\\nimport pathlib\\nimport subprocess\\nimport tempfile\\nimport uuid\\n\\nimport boto3\\n\\n# ASH's documented exit codes. 2 means a scan completed and found actionable\\n# findings, which is a gate failure but NOT an operational error; 1 and 3 mean\\n# ASH could not do its job. Treating them alike would report a broken scanner as\\n# a clean repository.\\nEXIT_SUCCESS = 0\\nEXIT_SCANNER_ERROR = 1\\nEXIT_ACTIONABLE_FINDINGS = 2\\nEXIT_INVALID_CONFIG = 3\\n\\n# Defensive bound. The PostCommentForPullRequest reference documents no length\\n# constraint on \\\"content\\\", so this is a safety margin rather than the API limit.\\nMAX_COMMENT_CHARS = 10000\\n\\n\\ndef _run(argv, **kwargs):\\n    return subprocess.run(argv, capture_output=True, text=True, **kwargs)\\n\\n\\ndef _scan_summary(output_dir):\\n    \\\"\\\"\\\"Prefer ASH's own markdown report; fall back to something truthful.\\\"\\\"\\\"\\n    report = pathlib.Path(output_dir) / \\\"reports\\\" / \\\"ash.summary.md\\\"\\n    if report.is_file():\\n        text = report.read_text(encoding=\\\"utf-8\\\", errors=\\\"replace\\\")\\n        if text.strip():\\n            return text\\n    return None\\n\\n\\ndef _verdict(exit_code):\\n    if exit_code == EXIT_SUCCESS:\\n        return \\\"passed\\\", \\\"No actionable findings at or above the configured threshold.\\\"\\n    if exit_code == EXIT_ACTIONABLE_FINDINGS:\\n        return \\\"failed\\\", \\\"ASH found actionable findings at or above the configured threshold.\\\"\\n    if exit_code == EXIT_INVALID_CONFIG:\\n        return \\\"errored\\\", \\\"ASH rejected its configuration, so nothing was scanned.\\\"\\n    if exit_code == EXIT_SCANNER_ERROR:\\n        return \\\"errored\\\", \\\"One or more scanners failed, so this result is incomplete.\\\"\\n    return \\\"errored\\\", \\\"ASH exited with unexpected code %d.\\\" % exit_code\\n\\n\\ndef handler(event, context):\\n    detail = event.get(\\\"detail\\\") or {}\\n    pull_request_id = detail.get(\\\"pullRequestId\\\")\\n    repository_names = detail.get(\\\"repositoryNames\\\") or []\\n    source_commit = detail.get(\\\"sourceCommit\\\")\\n    destination_commit = detail.get(\\\"destinationCommit\\\")\\n    revision_id = detail.get(\\\"revisionId\\\")\\n\\n    # repositoryNames is a list in the CodeCommit event payload, not a string.\\n    if not (pull_request_id and repository_names and source_commit and destination_commit):\\n        return {\\\"skipped\\\": \\\"event did not carry a complete pull request\\\", \\\"detail\\\": detail}\\n\\n    repository_name = repository_names[0]\\n    region = os.environ[\\\"AWS_REGION\\\"]\\n    codecommit = boto3.client(\\\"codecommit\\\")\\n\\n    workdir = tempfile.mkdtemp(dir=\\\"/tmp\\\")\\n    source_dir = os.path.join(workdir, \\\"src\\\")\\n    output_dir = os.path.join(workdir, \\\"out\\\")\\n\\n    clone = _run([\\\"git\\\", \\\"clone\\\", \\\"--no-single-branch\\\", \\\"--quiet\\\",\\n                  \\\"codecommit::%s://%s\\\" % (region, repository_name), source_dir])\\n    if clone.returncode != 0:\\n        body = \\\"## ASH scan errored\\\\n\\\\nCould not clone the repository:\\\\n\\\\n```\\\\n%s\\\\n```\\\\n\\\" % (\\n            (clone.stderr or \\\"\\\").strip()[:2000],\\n        )\\n        _post(codecommit, pull_request_id, repository_name, destination_commit, source_commit, body)\\n        raise RuntimeError(\\\"git clone failed for %s\\\" % repository_name)\\n\\n    checkout = _run([\\\"git\\\", \\\"-C\\\", source_dir, \\\"checkout\\\", \\\"--quiet\\\", source_commit])\\n    if checkout.returncode != 0:\\n        raise RuntimeError(\\\"could not check out %s: %s\\\" % (source_commit, checkout.stderr))\\n\\n    argv = [\\\"ash\\\", \\\"scan\\\", \\\"--source-dir\\\", source_dir, \\\"--output-dir\\\", output_dir,\\n            \\\"--no-progress\\\", \\\"--simple\\\", \\\"--compact-report\\\"]\\n    if os.environ.get(\\\"ASH_CHANGED_FILES_ONLY\\\", \\\"true\\\") == \\\"true\\\":\\n        # Diff against the pull request's destination commit, which is what the\\n        # reviewer is being asked to merge into.\\n        argv += [\\\"--changed-files-only\\\", \\\"--base-ref\\\", destination_commit]\\n    min_severity = os.environ.get(\\\"ASH_MIN_SEVERITY\\\")\\n    if min_severity:\\n        argv += [\\\"--min-severity\\\", min_severity]\\n\\n    scan = _run(argv, cwd=source_dir)\\n    verdict, explanation = _verdict(scan.returncode)\\n\\n    summary = _scan_summary(output_dir)\\n    parts = [\\\"## ASH scan %s\\\\n\\\" % verdict, explanation, \\\"\\\"]\\n    if summary:\\n        parts += [summary]\\n    else:\\n        tail = ((scan.stderr or scan.stdout or \\\"\\\").strip())[-2000:]\\n        parts += [\\\"ASH produced no markdown report. Tail of its output:\\\", \\\"\\\", \\\"```\\\", tail, \\\"```\\\"]\\n    parts += [\\\"\\\", \\\"_Scanned commit `%s` against `%s`._\\\" % (source_commit[:12], destination_commit[:12])]\\n    body = \\\"\\\\n\\\".join(parts)\\n\\n    _post(codecommit, pull_request_id, repository_name, destination_commit, source_commit, body)\\n\\n    if os.environ.get(\\\"ASH_APPROVAL_GATE\\\", \\\"false\\\") == \\\"true\\\" and revision_id:\\n        state = \\\"APPROVE\\\" if verdict == \\\"passed\\\" else \\\"REVOKE\\\"\\n        try:\\n            codecommit.update_pull_request_approval_state(\\n                pullRequestId=pull_request_id, revisionId=revision_id, approvalState=state)\\n        except codecommit.exceptions.PullRequestCannotBeApprovedByAuthorException:\\n            # The comment is already posted; only the vote is unavailable.\\n            pass\\n\\n    return {\\\"verdict\\\": verdict, \\\"exitCode\\\": scan.returncode, \\\"pullRequestId\\\": pull_request_id}\\n\\n\\ndef _post(codecommit, pull_request_id, repository_name, before_commit_id, after_commit_id, content):\\n    \\\"\\\"\\\"beforeCommitId is the destination tip and afterCommitId the source tip.\\n\\n    That ordering is the API's, not ours: PostCommentForPullRequest documents\\n    beforeCommitId as the destination-branch commit and afterCommitId as the\\n    current tip of the source branch. Swapping them attaches the comment to the\\n    wrong diff.\\n    \\\"\\\"\\\"\\n    codecommit.post_comment_for_pull_request(\\n        pullRequestId=pull_request_id,\\n        repositoryName=repository_name,\\n        beforeCommitId=before_commit_id,\\n        afterCommitId=after_commit_id,\\n        content=content[:MAX_COMMENT_CHARS],\\n        clientRequestToken=str(uuid.uuid4()),\\n    )\\n\\nASH_CDK_EOF\",\n        \"docker build --platform \\\"linux/${ASH_BUILD_PLATFORM}\\\" --target ci --build-arg \\\"OFFLINE=${ASH_OFFLINE}\\\" --build-arg \\\"INSTALL_ASH_REVISION=${ASH_VERSION}\\\" -t \\\"ash-base-ci:local\\\" ash-src\",\n        \"docker tag \\\"ash-base-ci:local\\\" \\\"ash-cli:local\\\"\",\n        \"docker tag \\\"ash-cli:local\\\" \\\"${ASH_ECR_REPOSITORY_URI}:cli-amd64\\\"\",\n        \"docker tag \\\"ash-cli:local\\\" \\\"${ASH_ECR_REPOSITORY_URI}:cli-amd64-${ASH_VERSION}\\\"\",\n        \"docker push \\\"${ASH_ECR_REPOSITORY_URI}:cli-amd64\\\"\",\n        \"docker push \\\"${ASH_ECR_REPOSITORY_URI}:cli-amd64-${ASH_VERSION}\\\"\"\n      ]\n    },\n    \"post_build\": {\n      \"commands\": [\n        \"if [ -n \\\"${CFN_RESPONSE_URL:-}\\\" ]; then\\n  if [ \\\"${CODEBUILD_BUILD_SUCCEEDING:-0}\\\" = \\\"1\\\" ]; then\\n    ASH_STATUS=SUCCESS\\n    ASH_REASON=\\\"ASH image build succeeded\\\"\\n  else\\n    ASH_STATUS=FAILED\\n    ASH_REASON=\\\"ASH image build failed; see CodeBuild build ${CODEBUILD_BUILD_ID:-unknown}\\\"\\n  fi\\n  python3 -c \\\"import json, os, sys, urllib.request; body = json.dumps({'Status': sys.argv[1], 'Reason': sys.argv[2], 'PhysicalResourceId': os.environ['CFN_LOGICAL_ID'], 'StackId': os.environ['CFN_STACK_ID'], 'RequestId': os.environ['CFN_REQUEST_ID'], 'LogicalResourceId': os.environ['CFN_LOGICAL_ID'], 'Data': {}}).encode(); req = urllib.request.Request(os.environ['CFN_RESPONSE_URL'], data=body, method='PUT', headers={'content-type': '', 'content-length': str(len(body))}); urllib.request.urlopen(req)\\\" \\\"$ASH_STATUS\\\" \\\"$ASH_REASON\\\"\\nfi\"\n      ]\n    }\n  }\n}"
+       ]
+      ]
+     },
+     "Type": "NO_SOURCE"
+    },
+    "TimeoutInMinutes": 120
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Image/Build/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "ImageBuildEventsRoleDF4F46F6": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "events.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Image/Build/EventsRole/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "ImageBuildEventsRoleDefaultPolicyB7206C02": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "codebuild:StartBuild",
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "ImageBuild31565E2D",
+         "Arn"
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "ImageBuildEventsRoleDefaultPolicyB7206C02",
+    "Roles": [
+     {
+      "Ref": "ImageBuildEventsRoleDF4F46F6"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Image/Build/EventsRole/DefaultPolicy/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "ImageRebuildScheduleC59CBD6A": {
+   "Type": "AWS::Events::Rule",
+   "Properties": {
+    "Description": "Rebuilds the ASH image so a long-lived deployment keeps receiving base-image, OS and scanner patches for the pinned ASH revision.",
+    "ScheduleExpression": {
+     "Ref": "RebuildSchedule"
+    },
+    "State": "ENABLED",
+    "Targets": [
+     {
+      "Arn": {
+       "Fn::GetAtt": [
+        "ImageBuild31565E2D",
+        "Arn"
+       ]
+      },
+      "Id": "Target0",
+      "RoleArn": {
+       "Fn::GetAtt": [
+        "ImageBuildEventsRoleDF4F46F6",
+        "Arn"
+       ]
+      }
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Image/RebuildSchedule/Resource"
+   }
+  },
+  "AccessLogs8B620ECA": {
+   "Type": "AWS::S3::Bucket",
+   "Properties": {
+    "BucketEncryption": {
+     "ServerSideEncryptionConfiguration": [
+      {
+       "ServerSideEncryptionByDefault": {
+        "SSEAlgorithm": "AES256"
+       }
+      }
+     ]
+    },
+    "PublicAccessBlockConfiguration": {
+     "BlockPublicAcls": true,
+     "BlockPublicPolicy": true,
+     "IgnorePublicAcls": true,
+     "RestrictPublicBuckets": true
+    }
+   },
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain",
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/AccessLogs/Resource"
+   }
+  },
+  "AccessLogsPolicyABDC4D2D": {
+   "Type": "AWS::S3::BucketPolicy",
+   "Properties": {
+    "Bucket": {
+     "Ref": "AccessLogs8B620ECA"
+    },
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "s3:*",
+       "Condition": {
+        "Bool": {
+         "aws:SecureTransport": "false"
+        }
+       },
+       "Effect": "Deny",
+       "Principal": {
+        "AWS": "*"
+       },
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "AccessLogs8B620ECA",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "AccessLogs8B620ECA",
+             "Arn"
+            ]
+           },
+           "/*"
+          ]
+         ]
+        }
+       ]
+      },
+      {
+       "Action": "s3:PutObject",
+       "Condition": {
+        "ArnLike": {
+         "aws:SourceArn": {
+          "Fn::GetAtt": [
+           "Source71E471F1",
+           "Arn"
+          ]
+         }
+        },
+        "StringEquals": {
+         "aws:SourceAccount": {
+          "Ref": "AWS::AccountId"
+         }
+        }
+       },
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "logging.s3.amazonaws.com"
+       },
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          {
+           "Fn::GetAtt": [
+            "AccessLogs8B620ECA",
+            "Arn"
+           ]
+          },
+          "/source/*"
+         ]
+        ]
+       }
+      },
+      {
+       "Action": "s3:PutObject",
+       "Condition": {
+        "ArnLike": {
+         "aws:SourceArn": {
+          "Fn::GetAtt": [
+           "Results25575328",
+           "Arn"
+          ]
+         }
+        },
+        "StringEquals": {
+         "aws:SourceAccount": {
+          "Ref": "AWS::AccountId"
+         }
+        }
+       },
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "logging.s3.amazonaws.com"
+       },
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          {
+           "Fn::GetAtt": [
+            "AccessLogs8B620ECA",
+            "Arn"
+           ]
+          },
+          "/results/*"
+         ]
+        ]
+       }
+      },
+      {
+       "Action": "s3:PutObject",
+       "Condition": {
+        "ArnLike": {
+         "aws:SourceArn": {
+          "Fn::GetAtt": [
+           "Artifacts82DD59A1",
+           "Arn"
+          ]
+         }
+        },
+        "StringEquals": {
+         "aws:SourceAccount": {
+          "Ref": "AWS::AccountId"
+         }
+        }
+       },
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "logging.s3.amazonaws.com"
+       },
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          {
+           "Fn::GetAtt": [
+            "AccessLogs8B620ECA",
+            "Arn"
+           ]
+          },
+          "/artifacts/*"
+         ]
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/AccessLogs/Policy/Resource"
+   }
+  },
+  "Source71E471F1": {
+   "Type": "AWS::S3::Bucket",
+   "Properties": {
+    "BucketEncryption": {
+     "ServerSideEncryptionConfiguration": [
+      {
+       "ServerSideEncryptionByDefault": {
+        "SSEAlgorithm": "AES256"
+       }
+      }
+     ]
+    },
+    "LoggingConfiguration": {
+     "DestinationBucketName": {
+      "Ref": "AccessLogs8B620ECA"
+     },
+     "LogFilePrefix": "source/"
+    },
+    "PublicAccessBlockConfiguration": {
+     "BlockPublicAcls": true,
+     "BlockPublicPolicy": true,
+     "IgnorePublicAcls": true,
+     "RestrictPublicBuckets": true
+    },
+    "VersioningConfiguration": {
+     "Status": "Enabled"
+    }
+   },
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain",
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Source/Resource"
+   }
+  },
+  "SourcePolicyE5AB5F73": {
+   "Type": "AWS::S3::BucketPolicy",
+   "Properties": {
+    "Bucket": {
+     "Ref": "Source71E471F1"
+    },
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "s3:*",
+       "Condition": {
+        "Bool": {
+         "aws:SecureTransport": "false"
+        }
+       },
+       "Effect": "Deny",
+       "Principal": {
+        "AWS": "*"
+       },
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "Source71E471F1",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "Source71E471F1",
+             "Arn"
+            ]
+           },
+           "/*"
+          ]
+         ]
+        }
+       ]
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Source/Policy/Resource"
+   }
+  },
+  "Results25575328": {
+   "Type": "AWS::S3::Bucket",
+   "Properties": {
+    "BucketEncryption": {
+     "ServerSideEncryptionConfiguration": [
+      {
+       "ServerSideEncryptionByDefault": {
+        "SSEAlgorithm": "AES256"
+       }
+      }
+     ]
+    },
+    "LifecycleConfiguration": {
+     "Rules": [
+      {
+       "ExpirationInDays": 30,
+       "Id": "ExpireShardResults",
+       "Status": "Enabled"
+      }
+     ]
+    },
+    "LoggingConfiguration": {
+     "DestinationBucketName": {
+      "Ref": "AccessLogs8B620ECA"
+     },
+     "LogFilePrefix": "results/"
+    },
+    "PublicAccessBlockConfiguration": {
+     "BlockPublicAcls": true,
+     "BlockPublicPolicy": true,
+     "IgnorePublicAcls": true,
+     "RestrictPublicBuckets": true
+    }
+   },
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain",
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Results/Resource"
+   }
+  },
+  "ResultsPolicy9F4743DA": {
+   "Type": "AWS::S3::BucketPolicy",
+   "Properties": {
+    "Bucket": {
+     "Ref": "Results25575328"
+    },
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "s3:*",
+       "Condition": {
+        "Bool": {
+         "aws:SecureTransport": "false"
+        }
+       },
+       "Effect": "Deny",
+       "Principal": {
+        "AWS": "*"
+       },
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "Results25575328",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "Results25575328",
+             "Arn"
+            ]
+           },
+           "/*"
+          ]
+         ]
+        }
+       ]
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Results/Policy/Resource"
+   }
+  },
+  "Artifacts82DD59A1": {
+   "Type": "AWS::S3::Bucket",
+   "Properties": {
+    "BucketEncryption": {
+     "ServerSideEncryptionConfiguration": [
+      {
+       "ServerSideEncryptionByDefault": {
+        "SSEAlgorithm": "AES256"
+       }
+      }
+     ]
+    },
+    "LoggingConfiguration": {
+     "DestinationBucketName": {
+      "Ref": "AccessLogs8B620ECA"
+     },
+     "LogFilePrefix": "artifacts/"
+    },
+    "PublicAccessBlockConfiguration": {
+     "BlockPublicAcls": true,
+     "BlockPublicPolicy": true,
+     "IgnorePublicAcls": true,
+     "RestrictPublicBuckets": true
+    }
+   },
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain",
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Artifacts/Resource"
+   }
+  },
+  "ArtifactsPolicy6E9058CC": {
+   "Type": "AWS::S3::BucketPolicy",
+   "Properties": {
+    "Bucket": {
+     "Ref": "Artifacts82DD59A1"
+    },
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "s3:*",
+       "Condition": {
+        "Bool": {
+         "aws:SecureTransport": "false"
+        }
+       },
+       "Effect": "Deny",
+       "Principal": {
+        "AWS": "*"
+       },
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "Artifacts82DD59A1",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "Artifacts82DD59A1",
+             "Arn"
+            ]
+           },
+           "/*"
+          ]
+         ]
+        }
+       ]
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Artifacts/Policy/Resource"
+   }
+  },
+  "Shard0ProjectRoleF3A1C5B4": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "codebuild.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard0Project/Role/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard0ProjectRoleDefaultPolicy287DD725": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:BatchGetImage",
+        "ecr:GetDownloadUrlForLayer"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "ImageRepositoryD8036990",
+         "Arn"
+        ]
+       }
+      },
+      {
+       "Action": "ecr:GetAuthorizationToken",
+       "Effect": "Allow",
+       "Resource": "*"
+      },
+      {
+       "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":logs:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":log-group:/aws/codebuild/",
+           {
+            "Ref": "Shard0Project06DF6494"
+           },
+           ":*"
+          ]
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":logs:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":log-group:/aws/codebuild/",
+           {
+            "Ref": "Shard0Project06DF6494"
+           }
+          ]
+         ]
+        }
+       ]
+      },
+      {
+       "Action": [
+        "codebuild:BatchPutCodeCoverages",
+        "codebuild:BatchPutTestCases",
+        "codebuild:CreateReport",
+        "codebuild:CreateReportGroup",
+        "codebuild:UpdateReport"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":codebuild:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":report-group/",
+          {
+           "Ref": "Shard0Project06DF6494"
+          },
+          "-*"
+         ]
+        ]
+       }
+      },
+      {
+       "Action": [
+        "kms:Decrypt",
+        "kms:Encrypt",
+        "kms:GenerateDataKey*",
+        "kms:ReEncrypt*"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "EncryptionKey1B843E66",
+         "Arn"
+        ]
+       }
+      },
+      {
+       "Action": [
+        "s3:Abort*",
+        "s3:DeleteObject*",
+        "s3:PutObject",
+        "s3:PutObjectLegalHold",
+        "s3:PutObjectRetention",
+        "s3:PutObjectTagging",
+        "s3:PutObjectVersionTagging"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "Results25575328",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "Results25575328",
+             "Arn"
+            ]
+           },
+           "/*"
+          ]
+         ]
+        }
+       ]
+      },
+      {
+       "Action": [
+        "ssm:DescribeParameters",
+        "ssm:GetParameter",
+        "ssm:GetParameterHistory",
+        "ssm:GetParameters"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":ssm:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":parameter/",
+          {
+           "Ref": "ConfigBaseConfig623C762C"
+          }
+         ]
+        ]
+       }
+      },
+      {
+       "Action": [
+        "secretsmanager:DescribeSecret",
+        "secretsmanager:GetSecretValue"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Ref": "ConfigMcpAuthHeaderSecret99D04B65"
+       }
+      },
+      {
+       "Action": [
+        "s3:GetBucket*",
+        "s3:GetObject*",
+        "s3:List*"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "Artifacts82DD59A1",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "Artifacts82DD59A1",
+             "Arn"
+            ]
+           },
+           "/*"
+          ]
+         ]
+        }
+       ]
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "Shard0ProjectRoleDefaultPolicy287DD725",
+    "Roles": [
+     {
+      "Ref": "Shard0ProjectRoleF3A1C5B4"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard0Project/Role/DefaultPolicy/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard0Project06DF6494": {
+   "Type": "AWS::CodeBuild::Project",
+   "Properties": {
+    "Artifacts": {
+     "Type": "NO_ARTIFACTS"
+    },
+    "Cache": {
+     "Type": "NO_CACHE"
+    },
+    "Description": "ASH scan shard 0 of 4.",
+    "EncryptionKey": {
+     "Fn::GetAtt": [
+      "EncryptionKey1B843E66",
+      "Arn"
+     ]
+    },
+    "Environment": {
+     "ComputeType": "BUILD_GENERAL1_LARGE",
+     "EnvironmentVariables": [
+      {
+       "Name": "ASH_SHARD_INDEX",
+       "Type": "PLAINTEXT",
+       "Value": "0"
+      },
+      {
+       "Name": "ASH_SHARD_COUNT",
+       "Type": "PLAINTEXT",
+       "Value": "4"
+      },
+      {
+       "Name": "ASH_RESULTS_BUCKET",
+       "Type": "PLAINTEXT",
+       "Value": {
+        "Ref": "Results25575328"
+       }
+      },
+      {
+       "Name": "ASH_BASE_CONFIG_SSM_PARAMETER",
+       "Type": "PLAINTEXT",
+       "Value": {
+        "Fn::If": [
+         "ConfigHasBaseConfigA7D225A9",
+         {
+          "Ref": "ConfigBaseConfig623C762C"
+         },
+         ""
+        ]
+       }
+      },
+      {
+       "Name": "ASH_CONFIG",
+       "Type": "PLAINTEXT",
+       "Value": "/tmp/ash-config/.ash.yaml"
+      }
+     ],
+     "Image": {
+      "Fn::Join": [
+       "",
+       [
+        {
+         "Fn::Select": [
+          4,
+          {
+           "Fn::Split": [
+            ":",
+            {
+             "Fn::GetAtt": [
+              "ImageRepositoryD8036990",
+              "Arn"
+             ]
+            }
+           ]
+          }
+         ]
+        },
+        ".dkr.ecr.",
+        {
+         "Fn::Select": [
+          3,
+          {
+           "Fn::Split": [
+            ":",
+            {
+             "Fn::GetAtt": [
+              "ImageRepositoryD8036990",
+              "Arn"
+             ]
+            }
+           ]
+          }
+         ]
+        },
+        ".",
+        {
+         "Ref": "AWS::URLSuffix"
+        },
+        "/",
+        {
+         "Ref": "ImageRepositoryD8036990"
+        },
+        ":cli-amd64"
+       ]
+      ]
+     },
+     "ImagePullCredentialsType": "SERVICE_ROLE",
+     "PrivilegedMode": false,
+     "Type": "LINUX_CONTAINER"
+    },
+    "ServiceRole": {
+     "Fn::GetAtt": [
+      "Shard0ProjectRoleF3A1C5B4",
+      "Arn"
+     ]
+    },
+    "Source": {
+     "BuildSpec": "{\n  \"version\": \"0.2\",\n  \"phases\": {\n    \"pre_build\": {\n      \"commands\": [\n        \"if [ -n \\\"${ASH_BASE_CONFIG_SSM_PARAMETER:-}\\\" ]; then\\n  mkdir -p \\\"$(dirname \\\"$ASH_CONFIG\\\")\\\"\\n  aws ssm get-parameter --name \\\"$ASH_BASE_CONFIG_SSM_PARAMETER\\\" --with-decryption \\\\\\n    --query Parameter.Value --output text > \\\"$ASH_CONFIG\\\"\\nelse\\n  echo \\\"No ASH base configuration supplied; ASH will use its built-in defaults.\\\"\\nfi\"\n      ]\n    },\n    \"build\": {\n      \"commands\": [\n        \"echo \\\"Scanning shard ${ASH_SHARD_INDEX} of ${ASH_SHARD_COUNT}\\\"\",\n        \"set +e\\nash scan --source-dir \\\"$CODEBUILD_SRC_DIR\\\" --output-dir ./ash-shard-output \\\\\\n  --shard-index \\\"$ASH_SHARD_INDEX\\\" --shard-count \\\"$ASH_SHARD_COUNT\\\" \\\\\\n  --no-fail-on-findings --no-progress --simple\\nASH_EXIT=$?\\nset -e\\n# ASH may have died before creating its output directory.\\nmkdir -p ./ash-shard-output\\necho \\\"$ASH_EXIT\\\" > ./ash-shard-output/.shard-exit-code\\necho \\\"shard ${ASH_SHARD_INDEX} finished with ASH exit code $ASH_EXIT\\\"\\nif [ ! -f ./ash-shard-output/ash_aggregated_results.json ]; then\\n  echo \\\"shard ${ASH_SHARD_INDEX} produced no ash_aggregated_results.json.\\\" >&2\\n  echo \\\"ASH exit code was $ASH_EXIT. Exit 2 from a usage error (for example an\\\" >&2\\n  echo \\\"unrecognized --no-fail-on-findings on an older ASH) looks identical to\\\" >&2\\n  echo \\\"exit 2 for findings, which is why this check looks for the results file\\\" >&2\\n  echo \\\"instead. Failing here rather than letting the merge report a clean scan\\\" >&2\\n  echo \\\"for scanners that never ran.\\\" >&2\\n  exit 1\\nfi\"\n      ]\n    },\n    \"post_build\": {\n      \"commands\": [\n        \"aws s3 cp --recursive --only-show-errors ./ash-shard-output \\\"s3://${ASH_RESULTS_BUCKET}/${ASH_RESULTS_PREFIX}/shard-${ASH_SHARD_INDEX}/\\\"\",\n        \"exit 0\"\n      ]\n    }\n  }\n}",
+     "Type": "NO_SOURCE"
+    },
+    "TimeoutInMinutes": 60
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard0Project/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard1ProjectRole6761C196": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "codebuild.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard1Project/Role/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard1ProjectRoleDefaultPolicy4B7CA148": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:BatchGetImage",
+        "ecr:GetDownloadUrlForLayer"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "ImageRepositoryD8036990",
+         "Arn"
+        ]
+       }
+      },
+      {
+       "Action": "ecr:GetAuthorizationToken",
+       "Effect": "Allow",
+       "Resource": "*"
+      },
+      {
+       "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":logs:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":log-group:/aws/codebuild/",
+           {
+            "Ref": "Shard1ProjectBE014382"
+           },
+           ":*"
+          ]
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":logs:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":log-group:/aws/codebuild/",
+           {
+            "Ref": "Shard1ProjectBE014382"
+           }
+          ]
+         ]
+        }
+       ]
+      },
+      {
+       "Action": [
+        "codebuild:BatchPutCodeCoverages",
+        "codebuild:BatchPutTestCases",
+        "codebuild:CreateReport",
+        "codebuild:CreateReportGroup",
+        "codebuild:UpdateReport"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":codebuild:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":report-group/",
+          {
+           "Ref": "Shard1ProjectBE014382"
+          },
+          "-*"
+         ]
+        ]
+       }
+      },
+      {
+       "Action": [
+        "kms:Decrypt",
+        "kms:Encrypt",
+        "kms:GenerateDataKey*",
+        "kms:ReEncrypt*"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "EncryptionKey1B843E66",
+         "Arn"
+        ]
+       }
+      },
+      {
+       "Action": [
+        "s3:Abort*",
+        "s3:DeleteObject*",
+        "s3:PutObject",
+        "s3:PutObjectLegalHold",
+        "s3:PutObjectRetention",
+        "s3:PutObjectTagging",
+        "s3:PutObjectVersionTagging"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "Results25575328",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "Results25575328",
+             "Arn"
+            ]
+           },
+           "/*"
+          ]
+         ]
+        }
+       ]
+      },
+      {
+       "Action": [
+        "ssm:DescribeParameters",
+        "ssm:GetParameter",
+        "ssm:GetParameterHistory",
+        "ssm:GetParameters"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":ssm:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":parameter/",
+          {
+           "Ref": "ConfigBaseConfig623C762C"
+          }
+         ]
+        ]
+       }
+      },
+      {
+       "Action": [
+        "secretsmanager:DescribeSecret",
+        "secretsmanager:GetSecretValue"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Ref": "ConfigMcpAuthHeaderSecret99D04B65"
+       }
+      },
+      {
+       "Action": [
+        "s3:GetBucket*",
+        "s3:GetObject*",
+        "s3:List*"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "Artifacts82DD59A1",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "Artifacts82DD59A1",
+             "Arn"
+            ]
+           },
+           "/*"
+          ]
+         ]
+        }
+       ]
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "Shard1ProjectRoleDefaultPolicy4B7CA148",
+    "Roles": [
+     {
+      "Ref": "Shard1ProjectRole6761C196"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard1Project/Role/DefaultPolicy/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard1ProjectBE014382": {
+   "Type": "AWS::CodeBuild::Project",
+   "Properties": {
+    "Artifacts": {
+     "Type": "NO_ARTIFACTS"
+    },
+    "Cache": {
+     "Type": "NO_CACHE"
+    },
+    "Description": "ASH scan shard 1 of 4.",
+    "EncryptionKey": {
+     "Fn::GetAtt": [
+      "EncryptionKey1B843E66",
+      "Arn"
+     ]
+    },
+    "Environment": {
+     "ComputeType": "BUILD_GENERAL1_LARGE",
+     "EnvironmentVariables": [
+      {
+       "Name": "ASH_SHARD_INDEX",
+       "Type": "PLAINTEXT",
+       "Value": "1"
+      },
+      {
+       "Name": "ASH_SHARD_COUNT",
+       "Type": "PLAINTEXT",
+       "Value": "4"
+      },
+      {
+       "Name": "ASH_RESULTS_BUCKET",
+       "Type": "PLAINTEXT",
+       "Value": {
+        "Ref": "Results25575328"
+       }
+      },
+      {
+       "Name": "ASH_BASE_CONFIG_SSM_PARAMETER",
+       "Type": "PLAINTEXT",
+       "Value": {
+        "Fn::If": [
+         "ConfigHasBaseConfigA7D225A9",
+         {
+          "Ref": "ConfigBaseConfig623C762C"
+         },
+         ""
+        ]
+       }
+      },
+      {
+       "Name": "ASH_CONFIG",
+       "Type": "PLAINTEXT",
+       "Value": "/tmp/ash-config/.ash.yaml"
+      }
+     ],
+     "Image": {
+      "Fn::Join": [
+       "",
+       [
+        {
+         "Fn::Select": [
+          4,
+          {
+           "Fn::Split": [
+            ":",
+            {
+             "Fn::GetAtt": [
+              "ImageRepositoryD8036990",
+              "Arn"
+             ]
+            }
+           ]
+          }
+         ]
+        },
+        ".dkr.ecr.",
+        {
+         "Fn::Select": [
+          3,
+          {
+           "Fn::Split": [
+            ":",
+            {
+             "Fn::GetAtt": [
+              "ImageRepositoryD8036990",
+              "Arn"
+             ]
+            }
+           ]
+          }
+         ]
+        },
+        ".",
+        {
+         "Ref": "AWS::URLSuffix"
+        },
+        "/",
+        {
+         "Ref": "ImageRepositoryD8036990"
+        },
+        ":cli-amd64"
+       ]
+      ]
+     },
+     "ImagePullCredentialsType": "SERVICE_ROLE",
+     "PrivilegedMode": false,
+     "Type": "LINUX_CONTAINER"
+    },
+    "ServiceRole": {
+     "Fn::GetAtt": [
+      "Shard1ProjectRole6761C196",
+      "Arn"
+     ]
+    },
+    "Source": {
+     "BuildSpec": "{\n  \"version\": \"0.2\",\n  \"phases\": {\n    \"pre_build\": {\n      \"commands\": [\n        \"if [ -n \\\"${ASH_BASE_CONFIG_SSM_PARAMETER:-}\\\" ]; then\\n  mkdir -p \\\"$(dirname \\\"$ASH_CONFIG\\\")\\\"\\n  aws ssm get-parameter --name \\\"$ASH_BASE_CONFIG_SSM_PARAMETER\\\" --with-decryption \\\\\\n    --query Parameter.Value --output text > \\\"$ASH_CONFIG\\\"\\nelse\\n  echo \\\"No ASH base configuration supplied; ASH will use its built-in defaults.\\\"\\nfi\"\n      ]\n    },\n    \"build\": {\n      \"commands\": [\n        \"echo \\\"Scanning shard ${ASH_SHARD_INDEX} of ${ASH_SHARD_COUNT}\\\"\",\n        \"set +e\\nash scan --source-dir \\\"$CODEBUILD_SRC_DIR\\\" --output-dir ./ash-shard-output \\\\\\n  --shard-index \\\"$ASH_SHARD_INDEX\\\" --shard-count \\\"$ASH_SHARD_COUNT\\\" \\\\\\n  --no-fail-on-findings --no-progress --simple\\nASH_EXIT=$?\\nset -e\\n# ASH may have died before creating its output directory.\\nmkdir -p ./ash-shard-output\\necho \\\"$ASH_EXIT\\\" > ./ash-shard-output/.shard-exit-code\\necho \\\"shard ${ASH_SHARD_INDEX} finished with ASH exit code $ASH_EXIT\\\"\\nif [ ! -f ./ash-shard-output/ash_aggregated_results.json ]; then\\n  echo \\\"shard ${ASH_SHARD_INDEX} produced no ash_aggregated_results.json.\\\" >&2\\n  echo \\\"ASH exit code was $ASH_EXIT. Exit 2 from a usage error (for example an\\\" >&2\\n  echo \\\"unrecognized --no-fail-on-findings on an older ASH) looks identical to\\\" >&2\\n  echo \\\"exit 2 for findings, which is why this check looks for the results file\\\" >&2\\n  echo \\\"instead. Failing here rather than letting the merge report a clean scan\\\" >&2\\n  echo \\\"for scanners that never ran.\\\" >&2\\n  exit 1\\nfi\"\n      ]\n    },\n    \"post_build\": {\n      \"commands\": [\n        \"aws s3 cp --recursive --only-show-errors ./ash-shard-output \\\"s3://${ASH_RESULTS_BUCKET}/${ASH_RESULTS_PREFIX}/shard-${ASH_SHARD_INDEX}/\\\"\",\n        \"exit 0\"\n      ]\n    }\n  }\n}",
+     "Type": "NO_SOURCE"
+    },
+    "TimeoutInMinutes": 60
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard1Project/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard2ProjectRole2D41E181": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "codebuild.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard2Project/Role/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard2ProjectRoleDefaultPolicy0E87B629": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:BatchGetImage",
+        "ecr:GetDownloadUrlForLayer"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "ImageRepositoryD8036990",
+         "Arn"
+        ]
+       }
+      },
+      {
+       "Action": "ecr:GetAuthorizationToken",
+       "Effect": "Allow",
+       "Resource": "*"
+      },
+      {
+       "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":logs:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":log-group:/aws/codebuild/",
+           {
+            "Ref": "Shard2Project48EB832B"
+           },
+           ":*"
+          ]
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":logs:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":log-group:/aws/codebuild/",
+           {
+            "Ref": "Shard2Project48EB832B"
+           }
+          ]
+         ]
+        }
+       ]
+      },
+      {
+       "Action": [
+        "codebuild:BatchPutCodeCoverages",
+        "codebuild:BatchPutTestCases",
+        "codebuild:CreateReport",
+        "codebuild:CreateReportGroup",
+        "codebuild:UpdateReport"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":codebuild:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":report-group/",
+          {
+           "Ref": "Shard2Project48EB832B"
+          },
+          "-*"
+         ]
+        ]
+       }
+      },
+      {
+       "Action": [
+        "kms:Decrypt",
+        "kms:Encrypt",
+        "kms:GenerateDataKey*",
+        "kms:ReEncrypt*"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "EncryptionKey1B843E66",
+         "Arn"
+        ]
+       }
+      },
+      {
+       "Action": [
+        "s3:Abort*",
+        "s3:DeleteObject*",
+        "s3:PutObject",
+        "s3:PutObjectLegalHold",
+        "s3:PutObjectRetention",
+        "s3:PutObjectTagging",
+        "s3:PutObjectVersionTagging"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "Results25575328",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "Results25575328",
+             "Arn"
+            ]
+           },
+           "/*"
+          ]
+         ]
+        }
+       ]
+      },
+      {
+       "Action": [
+        "ssm:DescribeParameters",
+        "ssm:GetParameter",
+        "ssm:GetParameterHistory",
+        "ssm:GetParameters"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":ssm:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":parameter/",
+          {
+           "Ref": "ConfigBaseConfig623C762C"
+          }
+         ]
+        ]
+       }
+      },
+      {
+       "Action": [
+        "secretsmanager:DescribeSecret",
+        "secretsmanager:GetSecretValue"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Ref": "ConfigMcpAuthHeaderSecret99D04B65"
+       }
+      },
+      {
+       "Action": [
+        "s3:GetBucket*",
+        "s3:GetObject*",
+        "s3:List*"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "Artifacts82DD59A1",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "Artifacts82DD59A1",
+             "Arn"
+            ]
+           },
+           "/*"
+          ]
+         ]
+        }
+       ]
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "Shard2ProjectRoleDefaultPolicy0E87B629",
+    "Roles": [
+     {
+      "Ref": "Shard2ProjectRole2D41E181"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard2Project/Role/DefaultPolicy/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard2Project48EB832B": {
+   "Type": "AWS::CodeBuild::Project",
+   "Properties": {
+    "Artifacts": {
+     "Type": "NO_ARTIFACTS"
+    },
+    "Cache": {
+     "Type": "NO_CACHE"
+    },
+    "Description": "ASH scan shard 2 of 4.",
+    "EncryptionKey": {
+     "Fn::GetAtt": [
+      "EncryptionKey1B843E66",
+      "Arn"
+     ]
+    },
+    "Environment": {
+     "ComputeType": "BUILD_GENERAL1_LARGE",
+     "EnvironmentVariables": [
+      {
+       "Name": "ASH_SHARD_INDEX",
+       "Type": "PLAINTEXT",
+       "Value": "2"
+      },
+      {
+       "Name": "ASH_SHARD_COUNT",
+       "Type": "PLAINTEXT",
+       "Value": "4"
+      },
+      {
+       "Name": "ASH_RESULTS_BUCKET",
+       "Type": "PLAINTEXT",
+       "Value": {
+        "Ref": "Results25575328"
+       }
+      },
+      {
+       "Name": "ASH_BASE_CONFIG_SSM_PARAMETER",
+       "Type": "PLAINTEXT",
+       "Value": {
+        "Fn::If": [
+         "ConfigHasBaseConfigA7D225A9",
+         {
+          "Ref": "ConfigBaseConfig623C762C"
+         },
+         ""
+        ]
+       }
+      },
+      {
+       "Name": "ASH_CONFIG",
+       "Type": "PLAINTEXT",
+       "Value": "/tmp/ash-config/.ash.yaml"
+      }
+     ],
+     "Image": {
+      "Fn::Join": [
+       "",
+       [
+        {
+         "Fn::Select": [
+          4,
+          {
+           "Fn::Split": [
+            ":",
+            {
+             "Fn::GetAtt": [
+              "ImageRepositoryD8036990",
+              "Arn"
+             ]
+            }
+           ]
+          }
+         ]
+        },
+        ".dkr.ecr.",
+        {
+         "Fn::Select": [
+          3,
+          {
+           "Fn::Split": [
+            ":",
+            {
+             "Fn::GetAtt": [
+              "ImageRepositoryD8036990",
+              "Arn"
+             ]
+            }
+           ]
+          }
+         ]
+        },
+        ".",
+        {
+         "Ref": "AWS::URLSuffix"
+        },
+        "/",
+        {
+         "Ref": "ImageRepositoryD8036990"
+        },
+        ":cli-amd64"
+       ]
+      ]
+     },
+     "ImagePullCredentialsType": "SERVICE_ROLE",
+     "PrivilegedMode": false,
+     "Type": "LINUX_CONTAINER"
+    },
+    "ServiceRole": {
+     "Fn::GetAtt": [
+      "Shard2ProjectRole2D41E181",
+      "Arn"
+     ]
+    },
+    "Source": {
+     "BuildSpec": "{\n  \"version\": \"0.2\",\n  \"phases\": {\n    \"pre_build\": {\n      \"commands\": [\n        \"if [ -n \\\"${ASH_BASE_CONFIG_SSM_PARAMETER:-}\\\" ]; then\\n  mkdir -p \\\"$(dirname \\\"$ASH_CONFIG\\\")\\\"\\n  aws ssm get-parameter --name \\\"$ASH_BASE_CONFIG_SSM_PARAMETER\\\" --with-decryption \\\\\\n    --query Parameter.Value --output text > \\\"$ASH_CONFIG\\\"\\nelse\\n  echo \\\"No ASH base configuration supplied; ASH will use its built-in defaults.\\\"\\nfi\"\n      ]\n    },\n    \"build\": {\n      \"commands\": [\n        \"echo \\\"Scanning shard ${ASH_SHARD_INDEX} of ${ASH_SHARD_COUNT}\\\"\",\n        \"set +e\\nash scan --source-dir \\\"$CODEBUILD_SRC_DIR\\\" --output-dir ./ash-shard-output \\\\\\n  --shard-index \\\"$ASH_SHARD_INDEX\\\" --shard-count \\\"$ASH_SHARD_COUNT\\\" \\\\\\n  --no-fail-on-findings --no-progress --simple\\nASH_EXIT=$?\\nset -e\\n# ASH may have died before creating its output directory.\\nmkdir -p ./ash-shard-output\\necho \\\"$ASH_EXIT\\\" > ./ash-shard-output/.shard-exit-code\\necho \\\"shard ${ASH_SHARD_INDEX} finished with ASH exit code $ASH_EXIT\\\"\\nif [ ! -f ./ash-shard-output/ash_aggregated_results.json ]; then\\n  echo \\\"shard ${ASH_SHARD_INDEX} produced no ash_aggregated_results.json.\\\" >&2\\n  echo \\\"ASH exit code was $ASH_EXIT. Exit 2 from a usage error (for example an\\\" >&2\\n  echo \\\"unrecognized --no-fail-on-findings on an older ASH) looks identical to\\\" >&2\\n  echo \\\"exit 2 for findings, which is why this check looks for the results file\\\" >&2\\n  echo \\\"instead. Failing here rather than letting the merge report a clean scan\\\" >&2\\n  echo \\\"for scanners that never ran.\\\" >&2\\n  exit 1\\nfi\"\n      ]\n    },\n    \"post_build\": {\n      \"commands\": [\n        \"aws s3 cp --recursive --only-show-errors ./ash-shard-output \\\"s3://${ASH_RESULTS_BUCKET}/${ASH_RESULTS_PREFIX}/shard-${ASH_SHARD_INDEX}/\\\"\",\n        \"exit 0\"\n      ]\n    }\n  }\n}",
+     "Type": "NO_SOURCE"
+    },
+    "TimeoutInMinutes": 60
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard2Project/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard3ProjectRole052E7B3A": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "codebuild.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard3Project/Role/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard3ProjectRoleDefaultPolicyB948A147": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:BatchGetImage",
+        "ecr:GetDownloadUrlForLayer"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "ImageRepositoryD8036990",
+         "Arn"
+        ]
+       }
+      },
+      {
+       "Action": "ecr:GetAuthorizationToken",
+       "Effect": "Allow",
+       "Resource": "*"
+      },
+      {
+       "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":logs:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":log-group:/aws/codebuild/",
+           {
+            "Ref": "Shard3Project3CB09F1D"
+           },
+           ":*"
+          ]
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":logs:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":log-group:/aws/codebuild/",
+           {
+            "Ref": "Shard3Project3CB09F1D"
+           }
+          ]
+         ]
+        }
+       ]
+      },
+      {
+       "Action": [
+        "codebuild:BatchPutCodeCoverages",
+        "codebuild:BatchPutTestCases",
+        "codebuild:CreateReport",
+        "codebuild:CreateReportGroup",
+        "codebuild:UpdateReport"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":codebuild:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":report-group/",
+          {
+           "Ref": "Shard3Project3CB09F1D"
+          },
+          "-*"
+         ]
+        ]
+       }
+      },
+      {
+       "Action": [
+        "kms:Decrypt",
+        "kms:Encrypt",
+        "kms:GenerateDataKey*",
+        "kms:ReEncrypt*"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "EncryptionKey1B843E66",
+         "Arn"
+        ]
+       }
+      },
+      {
+       "Action": [
+        "s3:Abort*",
+        "s3:DeleteObject*",
+        "s3:PutObject",
+        "s3:PutObjectLegalHold",
+        "s3:PutObjectRetention",
+        "s3:PutObjectTagging",
+        "s3:PutObjectVersionTagging"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "Results25575328",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "Results25575328",
+             "Arn"
+            ]
+           },
+           "/*"
+          ]
+         ]
+        }
+       ]
+      },
+      {
+       "Action": [
+        "ssm:DescribeParameters",
+        "ssm:GetParameter",
+        "ssm:GetParameterHistory",
+        "ssm:GetParameters"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":ssm:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":parameter/",
+          {
+           "Ref": "ConfigBaseConfig623C762C"
+          }
+         ]
+        ]
+       }
+      },
+      {
+       "Action": [
+        "secretsmanager:DescribeSecret",
+        "secretsmanager:GetSecretValue"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Ref": "ConfigMcpAuthHeaderSecret99D04B65"
+       }
+      },
+      {
+       "Action": [
+        "s3:GetBucket*",
+        "s3:GetObject*",
+        "s3:List*"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "Artifacts82DD59A1",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "Artifacts82DD59A1",
+             "Arn"
+            ]
+           },
+           "/*"
+          ]
+         ]
+        }
+       ]
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "Shard3ProjectRoleDefaultPolicyB948A147",
+    "Roles": [
+     {
+      "Ref": "Shard3ProjectRole052E7B3A"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard3Project/Role/DefaultPolicy/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard3Project3CB09F1D": {
+   "Type": "AWS::CodeBuild::Project",
+   "Properties": {
+    "Artifacts": {
+     "Type": "NO_ARTIFACTS"
+    },
+    "Cache": {
+     "Type": "NO_CACHE"
+    },
+    "Description": "ASH scan shard 3 of 4.",
+    "EncryptionKey": {
+     "Fn::GetAtt": [
+      "EncryptionKey1B843E66",
+      "Arn"
+     ]
+    },
+    "Environment": {
+     "ComputeType": "BUILD_GENERAL1_LARGE",
+     "EnvironmentVariables": [
+      {
+       "Name": "ASH_SHARD_INDEX",
+       "Type": "PLAINTEXT",
+       "Value": "3"
+      },
+      {
+       "Name": "ASH_SHARD_COUNT",
+       "Type": "PLAINTEXT",
+       "Value": "4"
+      },
+      {
+       "Name": "ASH_RESULTS_BUCKET",
+       "Type": "PLAINTEXT",
+       "Value": {
+        "Ref": "Results25575328"
+       }
+      },
+      {
+       "Name": "ASH_BASE_CONFIG_SSM_PARAMETER",
+       "Type": "PLAINTEXT",
+       "Value": {
+        "Fn::If": [
+         "ConfigHasBaseConfigA7D225A9",
+         {
+          "Ref": "ConfigBaseConfig623C762C"
+         },
+         ""
+        ]
+       }
+      },
+      {
+       "Name": "ASH_CONFIG",
+       "Type": "PLAINTEXT",
+       "Value": "/tmp/ash-config/.ash.yaml"
+      }
+     ],
+     "Image": {
+      "Fn::Join": [
+       "",
+       [
+        {
+         "Fn::Select": [
+          4,
+          {
+           "Fn::Split": [
+            ":",
+            {
+             "Fn::GetAtt": [
+              "ImageRepositoryD8036990",
+              "Arn"
+             ]
+            }
+           ]
+          }
+         ]
+        },
+        ".dkr.ecr.",
+        {
+         "Fn::Select": [
+          3,
+          {
+           "Fn::Split": [
+            ":",
+            {
+             "Fn::GetAtt": [
+              "ImageRepositoryD8036990",
+              "Arn"
+             ]
+            }
+           ]
+          }
+         ]
+        },
+        ".",
+        {
+         "Ref": "AWS::URLSuffix"
+        },
+        "/",
+        {
+         "Ref": "ImageRepositoryD8036990"
+        },
+        ":cli-amd64"
+       ]
+      ]
+     },
+     "ImagePullCredentialsType": "SERVICE_ROLE",
+     "PrivilegedMode": false,
+     "Type": "LINUX_CONTAINER"
+    },
+    "ServiceRole": {
+     "Fn::GetAtt": [
+      "Shard3ProjectRole052E7B3A",
+      "Arn"
+     ]
+    },
+    "Source": {
+     "BuildSpec": "{\n  \"version\": \"0.2\",\n  \"phases\": {\n    \"pre_build\": {\n      \"commands\": [\n        \"if [ -n \\\"${ASH_BASE_CONFIG_SSM_PARAMETER:-}\\\" ]; then\\n  mkdir -p \\\"$(dirname \\\"$ASH_CONFIG\\\")\\\"\\n  aws ssm get-parameter --name \\\"$ASH_BASE_CONFIG_SSM_PARAMETER\\\" --with-decryption \\\\\\n    --query Parameter.Value --output text > \\\"$ASH_CONFIG\\\"\\nelse\\n  echo \\\"No ASH base configuration supplied; ASH will use its built-in defaults.\\\"\\nfi\"\n      ]\n    },\n    \"build\": {\n      \"commands\": [\n        \"echo \\\"Scanning shard ${ASH_SHARD_INDEX} of ${ASH_SHARD_COUNT}\\\"\",\n        \"set +e\\nash scan --source-dir \\\"$CODEBUILD_SRC_DIR\\\" --output-dir ./ash-shard-output \\\\\\n  --shard-index \\\"$ASH_SHARD_INDEX\\\" --shard-count \\\"$ASH_SHARD_COUNT\\\" \\\\\\n  --no-fail-on-findings --no-progress --simple\\nASH_EXIT=$?\\nset -e\\n# ASH may have died before creating its output directory.\\nmkdir -p ./ash-shard-output\\necho \\\"$ASH_EXIT\\\" > ./ash-shard-output/.shard-exit-code\\necho \\\"shard ${ASH_SHARD_INDEX} finished with ASH exit code $ASH_EXIT\\\"\\nif [ ! -f ./ash-shard-output/ash_aggregated_results.json ]; then\\n  echo \\\"shard ${ASH_SHARD_INDEX} produced no ash_aggregated_results.json.\\\" >&2\\n  echo \\\"ASH exit code was $ASH_EXIT. Exit 2 from a usage error (for example an\\\" >&2\\n  echo \\\"unrecognized --no-fail-on-findings on an older ASH) looks identical to\\\" >&2\\n  echo \\\"exit 2 for findings, which is why this check looks for the results file\\\" >&2\\n  echo \\\"instead. Failing here rather than letting the merge report a clean scan\\\" >&2\\n  echo \\\"for scanners that never ran.\\\" >&2\\n  exit 1\\nfi\"\n      ]\n    },\n    \"post_build\": {\n      \"commands\": [\n        \"aws s3 cp --recursive --only-show-errors ./ash-shard-output \\\"s3://${ASH_RESULTS_BUCKET}/${ASH_RESULTS_PREFIX}/shard-${ASH_SHARD_INDEX}/\\\"\",\n        \"exit 0\"\n      ]\n    }\n  }\n}",
+     "Type": "NO_SOURCE"
+    },
+    "TimeoutInMinutes": 60
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard3Project/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "MergeProjectRoleE1E953C0": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "codebuild.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/MergeProject/Role/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "MergeProjectRoleDefaultPolicy82EB8D60": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:BatchGetImage",
+        "ecr:GetDownloadUrlForLayer"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "ImageRepositoryD8036990",
+         "Arn"
+        ]
+       }
+      },
+      {
+       "Action": "ecr:GetAuthorizationToken",
+       "Effect": "Allow",
+       "Resource": "*"
+      },
+      {
+       "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":logs:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":log-group:/aws/codebuild/",
+           {
+            "Ref": "MergeProject4EB0C9A5"
+           },
+           ":*"
+          ]
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":logs:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":log-group:/aws/codebuild/",
+           {
+            "Ref": "MergeProject4EB0C9A5"
+           }
+          ]
+         ]
+        }
+       ]
+      },
+      {
+       "Action": [
+        "codebuild:BatchPutCodeCoverages",
+        "codebuild:BatchPutTestCases",
+        "codebuild:CreateReport",
+        "codebuild:CreateReportGroup",
+        "codebuild:UpdateReport"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":codebuild:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":report-group/",
+          {
+           "Ref": "MergeProject4EB0C9A5"
+          },
+          "-*"
+         ]
+        ]
+       }
+      },
+      {
+       "Action": [
+        "kms:Decrypt",
+        "kms:Encrypt",
+        "kms:GenerateDataKey*",
+        "kms:ReEncrypt*"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "EncryptionKey1B843E66",
+         "Arn"
+        ]
+       }
+      },
+      {
+       "Action": [
+        "s3:Abort*",
+        "s3:DeleteObject*",
+        "s3:GetBucket*",
+        "s3:GetObject*",
+        "s3:List*",
+        "s3:PutObject",
+        "s3:PutObjectLegalHold",
+        "s3:PutObjectRetention",
+        "s3:PutObjectTagging",
+        "s3:PutObjectVersionTagging"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "Results25575328",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "Results25575328",
+             "Arn"
+            ]
+           },
+           "/*"
+          ]
+         ]
+        }
+       ]
+      },
+      {
+       "Action": [
+        "ssm:DescribeParameters",
+        "ssm:GetParameter",
+        "ssm:GetParameterHistory",
+        "ssm:GetParameters"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":ssm:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":parameter/",
+          {
+           "Ref": "ConfigBaseConfig623C762C"
+          }
+         ]
+        ]
+       }
+      },
+      {
+       "Action": [
+        "secretsmanager:DescribeSecret",
+        "secretsmanager:GetSecretValue"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Ref": "ConfigMcpAuthHeaderSecret99D04B65"
+       }
+      },
+      {
+       "Action": [
+        "s3:GetBucket*",
+        "s3:GetObject*",
+        "s3:List*"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "Artifacts82DD59A1",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "Artifacts82DD59A1",
+             "Arn"
+            ]
+           },
+           "/*"
+          ]
+         ]
+        }
+       ]
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "MergeProjectRoleDefaultPolicy82EB8D60",
+    "Roles": [
+     {
+      "Ref": "MergeProjectRoleE1E953C0"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/MergeProject/Role/DefaultPolicy/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "MergeProject4EB0C9A5": {
+   "Type": "AWS::CodeBuild::Project",
+   "Properties": {
+    "Artifacts": {
+     "Type": "NO_ARTIFACTS"
+    },
+    "Cache": {
+     "Type": "NO_CACHE"
+    },
+    "Description": "Merges 4 ASH shard result sets and owns the pass/fail verdict for the pipeline.",
+    "EncryptionKey": {
+     "Fn::GetAtt": [
+      "EncryptionKey1B843E66",
+      "Arn"
+     ]
+    },
+    "Environment": {
+     "ComputeType": "BUILD_GENERAL1_LARGE",
+     "EnvironmentVariables": [
+      {
+       "Name": "ASH_SHARD_COUNT",
+       "Type": "PLAINTEXT",
+       "Value": "4"
+      },
+      {
+       "Name": "ASH_RESULTS_BUCKET",
+       "Type": "PLAINTEXT",
+       "Value": {
+        "Ref": "Results25575328"
+       }
+      },
+      {
+       "Name": "ASH_BASE_CONFIG_SSM_PARAMETER",
+       "Type": "PLAINTEXT",
+       "Value": {
+        "Fn::If": [
+         "ConfigHasBaseConfigA7D225A9",
+         {
+          "Ref": "ConfigBaseConfig623C762C"
+         },
+         ""
+        ]
+       }
+      },
+      {
+       "Name": "ASH_CONFIG",
+       "Type": "PLAINTEXT",
+       "Value": "/tmp/ash-config/.ash.yaml"
+      }
+     ],
+     "Image": {
+      "Fn::Join": [
+       "",
+       [
+        {
+         "Fn::Select": [
+          4,
+          {
+           "Fn::Split": [
+            ":",
+            {
+             "Fn::GetAtt": [
+              "ImageRepositoryD8036990",
+              "Arn"
+             ]
+            }
+           ]
+          }
+         ]
+        },
+        ".dkr.ecr.",
+        {
+         "Fn::Select": [
+          3,
+          {
+           "Fn::Split": [
+            ":",
+            {
+             "Fn::GetAtt": [
+              "ImageRepositoryD8036990",
+              "Arn"
+             ]
+            }
+           ]
+          }
+         ]
+        },
+        ".",
+        {
+         "Ref": "AWS::URLSuffix"
+        },
+        "/",
+        {
+         "Ref": "ImageRepositoryD8036990"
+        },
+        ":cli-amd64"
+       ]
+      ]
+     },
+     "ImagePullCredentialsType": "SERVICE_ROLE",
+     "PrivilegedMode": false,
+     "Type": "LINUX_CONTAINER"
+    },
+    "ServiceRole": {
+     "Fn::GetAtt": [
+      "MergeProjectRoleE1E953C0",
+      "Arn"
+     ]
+    },
+    "Source": {
+     "BuildSpec": "{\n  \"version\": \"0.2\",\n  \"phases\": {\n    \"pre_build\": {\n      \"commands\": [\n        \"if [ -n \\\"${ASH_BASE_CONFIG_SSM_PARAMETER:-}\\\" ]; then\\n  mkdir -p \\\"$(dirname \\\"$ASH_CONFIG\\\")\\\"\\n  aws ssm get-parameter --name \\\"$ASH_BASE_CONFIG_SSM_PARAMETER\\\" --with-decryption \\\\\\n    --query Parameter.Value --output text > \\\"$ASH_CONFIG\\\"\\nelse\\n  echo \\\"No ASH base configuration supplied; ASH will use its built-in defaults.\\\"\\nfi\",\n        \"aws s3 cp --recursive --only-show-errors \\\"s3://${ASH_RESULTS_BUCKET}/${ASH_RESULTS_PREFIX}/\\\" ./shard-results/\",\n        \"# Refuse to merge a partial result set. The test is for ASH's\\n# aggregated results FILE, not merely for a shard directory: an\\n# empty directory is exactly what a shard that failed early leaves\\n# behind, and merging it would report a clean scan for scanners\\n# that never ran.\\nASH_PRESENT=0\\nASH_MISSING=\\\"\\\"\\nASH_INDEX=0\\nwhile [ \\\"$ASH_INDEX\\\" -lt \\\"$ASH_SHARD_COUNT\\\" ]; do\\n  if [ -f \\\"./shard-results/shard-${ASH_INDEX}/ash_aggregated_results.json\\\" ]; then\\n    ASH_PRESENT=$((ASH_PRESENT + 1))\\n  else\\n    ASH_MISSING=\\\"${ASH_MISSING} ${ASH_INDEX}\\\"\\n  fi\\n  ASH_INDEX=$((ASH_INDEX + 1))\\ndone\\nif [ \\\"$ASH_PRESENT\\\" -eq 0 ]; then\\n  echo \\\"Collected 0 of ${ASH_SHARD_COUNT} shard result sets. Refusing to run:\\\" >&2\\n  echo \\\"a merge over nothing would exit 0 and report a clean scan for a\\\" >&2\\n  echo \\\"repository nothing actually scanned.\\\" >&2\\n  exit 1\\nfi\\nif [ -n \\\"$ASH_MISSING\\\" ]; then\\n  echo \\\"Missing results for shard(s):${ASH_MISSING} (collected ${ASH_PRESENT} of\\\" >&2\\n  echo \\\"${ASH_SHARD_COUNT}). Refusing to merge a partial result set, which would\\\" >&2\\n  echo \\\"report a clean scan for scanners that never ran.\\\" >&2\\n  exit 1\\nfi\\necho \\\"Collected all ${ASH_SHARD_COUNT} shard result sets.\\\"\",\n        \"# Surface each shard's own exit code for diagnosis. These do NOT\\n# decide the verdict; the merge below does.\\nfor ash_dir in ./shard-results/shard-*; do\\n  if [ -f \\\"$ash_dir/.shard-exit-code\\\" ]; then\\n    echo \\\"$ash_dir reported ASH exit code $(cat \\\"$ash_dir/.shard-exit-code\\\")\\\"\\n  fi\\ndone\"\n      ]\n    },\n    \"build\": {\n      \"commands\": [\n        \"ash merge \\\\\\n  --results ./shard-results/shard-0 \\\\\\n  --results ./shard-results/shard-1 \\\\\\n  --results ./shard-results/shard-2 \\\\\\n  --results ./shard-results/shard-3 \\\\\\n  --output-dir ./ash-merged-output\"\n      ]\n    },\n    \"post_build\": {\n      \"commands\": [\n        \"aws s3 cp --recursive --only-show-errors ./ash-merged-output \\\"s3://${ASH_RESULTS_BUCKET}/${ASH_RESULTS_PREFIX}/merged/\\\" || true\"\n      ]\n    }\n  }\n}",
+     "Type": "NO_SOURCE"
+    },
+    "TimeoutInMinutes": 30
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/MergeProject/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "PipelineRoleD68726F7": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "codepipeline.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Role/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Object-level access within the artifact and source buckets this stack creates, plus assuming the per-action roles this stack creates. CodePipeline cannot name the artifact object keys in advance because they are generated per execution.",
+       "id": "AwsSolutions-IAM5"
+      }
+     ]
+    }
+   }
+  },
+  "PipelineRoleDefaultPolicyC7A05455": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "s3:Abort*",
+        "s3:DeleteObject*",
+        "s3:GetBucket*",
+        "s3:GetObject*",
+        "s3:List*",
+        "s3:PutObject",
+        "s3:PutObjectLegalHold",
+        "s3:PutObjectRetention",
+        "s3:PutObjectTagging",
+        "s3:PutObjectVersionTagging"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "Artifacts82DD59A1",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "Artifacts82DD59A1",
+             "Arn"
+            ]
+           },
+           "/*"
+          ]
+         ]
+        }
+       ]
+      },
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "PipelineBuildImageBuildAshImageCodePipelineActionRoleF9455BEF",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::GetAtt": [
+          "PipelineMergeMergeAndGateCodePipelineActionRoleBF4A894E",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::GetAtt": [
+          "PipelineScanShard0CodePipelineActionRole7F5B77AB",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::GetAtt": [
+          "PipelineScanShard1CodePipelineActionRole56612A75",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::GetAtt": [
+          "PipelineScanShard2CodePipelineActionRole495938BB",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::GetAtt": [
+          "PipelineScanShard3CodePipelineActionRole10B19A0C",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::GetAtt": [
+          "PipelineSourceCodePipelineActionRoleC6F9E7F5",
+          "Arn"
+         ]
+        }
+       ]
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "PipelineRoleDefaultPolicyC7A05455",
+    "Roles": [
+     {
+      "Ref": "PipelineRoleD68726F7"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Role/DefaultPolicy/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Object-level access within the artifact and source buckets this stack creates, plus assuming the per-action roles this stack creates. CodePipeline cannot name the artifact object keys in advance because they are generated per execution.",
+       "id": "AwsSolutions-IAM5"
+      }
+     ]
+    }
+   }
+  },
+  "PipelineC660917D": {
+   "Type": "AWS::CodePipeline::Pipeline",
+   "Properties": {
+    "ArtifactStore": {
+     "Location": {
+      "Ref": "Artifacts82DD59A1"
+     },
+     "Type": "S3"
+    },
+    "PipelineType": "V1",
+    "RestartExecutionOnUpdate": false,
+    "RoleArn": {
+     "Fn::GetAtt": [
+      "PipelineRoleD68726F7",
+      "Arn"
+     ]
+    },
+    "Stages": [
+     {
+      "Actions": [
+       {
+        "ActionTypeId": {
+         "Category": "Source",
+         "Owner": "AWS",
+         "Provider": "S3",
+         "Version": "1"
+        },
+        "Configuration": {
+         "S3Bucket": {
+          "Ref": "Source71E471F1"
+         },
+         "S3ObjectKey": "source.zip",
+         "PollForSourceChanges": false
+        },
+        "Name": "Source",
+        "OutputArtifacts": [
+         {
+          "Name": "Source"
+         }
+        ],
+        "RoleArn": {
+         "Fn::GetAtt": [
+          "PipelineSourceCodePipelineActionRoleC6F9E7F5",
+          "Arn"
+         ]
+        },
+        "RunOrder": 1
+       }
+      ],
+      "Name": "Source"
+     },
+     {
+      "Actions": [
+       {
+        "ActionTypeId": {
+         "Category": "Build",
+         "Owner": "AWS",
+         "Provider": "CodeBuild",
+         "Version": "1"
+        },
+        "Configuration": {
+         "ProjectName": {
+          "Ref": "ImageBuild31565E2D"
+         }
+        },
+        "InputArtifacts": [
+         {
+          "Name": "Source"
+         }
+        ],
+        "Name": "BuildAshImage",
+        "RoleArn": {
+         "Fn::GetAtt": [
+          "PipelineBuildImageBuildAshImageCodePipelineActionRoleF9455BEF",
+          "Arn"
+         ]
+        },
+        "RunOrder": 1
+       }
+      ],
+      "Name": "BuildImage"
+     },
+     {
+      "Actions": [
+       {
+        "ActionTypeId": {
+         "Category": "Build",
+         "Owner": "AWS",
+         "Provider": "CodeBuild",
+         "Version": "1"
+        },
+        "Configuration": {
+         "ProjectName": {
+          "Ref": "Shard0Project06DF6494"
+         },
+         "EnvironmentVariables": "[{\"name\":\"ASH_RESULTS_PREFIX\",\"type\":\"PLAINTEXT\",\"value\":\"executions/#{codepipeline.PipelineExecutionId}\"}]"
+        },
+        "InputArtifacts": [
+         {
+          "Name": "Source"
+         }
+        ],
+        "Name": "Shard0",
+        "RoleArn": {
+         "Fn::GetAtt": [
+          "PipelineScanShard0CodePipelineActionRole7F5B77AB",
+          "Arn"
+         ]
+        },
+        "RunOrder": 1
+       },
+       {
+        "ActionTypeId": {
+         "Category": "Build",
+         "Owner": "AWS",
+         "Provider": "CodeBuild",
+         "Version": "1"
+        },
+        "Configuration": {
+         "ProjectName": {
+          "Ref": "Shard1ProjectBE014382"
+         },
+         "EnvironmentVariables": "[{\"name\":\"ASH_RESULTS_PREFIX\",\"type\":\"PLAINTEXT\",\"value\":\"executions/#{codepipeline.PipelineExecutionId}\"}]"
+        },
+        "InputArtifacts": [
+         {
+          "Name": "Source"
+         }
+        ],
+        "Name": "Shard1",
+        "RoleArn": {
+         "Fn::GetAtt": [
+          "PipelineScanShard1CodePipelineActionRole56612A75",
+          "Arn"
+         ]
+        },
+        "RunOrder": 1
+       },
+       {
+        "ActionTypeId": {
+         "Category": "Build",
+         "Owner": "AWS",
+         "Provider": "CodeBuild",
+         "Version": "1"
+        },
+        "Configuration": {
+         "ProjectName": {
+          "Ref": "Shard2Project48EB832B"
+         },
+         "EnvironmentVariables": "[{\"name\":\"ASH_RESULTS_PREFIX\",\"type\":\"PLAINTEXT\",\"value\":\"executions/#{codepipeline.PipelineExecutionId}\"}]"
+        },
+        "InputArtifacts": [
+         {
+          "Name": "Source"
+         }
+        ],
+        "Name": "Shard2",
+        "RoleArn": {
+         "Fn::GetAtt": [
+          "PipelineScanShard2CodePipelineActionRole495938BB",
+          "Arn"
+         ]
+        },
+        "RunOrder": 1
+       },
+       {
+        "ActionTypeId": {
+         "Category": "Build",
+         "Owner": "AWS",
+         "Provider": "CodeBuild",
+         "Version": "1"
+        },
+        "Configuration": {
+         "ProjectName": {
+          "Ref": "Shard3Project3CB09F1D"
+         },
+         "EnvironmentVariables": "[{\"name\":\"ASH_RESULTS_PREFIX\",\"type\":\"PLAINTEXT\",\"value\":\"executions/#{codepipeline.PipelineExecutionId}\"}]"
+        },
+        "InputArtifacts": [
+         {
+          "Name": "Source"
+         }
+        ],
+        "Name": "Shard3",
+        "RoleArn": {
+         "Fn::GetAtt": [
+          "PipelineScanShard3CodePipelineActionRole10B19A0C",
+          "Arn"
+         ]
+        },
+        "RunOrder": 1
+       }
+      ],
+      "Name": "Scan"
+     },
+     {
+      "Actions": [
+       {
+        "ActionTypeId": {
+         "Category": "Build",
+         "Owner": "AWS",
+         "Provider": "CodeBuild",
+         "Version": "1"
+        },
+        "Configuration": {
+         "ProjectName": {
+          "Ref": "MergeProject4EB0C9A5"
+         },
+         "EnvironmentVariables": "[{\"name\":\"ASH_RESULTS_PREFIX\",\"type\":\"PLAINTEXT\",\"value\":\"executions/#{codepipeline.PipelineExecutionId}\"}]"
+        },
+        "InputArtifacts": [
+         {
+          "Name": "Source"
+         }
+        ],
+        "Name": "MergeAndGate",
+        "RoleArn": {
+         "Fn::GetAtt": [
+          "PipelineMergeMergeAndGateCodePipelineActionRoleBF4A894E",
+          "Arn"
+         ]
+        },
+        "RunOrder": 1
+       }
+      ],
+      "Name": "Merge"
+     }
+    ]
+   },
+   "DependsOn": [
+    "PipelineRoleDefaultPolicyC7A05455",
+    "PipelineRoleD68726F7"
+   ],
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Object-level access within the artifact and source buckets this stack creates, plus assuming the per-action roles this stack creates. CodePipeline cannot name the artifact object keys in advance because they are generated per execution.",
+       "id": "AwsSolutions-IAM5"
+      }
+     ]
+    }
+   }
+  },
+  "PipelineSourceCodePipelineActionRoleC6F9E7F5": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "AWS": {
+         "Fn::GetAtt": [
+          "PipelineRoleD68726F7",
+          "Arn"
+         ]
+        }
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Source/Source/CodePipelineActionRole/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Object-level access within the artifact and source buckets this stack creates, plus assuming the per-action roles this stack creates. CodePipeline cannot name the artifact object keys in advance because they are generated per execution.",
+       "id": "AwsSolutions-IAM5"
+      }
+     ]
+    }
+   }
+  },
+  "PipelineSourceCodePipelineActionRoleDefaultPolicy2D565925": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "s3:GetBucket*",
+        "s3:GetObject*",
+        "s3:List*"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "Source71E471F1",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "Source71E471F1",
+             "Arn"
+            ]
+           },
+           "/source.zip"
+          ]
+         ]
+        }
+       ]
+      },
+      {
+       "Action": [
+        "s3:Abort*",
+        "s3:DeleteObject*",
+        "s3:PutObject",
+        "s3:PutObjectLegalHold",
+        "s3:PutObjectRetention",
+        "s3:PutObjectTagging",
+        "s3:PutObjectVersionTagging"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "Artifacts82DD59A1",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "Artifacts82DD59A1",
+             "Arn"
+            ]
+           },
+           "/*"
+          ]
+         ]
+        }
+       ]
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "PipelineSourceCodePipelineActionRoleDefaultPolicy2D565925",
+    "Roles": [
+     {
+      "Ref": "PipelineSourceCodePipelineActionRoleC6F9E7F5"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Source/Source/CodePipelineActionRole/DefaultPolicy/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Object-level access within the artifact and source buckets this stack creates, plus assuming the per-action roles this stack creates. CodePipeline cannot name the artifact object keys in advance because they are generated per execution.",
+       "id": "AwsSolutions-IAM5"
+      }
+     ]
+    }
+   }
+  },
+  "PipelineBuildImageBuildAshImageCodePipelineActionRoleF9455BEF": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "AWS": {
+         "Fn::GetAtt": [
+          "PipelineRoleD68726F7",
+          "Arn"
+         ]
+        }
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Pipeline/BuildImage/BuildAshImage/CodePipelineActionRole/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Object-level access within the artifact and source buckets this stack creates, plus assuming the per-action roles this stack creates. CodePipeline cannot name the artifact object keys in advance because they are generated per execution.",
+       "id": "AwsSolutions-IAM5"
+      }
+     ]
+    }
+   }
+  },
+  "PipelineBuildImageBuildAshImageCodePipelineActionRoleDefaultPolicy93EC378B": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "codebuild:BatchGetBuilds",
+        "codebuild:StartBuild",
+        "codebuild:StopBuild"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "ImageBuild31565E2D",
+         "Arn"
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "PipelineBuildImageBuildAshImageCodePipelineActionRoleDefaultPolicy93EC378B",
+    "Roles": [
+     {
+      "Ref": "PipelineBuildImageBuildAshImageCodePipelineActionRoleF9455BEF"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Pipeline/BuildImage/BuildAshImage/CodePipelineActionRole/DefaultPolicy/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Object-level access within the artifact and source buckets this stack creates, plus assuming the per-action roles this stack creates. CodePipeline cannot name the artifact object keys in advance because they are generated per execution.",
+       "id": "AwsSolutions-IAM5"
+      }
+     ]
+    }
+   }
+  },
+  "PipelineScanShard0CodePipelineActionRole7F5B77AB": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "AWS": {
+         "Fn::GetAtt": [
+          "PipelineRoleD68726F7",
+          "Arn"
+         ]
+        }
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Scan/Shard0/CodePipelineActionRole/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Object-level access within the artifact and source buckets this stack creates, plus assuming the per-action roles this stack creates. CodePipeline cannot name the artifact object keys in advance because they are generated per execution.",
+       "id": "AwsSolutions-IAM5"
+      }
+     ]
+    }
+   }
+  },
+  "PipelineScanShard0CodePipelineActionRoleDefaultPolicyD371683B": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "codebuild:BatchGetBuilds",
+        "codebuild:StartBuild",
+        "codebuild:StopBuild"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "Shard0Project06DF6494",
+         "Arn"
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "PipelineScanShard0CodePipelineActionRoleDefaultPolicyD371683B",
+    "Roles": [
+     {
+      "Ref": "PipelineScanShard0CodePipelineActionRole7F5B77AB"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Scan/Shard0/CodePipelineActionRole/DefaultPolicy/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Object-level access within the artifact and source buckets this stack creates, plus assuming the per-action roles this stack creates. CodePipeline cannot name the artifact object keys in advance because they are generated per execution.",
+       "id": "AwsSolutions-IAM5"
+      }
+     ]
+    }
+   }
+  },
+  "PipelineScanShard1CodePipelineActionRole56612A75": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "AWS": {
+         "Fn::GetAtt": [
+          "PipelineRoleD68726F7",
+          "Arn"
+         ]
+        }
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Scan/Shard1/CodePipelineActionRole/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Object-level access within the artifact and source buckets this stack creates, plus assuming the per-action roles this stack creates. CodePipeline cannot name the artifact object keys in advance because they are generated per execution.",
+       "id": "AwsSolutions-IAM5"
+      }
+     ]
+    }
+   }
+  },
+  "PipelineScanShard1CodePipelineActionRoleDefaultPolicy6E0D771E": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "codebuild:BatchGetBuilds",
+        "codebuild:StartBuild",
+        "codebuild:StopBuild"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "Shard1ProjectBE014382",
+         "Arn"
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "PipelineScanShard1CodePipelineActionRoleDefaultPolicy6E0D771E",
+    "Roles": [
+     {
+      "Ref": "PipelineScanShard1CodePipelineActionRole56612A75"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Scan/Shard1/CodePipelineActionRole/DefaultPolicy/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Object-level access within the artifact and source buckets this stack creates, plus assuming the per-action roles this stack creates. CodePipeline cannot name the artifact object keys in advance because they are generated per execution.",
+       "id": "AwsSolutions-IAM5"
+      }
+     ]
+    }
+   }
+  },
+  "PipelineScanShard2CodePipelineActionRole495938BB": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "AWS": {
+         "Fn::GetAtt": [
+          "PipelineRoleD68726F7",
+          "Arn"
+         ]
+        }
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Scan/Shard2/CodePipelineActionRole/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Object-level access within the artifact and source buckets this stack creates, plus assuming the per-action roles this stack creates. CodePipeline cannot name the artifact object keys in advance because they are generated per execution.",
+       "id": "AwsSolutions-IAM5"
+      }
+     ]
+    }
+   }
+  },
+  "PipelineScanShard2CodePipelineActionRoleDefaultPolicyADE19524": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "codebuild:BatchGetBuilds",
+        "codebuild:StartBuild",
+        "codebuild:StopBuild"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "Shard2Project48EB832B",
+         "Arn"
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "PipelineScanShard2CodePipelineActionRoleDefaultPolicyADE19524",
+    "Roles": [
+     {
+      "Ref": "PipelineScanShard2CodePipelineActionRole495938BB"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Scan/Shard2/CodePipelineActionRole/DefaultPolicy/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Object-level access within the artifact and source buckets this stack creates, plus assuming the per-action roles this stack creates. CodePipeline cannot name the artifact object keys in advance because they are generated per execution.",
+       "id": "AwsSolutions-IAM5"
+      }
+     ]
+    }
+   }
+  },
+  "PipelineScanShard3CodePipelineActionRole10B19A0C": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "AWS": {
+         "Fn::GetAtt": [
+          "PipelineRoleD68726F7",
+          "Arn"
+         ]
+        }
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Scan/Shard3/CodePipelineActionRole/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Object-level access within the artifact and source buckets this stack creates, plus assuming the per-action roles this stack creates. CodePipeline cannot name the artifact object keys in advance because they are generated per execution.",
+       "id": "AwsSolutions-IAM5"
+      }
+     ]
+    }
+   }
+  },
+  "PipelineScanShard3CodePipelineActionRoleDefaultPolicyBCBE0F9C": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "codebuild:BatchGetBuilds",
+        "codebuild:StartBuild",
+        "codebuild:StopBuild"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "Shard3Project3CB09F1D",
+         "Arn"
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "PipelineScanShard3CodePipelineActionRoleDefaultPolicyBCBE0F9C",
+    "Roles": [
+     {
+      "Ref": "PipelineScanShard3CodePipelineActionRole10B19A0C"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Scan/Shard3/CodePipelineActionRole/DefaultPolicy/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Object-level access within the artifact and source buckets this stack creates, plus assuming the per-action roles this stack creates. CodePipeline cannot name the artifact object keys in advance because they are generated per execution.",
+       "id": "AwsSolutions-IAM5"
+      }
+     ]
+    }
+   }
+  },
+  "PipelineMergeMergeAndGateCodePipelineActionRoleBF4A894E": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "AWS": {
+         "Fn::GetAtt": [
+          "PipelineRoleD68726F7",
+          "Arn"
+         ]
+        }
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Merge/MergeAndGate/CodePipelineActionRole/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Object-level access within the artifact and source buckets this stack creates, plus assuming the per-action roles this stack creates. CodePipeline cannot name the artifact object keys in advance because they are generated per execution.",
+       "id": "AwsSolutions-IAM5"
+      }
+     ]
+    }
+   }
+  },
+  "PipelineMergeMergeAndGateCodePipelineActionRoleDefaultPolicyFFDA4D69": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "codebuild:BatchGetBuilds",
+        "codebuild:StartBuild",
+        "codebuild:StopBuild"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "MergeProject4EB0C9A5",
+         "Arn"
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "PipelineMergeMergeAndGateCodePipelineActionRoleDefaultPolicyFFDA4D69",
+    "Roles": [
+     {
+      "Ref": "PipelineMergeMergeAndGateCodePipelineActionRoleBF4A894E"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Merge/MergeAndGate/CodePipelineActionRole/DefaultPolicy/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Object-level access within the artifact and source buckets this stack creates, plus assuming the per-action roles this stack creates. CodePipeline cannot name the artifact object keys in advance because they are generated per execution.",
+       "id": "AwsSolutions-IAM5"
+      }
+     ]
+    }
+   }
+  }
+ },
+ "Outputs": {
+  "ShardCount": {
+   "Description": "Number of shard actions in this template. Changing it requires re-synthesizing with -c shardCount=N; it is not a deploy-time parameter.",
+   "Value": "4"
+  },
+  "SourceBucketName": {
+   "Description": "Upload the archive to scan as s3://<bucket>/source.zip.",
+   "Value": {
+    "Ref": "Source71E471F1"
+   }
+  },
+  "ResultsBucketName": {
+   "Description": "Shard results and the merged report, keyed by pipeline execution id.",
+   "Value": {
+    "Ref": "Results25575328"
+   }
+  },
+  "PipelineName": {
+   "Description": "Start a scan with `aws codepipeline start-pipeline-execution --name <this>` after uploading the source archive.",
+   "Value": {
+    "Ref": "PipelineC660917D"
+   }
+  },
+  "EcrRepositoryUri": {
+   "Value": {
+    "Fn::Join": [
+     "",
+     [
+      {
+       "Fn::Select": [
+        4,
+        {
+         "Fn::Split": [
+          ":",
+          {
+           "Fn::GetAtt": [
+            "ImageRepositoryD8036990",
+            "Arn"
+           ]
+          }
+         ]
+        }
+       ]
+      },
+      ".dkr.ecr.",
+      {
+       "Fn::Select": [
+        3,
+        {
+         "Fn::Split": [
+          ":",
+          {
+           "Fn::GetAtt": [
+            "ImageRepositoryD8036990",
+            "Arn"
+           ]
+          }
+         ]
+        }
+       ]
+      },
+      ".",
+      {
+       "Ref": "AWS::URLSuffix"
+      },
+      "/",
+      {
+       "Ref": "ImageRepositoryD8036990"
+      }
+     ]
+    ]
+   }
+  },
+  "BaseConfigParameterName": {
+   "Value": {
+    "Ref": "ConfigBaseConfig623C762C"
+   }
+  }
+ }
+}
