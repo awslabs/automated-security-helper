@@ -32,12 +32,14 @@ from typing import Dict, List, Sequence, Tuple
 import pytest
 from typer.testing import CliRunner
 
+from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.cli.merge import (
     MERGED_SHARD_COUNT_KEY,
     MERGED_SHARD_INDICES_KEY,
     RESULTS_FILE_NAME,
     SHARD_PROVENANCE_KEY,
     _merged_exit_code,
+    apply_aggregated_suppressions,
     load_shard_results,
     merge_shard_results,
     read_shard_assignment,
@@ -100,13 +102,19 @@ FINDINGS: Dict[str, List[Tuple[str, str]]] = {
 SHARED_COMPONENT = ("ash-core", "ASH core rules", "test")
 
 
-def _build_config(fail_on_findings=None):
+def _build_config(fail_on_findings=None, suppressions=None):
     """A minimal real AshConfig.
 
     Supplied rather than left as None because ``AshAggregatedResults`` logs a
     validation error for a None config on every construction, and because
     ``_compute_exit_code`` reads ``global_settings.severity_threshold`` off it --
     a test with no config would exercise a default that no real scan uses.
+
+    ``suppressions`` defaults to none, and that default is why the equivalence
+    property in ``TestShardedEqualsUnsharded`` passed while ``ash merge`` never
+    applied the aggregated suppression pass at all: with no suppression in the
+    config, both paths agree no matter which one skips the pass.
+    ``TestSuppressionsAcrossShards`` supplies some.
     """
     from automated_security_helper.config.ash_config import (
         AshConfig,
@@ -115,7 +123,10 @@ def _build_config(fail_on_findings=None):
 
     config = AshConfig(
         project_name="test-merge",
-        global_settings=AshConfigGlobalSettingsSection(severity_threshold="MEDIUM"),
+        global_settings=AshConfigGlobalSettingsSection(
+            severity_threshold="MEDIUM",
+            suppressions=list(suppressions or []),
+        ),
     )
     if fail_on_findings is not None:
         config.fail_on_findings = fail_on_findings
@@ -233,10 +244,18 @@ def build_shard(
     owned: Sequence[str],
     all_scanners: Sequence[str] = SCANNERS,
     stamp: bool = True,
+    suppressions=None,
 ) -> AshAggregatedResults:
-    """Build the results one shard of a sharded scan would write."""
+    """Build the results one shard of a sharded scan would write.
+
+    The SARIF this produces is never pre-suppressed, whatever ``suppressions``
+    says. That is deliberate and it is the state a real shard is in when a
+    suppression's path only becomes matchable after merge and normalization: the
+    shard carries the config, its own per-scanner pass did not match, and the
+    aggregated pass on the merged product is the only thing left that can.
+    """
     model = AshAggregatedResults()
-    model.ash_config = _build_config()
+    model.ash_config = _build_config(suppressions=suppressions)
     # Distinct per shard so it is observable which shard supplied the merged
     # report's identity. Without something base-dependent in the fixture, a merge
     # that took its base from whichever shard happened to be listed first would
@@ -258,15 +277,21 @@ def build_shard(
                 shard_index=shard_index,
                 shard_count=shard_count,
                 assigned_scanners=list(owned),
+                # Recorded because a real ScanPhase records it. Fixtures that left
+                # it None would exercise only the backward-compatibility path, in
+                # which verify_shard_coverage skips the union check entirely -- so
+                # the mainline merge tests would run against a weaker contract than
+                # any real scan produces.
+                candidate_scanners=list(all_scanners),
             ),
         )
     return model
 
 
-def build_unsharded() -> AshAggregatedResults:
+def build_unsharded(suppressions=None) -> AshAggregatedResults:
     """Build the results a single unsharded scan of the same tree would write."""
     model = AshAggregatedResults()
-    model.ash_config = _build_config()
+    model.ash_config = _build_config(suppressions=suppressions)
     model.sarif = _sarif_for(SCANNERS)
     for scanner in SCANNERS:
         _ran_entries(model, scanner)
@@ -276,11 +301,14 @@ def build_unsharded() -> AshAggregatedResults:
     return populate_metrics_from_unified_source(aggregated_results=model)
 
 
-def build_shards(shard_count: int = 3) -> List[AshAggregatedResults]:
+def build_shards(shard_count: int = 3, suppressions=None) -> List[AshAggregatedResults]:
     """Build every shard of a *shard_count*-way split of the same tree."""
     return [
         build_shard(
-            index, shard_count, partition_scanners(SCANNERS, index, shard_count)
+            index,
+            shard_count,
+            partition_scanners(SCANNERS, index, shard_count),
+            suppressions=suppressions,
         )
         for index in range(shard_count)
     ]
@@ -572,20 +600,56 @@ class TestCoverageIsRefused:
         with pytest.raises(ShardCoverageError, match=r"more than one shard"):
             merge_shard_results(as_loaded(shards))
 
-    def test_scanner_claimed_by_no_shard_is_refused(self):
-        # The residual risk the sharding module names: two executors resolving
-        # different scanner sets, so both partitions are internally valid and the
-        # union has a hole. Every shard marks the orphan SKIPPED, so a merge that
-        # allowed it would report a scanner nobody ran as deliberately excluded.
-        shards = build_shards(3)
+    def _orphan_grype(self, shards, keep_candidates: bool):
+        """Drop grype from every shard's assignment, leaving its SKIPPED markers.
+
+        The residual risk the sharding module names: two executors resolving
+        different scanner sets, so both partitions are internally valid and the
+        union has a hole.
+        """
         for model in shards:
             assignment = read_shard_assignment(model)
             assignment.assigned_scanners = [
                 name for name in assignment.assigned_scanners if name != "grype"
             ]
+            if not keep_candidates:
+                assignment.candidate_scanners = None
             stamp_shard_assignment(model, assignment)
+        return shards
+
+    def test_scanner_claimed_by_no_shard_is_refused_by_the_candidate_check(self):
+        # With candidate_scanners recorded -- what every current scan writes --
+        # verify_shard_coverage catches this from the provenance alone, before any
+        # results are read.
+        shards = self._orphan_grype(build_shards(3), keep_candidates=True)
+
+        with pytest.raises(ShardCoverageError, match=r"assigned to none"):
+            merge_shard_results(as_loaded(shards))
+
+    def test_scanner_claimed_by_no_shard_is_refused_from_the_results_alone(self):
+        # The same hole on results written before candidate_scanners existed, where
+        # verify_shard_coverage has nothing to compare a union against. Every shard
+        # marks the orphan SKIPPED, and _verify_scanner_union catches it from those
+        # markers -- a second line of defense that has to keep working, because it
+        # is the only one for legacy artifacts.
+        shards = self._orphan_grype(build_shards(3), keep_candidates=False)
 
         with pytest.raises(ShardCoverageError, match=r"no shard was assigned them"):
+            merge_shard_results(as_loaded(shards))
+
+    def test_executors_resolving_different_scanner_sets_are_refused(self):
+        # The disagreement itself, rather than its consequence: one executor was
+        # missing a plugin module, so its candidate set is short. Neither shard's
+        # own partition is wrong, which is why nothing but the candidate comparison
+        # can see it.
+        shards = build_shards(3)
+        assignment = read_shard_assignment(shards[1])
+        assignment.candidate_scanners = [
+            name for name in assignment.candidate_scanners if name != "grype"
+        ]
+        stamp_shard_assignment(shards[1], assignment)
+
+        with pytest.raises(ShardCoverageError, match=r"different scanner sets"):
             merge_shard_results(as_loaded(shards))
 
     def test_owning_shard_with_no_result_for_its_scanner_is_refused(self):
@@ -904,6 +968,193 @@ class TestExitCode:
         assert _merged_exit_code(merged, tmp_path, "low", None) == _merged_exit_code(
             unsharded, tmp_path, "low", None
         )
+
+
+# Every finding the fixtures rate at or above the MEDIUM threshold. Suppressing
+# exactly these makes the two paths' verdicts differ -- 0 against 2 -- rather than
+# differ only in a count, which is the sharpest form the divergence takes and the
+# one CI acts on. semgrep's LOW note is deliberately left unsuppressed so the
+# tests can tell "suppressed the actionable findings" apart from "suppressed
+# everything".
+_ACTIONABLE_SUPPRESSIONS = [
+    {"path": "src/bandit_*.py", "reason": "post-merge suppression, glob on path"},
+    {"path": "src/checkov_0.py", "reason": "post-merge suppression, exact path"},
+    {
+        "path": "src/detect-secrets_0.py",
+        "rule_id": "detect-secrets-RULE-0",
+        "reason": "post-merge suppression, path and rule",
+    },
+]
+
+
+def _suppressed_keys(model: AshAggregatedResults) -> List[Tuple]:
+    """The findings carrying a suppression, by the same identity as finding_key."""
+    return sorted(
+        finding_key(result)
+        for run in model.sarif.runs
+        for result in (run.results or [])
+        if result.suppressions
+    )
+
+
+def _scan_unsharded(tmp_path, suppressions, ignore_suppressions=False):
+    """What ``ash scan`` produces: aggregate, then the aggregated suppression pass.
+
+    The engine applies ``apply_suppressions_to_sarif`` to the aggregated SARIF just
+    before the report phase and then repopulates metrics, which is what
+    ``apply_aggregated_suppressions`` is. Modelling the scan side by calling the
+    same helper is deliberate: the property under test is not "does the helper
+    work" but "does the merge path invoke it at all", and the merge side below goes
+    through the real ``merge_command``.
+    """
+    model = build_unsharded(suppressions=suppressions)
+    context = PluginContext(
+        source_dir=Path.cwd(),
+        output_dir=tmp_path,
+        config=model.ash_config,
+        ignore_suppressions=ignore_suppressions,
+    )
+    return apply_aggregated_suppressions(model, context)
+
+
+class TestSuppressionsAcrossShards:
+    """A suppression that only matches after the collapse must apply either way.
+
+    Why this class exists
+    ---------------------
+    ``AshExecutionEngine`` applies the aggregated suppression pass to the merged
+    SARIF before the report phase, because per-scanner passes miss findings whose
+    paths only become matchable after merge and normalization. ``ash merge`` did
+    not, so a suppression of this kind applied in an unsharded scan and not in a
+    sharded one: identical inputs, ``ash scan`` exit 0, ``ash merge`` exit 2.
+
+    Why ``TestShardedEqualsUnsharded`` could not catch it
+    -----------------------------------------------------
+    Its fixtures carry no suppressions. With none configured, a path that skips
+    the suppression pass and a path that runs it produce byte-identical reports,
+    so the equivalence assertions hold no matter which one is broken. The property
+    was reported as verified end to end and the verification could not have
+    failed. A parity test has to run on input where the two sides are capable of
+    disagreeing.
+    """
+
+    def _merge_via_cli(self, tmp_path, suppressions, extra_args=()):
+        """Run the real ``ash merge`` and return (exit code, reloaded results)."""
+        shard_paths = write_shards(
+            tmp_path / "artifacts", build_shards(3, suppressions=suppressions)
+        )
+        output_dir = tmp_path / "merged"
+        args = []
+        for path in shard_paths:
+            args += ["--results", path]
+        args += ["--output-dir", str(output_dir), "--output-formats", "sarif"]
+        args += list(extra_args)
+
+        result = TestMergeCli()._invoke(args)
+        merged_file = output_dir / RESULTS_FILE_NAME
+        reloaded = (
+            AshAggregatedResults.model_validate_json(
+                merged_file.read_text(encoding="utf-8")
+            )
+            if merged_file.is_file()
+            else None
+        )
+        return result, reloaded
+
+    def test_the_fixture_actually_diverges_without_the_merge_side_pass(self, tmp_path):
+        """Guards the guard: the suppressions must move the unsharded verdict.
+
+        If they did not, every assertion below would compare 2 against 2 and pass
+        whether or not ``ash merge`` applies suppressions -- the same way the
+        no-suppression fixtures did.
+        """
+        unsuppressed = build_unsharded()
+        suppressed = _scan_unsharded(tmp_path, _ACTIONABLE_SUPPRESSIONS)
+
+        assert _merged_exit_code(unsuppressed, tmp_path, "low", None) == 2
+        assert _merged_exit_code(suppressed, tmp_path, "low", None) == 0
+
+    def test_verdict_matches_an_unsharded_scan(self, tmp_path):
+        """The divergence itself. Exit 2 against exit 0 before the fix."""
+        result, _ = self._merge_via_cli(tmp_path / "sharded", _ACTIONABLE_SUPPRESSIONS)
+        unsharded = _scan_unsharded(tmp_path / "unsharded", _ACTIONABLE_SUPPRESSIONS)
+
+        expected = _merged_exit_code(unsharded, tmp_path / "unsharded", "low", None)
+        assert expected == 0, "fixture no longer suppresses every actionable finding"
+        assert result.exit_code == expected, result.output
+
+    def test_suppressed_finding_set_matches_an_unsharded_scan(self, tmp_path):
+        result, merged = self._merge_via_cli(
+            tmp_path / "sharded", _ACTIONABLE_SUPPRESSIONS
+        )
+        assert merged is not None, result.output
+        unsharded = _scan_unsharded(tmp_path / "unsharded", _ACTIONABLE_SUPPRESSIONS)
+
+        assert _suppressed_keys(merged) == _suppressed_keys(unsharded)
+        # Non-empty, or the equality above would hold for two paths that both
+        # suppressed nothing.
+        assert _suppressed_keys(merged)
+
+    def test_findings_are_marked_not_dropped(self, tmp_path):
+        """Suppression annotates a finding; it must not remove it.
+
+        Comparing only the suppressed set would pass for a merge that deleted the
+        suppressed findings outright, which would lose them from every report.
+        """
+        result, merged = self._merge_via_cli(tmp_path, _ACTIONABLE_SUPPRESSIONS)
+        assert merged is not None, result.output
+        assert finding_keys(merged) == finding_keys(build_unsharded())
+
+    def test_the_written_results_file_reflects_the_suppressions(self, tmp_path):
+        """The on-disk merged results must not predate the suppression pass.
+
+        ``merge_command`` used to write the file before building its plugin
+        context. Applying suppressions after that write would leave
+        ash_aggregated_results.json describing a pre-suppression state while the
+        reports and the exit code described the post-suppression one -- two
+        artifacts of one run disagreeing about what is actionable.
+        """
+        result, merged = self._merge_via_cli(tmp_path, _ACTIONABLE_SUPPRESSIONS)
+        assert merged is not None, result.output
+        assert merged.metadata.summary_stats.actionable == 0
+        assert merged.metadata.summary_stats.suppressed > 0
+
+    def test_ignore_suppressions_restores_the_failing_verdict(self, tmp_path):
+        """The other half of the contract has to be expressible.
+
+        Without ``--ignore-suppressions`` on merge there is no way to ask a sharded
+        run the question ``ash scan --ignore-suppressions`` answers, so an operator
+        auditing what their suppressions hide could not do it on a sharded scan.
+        """
+        result, merged = self._merge_via_cli(
+            tmp_path / "sharded",
+            _ACTIONABLE_SUPPRESSIONS,
+            extra_args=["--ignore-suppressions"],
+        )
+        assert merged is not None, result.output
+        assert result.exit_code == 2, result.output
+        assert _suppressed_keys(merged) == []
+
+        unsharded = _scan_unsharded(
+            tmp_path / "unsharded",
+            _ACTIONABLE_SUPPRESSIONS,
+            ignore_suppressions=True,
+        )
+        assert result.exit_code == _merged_exit_code(
+            unsharded, tmp_path / "unsharded", "low", None
+        )
+
+    def test_a_tree_with_no_suppressions_is_unaffected(self, tmp_path):
+        """The pass must be a no-op when there is nothing to suppress.
+
+        This is the case the original equivalence tests covered, kept here so the
+        added pass cannot change it.
+        """
+        result, merged = self._merge_via_cli(tmp_path, suppressions=None)
+        assert merged is not None, result.output
+        assert result.exit_code == 2, result.output
+        assert _suppressed_keys(merged) == []
+        assert finding_keys(merged) == finding_keys(build_unsharded())
 
 
 class TestMergeCli:

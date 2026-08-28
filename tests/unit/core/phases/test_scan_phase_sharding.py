@@ -204,6 +204,86 @@ class TestShardPartitioning:
         assert _excluded_names(result) == set()
 
 
+class TestShardAssignmentProvenance:
+    """What the phase records, not just what it excludes.
+
+    ``verify_shard_coverage`` can only compare the union of the assignments
+    against the set they were taken from if each shard recorded that set. The
+    field is optional so that results predating it still merge, which means a
+    phase that stopped populating it would not fail anything -- every shard would
+    quietly take the backward-compatibility path and the union check would never
+    run again. That is the failure this class exists to catch, and it was found by
+    mutation: deleting the ``candidate_scanners=`` argument broke no test.
+    """
+
+    @pytest.mark.parametrize("index", [0, 1])
+    def test_the_candidate_set_is_recorded(self, scan_phase, index):
+        _run(scan_phase, FOUR_SCANNERS, shard_index=index, shard_count=2)
+        assignment = scan_phase._shard_assignment
+
+        assert assignment is not None
+        assert assignment.candidate_scanners is not None, (
+            "the phase recorded no candidate set, so ash merge cannot verify the "
+            "union covers it"
+        )
+
+    def test_the_candidate_set_is_every_resolved_scanner(self, scan_phase):
+        """Not just this shard's slice.
+
+        Recording the slice would make the union check compare the assignments
+        against themselves and pass unconditionally.
+        """
+        _run(scan_phase, FOUR_SCANNERS, shard_index=0, shard_count=2)
+        assignment = scan_phase._shard_assignment
+
+        assert set(assignment.candidate_scanners) == set(FOUR_SCANNERS)
+        assert set(assignment.assigned_scanners) < set(assignment.candidate_scanners)
+
+    def test_the_candidate_set_does_not_depend_on_plugin_order(
+        self, scan_phase, request
+    ):
+        """The same reason the partition must not.
+
+        Two executors that recorded differently-ordered candidate sets for the
+        same scanners would be refused as having partitioned different sets.
+        """
+        _run(scan_phase, FOUR_SCANNERS, shard_index=0, shard_count=2)
+        forward = scan_phase._shard_assignment.candidate_scanners
+
+        other = request.getfixturevalue("scan_phase")
+        _run(other, list(reversed(FOUR_SCANNERS)), shard_index=0, shard_count=2)
+        reversed_ = other._shard_assignment.candidate_scanners
+
+        assert forward == reversed_
+
+    def test_a_non_sharded_run_records_no_assignment(self, scan_phase):
+        """An unsharded scan must stay unstamped.
+
+        ``ash merge`` refuses a file with no provenance precisely so it cannot
+        accept a whole unsharded scan as a complete merge of a split.
+        """
+        _run(scan_phase, FOUR_SCANNERS)
+        assert scan_phase._shard_assignment is None
+
+    def test_the_assignments_verify_as_a_complete_shard_set(self, request):
+        """End to end: what the phase writes must satisfy the merge-time check.
+
+        Asserting on the field's contents alone would not catch a shape
+        ``verify_shard_coverage`` rejects -- a candidate set omitting a scanner the
+        partition assigned, say. A fresh phase per shard because ``_execute_phase``
+        mutates phase state.
+        """
+        from automated_security_helper.core.sharding import verify_shard_coverage
+
+        assignments = []
+        for index in range(2):
+            phase = request.getfixturevalue("scan_phase")
+            _run(phase, FOUR_SCANNERS, shard_index=index, shard_count=2)
+            assignments.append(phase._shard_assignment)
+
+        verify_shard_coverage(assignments)
+
+
 class TestShardStatusSemantics:
     def test_unassigned_scanner_is_excluded_not_missing(self, scan_phase):
         """SKIPPED/excluded, never MISSING.

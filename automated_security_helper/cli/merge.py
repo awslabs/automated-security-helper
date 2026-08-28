@@ -57,6 +57,24 @@ the same scanner (:func:`verify_shard_coverage` refuses that), so there is no
 legitimate duplicate to collapse, and a merge that quietly dropped
 similar-looking findings from different scanners would be hiding real results.
 
+The aggregated suppression pass, and why omitting it broke equivalence
+---------------------------------------------------------------------
+``AshExecutionEngine`` applies ``apply_suppressions_to_sarif`` to the aggregated
+SARIF just before the report phase, because per-scanner passes miss findings
+whose paths only become matchable after merge and normalization. This command
+originally went from ``merge_sarif_report`` straight to metrics and reports, so
+nothing applied suppressions to the cross-shard product: a suppression that only
+matched post-merge applied in an unsharded scan and not in a sharded one, and
+``ash merge`` exited 2 where ``ash scan`` exited 0 on the same tree.
+:func:`apply_aggregated_suppressions` closes that, and ``--ignore-suppressions``
+makes the other half of the contract expressible.
+
+That the equivalence was reported as verified end to end before this existed is
+the useful part of the story. The verification used a tree with no suppressions
+at all, so it could not have failed. A parity property has to be exercised on
+input where the two paths could actually disagree, which for suppressions means a
+suppression that matches only after the collapse.
+
 Shard provenance, and the field that does not exist yet
 -------------------------------------------------------
 Coverage is verified from the result files alone rather than from a
@@ -815,6 +833,81 @@ def _record_merge_provenance(
     )
 
 
+def apply_aggregated_suppressions(
+    merged: AshAggregatedResults, plugin_context: PluginContext
+) -> AshAggregatedResults:
+    """Run the aggregated suppression pass ``ash scan`` runs, over the merged SARIF.
+
+    Why this has to exist here
+    --------------------------
+    ``AshExecutionEngine`` applies ``apply_suppressions_to_sarif`` to the
+    *aggregated* SARIF immediately before the report phase, and then re-runs
+    ``populate_metrics_from_unified_source`` so the exit code reflects the
+    post-suppression state. Its stated reason is that the per-scanner passes miss
+    findings whose paths only become matchable after merge and normalization.
+
+    ``ash merge`` folded n shard SARIFs and went straight to metrics and reports,
+    so nothing ever applied suppressions to the cross-shard product. A suppression
+    that only matches post-merge therefore applied in an unsharded scan and not in
+    a sharded one: ``ash merge`` exited 2 where ``ash scan`` exited 0 on identical
+    inputs. That is precisely the divergence ``_merged_exit_code``'s own docstring
+    argues must not exist, and it is worse than an ordinary bug because the two
+    commands are supposed to be interchangeable -- CI gates on the sharded one.
+
+    Why the ignore_suppressions guard is duplicated from the engine
+    --------------------------------------------------------------
+    ``apply_suppressions_to_sarif`` also checks ``ignore_suppressions`` itself, so
+    the guard here looks redundant, and on the configuration the tests cover it
+    provably is: calling the function with ``ignore_suppressions=True`` was
+    measured to produce byte-identical SARIF to not calling it at all, and
+    deleting this condition kills no test.
+
+    It is kept for two reasons that the measurement does not cover. The engine
+    carries the identical guard, and the property being fixed is that the two
+    paths agree -- a merge path relying on the callee's check while the scan path
+    relies on the caller's would drift apart the moment either changed. And the
+    equivalence was only measured for a config with no ``ignore_paths``: inside
+    the function, the ignore-path branch is gated on ``not ignore_suppressions``
+    combined with a path match, so a config that sets ``ignore_paths`` could
+    behave differently between "skipped" and "called with the flag set". Skipping
+    the call is what ``ash scan`` does, so skipping it is what keeps the verdicts
+    equal in the configurations no fixture here exercises.
+
+    Args:
+        merged: The merged results, with metrics already populated from the union.
+        plugin_context: Carries the scan's own config and ``ignore_suppressions``.
+
+    Returns:
+        *merged*, with suppressions applied and metrics recomputed. Returned
+        rather than mutated in place only because
+        ``populate_metrics_from_unified_source`` returns the model.
+    """
+    if (
+        not plugin_context.ignore_suppressions
+        and merged is not None
+        and merged.sarif is not None
+    ):
+        # Imported here, matching the engine, which imports it inside the report
+        # branch. sarif_utils pulls in the SARIF model and the config tree, and
+        # ``ash merge`` reaches this point only after a successful merge.
+        from automated_security_helper.utils.sarif_utils import (
+            apply_suppressions_to_sarif,
+        )
+
+        merged.sarif = apply_suppressions_to_sarif(
+            sarif_report=merged.sarif,
+            plugin_context=plugin_context,
+            used_suppressions=getattr(merged, "used_suppressions", None),
+        )
+
+    # Recomputed unconditionally, not only when suppressions ran. Under
+    # ``--ignore-suppressions`` the counts merge_shard_results already produced are
+    # correct, so this is a no-op there; making it conditional would put the "did
+    # the counts get refreshed" question on the same branch as "did suppressions
+    # run", and the exit code depends on the first.
+    return populate_metrics_from_unified_source(aggregated_results=merged)
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -879,6 +972,17 @@ def merge_command(
             help="Minimum severity that counts as actionable for the exit code.",
         ),
     ] = "low",
+    ignore_suppressions: Annotated[
+        bool,
+        typer.Option(
+            "--ignore-suppressions",
+            help=(
+                "Ignore all suppression rules and report every finding regardless "
+                "of suppression status. Mirrors 'ash scan --ignore-suppressions', "
+                "so the same tree gives the same verdict sharded or not."
+            ),
+        ),
+    ] = False,
     fail_on_findings: Annotated[
         Optional[bool],
         typer.Option(
@@ -973,9 +1077,6 @@ def merge_command(
 
     output_dir_path = Path(output_dir)
     output_dir_path.mkdir(parents=True, exist_ok=True)
-    merged_file = output_dir_path.joinpath(RESULTS_FILE_NAME)
-    merged_file.write_text(merged.model_dump_json(indent=2), encoding="utf-8")
-    logger.info(f"Wrote merged results to {merged_file}")
 
     # The scan's own configuration, carried through the shard results, rather
     # than a config file resolved on this host. The collector job need not have
@@ -987,7 +1088,20 @@ def merge_command(
         output_dir=output_dir_path,
         work_dir=output_dir_path.joinpath("work"),
         config=merged.ash_config or AshConfig(),
+        ignore_suppressions=ignore_suppressions,
     )
+
+    merged = apply_aggregated_suppressions(merged, plugin_context)
+
+    # Written after the suppression pass, not before. Writing first was the
+    # original order and it would now leave the merged results file describing a
+    # pre-suppression state while the reports and the exit code describe the
+    # post-suppression one -- two artifacts of the same run disagreeing about
+    # which findings are actionable.
+    merged_file = output_dir_path.joinpath(RESULTS_FILE_NAME)
+    merged_file.write_text(merged.model_dump_json(indent=2), encoding="utf-8")
+    logger.info(f"Wrote merged results to {merged_file}")
+
     ash_plugin_manager.set_context(plugin_context)
     load_plugins(plugin_context=plugin_context)
 

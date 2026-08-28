@@ -78,34 +78,93 @@ def _cdk_extra_requirements() -> List[str]:
     name is a name someone else can own on a package index, and installing by
     such a name is the defect this function exists to remove.
 
-    Returns an empty list when the distribution is found but declares no ``cdk``
-    extra, since in that case there is genuinely nothing to install. Only an
-    unreadable or absent ``*.dist-info`` -- ASH run straight from a checkout
-    that was never installed -- falls back to the hardcoded pins. Failing closed
-    with an empty list in that case was rejected: callers only inspect the
-    process exit code, so it would look like a successful install that silently
-    installed nothing, which is how cdk-nag came to be reported MISSING before.
+    Never returns an empty list. This function is only reached when cdk-nag is
+    already missing, so an empty result means ``ash dependencies install`` runs
+    no pip command, exits 0, and leaves cdk-nag MISSING -- which is precisely
+    the defect it exists to remove. An empty accumulation therefore falls
+    through to the pinned fallback rather than being reported as "nothing to
+    install".
+
+    Why every mapped distribution is searched, not just the first
+    ------------------------------------------------------------
+    ``packages_distributions()`` maps a top-level package name to a *list* of
+    distributions providing it. An earlier version returned on the first entry
+    whose ``requires()`` was not None, whether or not any of its requirements
+    carried the ``extra == "cdk"`` marker. One shadowing or stale
+    ``*.dist-info`` that declares requirements but no ``cdk`` extra -- the
+    ordinary result of an editable install left behind next to a real one --
+    then yielded ``[]``, and the install silently did nothing. Accumulating
+    across all of them and only returning a non-empty result means a stale entry
+    can no longer mask a good one.
+
+    Why the try/except is inside the loop, and why ValueError is caught
+    ------------------------------------------------------------------
+    Both were found by probing rather than by reading. ``requires()`` returns
+    None for an unreadable or absent ``METADATA`` instead of raising, so the
+    handler does not fire for the case the previous docstring credited it with:
+    ASH run from a checkout that was never installed has no mapping at all,
+    ``.get()`` returns None, the loop body never executes, and the fallback is
+    reached by the normal path.
+
+    What the handlers do catch is narrower and real. ``packages_distributions()``
+    walks every entry on ``sys.path`` and raises ``OSError`` on an unreadable
+    one, which is why that call keeps its own handler -- moving all the handling
+    inside the loop was tried and let that OSError escape into
+    ``ash dependencies install`` as a traceback. Separately, ``requires()``
+    raises ``PackageNotFoundError`` for a name that stops resolving between the
+    two calls -- a concurrent uninstall, or an editable install being rebuilt.
+    And a ``*.dist-info`` carrying a ``top_level.txt`` but no ``METADATA`` makes
+    ``packages_distributions()`` yield ``[None]``; ``requires(None)`` raises
+    ``ValueError: A distribution name is required``, which the previous
+    two-exception clause did not catch, so one broken sibling distribution
+    crashed the command outright. The per-name handler is inside the loop so that
+    one unreadable distribution no longer discards what the others declared.
     """
     root_package = __name__.split(".", 1)[0]
+    accumulated: List[str] = []
     try:
-        for dist_name in packages_distributions().get(root_package) or []:
-            declared = requires(dist_name)
-            if declared is None:
-                continue
-            return [
-                # Keep the requirement, drop the marker. pip evaluates markers
-                # with ``extra`` undefined, so ``extra == "cdk"`` is false and
-                # pip skips the requirement while still exiting 0 -- an install
-                # that reports success and installs nothing.
-                requirement.split(";", 1)[0].strip()
-                for requirement in declared
-                if _CDK_EXTRA_MARKER.search(requirement)
-            ]
+        dist_names = packages_distributions().get(root_package) or []
     except (PackageNotFoundError, OSError) as exc:
         ASH_LOGGER.debug(
-            f"Could not read the cdk extra from ASH's own metadata ({exc}); "
-            "falling back to the pinned requirement list."
+            f"Could not enumerate the distributions providing {root_package!r} "
+            f"({exc}); falling back to the pinned requirement list."
         )
+        return list(_CDK_EXTRA_FALLBACK_REQUIREMENTS)
+
+    for dist_name in dist_names:
+        try:
+            declared = requires(dist_name)
+        except (PackageNotFoundError, OSError, ValueError) as exc:
+            ASH_LOGGER.debug(
+                f"Could not read requirements from distribution {dist_name!r} "
+                f"providing {root_package!r} ({exc}); skipping it."
+            )
+            continue
+        if declared is None:
+            continue
+        for requirement in declared:
+            if not _CDK_EXTRA_MARKER.search(requirement):
+                continue
+            # Keep the requirement, drop the marker. pip evaluates markers with
+            # ``extra`` undefined, so ``extra == "cdk"`` is false and pip skips
+            # the requirement while still exiting 0 -- an install that reports
+            # success and installs nothing.
+            bare = requirement.split(";", 1)[0].strip()
+            # Deduplicated in place rather than through a set, so the order
+            # pyproject.toml declares is what pip receives. A set would make the
+            # generated command vary run to run, which is noise in any log that
+            # records it.
+            if bare and bare not in accumulated:
+                accumulated.append(bare)
+
+    if accumulated:
+        return accumulated
+
+    ASH_LOGGER.debug(
+        f"No 'extra == \"cdk\"' requirements found in the metadata of any "
+        f"distribution providing {root_package!r}; falling back to the pinned "
+        f"requirement list."
+    )
     return list(_CDK_EXTRA_FALLBACK_REQUIREMENTS)
 
 
@@ -216,12 +275,26 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
 
         commands = super().get_installation_commands(platform, arch)
         if not _CDK_AVAILABLE:
-            requirements = _cdk_extra_requirements()
-            if requirements:
-                # One pip invocation, so the three are resolved together. Three
-                # separate installs let a later one downgrade an earlier one's
-                # shared transitive dependency.
-                commands.append([sys.executable, "-m", "pip", "install", *requirements])
+            # Appended unconditionally. _cdk_extra_requirements never returns an
+            # empty list, and the `if requirements:` that used to stand here was
+            # what turned an empty result into a silent no-op: no pip command was
+            # appended, `ash dependencies install` exited 0, and cdk-nag stayed
+            # MISSING. Should that invariant ever break, pip refuses an install
+            # with no arguments and exits non-zero, which is the loud failure this
+            # command needs rather than a green run that installed nothing.
+            #
+            # One pip invocation, so the three are resolved together. Three
+            # separate installs let a later one downgrade an earlier one's shared
+            # transitive dependency.
+            commands.append(
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    *_cdk_extra_requirements(),
+                ]
+            )
         return commands
 
     def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]

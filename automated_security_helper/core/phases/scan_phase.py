@@ -266,6 +266,14 @@ class ScanPhase(EnginePhase):
                     shard_index=shard_index,
                     shard_count=shard_count,
                     assigned_scanners=assigned,
+                    # The set the partition was taken from, not just this shard's
+                    # slice. Without it every shard can be internally consistent
+                    # while the union has a hole -- an executor missing a plugin
+                    # module resolves a smaller set, partitions it validly, and
+                    # nothing at merge time can tell. Recorded here because this
+                    # is the only layer that knows the resolved names; see the
+                    # comment above on why no earlier layer can.
+                    candidate_scanners=sorted(set(all_scanner_names)),
                 )
                 ASH_LOGGER.info(
                     f"Shard {shard_index} of {shard_count} runs "

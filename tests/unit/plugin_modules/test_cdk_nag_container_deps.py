@@ -289,12 +289,25 @@ class TestCdkExtraResolution:
         ):
             assert _cdk_extra_requirements() == _CDK_EXTRA_FALLBACK_REQUIREMENTS
 
-    def test_returns_empty_when_extra_was_removed(self) -> None:
-        """A distribution declaring no cdk extra means there is nothing to install.
+    def test_falls_back_when_no_distribution_declares_the_extra(self) -> None:
+        """Readable metadata with no cdk extra falls back; it does not return [].
 
-        Distinct from the unreadable-metadata case, which must fall back. Here the
-        metadata is readable and authoritative, so honoring it beats installing
-        the stale hardcoded pins.
+        This expectation is the reverse of what it was, and the reversal is the
+        point. The earlier version asserted ``== []`` on the argument that
+        readable metadata is authoritative, so honoring it beats installing stale
+        pins. That argument assumes the metadata being read belongs to ASH, and
+        the code cannot know that: ``packages_distributions()`` maps a top-level
+        name to every distribution providing it, so a stale or shadowing
+        ``*.dist-info`` -- an editable install left beside a real one -- is read
+        with exactly the same confidence as the genuine one.
+
+        Weighed as failure modes rather than as semantics: honoring an empty read
+        means ``ash dependencies install`` emits no pip command, exits 0, and
+        leaves cdk-nag MISSING, which is the original defect this whole area
+        exists to remove and is invisible to a caller that only checks the exit
+        code. Falling back installs pins that may lag pyproject.toml by a bound,
+        which is loud, recoverable, and separately guarded by
+        ``test_fallback_matches_installed_metadata``.
         """
         with patch.object(
             cdk_nag_scanner_module,
@@ -304,7 +317,7 @@ class TestCdkExtraResolution:
             with patch.object(
                 cdk_nag_scanner_module, "requires", return_value=["requests>=2.28.0"]
             ):
-                assert _cdk_extra_requirements() == []
+                assert _cdk_extra_requirements() == _CDK_EXTRA_FALLBACK_REQUIREMENTS
 
     def test_skips_distributions_declaring_nothing(self) -> None:
         """A distribution whose requires() is None is skipped, not treated as empty.

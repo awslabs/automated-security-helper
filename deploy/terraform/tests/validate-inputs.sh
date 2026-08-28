@@ -19,10 +19,40 @@
 # cannot tell "the rule fired" apart from "plan failed for an unrelated reason and
 # the grep happened to match":
 #
-#   must     - the invalid value MUST produce the rule's error_message.
-#   mustnot  - a valid value MUST NOT produce it. Plan is still expected to fail
-#              here, on credentials, and that later failure is the evidence that
-#              validation was passed rather than skipped.
+#   must     - the invalid value MUST produce the rule's error_message, AND the
+#              plan MUST have failed at the input-variable stage.
+#   mustnot  - a valid value MUST NOT produce it, AND the plan MUST have got past
+#              the input-variable stage, proving validation was passed rather than
+#              skipped.
+#
+# WHY THE mustnot DIRECTION IS ASSERTED THIS WAY
+# ----------------------------------------------
+# It used to assert only the absence of the fragment, and print a line claiming
+# the plan "stopped later: <credential error>" as evidence that validation had
+# been reached. Two things were wrong with that, and together they made the
+# direction unable to fail for the reason it claimed:
+#
+#   1. The evidence was printed, never asserted. terraform's exit status was
+#      discarded, so any failure that did not happen to contain the matched
+#      fragment scored PASS. Deleting or renaming a variable the case passes with
+#      -var makes terraform emit "Value for undeclared variable" -- which contains
+#      no rule error_message -- so the mustnot case passed while its must twin
+#      still fired, and the script reported pass=19 fail=0 with the variable gone.
+#
+#   2. The claim about credentials was mostly false. Measured across the eight
+#      mustnot cases, six plans SUCCEED: these modules plan offline without ever
+#      needing credentials. The old grep was matching the bare word "credentials"
+#      inside successful plan output, so "plan stopped later: credentials" was
+#      printed for plans that did not stop at all. Promoting that grep to an
+#      assertion would have failed two correct cases, which reach the resource
+#      stage and mention credentials nowhere.
+#
+# So the assertion is positional rather than about credentials: the plan must show
+# it got past variable evaluation, and must carry no input-variable error. Both
+# are needed and neither is redundant. The absence check catches a failure AT the
+# variable stage; the progress check catches terraform dying BEFORE it, where
+# there would be no variable error to find and the case would pass vacuously --
+# an uninitialized module directory being the obvious way in.
 #
 # Usage:
 #   deploy/terraform/tests/validate-inputs.sh
@@ -47,25 +77,56 @@ trap 'rm -f "$LOG"' EXIT
 PASS=0
 FAIL=0
 
+# Every error terraform raises while evaluating input variables. Their presence
+# means the plan stopped at the variable stage; their absence is half of what
+# proves it got past. "Invalid value for variable" is a failed validation
+# condition; the other three are the ways a -var can be wrong without tripping any
+# validation block, and "Value for undeclared variable" in particular is what a
+# renamed or deleted variable produces.
+VAR_STAGE_ERROR='Invalid value for variable|Value for undeclared variable|No value for required variable|Invalid value for input variable'
+
+# Proof the plan evaluated the configuration. One of these appears in all eight
+# mustnot cases as measured -- whether the plan then succeeded, failed on
+# credentials, or failed on a resource attribute. Asserting a *positive* marker is
+# what stops a case passing when terraform died before reading variables at all,
+# where there is no variable error to find.
+PAST_VARIABLES='Terraform will perform the following actions|Plan: [0-9]+ to add|No changes'
+
 # run_case <label> <must|mustnot> <error-fragment> <module-dir> [terraform args...]
 run_case() {
   local label="$1" expect="$2" fragment="$3" dir="$4"; shift 4
 
   terraform -chdir="$dir" plan -input=false -no-color "$@" > "$LOG" 2>&1
 
-  local found=no
+  local found=no var_stage=no past_variables=no
   grep -qF "$fragment" "$LOG" && found=yes
+  grep -qE "$VAR_STAGE_ERROR" "$LOG" && var_stage=yes
+  grep -qE "$PAST_VARIABLES" "$LOG" && past_variables=yes
 
-  if [[ "$expect" == must && "$found" == yes ]]; then
-    printf '  PASS  %-58s rule fired\n' "$label"
-    PASS=$((PASS + 1))
-  elif [[ "$expect" == mustnot && "$found" == no ]]; then
-    local why
-    why=$(grep -oiE 'no valid credential sources|credentials|InvalidClientTokenId|Unable to locate|failed to get shared config' "$LOG" | head -1)
-    printf '  PASS  %-58s rule silent (plan stopped later: %s)\n' "$label" "${why:-see log}"
+  local ok why
+  if [[ "$expect" == must ]]; then
+    # The fragment alone would be satisfied by any failure whose text happened to
+    # contain the error_message. Requiring the failure to be AT the variable stage
+    # is what makes it the rule firing rather than a coincidence.
+    if [[ "$found" == yes && "$var_stage" == yes ]]; then
+      ok=yes; why="rule fired at the variable stage"
+    else
+      ok=no; why="need fragment+var-stage, got fragment=$found var_stage=$var_stage"
+    fi
+  else
+    if [[ "$found" == no && "$var_stage" == no && "$past_variables" == yes ]]; then
+      ok=yes; why="rule silent, and the plan evaluated the configuration"
+    else
+      ok=no
+      why="need no-fragment+no-var-stage+past-variables, got fragment=$found var_stage=$var_stage past_variables=$past_variables"
+    fi
+  fi
+
+  if [[ "$ok" == yes ]]; then
+    printf '  PASS  %-58s %s\n' "$label" "$why"
     PASS=$((PASS + 1))
   else
-    printf '  FAIL  %-58s expected=%s found=%s\n' "$label" "$expect" "$found"
+    printf '  FAIL  %-58s %s\n' "$label" "$why"
     tail -15 "$LOG"
     FAIL=$((FAIL + 1))
   fi
