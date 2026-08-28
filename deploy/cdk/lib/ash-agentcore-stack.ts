@@ -15,15 +15,55 @@
  * - "By default, use stateless mode (`stateless_http=True`) for compatibility
  *   with AWS's session management and load balancing."
  *
- * That is why `McpStatelessHttp` defaults to `true`, and measured against ASH
- * directly: given a session id the server never issued, ASH's MCP returns HTTP
- * 404 "Session not found" in stateful mode and HTTP 200 in stateless mode.
+ * WHY `McpStatelessHttp` DEFAULTS TO `true`
+ * ----------------------------------------
+ * This comment previously said stateful "fails every request" on AgentCore,
+ * because the platform injects a session id a stateful server rejects. That was
+ * measured against a live runtime and is FALSE. A stateful runtime
+ * (`ASH_MCP_STATELESS: "false"`, confirmed in the deployed configuration)
+ * completed a full round trip: `initialize` with no session id returned 200,
+ * `notifications/initialized` 202, `tools/list` 200 with 14 tools, and
+ * `tools/call check_installation` 200 with a real result.
  *
- * Note what this does NOT say. AgentCore also supports stateful MCP servers, so
- * stateful is not forbidden here — it is unsupportable, which is a different
- * claim. Stateful mode requires clients to send `initialize` with no session id,
- * and this stack controls no clients. `mcpStatelessHttp` in `ash-config.ts`
- * separates the measured part from the inferred part in full.
+ * That pass is not the server ignoring session ids, which would make it
+ * meaningless. Controls against the same runtime: no session id returns 400, a
+ * fabricated undashed 32-hex id in ASH's own format returns 404, and a fabricated
+ * dashed UUID returns 404. Sessions are genuinely enforced, so those 200s can only
+ * be a session ASH itself issued.
+ *
+ * The real hazard is sharper, and it is what keeps the default at `true`.
+ * AgentCore returns a FRESH platform-minted `Mcp-Session-Id` on every response,
+ * and its own contract tells clients to capture the returned id and send it on
+ * subsequent requests. A stateful server honors only the id it issued at
+ * `initialize`, so following that guidance literally breaks on the third call:
+ *
+ *   initialize, no id   -> 200, returns id A   (client adopts A, per the docs)
+ *   tools/list with A   -> 200, returns id B   (client adopts B, per the docs)
+ *   tools/list with B   -> 404 Session not found
+ *
+ * A docs-following MCP client therefore fails against a stateful runtime.
+ * Stateless is immune because it ignores session ids entirely.
+ *
+ * WHICH PART IS WHICH, BECAUSE THIS HAS BEEN WRONG IN BOTH DIRECTIONS
+ * -----------------------------------------------------------------
+ * - DOCUMENTED by AWS: that the platform supplies an `Mcp-Session-Id` and routes
+ *   on it. The contract page states this for stateless mode specifically.
+ * - MEASURED against two live runtimes: the round trip above, the three controls,
+ *   and the id rotation.
+ * - NOT SEPARATED: whether an injected id is silently adopted by a stateful server
+ *   or whether nothing is injected on that path. Telling those apart needs header
+ *   logging inside the container, so it needs an image change. It does not affect
+ *   the default either way.
+ *
+ * WHY SESSION AFFINITY IS LOAD-BEARING HERE, NOT INCIDENTAL
+ * -------------------------------------------------------
+ * AgentCore routes on `Mcp-Session-Id` to the same microVM, which is what lets
+ * on-disk per-session state survive across separate `InvokeAgentRuntime` calls —
+ * observed as a scan's state persisting across 18 progress calls. Anything that
+ * delivers source in chunks and then scans it depends on that, so session
+ * semantics matter to this target rather than being a protocol detail.
+ *
+ * `mcpStatelessHttp` in `ash-config.ts` carries the parameter-facing version.
  *
  * WHY THE ENTRYPOINT IS BAKED INTO THE IMAGE
  * ------------------------------------------
@@ -47,11 +87,18 @@
  * `bedrock-agentcore:InvokeAgentRuntime`, which is IAM-authorized. The Fargate
  * target, where the hostname IS knowable, does set `--allowed-host`.
  *
- * NOT VERIFIED WITHOUT DEPLOYING
- * ------------------------------
- * See deploy/cdk/README.md. In short: that AgentCore accepts this exact property
- * combination, that the derived ARM64 image satisfies its container probe, and
- * that a rebuilt image behind a moving tag does not roll into a running runtime.
+ * WHAT DEPLOYING SETTLED, AND WHAT IT DID NOT
+ * ------------------------------------------
+ * Two successful deployments confirmed the two items that used to head this list:
+ * AgentCore accepts this exact property combination, and the derived ARM64 image
+ * satisfies its container probe. The deployed template was byte-identical to the
+ * committed `templates/AshAgentCore.template.json`, so that evidence applies to
+ * what ships here rather than to a variant.
+ *
+ * Still unverified: that a rebuilt image behind a moving tag rolls into a running
+ * runtime. It does not — AgentCore pins a runtime version at create time. See
+ * deploy/cdk/README.md, which also names the version-qualified tag to point at
+ * instead when a workload needs pinning.
  */
 
 import { Aws, CfnOutput, Fn, RemovalPolicy, Stack, StackProps } from 'aws-cdk-lib';
