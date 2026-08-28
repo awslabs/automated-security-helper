@@ -589,6 +589,95 @@ class TestCoverageIsRefused:
         assert entries["bandit"].status != ScannerStatus.SKIPPED
 
 
+class TestReadShardAssignment:
+    """The three shapes that can reach the reader in the wild.
+
+    ``ReportMetadata.shard`` is a declared ``ShardAssignment | None`` field, so
+    the scan side assigns an instance and a results file validates into one. A
+    raw dict is still reachable two ways: from a results file written before the
+    field was declared, when the key rode the model's ``extra="allow"``, and from
+    any caller that assigns one directly, since ``ReportMetadata`` does not enable
+    ``validate_assignment``. All three have to answer the same way, because
+    getting any of them wrong turns into "no shard provenance found" on a set of
+    shards that is perfectly good.
+    """
+
+    def _model(self):
+        model = AshAggregatedResults()
+        model.ash_config = _build_config()
+        return model
+
+    def test_a_shard_assignment_instance_is_returned_as_is(self):
+        model = self._model()
+        stamp_shard_assignment(
+            model,
+            ShardAssignment(shard_index=1, shard_count=4, assigned_scanners=["bandit"]),
+        )
+
+        got = read_shard_assignment(model)
+
+        assert isinstance(got, ShardAssignment)
+        assert (got.shard_index, got.shard_count, got.assigned_scanners) == (
+            1,
+            4,
+            ["bandit"],
+        )
+
+    def test_a_raw_dict_is_validated_into_an_assignment(self):
+        model = self._model()
+        setattr(
+            model.metadata,
+            SHARD_PROVENANCE_KEY,
+            {"shard_index": 2, "shard_count": 5, "assigned_scanners": ["checkov"]},
+        )
+
+        got = read_shard_assignment(model)
+
+        assert isinstance(got, ShardAssignment)
+        assert (got.shard_index, got.shard_count, got.assigned_scanners) == (
+            2,
+            5,
+            ["checkov"],
+        )
+
+    def test_none_means_this_was_not_a_sharded_scan(self):
+        # Both an unset field and an explicitly cleared one. The merged report
+        # carries the cleared form, so the two must agree or a second merge would
+        # read a merged report as shard 0 of n.
+        model = self._model()
+        assert read_shard_assignment(model) is None
+
+        setattr(model.metadata, SHARD_PROVENANCE_KEY, None)
+        assert read_shard_assignment(model) is None
+
+    def test_a_dict_shaped_assignment_merges_the_same_as_an_instance(self):
+        # End to end rather than just at the reader, because the assignment is
+        # also what ownership is decided from: a dict that read back correctly but
+        # lost assigned_scanners would put every scanner's skip marker in the
+        # merged report.
+        instances = build_shards(3)
+        dicts = build_shards(3)
+        for model in dicts:
+            assignment = read_shard_assignment(model)
+            setattr(
+                model.metadata, SHARD_PROVENANCE_KEY, assignment.model_dump(mode="json")
+            )
+
+        from_instances = merge_shard_results(as_loaded(instances))
+        from_dicts = merge_shard_results(as_loaded(dicts))
+
+        assert finding_keys(from_dicts) == finding_keys(from_instances)
+        assert sorted(from_dicts.scanner_results) == sorted(
+            from_instances.scanner_results
+        )
+        assert [
+            entry.excluded for _, entry in sorted(from_dicts.scanner_results.items())
+        ] == [
+            entry.excluded
+            for _, entry in sorted(from_instances.scanner_results.items())
+        ]
+
+
 class TestMergedProvenance:
     def test_merged_report_carries_no_shard_key(self):
         # Leaving it would let a second merge accept the merged report as shard 0
