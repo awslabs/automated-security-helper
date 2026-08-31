@@ -7,13 +7,32 @@
 # Provider plugins and downloaded registry modules.
 .terraform/
 
-# Dependency lock files are committed, so no ignore rule for .terraform.lock.hcl.
-# Regenerate one with `terraform providers lock` and an explicit -platform for
-# each of linux_amd64, linux_arm64, darwin_amd64, and darwin_arm64. A bare
-# `terraform init` records hashes for the machine's own platform only, and the
-# resulting lock file then fails init with a checksum error for anyone on a
-# different OS or architecture -- including this project's ubuntu-24.04-arm CI
-# jobs and any adopter on a Mac.
+# Dependency lock files are committed, so there is no ignore rule for
+# .terraform.lock.hcl. The rule that used to sit here had a legitimate concern
+# behind it: a bare `terraform init` records an h1: hash for only the platform
+# that ran it, so committing that does pin the repository to one machine's view
+# of the providers. Dropping lock files altogether was the wrong remedy for it.
+# Recording every platform anyone is likely to run `init` on is the right one,
+# so do not restore the rule citing that concern.
+#
+# A missing platform costs churn, not breakage. These providers come from the
+# origin registry, so the lock also carries the signed zh: checksums, which
+# cover every platform a version was published for. Terraform verifies a new
+# platform's package against those and appends the matching h1: -- it does not
+# refuse to install. The cost is that `init` on an unrecorded platform rewrites
+# a committed file and leaves a spurious diff behind. Outright refusal is the
+# provider-mirror case, and this repository configures no mirror.
+#
+# Regenerate every platform in one command:
+#
+#   terraform providers lock \
+#     -platform=linux_amd64 -platform=linux_arm64 \
+#     -platform=darwin_amd64 -platform=darwin_arm64 -platform=windows_amd64
+#
+# Only linux_amd64 is a CI platform -- terraform-hygiene, on ubuntu-latest, is
+# the one job that touches this directory. The rest are here because
+# contributors and adopters work on them, which the install-method and Python
+# matrices under .github/workflows show.
 
 # State, plans, and variable files that may carry account-specific or sensitive
 # values. Nothing here should ever be applied from the repository, but these
