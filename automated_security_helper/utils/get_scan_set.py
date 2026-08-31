@@ -152,17 +152,29 @@ def get_ash_ignorespec_lines(
     lines = []
     for ignorefile in all_ignores:
         if os.path.isfile(ignorefile):
-            # Both sides must be posix before the anchored substitution can fire.
-            # The pattern comes from as_posix() while ignorefile carries whatever
-            # os.walk produced, so on Windows the regex is "^C:/src" against a
-            # subject of "C:\\src\\.gitignore" and nothing is replaced: the
-            # placeholder silently degrades to an absolute host path in the
-            # emitted header. Normalizing the subject makes the output identical
-            # on both platforms, which is the point of the placeholder.
+            # KNOWN DEFECT, deliberately not repaired here. The pattern is posix
+            # because it comes from as_posix(), while ignorefile carries whatever
+            # os.walk produced, so on Windows this is "^C:/src" against a subject
+            # of "C:\\src\\.gitignore": the anchor cannot match and the emitted
+            # marker keeps an absolute host path instead of the placeholder.
+            #
+            # Normalizing the subject here is NOT the fix and was measured to make
+            # things worse. Path("./sub/.gitignore").as_posix() drops the leading
+            # "./", so under a relative scan root the anchor stops matching and the
+            # marker loses its placeholder entirely; for "./.gitignore" the "^\."
+            # anchor then matches the filename's own dot and yields the corrupted
+            # "${SOURCE_DIR}gitignore". On Windows it is worse still: today a
+            # missing placeholder makes get_ash_ignorespec fall through to a global
+            # base of "/", which is over-broad but still drops ignored files, and a
+            # parsed marker would instead produce a rule rooted at a drive the
+            # subjects are not on, matching nothing at all.
+            #
+            # The real repair is to pass the true scan root into get_ash_ignorespec
+            # and build base_path from it rather than from a synthetic "/" prefix,
+            # which also fixes nested ignore files -- those have never applied on
+            # any platform. That is a larger change than this one belongs in.
             clean = re.sub(
-                rf"^{re.escape(Path(path).as_posix())}",
-                "${SOURCE_DIR}",
-                Path(ignorefile).as_posix(),
+                rf"^{re.escape(Path(path).as_posix())}", "${SOURCE_DIR}", ignorefile
             )
             debug_echo(f"Found .ignore file: {clean}", debug=debug)
             lines.append(f"######### START CONTENTS: {clean} #########")
@@ -245,19 +257,19 @@ def get_files_not_matching_spec(
 
     included = []
     for inc_full in _all_files:
-        # os.walk and os.path.join hand back native separators, so every
-        # comparison against a forward-slash literal below has to normalize
-        # first. inc_full itself stays native, because callers use it to open
-        # files -- only the comparisons are posix.
-        as_posix = Path(inc_full).as_posix()
+        # inc_full stays native, because callers use it to open files. Only the
+        # forward-slash comparison below normalizes, and only for the comparison.
+        # The re.sub subject is left native on purpose: see the note in
+        # get_ash_ignorespec_lines for why normalizing it is a regression rather
+        # than a fix.
         clean = re.sub(
-            rf"^{re.escape(Path(path).as_posix())}", "${SOURCE_DIR}", as_posix
+            rf"^{re.escape(Path(path).as_posix())}", "${SOURCE_DIR}", inc_full
         )
         if not spec.match(Path(inc_full)):
             # "/node_modules/aws-cdk" cannot occur in a Windows path, where the
             # separator is a backslash, so this exclusion was unreachable there
             # and ASH scanned the CDK bundle it means to skip.
-            if "/node_modules/aws-cdk" not in as_posix:
+            if "/node_modules/aws-cdk" not in Path(inc_full).as_posix():
                 debug_echo(f"Matched file for scan set: {clean}", debug=debug)
                 included.append(inc_full)
     included = sorted(set(included))
