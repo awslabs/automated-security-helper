@@ -403,14 +403,22 @@ resource "aws_lambda_function" "gate" {
   # the function nearer anything private.
   #checkov:skip=CKV_AWS_117:Reaches only AWS API endpoints, so a VPC adds NAT or interface-endpoint cost without changing what it can talk to.
   #
-  # CKV_AWS_173: every value in the environment block below is non-secret
-  # configuration -- a severity threshold, three booleans, two paths, and the
-  # NAME of an SSM parameter. All of them are already plain text in the caller's
-  # Terraform. Lambda encrypts the environment at rest with an AWS managed key
-  # regardless; a customer managed key here would protect values that are not
-  # sensitive. The one secret this deployment does hold, the MCP auth header,
-  # lives in Secrets Manager in the agentcore and fargate modules.
-  #checkov:skip=CKV_AWS_173:The environment holds only non-secret configuration already visible in the caller's Terraform, and Lambda encrypts it at rest with an AWS managed key.
+  # CKV_AWS_173: the eight values in the environment block below are
+  # configuration rather than secrets -- a severity threshold, three booleans, a
+  # comment-length cap, one path, the NAME of an SSM parameter, and
+  # ASH_SCAN_EXTRA_ARGS. All eight are already plain text in the caller's
+  # Terraform, and Lambda encrypts the environment at rest with an AWS managed
+  # key regardless, so a customer managed key here would protect values that are
+  # not sensitive.
+  #
+  # ASH_SCAN_EXTRA_ARGS is named separately because it is the one value whose
+  # contents this module neither constrains nor reads: it is free text an
+  # operator supplies, appended to the `ash scan` command line. Calling it
+  # non-secret is a statement about how it is meant to be used, not something
+  # this module enforces, so do not pass a secret through it. The one secret this
+  # deployment does hold, the MCP auth header, lives in Secrets Manager in the
+  # agentcore and fargate modules.
+  #checkov:skip=CKV_AWS_173:The environment holds configuration already visible in the caller's Terraform, and Lambda encrypts it at rest with an AWS managed key. ash_scan_extra_args is operator-supplied free text and must not be used to carry a secret.
   #
   # CKV_AWS_116: a dropped invocation is not silent -- the pull request goes
   # uncommented and the failure shows in this function's error metric and log
