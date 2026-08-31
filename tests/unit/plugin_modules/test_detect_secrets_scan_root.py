@@ -201,8 +201,14 @@ def test_keys_stay_inside_root_so_relpath_cannot_fail_on_windows(tmp_path, monke
 
 
 def test_relative_source_dir_still_reports_findings(tmp_path, monkeypatch):
-    """``ash --source-dir ./sub`` reaches the scanner as the relative string, and
-    the scan set inherits it.
+    """A relative ``source_dir`` reaches the scanner as given, and the scan set
+    inherits it.
+
+    Not through the CLI, which anchors it in ``run_ash_scan``. Through a library
+    caller: ``ASHScanOrchestrator.model_post_init`` coerces a ``str`` to ``Path``
+    without anchoring it, so ``source_dir="./sub"`` stays relative all the way
+    into ``PluginContext``. That is the door this test comes through, which is
+    why it builds the scanner directly rather than invoking the CLI.
 
     ``scan_files()`` reads each name as ``os.path.join(self.root, name)``, so an
     anchored root plus a relative name would send detect-secrets looking for

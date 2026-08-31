@@ -540,12 +540,15 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 executor = ThreadPoolExecutor(max_workers=1)
                 # scan_files() reads each name as os.path.join(self.root, name),
                 # which is only a no-op for absolute names. ``source_dir`` may be
-                # relative -- ``ash --source-dir ./sub`` reaches the orchestrator
-                # as given -- and the scan set inherits that, so absolutize here:
-                # with a relative name a non-empty root would send detect-secrets
-                # looking for <root>/<root>/<file> and quietly find nothing. Kept
-                # separate from ``scannable`` so the baseline exclude patterns
-                # above still match against the paths they were written for.
+                # relative: the CLI absolutizes it in run_ash_scan, but a library
+                # caller reaches ASHScanOrchestrator directly and
+                # model_post_init only coerces a str to Path -- it does not
+                # anchor it -- so source_dir="./sub" arrives relative and the
+                # scan set inherits that. Absolutize here: with a relative name a
+                # non-empty root would send detect-secrets looking for
+                # <root>/<root>/<file> and quietly find nothing. Kept separate
+                # from ``scannable`` so the baseline exclude patterns above still
+                # match against the paths they were written for.
                 scan_paths = [str(Path(item).absolute()) for item in scannable]
                 future = executor.submit(
                     self._secrets_collection.scan_files, *scan_paths
