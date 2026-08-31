@@ -7,11 +7,13 @@
 # Provider plugins and downloaded registry modules.
 .terraform/
 
-# Dependency lock files. Deliberately not committed: these are reusable modules
-# whose provider constraints are expressed with `~>` in each versions.tf, and a
-# committed lock file would pin consumers to whatever provider build happened to
-# be current on the machine that ran init.
-.terraform.lock.hcl
+# Dependency lock files are committed, so no ignore rule for .terraform.lock.hcl.
+# Regenerate one with `terraform providers lock` and an explicit -platform for
+# each of linux_amd64, linux_arm64, darwin_amd64, and darwin_arm64. A bare
+# `terraform init` records hashes for the machine's own platform only, and the
+# resulting lock file then fails init with a checksum error for anyone on a
+# different OS or architecture -- including this project's ubuntu-24.04-arm CI
+# jobs and any adopter on a Mac.
 
 # State, plans, and variable files that may carry account-specific or sensitive
 # values. Nothing here should ever be applied from the repository, but these
