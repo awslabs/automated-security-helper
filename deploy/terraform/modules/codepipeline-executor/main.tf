@@ -91,10 +91,26 @@ resource "aws_s3_bucket" "artifacts" {
   # account-wide through CloudTrail data events rather than per-bucket logs.
   #checkov:skip=CKV_AWS_18:Server access logging needs a second log bucket per deployment; access here is limited to roles declared in this module and is auditable account-wide via CloudTrail data events.
   #
-  # NOTE: CKV_AWS_144 (cross-region replication) is deliberately left unresolved
-  # rather than suppressed. Replication is a recurring storage and transfer cost
-  # and changes where scan artifacts come to rest, so whether this module should
-  # do it is the deploying team's call, not a scanner's.
+  # CKV_AWS_144 asks for cross-region replication, which is a decision for the
+  # team adopting this module rather than a default it should impose. Three
+  # reasons, in the order they usually matter:
+  #
+  #   1. It bills a second full copy of every artifact this pipeline produces,
+  #      plus cross-region transfer per GB moved. Neither charge stops when the
+  #      pipeline is idle, because the copies persist.
+  #   2. Neither piece it needs exists here. Replication requires a destination
+  #      bucket in another region and a replication IAM role, and this module
+  #      creates only the one bucket above. Satisfying the rule means adding both
+  #      and deciding which region, which the module cannot choose for a caller.
+  #   3. It changes where scan results come to rest. These artifacts carry finding
+  #      detail and repository file paths, so replicating them puts that content
+  #      in a second region -- a data-residency question the adopter answers
+  #      against their own obligations, not one a scanner default settles.
+  #
+  # An opt-in variable was considered and rejected: Checkov reads static HCL, so a
+  # conditional replication block defaulting to off still trips this rule, leaving
+  # the same skip line plus a feature most adopters would not enable.
+  #checkov:skip=CKV_AWS_144:Replication bills a second full copy of every artifact plus per-GB cross-region transfer; the destination bucket and replication IAM role do not exist in this module and the region cannot be chosen on a caller's behalf; and it moves finding detail and file paths to rest in a second region, making it the adopter's data-residency decision rather than a module default. See the comment above this line.
   bucket_prefix = "${var.name_prefix}-"
   force_destroy = var.artifact_bucket_force_destroy
 
