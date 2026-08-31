@@ -176,6 +176,28 @@ def get_ash_ignorespec_lines(
     return lines
 
 
+def _forced_inclusion_spec(source_dir: str | Path) -> IgnoreParser:
+    """Compile the negated ``ASH_INCLUSIONS`` entries into a parser of their own.
+
+    Each entry is stripped of its leading ``!`` and added as an ordinary rule, so
+    a match against this parser means "ASH wants this file in the scan set no
+    matter what the ignore files said".
+
+    Separate from the main spec because a negation inside that spec cannot do the
+    job: git -- and igittigitt implementing it -- will not let a negation
+    re-include a path underneath an excluded *directory*, on the grounds that git
+    never descends into one. ``!**/*.template.json`` is not a preference that may
+    lose to a user's ``out/``; it is there to force CloudFormation templates into
+    the scan set that ``cdk_nag_scanner`` and ``cfn_nag_scanner`` read.
+    """
+    parser = IgnoreParser()
+    base_path = Path(source_dir)
+    for entry in ASH_INCLUSIONS:
+        if entry.startswith("!"):
+            parser.add_rule(entry[1:], base_path=base_path)
+    return parser
+
+
 def get_ash_ignorespec(
     lines: List[str],
     source_dir: str | Path,
@@ -285,15 +307,26 @@ def get_files_not_matching_spec(
             for f in files:
                 _all_files.append(os.path.join(root, f))
 
+    # Applied as a pass of its own after *spec* has had its say, because a
+    # negation inside that spec loses to an excluded ancestor directory: a nested
+    # "out/" in src/cdk/.gitignore beat "!**/*.template.json" and took
+    # src/cdk/out/Stack.template.json out of the scan set that cdk_nag_scanner and
+    # cfn_nag_scanner read, so CloudFormation analysis of that template stopped
+    # with nothing logged to say so.
+    forced_inclusions = _forced_inclusion_spec(path)
+
     included = []
     for inc_full in _all_files:
+        if "/node_modules/aws-cdk" in inc_full:
+            continue
+        file_path = Path(inc_full)
+        if spec.match(file_path) and not forced_inclusions.match(file_path):
+            continue
         clean = re.sub(
             rf"^{re.escape(Path(path).as_posix())}", "${SOURCE_DIR}", inc_full
         )
-        if not spec.match(Path(inc_full)):
-            if "/node_modules/aws-cdk" not in inc_full:
-                debug_echo(f"Matched file for scan set: {clean}", debug=debug)
-                included.append(inc_full)
+        debug_echo(f"Matched file for scan set: {clean}", debug=debug)
+        included.append(inc_full)
     included = sorted(set(included))
     return included
 
