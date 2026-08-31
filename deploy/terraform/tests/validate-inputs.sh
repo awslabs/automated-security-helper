@@ -64,6 +64,60 @@
 # "Got past variable evaluation" therefore has to admit a plan that stopped just
 # after it, not only one that finished. See PAST_VARIABLES below.
 #
+# WHAT THE CASE COUNT MEANS, AND WHY IT IS EASY TO OVERSTATE
+# ----------------------------------------------------------
+# There are 42 validation blocks across the five modules -- agentcore 4,
+# ash-image-pipeline 11, codecommit-gate 11, codepipeline-executor 8, fargate 8 --
+# and every one now has a `must` case proven to fire it.
+#
+# It reached 42 from 10, and the interesting part is that it was first reported as
+# 13. Three rules were counted as covered on the strength of an error_message
+# appearing in some case's output, when the case that produced it was exercising a
+# DIFFERENT rule:
+#
+#   * codecommit-gate min_severity shares its message verbatim with
+#     codepipeline-executor's, and no codecommit-gate case passed min_severity.
+#   * codecommit-gate lambda_architecture ends in the same six words as
+#     ash-image-pipeline's target_architecture ("must be either x86_64 or arm64"),
+#     and the existing case greps only that shared tail.
+#   * codepipeline-executor codecommit_repository_arn shares the ARN message with
+#     codecommit-gate's, and every codepipeline-executor case passed a VALID ARN --
+#     so the rule was evaluated on every run and never once asked to refuse
+#     anything.
+#
+# A grep for an error_message cannot tell which rule produced it. Worse, good
+# message writing actively encourages the collision: the same constraint should
+# read the same way in every module, so the duplicates are correct and should not
+# be perturbed to make this script's greps easier. The count therefore inflates in
+# exactly the direction that flatters the harness.
+#
+# Two things keep it honest, and both are needed:
+#
+#   1. Attribution by directory. A case names the module directory it plans, and a
+#      plan of module A cannot emit module B's diagnostics. The five module roots
+#      are independent -- none declares a `module` block pointing at another (the
+#      cross-module `source` references in this repository are all under
+#      examples/basic/, which this script never plans) -- so the directory, not the
+#      fragment, is what attributes a failure to a rule.
+#   2. Mutation. Each rule was neutered in turn and the case claiming to cover it
+#      was required to flip PASS -> FAIL. See the note in run_case's must branch.
+#
+# Where a fragment can carry the variable name, it does, so that a reader can see
+# which rule a case is about without cross-referencing. Some cannot: two modules'
+# name_prefix messages are byte-identical, as are their min_severity and ARN
+# messages. For those, the directory and the mutation are the whole of the
+# evidence, and no amount of fragment-tightening would add to it.
+#
+# WHAT THE PREVIOUS 32 UNCOVERED RULES WERE NOT
+# ---------------------------------------------
+# They were not broken, and nothing here fixes a validation rule. "This suite says
+# nothing about this rule" is a different statement from "this rule does not work".
+# Most of the 32 were never evaluated against a failing value at all, because no
+# case supplied the variable and it sat at its default. A few were evaluated with a
+# valid value and observed to stay silent, but never asked to refuse a bad one.
+# Neither is evidence of a defect. Every one of the 32 fired correctly the first
+# time it was given something invalid.
+#
 # Usage:
 #   deploy/terraform/tests/validate-inputs.sh
 #
@@ -147,13 +201,15 @@ run_case() {
     # Neither conjunct can be satisfied by the credential error that ends the
     # mustnot plans on a runner with no credentials: that text carries no
     # module's error_message, and none of the four VAR_STAGE_ERROR strings.
-    # Mutation-measured rather than argued, once per rule -- each of the ten
-    # rules these eleven cases cover was rewritten to a tautology that still
-    # references its variable, and every case flipped PASS -> FAIL, including
-    # both cases of the one rule that carries two. In that state the plan reaches
-    # provider configuration, so "No valid credential sources found" IS present
-    # in the failing case's output and the case fails anyway. A case that still
-    # passed with its rule neutered would not be testing the rule.
+    # Mutation-measured rather than argued, once per rule -- each of the 42
+    # rules across the five modules was rewritten to a tautology that still
+    # references its variable (`var.X == var.X`, because terraform rejects a
+    # validation condition that does not refer to var.<self>, so a bare `true`
+    # would not load), and every case flipped PASS -> FAIL, including both cases
+    # of the one rule that carries two. In that state the plan reaches provider
+    # configuration, so "No valid credential sources found" IS present in the
+    # failing case's output and the case fails anyway. A case that still passed
+    # with its rule neutered would not be testing the rule.
     if [[ "$found" == yes && "$var_stage" == yes ]]; then
       ok=yes; why="rule fired at the variable stage"
     else
@@ -193,6 +249,30 @@ EXEC_BASE=(
   -var container_image_uri=example.dkr.ecr.us-east-1.amazonaws.com/ash:latest
 )
 
+GATE_BASE=(
+  -var codecommit_repository_arn=arn:aws:codecommit:us-east-1:0:repo
+  -var base_image_uri=example.dkr.ecr.us-east-1.amazonaws.com/ash:latest
+)
+
+AGENTCORE_BASE=(
+  -var container_image_uri=example.dkr.ecr.us-east-1.amazonaws.com/ash:latest
+)
+
+# ash_version has no default, so every ash-image-pipeline case has to supply one.
+IMAGE_BASE=(
+  -var ash_version=v3.6.0
+)
+
+# A base array only holds a module's REQUIRED variables, and a case adds the one
+# variable it is about. Never both: terraform takes the FIRST -var for a given
+# variable and silently ignores a later one, so appending an override after a
+# base array leaves the base value in place. Measured, not assumed -- appending
+# `-var 'service_subnet_ids=[]'` after FARGATE_BASE plans with the base's
+# one-element list and raises no duplicate-flag warning. A case built that way
+# would exercise nothing while looking correct, which is why the
+# service_subnet_ids case below spells its variables out instead of reusing
+# FARGATE_BASE.
+
 echo "### fargate: cross-variable rule (the reason these modules need Terraform >= 1.9)"
 run_case "auth header + plain HTTP -> refused" must \
   "mcp_auth_header_value is set but the listener would be plain HTTP" \
@@ -214,6 +294,30 @@ run_case "alb_subnet_ids with one subnet -> refused" must \
 run_case "ephemeral_storage_gib below Fargate's 20 GiB default -> refused" must \
   "must be between 21 and 200" \
   "$MODULES/fargate" "${FARGATE_BASE[@]}" -var ephemeral_storage_gib=20
+# "1-25", not "1-33": this module's ceiling is lower than the other three
+# because ALB and target group names are derived from the prefix, and that is
+# what keeps this fragment from matching any other module's name_prefix rule.
+run_case "name_prefix uppercase -> refused" must \
+  "name_prefix must be 1-25 characters" \
+  "$MODULES/fargate" "${FARGATE_BASE[@]}" -var name_prefix=ASH
+# Spelled out rather than reusing FARGATE_BASE, which already sets
+# service_subnet_ids -- see the note above the base arrays.
+run_case "service_subnet_ids empty -> refused" must \
+  "service_subnet_ids must contain at least one subnet" \
+  "$MODULES/fargate" -var container_image_uri=x -var vpc_id=v \
+  -var 'service_subnet_ids=[]' -var 'alb_subnet_ids=["subnet-a","subnet-b"]'
+# Fargate spells the architecture uppercase where ash-image-pipeline spells it
+# lowercase, and `contains` is case-sensitive, so the ECS spelling of a value
+# that is valid in the image module is refused here.
+run_case "cpu_architecture lowercase x86_64 -> refused" must \
+  "cpu_architecture must be either X86_64 or ARM64" \
+  "$MODULES/fargate" "${FARGATE_BASE[@]}" -var cpu_architecture=x86_64
+run_case "desired_count negative -> refused" must \
+  "desired_count must be zero or greater" \
+  "$MODULES/fargate" "${FARGATE_BASE[@]}" -var desired_count=-1
+run_case "mcp_mount_path without a leading slash -> refused" must \
+  "mcp_mount_path must begin with a forward slash" \
+  "$MODULES/fargate" "${FARGATE_BASE[@]}" -var mcp_mount_path=mcp
 
 echo
 echo "### codepipeline-executor"
@@ -238,6 +342,29 @@ run_case "min_severity high -> allowed" mustnot \
 run_case "min_severity low (the default) -> allowed" mustnot \
   "min_severity must be one of" \
   "$MODULES/codepipeline-executor" "${EXEC_BASE[@]}" -var min_severity=low
+run_case "name_prefix uppercase -> refused" must \
+  "name_prefix must be 1-33 characters of lowercase letters" \
+  "$MODULES/codepipeline-executor" "${EXEC_BASE[@]}" -var name_prefix=ASH
+# EXEC_BASE deliberately unused: it supplies a WELL-FORMED ARN, and this rule
+# cannot be observed to fire without a malformed one. That is the whole gap --
+# the rule was evaluated on every codepipeline-executor case and never once
+# asked to refuse anything, while a grep for its error_message found the
+# byte-identical message from codecommit-gate's rule and read as coverage.
+run_case "malformed repository ARN -> refused" must \
+  "codecommit_repository_arn must be a CodeCommit repository ARN" \
+  "$MODULES/codepipeline-executor" -var codecommit_repository_arn=not-an-arn -var container_image_uri=x
+run_case "build_environment_type outside the two CodeBuild types -> refused" must \
+  "build_environment_type must be either LINUX_CONTAINER" \
+  "$MODULES/codepipeline-executor" "${EXEC_BASE[@]}" -var build_environment_type=WINDOWS_CONTAINER
+run_case "shard_build_timeout_minutes below 5 -> refused" must \
+  "shard_build_timeout_minutes must be between 5 and 480" \
+  "$MODULES/codepipeline-executor" "${EXEC_BASE[@]}" -var shard_build_timeout_minutes=4
+run_case "merge_build_timeout_minutes above 480 -> refused" must \
+  "merge_build_timeout_minutes must be between 5 and 480" \
+  "$MODULES/codepipeline-executor" "${EXEC_BASE[@]}" -var merge_build_timeout_minutes=481
+run_case "results_retention_days zero -> refused" must \
+  "results_retention_days must be at least 1" \
+  "$MODULES/codepipeline-executor" "${EXEC_BASE[@]}" -var results_retention_days=0
 
 echo
 echo "### ash-image-pipeline"
@@ -254,6 +381,37 @@ run_case "rebuild_schedule not rate()/cron() -> refused" must \
 run_case "target_architecture outside x86_64/arm64 -> refused" must \
   "must be either x86_64 or arm64" \
   "$MODULES/ash-image-pipeline" -var ash_version=v3.6.0 -var target_architecture=riscv
+# This module's name_prefix message is the codecommit-gate and
+# codepipeline-executor one plus a trailing clause, so the fragment has to be
+# that clause. A fragment taken from the shared opening would match all three.
+run_case "name_prefix uppercase -> refused" must \
+  "must start with a letter or digit" \
+  "$MODULES/ash-image-pipeline" "${IMAGE_BASE[@]}" -var name_prefix=ASH
+# ash_version is required and has no default, so the only way to reach its rule
+# is to pass a value that trimspace() empties.
+run_case "ash_version all whitespace -> refused" must \
+  "ash_version must be a non-empty git ref" \
+  "$MODULES/ash-image-pipeline" -var 'ash_version=   '
+run_case "ash_image_target outside the Dockerfile's stages -> refused" must \
+  "ash_image_target must be one of: core, ci, non-root" \
+  "$MODULES/ash-image-pipeline" "${IMAGE_BASE[@]}" -var ash_image_target=base
+run_case "ecr_image_tag_mutability lowercase -> refused" must \
+  "ecr_image_tag_mutability must be either MUTABLE or IMMUTABLE" \
+  "$MODULES/ash-image-pipeline" "${IMAGE_BASE[@]}" -var ecr_image_tag_mutability=mutable
+run_case "image_retention_count zero -> refused" must \
+  "image_retention_count must be between 1 and 1000" \
+  "$MODULES/ash-image-pipeline" "${IMAGE_BASE[@]}" -var image_retention_count=0
+run_case "ssm_parameter_tier not an SSM tier -> refused" must \
+  "ssm_parameter_tier must be one of: Standard, Advanced" \
+  "$MODULES/ash-image-pipeline" "${IMAGE_BASE[@]}" -var ssm_parameter_tier=Basic
+run_case "build_timeout_minutes above CodeBuild's 480 ceiling -> refused" must \
+  "build_timeout_minutes must be between 5 and 480" \
+  "$MODULES/ash-image-pipeline" "${IMAGE_BASE[@]}" -var build_timeout_minutes=481
+# 45 is not in CloudWatch Logs' accepted set, and a plausible-looking value is
+# the point: the rule exists because the API rejects anything off the list.
+run_case "log_retention_days off CloudWatch's accepted list -> refused" must \
+  "log_retention_days must be a retention value CloudWatch Logs" \
+  "$MODULES/ash-image-pipeline" "${IMAGE_BASE[@]}" -var log_retention_days=45
 
 echo
 echo "### agentcore"
@@ -263,6 +421,21 @@ run_case "name_prefix with a hyphen -> refused (AgentCore rejects it)" must \
 run_case "name_prefix with an underscore -> allowed" mustnot \
   "AgentCore runtime names do not accept hyphens" \
   "$MODULES/agentcore" -var container_image_uri=x -var name_prefix=ash_mcp
+# agent_runtime_name carries the same no-hyphens constraint as name_prefix but
+# in its own rule, so `ash-mcp` -- valid in every other module -- is refused
+# twice over in this one, once per rule. This case names the second rule.
+run_case "agent_runtime_name with a hyphen -> refused" must \
+  "agent_runtime_name must start with a letter" \
+  "$MODULES/agentcore" "${AGENTCORE_BASE[@]}" -var agent_runtime_name=ash-mcp
+run_case "network_mode outside PUBLIC/VPC -> refused" must \
+  "network_mode must be either PUBLIC or VPC" \
+  "$MODULES/agentcore" "${AGENTCORE_BASE[@]}" -var network_mode=PRIVATE
+# A header name starting with a digit fails AgentCore's allowlist pattern. This
+# rule matters because an unallowlisted header is silently dropped rather than
+# rejected, so a name the platform will not carry has to fail here.
+run_case "mcp_auth_header_name starting with a digit -> refused" must \
+  "mcp_auth_header_name must match AgentCore's allowlist" \
+  "$MODULES/agentcore" "${AGENTCORE_BASE[@]}" -var mcp_auth_header_name=1-invalid
 
 echo
 echo "### codecommit-gate"
@@ -272,6 +445,46 @@ run_case "malformed repository ARN -> refused" must \
 run_case "well-formed repository ARN -> allowed" mustnot \
   "must be a CodeCommit repository ARN" \
   "$MODULES/codecommit-gate" -var codecommit_repository_arn=arn:aws:codecommit:us-east-1:0:repo -var base_image_uri=x
+run_case "name_prefix uppercase -> refused" must \
+  "name_prefix must be 1-33 characters of lowercase letters" \
+  "$MODULES/codecommit-gate" "${GATE_BASE[@]}" -var name_prefix=ASH
+run_case "trigger_events empty -> refused (the gate would never run)" must \
+  "trigger_events must name at least one event" \
+  "$MODULES/codecommit-gate" "${GATE_BASE[@]}" -var 'trigger_events=[]'
+# This module's min_severity rule, not codepipeline-executor's. The two carry
+# byte-identical error_messages -- correctly, since it is the same constraint --
+# so no fragment can tell them apart and only running the case against THIS
+# module's directory attributes the failure here.
+run_case "min_severity outside ASH's ladder -> refused" must \
+  "min_severity must be one of" \
+  "$MODULES/codecommit-gate" "${GATE_BASE[@]}" -var min_severity=catastrophic
+run_case "approval_rule_approvals_required zero -> refused" must \
+  "approval_rule_approvals_required must be between 1 and 100" \
+  "$MODULES/codecommit-gate" "${GATE_BASE[@]}" -var approval_rule_approvals_required=0
+# 901 is one second past Lambda's own hard maximum, which is the limitation this
+# whole target is bounded by.
+run_case "lambda_timeout_seconds past Lambda's 900 ceiling -> refused" must \
+  "lambda_timeout_seconds must be between 30 and 900" \
+  "$MODULES/codecommit-gate" "${GATE_BASE[@]}" -var lambda_timeout_seconds=901
+run_case "lambda_memory_mb below 512 -> refused" must \
+  "lambda_memory_mb must be between 512 and 10240" \
+  "$MODULES/codecommit-gate" "${GATE_BASE[@]}" -var lambda_memory_mb=511
+run_case "lambda_ephemeral_storage_mb above 10240 -> refused" must \
+  "lambda_ephemeral_storage_mb must be between 512 and 10240" \
+  "$MODULES/codecommit-gate" "${GATE_BASE[@]}" -var lambda_ephemeral_storage_mb=10241
+# The fragment carries the variable name deliberately. ash-image-pipeline's
+# target_architecture rule ends in the same six words, and the existing case for
+# that rule greps only the shared tail -- which is how this rule was counted as
+# covered while no codecommit-gate case ever passed lambda_architecture.
+run_case "lambda_architecture outside x86_64/arm64 -> refused" must \
+  "lambda_architecture must be either x86_64 or arm64" \
+  "$MODULES/codecommit-gate" "${GATE_BASE[@]}" -var lambda_architecture=riscv
+run_case "max_comment_chars below 500 -> refused" must \
+  "max_comment_chars must be at least 500" \
+  "$MODULES/codecommit-gate" "${GATE_BASE[@]}" -var max_comment_chars=499
+run_case "ecr_image_tag_mutability lowercase -> refused" must \
+  "ecr_image_tag_mutability must be either MUTABLE or IMMUTABLE" \
+  "$MODULES/codecommit-gate" "${GATE_BASE[@]}" -var ecr_image_tag_mutability=mutable
 
 echo
 echo "validate-inputs: pass=$PASS fail=$FAIL"
