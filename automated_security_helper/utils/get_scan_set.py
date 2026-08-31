@@ -19,6 +19,13 @@ ASH_INCLUSIONS = [
     "!**/*.template.json",  # CDK output template default path pattern
 ]
 
+# Names used in the per-ignore-file exclusion report for the two sources of
+# exclusions that are not a user's ignore file. Both remove files from the scan
+# set, so both have to appear in the report: a count that left them out would not
+# add up to the number of files actually removed.
+ASH_INCLUSIONS_MARKER = "ASH_INCLUSIONS"
+BUNDLED_CDK_MARKER = "node_modules/aws-cdk (ASH built-in exclusion)"
+
 
 def red(msg) -> str:
     return "\033[91m{}\033[00m".format(msg)
@@ -254,8 +261,47 @@ def get_ash_ignorespec(
     Returns:
         A parser whose rules match paths underneath *source_dir*.
     """
+    parser, _rule_ids_by_marker = get_ash_ignorespec_with_attribution(
+        lines, source_dir, debug=debug
+    )
+    return parser
+
+
+def get_ash_ignorespec_with_attribution(
+    lines: list[str],
+    source_dir: str | Path,
+    debug: bool = False,
+) -> tuple[IgnoreParser, dict[str, list[int]]]:
+    """:func:`get_ash_ignorespec`, plus a record of which ignore file each rule came from.
+
+    The parser compiles every rule into one ordered list, because that ordering
+    *is* git's precedence and splitting it per file would break it. That leaves no
+    way to ask a matched rule which ignore file it came from, which is what
+    :func:`report_ignore_file_exclusions` needs to attribute an exclusion to the
+    ignore file responsible for it.
+
+    So the mapping is recorded here, while the answer is still known. It is keyed
+    by ``id()`` of the rule object rather than the rule itself because
+    ``IgnoreRule`` defines ``__eq__``/``__hash__`` over its string form: two
+    ignore files carrying the same pattern produce rules that are equal and hash
+    alike, so a dict keyed on the rules would merge them and attribute both to
+    whichever was inserted last. Identity is the only thing that separates them.
+    ``add_rule`` also extends by a slice rather than appending one rule, so the
+    whole added range is recorded rather than a presumed single rule.
+
+    Keying on ``id()`` is sound only while the rules are alive, and they are: the
+    returned parser holds every one of them for as long as the mapping is used.
+
+    Returns:
+        The parser, and an insertion-ordered mapping of marker to the ids of the
+        rules its block contributed. Markers whose block contributed no rules are
+        present with an empty list, so that "this ignore file excluded nothing"
+        stays distinguishable from "there was no such ignore file".
+    """
     debug_echo("Generating spec from collected ignorespec lines", debug=debug)
     parser = IgnoreParser()
+    rule_ids_by_marker: dict[str, list[int]] = {}
+    current_marker = ASH_INCLUSIONS_MARKER
 
     # Rules have to compile against the real scan root, not a synthetic "/"
     # prefix. igittigitt resolves a rule's base through os.path.abspath and then
@@ -327,13 +373,126 @@ def get_ash_ignorespec(
             current_base_path = _confine_base_path(
                 current_base_path, root_base_path, content_path
             )
+            # Registered on sight rather than on first rule, so an ignore file
+            # whose rules exclude nothing still gets a line in the report.
+            current_marker = content_path
+            rule_ids_by_marker.setdefault(current_marker, [])
             continue
 
         if stripped.startswith("#"):
             continue
 
+        added_from = len(parser.rules)
         parser.add_rule(stripped, base_path=current_base_path)
-    return parser
+        rule_ids_by_marker.setdefault(current_marker, []).extend(
+            id(rule) for rule in parser.rules[added_from:]
+        )
+    return parser, rule_ids_by_marker
+
+
+def report_ignore_file_exclusions(
+    path: str | Path,
+    spec: IgnoreParser,
+    scan_set_files: list[str],
+    rule_ids_by_marker: dict[str, list[int]],
+    all_files: list[str],
+    debug: bool = False,
+) -> dict[str, int]:
+    """Log how many files each ignore file removed from the scan set.
+
+    Making nested ignore files work means ASH scans *less* than it used to: a
+    vendored directory that ships its own ``.gitignore`` now takes its own source
+    out of the scan set. That is correct by gitignore semantics and matches what a
+    root-level ``.gitignore`` already did, but a security scanner that quietly
+    scans less after an upgrade is the worst outcome available, and vendored
+    dependencies very commonly ship ignore files. So the reduction is reported
+    rather than left silent.
+
+    The count is per ignore file, because that is what a user can act on -- a
+    single total says the scan set shrank without saying which file to go read.
+    It is a count and not a list of paths: the list is unbounded and would bury
+    the line that matters. The paths are available at debug level.
+
+    Counts are taken over the files that are missing from *scan_set_files*, not
+    over what the spec matched. Those differ, and the difference is the honest
+    one: ``ASH_INCLUSIONS`` re-adds ``*.template.json`` after the spec has
+    excluded it, and a file that came back is not a file this ignore file
+    removed. Counting spec matches would print a number that contradicts the
+    artifact it describes.
+
+    Known limitation: the counts cover files that were walked and then dropped.
+    A directory the root ``.gitignore`` prunes in
+    :func:`_collect_ignorefiles_and_all_files` is never descended into, so its
+    contents are in neither *all_files* nor the scan set and cannot be counted --
+    the report says nothing about them rather than guessing. The root
+    ``.gitignore`` therefore reads lower than the files it truly accounts for.
+
+    Returns:
+        Marker to number of files removed, for every marker seen -- including
+        zeros. Callers get the data; the log line is the product of it.
+    """
+    excluded = set(all_files) - set(scan_set_files)
+    marker_by_rule_id = {
+        rule_id: marker
+        for marker, rule_ids in rule_ids_by_marker.items()
+        for rule_id in rule_ids
+    }
+
+    counts: dict[str, int] = {marker: 0 for marker in rule_ids_by_marker}
+    counts[BUNDLED_CDK_MARKER] = 0
+    paths_by_marker: dict[str, list[str]] = {}
+    unattributed: list[str] = []
+
+    for excluded_file in sorted(excluded):
+        _ignored, rule = spec.match_with_rule(Path(excluded_file))
+        if rule is not None and id(rule) in marker_by_rule_id:
+            marker = marker_by_rule_id[id(rule)]
+        elif "/node_modules/aws-cdk" in excluded_file:
+            marker = BUNDLED_CDK_MARKER
+        else:
+            # No ignore rule owns this exclusion. Reaching here means the
+            # attribution mapping and the parser disagree, which would otherwise
+            # surface as every count reading zero -- the same absent-reads-as-zero
+            # ambiguity this report exists to remove. Say so instead.
+            unattributed.append(excluded_file)
+            continue
+        counts[marker] = counts.get(marker, 0) + 1
+        paths_by_marker.setdefault(marker, []).append(excluded_file)
+
+    ignore_file_markers = [
+        marker for marker in rule_ids_by_marker if marker != ASH_INCLUSIONS_MARKER
+    ]
+    if not ignore_file_markers:
+        ASH_LOGGER.info(
+            "No ignore files were found under %s, so no ignore rules removed "
+            "anything from the scan set.",
+            path,
+        )
+
+    for marker, count in counts.items():
+        if count == 0 and marker == BUNDLED_CDK_MARKER:
+            # Not a file the user wrote, and there is nothing to go look at when
+            # it excluded nothing.
+            continue
+        ASH_LOGGER.info(
+            "%s excluded %d %s from the scan set",
+            marker,
+            count,
+            "file" if count == 1 else "files",
+        )
+        if debug and paths_by_marker.get(marker):
+            for excluded_file in paths_by_marker[marker]:
+                debug_echo(f"  excluded by {marker}: {excluded_file}", debug=debug)
+
+    if unattributed:
+        ASH_LOGGER.warning(
+            "%d files left the scan set without any ignore rule accounting for "
+            "them, so the per-ignore-file counts above are incomplete. First: %s",
+            len(unattributed),
+            unattributed[0],
+        )
+
+    return counts
 
 
 def get_files_not_matching_spec(
@@ -568,12 +727,31 @@ def scan_set(
         )
 
     if not ashscanset_list:
-        spec = get_ash_ignorespec(ashignore_content, source, debug=debug)
+        spec, rule_ids_by_marker = get_ash_ignorespec_with_attribution(
+            ashignore_content, source, debug=debug
+        )
         ashscanset_list = get_files_not_matching_spec(
             source,
             spec,
             debug=debug,
             _all_files=all_files,
+        )
+        report_ignore_file_exclusions(
+            source,
+            spec,
+            ashscanset_list,
+            rule_ids_by_marker,
+            all_files,
+            debug=debug,
+        )
+    else:
+        # The scan set came off disk, so nothing was matched this run and there is
+        # no attribution to report. Say that rather than printing nothing, which
+        # would read as "no ignore file removed anything".
+        ASH_LOGGER.info(
+            "Scan set was reused from %s, so per-ignore-file exclusion counts "
+            "were not recomputed this run.",
+            output,
         )
 
     if output:
