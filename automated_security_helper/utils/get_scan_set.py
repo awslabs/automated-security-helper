@@ -152,8 +152,17 @@ def get_ash_ignorespec_lines(
     lines = []
     for ignorefile in all_ignores:
         if os.path.isfile(ignorefile):
+            # Both sides must be posix before the anchored substitution can fire.
+            # The pattern comes from as_posix() while ignorefile carries whatever
+            # os.walk produced, so on Windows the regex is "^C:/src" against a
+            # subject of "C:\\src\\.gitignore" and nothing is replaced: the
+            # placeholder silently degrades to an absolute host path in the
+            # emitted header. Normalizing the subject makes the output identical
+            # on both platforms, which is the point of the placeholder.
             clean = re.sub(
-                rf"^{re.escape(Path(path).as_posix())}", "${SOURCE_DIR}", ignorefile
+                rf"^{re.escape(Path(path).as_posix())}",
+                "${SOURCE_DIR}",
+                Path(ignorefile).as_posix(),
             )
             debug_echo(f"Found .ignore file: {clean}", debug=debug)
             lines.append(f"######### START CONTENTS: {clean} #########")
@@ -236,11 +245,19 @@ def get_files_not_matching_spec(
 
     included = []
     for inc_full in _all_files:
+        # os.walk and os.path.join hand back native separators, so every
+        # comparison against a forward-slash literal below has to normalize
+        # first. inc_full itself stays native, because callers use it to open
+        # files -- only the comparisons are posix.
+        as_posix = Path(inc_full).as_posix()
         clean = re.sub(
-            rf"^{re.escape(Path(path).as_posix())}", "${SOURCE_DIR}", inc_full
+            rf"^{re.escape(Path(path).as_posix())}", "${SOURCE_DIR}", as_posix
         )
         if not spec.match(Path(inc_full)):
-            if "/node_modules/aws-cdk" not in inc_full:
+            # "/node_modules/aws-cdk" cannot occur in a Windows path, where the
+            # separator is a backslash, so this exclusion was unreachable there
+            # and ASH scanned the CDK bundle it means to skip.
+            if "/node_modules/aws-cdk" not in as_posix:
                 debug_echo(f"Matched file for scan set: {clean}", debug=debug)
                 included.append(inc_full)
     included = sorted(set(included))
