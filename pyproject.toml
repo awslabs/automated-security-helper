@@ -92,7 +92,7 @@ dev = [
  "toml>=0.10.2",
  "hatchling>=1.32.0",
  "mcp>=2.0.0",
- "commitizen>=4.17.0",
+ "commitizen>=4.18.0",
  "httpx>=0.28.1,<1.0.0",
 ]
 
