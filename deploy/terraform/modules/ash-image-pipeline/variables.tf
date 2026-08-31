@@ -139,7 +139,23 @@ variable "ecr_force_delete" {
 variable "ecr_kms_key_arn" {
   description = <<-EOT
     Customer managed KMS key ARN for ECR encryption at rest. When null, the
-    repository uses AES256 server-side encryption with an Amazon-owned key.
+    repository uses AES256 server-side encryption with an Amazon-owned key. The
+    same key is also given to the image build's CodeBuild project.
+
+    Set this at the first apply. ECR fixes a repository's encryption
+    configuration when the repository is created, so changing this value on a
+    live deployment replaces the repository and deletes every image in it.
+
+    Nothing in the plan says so, which is the part worth knowing: image_uri is
+    built from the repository URL, and that URL is derived from account, Region,
+    and repository name, so it survives the replacement unchanged and no
+    deployment target consuming it plans a change. If the delete succeeds, the
+    apply finishes green with every target pointed at a tag that no longer
+    resolves. With the default ecr_force_delete = false the delete instead fails
+    on a non-empty repository and the apply stops partway.
+
+    To change the key later: set ecr_force_delete = true for that one apply, then
+    run the bootstrap_command output to rebuild and republish the image.
   EOT
   type        = string
   default     = null

@@ -313,6 +313,21 @@ variable "ecr_kms_key_arn" {
     repository. When null, the repository uses AES256 server-side encryption
     with an Amazon-owned key. Matches ash-image-pipeline's variable of the same
     name so both repositories can be given one key.
+
+    Set this at the first apply. ECR fixes a repository's encryption
+    configuration when the repository is created, so changing this value on a
+    live deployment replaces the repository and deletes every image in it.
+
+    Nothing in the plan says so, which is the part worth knowing: the gate image
+    URI is built from the repository URL, and that URL is derived from account,
+    Region, and repository name, so it survives the replacement unchanged and
+    Terraform plans no change to the Lambda function. If the delete succeeds,
+    the apply finishes green with the function pointed at a tag that no longer
+    resolves. With the default ecr_force_delete = false the delete instead fails
+    on a non-empty repository and the apply stops partway.
+
+    To change the key later: set ecr_force_delete = true for that one apply, then
+    run the bootstrap_command output to republish the gate image.
   EOT
   type        = string
   default     = null
