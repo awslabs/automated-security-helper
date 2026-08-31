@@ -7,7 +7,7 @@ import subprocess  # nosec B404
 import sys
 from typing import List, Optional
 from igittigitt import IgnoreParser
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import argparse
 import os
 
@@ -170,15 +170,44 @@ def get_ash_ignorespec_lines(
 
 def get_ash_ignorespec(
     lines: List[str],
+    source_dir: str | Path,
     debug: bool = False,
 ) -> IgnoreParser:
+    """Compile collected ignorespec lines into an ``IgnoreParser``.
+
+    Args:
+        lines: Output of :func:`get_ash_ignorespec_lines`: ignore file contents
+            wrapped in ``START/END CONTENTS`` markers naming the file each block
+            came from.
+        source_dir: The directory being scanned. Every rule's base path is
+            derived from it, which is also what makes the ``${SOURCE_DIR}`` token
+            in the markers resolvable -- and what lets a persisted
+            ``ash-ignore-report.txt`` be replayed against a different checkout.
+        debug: Enable debug logging.
+
+    Returns:
+        A parser whose rules match paths underneath *source_dir*.
+    """
     debug_echo("Generating spec from collected ignorespec lines", debug=debug)
     parser = IgnoreParser()
+
+    # Rules have to compile against the real scan root, not a synthetic "/"
+    # prefix. igittigitt resolves a rule's base through os.path.abspath and then
+    # matches it against the absolute paths os.walk produced, so a rule from
+    # sub/.gitignore given the base "/sub" becomes "/sub/**/<pattern>" and can
+    # never match "<source_dir>/sub/<file>" -- nested ignore files matched
+    # nothing at all. Root-level rules survived that only by accident: the base
+    # "/" compiles to "//**/<pattern>", whose leading ** swallows any prefix.
+    # Deriving every base from source_dir also keeps base and subject on the same
+    # Windows drive, which a rootless "/" cannot: abspath binds it to the drive
+    # of the current working directory, so an interpreter on D: compiled rules
+    # that could not match a tree on C:.
+    root_base_path = Path(source_dir)
 
     # Track the current base directory from section markers.
     # Lines like "######### START CONTENTS: ${SOURCE_DIR}/.ruff_cache/.gitignore #########"
     # indicate that subsequent rules should be scoped to that directory.
-    current_base_path = "/"
+    current_base_path = root_base_path
 
     for line in lines:
         stripped = line.strip()
@@ -196,22 +225,36 @@ def get_ash_ignorespec(
                     stripped.split("START CONTENTS:")[1].strip().rstrip("#").strip()
                 )
                 if content_path == "ASH_INCLUSIONS":
-                    current_base_path = "/"
+                    current_base_path = root_base_path
                 elif "${SOURCE_DIR}" in content_path:
-                    # Extract the directory containing the .gitignore/.ignore file
+                    # Extract the directory containing the .gitignore/.ignore
+                    # file. The marker is written with "/" separators, so it is
+                    # read back as a posix path regardless of host platform.
                     relative_path = content_path.replace("${SOURCE_DIR}", "").lstrip(
                         "/"
                     )
-                    # Get the parent directory of the ignore file
-                    parent_dir = str(Path(relative_path).parent)
-                    if parent_dir == ".":
-                        current_base_path = "/"
+                    parent_dir = PurePosixPath(relative_path).parent
+                    if str(parent_dir) == ".":
+                        current_base_path = root_base_path
                     else:
-                        current_base_path = "/" + parent_dir
+                        current_base_path = root_base_path / parent_dir
                 else:
-                    current_base_path = "/"
+                    marker_path = Path(content_path)
+                    if marker_path.is_absolute():
+                        # A marker naming a real path rather than the
+                        # ${SOURCE_DIR} token. get_ash_ignorespec_lines emits
+                        # that whenever the ignore file path does not start with
+                        # the posix form of the scan root, which on Windows is
+                        # every ignore file, because os.walk joins with "\".
+                        # Scope such a rule to the ignore file's own directory:
+                        # falling back to the scan root would quietly widen a
+                        # nested rule to the whole tree and drop files from the
+                        # scan set.
+                        current_base_path = marker_path.parent
+                    else:
+                        current_base_path = root_base_path
             except (IndexError, ValueError):
-                current_base_path = "/"
+                current_base_path = root_base_path
             continue
 
         if stripped.startswith("#"):
@@ -438,7 +481,7 @@ def scan_set(
         )
 
     if not ashscanset_list:
-        spec = get_ash_ignorespec(ashignore_content, debug=debug)
+        spec = get_ash_ignorespec(ashignore_content, source, debug=debug)
         ashscanset_list = get_files_not_matching_spec(
             source,
             spec,
