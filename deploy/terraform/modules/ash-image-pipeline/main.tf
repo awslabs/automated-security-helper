@@ -59,6 +59,7 @@ locals {
 #
 
 resource "aws_ecr_repository" "this" {
+  #checkov:skip=CKV_AWS_51:The scheduled rebuild republishes the same image_tag so running targets pick up patched scanners, which IMMUTABLE would fail on the push. See the ecr_image_tag_mutability description for the tradeoff and how to opt into IMMUTABLE.
   name                 = local.name
   image_tag_mutability = var.ecr_image_tag_mutability
   force_delete         = var.ecr_force_delete
@@ -106,6 +107,7 @@ resource "aws_ecr_lifecycle_policy" "this" {
 #
 
 resource "aws_ssm_parameter" "base_config" {
+  #checkov:skip=CKV2_AWS_34:This parameter holds a non-secret ASH configuration document -- reporter and scanner toggles, the same YAML a repository commits as .ash/.ash.yaml. It is supplied through the ash_base_config_yaml input, which is itself plain text in the caller's configuration, so SecureString would encrypt something that is not sensitive while adding a KMS decrypt grant to every target that reads it. Secret material for these targets goes to Secrets Manager instead; see the auth_header secret in the agentcore and fargate modules.
   count = local.manage_config_parameter ? 1 : 0
 
   name        = local.config_parameter_name
@@ -122,6 +124,8 @@ resource "aws_ssm_parameter" "base_config" {
 #
 
 resource "aws_cloudwatch_log_group" "build" {
+  #checkov:skip=CKV_AWS_158:CloudWatch Logs encrypts every log group at rest with an AWS managed key already. A customer managed key is a per-deployment compliance choice with a recurring cost per key, and this module should not create one on every caller's behalf. Nothing here is secret: these are container image build logs.
+  #checkov:skip=CKV_AWS_338:One year of retention is a compliance posture, not a property of build logs. These records exist to diagnose a failed image build, which is a question asked within days. Callers with a retention requirement set log_retention_days, which accepts any value CloudWatch Logs allows.
   name              = "/aws/codebuild/${local.name}-image-build"
   retention_in_days = var.log_retention_days
 
@@ -193,6 +197,19 @@ resource "aws_iam_role_policy" "build" {
 }
 
 resource "aws_codebuild_project" "this" {
+  # CKV_AWS_316 flags privileged_mode, and it cannot be removed here: this
+  # project exists to run `docker build`, and CodeBuild offers no rootless or
+  # daemonless build mode -- privileged_mode is how it grants a Docker daemon at
+  # all. The evidence that this is not a blanket habit is codepipeline-executor,
+  # whose shard and merge projects run the scanners with privileged_mode absent
+  # because they need no daemon.
+  #
+  # What bounds the usual escalation path: the build steps are fixed at deploy
+  # time. source.type is NO_SOURCE and the buildspec is the one rendered below
+  # from this module, so there is no repository from which a contributor could
+  # alter what runs as root. The role this project assumes grants ECR push on
+  # the single repository above and nothing else.
+  #checkov:skip=CKV_AWS_316:Required to run docker build; CodeBuild has no rootless mode. Escalation is bounded by NO_SOURCE with a module-rendered buildspec, so build steps cannot be altered from a repository, and the service role is scoped to ECR push on one repository. See the comment above this line.
   name           = "${local.name}-image-build"
   description    = "Builds the ASH container image from ${var.ash_version} into ${aws_ecr_repository.this.name}."
   service_role   = aws_iam_role.build.arn

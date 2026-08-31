@@ -307,6 +307,17 @@ variable "ecr_force_delete" {
   default     = false
 }
 
+variable "ecr_kms_key_arn" {
+  description = <<-EOT
+    Customer managed KMS key ARN for encryption at rest on the gate ECR
+    repository. When null, the repository uses AES256 server-side encryption
+    with an Amazon-owned key. Matches ash-image-pipeline's variable of the same
+    name so both repositories can be given one key.
+  EOT
+  type        = string
+  default     = null
+}
+
 variable "image_tag" {
   description = "Tag for the gate image."
   type        = string

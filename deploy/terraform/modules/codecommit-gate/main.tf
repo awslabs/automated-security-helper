@@ -47,12 +47,18 @@ locals {
 #
 
 resource "aws_ecr_repository" "gate" {
+  #checkov:skip=CKV_AWS_51:The scheduled rebuild republishes the same tag so the gate picks up patched scanners, which IMMUTABLE would fail on the push. See the ecr_image_tag_mutability description for the tradeoff and how to opt into IMMUTABLE.
   name                 = "${var.name_prefix}-lambda"
   image_tag_mutability = var.ecr_image_tag_mutability
   force_delete         = var.ecr_force_delete
 
   image_scanning_configuration {
     scan_on_push = true
+  }
+
+  encryption_configuration {
+    encryption_type = var.ecr_kms_key_arn == null ? "AES256" : "KMS"
+    kms_key         = var.ecr_kms_key_arn
   }
 
   tags = var.tags
@@ -80,6 +86,8 @@ resource "aws_ecr_lifecycle_policy" "gate" {
 }
 
 resource "aws_cloudwatch_log_group" "build" {
+  #checkov:skip=CKV_AWS_158:CloudWatch Logs already encrypts at rest with an AWS managed key. A customer managed key carries a recurring per-key cost this module should not impose on every caller, and these are container image build logs, not secret material.
+  #checkov:skip=CKV_AWS_338:These records answer "why did the image build fail", which is a question asked within days. A one-year floor is a compliance posture set per deployment; callers with that requirement set log_retention_days.
   name              = "/aws/codebuild/${var.name_prefix}-image-build"
   retention_in_days = var.log_retention_days
 
@@ -155,6 +163,16 @@ resource "aws_iam_role_policy" "build" {
 }
 
 resource "aws_codebuild_project" "gate_image" {
+  # Same as ash-image-pipeline's build project: privileged_mode is what gives
+  # CodeBuild a Docker daemon, and this project's whole job is to build the gate
+  # image on top of the shared ASH image. It is not removable while the image is
+  # built with Docker.
+  #
+  # Escalation is bounded the same way: source.type is NO_SOURCE with the
+  # buildspec rendered from this module, so nothing fetched from a repository
+  # decides what runs as root, and the service role reaches only this module's
+  # ECR repository.
+  #checkov:skip=CKV_AWS_316:Required to run docker build; CodeBuild has no rootless mode. Escalation is bounded by NO_SOURCE with a module-rendered buildspec, and the service role is scoped to this module's ECR repository. See the comment above this line.
   name          = "${var.name_prefix}-image-build"
   description   = "Adds a Lambda runtime interface client and the gate handler to the ASH image."
   service_role  = aws_iam_role.build.arn
@@ -282,6 +300,8 @@ resource "aws_cloudwatch_event_target" "base_image_built" {
 #
 
 resource "aws_cloudwatch_log_group" "gate" {
+  #checkov:skip=CKV_AWS_158:CloudWatch Logs already encrypts at rest with an AWS managed key. A customer managed key carries a recurring per-key cost this module should not impose on every caller. The gate logs ASH's verdict and its own progress; the scan findings themselves go to the pull request comment.
+  #checkov:skip=CKV_AWS_338:A one-year floor is a compliance posture set per deployment, not a property of these records, which exist to diagnose a gate invocation. Callers with a retention requirement set log_retention_days.
   name              = "/aws/lambda/${var.name_prefix}"
   retention_in_days = var.log_retention_days
 
@@ -371,6 +391,39 @@ resource "aws_iam_role_policy" "gate" {
 }
 
 resource "aws_lambda_function" "gate" {
+  # CKV_AWS_272 is not applicable rather than declined: Lambda code signing
+  # covers .zip deployment packages only, and this function is package_type
+  # "Image". The equivalent control for an image is registry-side scanning, which
+  # aws_ecr_repository.gate above enables with scan_on_push.
+  #checkov:skip=CKV_AWS_272:Code signing is unavailable for package_type Image; scan_on_push on the gate ECR repository is the image-side equivalent.
+  #
+  # CKV_AWS_117: the function talks to CodeCommit, SSM, and CloudWatch Logs, all
+  # AWS API endpoints. A VPC would add a NAT gateway or four interface endpoints
+  # and their hourly cost while reaching the same APIs, and it would not place
+  # the function nearer anything private.
+  #checkov:skip=CKV_AWS_117:Reaches only AWS API endpoints, so a VPC adds NAT or interface-endpoint cost without changing what it can talk to.
+  #
+  # CKV_AWS_173: every value in the environment block below is non-secret
+  # configuration -- a severity threshold, three booleans, two paths, and the
+  # NAME of an SSM parameter. All of them are already plain text in the caller's
+  # Terraform. Lambda encrypts the environment at rest with an AWS managed key
+  # regardless; a customer managed key here would protect values that are not
+  # sensitive. The one secret this deployment does hold, the MCP auth header,
+  # lives in Secrets Manager in the agentcore and fargate modules.
+  #checkov:skip=CKV_AWS_173:The environment holds only non-secret configuration already visible in the caller's Terraform, and Lambda encrypts it at rest with an AWS managed key.
+  #
+  # CKV_AWS_116: a dropped invocation is not silent -- the pull request goes
+  # uncommented and the failure shows in this function's error metric and log
+  # group. Replaying it from a dead-letter queue would re-scan a head commit that
+  # has likely moved on, so the recovery is to re-trigger the gate against the
+  # current head, which pushing to the pull request already does.
+  #checkov:skip=CKV_AWS_116:A dropped event surfaces as an uncommented pull request plus an error metric, and the correct recovery is re-triggering on the current head rather than replaying a stale event.
+  #
+  # CKV_AWS_50: X-Ray bills per trace and would describe one synchronous path --
+  # clone, scan, comment -- that this function's own log group already records
+  # step by step. There is no cross-service call graph here for tracing to
+  # reveal.
+  #checkov:skip=CKV_AWS_50:One synchronous path already recorded step by step in this function's log group; tracing bills per trace to reveal no additional call graph.
   function_name = var.name_prefix
   description   = "Scans a CodeCommit pull request with ASH and comments the result."
   role          = aws_iam_role.gate.arn

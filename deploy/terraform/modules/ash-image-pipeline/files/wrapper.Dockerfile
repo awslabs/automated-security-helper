@@ -1,4 +1,7 @@
 # syntax=docker/dockerfile:1
+#checkov:skip=CKV_DOCKER_2:The base ASH image declares its own HEALTHCHECK and a derived image inherits it, which Checkov cannot see reading only this file. This image's target is Bedrock AgentCore Runtime, which probes the container over its own protocol rather than through Docker's healthcheck.
+#checkov:skip=CKV_DOCKER_7:The base image arrives through the ASH_BASE_IMAGE build argument, which has no default for Checkov to resolve. The buildspec supplies a tagged ECR URI.
+#checkov:skip=CKV_DOCKER_3:USER comes from the base ASH image, whose non-root target sets one. Checkov reads only this file and cannot see it. See the COPY --chmod comment below, which exists for that same reason.
 #
 # Thin wrapper over a freshly built ASH image.
 #

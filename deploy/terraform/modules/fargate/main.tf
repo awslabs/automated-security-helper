@@ -67,6 +67,25 @@ locals {
 #
 
 resource "aws_secretsmanager_secret" "auth_header" {
+  # CKV2_AWS_57 asks for automatic rotation, which this secret cannot have in a
+  # useful form. Rotation needs a function that can change the credential at both
+  # ends; here the other end is whatever MCP client the operator configured with
+  # the same header value, which AWS cannot reach. Rotating on a schedule would
+  # simply start rejecting every client. The value is operator-supplied through
+  # mcp_auth_header_value, so rotating it means changing that input and
+  # re-applying, in step with the clients.
+  #checkov:skip=CKV2_AWS_57:No rotation function can update the far end -- an operator-configured MCP client -- so scheduled rotation would only start rejecting callers. Rotation is done by changing mcp_auth_header_value alongside the clients.
+  #
+  # CKV_AWS_149: Secrets Manager encrypts this with the aws/secretsmanager
+  # managed key already. Satisfying the rule would mean this module creating a
+  # customer managed key, whose per-key monthly charge every caller would then
+  # carry, and the module has no CMK input to accept an existing one. Adding that
+  # input is a reasonable request from a deployment with a CMK requirement; it is
+  # not something to infer from a scanner default. What this design does address
+  # is exposure through the runtime: the value is held here rather than in the
+  # task definition's environment, where anyone able to describe the service
+  # could read it.
+  #checkov:skip=CKV_AWS_149:Already encrypted with the aws/secretsmanager managed key. Satisfying this would require the module to create a CMK and bill every caller for it; there is no input to supply an existing key, and adding one should follow a deployment that needs it.
   count = local.manage_auth_secret ? 1 : 0
 
   name        = "${var.name_prefix}-mcp-auth-header"
@@ -166,6 +185,19 @@ resource "aws_vpc_security_group_egress_rule" "service_all" {
 #
 
 resource "aws_lb" "this" {
+  # CKV_AWS_150 wants deletion protection on by default. That would make
+  # `terraform destroy` fail on this load balancer, which is the wrong default for
+  # a module whose own examples/ directory is meant to be stood up and torn down.
+  # enable_deletion_protection is an input, so a long-lived deployment turns it on.
+  #checkov:skip=CKV_AWS_150:Defaulting this on would make terraform destroy fail, which is wrong for a module with a disposable example; long-lived deployments set enable_deletion_protection.
+  #
+  # CKV_AWS_91 wants access logging, which requires an S3 bucket to receive it
+  # plus the bucket policy granting the regional ELB account, and this module has
+  # no input for one. Request logs of an internal MCP endpoint are also not the
+  # record anyone reaches for here -- the scan output is, and it goes to the task
+  # log group. Adding an access_logs_bucket input is a reasonable follow-up for a
+  # deployment that needs the logs.
+  #checkov:skip=CKV_AWS_91:Needs a receiving S3 bucket and ELB-account bucket policy that this module has no input for; adding one should follow a deployment that needs request logs.
   name               = "${var.name_prefix}-alb"
   internal           = var.internal
   load_balancer_type = "application"
@@ -265,6 +297,8 @@ data "aws_iam_policy_document" "task_assume_role" {
 }
 
 resource "aws_cloudwatch_log_group" "task" {
+  #checkov:skip=CKV_AWS_158:CloudWatch Logs already encrypts at rest with an AWS managed key, and a customer managed key carries a recurring per-key cost this module should not impose on every caller.
+  #checkov:skip=CKV_AWS_338:A one-year floor is a per-deployment compliance posture rather than a property of these records, which exist to diagnose a task that failed or refused a request. Callers with a retention requirement set log_retention_days.
   name              = "/aws/ecs/${var.name_prefix}"
   retention_in_days = var.log_retention_days
 

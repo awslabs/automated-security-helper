@@ -78,6 +78,23 @@ locals {
 #
 
 resource "aws_s3_bucket" "artifacts" {
+  # CKV2_AWS_62 asks for event notifications. This is CodePipeline's artifact
+  # store: CodePipeline advances its own stages and does not consume S3 events,
+  # and no other subscriber exists, so a notification configuration here would
+  # publish to nothing.
+  #checkov:skip=CKV2_AWS_62:CodePipeline drives its own stage transitions and consumes no S3 events; there is no subscriber for a notification to reach.
+  #
+  # CKV_AWS_18 asks for server access logging, which requires a second bucket to
+  # receive the logs and cannot be satisfied by this bucket alone. The principals
+  # able to reach these objects are the shard and merge roles and CodePipeline,
+  # all declared in this module, and object-level access is auditable
+  # account-wide through CloudTrail data events rather than per-bucket logs.
+  #checkov:skip=CKV_AWS_18:Server access logging needs a second log bucket per deployment; access here is limited to roles declared in this module and is auditable account-wide via CloudTrail data events.
+  #
+  # NOTE: CKV_AWS_144 (cross-region replication) is deliberately left unresolved
+  # rather than suppressed. Replication is a recurring storage and transfer cost
+  # and changes where scan artifacts come to rest, so whether this module should
+  # do it is the deploying team's call, not a scanner's.
   bucket_prefix = "${var.name_prefix}-"
   force_destroy = var.artifact_bucket_force_destroy
 
@@ -169,6 +186,8 @@ data "aws_iam_policy_document" "build_assume_role" {
 }
 
 resource "aws_cloudwatch_log_group" "shard" {
+  #checkov:skip=CKV_AWS_158:CloudWatch Logs already encrypts at rest with an AWS managed key, and a customer managed key carries a recurring per-key cost this module should not impose. These are scanner console logs; the findings themselves are the pipeline artifact, encrypted with kms_key_arn when one is supplied.
+  #checkov:skip=CKV_AWS_338:A one-year floor is a per-deployment compliance posture. These records diagnose a shard that failed or timed out, a question asked within days. Callers with a retention requirement set log_retention_days.
   name              = "/aws/codebuild/${var.name_prefix}-shard"
   retention_in_days = var.log_retention_days
 
@@ -176,6 +195,8 @@ resource "aws_cloudwatch_log_group" "shard" {
 }
 
 resource "aws_cloudwatch_log_group" "merge" {
+  #checkov:skip=CKV_AWS_158:Same as the shard log group above -- already encrypted at rest with an AWS managed key, and a CMK is a per-deployment choice with a recurring cost.
+  #checkov:skip=CKV_AWS_338:Same as the shard log group above -- retention is a per-deployment compliance posture, set through log_retention_days.
   name              = "/aws/codebuild/${var.name_prefix}-merge"
   retention_in_days = var.log_retention_days
 
@@ -363,6 +384,13 @@ resource "aws_codebuild_project" "shard" {
   service_role  = aws_iam_role.shard.arn
   build_timeout = var.shard_build_timeout_minutes
 
+  # The same key the artifact bucket uses. Without this the module would honour
+  # kms_key_arn for the bucket but leave CodeBuild's own build output on the
+  # default AWS managed key, so a caller who supplied a CMK would get only half
+  # of what they asked for. Null keeps the default key, which is the behaviour
+  # when no CMK is supplied.
+  encryption_key = var.kms_key_arn
+
   source {
     type      = "CODEPIPELINE"
     buildspec = local.shard_buildspec
@@ -406,6 +434,9 @@ resource "aws_codebuild_project" "merge" {
   description   = "Merges every shard's ASH results and forms the pipeline verdict."
   service_role  = aws_iam_role.merge.arn
   build_timeout = var.merge_build_timeout_minutes
+
+  # Same reasoning as the shard project above.
+  encryption_key = var.kms_key_arn
 
   source {
     type      = "CODEPIPELINE"

@@ -23,6 +23,24 @@ global_settings:
     - rule_id: SECRET-SECRET-KEYWORD
       path: "docs/**"
       reason: "Documentation examples showing detection patterns"
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: deploy/terraform/modules/ash-image-pipeline/files/ash-container-init
+      reason: >-
+        The match is AUTH_SECRET_ENV = "ASH_MCP_AUTH_SECRET_ARN", the NAME of the
+        environment variable the entrypoint reads to find the secret, not a
+        secret. The value it names is an ARN resolved at runtime, and the header
+        it eventually fetches is never written to this file.
+    # === bandit: /tmp is the only writable path under a read-only rootfs ===
+    - rule_id: B108
+      path: deploy/terraform/modules/codecommit-gate/files/ash_pr_gate.py
+      reason: >-
+        The hardcoded /tmp is deliberate and cannot be relocated. This module runs
+        as a Lambda function, whose execution environment mounts the root
+        filesystem read-only and gives /tmp as the only writable path, so the
+        clone and the scan output have nowhere else to go. The same constraint is
+        why ASH redirects its scanner caches there. The path is not attacker
+        influenced: it is a module-level constant, and the line already carries a
+        matching noqa for the ruff equivalent of this rule.
     - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
       path: pyproject.toml
       reason: "Project configuration — base64 strings are dependency hashes"
