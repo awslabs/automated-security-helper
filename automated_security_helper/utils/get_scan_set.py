@@ -176,6 +176,42 @@ def get_ash_ignorespec_lines(
     return lines
 
 
+def _confine_base_path(candidate: Path, root_base_path: Path, marker: str) -> Path:
+    """Return *candidate* if it sits inside the scan root, else the scan root.
+
+    A rule's base is derived from a marker line, and both derivations can leave
+    the tree: ``${SOURCE_DIR}/../elsewhere/.gitignore`` joins a ``..`` onto the
+    scan root, and an absolute marker can name any directory on the host. Neither
+    escape announces itself, because igittigitt normalizes a base through
+    ``os.path.abspath`` when it compiles the rule. A base that escapes sideways
+    then matches nothing in the tree, so the ignore file the user asked for
+    becomes a no-op; one that escapes *upward* to an ancestor compiles to
+    ``<ancestor>/**/<pattern>``, which reaches every file in the tree and applies
+    that file's rules from the wrong anchor.
+
+    Normalization mirrors igittigitt's own ``_expand_base_path``: ``abspath``
+    after ``expanduser``, and deliberately not ``Path.resolve()``, so the
+    decision is made about the same path igittigitt will compile. Resolving
+    symlinks would answer a different question than the parser asks.
+    ``is_relative_to`` rather than ``os.path.commonpath`` because it is total --
+    ``commonpath`` raises on two Windows paths that share no drive, which is
+    exactly one of the cases that has to be answered "not contained".
+    """
+    root_absolute = Path(os.path.abspath(os.path.expanduser(str(root_base_path))))
+    candidate_absolute = Path(os.path.abspath(os.path.expanduser(str(candidate))))
+    if candidate_absolute.is_relative_to(root_absolute):
+        return candidate
+
+    ASH_LOGGER.warning(
+        "Ignore rules from %s resolve to a base outside the scan root, at %s. "
+        "Applying them from the scan root instead, so an explicitly supplied "
+        "ignore file is not silently discarded.",
+        marker,
+        candidate_absolute,
+    )
+    return root_base_path
+
+
 def _forced_inclusion_spec(source_dir: str | Path) -> IgnoreParser:
     """Compile the negated ``ASH_INCLUSIONS`` entries into a parser of their own.
 
@@ -250,6 +286,7 @@ def get_ash_ignorespec(
             # Format: "######### START CONTENTS: ${SOURCE_DIR}/subdir/.gitignore #########"
             # or:     "######### START CONTENTS: ${SOURCE_DIR}/.gitignore #########"
             # or:     "######### START CONTENTS: ASH_INCLUSIONS #########"
+            content_path = stripped
             try:
                 content_path = (
                     stripped.split("START CONTENTS:")[1].strip().rstrip("#").strip()
@@ -285,6 +322,11 @@ def get_ash_ignorespec(
                         current_base_path = root_base_path
             except (IndexError, ValueError):
                 current_base_path = root_base_path
+            # Gated here rather than in each branch above, so a derivation added
+            # later cannot reach the parser unchecked.
+            current_base_path = _confine_base_path(
+                current_base_path, root_base_path, content_path
+            )
             continue
 
         if stripped.startswith("#"):
@@ -447,7 +489,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--ignorefile",
-        help="ignore file to use in addition to the standard gitignore",
+        help=(
+            "ignore file to use in addition to the standard gitignore. A path "
+            "outside the scan root is allowed; its rules are applied from the "
+            "scan root, since a base outside the tree would match nothing in it"
+        ),
         default=[],
         type=str,
         nargs="*",
