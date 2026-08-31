@@ -457,14 +457,24 @@ class TestPlatformAndFlagMappings:
 class TestTheSchedulingKnobsComeFromTheWorkspaceRoot:
     """``max_parallel_projects`` and ``project_timeout`` are read, not defaulted."""
 
-    def test_without_a_config_the_documented_defaults_apply(self, tmp_path):
+    def test_without_a_config_the_documented_defaults_apply(
+        self, tmp_path, monkeypatch
+    ):
         """No ASH config at the root: bound 4, no timeout.
 
-        Note that 4 is *not* the dataclass default, which is 1. So this is a
-        real assertion about the builder consulting
+        4 is *not* ``ProjectScanSettings``' own default of 1, which is what makes
+        this a real assertion that the builder consults
         ``WorkspaceExecutionConfig.resolved_max_parallel_projects`` rather than
         leaving the field alone.
+
+        The CPU count is patched because that bound is
+        ``max(1, min(4, os.cpu_count() or 1))``, so an unpatched assertion on the
+        literal 4 asserts the host has at least four cores rather than anything
+        about the builder. It passed on Linux and failed on every macOS row with
+        ``assert 3 == 4`` -- a green that measured the runner. Any patched value
+        at or above the ceiling gives 4; 8 is used to stay clear of it.
         """
+        monkeypatch.setattr("os.cpu_count", lambda: 8)
         root = tmp_path / "bare"
         root.mkdir()
         opts = _opts(tmp_path).model_copy(update={"source_dir": root, "config": None})
@@ -474,7 +484,9 @@ class TestTheSchedulingKnobsComeFromTheWorkspaceRoot:
         assert settings.max_parallel_projects == 4
         assert settings.project_timeout is None
 
-    def test_an_unreadable_config_falls_back_rather_than_raising(self, tmp_path):
+    def test_an_unreadable_config_falls_back_rather_than_raising(
+        self, tmp_path, monkeypatch
+    ):
         """These are scheduling knobs, so a bad config must not refuse the scan.
 
         ``_resolve_workspace_execution_config`` warns and uses the defaults. The
@@ -482,7 +494,10 @@ class TestTheSchedulingKnobsComeFromTheWorkspaceRoot:
         be an exception with no workspace-level meaning, which the exit-code
         mapping would have to report as an internal error for what is really a
         typo in a config file.
+
+        CPU count patched for the same reason as the test above.
         """
+        monkeypatch.setattr("os.cpu_count", lambda: 8)
         root = tmp_path / "broken"
         root.mkdir()
         (root / ".ash.yaml").write_text(
