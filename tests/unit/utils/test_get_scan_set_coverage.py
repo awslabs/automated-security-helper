@@ -11,16 +11,27 @@ never opens them, so they carry no Windows ``is_absolute()``/``as_uri()`` hazard
 
 Two things about this file are worth knowing before changing it.
 
-Four tests are skipped on Windows because of a defect in the code under test,
-not because they are flaky. ``get_ash_ignorespec`` anchors every rule at a
-synthetic POSIX base -- ``/`` for a root-level ignore file, ``/<subdir>`` for a
-nested one -- and ``igittigitt`` puts that base through ``os.path.abspath``,
-which binds a rootless ``/`` to whichever drive the process is on. Hosted
-Windows runners put the interpreter on one drive and the temporary tree on
-another, so every compiled rule is anchored on the wrong drive and matches
-nothing at all. Repairing it means deriving the base from the real scan root,
-which changes which files ASH scans on every platform, so it is out of scope
-for a test change.
+Five tests are skipped on Windows, across two distinct defects in the code under
+test. Neither is flakiness, and both reasons are spelled out in the constants
+below rather than here so they travel with the markers.
+
+Four of them need a rule from ``get_ash_ignorespec`` to match a real file.
+``get_ash_ignorespec`` anchors every rule at a synthetic POSIX base -- ``/`` for a
+root-level ignore file, ``/<subdir>`` for a nested one -- and ``igittigitt`` puts
+that base through ``os.path.abspath``, which binds a rootless ``/`` to whichever
+drive the process is on. Hosted Windows runners put the interpreter on one drive
+and the temporary tree on another, so every compiled rule is anchored on the
+wrong drive and matches nothing at all.
+
+The fifth is a separate bug in the marker text, not the rule base:
+``get_ash_ignorespec_lines`` builds an anchored pattern from ``as_posix()`` and
+applies it to the native path ``os.walk`` returned, so on Windows the
+``${SOURCE_DIR}`` substitution never fires and the absolute host path leaks into
+the marker.
+
+Both repairs are the same change -- derive the base and the marker from the real
+scan root instead of a synthetic prefix -- and that changes which files ASH scans
+on every platform, so it is out of scope for a test change.
 
 That same synthetic base is why the marker tests below match against subjects
 like ``Path("/subdir/a.log")``: those sit under the very fake root the rules are
@@ -78,6 +89,21 @@ DRIVE_ANCHORED_RULES = (
     "compiles against the wrong drive and matches nothing. This is a defect in "
     "the base_path derivation, not a flaky test: the fix is to build the base "
     "from the real scan root, which changes scanning behavior on every platform."
+)
+
+# A different defect from the one above, in the marker text rather than the rule
+# base, so it gets its own reason instead of sharing.
+POSIX_ANCHORED_REWRITE = (
+    "get_ash_ignorespec_lines builds its anchored pattern from "
+    "Path(path).as_posix() but applies it to the native path os.walk returned, so "
+    "on Windows the regex is '^C:/src' against 'C:\\\\src\\\\.gitignore', the "
+    "anchor cannot match, and the marker keeps the absolute host path instead of "
+    "the ${SOURCE_DIR} placeholder. Normalizing the subject is not the fix and was "
+    "measured to be worse: Path('./sub/.gitignore').as_posix() drops the leading "
+    "'./', which loses the placeholder entirely under a relative scan root, and "
+    "for './.gitignore' the '^.' anchor then matches the filename's own dot and "
+    "emits a corrupted '${SOURCE_DIR}gitignore'. The fix is to derive the marker "
+    "from the real scan root, the same change DRIVE_ANCHORED_RULES needs."
 )
 
 
@@ -257,6 +283,7 @@ def test_ignorespec_lines_falls_back_to_walking_when_no_files_are_supplied(tmp_p
     assert "ignored/" in lines
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason=POSIX_ANCHORED_REWRITE)
 def test_ignorespec_lines_rewrites_the_source_dir_prefix_to_a_placeholder(tmp_path):
     _tree(tmp_path)
     root_gitignore = str(tmp_path / ".gitignore")
