@@ -39,13 +39,20 @@
 #      no rule error_message -- so the mustnot case passed while its must twin
 #      still fired, and the script reported pass=19 fail=0 with the variable gone.
 #
-#   2. The claim about credentials was mostly false. Measured across the eight
-#      mustnot cases, six plans SUCCEED: these modules plan offline without ever
-#      needing credentials. The old grep was matching the bare word "credentials"
-#      inside successful plan output, so "plan stopped later: credentials" was
-#      printed for plans that did not stop at all. Promoting that grep to an
-#      assertion would have failed two correct cases, which reach the resource
-#      stage and mention credentials nowhere.
+#   2. The claim about credentials was imprecise, and the grep behind it was
+#      loose. The old grep matched the bare word "credentials", which also occurs
+#      in successful plan output, so "plan stopped later: credentials" was printed
+#      for plans that did not stop at all.
+#
+#      Whether a mustnot plan stops at all is a property of the ENVIRONMENT, not of
+#      these modules. On a workstation with a ~/.aws/credentials default profile the
+#      AWS provider configures and six of the eight plans run to completion, which
+#      is where the since-removed claim that "these modules plan offline without
+#      ever needing credentials" came from. It does not hold in CI, which has no
+#      credentials file: there all eight stop at provider configuration. Unsetting
+#      the AWS_* variables at the top of this script does not close that gap,
+#      because it does not hide the file. Run this with HOME pointed at an empty
+#      directory to measure what CI measures.
 #
 # So the assertion is positional rather than about credentials: the plan must show
 # it got past variable evaluation, and must carry no input-variable error. Both
@@ -53,6 +60,9 @@
 # variable stage; the progress check catches terraform dying BEFORE it, where
 # there would be no variable error to find and the case would pass vacuously --
 # an uninitialized module directory being the obvious way in.
+#
+# "Got past variable evaluation" therefore has to admit a plan that stopped just
+# after it, not only one that finished. See PAST_VARIABLES below.
 #
 # Usage:
 #   deploy/terraform/tests/validate-inputs.sh
@@ -85,12 +95,37 @@ FAIL=0
 # renamed or deleted variable produces.
 VAR_STAGE_ERROR='Invalid value for variable|Value for undeclared variable|No value for required variable|Invalid value for input variable'
 
-# Proof the plan evaluated the configuration. One of these appears in all eight
-# mustnot cases as measured -- whether the plan then succeeded, failed on
-# credentials, or failed on a resource attribute. Asserting a *positive* marker is
-# what stops a case passing when terraform died before reading variables at all,
-# where there is no variable error to find.
-PAST_VARIABLES='Terraform will perform the following actions|Plan: [0-9]+ to add|No changes'
+# Proof the plan got PAST input-variable evaluation. Asserting a *positive* marker
+# is what stops a case passing when terraform died before reading variables at
+# all, where there is no variable error to find. There are two observable ways to
+# be past that stage, and both alternatives below are needed:
+#
+#   * the plan ran to completion -- the first three alternatives; or
+#   * it failed at a stage strictly after variable evaluation. Terraform
+#     configures a provider only once every input variable has been evaluated, so
+#     a diagnostic attributed to a provider block proves the variable stage is
+#     behind us. That attribution is the `with provider["..."]` line terraform's
+#     own diagnostic renderer emits.
+#
+# The provider alternative is not optional, and leaving it out is what shipped
+# this script red: the list once held only the first three, which are emitted by a
+# plan that COMPLETES. On a runner with no credentials file none of the eight
+# mustnot plans completes, so the suite reported pass=11 fail=8 with every failure
+# reading past_variables=no -- see point 2 in the header for why that did not show
+# up when the list was written.
+#
+# Matching the attribution rather than the credential message keeps this from
+# being coupled to one provider's wording. It also keeps the guard the positive
+# marker exists for. Measured with .terraform/ moved aside: plan emits "Required
+# plugins are not installed" and no attribution line, so an uninitialized
+# directory still scores past_variables=no and its cases still fail rather than
+# passing vacuously.
+#
+# A loose marker here cannot excuse a real validation failure on its own, because
+# the mustnot branch below also requires the rule's fragment to be absent and no
+# variable-stage error to have been raised. Both absences are checked
+# independently of this one.
+PAST_VARIABLES='Terraform will perform the following actions|Plan: [0-9]+ to add|No changes|with provider\["'
 
 # run_case <label> <must|mustnot> <error-fragment> <module-dir> [terraform args...]
 run_case() {
