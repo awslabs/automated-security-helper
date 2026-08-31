@@ -729,10 +729,27 @@ def test_a_non_matching_global_ignore_leaves_the_finding_in_place(scanner):
     assert [r.ruleId for r in report.runs[0].results] == ["SECRET-AWS-ACCESS-KEY"]
 
 
-def test_multiple_secrets_across_files_all_report(scanner):
-    """Every file with a finding contributes to the results list."""
+def test_multiple_secrets_across_files_all_report(scanner, monkeypatch):
+    """Every file with a finding contributes to the results list.
+
+    This is the only test here that hands detect-secrets more than one file, so
+    it is the only one that takes SecretsCollection.scan_files' multiprocessing
+    branch. That branch keys each finding by
+    ``os.path.relpath(secret.filename, self.root)``, and root defaults to "",
+    which resolves to the process working directory. The single-file branch
+    keys by the path it was handed and computes no relative path at all, which
+    is why the rest of this module is indifferent to the cwd.
+
+    Two drives have no relative path between them on Windows, so that relpath
+    raises ValueError whenever the scanned tree and the cwd sit on different
+    drives -- which is the normal arrangement on hosted Windows runners, where
+    the temp directory and the checkout are on different drives. Chdir'ing into
+    the scan target puts both on one drive by construction and leaves the keys
+    as bare filenames on every platform.
+    """
     source_with_planted_key(scanner.context.work_dir, name="first.py")
     source_with_planted_key(scanner.context.work_dir, name="second.py")
+    monkeypatch.chdir(scanner.context.work_dir)
 
     report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
