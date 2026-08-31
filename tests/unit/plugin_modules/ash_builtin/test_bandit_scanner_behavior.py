@@ -419,7 +419,17 @@ def test_config_file_is_discovered_in_the_source_directory(
     with caplog.at_level(logging.INFO):
         scanner = BanditScanner(context=plugin_context, config=BanditScannerConfig())
 
-    assert extra_arg_values(scanner, expected_flag) == [str(discovered)], (
+    # Discovery builds these paths by interpolating source_dir into an f-string
+    # with a literal forward slash, so on Windows the value comes back with a
+    # backslashed prefix and a forward slash before the filename. Both
+    # separators resolve to the same file there, but the strings differ from the
+    # one a Path builds natively, so each side is normalized before comparing.
+    # The comparison stays a full-path list equality: a wrong flag, a wrong
+    # file, a wrong directory or a second emitted arg all still fail.
+    discovered_args = [
+        Path(value).as_posix() for value in extra_arg_values(scanner, expected_flag)
+    ]
+    assert discovered_args == [discovered.as_posix()], (
         f"{relative_path} should be passed via {expected_flag}; "
         f"extra_args={[(a.key, a.value) for a in scanner.args.extra_args]}"
     )
