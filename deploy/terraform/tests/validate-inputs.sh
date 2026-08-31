@@ -143,6 +143,17 @@ run_case() {
     # The fragment alone would be satisfied by any failure whose text happened to
     # contain the error_message. Requiring the failure to be AT the variable stage
     # is what makes it the rule firing rather than a coincidence.
+    #
+    # Neither conjunct can be satisfied by the credential error that ends the
+    # mustnot plans on a runner with no credentials: that text carries no
+    # module's error_message, and none of the four VAR_STAGE_ERROR strings.
+    # Mutation-measured rather than argued, once per rule -- each of the ten
+    # rules these eleven cases cover was rewritten to a tautology that still
+    # references its variable, and every case flipped PASS -> FAIL, including
+    # both cases of the one rule that carries two. In that state the plan reaches
+    # provider configuration, so "No valid credential sources found" IS present
+    # in the failing case's output and the case fails anyway. A case that still
+    # passed with its rule neutered would not be testing the rule.
     if [[ "$found" == yes && "$var_stage" == yes ]]; then
       ok=yes; why="rule fired at the variable stage"
     else
