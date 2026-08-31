@@ -143,11 +143,19 @@ def get_ash_ignorespec_lines(
         ignorefiles = []
 
     if _discovered_ignore_files is not None:
-        all_ignores = list(set(_discovered_ignore_files))
+        all_ignores = _discovered_ignore_files
     else:
         # Fallback: collect ignore files via a walk (used when called standalone)
         all_ignores, _ = _collect_ignorefiles_and_all_files(path, ignorefiles, debug)
-        all_ignores = list(set(all_ignores))
+
+    # Shallowest ignore file first, so that a deeper one's rules are added to the
+    # spec last and therefore win: igittigitt lets the last matching rule decide,
+    # and git gives precedence to the ignore file closest to the file being
+    # tested. The order has to be stated rather than taken from a set, because a
+    # set of strings iterates in hash order, which is randomized per process --
+    # a "!keep.tmp" in sub/deep/.gitignore would override "*.tmp" from
+    # sub/.gitignore on some runs of the same scan and lose on others.
+    all_ignores = sorted(set(all_ignores), key=lambda p: (len(Path(p).parts), p))
 
     lines = []
     for ignorefile in all_ignores:

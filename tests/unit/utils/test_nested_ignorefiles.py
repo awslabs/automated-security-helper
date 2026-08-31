@@ -121,6 +121,76 @@ class TestNestedIgnoreFileScoping:
         )
 
 
+@pytest.fixture
+def layered_ignore_tree(tmp_path):
+    """Two ignore files at different depths, the deeper one re-including a file.
+
+    Structure::
+
+        src/
+        |-- app.py
+        `-- sub/
+            |-- .gitignore      (*.tmp)
+            |-- a.tmp           excluded by sub/.gitignore
+            `-- deep/
+                |-- .gitignore  (!keep.tmp)
+                |-- keep.tmp    re-included by the deeper ignore file
+                `-- other.tmp   still excluded by sub/.gitignore
+    """
+    root = tmp_path / "src"
+    root.mkdir()
+    (root / "app.py").write_text("x = 1\n")
+
+    sub = root / "sub"
+    sub.mkdir()
+    (sub / ".gitignore").write_text("*.tmp\n")
+    (sub / "a.tmp").write_text("scratch\n")
+
+    deep = sub / "deep"
+    deep.mkdir()
+    (deep / ".gitignore").write_text("!keep.tmp\n")
+    (deep / "keep.tmp").write_text("wanted\n")
+    (deep / "other.tmp").write_text("scratch\n")
+
+    return root
+
+
+class TestIgnoreFilePrecedenceByDepth:
+    """The ignore file closest to a file decides its fate, as git resolves it.
+
+    Rules reach the parser in the order their ignore files are read and the last
+    matching rule wins, so read order *is* precedence. That order used to come
+    from iterating a set of path strings, and string hashing is randomized per
+    process: the same tree scanned twice could put ``sub/deep/.gitignore`` before
+    or after ``sub/.gitignore``, so a re-include in the deeper file won on some
+    runs and was silently dropped from the scan set on others. Only observable
+    once a nested ignore file applied at all.
+    """
+
+    def test_deeper_reinclude_overrides_a_shallower_exclude(self, layered_ignore_tree):
+        found = _relative_posix_names(
+            layered_ignore_tree, scan_set(source=str(layered_ignore_tree))
+        )
+
+        assert "sub/deep/keep.tmp" in found, (
+            f"'!keep.tmp' in sub/deep/.gitignore lost to '*.tmp' in sub/.gitignore; "
+            f"scan set: {sorted(found)}"
+        )
+
+    def test_the_shallower_exclude_still_applies_where_not_overridden(
+        self, layered_ignore_tree
+    ):
+        """The deeper file overrides one path, it does not replace the rule."""
+        found = _relative_posix_names(
+            layered_ignore_tree, scan_set(source=str(layered_ignore_tree))
+        )
+
+        assert {"sub/a.tmp", "sub/deep/other.tmp"}.isdisjoint(found), (
+            f"'*.tmp' from sub/.gitignore stopped excluding files the deeper "
+            f"ignore file never named; scan set: {sorted(found)}"
+        )
+
+
 class TestMarkerCarryingRealPath:
     """A marker can name a real path instead of the ``${SOURCE_DIR}`` token.
 
