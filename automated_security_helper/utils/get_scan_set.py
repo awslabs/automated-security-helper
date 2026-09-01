@@ -148,6 +148,38 @@ def _source_dir_marker(
     return _with_posix_separators(file_path, separators)
 
 
+def _is_bundled_cdk_path(
+    file_path: str,
+    *,
+    separators: str = _PATH_SEPARATORS,
+) -> bool:
+    r"""True when *file_path* sits inside the vendored ``node_modules/aws-cdk`` tree.
+
+    ASH bundles aws-cdk so that ``cdk synth`` can run, and CDK carries
+    CloudFormation templates of its own as test fixtures. Those are not the user's
+    infrastructure, so they stay out of the scan set; otherwise a CDK project's
+    findings are diluted by its dependency's fixtures.
+
+    This carve-out is the *only* thing keeping those templates out, which is worth
+    stating because :func:`get_files_not_matching_spec` reads as though the ignore
+    spec were also involved. It is not: nothing excludes a bundled template in the
+    first place, so ``spec.match`` is False for it and the forced-inclusion pass on
+    ``!**/*.template.json`` is never consulted. Remove this test and the templates
+    are scanned, whatever the rest of the function does.
+
+    The check this replaced was ``"/node_modules/aws-cdk" in file_path``, against a
+    path ``os.walk`` joined with ``\`` on Windows -- so it matched nothing there and
+    the carve-out was dead on the one platform where it was silently dead rather
+    than loudly wrong.
+
+    Kept as a substring test rather than a path-components test so the POSIX answer
+    is byte for byte what it was, including that it also covers sibling packages
+    whose names merely begin with ``aws-cdk``. Narrowing that would change which
+    files POSIX scans and is a separate decision from making the platforms agree.
+    """
+    return "/node_modules/aws-cdk" in _with_posix_separators(file_path, separators)
+
+
 def _collect_ignorefiles_and_all_files(
     path: str,
     extra_ignorefiles: List[str] | None = None,
@@ -532,7 +564,7 @@ def report_ignore_file_exclusions(
         _ignored, rule = spec.match_with_rule(Path(excluded_file))
         if rule is not None and id(rule) in marker_by_rule_id:
             marker = marker_by_rule_id[id(rule)]
-        elif "/node_modules/aws-cdk" in excluded_file:
+        elif _is_bundled_cdk_path(excluded_file):
             marker = BUNDLED_CDK_MARKER
         else:
             # No ignore rule owns this exclusion. Reaching here means the
@@ -603,7 +635,7 @@ def get_files_not_matching_spec(
 
     included = []
     for inc_full in _all_files:
-        if "/node_modules/aws-cdk" in inc_full:
+        if _is_bundled_cdk_path(inc_full):
             continue
         file_path = Path(inc_full)
         if spec.match(file_path) and not forced_inclusions.match(file_path):
