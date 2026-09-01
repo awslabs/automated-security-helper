@@ -26,6 +26,20 @@ ASH_INCLUSIONS = [
 ASH_INCLUSIONS_MARKER = "ASH_INCLUSIONS"
 BUNDLED_CDK_MARKER = "node_modules/aws-cdk (ASH built-in exclusion)"
 
+# The characters that count as a path separator when a posix-shaped literal has to
+# be tested against a path ``os.walk`` built. ``os.walk`` joins with ``os.sep``, so
+# every walked path on Windows is ``\``-separated, while a ``--ignorefile`` value or
+# a replayed ``ash-ignore-report.txt`` may use ``/`` on the same host.
+#
+# Read off ``os`` rather than hardcoded to both, so the POSIX answer is unchanged:
+# ``\`` is a legal character in a POSIX filename, and treating it as a separator
+# there would rewrite a directory that really is named ``node_modules\aws-cdk``.
+# The two functions below take it as an argument for the same reason the value is
+# derived here rather than inlined -- passing the Windows set is the only way to
+# measure the Windows answer from a POSIX host, and both of these were wrong on
+# Windows for exactly as long as that was untestable.
+_PATH_SEPARATORS = os.sep if os.altsep is None else os.sep + os.altsep
+
 
 def red(msg) -> str:
     return "\033[91m{}\033[00m".format(msg)
@@ -64,6 +78,74 @@ def debug_echo(*msg, debug: bool = False) -> str | None:
     if debug:
         ASH_LOGGER.debug(message)
     return message
+
+
+def _with_posix_separators(path: str, separators: str) -> str:
+    """*path* with each character of *separators* rewritten to ``/``."""
+    for separator in separators:
+        path = path.replace(separator, "/")
+    return path
+
+
+def _source_dir_marker(
+    source_dir: str | Path,
+    file_path: str,
+    *,
+    separators: str = _PATH_SEPARATORS,
+) -> str:
+    r"""Name *file_path* with the ``${SOURCE_DIR}`` token when it sits under *source_dir*.
+
+    The token is what makes a marker mean anything to a second reader.
+    :func:`get_ash_ignorespec` reads it back to derive each rule's base path, and
+    :func:`report_ignore_file_exclusions` keys its per-ignore-file counts off the
+    same text. A marker holding an absolute host path still compiles, but it names
+    one machine's directory inside an artifact meant to be replayable against
+    another checkout, and it makes the exclusion report label a temp directory
+    instead of the ignore file the user wrote.
+
+    The derivation this replaced compared ``Path(source_dir).as_posix()`` against a
+    raw *file_path*. Those are the same string on POSIX and different on Windows,
+    where ``os.walk`` joins with ``\``: the anchor could not match, no substitution
+    happened, and every marker on Windows carried an absolute path.
+
+    Normalizing only the subject was tried and reverted. ``PurePath`` drops a
+    leading ``./``, so ``Path("./sub/.gitignore").as_posix()`` is
+    ``sub/.gitignore`` and a relative scan root's anchor stopped matching; for
+    ``./.gitignore`` the ``^\.`` anchor then matched the filename's own dot and
+    emitted ``${SOURCE_DIR}gitignore``. Here the prefix is compared raw -- *file_path*
+    was built by joining onto *source_dir*, so the two agree character for
+    character whatever shape the caller passed -- and only the remainder is
+    rewritten. The separator between token and remainder is written out rather
+    than salvaged from the strip, so no input can lose it.
+
+    The remainder has to begin at a separator. A bare prefix test would rewrite
+    ``/project/.gitignore`` under a ``/proj`` scan root into
+    ``${SOURCE_DIR}ect/.gitignore``, which an absolute ``--ignorefile`` naming a
+    sibling directory reaches.
+
+    Args:
+        source_dir: The scan root, in whatever form the caller passed it --
+            absolute or relative, with or without a trailing separator.
+        file_path: A path built by joining onto *source_dir*, normally by
+            ``os.walk``.
+        separators: Characters to treat as path separators, defaulting to the
+            host's.
+
+    Returns:
+        ``${SOURCE_DIR}/<posix relative path>`` for a path inside *source_dir*;
+        otherwise *file_path* with posix separators, which
+        :func:`get_ash_ignorespec` reads through its absolute-marker branch and
+        :func:`_confine_base_path` then scopes back into the tree.
+    """
+    root = str(source_dir)
+    if root and file_path.startswith(root):
+        remainder = file_path[len(root) :]
+        separator_tuple = tuple(separators)
+        if remainder.startswith(separator_tuple) or root.endswith(separator_tuple):
+            relative = _with_posix_separators(remainder, separators).lstrip("/")
+            if relative:
+                return f"${{SOURCE_DIR}}/{relative}"
+    return _with_posix_separators(file_path, separators)
 
 
 def _collect_ignorefiles_and_all_files(
@@ -167,9 +249,7 @@ def get_ash_ignorespec_lines(
     lines = []
     for ignorefile in all_ignores:
         if os.path.isfile(ignorefile):
-            clean = re.sub(
-                rf"^{re.escape(Path(path).as_posix())}", "${SOURCE_DIR}", ignorefile
-            )
+            clean = _source_dir_marker(path, ignorefile)
             debug_echo(f"Found .ignore file: {clean}", debug=debug)
             lines.append(f"######### START CONTENTS: {clean} #########")
             with open(ignorefile) as f:
@@ -355,14 +435,19 @@ def get_ash_ignorespec_with_attribution(
                     marker_path = Path(content_path)
                     if marker_path.is_absolute():
                         # A marker naming a real path rather than the
-                        # ${SOURCE_DIR} token. get_ash_ignorespec_lines emits
-                        # that whenever the ignore file path does not start with
-                        # the posix form of the scan root, which on Windows is
-                        # every ignore file, because os.walk joins with "\".
+                        # ${SOURCE_DIR} token. _source_dir_marker emits one for
+                        # any ignore file that is not under the scan root as the
+                        # caller spelled it: an absolute --ignorefile outside the
+                        # tree, or -- under a relative --source -- an absolute
+                        # --ignorefile inside it. A persisted
+                        # ash-ignore-report.txt written by an ASH whose
+                        # substitution never fired on Windows carries one for
+                        # every ignore file, and replaying it has to keep working.
                         # Scope such a rule to the ignore file's own directory:
                         # falling back to the scan root would quietly widen a
                         # nested rule to the whole tree and drop files from the
-                        # scan set.
+                        # scan set. _confine_base_path pulls it back if that
+                        # directory turns out to be outside the tree.
                         current_base_path = marker_path.parent
                     else:
                         current_base_path = root_base_path
@@ -523,9 +608,7 @@ def get_files_not_matching_spec(
         file_path = Path(inc_full)
         if spec.match(file_path) and not forced_inclusions.match(file_path):
             continue
-        clean = re.sub(
-            rf"^{re.escape(Path(path).as_posix())}", "${SOURCE_DIR}", inc_full
-        )
+        clean = _source_dir_marker(path, inc_full)
         debug_echo(f"Matched file for scan set: {clean}", debug=debug)
         included.append(inc_full)
     included = sorted(set(included))

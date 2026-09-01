@@ -126,10 +126,14 @@ class TestDerivedBaseStaysInsideTheScanRoot:
         )
 
     def test_a_marker_inside_the_scan_root_is_not_warned_about(self, scan_root):
-        """On Windows every marker carries an absolute path, because
-        ``get_ash_ignorespec_lines`` matches the posix form of the scan root
-        against a path ``os.walk`` built with ``\\``. Those markers are all inside
-        the tree, and warning on each of them would bury the real case.
+        """An absolute marker naming a path inside the tree is reachable.
+
+        ``--source .`` with an absolute ``--ignorefile`` underneath it produces
+        one: the ignore file is inside the tree, but not under the scan root as the
+        caller spelled it, so no ``${SOURCE_DIR}`` token is emitted for it. A
+        persisted ``ash-ignore-report.txt`` written by an ASH whose substitution
+        never fired on Windows carries one for every ignore file. Warning on each
+        of those would bury the case that matters.
         """
         sub = scan_root / "sub"
         sub.mkdir()

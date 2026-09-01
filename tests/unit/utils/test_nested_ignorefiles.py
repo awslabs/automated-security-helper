@@ -194,12 +194,15 @@ class TestIgnoreFilePrecedenceByDepth:
 class TestMarkerCarryingRealPath:
     """A marker can name a real path instead of the ``${SOURCE_DIR}`` token.
 
-    ``get_ash_ignorespec_lines`` substitutes the token by matching the posix form
-    of the scan root against a path that ``os.walk``/``os.path.join`` built with
-    the native separator. The two agree on POSIX and disagree on Windows, where
-    every marker therefore carries the ignore file's real path. Such a marker
-    still has to scope its rules to that file's own directory; falling back to
-    the scan root would widen every nested rule to the whole tree.
+    ``_source_dir_marker`` emits the token only for an ignore file under the scan
+    root as the caller spelled it. An absolute ``--ignorefile`` gets its real path
+    instead, including when that path is *inside* the tree -- which is what a
+    relative ``--source`` produces. A persisted ``ash-ignore-report.txt`` written
+    before the substitution worked on Windows carries real paths for every ignore
+    file, and replaying such a report has to keep working.
+
+    Such a marker still has to scope its rules to that file's own directory;
+    falling back to the scan root would widen every nested rule to the whole tree.
     """
 
     def test_absolute_marker_scopes_rules_to_its_own_directory(
