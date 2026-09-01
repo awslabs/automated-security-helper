@@ -51,6 +51,7 @@ import pytest
 from tests.unit.deploy.buildspec_extraction import (
     MCP_ENTRYPOINT_MARKER,
     joined_buildspec_document,
+    posix_shell,
     projects_containing,
     sole_command_containing,
     templates_with_joined_buildspec_marker,
@@ -112,7 +113,7 @@ def run_ssm_command(
     else:
         env["ASH_BASE_CONFIG_SSM_PARAMETER"] = parameter_name
     return subprocess.run(
-        ["sh", "-c", ssm_command()],
+        [posix_shell(env), "-c", ssm_command()],
         capture_output=True,
         text=True,
         env=env,

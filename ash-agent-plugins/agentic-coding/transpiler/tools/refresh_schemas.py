@@ -36,10 +36,18 @@ SCHEMAS_INDEX = SCHEMAS_DIR / "schemas.json"
 ZOD_CONVERTER = HERE / "zod_to_json_schema.mjs"
 
 
-def _require_tool(name: str, install_hint: str) -> None:
-    if shutil.which(name) is None:
+def _require_tool(name: str, install_hint: str) -> str:
+    """Resolve *name* on PATH, or exit 2 with *install_hint*.
+
+    Returns the absolute path, which is what callers must put in argv[0]. A bare
+    name there is resolved a second time by the child process against whatever
+    PATH it inherits, so the tool that runs need not be the one this check found.
+    """
+    resolved = shutil.which(name)
+    if resolved is None:
         sys.stderr.write(f"ERROR: {name} not found on PATH. {install_hint}\n")
         sys.exit(2)
+    return resolved
 
 
 def _fetch_direct(url: str, dest: Path) -> None:
@@ -73,16 +81,29 @@ def _fetch_direct(url: str, dest: Path) -> None:
 def _convert_zod(entry: dict, dest: Path) -> None:
     """Clone the source repo into a temp dir, run the Node converter, copy
     the resulting JSON Schema to dest."""
-    _require_tool("node", "Install Node.js >=18 (https://nodejs.org).")
+    node = _require_tool("node", "Install Node.js >=18 (https://nodejs.org).")
     _require_tool("npm", "Install npm (typically bundled with Node).")
-    _require_tool("git", "Install git.")
+    git = _require_tool("git", "Install git.")
 
     repo_url = entry["source_url"]
+    # Constrained before it reaches git, for the same reason _fetch_direct
+    # constrains its URL: this value comes from schemas.json, so it is
+    # configuration rather than a literal. git clone accepts far more than an HTTP
+    # URL -- `ext::<command>` makes it run a command, `file://` and a bare
+    # relative path make it read the local disk, and a value beginning with `-` is
+    # read as an option rather than a URL. Requiring an HTTP(S) scheme excludes
+    # all four.
+    scheme = urllib.parse.urlparse(repo_url).scheme.lower()
+    if scheme not in ("http", "https"):
+        sys.stderr.write(
+            f"ERROR: refusing to clone non-HTTP(S) source_url: {repo_url}\n"
+        )
+        sys.exit(1)
     print(f"  cloning {repo_url}")
     with tempfile.TemporaryDirectory() as tmp:
         clone_dir = Path(tmp) / "repo"
         subprocess.run(
-            ["git", "clone", "--depth", "1", repo_url, str(clone_dir)],
+            [git, "clone", "--depth", "1", "--", repo_url, str(clone_dir)],
             check=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
@@ -90,7 +111,7 @@ def _convert_zod(entry: dict, dest: Path) -> None:
         # Run the Node converter pointed at the cloned repo, output goes
         # straight into the schemas/ cache.
         subprocess.run(
-            ["node", str(ZOD_CONVERTER), str(clone_dir), str(dest)],
+            [node, str(ZOD_CONVERTER), str(clone_dir), str(dest)],
             check=True,
         )
     print(f"    -> {dest.name} ({dest.stat().st_size} bytes)")

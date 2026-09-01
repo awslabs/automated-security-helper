@@ -35,7 +35,14 @@ def _slug_to_module(filename: str) -> str:
 
 
 def main() -> int:
-    if shutil.which("datamodel-codegen") is None:
+    # Resolved to an absolute path once, and that path -- not the bare name -- is
+    # what argv[0] carries below. Two reasons: the PATH lookup then happens exactly
+    # once instead of again inside every subprocess.run, closing the window where a
+    # directory earlier on PATH gains a datamodel-codegen between this check and the
+    # call; and a bare name in argv[0] is resolved by the child against whatever
+    # PATH it inherits, which is not necessarily the one checked here.
+    codegen = shutil.which("datamodel-codegen")
+    if codegen is None:
         sys.stderr.write(
             "ERROR: datamodel-codegen not found.\n"
             "Run with the refresh extras enabled:\n"
@@ -66,7 +73,7 @@ def main() -> int:
         try:
             subprocess.run(
                 [
-                    "datamodel-codegen",
+                    codegen,
                     "--input", str(schema_path),
                     "--input-file-type", "jsonschema",
                     "--output", str(out_path),
