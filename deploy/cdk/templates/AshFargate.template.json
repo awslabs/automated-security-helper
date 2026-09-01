@@ -28,6 +28,12 @@
    "AllowedPattern": "^$|^(\\d{1,3}\\.){3}\\d{1,3}/([1-9]|[12]\\d|3[0-2])$",
    "Description": "CIDR allowed to reach the MCP load balancer on port 80. Leave empty and NO ingress rule is created, so the endpoint is reachable from nowhere — the default, and unchanged from before this parameter existed. Set it to the range your MCP clients come from, for example 10.1.0.0/16, or x.x.x.x/32 for one host. A CIDR is required, and 0.0.0.0/0 is rejected; to grant more broadly, authorize the McpSecurityGroupId output directly."
   },
+  "KmsKeyArn": {
+   "Type": "String",
+   "Default": "",
+   "AllowedPattern": "^$|^arn:aws[a-zA-Z-]*:kms:[a-z0-9-]+:\\d{12}:key/[0-9a-z-]{36}$",
+   "Description": "ARN of an existing symmetric customer-managed KMS key for this stack data at rest. Empty uses AWS-managed encryption. Needs a key policy admitting logs.<region>.amazonaws.com, plus kms:CreateGrant for whoever deploys."
+  },
   "AshBaseConfigYaml": {
    "Type": "String",
    "Default": "",
@@ -73,6 +79,18 @@
   }
  },
  "Conditions": {
+  "HasKmsKey": {
+   "Fn::Not": [
+    {
+     "Fn::Equals": [
+      {
+       "Ref": "KmsKeyArn"
+      },
+      ""
+     ]
+    }
+   ]
+  },
   "ConfigHasBaseConfigA7D225A9": {
    "Fn::Not": [
     {
@@ -166,15 +184,23 @@
       "# No ASH base configuration was supplied at deployment time."
      ]
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Config/BaseConfig/Resource"
    }
   },
   "ConfigMcpAuthHeaderSecret99D04B65": {
    "Type": "AWS::SecretsManager::Secret",
    "Properties": {
     "Description": "Expected value of McpAuthHeaderName. The container is handed this ARN and resolves the value at start, so the secret never enters a task definition or a runtime environment-variable map.",
+    "KmsKeyId": {
+     "Fn::If": [
+      "HasKmsKey",
+      {
+       "Ref": "KmsKeyArn"
+      },
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    },
     "SecretString": {
      "Fn::If": [
       "ConfigHasHeaderAuthA42E2E27",
@@ -188,7 +214,6 @@
    "UpdateReplacePolicy": "Delete",
    "DeletionPolicy": "Delete",
    "Metadata": {
-    "aws:cdk:path": "AshFargate/Config/McpAuthHeaderSecret/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -198,6 +223,30 @@
      ]
     }
    }
+  },
+  "ConfigKeyAccessB463082D": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "kms:Decrypt",
+       "Effect": "Allow",
+       "Resource": {
+        "Ref": "KmsKeyArn"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "ConfigKeyAccessB463082D",
+    "Roles": [
+     {
+      "Ref": "TaskDefinitionTaskRoleFD40A61D"
+     }
+    ]
+   },
+   "Condition": "HasKmsKey"
   },
   "EncryptionKey1B843E66": {
    "Type": "AWS::KMS::Key",
@@ -234,14 +283,25 @@
     }
    },
    "UpdateReplacePolicy": "Retain",
-   "DeletionPolicy": "Retain",
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/EncryptionKey/Resource"
-   }
+   "DeletionPolicy": "Retain"
   },
   "ImageRepositoryD8036990": {
    "Type": "AWS::ECR::Repository",
    "Properties": {
+    "EncryptionConfiguration": {
+     "EncryptionType": "KMS",
+     "KmsKey": {
+      "Fn::If": [
+       "HasKmsKey",
+       {
+        "Ref": "KmsKeyArn"
+       },
+       {
+        "Ref": "AWS::NoValue"
+       }
+      ]
+     }
+    },
     "ImageScanningConfiguration": {
      "ScanOnPush": true
     },
@@ -251,21 +311,26 @@
     }
    },
    "UpdateReplacePolicy": "Retain",
-   "DeletionPolicy": "Retain",
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Image/Repository/Resource"
-   }
+   "DeletionPolicy": "Retain"
   },
   "ImageBuildLogsBC6BBB2A": {
    "Type": "AWS::Logs::LogGroup",
    "Properties": {
+    "KmsKeyId": {
+     "Fn::If": [
+      "HasKmsKey",
+      {
+       "Ref": "KmsKeyArn"
+      },
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    },
     "RetentionInDays": 30
    },
    "UpdateReplacePolicy": "Retain",
-   "DeletionPolicy": "Retain",
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Image/BuildLogs/Resource"
-   }
+   "DeletionPolicy": "Retain"
   },
   "ImageBuildRole1BB51BF0": {
    "Type": "AWS::IAM::Role",
@@ -284,7 +349,6 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshFargate/Image/Build/Role/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -458,7 +522,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshFargate/Image/Build/Role/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -625,7 +688,6 @@
     "TimeoutInMinutes": 120
    },
    "Metadata": {
-    "aws:cdk:path": "AshFargate/Image/Build/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -658,7 +720,6 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshFargate/Image/Build/EventsRole/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -700,7 +761,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshFargate/Image/Build/EventsRole/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -719,13 +779,21 @@
   "ImageBootstrapStarterLogsFCF41B92": {
    "Type": "AWS::Logs::LogGroup",
    "Properties": {
+    "KmsKeyId": {
+     "Fn::If": [
+      "HasKmsKey",
+      {
+       "Ref": "KmsKeyArn"
+      },
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    },
     "RetentionInDays": 30
    },
    "UpdateReplacePolicy": "Retain",
-   "DeletionPolicy": "Retain",
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Image/BootstrapStarterLogs/Resource"
-   }
+   "DeletionPolicy": "Retain"
   },
   "ImageBootstrapStarterRole4262AC52": {
    "Type": "AWS::IAM::Role",
@@ -745,7 +813,6 @@
     "Description": "Execution role for the image-build bootstrap. Deliberately not using AWSLambdaBasicExecutionRole: the only logging grant it needs is on one log group."
    },
    "Metadata": {
-    "aws:cdk:path": "AshFargate/Image/BootstrapStarterRole/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -811,7 +878,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshFargate/Image/BootstrapStarterRole/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -837,11 +903,23 @@
      }
     },
     "Handler": "index.handler",
+    "KmsKeyArn": {
+     "Fn::If": [
+      "HasKmsKey",
+      {
+       "Ref": "KmsKeyArn"
+      },
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    },
     "LoggingConfig": {
      "LogGroup": {
       "Ref": "ImageBootstrapStarterLogsFCF41B92"
      }
     },
+    "ReservedConcurrentExecutions": 1,
     "Role": {
      "Fn::GetAtt": [
       "ImageBootstrapStarterRole4262AC52",
@@ -854,10 +932,7 @@
    "DependsOn": [
     "ImageBootstrapStarterRoleDefaultPolicy10189EBF",
     "ImageBootstrapStarterRole4262AC52"
-   ],
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Image/BootstrapStarter/Resource"
-   }
+   ]
   },
   "ImageBootstrapBuildCBE6CA7A": {
    "Type": "Custom::AshImageBootstrap",
@@ -877,10 +952,7 @@
     "Flavors": "mcp"
    },
    "UpdateReplacePolicy": "Delete",
-   "DeletionPolicy": "Delete",
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Image/BootstrapBuild/Default"
-   }
+   "DeletionPolicy": "Delete"
   },
   "ImageRebuildScheduleC59CBD6A": {
    "Type": "AWS::Events::Rule",
@@ -910,21 +982,26 @@
    },
    "DependsOn": [
     "ImageBootstrapBuildCBE6CA7A"
-   ],
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Image/RebuildSchedule/Resource"
-   }
+   ]
   },
   "VpcFlowLogsE6FFDEF9": {
    "Type": "AWS::Logs::LogGroup",
    "Properties": {
+    "KmsKeyId": {
+     "Fn::If": [
+      "HasKmsKey",
+      {
+       "Ref": "KmsKeyArn"
+      },
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    },
     "RetentionInDays": 30
    },
    "UpdateReplacePolicy": "Retain",
-   "DeletionPolicy": "Retain",
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/VpcFlowLogs/Resource"
-   }
+   "DeletionPolicy": "Retain"
   },
   "Vpc8378EB38": {
    "Type": "AWS::EC2::VPC",
@@ -939,9 +1016,6 @@
       "Value": "AshFargate/Vpc"
      }
     ]
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/Resource"
    }
   },
   "VpcPublicSubnet1Subnet5C2D37C4": {
@@ -974,9 +1048,6 @@
     "VpcId": {
      "Ref": "Vpc8378EB38"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PublicSubnet1/Subnet"
    }
   },
   "VpcPublicSubnet1RouteTable6C95E38E": {
@@ -991,9 +1062,6 @@
     "VpcId": {
      "Ref": "Vpc8378EB38"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PublicSubnet1/RouteTable"
    }
   },
   "VpcPublicSubnet1RouteTableAssociation97140677": {
@@ -1005,9 +1073,6 @@
     "SubnetId": {
      "Ref": "VpcPublicSubnet1Subnet5C2D37C4"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PublicSubnet1/RouteTableAssociation"
    }
   },
   "VpcPublicSubnet1DefaultRoute3DA9E72A": {
@@ -1023,10 +1088,7 @@
    },
    "DependsOn": [
     "VpcVPCGWBF912B6E"
-   ],
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PublicSubnet1/DefaultRoute"
-   }
+   ]
   },
   "VpcPublicSubnet1EIPD7E02669": {
    "Type": "AWS::EC2::EIP",
@@ -1038,9 +1100,6 @@
       "Value": "AshFargate/Vpc/PublicSubnet1"
      }
     ]
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PublicSubnet1/EIP"
    }
   },
   "VpcPublicSubnet1NATGateway4D7517AA": {
@@ -1065,10 +1124,7 @@
    "DependsOn": [
     "VpcPublicSubnet1DefaultRoute3DA9E72A",
     "VpcPublicSubnet1RouteTableAssociation97140677"
-   ],
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PublicSubnet1/NATGateway"
-   }
+   ]
   },
   "VpcPublicSubnet2Subnet691E08A3": {
    "Type": "AWS::EC2::Subnet",
@@ -1100,9 +1156,6 @@
     "VpcId": {
      "Ref": "Vpc8378EB38"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PublicSubnet2/Subnet"
    }
   },
   "VpcPublicSubnet2RouteTable94F7E489": {
@@ -1117,9 +1170,6 @@
     "VpcId": {
      "Ref": "Vpc8378EB38"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PublicSubnet2/RouteTable"
    }
   },
   "VpcPublicSubnet2RouteTableAssociationDD5762D8": {
@@ -1131,9 +1181,6 @@
     "SubnetId": {
      "Ref": "VpcPublicSubnet2Subnet691E08A3"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PublicSubnet2/RouteTableAssociation"
    }
   },
   "VpcPublicSubnet2DefaultRoute97F91067": {
@@ -1149,10 +1196,7 @@
    },
    "DependsOn": [
     "VpcVPCGWBF912B6E"
-   ],
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PublicSubnet2/DefaultRoute"
-   }
+   ]
   },
   "VpcPrivateSubnet1Subnet536B997A": {
    "Type": "AWS::EC2::Subnet",
@@ -1184,9 +1228,6 @@
     "VpcId": {
      "Ref": "Vpc8378EB38"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PrivateSubnet1/Subnet"
    }
   },
   "VpcPrivateSubnet1RouteTableB2C5B500": {
@@ -1201,9 +1242,6 @@
     "VpcId": {
      "Ref": "Vpc8378EB38"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PrivateSubnet1/RouteTable"
    }
   },
   "VpcPrivateSubnet1RouteTableAssociation70C59FA6": {
@@ -1215,9 +1253,6 @@
     "SubnetId": {
      "Ref": "VpcPrivateSubnet1Subnet536B997A"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PrivateSubnet1/RouteTableAssociation"
    }
   },
   "VpcPrivateSubnet1DefaultRouteBE02A9ED": {
@@ -1230,9 +1265,6 @@
     "RouteTableId": {
      "Ref": "VpcPrivateSubnet1RouteTableB2C5B500"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PrivateSubnet1/DefaultRoute"
    }
   },
   "VpcPrivateSubnet2Subnet3788AAA1": {
@@ -1265,9 +1297,6 @@
     "VpcId": {
      "Ref": "Vpc8378EB38"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PrivateSubnet2/Subnet"
    }
   },
   "VpcPrivateSubnet2RouteTableA678073B": {
@@ -1282,9 +1311,6 @@
     "VpcId": {
      "Ref": "Vpc8378EB38"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PrivateSubnet2/RouteTable"
    }
   },
   "VpcPrivateSubnet2RouteTableAssociationA89CAD56": {
@@ -1296,9 +1322,6 @@
     "SubnetId": {
      "Ref": "VpcPrivateSubnet2Subnet3788AAA1"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PrivateSubnet2/RouteTableAssociation"
    }
   },
   "VpcPrivateSubnet2DefaultRoute060D2087": {
@@ -1311,9 +1334,6 @@
     "RouteTableId": {
      "Ref": "VpcPrivateSubnet2RouteTableA678073B"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PrivateSubnet2/DefaultRoute"
    }
   },
   "VpcIGWD7BA715C": {
@@ -1325,9 +1345,6 @@
       "Value": "AshFargate/Vpc"
      }
     ]
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/IGW"
    }
   },
   "VpcVPCGWBF912B6E": {
@@ -1339,9 +1356,6 @@
     "VpcId": {
      "Ref": "Vpc8378EB38"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/VPCGW"
    }
   },
   "VpcIAMRoleAED9A610": {
@@ -1365,9 +1379,6 @@
       "Value": "AshFargate/Vpc/Vpc"
      }
     ]
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/Vpc/IAMRole/Resource"
    }
   },
   "VpcIAMRoleDefaultPolicyD97FC775": {
@@ -1398,9 +1409,6 @@
       "Ref": "VpcIAMRoleAED9A610"
      }
     ]
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/Vpc/IAMRole/DefaultPolicy/Resource"
    }
   },
   "VpcFlowLog64CE86D0": {
@@ -1427,9 +1435,6 @@
      }
     ],
     "TrafficType": "ALL"
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/Vpc/FlowLog"
    }
   },
   "ClusterEB0386A7": {
@@ -1441,21 +1446,26 @@
       "Value": "enabled"
      }
     ]
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Cluster/Resource"
    }
   },
   "TaskLogs5C7CDF8E": {
    "Type": "AWS::Logs::LogGroup",
    "Properties": {
+    "KmsKeyId": {
+     "Fn::If": [
+      "HasKmsKey",
+      {
+       "Ref": "KmsKeyArn"
+      },
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    },
     "RetentionInDays": 30
    },
    "UpdateReplacePolicy": "Retain",
-   "DeletionPolicy": "Retain",
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/TaskLogs/Resource"
-   }
+   "DeletionPolicy": "Retain"
   },
   "TaskDefinitionTaskRoleFD40A61D": {
    "Type": "AWS::IAM::Role",
@@ -1474,7 +1484,6 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshFargate/TaskDefinition/TaskRole/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -1544,7 +1553,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshFargate/TaskDefinition/TaskRole/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -1739,7 +1747,6 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshFargate/TaskDefinition/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -1768,7 +1775,6 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshFargate/TaskDefinition/ExecutionRole/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -1832,7 +1838,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshFargate/TaskDefinition/ExecutionRole/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -1848,6 +1853,165 @@
     }
    }
   },
+  "AccessLogsArchive1A69C748": {
+   "Type": "AWS::S3::Bucket",
+   "Properties": {
+    "BucketEncryption": {
+     "ServerSideEncryptionConfiguration": [
+      {
+       "ServerSideEncryptionByDefault": {
+        "SSEAlgorithm": "AES256"
+       }
+      }
+     ]
+    },
+    "LifecycleConfiguration": {
+     "Rules": [
+      {
+       "ExpirationInDays": 30,
+       "Id": "ExpireLogDeliveryRecords",
+       "NoncurrentVersionExpiration": {
+        "NoncurrentDays": 1
+       },
+       "Status": "Enabled"
+      }
+     ]
+    },
+    "LoggingConfiguration": {
+     "LogFilePrefix": "log-delivery/"
+    },
+    "PublicAccessBlockConfiguration": {
+     "BlockPublicAcls": true,
+     "BlockPublicPolicy": true,
+     "IgnorePublicAcls": true,
+     "RestrictPublicBuckets": true
+    },
+    "VersioningConfiguration": {
+     "Status": "Enabled"
+    }
+   },
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain"
+  },
+  "AccessLogsArchivePolicyBC5B3007": {
+   "Type": "AWS::S3::BucketPolicy",
+   "Properties": {
+    "Bucket": {
+     "Ref": "AccessLogsArchive1A69C748"
+    },
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "s3:*",
+       "Condition": {
+        "Bool": {
+         "aws:SecureTransport": "false"
+        }
+       },
+       "Effect": "Deny",
+       "Principal": {
+        "AWS": "*"
+       },
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "AccessLogsArchive1A69C748",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "AccessLogsArchive1A69C748",
+             "Arn"
+            ]
+           },
+           "/*"
+          ]
+         ]
+        }
+       ]
+      },
+      {
+       "Action": "s3:PutObject",
+       "Condition": {
+        "ArnLike": {
+         "aws:SourceArn": {
+          "Fn::GetAtt": [
+           "AccessLogsArchive1A69C748",
+           "Arn"
+          ]
+         }
+        },
+        "StringEquals": {
+         "aws:SourceAccount": {
+          "Ref": "AWS::AccountId"
+         }
+        }
+       },
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "logging.s3.amazonaws.com"
+       },
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          {
+           "Fn::GetAtt": [
+            "AccessLogsArchive1A69C748",
+            "Arn"
+           ]
+          },
+          "/log-delivery/*"
+         ]
+        ]
+       }
+      },
+      {
+       "Action": "s3:PutObject",
+       "Condition": {
+        "ArnLike": {
+         "aws:SourceArn": {
+          "Fn::GetAtt": [
+           "AccessLogs8B620ECA",
+           "Arn"
+          ]
+         }
+        },
+        "StringEquals": {
+         "aws:SourceAccount": {
+          "Ref": "AWS::AccountId"
+         }
+        }
+       },
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "logging.s3.amazonaws.com"
+       },
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          {
+           "Fn::GetAtt": [
+            "AccessLogsArchive1A69C748",
+            "Arn"
+           ]
+          },
+          "/access-logs/*"
+         ]
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   }
+  },
   "AccessLogs8B620ECA": {
    "Type": "AWS::S3::Bucket",
    "Properties": {
@@ -1860,26 +2024,24 @@
       }
      ]
     },
+    "LoggingConfiguration": {
+     "DestinationBucketName": {
+      "Ref": "AccessLogsArchive1A69C748"
+     },
+     "LogFilePrefix": "access-logs/"
+    },
     "PublicAccessBlockConfiguration": {
      "BlockPublicAcls": true,
      "BlockPublicPolicy": true,
      "IgnorePublicAcls": true,
      "RestrictPublicBuckets": true
+    },
+    "VersioningConfiguration": {
+     "Status": "Enabled"
     }
    },
    "UpdateReplacePolicy": "Retain",
-   "DeletionPolicy": "Retain",
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/AccessLogs/Resource",
-    "cdk_nag": {
-     "rules_to_suppress": [
-      {
-       "reason": "This IS the access-log destination. Self-logging is an infinite loop, and chaining to a further bucket leaves that one unlogged instead, so the chain has to terminate here. Nothing writes to this bucket except the log delivery service principal, whose access is already constrained by the bucket policy.",
-       "id": "AwsSolutions-S1"
-      }
-     ]
-    }
-   }
+   "DeletionPolicy": "Retain"
   },
   "AccessLogsPolicyABDC4D2D": {
    "Type": "AWS::S3::BucketPolicy",
@@ -1976,9 +2138,6 @@
      ],
      "Version": "2012-10-17"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/AccessLogs/Policy/Resource"
    }
   },
   "LoadBalancerBE9EEC3A": {
@@ -1988,6 +2147,10 @@
      {
       "Key": "deletion_protection.enabled",
       "Value": "false"
+     },
+     {
+      "Key": "routing.http.drop_invalid_header_fields.enabled",
+      "Value": "true"
      },
      {
       "Key": "access_logs.s3.enabled",
@@ -2022,9 +2185,6 @@
      }
     ],
     "Type": "application"
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/LoadBalancer/Resource"
    }
   },
   "LoadBalancerSecurityGroupA28D6DD7": {
@@ -2034,9 +2194,6 @@
     "VpcId": {
      "Ref": "Vpc8378EB38"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/LoadBalancer/SecurityGroup/Resource"
    }
   },
   "LoadBalancerSecurityGrouptoAshFargateServiceSecurityGroupBADB9C5780009CF0A984": {
@@ -2058,9 +2215,6 @@
     },
     "IpProtocol": "tcp",
     "ToPort": 8000
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/LoadBalancer/SecurityGroup/to AshFargateServiceSecurityGroupBADB9C57:8000"
    }
   },
   "LoadBalancerListenerE1A099B9": {
@@ -2079,9 +2233,6 @@
     },
     "Port": 80,
     "Protocol": "HTTP"
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/LoadBalancer/Listener/Resource"
    }
   },
   "LoadBalancerListenerMcpGroupABC8DC42": {
@@ -2109,9 +2260,6 @@
     "VpcId": {
      "Ref": "Vpc8378EB38"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/LoadBalancer/Listener/McpGroup/Resource"
    }
   },
   "ServiceD69D759B": {
@@ -2172,10 +2320,7 @@
     "LoadBalancerListenerE1A099B9",
     "TaskDefinitionTaskRoleDefaultPolicy282E8624",
     "TaskDefinitionTaskRoleFD40A61D"
-   ],
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Service/Service"
-   }
+   ]
   },
   "ServiceSecurityGroupC96ED6A7": {
    "Type": "AWS::EC2::SecurityGroup",
@@ -2196,10 +2341,7 @@
     "ImageBootstrapBuildCBE6CA7A",
     "TaskDefinitionTaskRoleDefaultPolicy282E8624",
     "TaskDefinitionTaskRoleFD40A61D"
-   ],
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Service/SecurityGroup/Resource"
-   }
+   ]
   },
   "ServiceSecurityGroupfromAshFargateLoadBalancerSecurityGroupCDCEE5AE800049473A47": {
    "Type": "AWS::EC2::SecurityGroupIngress",
@@ -2225,10 +2367,7 @@
     "ImageBootstrapBuildCBE6CA7A",
     "TaskDefinitionTaskRoleDefaultPolicy282E8624",
     "TaskDefinitionTaskRoleFD40A61D"
-   ],
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Service/SecurityGroup/from AshFargateLoadBalancerSecurityGroupCDCEE5AE:8000"
-   }
+   ]
   },
   "McpIngress": {
    "Type": "AWS::EC2::SecurityGroupIngress",
@@ -2248,7 +2387,6 @@
     "ToPort": 80
    },
    "Metadata": {
-    "aws:cdk:path": "AshFargate/McpIngress",
     "cdk_nag": {
      "rules_to_suppress": [
       {

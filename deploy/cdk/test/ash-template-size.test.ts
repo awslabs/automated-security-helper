@@ -29,6 +29,32 @@
  * gate (`scripts/synth-templates.sh --check`) is what guarantees those are the
  * same bytes; duplicating a synth here would be slow and would measure something
  * the adopter never receives.
+ *
+ * WHY `"pathMetadata": false` IS SET IN cdk.json
+ * ---------------------------------------------
+ * Adding the optional `KmsKeyArn` parameter put the two inline-launchable
+ * templates over the cap: AshAgentCore 50,666 to 52,174 and AshCodeCommitGate
+ * 50,822 to 52,683, against a 51,200 limit. A `CfnParameter` with a description
+ * and an `allowedPattern` costs about 448 bytes and its `CfnCondition` another
+ * 96, and those two templates had 534 and 378 bytes of headroom, so it did not
+ * fit by shortening a description or dropping a pattern.
+ *
+ * Disabling path metadata drops the per-resource `aws:cdk:path` entries and
+ * brought them to 50,715 and 50,811, restoring roughly the original margin. That
+ * kept every stack both inline-launchable AND able to take a customer-managed
+ * key, which the alternatives did not: reclassifying both as S3-only would have
+ * emptied the inline set entirely and made the central assertion here vacuous,
+ * and suppressing the KMS rules on those two stacks alone would have left them
+ * permanently unable to accept a key.
+ *
+ * The cost, stated rather than hidden: a committed template no longer records
+ * which construct produced each resource. Re-synthesize locally with path
+ * metadata enabled to recover that when debugging. Note also that it removed
+ * four detect-secrets findings, because `aws:cdk:path` values were being flagged
+ * as base64 high-entropy strings.
+ *
+ * Consequence for this file: if path metadata is ever re-enabled, these two
+ * templates go back over the cap and this test is what will say so.
  */
 
 import * as fs from 'fs';

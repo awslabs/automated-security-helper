@@ -56,14 +56,15 @@ import * as s3 from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
 
 import {
+  accessLogArchiveProps,
   ashSynthesizer,
+  AshCustomerKey,
   ashImageTag,
   ashOfflineMode, ashVersion, diagnosticLogGroupProps, mcpIngressCidr, MCP_PORT, rebuildSchedule,
 } from './ash-config';
 import { AshImageBuild } from './ash-image-build';
 import {
   suppressCodeBuildRoleWildcards,
-  suppressLogBucketSelfLogging,
   suppressParameterizedIngressRule,
   suppressSecretRotation,
   suppressTaskDefinitionEnvironment,
@@ -85,7 +86,11 @@ export class AshFargateStack extends Stack {
     const offline = ashOfflineMode(this);
     const schedule = rebuildSchedule(this);
     const ingressCidr = mcpIngressCidr(this);
-    const config = new AshRuntimeConfig(this, 'Config', { includeMcpParameters: true });
+    const customerKey = new AshCustomerKey(this);
+    const config = new AshRuntimeConfig(this, 'Config', {
+      includeMcpParameters: true,
+      customerKey,
+    });
 
     // One customer-managed key per stack, shared by every CodeBuild project here.
     // Rotation is on: the key only protects build output, so a rotated key needs
@@ -104,6 +109,7 @@ export class AshFargateStack extends Stack {
       rebuildSchedule: schedule,
       imageTag: ashImageTag(this),
       encryptionKey,
+      customerKey,
     });
 
     // Two AZs is the ALB minimum. `natGateways: 1` keeps the running cost of an
@@ -123,7 +129,7 @@ export class AshFargateStack extends Stack {
             // delete on teardown are not forensics. This is the highest-volume
             // group of the set, but retention is finite so its events still age
             // out on the same schedule.
-            new logs.LogGroup(this, 'VpcFlowLogs', diagnosticLogGroupProps()),
+            new logs.LogGroup(this, 'VpcFlowLogs', diagnosticLogGroupProps(customerKey)),
           ),
           trafficType: ec2.FlowLogTrafficType.ALL,
         },
@@ -144,7 +150,7 @@ export class AshFargateStack extends Stack {
      * carries only performance metrics, no stderr. See
      * `diagnosticLogGroupProps`.
      */
-    const logGroup = new logs.LogGroup(this, 'TaskLogs', diagnosticLogGroupProps());
+    const logGroup = new logs.LogGroup(this, 'TaskLogs', diagnosticLogGroupProps(customerKey));
 
     const taskDefinition = new ecs.FargateTaskDefinition(this, 'TaskDefinition', {
       // ASH runs several scanners concurrently. 2 vCPU / 4 GiB is the smallest
@@ -183,10 +189,36 @@ export class AshFargateStack extends Stack {
 
     config.grantRead(taskDefinition.taskRole);
 
+    /*
+     * Terminates the access-log chain, and self-logs because something has to.
+     *
+     * MEASURED, against checkov rather than inferred from its rule name:
+     * `CKV_AWS_18` inspects `Properties/LoggingConfiguration` and accepts ANY value
+     * there. A bucket naming itself passes, a bucket carrying only a `LogFilePrefix`
+     * passes, and a bucket with no `LoggingConfiguration` fails. So every bucket in a
+     * chain needs one, the chain cannot be infinite, and the last link has to point
+     * at itself. Adding a further bucket does not avoid that - it relocates the
+     * finding one hop.
+     *
+     * Given the self-reference is forced, the only real decision is WHICH bucket
+     * makes it, and it should be the quietest one. `accessLogArchiveProps` carries
+     * that argument in full, along with the bound on what the loop can accumulate.
+     */
+    const logArchiveBucket = new s3.Bucket(this, 'AccessLogsArchive', accessLogArchiveProps());
+
     const accessLogsBucket = new s3.Bucket(this, 'AccessLogs', {
       encryption: s3.BucketEncryption.S3_MANAGED,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       enforceSSL: true,
+      // The load balancer writes each log file under a unique key, so versioning
+      // creates no noncurrent versions here and needs no expiration rule to bound
+      // it. It is on because the bucket's posture should not depend on the write
+      // pattern of whatever happens to be delivering into it today.
+      versioned: true,
+      // This bucket holds the record of who reached the load balancer, so access to
+      // IT is worth recording too.
+      serverAccessLogsBucket: logArchiveBucket,
+      serverAccessLogsPrefix: 'access-logs/',
       // RETAIN, not autoDeleteObjects: the latter synthesizes an asset-backed
       // custom resource, which would make these templates need `cdk bootstrap`.
       removalPolicy: RemovalPolicy.RETAIN,
@@ -199,6 +231,22 @@ export class AshFargateStack extends Stack {
       // findings about it; putting that on the public internet behind nothing but
       // an optional shared-secret header is not a default anyone should inherit.
       // Flip to internet-facing deliberately, with auth configured.
+
+      /*
+       * Discard a request carrying a header the load balancer cannot parse, rather
+       * than forwarding it to the container.
+       *
+       * The default is to pass such a header through, which is what makes request
+       * smuggling possible: a malformed header the ALB tolerates and the container
+       * interprets differently lets one HTTP request be read as two. ASH's MCP
+       * server is a streamable-HTTP endpoint that accepts source code, so a second
+       * request smuggled past the load balancer is a request that was never
+       * authorized by anything in front of it.
+       *
+       * Free and behaviour-neutral for any client that sends valid headers, which
+       * is why it is on unconditionally rather than behind a parameter.
+       */
+      dropInvalidHeaderFields: true,
     });
 
     /**
@@ -373,23 +421,41 @@ export class AshFargateStack extends Stack {
     });
 
     suppressSecretRotation(config.authSecret);
-    suppressLogBucketSelfLogging(accessLogsBucket);
+    /*
+     * `suppressLogBucketSelfLogging` used to sit here, on `accessLogsBucket`.
+     *
+     * It is gone because the finding it silenced is now FIXED rather than
+     * suppressed: that bucket delivers its server access logs to
+     * `AccessLogsArchive`, so `AwsSolutions-S1` passes on it outright. The archive
+     * bucket passes too, because cdk-nag's rule accepts a `LogFilePrefix` with no
+     * destination, which is the self-reference. The reasoning the old suppression
+     * carried has not been discarded, only moved: it is the design argument in
+     * `accessLogArchiveProps`, where the choice of WHICH bucket self-logs is made.
+     */
     suppressTaskDefinitionEnvironment(taskDefinition);
     /*
-     * TWO CLOUDFORMATION SPEC WARNINGS ARE EXPECTED HERE AND ARE FALSE POSITIVES.
+     * A FAMILY OF CLOUDFORMATION SPEC WARNINGS IS EXPECTED HERE. ALL FALSE POSITIVES.
      *
      * `cdk synth` reports "SecretString: length 0 is below minimum 1" and, on the
      * AgentCore stack, "RequestHeaderAllowlist.{}: '' does not match pattern".
-     * The validator resolves each parameter to its DEFAULT and then evaluates the
-     * true branch of the `Fn::If` guarding it, so it sees the empty default.
+     * Since `KmsKeyArn` arrived there are three more, on every resource that takes
+     * the key: "KmsKeyId: Value is not valid under any of the given schemas",
+     * "KmsKeyId: '' does not match pattern '^arn:...kms:...(key|alias)/.+'" and
+     * "EncryptionConfiguration.KmsKey: length 0 is below minimum 1".
      *
-     * Verified against the synthesized template rather than assumed: both
-     * properties emit as
-     * `{"Fn::If": ["ConfigHasHeaderAuth...", <parameter>, <fallback>]}`, and that
-     * condition is `Fn::And(name != '', value != '')`. So whenever the validator's
-     * empty value would apply, the condition is false and CloudFormation receives
-     * the fallback instead — a non-empty placeholder for the secret, and
-     * `AWS::NoValue` for the allowlist. Neither empty value can reach the service.
+     * They are all ONE mechanism, which is why they are documented together rather
+     * than listed exhaustively - the list will grow with every conditional property
+     * added. The validator resolves each parameter to its DEFAULT and then evaluates
+     * the true branch of the `Fn::If` guarding it, so it sees the empty default.
+     *
+     * Verified against the synthesized template rather than assumed: every one of
+     * these properties emits as `{"Fn::If": [<condition>, <parameter>, <fallback>]}`,
+     * where the condition is `Fn::And(name != '', value != '')` for the auth pair and
+     * `KmsKeyArn != ''` for the key. So whenever the validator's empty value would
+     * apply, the condition is false and CloudFormation receives the fallback
+     * instead — a non-empty placeholder for the secret, and `AWS::NoValue`, which
+     * removes the property outright, for the allowlist and for every KMS key
+     * reference. No empty value can reach any of these services.
      *
      * `Annotations.acknowledgeWarning` does NOT clear these: the CloudFormation
      * spec validator emits outside the `addWarningV2` acknowledgement mechanism,

@@ -93,7 +93,9 @@ import * as s3 from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
 
 import {
+  accessLogArchiveProps,
   ashSynthesizer,
+  AshCustomerKey,
   ashImageTag,
   ashOfflineMode, ashVersion, rebuildSchedule, resolveShardCount,
 } from './ash-config';
@@ -129,7 +131,11 @@ export class AshDistributedPipelineStack extends Stack {
     const version = ashVersion(this);
     const offline = ashOfflineMode(this);
     const schedule = rebuildSchedule(this);
-    const config = new AshRuntimeConfig(this, 'Config', { includeMcpParameters: false });
+    const customerKey = new AshCustomerKey(this);
+    const config = new AshRuntimeConfig(this, 'Config', {
+      includeMcpParameters: false,
+      customerKey,
+    });
 
     // One customer-managed key per stack, shared by every CodeBuild project here.
     // Rotation is on: the key only protects build output, so a rotated key needs
@@ -151,12 +157,37 @@ export class AshDistributedPipelineStack extends Stack {
       // bootstrap would duplicate it.
       bootstrapOnDeploy: false,
       encryptionKey,
+      customerKey,
     });
+
+    /*
+     * Terminates the access-log chain, and self-logs because something has to.
+     *
+     * MEASURED, against checkov rather than inferred from its rule name:
+     * `CKV_AWS_18` inspects `Properties/LoggingConfiguration` and accepts ANY value
+     * there, so every bucket in a chain needs one, the chain cannot be infinite, and
+     * the last link has to point at itself. Adding a further bucket relocates the
+     * finding rather than removing it. This is the quietest bucket in the chain -
+     * the only thing that writes here is delivery of records ABOUT delivery into
+     * `AccessLogs` - which is why the self-reference lives here and not on the
+     * bucket receiving the source, results and artifact traffic.
+     * `accessLogArchiveProps` carries the argument in full.
+     */
+    const logArchiveBucket = new s3.Bucket(this, 'AccessLogsArchive', accessLogArchiveProps());
 
     const accessLogsBucket = new s3.Bucket(this, 'AccessLogs', {
       encryption: s3.BucketEncryption.S3_MANAGED,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       enforceSSL: true,
+      // Versioned so this bucket is not the one exception to the rule the other
+      // three follow. Access log objects carry unique keys, so nothing here is
+      // overwritten and no noncurrent version is ever created; the property is
+      // about the bucket's posture, not about protecting a write pattern that
+      // does not happen.
+      versioned: true,
+      // This bucket holds the evidence, so access to IT is worth recording too.
+      serverAccessLogsBucket: logArchiveBucket,
+      serverAccessLogsPrefix: 'access-logs/',
       // RETAIN everywhere in this stack: `autoDeleteObjects` synthesizes an
       // asset-backed custom resource, which needs a staging bucket and therefore
       // `cdk bootstrap` — and these templates launch from the console.
@@ -179,22 +210,43 @@ export class AshDistributedPipelineStack extends Stack {
       encryption: s3.BucketEncryption.S3_MANAGED,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       enforceSSL: true,
+      versioned: true,
       removalPolicy: RemovalPolicy.RETAIN,
       serverAccessLogsBucket: accessLogsBucket,
       serverAccessLogsPrefix: 'results/',
       // Shard results are consumed by the merge action in the same execution;
       // the retention window is for after-the-fact inspection, not for the
       // pipeline itself.
-      lifecycleRules: [{ id: 'ExpireShardResults', expiration: Duration.days(30) }],
+      //
+      // `noncurrentVersionExpiration` is not decoration. Turning versioning on
+      // changes what `expiration` DOES: instead of deleting the object it writes a
+      // delete marker and the object becomes a noncurrent version, which no other
+      // rule would ever remove. Without this second bound, enabling versioning
+      // would have quietly converted a bucket that empties itself every 30 days
+      // into one that grows forever.
+      lifecycleRules: [
+        {
+          id: 'ExpireShardResults',
+          expiration: Duration.days(30),
+          noncurrentVersionExpiration: Duration.days(1),
+        },
+      ],
     });
 
     const artifactBucket = new s3.Bucket(this, 'Artifacts', {
       encryption: s3.BucketEncryption.S3_MANAGED,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       enforceSSL: true,
+      versioned: true,
       removalPolicy: RemovalPolicy.RETAIN,
       serverAccessLogsBucket: accessLogsBucket,
       serverAccessLogsPrefix: 'artifacts/',
+      // CodePipeline rewrites the same object key on every execution, so this is
+      // the one bucket here where versioning genuinely produces noncurrent
+      // versions - one per action per run, retained forever without a bound. The
+      // artifacts are inputs to a finished execution, so a short window is enough
+      // to inspect a failure and no more.
+      lifecycleRules: [{ id: 'ExpireSupersededArtifacts', noncurrentVersionExpiration: Duration.days(30) }],
     });
 
     /**

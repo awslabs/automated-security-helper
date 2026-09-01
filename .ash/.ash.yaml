@@ -41,9 +41,418 @@ global_settings:
         why ASH redirects its scanner caches there. The path is not attacker
         influenced: it is a module-level constant, and the line already carries a
         matching noqa for the ruff equivalent of this rule.
+    # === bandit in tests: the inherently-unfixable remainder ===
+    #
+    # Every other bandit finding in this repository is being FIXED rather than
+    # suppressed — a bare `except: pass` in shipped code is a defect whatever a
+    # scanner thinks of it. These six files are the exception, and each is listed
+    # individually rather than behind a `tests/**` glob so that a new test cannot
+    # inherit a suppression nobody looked at. That also matches the only bandit
+    # precedent already in this file, which names a single path.
+    #
+    # B104 — two files, 13 findings. Both are tests OF host binding, so the
+    # literal `0.0.0.0` is the value under test, not a careless default. AgentCore
+    # requires the MCP server to bind `0.0.0.0` (see the comment on
+    # `mcpEnvironment()` in deploy/cdk/lib/ash-runtime-config.ts, which pins
+    # ASH_MCP_HOST for that reason and notes a loopback bind would be unreachable
+    # from any load balancer). test_mcp_sse_host_binding.py states it outright at
+    # line 79: "The defect itself: 0.0.0.0 must not be built as though it were
+    # loopback." A test cannot assert that without naming the address, so the
+    # finding is unfixable by construction.
+    - rule_id: B104
+      path: tests/unit/cli/test_mcp_sse_host_binding.py
+      reason: >-
+        This file exists to test 0.0.0.0 handling; the address is the subject of
+        the test. AgentCore requires the MCP server to bind all interfaces, so the
+        binding is a requirement being verified rather than an insecure default.
+    - rule_id: B104
+      path: tests/unit/cli/test_mcp_stateless_http.py
+      reason: >-
+        Same as test_mcp_sse_host_binding.py: asserts the streamable-http app is
+        built with the host AgentCore requires. The address is the value under
+        test.
+    # B105 — three files, four findings, all of them bandit's keyword heuristic
+    # firing on a variable NAME while the value is harmless. Verified by reading
+    # each line rather than by assuming, because "hardcoded password" in a public
+    # security tool is worth being sure about.
+    - rule_id: B105
+      path: tests/unit/test_release_workflow_token.py
+      reason: >-
+        The flagged value is `TOKEN_ACTION = "actions/create-github-app-token"`,
+        the NAME of a GitHub Action the release workflow uses. The heuristic fires
+        on the variable name containing "TOKEN"; the string is an action
+        reference, and this test asserts the workflow pins that action.
+    - rule_id: B105
+      path: tests/unit/interactions/test_gha_layer_cache_args.py
+      reason: >-
+        The flagged value is the literal word "token", supplied as
+        ACTIONS_RUNTIME_TOKEN in a fixture environment. The test covers how the
+        buildx cache gate behaves when those variables are present versus absent,
+        so the value only has to be non-empty.
+    - rule_id: B105
+      path: tests/unit/deploy/test_deploy_mcp_entrypoint_secrets_moto_server.py
+      reason: >-
+        Two matches, neither a credential. `SECRET_MARKER = "get_secret_value"` is
+        the Secrets Manager API operation name the test greps for in a generated
+        entrypoint. `SECRET_VALUE` is an adversarial fixture,
+        "hdr-${not-expanded}-`not-run`-a1b2c3", built from shell metacharacters
+        precisely to prove the entrypoint's heredoc quoting neither expands nor
+        executes them; its own value spells out the expected outcome.
+    # B108 — one finding. Same shape as the codecommit-gate entry above: the
+    # hardcoded /tmp is a path INSIDE the build container, where it is correct.
+    - rule_id: B108
+      path: tests/unit/deploy/buildspec_extraction.py
+      reason: >-
+        `CONTAINER_HELPER_PATH = "/tmp/ash-s3-sync.py"` is the location the
+        buildspec writes its helper to inside the CodeBuild container, so the
+        constant has to match what the template emits. It is not a path this test
+        process writes: the comment above it records that tests rewrite it to a
+        per-test temporary path through `rewrite_helper_path`.
+    # === bandit subprocess family: unfixable in a tool that runs other tools ===
+    #
+    # B404 fires on `import subprocess` itself, before any call is examined. ASH's
+    # entire function is to invoke other security scanners as child processes, and
+    # these are the modules that do it, so the import cannot be removed and no code
+    # change satisfies the rule.
+    #
+    # B603 is worse than unfixable, it is inverted. `subprocess_without_shell_
+    # equals_true` fires on every `subprocess.run` that does NOT pass
+    # `shell=True` — the opposite of what the rule name suggests, and the opposite
+    # of what is wanted. A list argv with `shell=False` is the safe form; passing
+    # `shell=True` to silence the rule would introduce the shell-injection surface
+    # the rule exists to warn about.
+    #
+    # What makes these safe, and it was made MORE true rather than merely asserted:
+    # every call passes a list argv whose `argv[0]` is now a `shutil.which`-resolved
+    # absolute path rather than a bare name. That mattered — a bare `argv[0]` is
+    # re-resolved by the CHILD against whatever PATH it inherits, and three of these
+    # files previously called `shutil.which` as a guard and then threw the result
+    # away. Remaining argv elements are literal constants or repository-derived
+    # paths. The one element sourced from configuration, `source_url` in
+    # refresh_schemas.py, is now scheme-restricted to HTTP(S) before it reaches
+    # `git` and is passed after a `--` terminator; `git clone` otherwise accepts
+    # `ext::<command>`, which executes a command.
+    #
+    # Listed per file rather than as a glob, so a new module that starts shelling
+    # out has to be looked at instead of inheriting this.
+    - rule_id: B404
+      path: ash-agent-plugins/agentic-coding/transpiler/tools/generate_models.py
+      reason: "Imports subprocess to run the model generator; see the block comment above."
+    - rule_id: B404
+      path: ash-agent-plugins/agentic-coding/transpiler/tools/refresh_schemas.py
+      reason: "Imports subprocess to run `git clone`; URL is scheme-restricted before use."
+    - rule_id: B404
+      path: ash-agent-plugins/agentic-coding/transpiler/transpiler/backends/aider/__init__.py
+      reason: "Backend shells out to its CLI; the import is the rule's only subject."
+    - rule_id: B404
+      path: ash-agent-plugins/agentic-coding/transpiler/transpiler/backends/generic_skill/__init__.py
+      reason: "Backend shells out to its CLI; the import is the rule's only subject."
+    - rule_id: B404
+      path: ash-agent-plugins/agentic-coding/transpiler/transpiler/core.py
+      reason: "Invokes external validators and CLIs; the import cannot be removed."
+    - rule_id: B404
+      path: scripts/verify_moto_server_suite.py
+      reason: "Starts a moto server subprocess for the suite it verifies."
+    - rule_id: B404
+      path: tests/unit/assets/test_with_retry.py
+      reason: "Exercises a retry wrapper around a real subprocess call."
+    - rule_id: B404
+      path: tests/unit/deploy/test_deploy_buildspec_ssm_moto_server.py
+      reason: "Runs a moto server and the buildspec's own shell line under test."
+    - rule_id: B404
+      path: tests/unit/deploy/test_deploy_mcp_entrypoint_secrets_moto_server.py
+      reason: "Executes the generated POSIX entrypoint to prove its quoting holds."
+    - rule_id: B404
+      path: tests/unit/deploy/test_deploy_s3_sync_moto_server.py
+      reason: "Runs a moto server and the generated sync helper under test."
+    - rule_id: B404
+      path: tests/unit/test_ash_bash_entrypoint_build_failure.py
+      reason: "Runs the bash entrypoint to assert it fails as intended."
+    - rule_id: B603
+      path: ash-agent-plugins/agentic-coding/transpiler/tools/generate_models.py
+      reason: "List argv, shell=False, which-resolved argv[0]; see the block comment above."
+    - rule_id: B603
+      path: ash-agent-plugins/agentic-coding/transpiler/tools/refresh_schemas.py
+      reason: >-
+        List argv, shell=False, which-resolved argv[0]. The one configuration-sourced
+        element, `source_url`, is scheme-restricted to HTTP(S) and passed after `--`.
+    - rule_id: B603
+      path: ash-agent-plugins/agentic-coding/transpiler/transpiler/backends/generic_skill/__init__.py
+      reason: "List argv, shell=False, which-resolved argv[0]."
+    - rule_id: B603
+      path: ash-agent-plugins/agentic-coding/transpiler/transpiler/core.py
+      reason: "List argv, shell=False, which-resolved argv[0]."
+    - rule_id: B603
+      path: scripts/verify_moto_server_suite.py
+      reason: "List argv, shell=False, which-resolved argv[0]."
+    - rule_id: B603
+      path: tests/unit/deploy/test_deploy_buildspec_ssm_moto_server.py
+      reason: >-
+        List argv, shell=False. The shell path comes from `posix_shell(env)`, which
+        resolves against the CHILD's PATH and raises rather than defaulting to
+        /bin/sh.
+    - rule_id: B603
+      path: tests/unit/deploy/test_deploy_mcp_entrypoint_secrets_moto_server.py
+      reason: "List argv, shell=False; shell path from `posix_shell(env)`, which raises if absent."
+    - rule_id: B603
+      path: tests/unit/deploy/test_deploy_s3_sync_moto_server.py
+      reason: "List argv, shell=False; shell path from `posix_shell(env)`, which raises if absent."
+    # === checkov on the synthesized CloudFormation templates ===
+    #
+    # 37 of the 53 checkov findings on these templates were FIXED rather than
+    # suppressed, by making the hardening opt-in through a KmsKeyArn parameter and
+    # by applying the free changes unconditionally. What follows is the remainder,
+    # where no code change satisfies the rule.
+    #
+    # Three rules ask for hardening that costs money or infrastructure the adopter
+    # has to own. Each names the parameter that opts in. Two of those parameters are
+    # RESERVED rather than declared: the names are fixed in ASH_PARAMETER_NAMES and
+    # deploy/cdk/lib/ash-config.ts ships a factory for each, but no template declares
+    # them, because a parameter no resource reads is a question with no consequence.
+    - rule_id: CKV_AWS_117
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        Attaching the function to a VPC removes its route to the public internet, so
+        it then reaches CodeCommit, ECR, Secrets Manager, Systems Manager and
+        CloudWatch Logs only through a NAT gateway, billed hourly for as long as it
+        exists plus per-GB data processing, or through six interface endpoints, each
+        also billed hourly per Availability Zone, plus the free S3 gateway endpoint
+        that ECR image layers are served from. The function is invoked by
+        EventBridge and by CloudFormation, reaches no private resource, and holds no
+        listener, so a VPC buys egress control rather than reachability control.
+        VpcSubnetIds is the reserved name for this opt-in.
+    - rule_id: CKV_AWS_117
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: >-
+        Same cost and same reasoning as the AshAgentCore entry above. Both functions
+        in this template are affected: the image-build bootstrap starter and the
+        pull-request scan function. VpcSubnetIds is the reserved name for this
+        opt-in.
+    - rule_id: CKV_AWS_117
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        Same cost and same reasoning as the AshAgentCore entry above. The ECS tasks
+        in this template already run in private subnets; the finding is on the
+        image-build bootstrap starter, which runs once per stack operation.
+        VpcSubnetIds is the reserved name for this opt-in.
+    - rule_id: CKV_AWS_2
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        An HTTPS listener needs an ACM certificate, and ACM issues one only against
+        a domain the requester can prove control of, so there is no default value
+        this template could supply. The load balancer is internal and starts with no
+        ingress rule at all, so nothing reaches the HTTP listener until an operator
+        sets McpIngressCidr. Clearing this rule needs a second, conditional listener
+        RESOURCE rather than a conditional property, and checkov would still read
+        the HTTP listener that remains alongside it. CertificateArn is the reserved
+        name for this opt-in.
+    - rule_id: CKV_AWS_103
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        The same listener as the CKV_AWS_2 entry above. SslPolicy is only meaningful
+        on an HTTPS or TLS listener, so this rule cannot pass while the listener is
+        HTTP, and it will pass without further work once a certificate turns it into
+        an HTTPS listener. CertificateArn is the reserved name for this opt-in.
+    # === checkov: the Lambda DLQ rule asks for the wrong mechanism here ===
+    #
+    # CKV_AWS_116 inspects Properties/DeadLetterConfig/TargetArn, which is Lambda's
+    # ASYNCHRONOUS invocation DLQ. Neither function here is invoked in a way that
+    # rule fits, so satisfying it would add a queue that never receives anything.
+    - rule_id: CKV_AWS_116
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        The image-build bootstrap starter is a CloudFormation custom-resource
+        responder whose entire contract is to answer the response URL. A DLQ
+        captures an event only after asynchronous retries are exhausted, by which
+        point the stack is already waiting on its own timeout, and the handler
+        already catches its exceptions and reports FAILED. Worse, Lambda's
+        asynchronous retry would re-invoke it and call StartBuild a second time. The
+        correct failure signal for this function is the CloudFormation response it
+        already sends.
+    - rule_id: CKV_AWS_116
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: >-
+        Two functions. The bootstrap starter is the same custom-resource responder
+        described in the AshAgentCore entry above. The pull-request scan function is
+        invoked by an EventBridge rule, and the idiomatic dead-letter target for
+        that path is on the RULE TARGET rather than on the function; retryAttempts
+        and maxEventAge are already set there. A target-side DLQ does not satisfy
+        this rule, which reads only the function's own DeadLetterConfig.
+    - rule_id: CKV_AWS_116
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        The finding is on the image-build bootstrap starter, the same
+        custom-resource responder described in the AshAgentCore entry above.
+    # === checkov: ECR tag mutability is load-bearing, not an oversight ===
+    #
+    # MUTABLE is required by how the image is published. flavorBuildCommands in
+    # deploy/cdk/lib/ash-image-build.ts pushes TWO tags on every build: a moving tag
+    # from tagForFlavor, which the neighbouring comment calls "The moving tag", and a
+    # version-qualified audit tag built from the folded ref plus a digest. Cited by
+    # symbol rather than by line number on purpose, because the lines move.
+    - rule_id: CKV_AWS_51
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        IMMUTABLE would make the second scheduled rebuild fail. Every build
+        republishes the moving tag from flavorBuildCommands in
+        deploy/cdk/lib/ash-image-build.ts, which is what lets a long-lived
+        deployment pick up base-image and scanner patches without a stack update.
+        The same function already pushes a version-qualified tag alongside it for
+        anyone who wants immutable pinning, and AshImageTag is the parameter that
+        points a workload at that tag instead of the moving one.
+    - rule_id: CKV_AWS_51
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: >-
+        Same mechanism as the AshAgentCore entry above: flavorBuildCommands pushes
+        both a moving tag and a version-qualified tag on every rebuild, so IMMUTABLE
+        would fail the second one. AshImageTag is the pinning parameter.
+    - rule_id: CKV_AWS_51
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        Same mechanism as the AshAgentCore entry above. This template additionally
+        consumes the moving tag as a CodeBuild environment image, resolved when each
+        build starts. AshImageTag is the pinning parameter.
+    - rule_id: CKV_AWS_51
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        Same mechanism as the AshAgentCore entry above: flavorBuildCommands pushes
+        both a moving tag and a version-qualified tag on every rebuild, so IMMUTABLE
+        would fail the second one. AshImageTag is the pinning parameter.
+    - rule_id: CKV_AWS_51
+      path: deploy/cdk/templates/AshImagePipeline.template.json
+      reason: >-
+        Same mechanism as the AshAgentCore entry above, on both repositories this
+        template creates, one per architecture. AshImageTag is not declared here
+        because this template runs no workload; the tags are stack outputs instead.
     - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
       path: pyproject.toml
       reason: "Project configuration — base64 strings are dependency hashes"
+    # === detect-secrets on the synthesized CloudFormation templates ===
+    #
+    # These templates are `cdk synth` output, committed so the stacks are
+    # launchable from the console without a CDK toolchain. Every high-entropy
+    # string in them is generated by CDK or cdk-nag; none is authored, and none
+    # is a credential. Verified by reading all 34 flagged lines individually
+    # rather than by sampling, because 31 real leaked secrets in a public
+    # repository would be far worse than the cost of checking.
+    #
+    # Two distinct mechanisms produce the base64 matches, and a reviewer can
+    # confirm each one against the file. Deliberately NOT stating a per-file
+    # count: `cdk synth` regenerates these templates, so any count written here
+    # rots the same way a line range does.
+    #
+    # A third mechanism used to appear here and no longer does: `aws:cdk:path`
+    # metadata values such as `AshFargate/Vpc/PublicSubnet1/NATGateway` were
+    # flagged as base64 high-entropy strings. `"pathMetadata": false` in
+    # deploy/cdk/cdk.json removed them, which was done for template size rather
+    # than for this rule but eliminates those findings as a side effect. See the
+    # header of deploy/cdk/test/ash-template-size.test.ts.
+    #
+    #   1. CDK logical resource ids — a CamelCase construct path concatenated
+    #      with a deterministic hash, e.g. `ConfigMcpAuthHeaderSecret99D04B65`,
+    #      `Shard1ProjectRoleDefaultPolicy4B7CA148`,
+    #      `VpcPrivateSubnet2RouteTableA678073B`. These are JSON object KEYS in
+    #      the Resources block, not values.
+    #   2. cdk-nag suppression reasons — upstream cdk-nag base64-encodes some
+    #      reason text and records that it did so with a sibling
+    #      `"is_reason_encoded": true`. That marker is the structural proof: it
+    #      sits in the same JSON object as every one of these 8 matches. The
+    #      plaintext is ours, in `deploy/cdk/lib/ash-nag-suppressions.ts`.
+    #
+    #      WHICH reasons get encoded is worth stating precisely, because an
+    #      earlier version of this comment got it wrong and claimed only
+    #      `CdkNagValidationFailure` reasons are encoded. That is false: across
+    #      the five templates, encoded reasons carry `CdkNagValidationFailure`
+    #      (48) AND `AwsSolutions-ECS2` (5), so the suppression id does not
+    #      predict it. What does, measured over all 130 reasons here: every one
+    #      of the 53 encoded reasons decodes to text containing a non-ASCII
+    #      character (U+2014, an em dash), and all 77 un-encoded reasons are pure
+    #      ASCII. A clean 130/130 split. Reported as the observation it is rather
+    #      than as cdk-nag's documented behaviour, because cdk-nag is not
+    #      vendored here and its source was not read.
+    #
+    #      Practical consequence: adding an em dash to any reason moves it into
+    #      the encoded set and can create a new finding here. Keeping reasons
+    #      ASCII avoids that entirely.
+    #
+    # PATHS ARE NAMED FILE BY FILE, NOT GLOBBED
+    #
+    # `deploy/cdk/templates/**` would be one entry instead of five, and it was
+    # written that way first. The problem is what a trailing `**` means: it is a
+    # whole-subtree match at any depth, so a sixth template added later inherits
+    # the suppression without anyone having looked at it. Naming the five files
+    # costs four extra entries and makes a new template fail loudly instead.
+    # This also matches the convention the rest of this file already uses for
+    # entries justified by inspection; the broad globs above (`tests/**`,
+    # `docs/**`) are category suppressions, which is a different claim.
+    #
+    # Line ranges would be the wrong way to narrow further: `cdk synth`
+    # regenerates these files and the line numbers drift, and a `line_start`
+    # with no `line_end` covers to end of file — so a range would silently widen
+    # rather than narrow.
+    - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        Generated `cdk synth` output, 11 matches: CDK logical resource ids,
+        `aws:cdk:path` construct paths, and cdk-nag reasons marked
+        `"is_reason_encoded": true`. See the comment above for the breakdown.
+    - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        Generated `cdk synth` output, 6 matches, same three mechanisms as
+        AshFargate above.
+    - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: >-
+        Generated `cdk synth` output, 5 matches, same three mechanisms as
+        AshFargate above.
+    - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
+      path: deploy/cdk/templates/AshImagePipeline.template.json
+      reason: >-
+        Generated `cdk synth` output, 5 matches, same three mechanisms as
+        AshFargate above.
+    - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        Generated `cdk synth` output, 4 matches, same three mechanisms as
+        AshFargate above.
+    # The two SECRET-KEYWORD matches are named individually for a sharper reason
+    # than tidiness. AshFargate and AshAgentCore render
+    # `"SecretString": {"Fn::If": [...]}` and escape this rule only because a `{`
+    # follows the key rather than a literal. If a later change ever resolves
+    # `McpAuthHeaderValue` to a literal — a `Default:` on the parameter would do
+    # it — synth would emit `"SecretString": "<literal>"` in exactly those two
+    # templates, which is this rule's signature. A subtree glob here would hide
+    # that. The IaC drift gate does not cover it either: it asserts that the
+    # committed template equals synth output, so a synth that emits a credential
+    # passes it green.
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: >-
+        The two matches are `"SecretString": "ash-mcp-auth-disabled"`, which is
+        `SECRET_PLACEHOLDER` in deploy/cdk/lib/ash-runtime-config.ts — the value
+        stored when ASH-level header auth is disabled. Both matches are in the
+        two stacks that do not serve MCP at all (AshCodeCommitGate,
+        AshDistributedPipeline); those pass the placeholder to the secret
+        directly so the construct keeps one shape, and nothing reads it. The
+        MCP-serving stacks instead emit an `Fn::If` whose true branch is
+        `{"Ref": "McpAuthHeaderValue"}`, a NoEcho parameter, so a real header
+        value never appears in a committed template.
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        The second of the two `"SecretString": "ash-mcp-auth-disabled"` matches.
+        Same mechanism as the AshCodeCommitGate entry above: this stack runs the
+        sharded executor and does not serve MCP, so it is built with
+        `includeMcpParameters` off and gets the placeholder secret that nothing
+        reads.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: deploy/cdk/test/ash-image-build.test.ts
+      reason: >-
+        The match is `commitSha: '0123456789abcdef0123456789abcdef01234567'`, a
+        40-character placeholder standing in for a git SHA so the test can assert
+        how the image tag is derived. It is sequential hex digits, not a
+        credential, and it names no real commit.
     # === semgrep/opengrep Python compatibility (ASH requires 3.10+) ===
     - rule_id: "python.lang.compatibility.*"
       path: "automated_security_helper/**/*.py"

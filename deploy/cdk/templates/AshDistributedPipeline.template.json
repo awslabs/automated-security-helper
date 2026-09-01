@@ -22,6 +22,12 @@
    "Description": "EventBridge schedule expression for the image rebuild, for example \"cron(0 6 * * ? *)\" or \"rate(1 day)\". The rebuild repulls the base image and scanner tools so a long-lived deployment keeps getting OS and scanner patches without a stack update. Note that a rate() expression starts when the rule is created, so it also rebuilds once at deployment; a cron() expression only fires at the times it names.",
    "MinLength": 1
   },
+  "KmsKeyArn": {
+   "Type": "String",
+   "Default": "",
+   "AllowedPattern": "^$|^arn:aws[a-zA-Z-]*:kms:[a-z0-9-]+:\\d{12}:key/[0-9a-z-]{36}$",
+   "Description": "ARN of an existing symmetric customer-managed KMS key for this stack data at rest. Empty uses AWS-managed encryption. Needs a key policy admitting logs.<region>.amazonaws.com, plus kms:CreateGrant for whoever deploys."
+  },
   "AshBaseConfigYaml": {
    "Type": "String",
    "Default": "",
@@ -35,6 +41,18 @@
   }
  },
  "Conditions": {
+  "HasKmsKey": {
+   "Fn::Not": [
+    {
+     "Fn::Equals": [
+      {
+       "Ref": "KmsKeyArn"
+      },
+      ""
+     ]
+    }
+   ]
+  },
   "ConfigHasBaseConfigA7D225A9": {
    "Fn::Not": [
     {
@@ -76,21 +94,28 @@
       "# No ASH base configuration was supplied at deployment time."
      ]
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Config/BaseConfig/Resource"
    }
   },
   "ConfigMcpAuthHeaderSecret99D04B65": {
    "Type": "AWS::SecretsManager::Secret",
    "Properties": {
     "Description": "Expected value of McpAuthHeaderName. The container is handed this ARN and resolves the value at start, so the secret never enters a task definition or a runtime environment-variable map.",
+    "KmsKeyId": {
+     "Fn::If": [
+      "HasKmsKey",
+      {
+       "Ref": "KmsKeyArn"
+      },
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    },
     "SecretString": "ash-mcp-auth-disabled"
    },
    "UpdateReplacePolicy": "Delete",
    "DeletionPolicy": "Delete",
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Config/McpAuthHeaderSecret/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -136,14 +161,25 @@
     }
    },
    "UpdateReplacePolicy": "Retain",
-   "DeletionPolicy": "Retain",
-   "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/EncryptionKey/Resource"
-   }
+   "DeletionPolicy": "Retain"
   },
   "ImageRepositoryD8036990": {
    "Type": "AWS::ECR::Repository",
    "Properties": {
+    "EncryptionConfiguration": {
+     "EncryptionType": "KMS",
+     "KmsKey": {
+      "Fn::If": [
+       "HasKmsKey",
+       {
+        "Ref": "KmsKeyArn"
+       },
+       {
+        "Ref": "AWS::NoValue"
+       }
+      ]
+     }
+    },
     "ImageScanningConfiguration": {
      "ScanOnPush": true
     },
@@ -153,21 +189,26 @@
     }
    },
    "UpdateReplacePolicy": "Retain",
-   "DeletionPolicy": "Retain",
-   "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Image/Repository/Resource"
-   }
+   "DeletionPolicy": "Retain"
   },
   "ImageBuildLogsBC6BBB2A": {
    "Type": "AWS::Logs::LogGroup",
    "Properties": {
+    "KmsKeyId": {
+     "Fn::If": [
+      "HasKmsKey",
+      {
+       "Ref": "KmsKeyArn"
+      },
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    },
     "RetentionInDays": 30
    },
    "UpdateReplacePolicy": "Retain",
-   "DeletionPolicy": "Retain",
-   "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Image/BuildLogs/Resource"
-   }
+   "DeletionPolicy": "Retain"
   },
   "ImageBuildRole1BB51BF0": {
    "Type": "AWS::IAM::Role",
@@ -186,7 +227,6 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Image/Build/Role/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -390,7 +430,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Image/Build/Role/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -557,7 +596,6 @@
     "TimeoutInMinutes": 120
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Image/Build/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -590,7 +628,6 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Image/Build/EventsRole/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -632,7 +669,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Image/Build/EventsRole/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -673,9 +709,165 @@
       }
      }
     ]
+   }
+  },
+  "AccessLogsArchive1A69C748": {
+   "Type": "AWS::S3::Bucket",
+   "Properties": {
+    "BucketEncryption": {
+     "ServerSideEncryptionConfiguration": [
+      {
+       "ServerSideEncryptionByDefault": {
+        "SSEAlgorithm": "AES256"
+       }
+      }
+     ]
+    },
+    "LifecycleConfiguration": {
+     "Rules": [
+      {
+       "ExpirationInDays": 30,
+       "Id": "ExpireLogDeliveryRecords",
+       "NoncurrentVersionExpiration": {
+        "NoncurrentDays": 1
+       },
+       "Status": "Enabled"
+      }
+     ]
+    },
+    "LoggingConfiguration": {
+     "LogFilePrefix": "log-delivery/"
+    },
+    "PublicAccessBlockConfiguration": {
+     "BlockPublicAcls": true,
+     "BlockPublicPolicy": true,
+     "IgnorePublicAcls": true,
+     "RestrictPublicBuckets": true
+    },
+    "VersioningConfiguration": {
+     "Status": "Enabled"
+    }
    },
-   "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Image/RebuildSchedule/Resource"
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain"
+  },
+  "AccessLogsArchivePolicyBC5B3007": {
+   "Type": "AWS::S3::BucketPolicy",
+   "Properties": {
+    "Bucket": {
+     "Ref": "AccessLogsArchive1A69C748"
+    },
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "s3:*",
+       "Condition": {
+        "Bool": {
+         "aws:SecureTransport": "false"
+        }
+       },
+       "Effect": "Deny",
+       "Principal": {
+        "AWS": "*"
+       },
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "AccessLogsArchive1A69C748",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "AccessLogsArchive1A69C748",
+             "Arn"
+            ]
+           },
+           "/*"
+          ]
+         ]
+        }
+       ]
+      },
+      {
+       "Action": "s3:PutObject",
+       "Condition": {
+        "ArnLike": {
+         "aws:SourceArn": {
+          "Fn::GetAtt": [
+           "AccessLogsArchive1A69C748",
+           "Arn"
+          ]
+         }
+        },
+        "StringEquals": {
+         "aws:SourceAccount": {
+          "Ref": "AWS::AccountId"
+         }
+        }
+       },
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "logging.s3.amazonaws.com"
+       },
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          {
+           "Fn::GetAtt": [
+            "AccessLogsArchive1A69C748",
+            "Arn"
+           ]
+          },
+          "/log-delivery/*"
+         ]
+        ]
+       }
+      },
+      {
+       "Action": "s3:PutObject",
+       "Condition": {
+        "ArnLike": {
+         "aws:SourceArn": {
+          "Fn::GetAtt": [
+           "AccessLogs8B620ECA",
+           "Arn"
+          ]
+         }
+        },
+        "StringEquals": {
+         "aws:SourceAccount": {
+          "Ref": "AWS::AccountId"
+         }
+        }
+       },
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "logging.s3.amazonaws.com"
+       },
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          {
+           "Fn::GetAtt": [
+            "AccessLogsArchive1A69C748",
+            "Arn"
+           ]
+          },
+          "/access-logs/*"
+         ]
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    }
    }
   },
   "AccessLogs8B620ECA": {
@@ -690,18 +882,24 @@
       }
      ]
     },
+    "LoggingConfiguration": {
+     "DestinationBucketName": {
+      "Ref": "AccessLogsArchive1A69C748"
+     },
+     "LogFilePrefix": "access-logs/"
+    },
     "PublicAccessBlockConfiguration": {
      "BlockPublicAcls": true,
      "BlockPublicPolicy": true,
      "IgnorePublicAcls": true,
      "RestrictPublicBuckets": true
+    },
+    "VersioningConfiguration": {
+     "Status": "Enabled"
     }
    },
    "UpdateReplacePolicy": "Retain",
-   "DeletionPolicy": "Retain",
-   "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/AccessLogs/Resource"
-   }
+   "DeletionPolicy": "Retain"
   },
   "AccessLogsPolicyABDC4D2D": {
    "Type": "AWS::S3::BucketPolicy",
@@ -856,9 +1054,6 @@
      ],
      "Version": "2012-10-17"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/AccessLogs/Policy/Resource"
    }
   },
   "Source71E471F1": {
@@ -890,10 +1085,7 @@
     }
    },
    "UpdateReplacePolicy": "Retain",
-   "DeletionPolicy": "Retain",
-   "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Source/Resource"
-   }
+   "DeletionPolicy": "Retain"
   },
   "SourcePolicyE5AB5F73": {
    "Type": "AWS::S3::BucketPolicy",
@@ -940,9 +1132,6 @@
      ],
      "Version": "2012-10-17"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Source/Policy/Resource"
    }
   },
   "Results25575328": {
@@ -962,6 +1151,9 @@
       {
        "ExpirationInDays": 30,
        "Id": "ExpireShardResults",
+       "NoncurrentVersionExpiration": {
+        "NoncurrentDays": 1
+       },
        "Status": "Enabled"
       }
      ]
@@ -977,13 +1169,13 @@
      "BlockPublicPolicy": true,
      "IgnorePublicAcls": true,
      "RestrictPublicBuckets": true
+    },
+    "VersioningConfiguration": {
+     "Status": "Enabled"
     }
    },
    "UpdateReplacePolicy": "Retain",
-   "DeletionPolicy": "Retain",
-   "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Results/Resource"
-   }
+   "DeletionPolicy": "Retain"
   },
   "ResultsPolicy9F4743DA": {
    "Type": "AWS::S3::BucketPolicy",
@@ -1030,9 +1222,6 @@
      ],
      "Version": "2012-10-17"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Results/Policy/Resource"
    }
   },
   "Artifacts82DD59A1": {
@@ -1047,6 +1236,17 @@
       }
      ]
     },
+    "LifecycleConfiguration": {
+     "Rules": [
+      {
+       "Id": "ExpireSupersededArtifacts",
+       "NoncurrentVersionExpiration": {
+        "NoncurrentDays": 30
+       },
+       "Status": "Enabled"
+      }
+     ]
+    },
     "LoggingConfiguration": {
      "DestinationBucketName": {
       "Ref": "AccessLogs8B620ECA"
@@ -1058,13 +1258,13 @@
      "BlockPublicPolicy": true,
      "IgnorePublicAcls": true,
      "RestrictPublicBuckets": true
+    },
+    "VersioningConfiguration": {
+     "Status": "Enabled"
     }
    },
    "UpdateReplacePolicy": "Retain",
-   "DeletionPolicy": "Retain",
-   "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Artifacts/Resource"
-   }
+   "DeletionPolicy": "Retain"
   },
   "ArtifactsPolicy6E9058CC": {
    "Type": "AWS::S3::BucketPolicy",
@@ -1111,9 +1311,6 @@
      ],
      "Version": "2012-10-17"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Artifacts/Policy/Resource"
    }
   },
   "Shard0ProjectRoleF3A1C5B4": {
@@ -1133,7 +1330,6 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Shard0Project/Role/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -1396,7 +1592,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Shard0Project/Role/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -1542,7 +1737,6 @@
     "TimeoutInMinutes": 60
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Shard0Project/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -1575,7 +1769,6 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Shard1Project/Role/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -1838,7 +2031,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Shard1Project/Role/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -1984,7 +2176,6 @@
     "TimeoutInMinutes": 60
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Shard1Project/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -2017,7 +2208,6 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Shard2Project/Role/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -2280,7 +2470,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Shard2Project/Role/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -2426,7 +2615,6 @@
     "TimeoutInMinutes": 60
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Shard2Project/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -2459,7 +2647,6 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Shard3Project/Role/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -2722,7 +2909,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Shard3Project/Role/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -2868,7 +3054,6 @@
     "TimeoutInMinutes": 60
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Shard3Project/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -2901,7 +3086,6 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/MergeProject/Role/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -3167,7 +3351,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/MergeProject/Role/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -3308,7 +3491,6 @@
     "TimeoutInMinutes": 30
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/MergeProject/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -3341,7 +3523,6 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Role/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -3453,7 +3634,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Role/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -3698,7 +3878,6 @@
     "PipelineRoleD68726F7"
    ],
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -3731,7 +3910,6 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Source/Source/CodePipelineActionRole/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -3822,7 +4000,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Source/Source/CodePipelineActionRole/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -3855,7 +4032,6 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Pipeline/BuildImage/BuildAshImage/CodePipelineActionRole/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -3896,7 +4072,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Pipeline/BuildImage/BuildAshImage/CodePipelineActionRole/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -3929,7 +4104,6 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Scan/Shard0/CodePipelineActionRole/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -3970,7 +4144,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Scan/Shard0/CodePipelineActionRole/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -4003,7 +4176,6 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Scan/Shard1/CodePipelineActionRole/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -4044,7 +4216,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Scan/Shard1/CodePipelineActionRole/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -4077,7 +4248,6 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Scan/Shard2/CodePipelineActionRole/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -4118,7 +4288,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Scan/Shard2/CodePipelineActionRole/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -4151,7 +4320,6 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Scan/Shard3/CodePipelineActionRole/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -4192,7 +4360,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Scan/Shard3/CodePipelineActionRole/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -4225,7 +4392,6 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Merge/MergeAndGate/CodePipelineActionRole/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -4266,7 +4432,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Merge/MergeAndGate/CodePipelineActionRole/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {

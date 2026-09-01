@@ -28,6 +28,12 @@
    "Description": "ARN of an EXISTING CodeCommit repository to gate, in the form arn:aws:codecommit:<region>:<account-id>:<repository-name>. This stack references the repository and never creates, modifies or deletes it.",
    "MinLength": 1
   },
+  "KmsKeyArn": {
+   "Type": "String",
+   "Default": "",
+   "AllowedPattern": "^$|^arn:aws[a-zA-Z-]*:kms:[a-z0-9-]+:\\d{12}:key/[0-9a-z-]{36}$",
+   "Description": "ARN of an existing symmetric customer-managed KMS key for this stack data at rest. Empty uses AWS-managed encryption. Needs a key policy admitting logs.<region>.amazonaws.com, plus kms:CreateGrant for whoever deploys."
+  },
   "AshBaseConfigYaml": {
    "Type": "String",
    "Default": "",
@@ -71,6 +77,18 @@
   }
  },
  "Conditions": {
+  "HasKmsKey": {
+   "Fn::Not": [
+    {
+     "Fn::Equals": [
+      {
+       "Ref": "KmsKeyArn"
+      },
+      ""
+     ]
+    }
+   ]
+  },
   "ConfigHasBaseConfigA7D225A9": {
    "Fn::Not": [
     {
@@ -112,21 +130,28 @@
       "# No ASH base configuration was supplied at deployment time."
      ]
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshCodeCommitGate/Config/BaseConfig/Resource"
    }
   },
   "ConfigMcpAuthHeaderSecret99D04B65": {
    "Type": "AWS::SecretsManager::Secret",
    "Properties": {
     "Description": "Expected value of McpAuthHeaderName. The container is handed this ARN and resolves the value at start, so the secret never enters a task definition or a runtime environment-variable map.",
+    "KmsKeyId": {
+     "Fn::If": [
+      "HasKmsKey",
+      {
+       "Ref": "KmsKeyArn"
+      },
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    },
     "SecretString": "ash-mcp-auth-disabled"
    },
    "UpdateReplacePolicy": "Delete",
    "DeletionPolicy": "Delete",
    "Metadata": {
-    "aws:cdk:path": "AshCodeCommitGate/Config/McpAuthHeaderSecret/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -172,14 +197,25 @@
     }
    },
    "UpdateReplacePolicy": "Retain",
-   "DeletionPolicy": "Retain",
-   "Metadata": {
-    "aws:cdk:path": "AshCodeCommitGate/EncryptionKey/Resource"
-   }
+   "DeletionPolicy": "Retain"
   },
   "ImageRepositoryD8036990": {
    "Type": "AWS::ECR::Repository",
    "Properties": {
+    "EncryptionConfiguration": {
+     "EncryptionType": "KMS",
+     "KmsKey": {
+      "Fn::If": [
+       "HasKmsKey",
+       {
+        "Ref": "KmsKeyArn"
+       },
+       {
+        "Ref": "AWS::NoValue"
+       }
+      ]
+     }
+    },
     "ImageScanningConfiguration": {
      "ScanOnPush": true
     },
@@ -205,21 +241,26 @@
     }
    },
    "UpdateReplacePolicy": "Retain",
-   "DeletionPolicy": "Retain",
-   "Metadata": {
-    "aws:cdk:path": "AshCodeCommitGate/Image/Repository/Resource"
-   }
+   "DeletionPolicy": "Retain"
   },
   "ImageBuildLogsBC6BBB2A": {
    "Type": "AWS::Logs::LogGroup",
    "Properties": {
+    "KmsKeyId": {
+     "Fn::If": [
+      "HasKmsKey",
+      {
+       "Ref": "KmsKeyArn"
+      },
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    },
     "RetentionInDays": 30
    },
    "UpdateReplacePolicy": "Retain",
-   "DeletionPolicy": "Retain",
-   "Metadata": {
-    "aws:cdk:path": "AshCodeCommitGate/Image/BuildLogs/Resource"
-   }
+   "DeletionPolicy": "Retain"
   },
   "ImageBuildRole1BB51BF0": {
    "Type": "AWS::IAM::Role",
@@ -238,7 +279,6 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshCodeCommitGate/Image/Build/Role/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -412,7 +452,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshCodeCommitGate/Image/Build/Role/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -579,7 +618,6 @@
     "TimeoutInMinutes": 120
    },
    "Metadata": {
-    "aws:cdk:path": "AshCodeCommitGate/Image/Build/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -612,7 +650,6 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshCodeCommitGate/Image/Build/EventsRole/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -654,7 +691,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshCodeCommitGate/Image/Build/EventsRole/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -673,13 +709,21 @@
   "ImageBootstrapStarterLogsFCF41B92": {
    "Type": "AWS::Logs::LogGroup",
    "Properties": {
+    "KmsKeyId": {
+     "Fn::If": [
+      "HasKmsKey",
+      {
+       "Ref": "KmsKeyArn"
+      },
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    },
     "RetentionInDays": 30
    },
    "UpdateReplacePolicy": "Retain",
-   "DeletionPolicy": "Retain",
-   "Metadata": {
-    "aws:cdk:path": "AshCodeCommitGate/Image/BootstrapStarterLogs/Resource"
-   }
+   "DeletionPolicy": "Retain"
   },
   "ImageBootstrapStarterRole4262AC52": {
    "Type": "AWS::IAM::Role",
@@ -699,7 +743,6 @@
     "Description": "Execution role for the image-build bootstrap. Deliberately not using AWSLambdaBasicExecutionRole: the only logging grant it needs is on one log group."
    },
    "Metadata": {
-    "aws:cdk:path": "AshCodeCommitGate/Image/BootstrapStarterRole/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -765,7 +808,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshCodeCommitGate/Image/BootstrapStarterRole/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -791,11 +833,23 @@
      }
     },
     "Handler": "index.handler",
+    "KmsKeyArn": {
+     "Fn::If": [
+      "HasKmsKey",
+      {
+       "Ref": "KmsKeyArn"
+      },
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    },
     "LoggingConfig": {
      "LogGroup": {
       "Ref": "ImageBootstrapStarterLogsFCF41B92"
      }
     },
+    "ReservedConcurrentExecutions": 1,
     "Role": {
      "Fn::GetAtt": [
       "ImageBootstrapStarterRole4262AC52",
@@ -808,10 +862,7 @@
    "DependsOn": [
     "ImageBootstrapStarterRoleDefaultPolicy10189EBF",
     "ImageBootstrapStarterRole4262AC52"
-   ],
-   "Metadata": {
-    "aws:cdk:path": "AshCodeCommitGate/Image/BootstrapStarter/Resource"
-   }
+   ]
   },
   "ImageBootstrapBuildCBE6CA7A": {
    "Type": "Custom::AshImageBootstrap",
@@ -831,10 +882,7 @@
     "Flavors": "lambda"
    },
    "UpdateReplacePolicy": "Delete",
-   "DeletionPolicy": "Delete",
-   "Metadata": {
-    "aws:cdk:path": "AshCodeCommitGate/Image/BootstrapBuild/Default"
-   }
+   "DeletionPolicy": "Delete"
   },
   "ImageRebuildScheduleC59CBD6A": {
    "Type": "AWS::Events::Rule",
@@ -864,21 +912,26 @@
    },
    "DependsOn": [
     "ImageBootstrapBuildCBE6CA7A"
-   ],
-   "Metadata": {
-    "aws:cdk:path": "AshCodeCommitGate/Image/RebuildSchedule/Resource"
-   }
+   ]
   },
   "ScanLogsE2E8E605": {
    "Type": "AWS::Logs::LogGroup",
    "Properties": {
+    "KmsKeyId": {
+     "Fn::If": [
+      "HasKmsKey",
+      {
+       "Ref": "KmsKeyArn"
+      },
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    },
     "RetentionInDays": 30
    },
    "UpdateReplacePolicy": "Retain",
-   "DeletionPolicy": "Retain",
-   "Metadata": {
-    "aws:cdk:path": "AshCodeCommitGate/ScanLogs/Resource"
-   }
+   "DeletionPolicy": "Retain"
   },
   "ScanFunctionRoleD9323212": {
    "Type": "AWS::IAM::Role",
@@ -898,7 +951,6 @@
     "Description": "Execution role for the ASH pull-request scan."
    },
    "Metadata": {
-    "aws:cdk:path": "AshCodeCommitGate/ScanFunctionRole/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -1013,7 +1065,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshCodeCommitGate/ScanFunctionRole/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -1113,6 +1164,17 @@
     "EphemeralStorage": {
      "Size": 4096
     },
+    "KmsKeyArn": {
+     "Fn::If": [
+      "HasKmsKey",
+      {
+       "Ref": "KmsKeyArn"
+      },
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    },
     "LoggingConfig": {
      "LogGroup": {
       "Ref": "ScanLogsE2E8E605"
@@ -1120,6 +1182,7 @@
     },
     "MemorySize": 10240,
     "PackageType": "Image",
+    "ReservedConcurrentExecutions": 10,
     "Role": {
      "Fn::GetAtt": [
       "ScanFunctionRoleD9323212",
@@ -1132,10 +1195,7 @@
     "ImageBootstrapBuildCBE6CA7A",
     "ScanFunctionRoleDefaultPolicy885340FF",
     "ScanFunctionRoleD9323212"
-   ],
-   "Metadata": {
-    "aws:cdk:path": "AshCodeCommitGate/ScanFunction/Resource"
-   }
+   ]
   },
   "PullRequestRule01EC9868": {
    "Type": "AWS::Events::Rule",
@@ -1176,9 +1236,6 @@
       }
      }
     ]
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshCodeCommitGate/PullRequestRule/Resource"
    }
   },
   "PullRequestRuleAllowEventRuleAshCodeCommitGateScanFunctionB89CF5E03F052F6A": {
@@ -1198,9 +1255,6 @@
       "Arn"
      ]
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshCodeCommitGate/PullRequestRule/AllowEventRuleAshCodeCommitGateScanFunctionB89CF5E0"
    }
   }
  },

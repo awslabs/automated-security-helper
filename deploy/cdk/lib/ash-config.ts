@@ -38,8 +38,20 @@
  *   `resolveShardCount` for the full reasoning.
  */
 
-import { CfnParameter, DefaultStackSynthesizer, IStackSynthesizer, RemovalPolicy, Stack } from 'aws-cdk-lib';
+import {
+  Aws,
+  CfnCondition,
+  CfnParameter,
+  DefaultStackSynthesizer,
+  Duration,
+  Fn,
+  IStackSynthesizer,
+  RemovalPolicy,
+  Stack,
+} from 'aws-cdk-lib';
+import * as kms from 'aws-cdk-lib/aws-kms';
 import * as logs from 'aws-cdk-lib/aws-logs';
+import * as s3 from 'aws-cdk-lib/aws-s3';
 
 /**
  * Canonical parameter names, shared with the Terraform mirror.
@@ -60,6 +72,9 @@ export const ASH_PARAMETER_NAMES = {
   rebuildSchedule: 'RebuildSchedule',
   shardCount: 'ShardCount',
   codeCommitRepositoryArn: 'CodeCommitRepositoryArn',
+  kmsKeyArn: 'KmsKeyArn',
+  vpcSubnetIds: 'VpcSubnetIds',
+  certificateArn: 'CertificateArn',
 } as const;
 
 /**
@@ -486,6 +501,247 @@ export function codeCommitRepositoryArn(scope: Stack): CfnParameter {
 }
 
 /**
+ * An existing customer-managed KMS key to encrypt the stack's data at rest.
+ *
+ * WHY THIS IS A PARAMETER RATHER THAN A KEY THE STACK CREATES
+ * ----------------------------------------------------------
+ * Every stack here already creates one CMK, but it exists for a single narrow
+ * job: encrypting CodeBuild project output. Widening that key to also cover the
+ * log groups, the ECR repository, the Secrets Manager secret and the Lambda
+ * environment would enlarge its blast radius and, more importantly, would take
+ * the decision away from the adopter. A customer-managed key is only worth
+ * anything if the adopter controls its policy, its rotation and its grants, and
+ * a key this stack minted answers to this stack.
+ *
+ * So this names a key the adopter already owns. Empty means AWS-managed
+ * encryption, which is what every existing deployment already has, so an
+ * existing stack that updates without setting this sees no change to any of the
+ * four resource classes below.
+ *
+ * WHAT THE KEY MUST ALLOW - SPLIT BY WHO NEEDS THE PERMISSION
+ * ----------------------------------------------------------
+ * A key that is merely named does not work, and the four services that encrypt
+ * with it want their access from three different places. Getting this list wrong
+ * is easy: an earlier version of this comment claimed a Lambda function with an
+ * encrypted environment needs `kms:Decrypt` on its EXECUTION role, which is false
+ * for server-side encryption and is corrected below.
+ *
+ * 1. THE KEY POLICY, for CloudWatch Logs. The `logs.<region>.amazonaws.com`
+ *    service principal needs `kms:Encrypt`, `kms:Decrypt`, `kms:ReEncrypt*`,
+ *    `kms:GenerateDataKey*` and `kms:Describe*`. AWS puts it plainly: "CloudWatch
+ *    Logs must have permissions for the KMS key whenever encrypted data is
+ *    requested", and "if you revoke CloudWatch Logs access to an associated key or
+ *    delete an associated KMS key, your encrypted data in CloudWatch Logs can no
+ *    longer be retrieved". The key must also be SYMMETRIC - CloudWatch Logs
+ *    supports only symmetric keys, and no `AllowedPattern` can check that.
+ *    https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/encrypt-log-data-kms.html
+ *
+ * 2. THE PRINCIPAL RUNNING THE DEPLOYMENT, for ECR and for Lambda. Neither of
+ *    these is something the stack can grant itself, because the grantee is
+ *    whoever ran `create-stack`:
+ *    - ECR: `kms:CreateGrant`, `kms:RetireGrant` and `kms:DescribeKey` on the key,
+ *      to create a repository encrypted with it.
+ *      https://docs.aws.amazon.com/AmazonECR/latest/userguide/encryption-at-rest.html
+ *    - Lambda: `kms:CreateGrant` and `kms:Encrypt` to configure a customer managed
+ *      key on a function. Lambda then uses the grant it created, which is why the
+ *      execution role needs nothing extra. `kms:Decrypt` is only needed to VIEW or
+ *      MANAGE the encrypted variables, and only client-side encryption - which this
+ *      app does not use - puts `kms:Decrypt` on the execution role.
+ *      https://docs.aws.amazon.com/lambda/latest/dg/configuration-envvars-encryption.html
+ *
+ * 3. THIS STACK, for Secrets Manager, and this one IS handled here. A principal
+ *    reading a CMK-encrypted secret needs `kms:Decrypt` on the key ARN in its own
+ *    identity policy, so `AshRuntimeConfig.grantRead` attaches it - through a
+ *    policy resource conditional on the same `HasKmsKey`, so it exists only when a
+ *    key was supplied.
+ *    https://docs.aws.amazon.com/secretsmanager/latest/userguide/auth-and-access_iam-policies.html
+ *
+ * So the division is: item 3 is automatic, and items 1 and 2 are the adopter's to
+ * arrange before the stack will deploy with a key set. That is what the parameter
+ * description says, in fewer words, because an adopter reads that and not this.
+ *
+ * WHAT THE PATTERN ENFORCES
+ * -------------------------
+ * A KEY ARN, not an alias and not a bare key id. CloudWatch Logs and Lambda both
+ * require a full key ARN, and this one parameter feeds all four services, so the
+ * narrowest common shape wins. `key/` followed by 36 characters admits both a
+ * plain UUID key id and the `mrk-` form a multi-Region key uses, and rejects
+ * `alias/...`, which two of the four services would not accept. It cannot check
+ * that the key is symmetric or that its policy is right; those fail at deploy.
+ */
+export function kmsKeyArn(scope: Stack): CfnParameter {
+  return new CfnParameter(scope, ASH_PARAMETER_NAMES.kmsKeyArn, {
+    type: 'String',
+    default: '',
+    allowedPattern: '^$|^arn:aws[a-zA-Z-]*:kms:[a-z0-9-]+:\\d{12}:key/[0-9a-z-]{36}$',
+    // Kept short on purpose: this text is inlined into all five templates, two of
+    // which sit close to CloudFormation's 51,200-byte inline limit. The full
+    // requirement list is in the doc comment above and in deploy/cdk/README.md.
+    description:
+      'ARN of an existing symmetric customer-managed KMS key for this stack data at rest. ' +
+      'Empty uses AWS-managed encryption. Needs a key policy admitting ' +
+      'logs.<region>.amazonaws.com, plus kms:CreateGrant for whoever deploys.',
+  });
+}
+
+/**
+ * Private subnets to attach the pull-request gate function to.
+ *
+ * WHY `CommaDelimitedList` AND NOT `List<AWS::EC2::Subnet::Id>`
+ * ------------------------------------------------------------
+ * `List<AWS::EC2::Subnet::Id>` is the type that would give the CloudFormation
+ * console a subnet picker, and it cannot be used here: CloudFormation validates
+ * an AWS-specific parameter type against the account before it creates anything,
+ * and an empty value is not a valid list of subnet ids. So the parameter could
+ * not be optional, and a console launch with nothing supplied would fail
+ * validation. That is the one thing these templates must never do.
+ *
+ * `CommaDelimitedList` with an empty default is accepted, and it resolves to a
+ * one-element list holding the empty string. `Fn::Select(0, ...)` compared
+ * against `''` is therefore how "the adopter supplied nothing" is detected, which
+ * is the shape the condition below uses.
+ *
+ * WHY NOT A PLAIN `String`
+ * ------------------------
+ * A `String` would make the empty test simpler, a bare `Fn::Equals` against the
+ * ref. It was rejected because the value's shape would then disagree with its
+ * use: `VpcConfig.SubnetIds` is a list, so a string would have to be split with
+ * `Fn::Split` at the point of use, and a stray space after a comma would become
+ * part of a subnet id. `CommaDelimitedList` is handed straight to a list property
+ * and CloudFormation does the splitting, so there is one fewer place to get it
+ * wrong. Neither type renders a picker in the console, so nothing is lost there.
+ *
+ * SCOPE OF THIS CHANGE, STATED SO NOBODY IS MISLED
+ * -----------------------------------------------
+ * This declares the name. No resource consumes it yet: attaching the gate
+ * function to a VPC is what `CKV_AWS_117` asks for, and it is suppressed in
+ * `.ash/.ash.yaml` with the cost that suppression names, because a VPC-attached
+ * function reaches CodeCommit, ECR and Secrets Manager only through a NAT
+ * gateway or through interface endpoints for each of them. The name is fixed here
+ * so the shared parameter surface and the suppression reason agree on what the
+ * opt-in will be called.
+ */
+export function vpcSubnetIds(scope: Stack): CfnParameter {
+  return new CfnParameter(scope, ASH_PARAMETER_NAMES.vpcSubnetIds, {
+    type: 'CommaDelimitedList',
+    default: '',
+    description:
+      'Private subnet ids, comma separated, to attach the scan function to. Empty leaves ' +
+      'it outside any VPC, which is the default and unchanged from before this parameter ' +
+      'existed. A VPC-attached function needs a NAT gateway, or interface endpoints for ' +
+      'CodeCommit, ECR and Secrets Manager, to reach them at all.',
+  });
+}
+
+/**
+ * ACM certificate for an HTTPS listener on the MCP load balancer.
+ *
+ * WHY THE DEFAULT IS EMPTY AND THE LISTENER IS PLAIN HTTP
+ * ------------------------------------------------------
+ * A certificate is not something a template can supply. ACM issues one against a
+ * domain the requester can prove control of, so the adopter has to own a name,
+ * validate it, and point it at the load balancer. There is no default value that
+ * works, and no value this stack could invent. `AshFargateStack`'s header already
+ * said HTTPS "is not possible without a certificate ARN the adopter has to
+ * supply, and the shared parameter surface has no slot for one" - this is that
+ * slot.
+ *
+ * SCOPE OF THIS CHANGE, STATED SO NOBODY IS MISLED
+ * -----------------------------------------------
+ * This declares the name. The listener is still HTTP only: `CKV_AWS_2` and
+ * `CKV_AWS_103` are suppressed in `.ash/.ash.yaml` with the cost that suppression
+ * names, because clearing them needs a second, conditional listener RESOURCE
+ * rather than a conditional property, and checkov reads the HTTP listener that
+ * would remain alongside it either way. The name is fixed here so the shared
+ * parameter surface and the suppression reason agree on what the opt-in will be
+ * called.
+ */
+export function certificateArn(scope: Stack): CfnParameter {
+  return new CfnParameter(scope, ASH_PARAMETER_NAMES.certificateArn, {
+    type: 'String',
+    default: '',
+    allowedPattern: '^$|^arn:aws[a-zA-Z-]*:acm:[a-z0-9-]+:\\d{12}:certificate/[0-9a-f-]{36}$',
+    description:
+      'ACM certificate ARN for an HTTPS listener on the MCP load balancer. Empty leaves ' +
+      'the HTTP listener only, which is the default and unchanged from before this ' +
+      'parameter existed. The certificate must cover a name you own and resolve to this ' +
+      'load balancer.',
+  });
+}
+
+/**
+ * The customer-managed-key opt-in, declared once per stack and threaded down.
+ *
+ * WHY A CLASS RATHER THAN THREE LOOSE VALUES
+ * ------------------------------------------
+ * Three constructs need the same three things: the parameter (so the template
+ * declares it once), the condition (so the logical id is one string every
+ * `Fn::If` names), and the conditional ARN itself. Passing them separately
+ * invites a call site that has the ARN but not the condition, which would emit a
+ * property whose value is an empty string rather than one that disappears. An
+ * empty `KmsKeyId` is not "no key", it is an invalid key.
+ *
+ * WHY THE FALSE BRANCH IS `AWS::NoValue` AND NOT AN EMPTY STRING
+ * -------------------------------------------------------------
+ * `AWS::NoValue` removes the property from the resource entirely, so an unset
+ * parameter produces exactly the template shape that shipped before this
+ * parameter existed. That is what makes the opt-in free of consequence for an
+ * existing stack: CloudFormation sees no property change, so there is no update
+ * to apply.
+ *
+ * WHERE THIS SHAPE DOES NOT WORK, AND WHY THAT MATTERS
+ * ---------------------------------------------------
+ * `keyArnOrNoValue` must only ever be a whole property value. Two places it must
+ * not go:
+ *
+ * - An IAM `Resource` list. `AWS::NoValue` inside a list removes the element, so
+ *   an unset key would leave `"Resource": []`, which is not a valid policy. This
+ *   is why the class exposes no grant helper and why the key policy carries the
+ *   access instead. See `kmsKeyArn`.
+ * - ECR's `EncryptionConfiguration`. Wrapping the whole block in `Fn::If` is the
+ *   obvious move and it does not work, because a reader looking for
+ *   `EncryptionConfiguration.EncryptionType` then finds nothing. Only `KmsKey` is
+ *   conditional there; see the repository in `ash-image-build.ts`.
+ */
+export class AshCustomerKey {
+  /** `KmsKeyArn`, declared once so callers can reference it for outputs. */
+  public readonly parameter: CfnParameter;
+  /** True when the adopter supplied a key ARN. */
+  public readonly condition: CfnCondition;
+  /**
+   * The supplied ARN, or `AWS::NoValue` so the consuming property vanishes.
+   *
+   * Only ever assign this as an entire property value. See the class comment.
+   */
+  public readonly keyArnOrNoValue: string;
+  /**
+   * The same ARN as an `IKey`, for L2 props that take one.
+   *
+   * `logs.LogGroup` accepts only an `IKey` and reads nothing from it but
+   * `keyArn`, so importing the conditional ARN is enough. Imported here once
+   * because `Key.fromKeyArn` creates a construct, and creating it per log group
+   * would collide on the construct id.
+   */
+  public readonly key: kms.IKey;
+
+  constructor(stack: Stack) {
+    this.parameter = kmsKeyArn(stack);
+    // Named at the stack root rather than inside a construct so the logical id
+    // stays `HasKmsKey`. Every Fn::If below repeats it, and a nested id would
+    // repeat a hashed suffix with it, in five templates.
+    this.condition = new CfnCondition(stack, 'HasKmsKey', {
+      expression: Fn.conditionNot(Fn.conditionEquals(this.parameter.valueAsString, '')),
+    });
+    this.keyArnOrNoValue = Fn.conditionIf(
+      this.condition.logicalId,
+      this.parameter.valueAsString,
+      Aws.NO_VALUE,
+    ).toString();
+    this.key = kms.Key.fromKeyArn(stack, 'CustomerKey', this.keyArnOrNoValue);
+  }
+}
+
+/**
  * Resolve the shard count from CDK context.
  *
  * WHY THIS IS NOT A CLOUDFORMATION PARAMETER, AND WHY THAT DIFFERS FROM
@@ -575,11 +831,122 @@ export function toAgentCoreName(raw: string): string {
  *   this is not a new value; keeping it bounded means a retained group stops
  *   costing anything for storage once its events age out, rather than
  *   accumulating indefinitely the way `RetentionDays.INFINITE` would.
+ *
+ * WHY THE KMS KEY ARRIVES HERE AND NOT AT THE CALL SITES
+ * -----------------------------------------------------
+ * Same argument as the removal policy, one step later. There are five call sites
+ * in this app and they synthesize twelve log groups across the five templates, so
+ * a key set at the call sites would be twelve chances to miss one, and a missed
+ * one is invisible in the source exactly as the `DESTROY`/`RETAIN` split was.
+ * Adding it here means a group either goes through this function and is encrypted
+ * or visibly does not.
+ *
+ * `customerKey` is optional so that calling this with no arguments still means
+ * "the shared retention and removal policy", which is what
+ * `ash-log-retention.test.ts` asserts. Omitting it does not weaken the guard: the
+ * property is asserted over the synthesized templates rather than at compile
+ * time, which also covers log groups CDK creates on our behalf.
+ *
+ * Nothing about the retention or the removal policy changes. An adopter who
+ * leaves `KmsKeyArn` empty gets `AWS::NoValue` for `KmsKeyId`, which is the same
+ * template these groups had before the parameter existed.
  */
-export function diagnosticLogGroupProps(): Pick<logs.LogGroupProps, 'retention' | 'removalPolicy'> {
+export function diagnosticLogGroupProps(
+  customerKey?: AshCustomerKey,
+): Pick<logs.LogGroupProps, 'retention' | 'removalPolicy' | 'encryptionKey'> {
   return {
     retention: logs.RetentionDays.ONE_MONTH,
     removalPolicy: RemovalPolicy.RETAIN,
+    encryptionKey: customerKey?.key,
+  };
+}
+
+/** Prefix the archive bucket files its own access records under. */
+export const ACCESS_LOG_ARCHIVE_SELF_PREFIX = 'log-delivery/';
+
+/** How long an access-log chain keeps records ABOUT log delivery. */
+export const ACCESS_LOG_ARCHIVE_RETENTION = Duration.days(30);
+
+/**
+ * The bucket that terminates an access-log chain.
+ *
+ * WHY A SECOND LOG BUCKET EXISTS, WHICH LOOKS LIKE ONE TOO MANY
+ * ------------------------------------------------------------
+ * Two stacks here keep an `AccessLogs` bucket. In `AshFargate` it receives the
+ * load balancer's access logs; in `AshDistributedPipeline` it receives the server
+ * access logs of the source, results and artifact buckets. Neither had server
+ * access logging turned on ITSELF, which is a real gap: the bucket holding the
+ * evidence was the one bucket nobody could see access to.
+ *
+ * Turning it on needs a destination, and the destination needs one too, and so on.
+ * The chain has to stop, and where it stops is the whole design question.
+ *
+ * WHAT WAS MEASURED, NOT ASSUMED
+ * ------------------------------
+ * checkov's `CKV_AWS_18` inspects `Properties/LoggingConfiguration` and accepts
+ * ANY value there. Confirmed by running it against a probe template: a bucket
+ * naming itself as the destination passes, a bucket with only a `LogFilePrefix`
+ * passes (CloudFormation defaults the destination to the bucket itself), and a
+ * bucket with no `LoggingConfiguration` fails. So there is no configuration that
+ * both satisfies the rule on every bucket and avoids a bucket that logs to
+ * itself. One bucket in the chain has to point at itself.
+ *
+ * WHY THAT BUCKET IS THIS ONE AND NOT THE `AccessLogs` BUCKET
+ * ---------------------------------------------------------
+ * Self-logging amplifies: every log file delivered is a request, which produces a
+ * record, which is delivered as a file. AWS documents targeting the source bucket
+ * as "an infinite loop of logs" and advises against it. The amplification scales
+ * with the volume arriving at the self-logging bucket, so WHICH bucket self-logs
+ * decides how much of it there is.
+ *
+ * `AccessLogs` is the high-volume one - every request to the load balancer or to
+ * the three pipeline buckets lands there. This bucket receives only the records
+ * describing deliveries INTO `AccessLogs`, which is a small fraction of that, and
+ * it is the only thing that ever writes here. So the loop is confined to the
+ * quietest bucket in the chain instead of the busiest one, and
+ * `ACCESS_LOG_ARCHIVE_RETENTION` bounds what it can accumulate.
+ *
+ * TWO ALTERNATIVES WERE REJECTED
+ * ------------------------------
+ * - Self-logging `AccessLogs` directly and adding no bucket at all. It clears the
+ *   same finding with one fewer resource, and it puts the loop on the bucket
+ *   receiving all the traffic. The extra bucket is bought precisely to avoid that.
+ * - Leaving this bucket without a `LoggingConfiguration`. That does not remove the
+ *   finding, it relocates it: the count stays at one per stack and the new bucket
+ *   is the one reported. `cdk-nag`'s `AwsSolutions-S1` is suppressed on exactly
+ *   this reasoning in `suppressLogBucketSelfLogging`, and the suppression there
+ *   remains correct for cdk-nag, which does not accept a self-reference.
+ *
+ * SSE-S3 RATHER THAN THE CUSTOMER KEY, DELIBERATELY. `AshFargate`'s log bucket
+ * must use SSE-S3 because that is the only encryption an ALB log bucket supports,
+ * and matching it here keeps one shape across both stacks. Nothing in this bucket
+ * is sensitive beyond the request records it holds.
+ */
+export function accessLogArchiveProps(): s3.BucketProps {
+  return {
+    encryption: s3.BucketEncryption.S3_MANAGED,
+    blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+    enforceSSL: true,
+    versioned: true,
+    // RETAIN for the same reason as every other bucket in these stacks:
+    // `autoDeleteObjects` synthesizes an asset-backed custom resource, which needs
+    // a staging bucket and therefore `cdk bootstrap`. See `ashSynthesizer`.
+    removalPolicy: RemovalPolicy.RETAIN,
+    // No `serverAccessLogsBucket`, which is what makes this self-logging: CDK
+    // reads a prefix with no bucket as "deliver to this bucket" and adds the
+    // matching `logging.s3.amazonaws.com` statement to its own bucket policy.
+    serverAccessLogsPrefix: ACCESS_LOG_ARCHIVE_SELF_PREFIX,
+    lifecycleRules: [
+      {
+        id: 'ExpireLogDeliveryRecords',
+        expiration: ACCESS_LOG_ARCHIVE_RETENTION,
+        // Versioning is on because `CKV_AWS_21` asks for it, and versioning turns
+        // the expiration above into a delete marker rather than a deletion. Without
+        // this second bound the noncurrent versions would live forever and the
+        // expiration would be decorative.
+        noncurrentVersionExpiration: Duration.days(1),
+      },
+    ],
   };
 }
 
