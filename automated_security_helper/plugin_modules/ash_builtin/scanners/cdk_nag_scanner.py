@@ -54,7 +54,7 @@ except (ImportError, Exception):
 # and can therefore go stale, which is exactly why it is only reached when the
 # metadata read below fails outright.
 _CDK_EXTRA_FALLBACK_REQUIREMENTS: List[str] = [
-    "aws-cdk-lib>=2.257.0,<3.0.0",
+    "aws-cdk-lib>=2.266.0,<3.0.0",
     "cdk-nag>=3.0.2,<4.0.0",
     "constructs>=10.8.1,<11.0.0",
 ]
