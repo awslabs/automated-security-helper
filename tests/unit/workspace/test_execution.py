@@ -18,6 +18,7 @@ import subprocess  # nosec B404 -- builds throwaway git repositories for the cha
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Dict, List
 
 import pytest
@@ -1050,12 +1051,42 @@ class TestWorkspaceOutput:
     ):
         """Pin the arithmetic by driving the clock instead of racing it.
 
-        The first ``monotonic()`` call in ``execute_workspace`` is the start
-        stamp; every later call here returns a fixed later instant, so the
-        recorded wall clock must be exactly the difference. ``calls`` is the
-        control: if the start stamp were ever *not* the first call, or the clock
-        were consulted only once, the subtraction below would be meaningless, so
-        the count is asserted rather than assumed.
+        WHY THIS IS NOT "first call is the start stamp"
+
+        It was, and that form failed on one CI row with ``Obtained: 0.0,
+        Expected: 42.5`` while passing on the other seventeen. The reason is that
+        ``monkeypatch.setattr`` on ``time.monotonic`` replaces the attribute on
+        the ``time`` MODULE, so the fake is process-global: thread-pool warmup,
+        logging and executor internals consult it too, and how many calls they
+        take before ``execute_workspace`` reaches its own ``started`` varies by
+        platform. When one of them consumed the single 100.0, the workspace's
+        start stamp became the same value as its end stamp and the difference
+        was exactly zero.
+
+        Note the old assertion ``calls[0] == 100.0`` still passed in that state,
+        because it only proved SOMETHING read 100.0 first -- not that the
+        workspace's own start stamp was that read. A control that cannot fail on
+        the thing it is guarding is not a control.
+
+        The fix is to stop patching the global clock at all. This module reads
+        ``time.monotonic`` and nothing else from ``time`` -- nine call sites, no
+        ``sleep``, no ``time()`` -- so replacing the module's own ``time``
+        reference with a stand-in confines the fake to the code under test.
+        Thread pools, logging and executors keep the real clock and cannot
+        consume a read.
+
+        That restores the premise the exact assertion needs: among this module's
+        own calls, ``execute_workspace``'s ``started`` really is the first,
+        because the per-project stamps are taken by workers it launches later.
+        So the recorded wall clock must be exactly the difference, and a
+        constant fails.
+
+        A weaker form was tried first -- a strictly increasing clock, asserting
+        only that the result was *some* difference of two observed reads. It was
+        rejected on review: with reads one apart, every integer up to the call
+        count is a valid difference, so a hardcoded constant passes as soon as
+        enough reads happen. It survived a mutation check only by luck of how
+        many calls that run made.
         """
         calls: List[float] = []
 
@@ -1065,13 +1096,16 @@ class TestWorkspaceOutput:
             return value
 
         monkeypatch.setattr(
-            "automated_security_helper.workspace.execution.time.monotonic",
-            fake_monotonic,
+            "automated_security_helper.workspace.execution.time",
+            SimpleNamespace(monotonic=fake_monotonic),
         )
         _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
         outcome = _run(tmp_path, plan)
         assert len(calls) >= 2, "the clock was consulted too few times to subtract"
-        assert calls[0] == 100.0
+        assert calls[0] == 100.0, (
+            "the module's first clock read was not the start stamp, so the "
+            f"subtraction below is not the one under test: {calls!r}"
+        )
         assert outcome.payload.wall_clock_seconds == pytest.approx(42.5)
 
     def test_the_payload_status_is_completed(self, tmp_path):

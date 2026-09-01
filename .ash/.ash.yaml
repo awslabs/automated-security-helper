@@ -324,6 +324,28 @@ global_settings:
         Same mechanism as the AshAgentCore entry above, on both repositories this
         template creates, one per architecture. AshImageTag is not declared here
         because this template runs no workload; the tags are stack outputs instead.
+    # === checkov: a rule only the local-mode scanner version raises ===
+    #
+    # CKV_AWS_45 does not appear in a container-mode scan, because the image pins its
+    # scanner versions while the local mode installs current ones. Every other
+    # suppression in this file was derived from a container-mode run, so this is the
+    # one rule that population could not have contained. Worth knowing before
+    # concluding a container-mode zero means every mode is zero: the modes run
+    # different scanner versions, and the local mode additionally reports cfn-nag,
+    # grype and syft as MISSING because it cannot install them.
+    - rule_id: CKV_AWS_45
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        "Ensure no hard-coded secrets exist in Lambda environment", raised on the
+        image-build bootstrap starter. Its entire environment is one variable,
+        PROJECT_NAME, whose value is a Ref to the CodeBuild project this stack
+        creates. A Ref is resolved by CloudFormation at deploy time, so there is no
+        hard-coded value in the environment at all, let alone a secret. Verified by
+        reading the rendered Environment.Variables block rather than inferred from
+        the rule name. The function also carries an inline Code.ZipFile handler
+        immediately above that block, which is the more likely thing the rule's
+        heuristic is reacting to, though that was not confirmed against checkov's
+        implementation.
     # === checkov's own secret detector, same two lines as detect-secrets ===
     #
     # CKV_SECRET_6 fires on the identical two `"SecretString": "ash-mcp-auth-
@@ -713,10 +735,16 @@ global_settings:
     - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
       path: deploy/cdk/test/ash-image-build.test.ts
       reason: >-
-        The match is `commitSha: '0123456789abcdef0123456789abcdef01234567'`, a
-        40-character placeholder standing in for a git SHA so the test can assert
-        how the image tag is derived. It is sequential hex digits, not a
-        credential, and it names no real commit.
+        The match is a `commitSha` value in the REFS table of tag-sanitizer inputs:
+        a 40-character placeholder standing in for a git SHA so the test can assert
+        how the image tag is derived. It is the digits 0-9 followed by a-f, repeated
+        to length, so it names no real commit and is not a credential.
+        Deliberately DESCRIBED rather than quoted here. An earlier version of this
+        reason pasted the literal, and detect-secrets then flagged THIS FILE on line
+        716 -- a suppression explaining that a hex string is not a secret became a
+        hex-string finding of its own. Suppressing that would have been circular;
+        not reproducing the value removes it. Keep reasons free of the literals they
+        describe.
     # === semgrep/opengrep Python compatibility (ASH requires 3.10+) ===
     - rule_id: "python.lang.compatibility.*"
       path: "automated_security_helper/**/*.py"
