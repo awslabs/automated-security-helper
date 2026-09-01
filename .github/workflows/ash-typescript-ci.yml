@@ -24,6 +24,41 @@ name: TypeScript CI
 # assert-coverage-scope.mjs pins the file count, the statement denominator, and
 # the presence of specific files, so shrinking the measured scope fails loudly
 # instead of raising the percentage.
+#
+# WHY A COMPLETENESS CHECK RUNS ALONGSIDE THE DENOMINATOR CHECK
+#
+# Pinning the denominator stops it shrinking, which is the important half and not
+# the whole story. A floor on the file count cannot tell "we measure 20 of 21
+# production files and the 21st has no harness" from "we measure 20 and lost
+# track of one" -- from inside one report the two are identical, because jest
+# omits source no test imports ENTIRELY rather than listing it at 0%. Nothing in
+# the report's own contents can reveal a file that was never loaded.
+#
+# So the census has to come from outside the report. assert-coverage-completeness
+# .mjs takes it from `git ls-files`, which knows about files no harness has ever
+# seen, and requires every tracked production file to be either measured or named
+# in .github/typescript-coverage-exclusions.json with a reason. Today that list
+# holds three entries: each package's own jest.config.js, which jest loads before
+# instrumentation exists, and a node helper under the Python transpiler's tools/
+# whose tree has no package.json, tsconfig, jest or vitest config at all. The
+# third is the case the check exists to state precisely: "no harness exists to
+# measure this" is a different disposition from "measured and uncovered", and it
+# should be a committed claim rather than a reviewer's recollection. The entries
+# carry a kind, and the kind selects a staleness test, so an exclusion that stops
+# being true fails instead of being carried forward.
+#
+# THE SCOPES, AND THE ONE INVARIANT A REVIEWER HAS TO HOLD
+#
+# The packages run as a parallel matrix, so no single job holds both reports. A
+# whole-repo completeness check would need cross-job artifacts. Instead each
+# package job checks its own scope against its own report, and the
+# coverage-completeness-outside job checks what is left: production files that no
+# package scope covers, which must all be exclusions. That job's --package list
+# must name the same packages as the matrix above. A package added to the tree
+# but to neither list fails the outside job, which is the accident worth
+# catching. A package name added to the --package list without a matrix entry
+# would NOT fail -- it is a deliberate edit in this file, next to the matrix, and
+# review is what catches it.
 
 # PATH-FILTERED ON PURPOSE, AND THE FILTER IS LOAD-BEARING
 #
@@ -39,12 +74,21 @@ name: TypeScript CI
 # filter decides WHETHER the job runs, and the presence check makes it impossible
 # for a run to pass without a package. Neither is a silent pass.
 #
-# This workflow and its helper script are deliberately NOT in their own filter.
+# This workflow and its helper files are deliberately NOT in their own filter.
 # Self-referencing would make the pull request that ADDS this file trigger it,
 # against a tree where deploy/ does not exist yet, so the change introducing the
 # gate would fail its own gate on arrival. Once deploy/ is on the default branch,
-# adding the two paths back is safe and worth doing so edits to the gate are
-# themselves tested.
+# adding all four back is safe and worth doing so edits to the gate are
+# themselves tested:
+#
+#   .github/workflows/ash-typescript-ci.yml
+#   .github/scripts/assert-coverage-scope.mjs
+#   .github/scripts/assert-coverage-completeness.mjs
+#   .github/typescript-coverage-exclusions.json
+#
+# The exclusions file matters most of the four. It is the one place where editing
+# a single line widens what the gate tolerates, and until it is in the filter an
+# edit to it alone runs nothing.
 #
 # Consequence to be aware of: a change outside these paths that breaks the
 # TypeScript build will not be caught here, because the job will not run.
@@ -142,6 +186,17 @@ jobs:
             --min-statements ${{ matrix.min_statements }} \
             ${{ matrix.require }}
 
+      # The floors above say the denominator did not shrink. This says nothing in
+      # the package is missing from it: every tracked production file under
+      # deploy/<package> is in the report, or is a named exclusion that still
+      # needs excluding.
+      - name: Assert every production file in the package is measured
+        run: |
+          node .github/scripts/assert-coverage-completeness.mjs \
+            --exclusions .github/typescript-coverage-exclusions.json \
+            --scope "deploy/${{ matrix.package }}" \
+            --summary "deploy/${{ matrix.package }}/coverage/coverage-summary.json"
+
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@v7
@@ -150,3 +205,32 @@ jobs:
           path: deploy/${{ matrix.package }}/coverage/
           retention-days: 7
           if-no-files-found: warn
+
+  # The other half of the completeness question: a production file that sits
+  # outside every package scope is measured by nothing, and no per-package job
+  # would ever look for it. Exactly the shape of
+  # transpiler/tools/zod_to_json_schema.mjs, which is why that file is a named
+  # exclusion rather than an unremarked absence.
+  #
+  # Separate from the matrix on purpose: this needs no npm install and no jest
+  # run, only the checkout and the git index, so it does not belong behind a
+  # per-package dependency install.
+  coverage-completeness-outside:
+    name: ts (files outside the packages)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      # --package must name the same packages as the matrix above. The check
+      # itself fails when a deploy/<pkg>/package.json exists that this list does
+      # not name, so a new package cannot slip past both.
+      - name: Assert no unnamed production file sits outside every package
+        run: |
+          node .github/scripts/assert-coverage-completeness.mjs \
+            --exclusions .github/typescript-coverage-exclusions.json \
+            --scope outside \
+            --package deploy/cdk \
+            --package deploy/cdk-constructs
