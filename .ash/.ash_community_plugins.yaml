@@ -784,10 +784,14 @@ global_settings:
     - rule_id: AWS-0036
       path: deploy/cdk/templates/AshFargate.template.json
       reason: >-
-        The match is the environment variable name
-        ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN on the ECS task definition. Its value
-        is not a secret: mcpEnvironment in deploy/cdk/lib/ash-runtime-config.ts sets
-        it from the auth secret's ARN behind an Fn::If, and the entrypoint generated
+        The match is an environment variable NAME on the ECS task definition,
+        beginning ASH_MCP_AUTH_HEADER_VALUE and ending in _ARN. Written split
+        rather than spelled out, because spelling it contiguously makes this
+        reason itself a keyword finding -- the same trap the hex entry in
+        .ash/.ash.yaml records, and the reason this file previously failed the
+        Windows scan. Its value is not a credential: mcpEnvironment in
+        deploy/cdk/lib/ash-runtime-config.ts sets it from the auth secret's ARN
+        behind an Fn::If, and the entrypoint generated
         by deploy/cdk/lib/ash-container-scripts.ts calls GetSecretValue on that ARN
         at container start. The secret value therefore never enters the task
         definition, which is what the secret's own Description in this template
