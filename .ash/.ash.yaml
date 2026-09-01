@@ -740,11 +740,13 @@ global_settings:
         how the image tag is derived. It is the digits 0-9 followed by a-f, repeated
         to length, so it names no real commit and is not a credential.
         Deliberately DESCRIBED rather than quoted here. An earlier version of this
-        reason pasted the literal, and detect-secrets then flagged THIS FILE on line
-        716 -- a suppression explaining that a hex string is not a secret became a
-        hex-string finding of its own. Suppressing that would have been circular;
-        not reproducing the value removes it. Keep reasons free of the literals they
-        describe.
+        reason pasted the literal, and detect-secrets then flagged THIS FILE on the
+        line this reason occupies -- a suppression explaining that a hex string is
+        not a secret became a hex-string finding of its own. Suppressing that would
+        have been circular; not reproducing the value removes it. Keep reasons free
+        of the literals they describe. Deliberately not citing a line number: this
+        file argues against that a few entries above, and the number had already
+        gone stale by the next commit.
     # === semgrep/opengrep Python compatibility (ASH requires 3.10+) ===
     - rule_id: "python.lang.compatibility.*"
       path: "automated_security_helper/**/*.py"

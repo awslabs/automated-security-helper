@@ -764,6 +764,14 @@ global_settings:
         for the same four AWS API endpoints. Narrowing the destination depends on
         whether the caller's VPC uses NAT or interface endpoints, which this module
         does not know; the comment above the resource records that.
+        IMPORTANT ASYMMETRY, do not read the section header above as covering this
+        entry: unlike the CDK security group, this resource is ip_protocol "-1",
+        every protocol and every port, not TCP 443. Every sibling egress rule in
+        this module pins "tcp"; this one alone does not. Narrowing it would NOT
+        clear AWS-0104, which reads the CIDR rather than the protocol, so it is a
+        separate hardening step rather than a fix for this finding -- but the
+        suppression should not imply a posture the resource does not have. Left
+        open deliberately and recorded here so it is visible in review.
     # === trivy AWS-0036 matches the variable NAME, not a value ===
     #
     # MEASURED. Renaming ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN to

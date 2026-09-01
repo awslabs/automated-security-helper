@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import subprocess  # nosec B404 -- builds throwaway git repositories for the changed-files gate
+import sys
 import threading
 import time
 from pathlib import Path
@@ -1087,12 +1088,33 @@ class TestWorkspaceOutput:
         count is a valid difference, so a hardcoded constant passes as soon as
         enough reads happen. It survived a mutation check only by luck of how
         many calls that run made.
+
+        The control records the CALLER, not the value. `calls[0] == 100.0` would be
+        a tautology: the fake returns 100.0 exactly when `calls` is empty, so the
+        first recorded value is 100.0 in every possible execution. Asserting it
+        proves nothing, and giving it a message about the start stamp moving is
+        worse than omitting it, because that message can never fire. Recording
+        which function took each read is what makes "execute_workspace's stamp is
+        the first one" falsifiable.
+
+        WHAT THIS STILL DOES NOT CATCH, stated so nobody assumes otherwise
+
+        Moving ``started`` LATER inside ``execute_workspace`` -- after the plugin
+        prewarm, say, or after the changed-file gate loop -- leaves it the first
+        read by this module and by this function, so the caller check passes and
+        the difference is still exactly 42.5. Production would then under-report
+        the wall clock by however long that skipped work took, which under
+        ``--precommit`` is real seconds. This test pins "the field is a
+        subtraction of the first module read from a later one"; it does not pin
+        "the first read happens before all the work". A hardcoded 42.5 also
+        passes, for the same reason any exact-value assertion does.
         """
-        calls: List[float] = []
+        calls: List[tuple[str, float]] = []
 
         def fake_monotonic() -> float:
+            caller = sys._getframe(1).f_code.co_name
             value = 100.0 if not calls else 142.5
-            calls.append(value)
+            calls.append((caller, value))
             return value
 
         monkeypatch.setattr(
@@ -1102,9 +1124,9 @@ class TestWorkspaceOutput:
         _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
         outcome = _run(tmp_path, plan)
         assert len(calls) >= 2, "the clock was consulted too few times to subtract"
-        assert calls[0] == 100.0, (
-            "the module's first clock read was not the start stamp, so the "
-            f"subtraction below is not the one under test: {calls!r}"
+        assert calls[0] == ("execute_workspace", 100.0), (
+            "the module's first clock read was not execute_workspace's start stamp, "
+            f"so the subtraction below is not the one under test: {calls!r}"
         )
         assert outcome.payload.wall_clock_seconds == pytest.approx(42.5)
 
