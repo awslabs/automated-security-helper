@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import shutil
 
 # tests/unit/deploy/buildspec_extraction.py -> repository root
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
@@ -68,6 +69,33 @@ CODEBUILD_PROJECT = "AWS::CodeBuild::Project"
 # The path the buildspec writes the helper to inside the build container. Tests
 # rewrite this to a per-test temporary path; see rewrite_helper_path.
 CONTAINER_HELPER_PATH = "/tmp/ash-s3-sync.py"
+
+
+def posix_shell(env: dict[str, str]) -> str:
+    """Absolute path to the `sh` the child would resolve, for use as argv[0].
+
+    The buildspec commands under test are shell text, so running them means
+    running a shell. Passing a bare "sh" leaves argv[0] to be resolved a second
+    time inside the child, against whatever PATH the child was handed -- which is
+    not necessarily the one anything here inspected. Resolving here, against the
+    same `env["PATH"]` the child receives, makes the shell that runs the one this
+    module chose.
+
+    Raises rather than falling back to a hard-coded "/bin/sh": a fallback would
+    quietly run a different shell than the resolution found, which is the failure
+    this exists to remove. The callers are all marked posix-shell-only, so a host
+    with no `sh` on the child's PATH means the marker is wrong, not that the test
+    should improvise.
+    """
+    resolved = shutil.which("sh", path=env.get("PATH"))
+    if resolved is None:
+        raise AssertionError(
+            "no `sh` on the child environment's PATH, so the committed buildspec "
+            "command cannot be executed. These tests run shell text extracted from "
+            "a rendered template; without a shell there is nothing to run.\n"
+            f"    child PATH: {env.get('PATH')!r}"
+        )
+    return resolved
 
 
 def all_template_paths() -> list[pathlib.Path]:

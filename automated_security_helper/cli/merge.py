@@ -138,6 +138,7 @@ from pathlib import Path
 from typing import Annotated, Any, Dict, List, Optional, Sequence, Tuple
 
 import typer
+from pydantic import ValidationError
 from rich import print
 
 from automated_security_helper.base.plugin_context import PluginContext
@@ -253,11 +254,17 @@ def read_shard_assignment(results: AshAggregatedResults) -> ShardAssignment | No
             return raw
         try:
             return ShardAssignment.model_validate(raw)
-        except Exception:
+        except ValidationError:
             # A malformed value is reported as missing provenance rather than
             # crashing with a validation traceback. The caller's message names
             # the file, which is what an operator needs; the shape of the bad
             # value is not.
+            #
+            # ValidationError rather than Exception: model_validate is the only
+            # call in the try, and it raises exactly this for every rejected
+            # shape -- dict with a bad field type, empty dict, int, str, list and
+            # a bare object were each checked. Anything else escaping this
+            # function is a defect worth a traceback rather than a silent None.
             continue
     return None
 

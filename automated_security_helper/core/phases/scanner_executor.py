@@ -148,8 +148,18 @@ class ScannerExecutor:
                     try:
                         from automated_security_helper.plugins.events import AshEventType
                         self._notify(AshEventType.ERROR, message=err_str, scanner=scanner_name, exception=e)
-                    except Exception:
-                        pass
+                    except Exception as notify_error:
+                        # _notify already catches and error-logs anything the
+                        # subscriber callback raises, so what reaches here is a
+                        # failure to get as far as the call: the local import above,
+                        # or building the keyword arguments. Kept broad and
+                        # swallowed so a bookkeeping failure cannot mask the
+                        # scanner error already recorded in raw_results, but logged
+                        # so it is not invisible.
+                        ASH_LOGGER.debug(
+                            f"ERROR notification for {scanner_name} could not be "
+                            f"issued: {notify_error!r}"
+                        )
                 finally:
                     ASH_LOGGER.trace(
                         f"{scanner_plugin.__class__.__name__} raw_results for {target_type}: {raw_results}"
@@ -297,8 +307,14 @@ class ScannerExecutor:
             try:
                 from automated_security_helper.plugins.events import AshEventType
                 self._notify(AshEventType.ERROR, message=error_msg, scanner=scanner_name, exception=e)
-            except Exception:
-                pass
+            except Exception as notify_error:
+                # See the ERROR guard in _execute_scanner: _notify already handles
+                # a raising subscriber, so this only covers the local import and
+                # kwargs construction.
+                ASH_LOGGER.debug(
+                    f"ERROR notification for {scanner_name} could not be issued: "
+                    f"{notify_error!r}"
+                )
 
             return [failure_container], False
 
@@ -340,8 +356,14 @@ class ScannerExecutor:
                         scan_targets=scan_targets,
                         message=f"Starting scanner: {scanner_name}",
                     )
-                except Exception:
-                    pass
+                except Exception as notify_error:
+                    # See the ERROR guard in _execute_scanner: _notify already
+                    # handles a raising subscriber, so this only covers the local
+                    # import and kwargs construction.
+                    ASH_LOGGER.debug(
+                        f"SCAN_START notification for {scanner_name} could not be "
+                        f"issued: {notify_error!r}"
+                    )
 
                 results_list, scanner_succeeded = self._safe_execute_scanner(
                     scanner_name, scanner_plugin, scan_targets
@@ -400,8 +422,14 @@ class ScannerExecutor:
                             remaining_scanners=remaining_scanners,
                             message=f"Scanner {scanner_name} completed. {remaining_count} remaining: {remaining_list}",
                         )
-                    except Exception:
-                        pass
+                    except Exception as notify_error:
+                        # See the ERROR guard in _execute_scanner: _notify already
+                        # handles a raising subscriber, so this only covers the
+                        # local import and kwargs construction.
+                        ASH_LOGGER.debug(
+                            f"SCAN_COMPLETE notification for {scanner_name} could "
+                            f"not be issued: {notify_error!r}"
+                        )
 
             except Exception as e:
                 stack_trace = traceback.format_exc()
@@ -551,8 +579,17 @@ class ScannerExecutor:
                                     remaining_scanners=remaining_scanners.copy(),
                                     message=f"Scanner {scanner_name} completed. {remaining_count} remaining: {remaining_list}",
                                 )
-                            except Exception:
-                                pass
+                            except Exception as notify_error:
+                                # See the ERROR guard in _execute_scanner: _notify
+                                # already handles a raising subscriber, so this only
+                                # covers the local import and kwargs construction.
+                                # Note this runs while remaining_scanners_lock is
+                                # held, so raising here would unwind the lock through
+                                # the enclosing handler.
+                                ASH_LOGGER.debug(
+                                    f"SCAN_COMPLETE notification for {scanner_name} "
+                                    f"could not be issued: {notify_error!r}"
+                                )
 
                 except Exception as e:
                     stack_trace = traceback.format_exc()
@@ -608,5 +645,9 @@ class ScannerExecutor:
                     completed=completed,
                     description=description,
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            # Progress reporting is cosmetic and progress_display is a mock in much
+            # of the test suite, so a display that raises must not fail a scan. The
+            # type stays broad because the display is injected. Logged so a display
+            # that never updates is diagnosable instead of just looking frozen.
+            ASH_LOGGER.debug(f"Progress update skipped: {e!r}")

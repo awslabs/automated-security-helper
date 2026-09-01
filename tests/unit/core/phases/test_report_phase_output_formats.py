@@ -48,6 +48,7 @@ and reproduce it exactly.
 """
 
 import logging
+import warnings
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
@@ -234,7 +235,22 @@ def _reporter_instances(tmp_path: Path) -> List[object]:
                     ),
                 )
             )
-        except Exception:  # noqa: BLE001 -- mirrors ReportPhase's own tolerance
+        except Exception as exc:  # noqa: BLE001 -- mirrors ReportPhase's own tolerance
+            # The tolerance is kept: a reporter whose constructor wants
+            # credentials or a missing tool must not fail this suite, exactly as
+            # ReportPhase does not let one such reporter fail a scan. The broad
+            # type is kept for the same reason -- the registry is extensible, so
+            # the exception set is open.
+            #
+            # What changed is that the skip is no longer silent. All fifteen
+            # shipped reporters construct today (measured), so a skip means the
+            # denominator behind every assertion below just shrank, and a bare
+            # `continue` let that happen with nothing on the terminal.
+            warnings.warn(
+                f"{cls.__name__} could not be constructed and is excluded from "
+                f"this module's reporter set: {exc!r}",
+                stacklevel=2,
+            )
             continue
     return instances
 

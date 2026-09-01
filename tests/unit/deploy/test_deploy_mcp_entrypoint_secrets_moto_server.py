@@ -66,6 +66,7 @@ from tests.unit.deploy.buildspec_extraction import (
     MCP_ENTRYPOINT_MARKER,
     heredoc_body,
     joined_buildspec_document,
+    posix_shell,
     sole_command_containing,
     templates_with_joined_buildspec_marker,
 )
@@ -153,7 +154,11 @@ def run_secret_read(
         f"printf '%s' \"$ASH_AUTH_VALUE\" > {captured}\n"
     )
     return subprocess.run(
-        ["sh", "-c", script], capture_output=True, text=True, env=env, timeout=120
+        [posix_shell(env), "-c", script],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=120,
     )
 
 

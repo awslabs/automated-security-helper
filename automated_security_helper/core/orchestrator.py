@@ -505,8 +505,19 @@ class ASHScanOrchestrator(BaseModel):
                 )
 
             try:
-                # Execute all phases
-                assert self.execution_engine is not None
+                # Execute all phases.
+                #
+                # Raise rather than assert. This guard narrows the type for the
+                # checker, but an `assert` is stripped under `python -O`, and
+                # without it the next line fails with `'NoneType' object has no
+                # attribute 'execute_phases'` — which the handler below catches
+                # and logs as a generic "Execution failed", losing the actual
+                # cause. A raise keeps the narrowing and says what went wrong in
+                # both optimized and unoptimized runs.
+                if self.execution_engine is None:
+                    raise RuntimeError(
+                        "Execution engine was never initialized; cannot execute scan phases."
+                    )
                 asharp_model_results = self.execution_engine.execute_phases(
                     phases=phases,
                 )

@@ -52,6 +52,7 @@ from tests.unit.deploy.buildspec_extraction import (
     TERRAFORM_S3_SYNC,
     heredoc_body,
     helper_invocation,
+    posix_shell,
     projects_containing,
     rewrite_helper_path,
     sole_command_containing,
@@ -558,8 +559,10 @@ class TestCommittedBuildspecCommands:
         env = dict(child_env)
         env.update(extra_env)
 
+        shell = posix_shell(env)
+
         setup = subprocess.run(
-            ["sh", "-c", materialize],
+            [shell, "-c", materialize],
             capture_output=True,
             text=True,
             env=env,
@@ -569,7 +572,7 @@ class TestCommittedBuildspecCommands:
         assert helper_path.is_file(), "the heredoc did not write the helper"
 
         return subprocess.run(
-            ["sh", "-c", invocation],
+            [shell, "-c", invocation],
             capture_output=True,
             text=True,
             env=env,
