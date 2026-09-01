@@ -48,13 +48,32 @@ describe('parameter names are the contract', () => {
     // balancer, which is created with no ingress rule at all. Like every name in
     // this list both are part of the surface the Terraform mirror under
     // `deploy/terraform/` is expected to match, so both still need adding there.
+    //
+    // Three more arrived with the checkov hardening pass, and TWO OF THEM ARE
+    // RESERVED NAMES RATHER THAN LIVE PARAMETERS. That distinction is the point of
+    // this comment, because the next test asserts every DECLARED parameter is in
+    // this list but nothing asserts the reverse:
+    //
+    // - `KmsKeyArn` is live. Every stack declares it, and it encrypts the log
+    //   groups, the ECR repository, the secret and the Lambda environment.
+    // - `VpcSubnetIds` and `CertificateArn` are RESERVED. `ash-config.ts` ships a
+    //   factory for each, with the type and pattern settled, and no stack calls
+    //   either one. They are the opt-in names the `CKV_AWS_117` and
+    //   `CKV_AWS_2`/`CKV_AWS_103` suppressions in `.ash/.ash.yaml` refer to, fixed
+    //   here so the suppression reason and the eventual parameter cannot disagree.
+    //   Declaring them in a template before anything reads them would be the exact
+    //   defect the "no stack declares a parameter it does not read" test below
+    //   exists to catch, so they stay out of the templates until the resources that
+    //   consume them land.
     expect(Object.values(ASH_PARAMETER_NAMES).sort()).toEqual(
       [
         'AshBaseConfigYaml',
         'AshImageTag',
         'AshOfflineMode',
         'AshVersion',
+        'CertificateArn',
         'CodeCommitRepositoryArn',
+        'KmsKeyArn',
         'McpAllowedHost',
         'McpAuthHeaderName',
         'McpIngressCidr',
@@ -63,8 +82,82 @@ describe('parameter names are the contract', () => {
         'McpStatelessHttp',
         'RebuildSchedule',
         'ShardCount',
+        'VpcSubnetIds',
       ].sort(),
     );
+  });
+
+  test('the reserved names are reserved, not quietly declared', () => {
+    // The other half of the note above, as an assertion rather than a promise. If
+    // someone instantiates one of these without wiring a resource to it, the
+    // "no stack declares a parameter it does not read" test would catch it only if
+    // they also forgot the Ref -- and adding a lone CfnCondition would satisfy that
+    // test while still asking an adopter a question with no consequence. This
+    // closes that gap directly.
+    for (const [id, template] of Object.entries(ALL)) {
+      const declared = Object.keys(template.toJSON().Parameters ?? {});
+      expect(declared).not.toContain(ASH_PARAMETER_NAMES.vpcSubnetIds);
+      expect(declared).not.toContain(ASH_PARAMETER_NAMES.certificateArn);
+      // Positive control: without this, the two assertions above would also pass
+      // for a template that declared no parameters at all.
+      expect(declared).toContain(ASH_PARAMETER_NAMES.kmsKeyArn);
+      expect(id).toBeTruthy();
+    }
+  });
+
+  test('every log group is encrypted with the customer-managed key when one is set', () => {
+    // The guard that replaces a compile-time one. `diagnosticLogGroupProps` takes
+    // its key as an OPTIONAL argument, so a call site that forgets it still
+    // compiles and still gets the right retention -- and the missing encryption
+    // would be invisible in the source, which is exactly how the
+    // DESTROY/RETAIN split in ash-log-retention.test.ts went unnoticed.
+    //
+    // Asserted over the synthesized templates rather than the helper, so it also
+    // covers a group created without going through the helper at all.
+    let groups = 0;
+    for (const template of Object.values(ALL)) {
+      for (const [, resource] of Object.entries<any>(
+        template.findResources('AWS::Logs::LogGroup'),
+      )) {
+        groups++;
+        expect(resource.Properties?.KmsKeyId).toEqual({
+          'Fn::If': ['HasKmsKey', { Ref: 'KmsKeyArn' }, { Ref: 'AWS::NoValue' }],
+        });
+      }
+    }
+    // A findResources filter that matched nothing would make the loop vacuous.
+    expect(groups).toBeGreaterThanOrEqual(12);
+  });
+
+  test('no IAM statement puts the conditional key ARN in a Resource list', () => {
+    /*
+     * The failure this exists for synthesizes clean and fails at deploy.
+     *
+     * `AshCustomerKey.keyArnOrNoValue` is `Fn::If(HasKmsKey, <ref>, AWS::NoValue)`,
+     * which is correct as an entire property value -- `AWS::NoValue` removes the
+     * property. Inside a LIST it removes the ELEMENT instead, so an unset key turns
+     * an IAM statement into `"Resource": []`, which CloudFormation rejects. CDK's
+     * `Secret.grantRead` does exactly this if the secret is given the L2
+     * `encryptionKey` prop, which is why ash-runtime-config.ts sets `KmsKeyId`
+     * through an L1 override and grants `kms:Decrypt` through a conditional policy
+     * resource instead.
+     *
+     * Nothing else in the app would report this. cdk-nag does not evaluate it, the
+     * drift gate only compares bytes, and synth exits 0.
+     */
+    let statements = 0;
+    for (const template of Object.values(ALL)) {
+      for (const [, resource] of Object.entries<any>(template.toJSON().Resources ?? {})) {
+        const document = resource.Properties?.PolicyDocument;
+        for (const statement of document?.Statement ?? []) {
+          statements++;
+          for (const entry of [statement.Resource ?? []].flat()) {
+            expect(JSON.stringify(entry)).not.toContain('AWS::NoValue');
+          }
+        }
+      }
+    }
+    expect(statements).toBeGreaterThan(0);
   });
 
   test('every declared parameter is one of the canonical names or a documented extra', () => {

@@ -71,7 +71,7 @@ import * as kms from 'aws-cdk-lib/aws-kms';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
 
-import { diagnosticLogGroupProps } from './ash-config';
+import { AshCustomerKey, diagnosticLogGroupProps } from './ash-config';
 import { suppressCodeBuildRoleWildcards, suppressLambdaLogWildcard, suppressUnevaluableRules } from './ash-nag-suppressions';
 import { MCP_ENTRYPOINT_SCRIPT, CODECOMMIT_GATE_HANDLER, ASH_MATERIALIZED_CONFIG_PATH } from './ash-container-scripts';
 
@@ -157,6 +157,15 @@ export interface AshImageBuildProps {
    * would multiply the standing charge for no additional isolation.
    */
   readonly encryptionKey: kms.IKey;
+  /**
+   * The adopter's optional customer-managed key, for the repository and the logs.
+   *
+   * Distinct from `encryptionKey` above, and deliberately so. `encryptionKey` is a
+   * CMK this stack creates and owns, scoped to CodeBuild output. This one is a key
+   * the ADOPTER owns and may not have supplied at all, so every use of it has to
+   * survive being absent. See `AshCustomerKey` in ash-config.ts.
+   */
+  readonly customerKey: AshCustomerKey;
 }
 
 export class AshImageBuild extends Construct {
@@ -194,15 +203,47 @@ export class AshImageBuild extends Construct {
       });
     }
 
-    // RETAIN, deliberately. `emptyOnDelete` would make CDK synthesize an
-    // asset-backed custom resource to purge images, which drags in a staging
-    // bucket and therefore `cdk bootstrap` — and these templates are meant to
-    // launch straight from the CloudFormation console. Retaining also means a
-    // rolled-back stack does not throw away an image that took 20 minutes to
-    // build.
+    /*
+     * ENCRYPTION IS `KMS` UNCONDITIONALLY AND THE KEY IS THE CONDITIONAL PART.
+     *
+     * The obvious shape is one `Fn::If` around the whole `EncryptionConfiguration`
+     * so an adopter who supplies no key gets the template that shipped before.
+     * That does not work, and the reason is worth stating because it is the
+     * opposite of every other property in this change: a reader looking for
+     * `EncryptionConfiguration.EncryptionType` finds nothing at all inside an
+     * `Fn::If`, so the repository reads as unencrypted whatever the parameter says.
+     * Measured against checkov's CKV_AWS_136, which inspects exactly that path.
+     *
+     * `KMS` with no `KmsKey` is not a downgrade from the previous `AES256`: ECR
+     * falls back to the AWS-managed `aws/ecr` key, which costs nothing and is
+     * still KMS. So the unconditional half is free.
+     *
+     * THE COST, STATED PLAINLY: `EncryptionConfiguration` IS FORCE-NEW. AWS
+     * documents it as "Update requires: Replacement" and offers no way to
+     * re-encrypt a repository in place. An EXISTING stack that updates onto this
+     * template therefore gets a NEW, EMPTY repository. Nothing is lost, because the
+     * old one is retained rather than deleted, but nothing has pushed to the new
+     * one either - and the bootstrap custom resource only re-runs when
+     * `AshVersion`, `AshOfflineMode` or the flavor list changed, none of which
+     * this is. So a workload pointed at the new repository has no image to pull
+     * until the build project is started by hand. That is what the
+     * `ImageBuildProjectName` stack output is for.
+     * https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-ecr-repository.html
+     *
+     * RETAIN, deliberately, and unchanged. `emptyOnDelete` would make CDK
+     * synthesize an asset-backed custom resource to purge images, which drags in a
+     * staging bucket and therefore `cdk bootstrap` - and these templates are meant
+     * to launch straight from the CloudFormation console. Retaining also means a
+     * rolled-back stack does not throw away an image that took 20 minutes to
+     * build.
+     */
     this.repository = new ecr.Repository(this, 'Repository', {
       imageScanOnPush: true,
       imageTagMutability: ecr.TagMutability.MUTABLE,
+      encryption: ecr.RepositoryEncryption.KMS,
+      // Resolves to `{"Fn::If": ["HasKmsKey", {"Ref": "KmsKeyArn"}, {"Ref":
+      // "AWS::NoValue"}]}`, so `KmsKey` disappears when no key was supplied.
+      encryptionKey: props.customerKey.key,
       removalPolicy: RemovalPolicy.RETAIN,
       lifecycleRules: [
         {
@@ -215,7 +256,7 @@ export class AshImageBuild extends Construct {
     // Retained on purpose: these logs are the only account of why an image build
     // failed, and a failed build rolls the stack back. See
     // `diagnosticLogGroupProps`.
-    const logGroup = new logs.LogGroup(this, 'BuildLogs', diagnosticLogGroupProps());
+    const logGroup = new logs.LogGroup(this, 'BuildLogs', diagnosticLogGroupProps(props.customerKey));
 
     this.project = new codebuild.Project(this, 'Build', {
       description:
@@ -392,7 +433,11 @@ export class AshImageBuild extends Construct {
     // Retained: this is where a build that never STARTED is explained, which
     // `concurrentBuildLimit` gives a real trigger — CodeBuild refuses a colliding
     // StartBuild rather than queueing it. See `diagnosticLogGroupProps`.
-    const starterLogs = new logs.LogGroup(this, 'BootstrapStarterLogs', diagnosticLogGroupProps());
+    const starterLogs = new logs.LogGroup(
+      this,
+      'BootstrapStarterLogs',
+      diagnosticLogGroupProps(props.customerKey),
+    );
     const starterRole = new iam.Role(this, 'BootstrapStarterRole', {
       assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
       description:
@@ -420,6 +465,26 @@ export class AshImageBuild extends Construct {
         'Starts the ASH image build during stack creation and hands CloudFormation’s ' +
         'response URL to the build, which answers once the image exists.',
       environment: { PROJECT_NAME: this.project.projectName },
+      // Encrypts PROJECT_NAME at rest with the adopter's key when one was
+      // supplied, and disappears when it was not. See `AshCustomerKey`.
+      environmentEncryption: props.customerKey.key,
+      /*
+       * ONE, because one is the most CloudFormation will ever ask for.
+       *
+       * This handler is a custom-resource responder. CloudFormation invokes it once
+       * per lifecycle event on one resource in one stack, and it does not run two
+       * operations against the same stack at once, so there is no second concurrent
+       * invocation for a second slot to serve. The project it starts also allows
+       * exactly one concurrent build, so a second invocation could not do useful
+       * work even if it happened.
+       *
+       * WHAT A RESERVATION COSTS, STATED BECAUSE IT IS NOT FREE: reserved
+       * concurrency is subtracted from the account's unreserved pool for as long as
+       * the stack exists, whether or not the function is running. One execution out
+       * of an account's limit is a small price, but it is a price, and a stack that
+       * deploys several of these targets pays it once per target.
+       */
+      reservedConcurrentExecutions: 1,
     });
     // codebuild.Project exposes no grantStartBuild, so the statement is written
     // out. Scoped to this one project's ARN.

@@ -70,6 +70,7 @@ import { Construct } from 'constructs';
 import {
   ashOfflineMode,
   ashSynthesizer,
+  AshCustomerKey,
   ashVersion,
   ashImageTag,
   codeCommitRepositoryArn,
@@ -96,7 +97,11 @@ export class AshCodeCommitGateStack extends Stack {
     const offline = ashOfflineMode(this);
     const schedule = rebuildSchedule(this);
     const repositoryArn = codeCommitRepositoryArn(this);
-    const config = new AshRuntimeConfig(this, 'Config', { includeMcpParameters: false });
+    const customerKey = new AshCustomerKey(this);
+    const config = new AshRuntimeConfig(this, 'Config', {
+      includeMcpParameters: false,
+      customerKey,
+    });
 
     const approvalGate = new CfnParameter(this, 'ApprovalGate', {
       type: 'String',
@@ -145,6 +150,7 @@ export class AshCodeCommitGateStack extends Stack {
       rebuildSchedule: schedule,
       imageTag: ashImageTag(this),
       encryptionKey,
+      customerKey,
     });
 
     // The repository name is the last colon-delimited field of a CodeCommit ARN,
@@ -157,7 +163,7 @@ export class AshCodeCommitGateStack extends Stack {
     // groups that named a policy chose DESTROY. Stating it explicitly means the
     // behaviour no longer depends on a library default, and the split is no longer
     // invisible in the source. See `diagnosticLogGroupProps`.
-    const logGroup = new logs.LogGroup(this, 'ScanLogs', diagnosticLogGroupProps());
+    const logGroup = new logs.LogGroup(this, 'ScanLogs', diagnosticLogGroupProps(customerKey));
 
     // Own role rather than the AWS managed AWSLambdaBasicExecutionRole: the only
     // logging grant this function needs is on the one log group above.
@@ -190,6 +196,35 @@ export class AshCodeCommitGateStack extends Stack {
       // Clone plus ASH output, both under /tmp.
       ephemeralStorageSize: Size.gibibytes(4),
       logGroup,
+      // Encrypts the four variables below at rest with the adopter's key when one
+      // was supplied, and disappears when it was not. None of them is a secret -
+      // the values are two booleans, a severity name and an SSM parameter NAME -
+      // so this is defence in depth rather than the thing keeping a credential
+      // safe. See `AshCustomerKey` in ash-config.ts.
+      environmentEncryption: customerKey.key,
+      /*
+       * TEN CONCURRENT SCANS, AND THIS INTRODUCES A NEW WAY TO LOSE ONE.
+       *
+       * The number bounds a burst of pull requests: without a reservation, one busy
+       * repository can take an account's entire unreserved concurrency, and each of
+       * these executions holds 10 GB for up to 15 minutes. Ten is enough for a
+       * normal review day on one repository and small enough that the reservation
+       * itself is affordable.
+       *
+       * BOTH HALVES OF THE COST, BECAUSE NEITHER IS OBVIOUS:
+       *
+       * 1. Reserved concurrency is subtracted from the account's unreserved pool for
+       *    as long as the stack exists, running or not. Ten executions is not free
+       *    to the rest of the account.
+       * 2. It is also a CEILING, which this function did not have before. An
+       *    eleventh concurrent pull request is throttled, and the EventBridge target
+       *    below retries once inside a one-hour window - so a burst that stays above
+       *    ten for longer than that loses a scan, and the pull request gets no
+       *    comment. There is no finite reservation that avoids this; the trade is
+       *    accepted here rather than hidden, and raising the number is the lever if
+       *    a repository outgrows it.
+       */
+      reservedConcurrentExecutions: 10,
       environment: {
         ASH_APPROVAL_GATE: approvalGate.valueAsString,
         ASH_CHANGED_FILES_ONLY: changedFilesOnly.valueAsString,

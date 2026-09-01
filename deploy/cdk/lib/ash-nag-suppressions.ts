@@ -13,6 +13,14 @@
  * - AwsSolutions-IAM4 — the AWS managed `AWSLambdaBasicExecutionRole` is
  *                       replaced by a logs policy scoped to one log group.
  * - AwsSolutions-L1   — Lambda functions run the newest available Python runtime.
+ * - AwsSolutions-S1   — every bucket delivers server access logs, including the
+ *                       access-log buckets themselves. This one used to be
+ *                       suppressed here, by `suppressLogBucketSelfLogging`. The
+ *                       argument that suppression made is still true and still
+ *                       needed, so it moved rather than vanished: it is now the
+ *                       design comment on `accessLogArchiveProps` in
+ *                       ash-config.ts, which decides which single bucket in a
+ *                       log chain points at itself.
  *
  * WHY IAM5 SUPPRESSIONS HERE DO NOT USE `appliesTo`
  * ------------------------------------------------
@@ -215,24 +223,3 @@ export function suppressTaskDefinitionEnvironment(scope: IConstruct): void {
   );
 }
 
-/**
- * A log bucket cannot usefully log its own access.
- *
- * AwsSolutions-S1 wants server access logging on every bucket. Pointing this
- * bucket at itself makes every write generate another write, which S3 documents
- * as an infinite loop; pointing it at a second bucket only moves the same
- * unlogged bucket one hop away. The recursion has to stop somewhere, and the
- * bucket whose only content is logs is the right place.
- */
-export function suppressLogBucketSelfLogging(scope: IConstruct): void {
-  NagSuppressions.addResourceSuppressions(scope, [
-    {
-      id: 'AwsSolutions-S1',
-      reason:
-        'This IS the access-log destination. Self-logging is an infinite loop, and chaining ' +
-        'to a further bucket leaves that one unlogged instead, so the chain has to terminate ' +
-        'here. Nothing writes to this bucket except the log delivery service principal, whose ' +
-        'access is already constrained by the bucket policy.',
-    },
-  ]);
-}

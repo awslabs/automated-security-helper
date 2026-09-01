@@ -21,6 +21,26 @@
    "Default": "cron(0 6 * * ? *)",
    "Description": "EventBridge schedule expression for the image rebuild, for example \"cron(0 6 * * ? *)\" or \"rate(1 day)\". The rebuild repulls the base image and scanner tools so a long-lived deployment keeps getting OS and scanner patches without a stack update. Note that a rate() expression starts when the rule is created, so it also rebuilds once at deployment; a cron() expression only fires at the times it names.",
    "MinLength": 1
+  },
+  "KmsKeyArn": {
+   "Type": "String",
+   "Default": "",
+   "AllowedPattern": "^$|^arn:aws[a-zA-Z-]*:kms:[a-z0-9-]+:\\d{12}:key/[0-9a-z-]{36}$",
+   "Description": "ARN of an existing symmetric customer-managed KMS key for this stack data at rest. Empty uses AWS-managed encryption. Needs a key policy admitting logs.<region>.amazonaws.com, plus kms:CreateGrant for whoever deploys."
+  }
+ },
+ "Conditions": {
+  "HasKmsKey": {
+   "Fn::Not": [
+    {
+     "Fn::Equals": [
+      {
+       "Ref": "KmsKeyArn"
+      },
+      ""
+     ]
+    }
+   ]
   }
  },
  "Resources": {
@@ -59,14 +79,25 @@
     }
    },
    "UpdateReplacePolicy": "Retain",
-   "DeletionPolicy": "Retain",
-   "Metadata": {
-    "aws:cdk:path": "AshImagePipeline/EncryptionKey/Resource"
-   }
+   "DeletionPolicy": "Retain"
   },
   "Arm64Repository2F867C55": {
    "Type": "AWS::ECR::Repository",
    "Properties": {
+    "EncryptionConfiguration": {
+     "EncryptionType": "KMS",
+     "KmsKey": {
+      "Fn::If": [
+       "HasKmsKey",
+       {
+        "Ref": "KmsKeyArn"
+       },
+       {
+        "Ref": "AWS::NoValue"
+       }
+      ]
+     }
+    },
     "ImageScanningConfiguration": {
      "ScanOnPush": true
     },
@@ -76,21 +107,26 @@
     }
    },
    "UpdateReplacePolicy": "Retain",
-   "DeletionPolicy": "Retain",
-   "Metadata": {
-    "aws:cdk:path": "AshImagePipeline/Arm64/Repository/Resource"
-   }
+   "DeletionPolicy": "Retain"
   },
   "Arm64BuildLogs3AC2EA1D": {
    "Type": "AWS::Logs::LogGroup",
    "Properties": {
+    "KmsKeyId": {
+     "Fn::If": [
+      "HasKmsKey",
+      {
+       "Ref": "KmsKeyArn"
+      },
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    },
     "RetentionInDays": 30
    },
    "UpdateReplacePolicy": "Retain",
-   "DeletionPolicy": "Retain",
-   "Metadata": {
-    "aws:cdk:path": "AshImagePipeline/Arm64/BuildLogs/Resource"
-   }
+   "DeletionPolicy": "Retain"
   },
   "Arm64BuildRole996AACA9": {
    "Type": "AWS::IAM::Role",
@@ -109,7 +145,6 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshImagePipeline/Arm64/Build/Role/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -283,7 +318,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshImagePipeline/Arm64/Build/Role/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -450,7 +484,6 @@
     "TimeoutInMinutes": 120
    },
    "Metadata": {
-    "aws:cdk:path": "AshImagePipeline/Arm64/Build/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -483,7 +516,6 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshImagePipeline/Arm64/Build/EventsRole/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -525,7 +557,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshImagePipeline/Arm64/Build/EventsRole/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -566,14 +597,25 @@
       }
      }
     ]
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshImagePipeline/Arm64/RebuildSchedule/Resource"
    }
   },
   "Amd64Repository0FA31DF6": {
    "Type": "AWS::ECR::Repository",
    "Properties": {
+    "EncryptionConfiguration": {
+     "EncryptionType": "KMS",
+     "KmsKey": {
+      "Fn::If": [
+       "HasKmsKey",
+       {
+        "Ref": "KmsKeyArn"
+       },
+       {
+        "Ref": "AWS::NoValue"
+       }
+      ]
+     }
+    },
     "ImageScanningConfiguration": {
      "ScanOnPush": true
     },
@@ -583,21 +625,26 @@
     }
    },
    "UpdateReplacePolicy": "Retain",
-   "DeletionPolicy": "Retain",
-   "Metadata": {
-    "aws:cdk:path": "AshImagePipeline/Amd64/Repository/Resource"
-   }
+   "DeletionPolicy": "Retain"
   },
   "Amd64BuildLogsF9EE6AF1": {
    "Type": "AWS::Logs::LogGroup",
    "Properties": {
+    "KmsKeyId": {
+     "Fn::If": [
+      "HasKmsKey",
+      {
+       "Ref": "KmsKeyArn"
+      },
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    },
     "RetentionInDays": 30
    },
    "UpdateReplacePolicy": "Retain",
-   "DeletionPolicy": "Retain",
-   "Metadata": {
-    "aws:cdk:path": "AshImagePipeline/Amd64/BuildLogs/Resource"
-   }
+   "DeletionPolicy": "Retain"
   },
   "Amd64BuildRole23AB6DE3": {
    "Type": "AWS::IAM::Role",
@@ -616,7 +663,6 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshImagePipeline/Amd64/Build/Role/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -790,7 +836,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshImagePipeline/Amd64/Build/Role/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -957,7 +1002,6 @@
     "TimeoutInMinutes": 120
    },
    "Metadata": {
-    "aws:cdk:path": "AshImagePipeline/Amd64/Build/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -990,7 +1034,6 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshImagePipeline/Amd64/Build/EventsRole/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -1032,7 +1075,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshImagePipeline/Amd64/Build/EventsRole/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -1073,9 +1115,6 @@
       }
      }
     ]
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshImagePipeline/Amd64/RebuildSchedule/Resource"
    }
   }
  },

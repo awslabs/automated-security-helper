@@ -145,6 +145,7 @@ import { Construct } from 'constructs';
 
 import {
   ashSynthesizer,
+  AshCustomerKey,
   ashImageTag,
   ashOfflineMode, ashVersion, rebuildSchedule,
 } from './ash-config';
@@ -166,7 +167,11 @@ export class AshAgentCoreStack extends Stack {
     const version = ashVersion(this);
     const offline = ashOfflineMode(this);
     const schedule = rebuildSchedule(this);
-    const config = new AshRuntimeConfig(this, 'Config', { includeMcpParameters: true });
+    const customerKey = new AshCustomerKey(this);
+    const config = new AshRuntimeConfig(this, 'Config', {
+      includeMcpParameters: true,
+      customerKey,
+    });
 
     // One customer-managed key per stack, shared by every CodeBuild project here.
     // Rotation is on: the key only protects build output, so a rotated key needs
@@ -186,6 +191,7 @@ export class AshAgentCoreStack extends Stack {
       rebuildSchedule: schedule,
       imageTag: ashImageTag(this),
       encryptionKey,
+      customerKey,
     });
 
     /**
@@ -219,10 +225,21 @@ export class AshAgentCoreStack extends Stack {
     image.repository.grantPull(role);
     config.grantRead(role);
 
-    // ECR's authorization token is account-scoped and has no resource ARN.
+    /*
+     * ECR's authorization token is account-scoped and has no resource ARN.
+     *
+     * `grantPull` above already emits this exact statement, so this call is
+     * defensive rather than load-bearing -- it keeps the grant visible here if a
+     * future aws-cdk-lib stops bundling the token action into grantPull.
+     *
+     * It carries no `sid` on purpose. With one, the two statements were distinct to
+     * the `@aws-cdk/aws-iam:minimizePolicies` pass configured in cdk.json, so the
+     * rendered policy carried the same wildcard grant twice. Without one they
+     * merge, which is why adding a Sid back would silently reintroduce the
+     * duplicate rather than just annotate it.
+     */
     role.addToPolicy(
       new iam.PolicyStatement({
-        sid: 'EcrTokenAccess',
         actions: ['ecr:GetAuthorizationToken'],
         resources: ['*'],
       }),
@@ -315,20 +332,28 @@ export class AshAgentCoreStack extends Stack {
 
     suppressSecretRotation(config.authSecret);
     /*
-     * TWO CLOUDFORMATION SPEC WARNINGS ARE EXPECTED HERE AND ARE FALSE POSITIVES.
+     * A FAMILY OF CLOUDFORMATION SPEC WARNINGS IS EXPECTED HERE. ALL FALSE POSITIVES.
      *
-     * `cdk synth` reports "SecretString: length 0 is below minimum 1" and, on the
-     * AgentCore stack, "RequestHeaderAllowlist.{}: '' does not match pattern".
-     * The validator resolves each parameter to its DEFAULT and then evaluates the
-     * true branch of the `Fn::If` guarding it, so it sees the empty default.
+     * `cdk synth` reports "SecretString: length 0 is below minimum 1" and
+     * "RequestHeaderAllowlist.{}: '' does not match pattern". Since `KmsKeyArn`
+     * arrived there are three more, on every resource that takes the key:
+     * "KmsKeyId: Value is not valid under any of the given schemas", "KmsKeyId: ''
+     * does not match pattern '^arn:...kms:...(key|alias)/.+'" and
+     * "EncryptionConfiguration.KmsKey: length 0 is below minimum 1".
      *
-     * Verified against the synthesized template rather than assumed: both
-     * properties emit as
-     * `{"Fn::If": ["ConfigHasHeaderAuth...", <parameter>, <fallback>]}`, and that
-     * condition is `Fn::And(name != '', value != '')`. So whenever the validator's
-     * empty value would apply, the condition is false and CloudFormation receives
-     * the fallback instead — a non-empty placeholder for the secret, and
-     * `AWS::NoValue` for the allowlist. Neither empty value can reach the service.
+     * They are all ONE mechanism, which is why they are documented together rather
+     * than listed exhaustively - the list will grow with every conditional property
+     * added. The validator resolves each parameter to its DEFAULT and then evaluates
+     * the true branch of the `Fn::If` guarding it, so it sees the empty default.
+     *
+     * Verified against the synthesized template rather than assumed: every one of
+     * these properties emits as `{"Fn::If": [<condition>, <parameter>, <fallback>]}`,
+     * where the condition is `Fn::And(name != '', value != '')` for the auth pair and
+     * `KmsKeyArn != ''` for the key. So whenever the validator's empty value would
+     * apply, the condition is false and CloudFormation receives the fallback
+     * instead — a non-empty placeholder for the secret, and `AWS::NoValue`, which
+     * removes the property outright, for the allowlist and for every KMS key
+     * reference. No empty value can reach any of these services.
      *
      * `Annotations.acknowledgeWarning` does NOT clear these: the CloudFormation
      * spec validator emits outside the `addWarningV2` acknowledgement mechanism,

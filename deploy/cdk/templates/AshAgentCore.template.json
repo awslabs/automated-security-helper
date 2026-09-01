@@ -22,6 +22,12 @@
    "Description": "EventBridge schedule expression for the image rebuild, for example \"cron(0 6 * * ? *)\" or \"rate(1 day)\". The rebuild repulls the base image and scanner tools so a long-lived deployment keeps getting OS and scanner patches without a stack update. Note that a rate() expression starts when the rule is created, so it also rebuilds once at deployment; a cron() expression only fires at the times it names.",
    "MinLength": 1
   },
+  "KmsKeyArn": {
+   "Type": "String",
+   "Default": "",
+   "AllowedPattern": "^$|^arn:aws[a-zA-Z-]*:kms:[a-z0-9-]+:\\d{12}:key/[0-9a-z-]{36}$",
+   "Description": "ARN of an existing symmetric customer-managed KMS key for this stack data at rest. Empty uses AWS-managed encryption. Needs a key policy admitting logs.<region>.amazonaws.com, plus kms:CreateGrant for whoever deploys."
+  },
   "AshBaseConfigYaml": {
    "Type": "String",
    "Default": "",
@@ -67,6 +73,18 @@
   }
  },
  "Conditions": {
+  "HasKmsKey": {
+   "Fn::Not": [
+    {
+     "Fn::Equals": [
+      {
+       "Ref": "KmsKeyArn"
+      },
+      ""
+     ]
+    }
+   ]
+  },
   "ConfigHasBaseConfigA7D225A9": {
    "Fn::Not": [
     {
@@ -136,15 +154,23 @@
       "# No ASH base configuration was supplied at deployment time."
      ]
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshAgentCore/Config/BaseConfig/Resource"
    }
   },
   "ConfigMcpAuthHeaderSecret99D04B65": {
    "Type": "AWS::SecretsManager::Secret",
    "Properties": {
     "Description": "Expected value of McpAuthHeaderName. The container is handed this ARN and resolves the value at start, so the secret never enters a task definition or a runtime environment-variable map.",
+    "KmsKeyId": {
+     "Fn::If": [
+      "HasKmsKey",
+      {
+       "Ref": "KmsKeyArn"
+      },
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    },
     "SecretString": {
      "Fn::If": [
       "ConfigHasHeaderAuthA42E2E27",
@@ -158,7 +184,6 @@
    "UpdateReplacePolicy": "Delete",
    "DeletionPolicy": "Delete",
    "Metadata": {
-    "aws:cdk:path": "AshAgentCore/Config/McpAuthHeaderSecret/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -168,6 +193,30 @@
      ]
     }
    }
+  },
+  "ConfigKeyAccessB463082D": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "kms:Decrypt",
+       "Effect": "Allow",
+       "Resource": {
+        "Ref": "KmsKeyArn"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "ConfigKeyAccessB463082D",
+    "Roles": [
+     {
+      "Ref": "RuntimeRoleFD8790A4"
+     }
+    ]
+   },
+   "Condition": "HasKmsKey"
   },
   "EncryptionKey1B843E66": {
    "Type": "AWS::KMS::Key",
@@ -204,14 +253,25 @@
     }
    },
    "UpdateReplacePolicy": "Retain",
-   "DeletionPolicy": "Retain",
-   "Metadata": {
-    "aws:cdk:path": "AshAgentCore/EncryptionKey/Resource"
-   }
+   "DeletionPolicy": "Retain"
   },
   "ImageRepositoryD8036990": {
    "Type": "AWS::ECR::Repository",
    "Properties": {
+    "EncryptionConfiguration": {
+     "EncryptionType": "KMS",
+     "KmsKey": {
+      "Fn::If": [
+       "HasKmsKey",
+       {
+        "Ref": "KmsKeyArn"
+       },
+       {
+        "Ref": "AWS::NoValue"
+       }
+      ]
+     }
+    },
     "ImageScanningConfiguration": {
      "ScanOnPush": true
     },
@@ -221,21 +281,26 @@
     }
    },
    "UpdateReplacePolicy": "Retain",
-   "DeletionPolicy": "Retain",
-   "Metadata": {
-    "aws:cdk:path": "AshAgentCore/Image/Repository/Resource"
-   }
+   "DeletionPolicy": "Retain"
   },
   "ImageBuildLogsBC6BBB2A": {
    "Type": "AWS::Logs::LogGroup",
    "Properties": {
+    "KmsKeyId": {
+     "Fn::If": [
+      "HasKmsKey",
+      {
+       "Ref": "KmsKeyArn"
+      },
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    },
     "RetentionInDays": 30
    },
    "UpdateReplacePolicy": "Retain",
-   "DeletionPolicy": "Retain",
-   "Metadata": {
-    "aws:cdk:path": "AshAgentCore/Image/BuildLogs/Resource"
-   }
+   "DeletionPolicy": "Retain"
   },
   "ImageBuildRole1BB51BF0": {
    "Type": "AWS::IAM::Role",
@@ -254,7 +319,6 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshAgentCore/Image/Build/Role/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -428,7 +492,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshAgentCore/Image/Build/Role/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -595,7 +658,6 @@
     "TimeoutInMinutes": 120
    },
    "Metadata": {
-    "aws:cdk:path": "AshAgentCore/Image/Build/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -628,7 +690,6 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshAgentCore/Image/Build/EventsRole/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -670,7 +731,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshAgentCore/Image/Build/EventsRole/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -689,13 +749,21 @@
   "ImageBootstrapStarterLogsFCF41B92": {
    "Type": "AWS::Logs::LogGroup",
    "Properties": {
+    "KmsKeyId": {
+     "Fn::If": [
+      "HasKmsKey",
+      {
+       "Ref": "KmsKeyArn"
+      },
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    },
     "RetentionInDays": 30
    },
    "UpdateReplacePolicy": "Retain",
-   "DeletionPolicy": "Retain",
-   "Metadata": {
-    "aws:cdk:path": "AshAgentCore/Image/BootstrapStarterLogs/Resource"
-   }
+   "DeletionPolicy": "Retain"
   },
   "ImageBootstrapStarterRole4262AC52": {
    "Type": "AWS::IAM::Role",
@@ -715,7 +783,6 @@
     "Description": "Execution role for the image-build bootstrap. Deliberately not using AWSLambdaBasicExecutionRole: the only logging grant it needs is on one log group."
    },
    "Metadata": {
-    "aws:cdk:path": "AshAgentCore/Image/BootstrapStarterRole/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -781,7 +848,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshAgentCore/Image/BootstrapStarterRole/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -807,11 +873,23 @@
      }
     },
     "Handler": "index.handler",
+    "KmsKeyArn": {
+     "Fn::If": [
+      "HasKmsKey",
+      {
+       "Ref": "KmsKeyArn"
+      },
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    },
     "LoggingConfig": {
      "LogGroup": {
       "Ref": "ImageBootstrapStarterLogsFCF41B92"
      }
     },
+    "ReservedConcurrentExecutions": 1,
     "Role": {
      "Fn::GetAtt": [
       "ImageBootstrapStarterRole4262AC52",
@@ -824,10 +902,7 @@
    "DependsOn": [
     "ImageBootstrapStarterRoleDefaultPolicy10189EBF",
     "ImageBootstrapStarterRole4262AC52"
-   ],
-   "Metadata": {
-    "aws:cdk:path": "AshAgentCore/Image/BootstrapStarter/Resource"
-   }
+   ]
   },
   "ImageBootstrapBuildCBE6CA7A": {
    "Type": "Custom::AshImageBootstrap",
@@ -847,10 +922,7 @@
     "Flavors": "mcp"
    },
    "UpdateReplacePolicy": "Delete",
-   "DeletionPolicy": "Delete",
-   "Metadata": {
-    "aws:cdk:path": "AshAgentCore/Image/BootstrapBuild/Default"
-   }
+   "DeletionPolicy": "Delete"
   },
   "ImageRebuildScheduleC59CBD6A": {
    "Type": "AWS::Events::Rule",
@@ -880,10 +952,7 @@
    },
    "DependsOn": [
     "ImageBootstrapBuildCBE6CA7A"
-   ],
-   "Metadata": {
-    "aws:cdk:path": "AshAgentCore/Image/RebuildSchedule/Resource"
-   }
+   ]
   },
   "RuntimeRoleFD8790A4": {
    "Type": "AWS::IAM::Role",
@@ -932,7 +1001,6 @@
     "Description": "Execution role AgentCore Runtime assumes to run the ASH MCP server."
    },
    "Metadata": {
-    "aws:cdk:path": "AshAgentCore/RuntimeRole/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -1009,12 +1077,6 @@
        "Resource": {
         "Ref": "ConfigMcpAuthHeaderSecret99D04B65"
        }
-      },
-      {
-       "Action": "ecr:GetAuthorizationToken",
-       "Effect": "Allow",
-       "Resource": "*",
-       "Sid": "EcrTokenAccess"
       },
       {
        "Action": [
@@ -1165,7 +1227,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshAgentCore/RuntimeRole/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -1319,10 +1380,7 @@
    },
    "DependsOn": [
     "ImageBootstrapBuildCBE6CA7A"
-   ],
-   "Metadata": {
-    "aws:cdk:path": "AshAgentCore/Runtime"
-   }
+   ]
   }
  },
  "Outputs": {
