@@ -119,6 +119,29 @@ export class AshFargateStack extends Stack {
     const vpc = new ec2.Vpc(this, 'Vpc', {
       maxAzs: 2,
       natGateways: 1,
+      /*
+       * CDK's default subnet layout, spelled out so the public subnets can opt out
+       * of auto-assigning public IPv4 addresses.
+       *
+       * CDK sets `MapPublicIpOnLaunch: true` on every PUBLIC subnet of an
+       * IPv4-only VPC. Nothing in this stack needs it. The only resource placed in
+       * a public subnet is the NAT gateway, and a NAT gateway takes its address
+       * from the Elastic IP named in its `AllocationId`, not from the subnet
+       * default; `natGateways: 1` puts that single gateway in the first public
+       * subnet, so the second holds nothing but a route table association. The
+       * load balancer is `internetFacing: false` and the service below runs with
+       * `assignPublicIp` disabled, so both of those live in the private subnets.
+       *
+       * The names and types are `Vpc.DEFAULT_SUBNETS` verbatim -- 'Public' with
+       * SubnetType.PUBLIC and 'Private' with SubnetType.PRIVATE_WITH_EGRESS --
+       * because the subnet group NAME feeds the generated logical ids. Renaming a
+       * group would rename every subnet, route table, route and association in an
+       * existing stack, which is a replacement, not a property change.
+       */
+      subnetConfiguration: [
+        { name: 'Public', subnetType: ec2.SubnetType.PUBLIC, mapPublicIpOnLaunch: false },
+        { name: 'Private', subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      ],
       // Flow logs are on because this VPC carries source code being scanned and
       // the findings about it; without them a suspected exfiltration has nothing
       // to investigate.
@@ -314,9 +337,89 @@ export class AshFargateStack extends Stack {
     loadBalancer.setAttribute('access_logs.s3.bucket', accessLogsBucket.bucketName);
     loadBalancer.setAttribute('access_logs.s3.prefix', accessLogPrefix);
 
+    /**
+     * The task's egress, narrowed from CDK's default of every IP protocol to TCP 443.
+     *
+     * `FargateService` otherwise creates this group itself with `allowAllOutbound`,
+     * which renders as one rule with `IpProtocol: -1` to `0.0.0.0/0` -- cfn-nag's
+     * CFN_NAG_W40 and CFN_NAG_W5 respectively. Pinning one port clears W40 and also
+     * CFN_NAG_W29, which passes only when FromPort equals ToPort. W5 survives and its
+     * reason is recorded in .ash/.ash.yaml.
+     *
+     * WHY 0.0.0.0/0 STAYS
+     * -------------------
+     * The task runs in a private subnet with `assignPublicIp` disabled and this
+     * stack creates no VPC endpoint, so everything it sends -- the image pull, the
+     * awslogs delivery, the Systems Manager and Secrets Manager reads, and whatever
+     * the scanners fetch -- leaves through the NAT gateway to a public endpoint.
+     *
+     * AWS-managed prefix lists would be the way to name those endpoints, and none of
+     * them is covered. The published set is CloudFront origin-facing, DynamoDB, EC2
+     * Instance Connect, Ground Station, Route 53 health checkers, S3, S3 Express One
+     * Zone, VPC Lattice, and Secrets Manager's MANAGED EXTERNAL SECRETS ranges --
+     * that last one is not the Secrets Manager API endpoint, so it does not help
+     * here. Nothing covers ECR, CloudWatch Logs, the Secrets Manager endpoint or
+     * Systems Manager.
+     * https://docs.aws.amazon.com/vpc/latest/userguide/working-with-aws-managed-prefix-lists.html
+     *
+     * Naming them instead needs interface endpoints, billed hourly per Availability
+     * Zone, which is the cost already recorded against CKV_AWS_117.
+     *
+     * WHAT 443 COVERS, AND THE LIMITATION IT INTRODUCES
+     * ------------------------------------------------
+     * Everything THIS STACK reaches is 443: the ECR image pull, CloudWatch Logs via
+     * the awslogs driver, and the Secrets Manager and Systems Manager reads that
+     * `config.grantRead` grants. DNS is unaffected either way, because "You cannot
+     * filter traffic to or from the Amazon DNS server using network ACLs or security
+     * groups."
+     * https://docs.aws.amazon.com/vpc/latest/userguide/AmazonDNS-concepts.html
+     *
+     * What is NOT covered is egress the SCANNED repository decides. The npm-audit
+     * scanner runs `npm`, `yarn` or `pnpm audit` against whatever registry that
+     * repository configures, and corepack fetches the package manager it pins -- see
+     * the corepack note in the Dockerfile. So a scan fails to fetch when the source
+     * under scan needs any of:
+     *
+     *   - a registry served over plain HTTP on port 80;
+     *   - a registry on a non-standard port, such as an internal mirror on 8080;
+     *   - a `git:` dependency, which is port 9418, or a `git+ssh:` one, which is 22.
+     *
+     * READ THIS BEFORE DEBUGGING SUCH A SCAN. The symptom is not a permission error.
+     * The security group DROPS the packet rather than rejecting it, so the scanner
+     * hangs until its own timeout and then reports a fetch failure or a registry
+     * that is unreachable. Nothing in the ASH output names the security group, which
+     * is what makes this expensive to diagnose without this comment.
+     *
+     * THE WAY OUT, so an adopter does not have to edit this template: the group id is
+     * the `TaskSecurityGroupId` output. Authorize further egress against it directly,
+     * the same way `McpSecurityGroupId` is the handle for widening INGRESS. The
+     * output's description carries the command.
+     *
+     * The other cost, stated rather than hidden: creating the group here rather than
+     * letting the service create it moves its construct path, so an existing stack
+     * replaces the security group and its load-balancer ingress rule on update. The
+     * ECS service is updated to the new group before the old one is deleted. The
+     * alternative -- overwriting the rendered rule through the L1 -- would have
+     * kept the logical id, but would leave the L2 still believing outbound is open,
+     * so a later `connections.allowTo` would be dropped with only a synth warning.
+     */
+    const serviceSecurityGroup = new ec2.SecurityGroup(this, 'ServiceSecurityGroup', {
+      vpc,
+      description:
+        'ASH MCP tasks. Egress is TCP 443 only; widen it against TaskSecurityGroupId ' +
+        'for a registry on another port. See ash-fargate-stack.ts.',
+      allowAllOutbound: false,
+    });
+    serviceSecurityGroup.addEgressRule(
+      ec2.Peer.anyIpv4(),
+      ec2.Port.tcp(443),
+      'Image pull, log delivery, and SSM and Secrets Manager reads, all via NAT.',
+    );
+
     const service = new ecs.FargateService(this, 'Service', {
       cluster,
       taskDefinition,
+      securityGroups: [serviceSecurityGroup],
       desiredCount: 1,
       // With desiredCount 1 the 50% default lets ECS stop the only task during a
       // deployment, so the endpoint goes down. 100/200 keeps the old task serving
@@ -484,6 +587,26 @@ export class AshFargateStack extends Stack {
       // so indexing it is a synth-time fact rather than an assumption about
       // deploy-time ordering. It is asserted in ash-fargate-stack.test.ts.
       value: loadBalancer.connections.securityGroups[0].securityGroupId,
+    });
+    /*
+     * The egress counterpart of McpSecurityGroupId above, and it exists for the same
+     * reason: a rule an adopter cannot widen without editing the template is worse
+     * than the finding it clears.
+     *
+     * The task's egress is TCP 443 only, which covers every service this stack
+     * itself reaches but not a package registry the SCANNED repository points at on
+     * another port. The comment on `serviceSecurityGroup` lists the cases and says
+     * why the failure looks like a scanner timeout rather than a denial.
+     */
+    new CfnOutput(this, 'TaskSecurityGroupId', {
+      description:
+        "The ASH task's security group. Egress is TCP 443 only, which covers ECR, " +
+        'CloudWatch Logs, Secrets Manager and Systems Manager. If a scanned repository ' +
+        'resolves dependencies from a registry on another port, add that port, for ' +
+        'example: aws ec2 authorize-security-group-egress --group-id <this> --protocol ' +
+        'tcp --port 8080 --cidr <your-registry-cidr>. A missing rule shows up as a ' +
+        'scanner timing out or failing to fetch, not as a permission error.',
+      value: serviceSecurityGroup.securityGroupId,
     });
     new CfnOutput(this, 'LoadBalancerDnsName', {
       description:

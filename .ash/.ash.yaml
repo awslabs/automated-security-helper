@@ -324,6 +324,270 @@ global_settings:
         Same mechanism as the AshAgentCore entry above, on both repositories this
         template creates, one per architecture. AshImageTag is not declared here
         because this template runs no workload; the tags are stack outputs instead.
+    # === checkov's own secret detector, same two lines as detect-secrets ===
+    #
+    # CKV_SECRET_6 fires on the identical two `"SecretString": "ash-mcp-auth-
+    # disabled"` lines that SECRET-SECRET-KEYWORD does, above. Two scanners, one
+    # cause, so the justification is the same and is not restated at length here.
+    # Listed separately because a suppression is keyed by rule id, and covering
+    # the detect-secrets rule does nothing for the checkov one -- which is exactly
+    # the mistake that left these two findings live after the first pass.
+    - rule_id: CKV_SECRET_6
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: >-
+        `SECRET_PLACEHOLDER` from deploy/cdk/lib/ash-runtime-config.ts, the value
+        stored when ASH-level header auth is disabled. This stack does not serve
+        MCP, so it is built with includeMcpParameters off and nothing reads the
+        secret. See the SECRET-SECRET-KEYWORD entry for the same file above.
+    - rule_id: CKV_SECRET_6
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        The second of the two placeholder lines, in the stack that runs the sharded
+        executor and likewise does not serve MCP. See the SECRET-SECRET-KEYWORD
+        entry for the same file above.
+    # === bandit in the Terraform gate handler ===
+    #
+    # Same two unfixable subprocess rules covered for the Python tree above, on the
+    # Lambda handler the Terraform codecommit-gate module ships. It was missed on
+    # the first pass because the bandit work was scoped to the Python package and
+    # deliberately excluded deploy/.
+    - rule_id: B404
+      path: deploy/terraform/modules/codecommit-gate/files/ash_pr_gate.py
+      reason: >-
+        The handler clones the pull request and runs ASH over it, so `import
+        subprocess` cannot be removed. B404 fires on the import statement itself,
+        before any call is examined.
+    - rule_id: B603
+      path: deploy/terraform/modules/codecommit-gate/files/ash_pr_gate.py
+      reason: >-
+        The single call site is `_run(argv: list[str])`, which passes a list to
+        `subprocess.run` with `shell` left at its default of False and
+        `check=False`. Passing `shell=True` to silence this rule would introduce
+        the injection surface the rule warns about. The line already carries a
+        matching `# noqa: S603` for the ruff equivalent, as the B108 entry for this
+        same file does.
+    # === cfn-nag on the synthesized CloudFormation templates ===
+    #
+    # 3 of the 34 cfn-nag findings on these templates were FIXED rather than
+    # suppressed, leaving 31.
+    #
+    # CFN_NAG_W33 on both public subnets, by setting mapPublicIpOnLaunch false in the
+    # Vpc subnetConfiguration -- the NAT gateway takes its address from an Elastic IP,
+    # so nothing there wanted the subnet default.
+    #
+    # CFN_NAG_W40 on the ECS task's security group, by pinning its egress to TCP 443
+    # instead of every IP protocol. The PORT is pinned and not just the protocol
+    # because narrowing to all-TCP trades one finding for another: CFN_NAG_W29 passes
+    # only when FromPort equals ToPort, and IpProtocol -1 had satisfied it by naming
+    # no ports at all. That was measured, not assumed -- the all-TCP form was
+    # synthesized and scanned first, and it reported W29. Pinning 443 clears both.
+    #
+    # What follows is the remainder, where no code change satisfies the rule.
+    #
+    # === cfn-nag cannot see a logs grant that lives in its own IAM::Policy ===
+    #
+    # CFN_NAG_W58 is a false positive on all four functions, and it is worth being
+    # exact about why, because "the function cannot write its logs" would be a real
+    # defect rather than a scanner artifact.
+    #
+    # LambdaFunctionCloudWatchLogsRule inspects two places and no others: the role's
+    # inline Policies array, and an allowlist of seven AWS managed policy ARNs. Every
+    # role here carries its logging grant in a separate AWS::IAM::Policy attached
+    # through Roles, which is what CDK emits for addToPolicy, so the rule looks in
+    # neither place.
+    #
+    # The rule also requires logs:CreateLogGroup, logs:CreateLogStream and
+    # logs:PutLogEvents together in one statement. These roles omit CreateLogGroup
+    # deliberately: the stack creates the group and the function is constructed with
+    # logGroup pointing at it, so the group exists before the function runs. That
+    # second reason is the dispositive one -- the change the rule asks for is a
+    # BROADER grant, which is the same trade AwsSolutions-IAM4 was fixed to avoid
+    # when AWSLambdaBasicExecutionRole was replaced by a one-group policy.
+    - rule_id: CFN_NAG_W58
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        The image-build bootstrap starter can write its logs. Its role grants
+        logs:CreateLogStream and logs:PutLogEvents on the ARN of the log group this
+        stack creates for it plus that group's stream suffix, in the separate
+        AWS::IAM::Policy CDK emits for addToPolicy, which
+        LambdaFunctionCloudWatchLogsRule does not read. logs:CreateLogGroup is absent
+        because CloudFormation creates the group and the function is built with
+        logGroup pointing at it, so satisfying the rule would mean granting a
+        permission the function does not use. See addBootstrap in
+        deploy/cdk/lib/ash-image-build.ts, whose role description states the same
+        choice.
+    - rule_id: CFN_NAG_W58
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: >-
+        Both functions in this template, for the reason given in the AshAgentCore
+        entry above. The image-build bootstrap starter is the same construct; the
+        pull-request scan function is built the same way by
+        deploy/cdk/lib/ash-codecommit-gate-stack.ts, which creates ScanLogs, grants
+        the scan role CreateLogStream and PutLogEvents on that group alone, and
+        passes the group to the function.
+    - rule_id: CFN_NAG_W58
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        The image-build bootstrap starter, the same construct described in the
+        AshAgentCore entry above. The ECS task is not affected: it logs through the
+        awslogs driver, not through a Lambda execution role.
+    # === cfn-nag's VPC rule is checkov's CKV_AWS_117, same functions ===
+    #
+    # CFN_NAG_W89 fires on exactly the four functions CKV_AWS_117 fires on, and asks
+    # for the same change. The cost argument is not restated here; it is recorded
+    # against CKV_AWS_117 above, including the reserved VpcSubnetIds parameter that
+    # opts in. Listed separately because a suppression is keyed by rule id, so
+    # covering the checkov rule does nothing for the cfn-nag one.
+    - rule_id: CFN_NAG_W89
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        Attaching the function to a VPC costs a NAT gateway or six interface
+        endpoints, both billed hourly, to reach services it currently reaches over
+        the public internet. See the CKV_AWS_117 entry for this same file above for
+        the full accounting. VpcSubnetIds is the reserved name for this opt-in.
+    - rule_id: CFN_NAG_W89
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: >-
+        Both functions, the same two CKV_AWS_117 names for this file: the image-build
+        bootstrap starter and the pull-request scan function. Same cost, recorded
+        there. VpcSubnetIds is the reserved name for this opt-in.
+    - rule_id: CFN_NAG_W89
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        The image-build bootstrap starter. The ECS tasks in this template already run
+        in private subnets, so the finding is only on the Lambda. Same cost, recorded
+        against CKV_AWS_117 for this file. VpcSubnetIds is the reserved name for this
+        opt-in.
+    # === cfn-nag W12: the wildcards are the ones IAM defines without a resource ===
+    #
+    # 13 findings across five templates, all on CDK-generated DefaultPolicy resources
+    # rather than on a policy this repo hand-writes, and driven by three action sets
+    # in total. Twelve of the thirteen carry no wildcard but ecr:GetAuthorizationToken.
+    #
+    # deploy/cdk/lib/ash-nag-suppressions.ts already makes this argument for cdk-nag's
+    # AwsSolutions-IAM5 in suppressCodeBuildRoleWildcards, item (3): IAM defines
+    # ecr:GetAuthorizationToken with no resource ARN, so "*" is the only value the
+    # action accepts. Reused here because it genuinely applies; the two rules read the
+    # same statements.
+    - rule_id: CFN_NAG_W12
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        Two policies, both CDK DefaultPolicy resources. On the image-build role the
+        only wildcard is ecr:GetAuthorizationToken, which IAM defines with no
+        resource ARN. The AgentCore runtime role adds two more, both actions AWS
+        defines without a resource: the X-Ray sampling and write APIs, granted by the
+        RuntimeTelemetry statement, and cloudwatch:PutMetricData, which is already
+        narrowed the only way it can be, by a StringEquals condition pinning
+        cloudwatch:namespace to the AgentCore namespace. See
+        suppressCodeBuildRoleWildcards in deploy/cdk/lib/ash-nag-suppressions.ts.
+    - rule_id: CFN_NAG_W12
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: >-
+        One policy, the image-build role's CDK DefaultPolicy, whose only wildcard is
+        ecr:GetAuthorizationToken. Same reasoning as the AshAgentCore entry above.
+    - rule_id: CFN_NAG_W12
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        Six CDK DefaultPolicy resources -- the image-build role, one per scan shard,
+        and the merge project -- each with ecr:GetAuthorizationToken as its only
+        wildcard. The shard count comes from the shardCount context value, so this
+        finding count scales with it rather than with anything about the grants. Same
+        reasoning as the AshAgentCore entry above.
+    - rule_id: CFN_NAG_W12
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        Two CDK DefaultPolicy resources, the image-build role and the ECS task
+        execution role, each with ecr:GetAuthorizationToken as its only wildcard. The
+        task execution role needs it to pull the image at task start. Same reasoning
+        as the AshAgentCore entry above.
+    - rule_id: CFN_NAG_W12
+      path: deploy/cdk/templates/AshImagePipeline.template.json
+      reason: >-
+        Two CDK DefaultPolicy resources, one per architecture build role, each with
+        ecr:GetAuthorizationToken as its only wildcard. Same reasoning as the
+        AshAgentCore entry above.
+    # === cfn-nag W76 measures intrinsics, not permissiveness ===
+    #
+    # SPCM counts a statement's distinct "services", taking the service from the
+    # ARN's third colon-separated field. StatementMetric#resource_service_name does
+    # that only for Strings and returns the value unchanged for anything else, so a
+    # resource written as Fn::GetAtt, Fn::Join or Ref becomes its own distinct
+    # service: 2 points under Extra_Service, plus 1 more under
+    # Resource_Action_NotAligned because it cannot match the statement's action
+    # service either.
+    #
+    # These templates are environment-agnostic on purpose -- deploy/cdk/scripts/
+    # synth-templates.sh depends on it, because a template with a baked-in account id
+    # is neither reproducible nor launchable by an adopter. So every resource ARN is
+    # an intrinsic. MEASURED, by rescoring each flagged document with its intrinsics
+    # replaced by literal ARNs of the service actually being granted: 32 becomes 11,
+    # 31 becomes 7, the five 42s become 9, and 29 becomes 2, against a threshold of
+    # 25. Identical grants, identical permissiveness, every one of them well clear.
+    #
+    # The metric is also insensitive to what W12 looks at. PipelineRoleDefaultPolicy
+    # scores 29 with two statements and no wildcard at all, and the image-build policy
+    # sits at 24 in four templates and 31 in the fifth, one statement apart.
+    # @aws-cdk/aws-iam:minimizePolicies is already true in deploy/cdk/cdk.json and
+    # pushes the wrong way here: merging statements concentrates resources into fewer
+    # statements, and the per-resource cost is charged either way.
+    - rule_id: CFN_NAG_W76
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        The AgentCore runtime role's CDK DefaultPolicy, scoring 32 against a
+        threshold of 25. Seven of its resources are intrinsics -- log-group ARNs
+        built from AWS::Partition, AWS::Region and AWS::AccountId, and the ECR
+        repository and config references -- and rescoring the same document with
+        literal ARNs gives 11. Writing literals would bake an account id into a
+        template adopters launch, which is what the synth-templates.sh drift gate
+        exists to prevent.
+    - rule_id: CFN_NAG_W76
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        Seven CDK DefaultPolicy resources: the image-build role at 31, the four scan
+        shards and the merge project at 42 each, and the pipeline role at 29, against
+        a threshold of 25. Rescored with literal ARNs in place of intrinsics they are
+        7, 9 and 2. The pipeline role is the clearest case that this rule is not
+        measuring permissiveness: two statements, no wildcard resource at all, and it
+        still trips, because it names an artifact bucket and six action roles by
+        Fn::GetAtt. Same mechanism as the AshAgentCore entry above.
+    # === cfn-nag W56 is checkov's CKV_AWS_2, same listener ===
+    - rule_id: CFN_NAG_W56
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        The only listener in this template, the same resource CKV_AWS_2 and
+        CKV_AWS_103 fire on above. An HTTPS listener needs an ACM certificate and ACM
+        issues one only against a domain the requester controls, so there is no
+        default this template could supply; the load balancer is internal and starts
+        with no ingress rule, so nothing reaches the HTTP listener until an operator
+        sets McpIngressCidr. CertificateArn is the reserved name for this opt-in.
+    # === cfn-nag W5: the destination is the internet, and only the CIDR is left ===
+    #
+    # The last finding on the ECS task's egress rule. The group is now written by
+    # deploy/cdk/lib/ash-fargate-stack.ts rather than left to FargateService, so the
+    # protocol and port are pinned to TCP 443 and only the destination CIDR is still
+    # open. The comment on serviceSecurityGroup there carries the full argument, the
+    # cases a 443-only rule does not cover, and how an adopter widens it.
+    - rule_id: CFN_NAG_W5
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        The ECS task's egress destination is the public internet and cannot be
+        narrowed to a CIDR set. The task runs in a private subnet with assignPublicIp
+        disabled and this template creates no VPC endpoint, so the image pull, the
+        awslogs delivery, and the Systems Manager and Secrets Manager reads all leave
+        through the NAT gateway to public service endpoints. An AWS-managed prefix
+        list would be the way to name those endpoints, and the published set covers
+        none of them -- it is CloudFront origin-facing, DynamoDB, EC2 Instance
+        Connect, Ground Station, Route 53 health checkers, S3, S3 Express One Zone,
+        VPC Lattice, and Secrets Manager's managed external secrets ranges, which are
+        not the Secrets Manager API endpoint. Nothing covers ECR, CloudWatch Logs, the
+        Secrets Manager endpoint or Systems Manager. Naming them instead needs
+        interface endpoints, billed hourly per Availability Zone, which is the cost
+        already recorded against CKV_AWS_117. Everything else about this rule WAS
+        narrowed: the protocol and port are now TCP 443, which cleared CFN_NAG_W40 and
+        avoided CFN_NAG_W29. The residual limitation is recorded where an operator
+        will meet it rather than only here -- a scanned repository that resolves
+        dependencies from a registry on another port fails to fetch, and the
+        TaskSecurityGroupId output is the handle for authorizing that port.
     - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
       path: pyproject.toml
       reason: "Project configuration — base64 strings are dependency hashes"

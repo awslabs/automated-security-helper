@@ -225,10 +225,21 @@ export class AshAgentCoreStack extends Stack {
     image.repository.grantPull(role);
     config.grantRead(role);
 
-    // ECR's authorization token is account-scoped and has no resource ARN.
+    /*
+     * ECR's authorization token is account-scoped and has no resource ARN.
+     *
+     * `grantPull` above already emits this exact statement, so this call is
+     * defensive rather than load-bearing -- it keeps the grant visible here if a
+     * future aws-cdk-lib stops bundling the token action into grantPull.
+     *
+     * It carries no `sid` on purpose. With one, the two statements were distinct to
+     * the `@aws-cdk/aws-iam:minimizePolicies` pass configured in cdk.json, so the
+     * rendered policy carried the same wildcard grant twice. Without one they
+     * merge, which is why adding a Sid back would silently reintroduce the
+     * duplicate rather than just annotate it.
+     */
     role.addToPolicy(
       new iam.PolicyStatement({
-        sid: 'EcrTokenAccess',
         actions: ['ecr:GetAuthorizationToken'],
         resources: ['*'],
       }),
