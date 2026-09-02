@@ -57,15 +57,37 @@ runs:
 
     - name: "nix: scan"
       shell: bash
-      # The exit code is deliberately not the gate. ASH exits 2 when it finds actionable
-      # findings, and this fixture is built to produce them, so gating on the status would
-      # fail the job precisely when the scan worked.
+      env:
+        # Point at the flake in THIS checkout. ASH is pip-installed above, so it lives in
+        # site-packages with no flake beside it, and resolve_flake_ref correctly falls back
+        # to the published repository at the running version. That fallback cannot work
+        # here: flake.nix exists only on this branch, so the released tag has no flake and
+        # nix fails with "path '«github:...»/flake.nix' does not exist". CI must exercise
+        # the flake under review in any case, not a previously released one.
+        ASH_NIX_FLAKE_REF: "path:${{ github.workspace }}"
+      # ASH's documented exit codes: 0 success, 1 error during execution, 2 actionable
+      # findings with fail_on_findings. This fixture is built to produce findings, so 2 is
+      # the expected success case and gating on zero would fail precisely when the scan
+      # worked.
+      #
+      # Distinguishing 2 from 1 rather than using `|| true`: an earlier version swallowed
+      # every status, so when the scan died on a bad flake reference the job carried on and
+      # failed later at the assertion with "no results ... the scan did not complete". That
+      # reports a symptom and hides the cause, which cost a full CI round trip to diagnose.
       run: |
+        set +e
         ash scan \
           --mode nix \
           --source-dir /tmp/ash-nix-selftest \
           --output-dir /tmp/ash-nix-selftest/output \
-          --simple || true
+          --simple
+        rc=$?
+        set -e
+        if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then
+          echo "::error::ash scan --mode nix exited $rc (expected 0, or 2 for findings)"
+          exit "$rc"
+        fi
+        echo "scan exited $rc"
 
     - name: "nix: assert every flake-supplied scanner participated"
       shell: bash

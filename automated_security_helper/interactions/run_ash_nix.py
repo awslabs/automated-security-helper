@@ -80,6 +80,11 @@ def resolve_flake_ref(explicit: Optional[str] = None) -> str:
     # produced a report can be reconstructed later. `automated_security_helper.__version__`
     # is imported lazily because importing the package root from here at module scope is
     # circular.
+    #
+    # This requires the released tag to actually contain flake.nix, which is only true from
+    # the first release that ships it. Before then a packaged install reaches this branch
+    # and nix fails with "path '«github:...»/flake.nix' does not exist" -- an error about
+    # the ref, not about the user's setup. Set ASH_NIX_FLAKE_REF to a checkout in that case.
     from automated_security_helper import __version__
 
     owner_repo = ASH_REPO_URL.replace("https://github.com/", "")
