@@ -635,6 +635,8 @@ def get_files_not_matching_spec(
 
     included = []
     for inc_full in _all_files:
+        # inc_full stays native throughout, because callers use it to open files.
+        # Both helpers below normalize internally and only for their own comparison.
         if _is_bundled_cdk_path(inc_full):
             continue
         file_path = Path(inc_full)
