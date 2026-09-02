@@ -132,6 +132,32 @@ def _normalize_rule_level(severity: str) -> str:
     )
 
 
+def _level_and_kind(
+    compliance: str, rule_level: str, exception_reason: str
+) -> tuple[Level, Kind]:
+    """Map one finding's compliance state onto its SARIF level and kind.
+
+    Lifted verbatim out of the ``Result(...)`` construction below, where it was two nested
+    conditional expressions covering about forty lines and reachable only by driving a full
+    synthesis. Being a plain function it can be called directly, which matters more after the
+    v3 migration than it did before: the validation report carries violations only, so three
+    of the four rows here cannot arise from a real scan, and a test that faked a report to
+    reach them would be asserting against a payload cdk-nag is incapable of writing.
+
+    Those three rows are kept rather than deleted. ``_NagFinding`` is a shared shape, the
+    scanner reads ``compliance`` back out of the SARIF property bag, and a report format that
+    restores suppression records would need the mapping intact. They are, today, unreachable
+    from the report path -- see the note in :func:`_violations_from_validation_report`.
+    """
+    if compliance == "Non-Compliant":
+        if rule_level == "Error":
+            return Level.error, Kind.fail
+        return Level.warning, Kind.informational
+    if compliance == "Suppressed" and exception_reason != "N/A":
+        return Level.none, Kind.review
+    return Level.none, Kind.informational
+
+
 def _violations_from_validation_report(
     report_path: Path,
 ) -> Dict[str, List["_NagFinding"]]:
@@ -161,7 +187,20 @@ def _violations_from_validation_report(
     try:
         report = json.loads(report_path.read_text(encoding="utf-8"))
     except Exception as exc:
-        ASH_LOGGER.error(f"Could not parse cdk-nag validation report {report_path}: {exc}")
+        ASH_LOGGER.error(
+            f"Could not parse cdk-nag validation report {report_path}: {exc}"
+        )
+        return {}
+
+    # A file holding literal ``null`` is valid JSON that decodes to None, and a bare
+    # ``report.get(...)`` on it raises AttributeError out of the scanner rather than reporting
+    # an unreadable report. The type is checked instead of trusted because the only thing known
+    # about the file at this point is that it parsed.
+    if not isinstance(report, dict):
+        ASH_LOGGER.error(
+            f"cdk-nag validation report {report_path} is not a JSON object "
+            f"(got {type(report).__name__}). No violations could be read from it."
+        )
         return {}
 
     per_pack: Dict[str, List[_NagFinding]] = {}
@@ -354,16 +393,22 @@ def run_cdk_nag_against_cfn_template(
             # Aspects.of(stack).add(...). From 3.0.0 they implement IPolicyValidationPlugin
             # instead -- `hasattr(pack, "visit")` is False and `hasattr(pack, "validate")` is
             # True -- so an aspect registration attaches nothing and evaluates no rules.
-            registered = 0
+            # An unresolvable pack name is raised, not skipped. Logging it and continuing
+            # would let a request for three packs evaluate two and still exit zero, with a
+            # single log line as the only record that a third of the requested rules never
+            # ran. That is the same partial-scan-reports-whole shape this migration exists to
+            # remove, reintroduced one level up: the total-failure case below would not catch
+            # it, because some packs did register.
             for pack in nag_packs:
                 if pack not in nag_pack_lookup:
-                    ASH_LOGGER.error(f"Unknown cdk-nag pack requested: {pack}")
-                    continue
+                    raise KeyError(
+                        f"Unknown cdk-nag pack requested: {pack}. Available packs: "
+                        f"{sorted(nag_pack_lookup)}"
+                    )
                 ASH_LOGGER.debug(f"Adding nag pack '{pack}'")
                 Validations.of(app).add_plugins(_build_nag_pack(pack))
-                registered += 1
 
-            if registered == 0:
+            if not nag_packs:
                 # No pack means no rule can fire, which would otherwise yield an empty report
                 # indistinguishable from a compliant template.
                 ASH_LOGGER.error(
@@ -404,9 +449,7 @@ def run_cdk_nag_against_cfn_template(
             )
 
             if not cdk_nag_report_lines:
-                ASH_LOGGER.debug(
-                    f"cdk-nag reported no violations for {template_path}"
-                )
+                ASH_LOGGER.debug(f"cdk-nag reported no violations for {template_path}")
 
             for pack_name, report_lines in cdk_nag_report_lines.items():
                 if pack_name not in results:
@@ -437,7 +480,9 @@ def run_cdk_nag_against_cfn_template(
                     resource_line = None
                     resource_column = None
                     resource_log_id_pattern = re.compile(
-                        r"(?<![a-zA-Z0-9_])" + re.escape(resource_log_id) + r"(?![a-zA-Z0-9_])"
+                        r"(?<![a-zA-Z0-9_])"
+                        + re.escape(resource_log_id)
+                        + r"(?![a-zA-Z0-9_])"
                     )
                     for i, line_str in enumerate(template_lines, start=1):
                         match = resource_log_id_pattern.search(line_str)
@@ -451,6 +496,11 @@ def run_cdk_nag_against_cfn_template(
                             resource_log_id: cfn_resource.model_dump(by_alias=True)
                         }
                     }
+                    level, kind = _level_and_kind(
+                        compliance=line.compliance,
+                        rule_level=line.rule_level,
+                        exception_reason=line.exception_reason,
+                    )
                     finding = Result(
                         properties=PropertyBag(
                             cdk_nag_finding=line.as_dict(),
@@ -468,28 +518,8 @@ def run_cdk_nag_against_cfn_template(
                             ],
                         ),
                         ruleId=line.rule_id,
-                        level=(
-                            Level.error
-                            if line.compliance == "Non-Compliant"
-                            and line.rule_level == "Error"
-                            else (
-                                Level.warning
-                                if line.compliance == "Non-Compliant"
-                                and line.rule_level != "Error"
-                                else Level.none
-                            )
-                        ),
-                        kind=(
-                            Kind.fail
-                            if line.compliance == "Non-Compliant"
-                            and line.rule_level == "Error"
-                            else (
-                                Kind.review
-                                if line.compliance == "Suppressed"
-                                and line.exception_reason != "N/A"
-                                else Kind.informational
-                            )
-                        ),
+                        level=level,
+                        kind=kind,
                         message=Message(
                             root=Message1(
                                 text=f"{line.rule_info}\n\nException Reason: {line.exception_reason}"
@@ -571,4 +601,3 @@ if __name__ == "__main__":
         .joinpath("scanners")
         .joinpath("cdknag"),
     )
-
