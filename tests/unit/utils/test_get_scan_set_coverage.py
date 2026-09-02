@@ -313,22 +313,34 @@ def _marker(path):
     return f"######### START CONTENTS: {path} #########"
 
 
+# get_ash_ignorespec now takes the scan root explicitly, so ${SOURCE_DIR} in a marker
+# resolves against a real directory rather than a synthesized "/" prefix. These
+# base-path tests pass "/" so their assertions keep asserting exactly what they did
+# before: the rule bases and the subject paths below are both rooted there, which is
+# what makes "/subdir/a.log" the right subject for a "${SOURCE_DIR}/subdir" rule.
+_ROOT = "/"
+
+
 def test_a_nested_marker_scopes_its_rules_to_that_subdirectory():
-    spec = get_ash_ignorespec([_marker("${SOURCE_DIR}/subdir/.gitignore"), "*.log"])
+    spec = get_ash_ignorespec(
+        [_marker("${SOURCE_DIR}/subdir/.gitignore"), "*.log"], _ROOT
+    )
 
     assert spec.match(Path("/subdir/a.log")) is True
     assert spec.match(Path("/other/a.log")) is False
 
 
 def test_a_deeply_nested_marker_scopes_to_the_full_parent_path():
-    spec = get_ash_ignorespec([_marker("${SOURCE_DIR}/a/b/c/.gitignore"), "*.log"])
+    spec = get_ash_ignorespec(
+        [_marker("${SOURCE_DIR}/a/b/c/.gitignore"), "*.log"], _ROOT
+    )
 
     assert spec.match(Path("/a/b/c/x.log")) is True
     assert spec.match(Path("/a/b/x.log")) is False
 
 
 def test_a_root_level_marker_scopes_its_rules_to_the_whole_tree():
-    spec = get_ash_ignorespec([_marker("${SOURCE_DIR}/.gitignore"), "*.log"])
+    spec = get_ash_ignorespec([_marker("${SOURCE_DIR}/.gitignore"), "*.log"], _ROOT)
 
     assert spec.match(Path("/subdir/a.log")) is True
     assert spec.match(Path("/a.log")) is True
@@ -340,7 +352,8 @@ def test_the_ash_inclusions_marker_resets_the_base_path_to_the_root():
             _marker("${SOURCE_DIR}/subdir/.gitignore"),
             _marker("ASH_INCLUSIONS"),
             "*.log",
-        ]
+        ],
+        _ROOT,
     )
 
     assert spec.match(Path("/anywhere/a.log")) is True
@@ -353,14 +366,15 @@ def test_a_marker_without_the_source_dir_placeholder_falls_back_to_the_root():
             _marker("${SOURCE_DIR}/subdir/.gitignore"),
             _marker("some-unrecognized-payload"),
             "*.log",
-        ]
+        ],
+        _ROOT,
     )
 
     assert spec.match(Path("/elsewhere/a.log")) is True
 
 
 def test_blank_lines_and_comments_are_not_turned_into_rules():
-    spec = get_ash_ignorespec(["", "   ", "# a plain comment", "*.log"])
+    spec = get_ash_ignorespec(["", "   ", "# a plain comment", "*.log"], _ROOT)
 
     assert spec.match(Path("/a.log")) is True
     assert spec.match(Path("/a.txt")) is False
@@ -375,7 +389,7 @@ def test_blank_lines_and_comments_are_not_turned_into_rules():
 def test_files_not_matching_spec_walks_the_tree_when_no_file_list_is_given(tmp_path):
     (tmp_path / "keep.py").write_text("k = 1\n")
     (tmp_path / "drop.log").write_text("noise\n")
-    spec = get_ash_ignorespec([_marker("ASH_INCLUSIONS"), "*.log"])
+    spec = get_ash_ignorespec([_marker("ASH_INCLUSIONS"), "*.log"], str(tmp_path))
 
     included = get_files_not_matching_spec(str(tmp_path), spec)
 
@@ -385,7 +399,7 @@ def test_files_not_matching_spec_walks_the_tree_when_no_file_list_is_given(tmp_p
 @pytest.mark.skipif(sys.platform == "win32", reason=DRIVE_ANCHORED_RULES)
 def test_files_not_matching_spec_uses_a_supplied_file_list_verbatim(tmp_path):
     supplied = [str(tmp_path / "a.py"), str(tmp_path / "b.log")]
-    spec = get_ash_ignorespec([_marker("ASH_INCLUSIONS"), "*.log"])
+    spec = get_ash_ignorespec([_marker("ASH_INCLUSIONS"), "*.log"], str(tmp_path))
 
     included = get_files_not_matching_spec(str(tmp_path), spec, _all_files=supplied)
 
@@ -394,7 +408,7 @@ def test_files_not_matching_spec_uses_a_supplied_file_list_verbatim(tmp_path):
 
 def test_files_not_matching_spec_returns_a_sorted_deduplicated_list(tmp_path):
     dupe = str(tmp_path / "a.py")
-    spec = get_ash_ignorespec([_marker("ASH_INCLUSIONS")])
+    spec = get_ash_ignorespec([_marker("ASH_INCLUSIONS")], str(tmp_path))
 
     included = get_files_not_matching_spec(
         str(tmp_path), spec, _all_files=[dupe, str(tmp_path / "b.py"), dupe]
@@ -405,7 +419,7 @@ def test_files_not_matching_spec_returns_a_sorted_deduplicated_list(tmp_path):
 
 
 def test_files_not_matching_spec_always_drops_bundled_aws_cdk_node_modules(tmp_path):
-    spec = get_ash_ignorespec([_marker("ASH_INCLUSIONS")])
+    spec = get_ash_ignorespec([_marker("ASH_INCLUSIONS")], str(tmp_path))
     vendored = os.path.join(str(tmp_path), "node_modules", "aws-cdk", "lib.js")
 
     included = get_files_not_matching_spec(
