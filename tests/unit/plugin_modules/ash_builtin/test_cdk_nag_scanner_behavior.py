@@ -110,6 +110,24 @@ def cdk_available(monkeypatch, tmp_path):
 
 
 @pytest.fixture
+def cdk_unavailable(monkeypatch):
+    """Absent the CDK dependencies, without depending on them being uninstalled.
+
+    The counterpart to :func:`cdk_available`, and it exists because the tests that need this
+    state used to obtain it by accident: they asserted that validation fails while relying on
+    ``_CDK_AVAILABLE`` having been set False by a failed import at module load. That holds only
+    while nothing installs the ``cdk`` extra. Once something does -- and the unit-test action
+    now runs ``uv sync --extra cdk`` so the cdk-nag integration tests can execute -- the flag
+    is True, validation succeeds, and the tests fail without anything being wrong with the
+    code they cover.
+
+    A test whose verdict is decided by what happens to be installed is not testing the code, so
+    the flag is forced here rather than observed.
+    """
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_AVAILABLE", False)
+
+
+@pytest.fixture
 def wrapper_double(monkeypatch):
     """Substitute the cdk_nag wrapper, keeping its real signature.
 
@@ -156,8 +174,8 @@ def test_config_defaults_enable_only_aws_solutions_checks(plugin_context):
     assert scanner.config.options.include_compliant_checks is False
 
 
-def test_missing_cdk_dependencies_fail_validation(scanner, caplog):
-    """The real state here: cdk-nag absent means the scanner is unavailable."""
+def test_missing_cdk_dependencies_fail_validation(scanner, cdk_unavailable, caplog):
+    """cdk-nag absent means the scanner reports unavailable, with an install hint."""
     with caplog.at_level(logging.WARNING):
         assert scanner.validate_plugin_dependencies() is False
 
@@ -220,7 +238,9 @@ def test_placeholder_report_command_line_is_a_copy_paste_artifact(
     assert report.runs[0].invocations[0].commandLine == "npm audit --json"
 
 
-def test_unsatisfied_dependencies_return_false(scanner, wrapper_double, monkeypatch):
+def test_unsatisfied_dependencies_return_false(
+    scanner, wrapper_double, cdk_unavailable
+):
     """Without cdk-nag installed the scanner reports skipped, not clean."""
     (scanner.context.work_dir / "bucket.yaml").write_text(CFN_TEMPLATE)
 
