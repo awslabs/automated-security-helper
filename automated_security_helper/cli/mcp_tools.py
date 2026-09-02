@@ -831,7 +831,11 @@ def mcp_diff_scan_results(before_path: str, after_path: str) -> Dict[str, Any]:
         a_sev = (after_by_id[vid].severity or "").upper()
         if b_sev != a_sev:
             severity_changed.append(
-                {"id": vid, "before_severity": b_sev or None, "after_severity": a_sev or None}
+                {
+                    "id": vid,
+                    "before_severity": b_sev or None,
+                    "after_severity": a_sev or None,
+                }
             )
 
     return {"new": new, "resolved": resolved, "severity_changed": severity_changed}
@@ -943,6 +947,39 @@ def _loaded_scanner_classes() -> list:
 _ABSENT_VERSION_MARKERS = frozenset({"", "unavailable", "unknown", "none"})
 
 
+def _declared_config_class(cls):
+    """The scanner's own config class, read from its Pydantic ``model_fields``.
+
+    Only consulted when the scanner itself cannot be instantiated. The preferred path reads
+    ``plugin.config`` off a live instance, which reflects any config actually resolved for the
+    run; this reads what the class *declares* instead, which is all that remains available
+    when construction fails.
+
+    Without it, a scanner that cannot be built reports ``enabled: True`` no matter what its
+    config declares, because the optimistic default set before construction is never revised.
+    A config saying ``enabled = False`` then reads to a caller as enabled -- wrong in the
+    direction that matters, since it describes a scanner as participating when it is switched
+    off.
+
+    The ``config`` field's annotation is a Union of the concrete config, the shared base and
+    None. The concrete one is identified by name rather than by position: relying on the first
+    argument would break the moment the Union's order changed, and would do so silently by
+    picking the base class, whose ``enabled`` default is the very value being corrected.
+    """
+    config_field = getattr(cls, "model_fields", {}).get("config")
+    if config_field is None:
+        return None
+    annotation = getattr(config_field, "annotation", None)
+    for arg in getattr(annotation, "__args__", None) or ():
+        if (
+            isinstance(arg, type)
+            and arg.__name__.endswith("ScannerConfig")
+            and arg.__name__ != "ScannerPluginConfigBase"
+        ):
+            return arg
+    return None
+
+
 def _scanner_name_from_class(cls) -> str:
     """Derive a scanner's name from its class name.
 
@@ -1020,12 +1057,36 @@ def _describe_scanner(cls, context, default_config) -> Dict[str, Any]:
         # a scanner present with dependencies_satisfied None reads as "could not
         # determine", which is the true one.
         ASH_LOGGER.debug(f"Could not instantiate {cls.__name__} to describe it: {exc}")
+
+        # The instance is gone, but the class still declares its config, and that declaration
+        # is the only remaining source for `enabled`. Skipping this leaves the optimistic
+        # default in place and reports a disabled scanner as enabled.
+        declared_cls = _declared_config_class(cls)
+        if declared_cls is not None:
+            try:
+                declared = declared_cls()
+            except Exception:
+                # A config class that cannot be built either tells us nothing, so the
+                # optimistic default stands rather than being replaced by a guess.
+                return entry
+            entry["enabled"] = getattr(declared, "enabled", True)
         return entry
 
     config = getattr(plugin, "config", None)
     raw_name = getattr(config, "name", None)
     if raw_name:
         entry["name"] = str(raw_name).replace("-", "_")
+
+    # Resolved whether or not the config carried a name.
+    #
+    # This used to sit inside the `if raw_name:` branch, which meant a config declaring
+    # `enabled = False` was reported as enabled whenever its `name` was absent -- the entry
+    # kept the optimistic default from above. That is a wrong answer in the dangerous
+    # direction: it tells a caller a scanner is on when its own config says it is off.
+    #
+    # The name is still taken from the class in that case (set when the entry was built), so
+    # the config lookup below has a key to search on either way.
+    if config is not None:
         enabled_default = getattr(config, "enabled", True)
         found_cfg = default_config.get_plugin_config("scanner", entry["name"])
         if found_cfg is None:
@@ -1187,9 +1248,7 @@ def mcp_validate_config(
         return {"field": "", "message": raw, "type": "validation_error"}
 
     if config_content is not None:
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".yaml", delete=False
-        ) as tmp:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as tmp:
             tmp.write(config_content)
             tmp_path = Path(tmp.name)
         try:
@@ -1256,7 +1315,9 @@ def mcp_suggest_suppression(
     from automated_security_helper.models.core import AshSuppression
 
     if results_path is None:
-        results_file = Path.cwd() / ".ash" / "ash_output" / "ash_aggregated_results.json"
+        results_file = (
+            Path.cwd() / ".ash" / "ash_output" / "ash_aggregated_results.json"
+        )
     else:
         results_file = Path(results_path)
 
@@ -1283,8 +1344,13 @@ def mcp_suggest_suppression(
             "error": f"Finding not found: {finding_id}",
         }
 
-    expiration_date = expiration or (date.today() + timedelta(days=90)).strftime("%Y-%m-%d")
-    reason = justification or "Suppressed via ASH MCP suggest_suppression tool — review before merging"
+    expiration_date = expiration or (date.today() + timedelta(days=90)).strftime(
+        "%Y-%m-%d"
+    )
+    reason = (
+        justification
+        or "Suppressed via ASH MCP suggest_suppression tool — review before merging"
+    )
 
     suppression = AshSuppression(
         path=finding.file_path or "",
@@ -1296,7 +1362,9 @@ def mcp_suggest_suppression(
     )
 
     suppression_dict = suppression.model_dump(exclude_none=True)
-    suppression_yaml = _yaml.safe_dump(suppression_dict, default_flow_style=False, sort_keys=True)
+    suppression_yaml = _yaml.safe_dump(
+        suppression_dict, default_flow_style=False, sort_keys=True
+    )
 
     return {
         "success": True,
@@ -1318,7 +1386,10 @@ def mcp_list_profiles() -> Dict[str, Any]:
 
     registry = get_profile_registry()
     profiles = sorted(
-        ({"name": name, "path_sha256": entry.path_sha256} for name, entry in registry.items()),
+        (
+            {"name": name, "path_sha256": entry.path_sha256}
+            for name, entry in registry.items()
+        ),
         key=lambda e: e["name"],
     )
     return {"profiles": profiles, "count": len(profiles)}
@@ -1424,18 +1495,14 @@ def mcp_select_profile(
         }
 
     if patch_ops is not None:
-        mcp_cfg: Optional[AshMcpConfig] = getattr(
-            base_cfg.global_settings, "mcp", None
-        )
+        mcp_cfg: Optional[AshMcpConfig] = getattr(base_cfg.global_settings, "mcp", None)
         allowlist = (
             mcp_cfg.runtime_overrides
             if mcp_cfg is not None
             else RuntimeOverridesConfig()
         )
         try:
-            patched = apply_runtime_patch(
-                base_cfg, patch_ops, allowlist=allowlist
-            )
+            patched = apply_runtime_patch(base_cfg, patch_ops, allowlist=allowlist)
         except RuntimePatchDeniedError as exc:
             return {"success": False, "error": f"patch denied: {exc}"}
         bind_session_config(

@@ -1108,6 +1108,21 @@ class TestWorkspaceOutput:
         subtraction of the first module read from a later one"; it does not pin
         "the first read happens before all the work". A hardcoded 42.5 also
         passes, for the same reason any exact-value assertion does.
+        WHY THE PATCH TARGETS THE NAME AND NOT THE ATTRIBUTE
+
+        The stand-in replaces the ``time`` *name* in ``execution``'s namespace
+        rather than the ``monotonic`` attribute on the module that name refers
+        to. ``execution.time`` IS the stdlib ``time`` module, so patching
+        ``execution.time.monotonic`` would mutate it process-wide and every
+        unrelated caller of ``time.monotonic()`` would land in ``calls``. That
+        defeats the control instead of tripping it: a foreign call consumes the
+        ``100.0``, so ``execute_workspace`` reads ``142.5`` for both of its own
+        stamps and records a difference of ``0.0``. The failure surfaces only
+        once enough other tests have run to warm the plugin caches, which reads
+        as flake rather than as an order-dependent patch. Keep the patch narrow:
+        ``execution`` only ever uses ``time.monotonic``, so a stand-in exposing
+        that one name is sufficient, and ``calls`` then records solely the reads
+        made by the code under test.
         """
         calls: List[tuple[str, float]] = []
 
