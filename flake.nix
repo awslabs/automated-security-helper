@@ -101,7 +101,11 @@
         in {
           default = pkgs.mkShell {
             name = "ash-scanners";
-            packages = scannersFor system;
+            # curl is not a scanner; the shellHook below uses it to seed the semgrep and
+            # opengrep rule caches. It is listed explicitly rather than assumed present,
+            # because a shell that silently depends on a host binary is the same class of
+            # problem this mode exists to fix.
+            packages = scannersFor system ++ [ pkgs.curl ];
 
             # ASH itself is intentionally NOT in this shell. The shell's job is to supply
             # the external scanner binaries; ASH comes from the ambient environment (uv,
@@ -136,27 +140,53 @@
               # their versions, and ASH imports cleanly.
               unset PYTHONPATH
 
-              # grype ships no vulnerability data. It downloads a database on first use,
-              # and ASH_OFFLINE above disables that download -- correctly, since the same
-              # flag is what stops scanners installing tools that shadow the pinned ones.
-              # The result is that grype starts, finds no database, and reports ERROR with
-              # "failed to load vulnerability db: database does not exist". Measured: grype
-              # went from MISSING in local mode to ERROR here, so the binary is fine and
-              # only the data is absent.
+              # Three scanners need DATA that no flake can pin, and ASH_OFFLINE above stops
+              # them fetching it themselves. The flag is still right -- it is what keeps
+              # scanners from installing tools that shadow the pinned ones -- but it makes
+              # seeding these caches this shell's job.
               #
-              # The container image handles this by running `grype db update` at image
-              # build time and pointing GRYPE_DB_CACHE_DIR at the result; a shell has no
-              # build step, so the equivalent is to seed on first entry. This database
-              # cannot live in the flake: it changes daily and is far too large to pin,
-              # which is why it is fetched rather than derived.
+              # Leaving them unseeded does not produce a clean failure. grype starts, finds
+              # no database and reports ERROR. semgrep and opengrep refuse to construct at
+              # all ("running in offline mode but no rule cache was found"), so they vanish
+              # from the report entirely rather than appearing as MISSING -- which is worse,
+              # because a reader counting scanner rows sees eight and has no row to ask
+              # about. That was measured, not predicted: seeding only grype left both
+              # absent.
+              #
+              # This mirrors what the container image does at build time (see the OFFLINE
+              # block in the Dockerfile): update the grype database, then fetch each
+              # configured semgrep ruleset and share it with opengrep, which reads the same
+              # rule format. A shell has no build step, so it seeds on first entry instead.
+              # None of this can live in the flake: the vulnerability database changes daily
+              # and the rulesets are fetched from a service, so pinning either would mean
+              # shipping stale security data, which is worse than fetching it.
               export GRYPE_DB_CACHE_DIR="''${GRYPE_DB_CACHE_DIR:-$HOME/.cache/ash/grype-db}"
+              export SEMGREP_RULES_CACHE_DIR="''${SEMGREP_RULES_CACHE_DIR:-$HOME/.cache/ash/semgrep-rules}"
+              export OPENGREP_RULES_CACHE_DIR="''${OPENGREP_RULES_CACHE_DIR:-$HOME/.cache/ash/opengrep-rules}"
+              mkdir -p "$GRYPE_DB_CACHE_DIR" "$SEMGREP_RULES_CACHE_DIR" "$OPENGREP_RULES_CACHE_DIR"
+
+              # Announced rather than silent: these are network fetches inside what is
+              # otherwise a hermetic shell, and a reader deserves to know they happened.
               if [ -z "$(ls -A "$GRYPE_DB_CACHE_DIR" 2>/dev/null)" ]; then
-                # Announced rather than silent: this is a network fetch inside what is
-                # otherwise a hermetic shell, and a reader deserves to know it happened.
                 echo "ash: seeding grype vulnerability database (one time, needs network)" >&2
-                mkdir -p "$GRYPE_DB_CACHE_DIR"
                 grype db update >/dev/null 2>&1 \
                   || echo "ash: grype database download FAILED; grype will report ERROR" >&2
+              fi
+
+              if [ -z "$(ls -A "$SEMGREP_RULES_CACHE_DIR" 2>/dev/null)" ]; then
+                echo "ash: seeding semgrep and opengrep rulesets (one time, needs network)" >&2
+                # Defaults to p/ci, matching ScanOptions.offline_semgrep_rulesets, so the
+                # shell and a default scan agree on which rules are present.
+                for ruleset in ''${ASH_OFFLINE_SEMGREP_RULESETS:-p/ci}; do
+                  outfile="$SEMGREP_RULES_CACHE_DIR/$(basename "$ruleset").yml"
+                  if curl -sSf "https://semgrep.dev/c/$ruleset" -o "$outfile"; then
+                    # opengrep is a semgrep fork and reads the same rule format, which is
+                    # why the container copies rather than fetching twice.
+                    cp "$outfile" "$OPENGREP_RULES_CACHE_DIR/$(basename "$ruleset").yml"
+                  else
+                    echo "ash: ruleset $ruleset download FAILED; semgrep and opengrep will not run" >&2
+                  fi
+                done
               fi
             '';
           };
