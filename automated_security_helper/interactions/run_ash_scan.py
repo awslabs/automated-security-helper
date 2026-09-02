@@ -24,6 +24,9 @@ from automated_security_helper.core.enums import ExecutionPhase
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.core.enums import ExecutionStrategy
 from automated_security_helper.core.enums import RunMode
+from automated_security_helper.interactions.run_ash_nix import (
+    run_ash_nix,
+)
 from automated_security_helper.interactions.run_ash_container import (
     run_ash_container,
 )
@@ -318,6 +321,40 @@ def run_ash_scan(
                     sys.exit(1)
         else:
             logger.error(f"Results file not found at {output_file}")
+            sys.exit(1)
+
+    elif mode == RunMode.nix:
+        # Nix mode is an outer wrapper like container mode: re-enter ASH inside a shell
+        # that supplies the pinned scanners, and let that inner run be an ordinary local
+        # scan. Unlike container mode there is no path translation, because a development
+        # shell changes PATH and not the filesystem.
+        nix_result = run_ash_nix(debug=debug)
+
+        if nix_result.returncode != 0:
+            # Logged rather than fatal. A scan that finds something exits non-zero by
+            # design, so treating any non-zero status as a failure here would turn a
+            # working scan into an error. Whether findings should fail the run is decided
+            # further down from the loaded results, exactly as in container mode.
+            logger.debug(f"Nix shell exited with code {nix_result.returncode}")
+
+        # The inner scan wrote its results to the same output directory this process was
+        # given; no mount mapping is involved.
+        output_file = Path(output_dir).joinpath("ash_aggregated_results.json")
+        if output_file.exists():
+            with open(output_file, mode="r", encoding="utf-8") as f:
+                content = f.read()
+                try:
+                    results = AshAggregatedResults.model_validate_json(content)
+                except Exception as e:
+                    logger.error(f"Failed to parse results file: {e}")
+                    sys.exit(1)
+        else:
+            # No results file means the inner scan did not get far enough to write one, so
+            # the Nix shell's own exit code is the only diagnostic available.
+            logger.error(
+                f"Results file not found at {output_file}. The Nix shell exited with "
+                f"code {nix_result.returncode}."
+            )
             sys.exit(1)
 
     else:

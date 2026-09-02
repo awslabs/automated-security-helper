@@ -116,6 +116,48 @@
               # own and shadowing them. Accepted values are YES, TRUE or 1
               # (core/constants.py:is_offline_mode).
               export ASH_OFFLINE=YES
+
+              # MUST be unset, and this is not a tidiness measure.
+              #
+              # Four of the scanners here (bandit, checkov, detect-secrets, semgrep) are
+              # Python packages, so nixpkgs' Python setup hook appends their entire
+              # dependency closure's site-packages to PYTHONPATH -- roughly 170 store
+              # paths, including its own pydantic and pydantic-core built against
+              # python3.14. ASH runs from its own environment on a different interpreter,
+              # and inherits that PYTHONPATH, so those take precedence over the ones ASH
+              # installed. The extension modules are ABI-incompatible across interpreter
+              # versions, and the inner scan dies before it can start with:
+              #
+              #   ModuleNotFoundError: No module named 'pydantic_core._pydantic_core'
+              #
+              # Unsetting it is safe because nixpkgs wraps Python applications with their
+              # import paths baked into the executable rather than read from the
+              # environment. Measured after unsetting: all four scanners still report
+              # their versions, and ASH imports cleanly.
+              unset PYTHONPATH
+
+              # grype ships no vulnerability data. It downloads a database on first use,
+              # and ASH_OFFLINE above disables that download -- correctly, since the same
+              # flag is what stops scanners installing tools that shadow the pinned ones.
+              # The result is that grype starts, finds no database, and reports ERROR with
+              # "failed to load vulnerability db: database does not exist". Measured: grype
+              # went from MISSING in local mode to ERROR here, so the binary is fine and
+              # only the data is absent.
+              #
+              # The container image handles this by running `grype db update` at image
+              # build time and pointing GRYPE_DB_CACHE_DIR at the result; a shell has no
+              # build step, so the equivalent is to seed on first entry. This database
+              # cannot live in the flake: it changes daily and is far too large to pin,
+              # which is why it is fetched rather than derived.
+              export GRYPE_DB_CACHE_DIR="''${GRYPE_DB_CACHE_DIR:-$HOME/.cache/ash/grype-db}"
+              if [ -z "$(ls -A "$GRYPE_DB_CACHE_DIR" 2>/dev/null)" ]; then
+                # Announced rather than silent: this is a network fetch inside what is
+                # otherwise a hermetic shell, and a reader deserves to know it happened.
+                echo "ash: seeding grype vulnerability database (one time, needs network)" >&2
+                mkdir -p "$GRYPE_DB_CACHE_DIR"
+                grype db update >/dev/null 2>&1 \
+                  || echo "ash: grype database download FAILED; grype will report ERROR" >&2
+              fi
             '';
           };
         });

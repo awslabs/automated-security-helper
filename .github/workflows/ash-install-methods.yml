@@ -27,8 +27,26 @@ jobs:
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-14, windows-latest]
         python-version: ["3.10", "3.11", "3.12", "3.13"]
-        method: [pip, pipx, uvx, homebrew, pre-commit, podman, finch, mcp]
+        method: [pip, pipx, uvx, homebrew, pre-commit, podman, finch, mcp, nix]
         exclude:
+          # Native Windows Nix cannot supply the toolchain: it has no fixed-output
+          # derivations, which is the mechanism by which the scanners are fetched, and no
+          # build sandbox. Windows users go through WSL2, covered by the Linux entries.
+          - { os: windows-latest, method: nix }
+          # Nix supplies the scanners itself, so the host Python version does not change
+          # what is under test here. One version per OS is enough.
+          - { os: ubuntu-latest, python-version: "3.10", method: nix }
+          - { os: ubuntu-latest, python-version: "3.11", method: nix }
+          - { os: ubuntu-latest, python-version: "3.13", method: nix }
+          - { os: ubuntu-24.04-arm, python-version: "3.10", method: nix }
+          - { os: ubuntu-24.04-arm, python-version: "3.11", method: nix }
+          - { os: ubuntu-24.04-arm, python-version: "3.13", method: nix }
+          - { os: macos-latest, python-version: "3.10", method: nix }
+          - { os: macos-latest, python-version: "3.11", method: nix }
+          - { os: macos-latest, python-version: "3.13", method: nix }
+          - { os: macos-14, python-version: "3.10", method: nix }
+          - { os: macos-14, python-version: "3.11", method: nix }
+          - { os: macos-14, python-version: "3.13", method: nix }
           # Homebrew not available on Windows
           - { os: windows-latest, method: homebrew }
           # Podman/Finch not available on Windows
@@ -107,3 +125,11 @@ jobs:
         uses: ./.github/actions/validate-container
         with:
           runtime: ${{ matrix.method }}
+
+      # === nix: pinned toolchain validation ===
+      # Asserts no flake-supplied scanner reports MISSING. A Nix job that passes while
+      # silently providing no tools is the exact failure this mode exists to prevent, so
+      # the assertion reads the per-scanner status table rather than the finding total.
+      - name: "Validate Nix mode"
+        if: matrix.method == 'nix'
+        uses: ./.github/actions/validate-nix
