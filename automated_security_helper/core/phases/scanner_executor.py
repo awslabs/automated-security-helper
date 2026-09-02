@@ -19,6 +19,26 @@ from automated_security_helper.utils.sarif_utils import (
 _ResultsFn = Callable[[ScanResultsContainer, AshAggregatedResults], AshAggregatedResults]
 
 
+def _non_negative_int_attr(obj: Any, name: str) -> int:
+    """Read an integer counter off a scanner plugin, defaulting to 0 for anything else.
+
+    A plain ``getattr(obj, name, 0)`` is not safe here. Scanner plugins are arbitrary objects,
+    and a ``MagicMock`` auto-creates any attribute asked of it -- so the default never applies
+    and a mock lands in an int field, which is not validated on assignment. The first
+    ``> 0`` comparison downstream then raises
+    ``TypeError: '>' not supported between instances of 'MagicMock' and 'int'``.
+
+    Coercing at this boundary keeps the trust boundary where the untrusted value enters,
+    rather than teaching every consumer to be defensive about a field typed ``int``.
+    """
+    value = getattr(obj, name, 0)
+    # bool is an int subclass; excluded because a True/False counter is a caller bug and
+    # silently reading it as 1/0 would hide that.
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return value
+    return 0
+
+
 class ScannerExecutor:
     """Runs scanner tasks in parallel or sequential mode.
 
@@ -225,6 +245,21 @@ class ScannerExecutor:
                                 container.finding_count = len(raw_results["findings"])
 
                     container.exit_code = getattr(scanner_plugin, "exit_code", 0)
+
+                    # Carry per-target outcome counts across, following the exit_code pattern
+                    # above. This is what lets determine_status distinguish "scanned and found
+                    # nothing" from "failed on everything it tried" -- without it, status can
+                    # only be derived from findings and a total failure reports PASSED.
+                    #
+                    # Scanners that do not track per-target outcomes report 0/0 and are
+                    # unaffected, so this is additive for every existing scanner.
+                    container.targets_attempted = _non_negative_int_attr(
+                        scanner_plugin, "targets_attempted"
+                    )
+                    container.targets_failed = _non_negative_int_attr(
+                        scanner_plugin, "targets_failed"
+                    )
+
                     if container.status != ScannerStatus.ERROR:
                         container.status = container.determine_status(
                             scanner_config.options.severity_threshold
