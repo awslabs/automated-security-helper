@@ -78,10 +78,12 @@ class LiveProgressDisplay:
         # Create a log panel for displaying log messages
         self.log_panel = RichLogPanel(max_lines=max_log_lines)
 
-        # Set up a log handler to capture logs with appropriate level based on flags
+        # Set up a log handler to capture logs with appropriate level based on flags.
+        # 15 is VERBOSE, and it is the default rather than a level `verbose` raises us
+        # to, so that flag needs no branch of its own here. Lowering this default to
+        # INFO would change what every run prints, not just verbose ones -- see
+        # tests/unit/core/test_progress.py, which pins the mapping.
         log_level = 15
-        if verbose:
-            log_level = 15  # VERBOSE level
         if debug:
             log_level = logging.DEBUG
 

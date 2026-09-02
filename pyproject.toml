@@ -25,13 +25,13 @@ dependencies = [
  "junitparser>=5.0.1,<6",
  "textual>=8.2.8,<9",
  "detect-secrets>=1.5.0,<2",
- "boto3>=1.43.78,<1.44",
+ "boto3>=1.43.80,<1.44",
  "cfn-flip>=1.3.0,<2",
  "mcp>=2.1.1,<3",
  "toml>=0.10.2,<1.0.0",
  "python-multipart>=0.0.32,<0.1",
  # Transitive via pyjwt[crypto] <- mcp[crypto]; pinned to patch GHSA-g6cj-pr64-35w5
- "cryptography>=50.0.0,<51",
+ "cryptography>=50.0.1,<51",
  "uvicorn>=0.52.4,<1",
  "jsonpatch>=1.33,<2",
 ]

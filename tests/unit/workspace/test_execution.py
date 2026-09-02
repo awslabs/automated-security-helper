@@ -18,6 +18,7 @@ import subprocess  # nosec B404 -- builds throwaway git repositories for the cha
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Dict, List
 
 import pytest
@@ -1056,6 +1057,21 @@ class TestWorkspaceOutput:
         control: if the start stamp were ever *not* the first call, or the clock
         were consulted only once, the subtraction below would be meaningless, so
         the count is asserted rather than assumed.
+
+        The stand-in replaces the ``time`` *name* in ``execution``'s namespace
+        rather than the ``monotonic`` attribute on the module that name refers
+        to. ``execution.time`` is the stdlib ``time`` module itself, so patching
+        ``execution.time.monotonic`` mutates it process-wide and every unrelated
+        caller of ``time.monotonic()`` lands in ``calls``. That defeats the
+        control instead of tripping it: a foreign call consumes the ``100.0``,
+        so ``calls[0] == 100.0`` and ``len(calls) >= 2`` still hold while
+        ``execute_workspace`` reads ``142.5`` for both of its own stamps and
+        records a difference of ``0.0``. The test then failed only once enough
+        other tests ran first to warm the plugin caches, which made it look like
+        flake rather than an order-dependent patch. Keep the patch narrow:
+        ``execution`` only ever uses ``time.monotonic``, so a stand-in exposing
+        that one name is sufficient, and ``calls`` records solely the calls made
+        by the code under test.
         """
         calls: List[float] = []
 
@@ -1065,8 +1081,8 @@ class TestWorkspaceOutput:
             return value
 
         monkeypatch.setattr(
-            "automated_security_helper.workspace.execution.time.monotonic",
-            fake_monotonic,
+            "automated_security_helper.workspace.execution.time",
+            SimpleNamespace(monotonic=fake_monotonic),
         )
         _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
         outcome = _run(tmp_path, plan)
