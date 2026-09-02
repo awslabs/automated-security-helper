@@ -2,13 +2,16 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import shlex
 import logging
+import os
 from pathlib import Path
-from typing import Annotated, Any, Literal, List
+from typing import Annotated, Any, ClassVar, Literal, List
 from pydantic import Field
 
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
+from automated_security_helper.core.constants import is_offline_mode
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
     ToolExtraArg,
@@ -16,7 +19,7 @@ from automated_security_helper.models.core import (
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
-from automated_security_helper.core.enums import ScannerToolType
+from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -25,6 +28,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     SarifReport,
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
+from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sarif_utils import attach_scanner_details
 from automated_security_helper.utils.subprocess_utils import find_executable
 
@@ -59,6 +63,13 @@ class TrivyRepoScannerConfigOptions(ScannerOptionsBase):
             description="Disable sending anonymous usage data to Aqua",
         ),
     ] = True
+    offline: Annotated[
+        bool,
+        Field(
+            description="Run in offline mode, skipping DB updates and check-update calls",
+            default_factory=is_offline_mode,
+        ),
+    ]
 
 
 class TrivyRepoScannerConfig(ScannerPluginConfigBase):
@@ -75,6 +86,13 @@ class TrivyRepoScannerConfig(ScannerPluginConfigBase):
 @ash_scanner_plugin
 class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
     """Trivy repo scanner plugin."""
+
+    offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
+
+    # Env vars layered onto the subprocess. Populated by _process_config_options
+    # when offline mode is active. Kept on the instance so concurrent scanners
+    # do not race on os.environ.
+    extra_env: Annotated[dict, Field(default_factory=dict)]
 
     def model_post_init(self, context):
         if self.config is None:
@@ -150,7 +168,35 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
                 )
             )
 
+        if self.config.options.offline:
+            for flag in (
+                "--skip-db-update",
+                "--skip-java-db-update",
+                "--offline-scan",
+                "--skip-check-update",
+            ):
+                self.args.extra_args.append(ToolExtraArg(key=flag, value=None))
+
+            from automated_security_helper.utils.offline_mode_validator import (
+                validate_trivy_offline_mode,
+            )
+
+            offline_valid, offline_messages = validate_trivy_offline_mode()
+            if not offline_valid:
+                for msg in offline_messages:
+                    self._plugin_log(msg, level=logging.WARNING)
+
+            ASH_LOGGER.info(
+                "Running Trivy in offline mode - DB updates and check-update disabled"
+            )
+
         return super()._process_config_options()
+
+    def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
+        """Abstract stub — TrivyRepoScanner overrides scan() directly; this is unreachable."""
+        raise NotImplementedError(
+            f"{self.__class__.__name__} overrides scan() directly."
+        )
 
     def scan(
         self,
@@ -202,7 +248,6 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
             )
             return False
 
-
         if not self.dependencies_satisfied:
             self._post_scan(
                 target=target,
@@ -226,9 +271,14 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
                 level=logging.VERBOSE,
             )
 
+            subprocess_env = (
+                {**os.environ, **self.extra_env} if self.extra_env else None
+            )
             self._run_subprocess(
                 command=final_args,
                 results_dir=target_results_dir,
+                env=subprocess_env,
+                timeout=self._effective_scan_timeout(),
             )
 
             # SARIF mode - parse SARIF results
@@ -262,11 +312,13 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
                     if sarif_report.runs:
                         sarif_report.runs[0].invocations = [
                             Invocation(
-                                commandLine=" ".join(final_args),
+                                commandLine=shlex.join(final_args),
                                 arguments=final_args[1:],
                                 startTimeUtc=self.start_time,
                                 endTimeUtc=self.end_time,
-                                executionSuccessful=(self.exit_code == 0 or self.exit_code == 1),
+                                executionSuccessful=(
+                                    self.exit_code == 0 or self.exit_code == 1
+                                ),
                                 exitCode=self.exit_code,
                                 exitCodeDescription="\n".join(self.errors),
                                 workingDirectory=ArtifactLocation(

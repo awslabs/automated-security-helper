@@ -149,6 +149,12 @@ ash --mode container --oci-runner finch
 
 ### Custom Container Images
 
+ASH does not publish a container image to a public registry. Building it yourself and
+hosting it in your own registry is the recommended posture, so that the provenance and
+patching cadence of the image that reads your source code belong to you. See
+[Building your own container image](building-your-own-image.md) for the reasoning, the
+rebuild cadence it commits you to, and offline builds.
+
 ```bash
 # Specify a custom container image
 export ASH_IMAGE_NAME="my-registry/ash:custom"
@@ -176,10 +182,10 @@ ash --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reaso
 
 ```bash
 # Add a suppression rule
-ash --config-overrides 'global_settings.suppressions+=[{"rule_id": "RULE-123", "file_path": "src/example.py", "reason": "False positive"}]'
+ash --config-overrides 'global_settings.suppressions+=[{"rule_id": "RULE-123", "path": "src/example.py", "reason": "False positive"}]'
 
 # Add a suppression with line range and expiration
-ash --config-overrides 'global_settings.suppressions+=[{"rule_id": "RULE-456", "file_path": "src/*.js", "line_start": 10, "line_end": 15, "reason": "Known issue", "expiration": "2025-12-31"}]'
+ash --config-overrides 'global_settings.suppressions+=[{"rule_id": "RULE-456", "path": "src/*.js", "line_start": 10, "line_end": 15, "reason": "Known issue", "expiration": "2025-12-31"}]'
 ```
 
 ### Inline code suppressions
@@ -255,7 +261,7 @@ print(f"Found {results.summary_stats.total_findings} findings")
 
 ## CI/CD Integration
 
-> **Tip**: The examples below use pinned versions (`@v3.5.9`) for reproducibility. You can also use the `v3` floating tag (`@v3`) to always get the latest stable v3.x release, though pinned versions are recommended for CI/CD.
+> **Tip**: The examples below use pinned versions (`@v3.7.0`) for reproducibility. You can also use the `v3` floating tag (`@v3`) to always get the latest stable v3.x release, though pinned versions are recommended for CI/CD.
 
 ### GitHub Actions
 
@@ -278,7 +284,7 @@ jobs:
         with:
           python-version: '3.10'
       - name: Install ASH
-        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.5.9
+        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
       - name: Run ASH scan
         run: ash --mode local
       - name: Upload scan results
@@ -294,7 +300,7 @@ jobs:
 ash-scan:
   image: python:3.10
   script:
-    - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.5.9
+    - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
     - ash --mode local
   artifacts:
     paths:

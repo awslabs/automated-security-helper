@@ -6,8 +6,7 @@ import shutil
 from pathlib import Path
 from typing import Annotated, Any, Dict, List, Optional
 
-import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
@@ -53,6 +52,21 @@ class ASHScanOrchestrator(BaseModel):
     ] = None
     config: Annotated[
         AshConfig | None, Field(description="The resolved ASH configuration")
+    ] = None
+    resolved_config: Annotated[
+        AshConfig | None,
+        Field(
+            description=(
+                "A configuration the caller has already resolved and merged. When "
+                "set, initialize() adopts it verbatim instead of resolving one of "
+                "its own, and leaves it as the value of `config`. Because "
+                "resolution is skipped entirely, the caller must have applied any "
+                "config_overrides itself before building this config: they cannot "
+                "be supplied alongside it (see _reject_conflicting_config_inputs) "
+                "and nothing here will apply them. A caller that resolves without "
+                "overrides and then passes the result will silently drop them."
+            )
+        ),
     ] = None
 
     strategy: Annotated[
@@ -153,18 +167,81 @@ class ASHScanOrchestrator(BaseModel):
         ),
     ] = True
 
+    # Sentinel: True after initialize() has run successfully
+    _initialized: bool = False
+
+    @model_validator(mode="after")
+    def _reject_conflicting_config_inputs(self) -> "ASHScanOrchestrator":
+        """Refuse a pre-resolved config alongside the inputs to resolution.
+
+        `resolved_config` says resolution already happened; `config_path` and
+        `config_overrides` say how to perform it. Accepting both would mean
+        honouring one and dropping the other, which is the failure
+        `resolved_config` exists to fix — so refuse instead of picking a winner.
+        Empty values do not conflict: callers routinely pass `... or []`.
+
+        The consequence for the caller is that they own the overrides. Nothing
+        downstream of this point applies them, so a caller that resolves without
+        them and hands the result over drops them silently. The error below says
+        so, because whoever hits it is exactly who needs to know.
+        """
+        if self.resolved_config is None:
+            return self
+        conflicting = [
+            name
+            for name, value in (
+                ("config_path", self.config_path),
+                ("config_overrides", self.config_overrides),
+            )
+            if value
+        ]
+        if conflicting:
+            supplied = " and ".join(conflicting)
+            raise ValueError(
+                f"resolved_config cannot be combined with {supplied}. A resolved "
+                f"config means resolution has already happened, so {supplied} "
+                "would have no effect. Apply them yourself before building the "
+                "config you pass as resolved_config, because nothing else will, "
+                "or drop resolved_config and let the orchestrator resolve."
+            )
+        return self
+
     def model_post_init(self, context):
-        """Post initialization configuration."""
+        """Post initialization — data-only; no filesystem I/O."""
         super().model_post_init(context)
+        # Coerce source_dir / output_dir to Path so callers never get str
+        if self.source_dir is None:
+            self.source_dir = Path.cwd()
+        elif not isinstance(self.source_dir, Path):
+            self.source_dir = Path(self.source_dir)
+
+        if self.output_dir is None:
+            self.output_dir = self.source_dir.joinpath(".ash", "ash_output")
+        elif not isinstance(self.output_dir, Path):
+            self.output_dir = Path(self.output_dir)
+
+    def initialize(self) -> None:
+        """Perform all filesystem I/O and engine setup.
+
+        Idempotent: subsequent calls are no-ops once _initialized is True.
+        Call this explicitly, or use the .create() factory which calls it for you.
+        """
+        if self._initialized:
+            return
+
         ASH_LOGGER.info(f"Initializing ASH v{get_ash_version()}")
 
-        self.config = resolve_config(
-            config_path=self.config_path,
-            source_dir=self.source_dir,
-            config_overrides=self.config_overrides
-            if hasattr(self, "config_overrides")
-            else [],
-        )
+        if self.resolved_config is not None:
+            ASH_LOGGER.verbose(
+                "Using the configuration supplied by the caller; skipping resolution"
+            )
+            self.config = self.resolved_config
+        else:
+            self.config = resolve_config(
+                config_path=self.config_path,
+                source_dir=self.source_dir,
+                config_overrides=self.config_overrides or [],
+            )
 
         # Surface config resolution warnings prominently
         if self.config._resolution_warnings:
@@ -172,21 +249,6 @@ class ASHScanOrchestrator(BaseModel):
                 ASH_LOGGER.warning(f"⚠️  CONFIG WARNING: {warning}")
 
         ASH_LOGGER.verbose("Setting up working directories")
-        if self.source_dir is None:
-            ASH_LOGGER.warning(
-                "No explicit source directory provided, using current working directory"
-            )
-            self.source_dir = Path.cwd()
-        elif not isinstance(self.source_dir, Path):
-            self.source_dir = Path(self.source_dir)
-
-        if self.output_dir is None:
-            ASH_LOGGER.verbose(
-                "No explicit output directory provided, using '.ash/ash_output' within the source directory."
-            )
-            self.output_dir = self.source_dir.joinpath(".ash", "ash_output")
-        elif not isinstance(self.output_dir, Path):
-            self.output_dir = Path(self.output_dir)
 
         self.ensure_directories()
 
@@ -214,7 +276,7 @@ class ASHScanOrchestrator(BaseModel):
                         f"Permission denied when trying to remove {old_file}: {str(e)}"
                     )
                     continue
-            exec_engine_params = {}
+            exec_engine_params: Dict[str, Any] = {}
         else:
             asharp_model = AshAggregatedResults.model_validate_json(
                 Path(self.existing_results_path).read_text()
@@ -235,17 +297,79 @@ class ASHScanOrchestrator(BaseModel):
             show_progress=self.show_progress,
             show_summary=self.show_summary,
             global_ignore_paths=self.config.global_settings.ignore_paths,
-            color_system=self.color_system,
+            color_system=self.color_system,  # type: ignore[arg-type]
             verbose=self.verbose,
             debug=self.debug,
             python_based_plugins_only=self.python_based_plugins_only,
-            ash_plugin_modules=self.ash_plugin_modules,  # Pass the ash_plugin_modules to the execution engine
-            output_formats=self.output_formats,
-            **exec_engine_params,
+            ash_plugin_modules=self.ash_plugin_modules,
+            output_formats=[f.value for f in self.output_formats] or None,
+            asharp_model=exec_engine_params.get("asharp_model"),
         )
 
+        self._apply_metadata()
+
+        self._initialized = True
         ASH_LOGGER.info("ASH Orchestrator and ScanExecutionEngine initialized")
-        return super().model_post_init(context)
+
+    def _apply_metadata(self) -> None:
+        """Copy ``self.metadata`` onto the results model's own metadata.
+
+        ``metadata`` has been a declared parameter of this class for its whole
+        life, documented as "Additional metadata for the scan", and read nowhere.
+        Workspace mode is the first caller that needs it, and what it needs it for
+        is the thing that makes the PER_PROJECT reporter ruling honest.
+
+        Every project in a workspace is scanned as a complete single-project run,
+        so its model's ``workspace`` is ``None`` -- a project does not know it is
+        in a workspace. Without something on the metadata, its reports cannot say
+        which project they describe. That mattered concretely rather than
+        aesthetically: ``metadata.project_name`` is hardcoded to ``"ASH"`` in
+        ``AshAggregatedResults``'s default and never derived from
+        ``AshConfig.project_name``, so every project's ``html``, ``markdown`` and
+        ``text`` report printed the same project name; and the ``s3`` reporter
+        derives its object key from a timestamp with one shared prefix, so two
+        projects starting in the same instant overwrote each other's report.
+
+        Applied here, at the end of ``initialize``, because the report phase runs
+        inside ``execute_scan`` -- setting it any later would be after the reports
+        that need it have been written.
+
+        ``project_name`` is set through validation rather than by raw assignment,
+        so an empty or whitespace value is refused and the default kept. Assigning
+        past a pydantic validator produces a model that fails to serialise much
+        later, a long way from the assignment.
+        """
+        if not self.metadata or self.execution_engine is None:
+            return
+        model = getattr(self.execution_engine, "_asharp_model", None)
+        if model is None or model.metadata is None:  # pragma: no cover - defensive
+            return
+
+        for key, value in self.metadata.items():
+            if key == "project_name":
+                if isinstance(value, str) and value.strip():
+                    model.metadata.project_name = value.strip()
+                else:
+                    ASH_LOGGER.warning(
+                        f"Ignoring unusable project_name {value!r} in scan metadata; "
+                        f"keeping {model.metadata.project_name!r}"
+                    )
+                continue
+            # ReportMetadata allows extras, so anything else is carried through
+            # verbatim for a reporter to read.
+            setattr(model.metadata, key, value)
+
+    @classmethod
+    def create(cls, **kwargs: Any) -> "ASHScanOrchestrator":
+        """Construct and fully initialize an orchestrator.
+
+        Equivalent to ASHScanOrchestrator(**kwargs) followed by .initialize().
+        Use this in production code; use the bare constructor in tests that
+        need an uninitialized instance.
+        """
+        instance = cls(**kwargs)
+        instance.initialize()
+        return instance
 
     def ensure_directories(self):
         """Ensure required directories exist in a thread-safe manner.
@@ -278,68 +402,6 @@ class ASHScanOrchestrator(BaseModel):
             ASH_LOGGER.error(f"Error ensuring directories: {str(e)}")
             raise ASHValidationError(f"Failed to ensure directories: {str(e)}")
 
-    def _load_config(self) -> AshConfig:
-        """Load configuration from file or return default configuration."""
-        try:
-            config = get_default_config()
-            if not self.config_path:
-                ASH_LOGGER.verbose(
-                    "No configuration file provided, checking for default paths"
-                )
-                for item in ASH_CONFIG_FILE_NAMES:
-                    config_path = self.source_dir.joinpath(item)
-                    if config_path.exists():
-                        self.config_path = config_path
-                        ASH_LOGGER.verbose(
-                            f"Found configuration file at: {config_path.as_posix()}"
-                        )
-                        break
-                ASH_LOGGER.verbose(
-                    "Configuration file not found or provided, using default config"
-                )
-
-            # We *always* want to evaluate this after the inverse block above runs, in
-            # case self.config_path is resolved from a default location.
-            # Do not use `else:` here!
-            if self.config_path:
-                ASH_LOGGER.debug(
-                    f"Loading configuration from {self.config_path.as_posix()}"
-                )
-                try:
-                    with open(self.config_path, "r") as f:
-                        if str(self.config_path).endswith(".json"):
-                            config_data = json.load(f)
-                        else:
-                            config_data = yaml.safe_load(f)
-
-                    if not isinstance(config_data, dict):
-                        raise ValueError("Configuration must be a dictionary")
-
-                    ASH_LOGGER.debug("Transforming file config")
-                    config = AshConfig(**config_data)
-                    ASH_LOGGER.debug(f"Loaded config from file: {config}")
-                except (IOError, yaml.YAMLError, json.JSONDecodeError) as e:
-                    ASH_LOGGER.error(f"Failed to load configuration file: {str(e)}")
-                    raise ASHConfigValidationError(
-                        f"Failed to load configuration: {str(e)}"
-                    )
-                except ValidationError as e:
-                    ASH_LOGGER.error(f"Configuration validation failed: {str(e)}")
-                    raise ASHConfigValidationError(
-                        f"Configuration validation failed: {str(e)}"
-                    )
-
-            # Use CLI-specified formats if provided
-            if self.output_formats:
-                config.output_formats = self.output_formats
-                ASH_LOGGER.debug(
-                    f"Using CLI-specified output formats: {self.output_formats}"
-                )
-
-            return config
-        except Exception as e:
-            raise e
-
     def execute_scan(
         self, phases: List[ExecutionPhaseType] | None = None
     ) -> AshAggregatedResults:
@@ -361,26 +423,6 @@ class ASHScanOrchestrator(BaseModel):
         ASH_LOGGER.verbose(f"Executing phases: {phases}")
 
         try:
-            # Setup execution engine if not already configured
-            if self.execution_engine is None:
-                ASH_LOGGER.debug("Creating execution engine")
-                self.execution_engine = ScanExecutionEngine(
-                    context=PluginContext(
-                        source_dir=self.source_dir,
-                        output_dir=self.output_dir,
-                        work_dir=self.output_dir.joinpath(ASH_WORK_DIR_NAME),
-                        config=self.config,
-                        ignore_suppressions=self.ignore_suppressions,
-                    ),
-                    strategy=self.strategy,
-                    enabled_scanners=self.enabled_scanners,
-                    show_progress=self.show_progress,
-                    global_ignore_paths=self.config.global_settings.ignore_paths,
-                    color_system=self.color_system,
-                    verbose=self.verbose,
-                    debug=self.debug,
-                )
-
             # If existing results path is provided, load the model from it
             if self.existing_results_path and self.existing_results_path.exists():
                 ASH_LOGGER.info(
@@ -398,7 +440,9 @@ class ASHScanOrchestrator(BaseModel):
                     asharp_model = AshAggregatedResults.from_json(model_data)
 
                     # Update the execution engine's model
-                    if hasattr(self.execution_engine, "_asharp_model"):
+                    if self.execution_engine is not None and hasattr(
+                        self.execution_engine, "_asharp_model"
+                    ):
                         self.execution_engine._asharp_model = asharp_model
 
                     # When using existing results, only run the report phase
@@ -427,8 +471,8 @@ class ASHScanOrchestrator(BaseModel):
             elif "convert" in phases or "scan" in phases:
                 ASH_LOGGER.info("Identifying non-ignored files to include in scans")
                 self.source_scan_set = scan_set(
-                    source=self.source_dir,
-                    output=self.output_dir,
+                    source=str(self.source_dir),
+                    output=str(self.output_dir),
                     debug=self.debug,
                 )
                 ASH_LOGGER.info(
@@ -437,6 +481,7 @@ class ASHScanOrchestrator(BaseModel):
 
             try:
                 # Execute all phases
+                assert self.execution_engine is not None
                 asharp_model_results = self.execution_engine.execute_phases(
                     phases=phases,
                 )
@@ -447,7 +492,7 @@ class ASHScanOrchestrator(BaseModel):
                 raise
 
             # Add config resolution warnings to validation checkpoints
-            if self.config._resolution_warnings:
+            if self.config is not None and self.config._resolution_warnings:
                 for warning in self.config._resolution_warnings:
                     asharp_model_results.validation_checkpoints.append(
                         {

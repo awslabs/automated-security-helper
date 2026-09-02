@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import re
+from threading import Lock
 from typing import TYPE_CHECKING, Any, Callable, Dict, Annotated, List, Literal
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, PrivateAttr
 
 from automated_security_helper.plugins.events import AshEventType
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -69,7 +70,12 @@ class AshPluginManager(BaseModel):
 
     plugin_library: Annotated[AshPluginLibrary, Field()] = AshPluginLibrary()
     context: Any = None
-    _resolved_plugins: dict = {}
+    _resolved_plugins: dict = PrivateAttr(default_factory=dict)
+    #: Guards the shared event-handler lists. This manager is a module-level
+    #: singleton (``plugins/__init__.py``) and workspace mode runs several
+    #: differently-configured scans against it concurrently, so subscribe and
+    #: notify cannot both touch the same list unsynchronised.
+    _event_lock: Lock = PrivateAttr(default_factory=Lock)
 
     def set_context(self, context: "PluginContext"):
         """Set the plugin context for this plugin manager.
@@ -81,13 +87,39 @@ class AshPluginManager(BaseModel):
         ASH_LOGGER.debug(f"Plugin manager context set: {context}")
 
     def subscribe(self, event_type, callback):
-        """Subscribe a callback to a specific event type"""
-        if event_type not in self.plugin_library.event_handlers:
-            self.plugin_library.event_handlers[event_type] = []
+        """Subscribe a callback to a specific event type, at most once.
 
-        self.plugin_library.event_handlers[event_type].append(callback)
+        Idempotent, and locked, because both properties are load-bearing once
+        more than one differently-configured scan runs in a process:
+
+        * ``load_internal_plugins()`` runs per ``ScanExecutionEngine``, so a
+          workspace of five projects previously ended up with five copies of
+          every handler and fired each one five times. Harmless while the
+          handlers only log, and a verdict bug as soon as one touches results --
+          which is exactly what the reporter and workspace-policy phases add.
+        * The old ``not in``-then-assign was unsynchronised, so two threads could
+          each build a fresh list for the same event and one would clobber the
+          other, silently dropping the subscription it had just made.
+
+        Identity is decided by ``==``, which for a plain function is identity and
+        for a bound method compares both the instance and the function -- the
+        right granularity, since two instances of a handler class are genuinely
+        two subscribers.
+
+        Still returns the callback so decorator usage is unchanged.
+        """
+        with self._event_lock:
+            handlers = self.plugin_library.event_handlers.setdefault(event_type, [])
+            if callback in handlers:
+                ASH_LOGGER.debug(
+                    f"Callback already subscribed to event {event_type}; skipping "
+                    f"the duplicate. Total subscribers: {len(handlers)}"
+                )
+                return callback
+            handlers.append(callback)
+            total = len(handlers)
         ASH_LOGGER.debug(
-            f"Subscribed callback to event {event_type}. Total subscribers for this event: {len(self.plugin_library.event_handlers[event_type])}"
+            f"Subscribed callback to event {event_type}. Total subscribers for this event: {total}"
         )
         return callback  # Return for decorator usage
 
@@ -103,11 +135,16 @@ class AshPluginManager(BaseModel):
             ASH_LOGGER.debug(f"No subscribers for event {event_type}")
             return []
 
-        ASH_LOGGER.debug(
-            f"Notifying {len(self.plugin_library.event_handlers[event_type])} subscribers of event {event_type}"
-        )
+        # Snapshot under the lock. A callback subscribed from another project's
+        # thread while this loop ran would otherwise raise "list changed size
+        # during iteration", and the same handler list is shared by every project
+        # in a workspace.
+        with self._event_lock:
+            handlers = list(self.plugin_library.event_handlers[event_type])
+
+        ASH_LOGGER.debug(f"Notifying {len(handlers)} subscribers of event {event_type}")
         results = []
-        for callback in self.plugin_library.event_handlers[event_type]:
+        for callback in handlers:
             ASH_LOGGER.debug(
                 f"Calling subscriber callback {callback.__name__ if hasattr(callback, '__name__') else 'anonymous'}"
             )

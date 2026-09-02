@@ -4,19 +4,22 @@
 """Module containing the Ferret Scan sensitive data detection scanner implementation."""
 
 import json
+import shlex
 import logging
 import re
 import subprocess  # nosec B404 — ferret-scan is an external CLI tool invoked via subprocess
+import sys
 from pathlib import Path
-from typing import Annotated, Any, List, Literal, Optional, Tuple
+from typing import Annotated, Any, ClassVar, List, Literal, Optional, Tuple
 
 from pydantic import Field, model_validator
 
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.plugin_base import pep440_requirement
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.models.core import ToolArgs, ToolExtraArg
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
-from automated_security_helper.core.enums import ScannerToolType
+from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -366,6 +369,8 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         MAX_SUPPORTED_VERSION=MAX_SUPPORTED_VERSION,
     )
 
+    offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+
     def model_post_init(self, context):
         if self.config is None:
             self.config = FerretScannerConfig()
@@ -412,6 +417,37 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
 
         # Return default version constraint
         return DEFAULT_VERSION_CONSTRAINT
+
+    def get_installation_commands(self, platform: str, arch: str) -> List[List[str]]:
+        """Install ferret-scan under this plugin's declared version constraint.
+
+        Before this existed the plugin declared a supported range but never
+        installed anything, so every caller installed ferret-scan by hand and
+        nothing applied the range. CI ran ``pip install ferret-scan``, which
+        resolves to whatever is newest -- 2.3.3 on 2026-08-20, three major
+        versions above MAX_SUPPORTED_VERSION. It added an API_KEY_OR_SECRET
+        detector that matches ``session: Optional[Session]`` in generated
+        Pydantic schemas at "95% HIGH" confidence, and every open PR went red
+        with no source change.
+
+        The install is deliberately unconditional rather than skipped when the
+        binary is already present: an already-installed out-of-range build is
+        the case that needs correcting, and pip will downgrade it to satisfy
+        the constraint.
+        """
+        commands = super().get_installation_commands(platform, arch)
+        commands.append(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                pep440_requirement(
+                    "ferret-scan", self._get_tool_version_constraint() or "latest"
+                ),
+            ]
+        )
+        return commands
 
     def _get_installed_version(self) -> Optional[str]:
         """Get the currently installed ferret-scan version.
@@ -499,8 +535,12 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         ferret_binary = find_executable("ferret-scan")
         if not ferret_binary:
             self._plugin_log(
-                "ferret-scan binary not found. Please install it from "
-                "https://github.com/awslabs/ferret-scan or via 'pip install ferret-scan'",
+                "ferret-scan binary not found. Install it with "
+                "'ash dependencies install', which applies the version range this "
+                f"plugin supports, or by hand with 'pip install \"ferret-scan{DEFAULT_VERSION_CONSTRAINT}\"'. "
+                "A bare 'pip install ferret-scan' resolves to the newest release, "
+                "which may be outside the supported range. Source: "
+                "https://github.com/awslabs/ferret-scan",
                 level=logging.ERROR,
             )
             return False
@@ -727,6 +767,12 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
 
         return args
 
+    def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
+        """Abstract stub — FerretScanScanner overrides scan() directly; this is unreachable."""
+        raise NotImplementedError(
+            f"{self.__class__.__name__} overrides scan() directly."
+        )
+
     def scan(
         self,
         target: Path,
@@ -786,7 +832,6 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             self._post_scan(target=target, target_type=target_type)
             return False
 
-
         if not self.dependencies_satisfied:
             self._post_scan(target=target, target_type=target_type)
             return False
@@ -826,6 +871,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 results_dir=target_results_dir,
                 stdout_preference="write",
                 stderr_preference="write",
+                timeout=self._effective_scan_timeout(),
             )
 
             self._post_scan(target=target, target_type=target_type)
@@ -869,7 +915,7 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 if sarif_report.runs:
                     sarif_report.runs[0].invocations = [
                         Invocation(
-                            commandLine=" ".join(final_args),
+                            commandLine=shlex.join(final_args),
                             arguments=final_args[1:],
                             startTimeUtc=self.start_time,
                             endTimeUtc=self.end_time,

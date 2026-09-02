@@ -11,6 +11,10 @@ from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
+    ReporterWorkspaceBehaviour,
+)
+from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_section import (
+    html_workspace_section,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
@@ -32,7 +36,21 @@ class HTMLReporterConfig(ReporterPluginConfigBase):
 
 @ash_reporter_plugin
 class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
-    """Formats results as HTML."""
+    """Formats results as HTML.
+
+    Workspace mode: one merged artefact with a per-project section. A human
+    reading a workspace report is asking "which project is in trouble", so the
+    project has to be the top-level structure and not a column buried in the
+    findings table.
+
+    The workspace section is added ahead of the existing content rather than
+    replacing it. The whole-workspace severity and scanner tables stay useful --
+    they answer "how bad is it overall" -- and reshaping the entire document
+    around projects would have made a workspace report and a single-project
+    report two different things to read.
+    """
+
+    workspace_behaviour = ReporterWorkspaceBehaviour.MERGED
 
     def model_post_init(self, context):
         if self.config is None:
@@ -49,10 +67,7 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         scanner_results = emitter.get_scanner_results()
 
         # Get results from SARIF report for backward compatibility
-        results = []
-        if model.sarif and model.sarif.runs:
-            for run in model.sarif.runs:
-                results.extend(run.results or [])
+        results = model.sarif.get_all_results() if model.sarif else []
 
         # Group results by severity and rule
         findings_by_severity = self._group_results_by_severity(results)
@@ -68,6 +83,12 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         # Get top hotspots
         top_hotspots = emitter.get_top_hotspots(10)
         hotspots_section = self._format_hotspots_section(top_hotspots)
+
+        # The per-project table, placed after the metadata block and before the
+        # whole-workspace scanner table. Empty string for a single-directory scan,
+        # so that output is unchanged. Every value inside is escaped by the
+        # renderer -- a project label arrives from a project's own config file.
+        workspace_section = html_workspace_section(model)
 
         template = f"""
 <!DOCTYPE html>
@@ -160,6 +181,8 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
             <p><strong>Report generated:</strong> {html.escape(metadata["report_time"])}</p>
             <p><strong>ASH version:</strong> {html.escape(metadata["tool_version"])}</p>
         </div>
+
+        {workspace_section}
 
         <h2>Scanner Results</h2>
         <div class="help-text">

@@ -59,6 +59,10 @@ class ConfigValidator:
         "reporters",
         "converters",
         "mcp-resource-management",
+        # Workspace-mode execution settings. Valid at the top level rather than
+        # internal-only, because an operator scanning a multi-project workspace
+        # sets max_parallel_projects and project_timeout by hand.
+        "workspace",
     }
 
     @classmethod

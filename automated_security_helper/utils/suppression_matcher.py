@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from automated_security_helper.models.core import AshSuppression
+from automated_security_helper.utils.path_matching import _recursive_glob_match
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -21,15 +22,11 @@ from automated_security_helper.utils.log import ASH_LOGGER
 # Supported formats (slash-style for JS/TS/Java/C#/Go):
 #   // ash-ignore: RULE-ID [reason]
 #   // ash-ignore-next-line: RULE-ID [reason]
-_HASH_INLINE_PATTERN = re.compile(
-    r"#\s*ash-ignore:\s*(\S+)\s*(.*)?$", re.IGNORECASE
-)
+_HASH_INLINE_PATTERN = re.compile(r"#\s*ash-ignore:\s*(\S+)\s*(.*)?$", re.IGNORECASE)
 _HASH_NEXT_LINE_PATTERN = re.compile(
     r"#\s*ash-ignore-next-line:\s*(\S+)\s*(.*)?$", re.IGNORECASE
 )
-_SLASH_INLINE_PATTERN = re.compile(
-    r"//\s*ash-ignore:\s*(\S+)\s*(.*)?$", re.IGNORECASE
-)
+_SLASH_INLINE_PATTERN = re.compile(r"//\s*ash-ignore:\s*(\S+)\s*(.*)?$", re.IGNORECASE)
 _SLASH_NEXT_LINE_PATTERN = re.compile(
     r"//\s*ash-ignore-next-line:\s*(\S+)\s*(.*)?$", re.IGNORECASE
 )
@@ -51,31 +48,11 @@ class InlineSuppression:
 def matches_suppression(
     finding: FlatVulnerability, suppression: AshSuppression
 ) -> bool:
+    """Thin wrapper around ``AshSuppression.matches`` kept for backward compatibility.
+
+    Prefer ``suppression.matches(finding)`` in new code.
     """
-    Determine if a finding matches a suppression rule.
-
-    Args:
-        finding: The finding to check
-        suppression: The suppression rule to match against
-
-    Returns:
-        True if the finding matches the suppression rule, False otherwise
-    """
-    # Check if rule ID matches
-    if suppression.rule_id and not _rule_id_matches(
-        finding.rule_id, suppression.rule_id
-    ):
-        return False
-
-    # Check if file path matches
-    if not file_path_matches(finding.file_path, suppression.path):
-        return False
-
-    # Check if line range matches (if specified)
-    if not _line_range_matches(finding, suppression):
-        return False
-
-    return True
+    return suppression.matches(finding)
 
 
 def _rule_id_matches(finding_rule_id: Optional[str], suppression_rule_id: str) -> bool:
@@ -108,120 +85,25 @@ def file_path_matches(
     if finding_lower == suppression_lower:
         return True
 
-    # When the pattern contains "**", we need special handling because
-    # fnmatch treats "*" as "anything except /" and has no concept of
-    # recursive directory matching.  We split on "**" and check that
-    # each segment matches in order, allowing any number of path
-    # components (including zero) in place of each "**".
+    # A pattern containing "**" is routed to _recursive_glob_match instead of
+    # fnmatch.
+    #
+    # Not because fnmatch's "*" stops at a path separator -- it does not.
+    # fnmatch.translate("*") is "(?s:.*)", so "*" matches any run of characters
+    # including "/". The practical consequence is that the plain fnmatch call
+    # below OVER-matches rather than under-matches: the pattern "src/*.py" also
+    # matches "src/sub/deep/a.py", so a suppression written that way silently
+    # covers subdirectories too.
+    #
+    # "**" needs its own matcher because fnmatch has no notion of path
+    # components at all, so it cannot express the per-segment anchoring a
+    # recursive glob implies. _recursive_glob_match splits the pattern on "**"
+    # and requires each segment to match whole path components in order,
+    # allowing any number of components (including zero) in place of each "**".
     if "**" in suppression_lower:
         return _recursive_glob_match(finding_lower, suppression_lower)
 
     return fnmatch.fnmatch(finding_lower, suppression_lower)
-
-
-def _recursive_glob_match(path: str, pattern: str) -> bool:
-    """Match *path* against *pattern* treating ``**`` as zero-or-more directories.
-
-    The algorithm splits the pattern on ``**`` separators, then verifies that
-    each resulting segment appears in the correct order inside *path* using
-    ``fnmatch`` for each segment.
-    """
-    # Normalise separators
-    path = path.replace("\\", "/")
-    pattern = pattern.replace("\\", "/")
-
-    # Split pattern on "**" (possibly surrounded by slashes)
-    import re
-
-    segments = re.split(r"/?\*\*/?", pattern)
-
-    # Handle trailing ** (e.g. "tests/**") — means match anything under prefix
-    has_trailing_star = pattern.rstrip("/").endswith("**")
-    # Handle leading ** (e.g. "**/*.py") — means match from any depth
-    has_leading_star = pattern.lstrip("/").startswith("**")
-
-    # Remove empty segments but track their positions
-    segments = [s for s in segments if s]
-
-    # Pattern is just "**" — matches everything
-    if not segments:
-        return True
-
-    # Single segment with both leading and trailing ** — match anywhere in path
-    if len(segments) == 1 and has_leading_star and has_trailing_star:
-        middle = segments[0]
-        parts = path.split("/")
-        seg_parts = middle.split("/")
-        seg_len = len(seg_parts)
-        for j in range(len(parts) - seg_len + 1):
-            candidate = "/".join(parts[j : j + seg_len])
-            if fnmatch.fnmatch(candidate, middle):
-                return True
-        return False
-
-    # Single segment with trailing ** — prefix match
-    if len(segments) == 1 and has_trailing_star and not has_leading_star:
-        prefix = segments[0]
-        parts = path.split("/")
-        seg_parts = prefix.split("/")
-        seg_len = len(seg_parts)
-        if len(parts) < seg_len:
-            return False
-        candidate = "/".join(parts[:seg_len])
-        return fnmatch.fnmatch(candidate, prefix)
-
-    # Single segment with leading ** — suffix match
-    if len(segments) == 1 and has_leading_star and not has_trailing_star:
-        suffix = segments[0]
-        parts = path.split("/")
-        seg_parts = suffix.split("/")
-        seg_len = len(seg_parts)
-        if len(parts) < seg_len:
-            return fnmatch.fnmatch(path, suffix)
-        candidate = "/".join(parts[-seg_len:])
-        return fnmatch.fnmatch(candidate, suffix)
-
-    # Multiple segments — match in order
-    remaining = path
-    for i, segment in enumerate(segments):
-        if not segment:
-            continue
-
-        is_first = i == 0
-        is_last = i == len(segments) - 1
-
-        if is_first and is_last:
-            return fnmatch.fnmatch(remaining, segment)
-
-        if is_first:
-            parts = remaining.split("/")
-            seg_parts = segment.split("/")
-            seg_len = len(seg_parts)
-            prefix = "/".join(parts[:seg_len])
-            if not fnmatch.fnmatch(prefix, segment):
-                return False
-            remaining = "/".join(parts[seg_len:])
-        elif is_last:
-            parts = remaining.split("/")
-            seg_parts = segment.split("/")
-            seg_len = len(seg_parts)
-            suffix = "/".join(parts[-seg_len:]) if seg_len <= len(parts) else remaining
-            return fnmatch.fnmatch(suffix, segment)
-        else:
-            parts = remaining.split("/")
-            seg_parts = segment.split("/")
-            seg_len = len(seg_parts)
-            found = False
-            for j in range(len(parts) - seg_len + 1):
-                candidate = "/".join(parts[j : j + seg_len])
-                if fnmatch.fnmatch(candidate, segment):
-                    remaining = "/".join(parts[j + seg_len :])
-                    found = True
-                    break
-            if not found:
-                return False
-
-    return True
 
 
 def _line_range_matches(
@@ -238,6 +120,17 @@ def _line_range_matches(
 
     # If only start line is specified in suppression
     if suppression.line_start is not None and suppression.line_end is None:
+        # Open-ended on purpose: a suppression with line_start and no line_end
+        # matches every finding from that line to the end of the file, including
+        # findings that do not exist yet. It does not mean "just this line".
+        #
+        # This is the documented contract, not an oversight. The linter used to
+        # describe it as defaulting to a single line, which was the reverse of
+        # what happens here; the message was corrected rather than this
+        # comparison, because narrowing it would stop existing single-line
+        # suppressions from covering the range they cover today. Tests in
+        # tests/unit/config/test_open_ended_suppression_range.py pin it.
+        #
         # Match if finding overlaps with the suppression start line:
         # either the finding starts at/after suppression start, or the
         # finding spans across the suppression start (multi-line finding).

@@ -614,5 +614,4 @@ class ScanExecutionEngine:
                             use_color=use_color,
                         )
 
-                # Return the results
-                return self._results
+        return self._results

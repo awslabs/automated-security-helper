@@ -33,10 +33,8 @@ ASH includes 14 built-in reporters that generate scan results in various formats
 reporters:
   csv:
     enabled: true
-    options:
-      include_suppressed: false
-      delimiter: ","
-      quote_char: "\""
+    # The CSV reporter exposes no options. Suppressed findings are filtered by
+    # global_settings.suppressions, not per reporter.
 ```
 
 **Output Structure**:
@@ -64,10 +62,7 @@ reporters:
 reporters:
   cyclonedx:
     enabled: true
-    options:
-      format: "json"  # json, xml
-      include_licenses: true
-      include_vulnerabilities: true
+    # The CycloneDX reporter exposes no options.
 ```
 
 **Key Features**:
@@ -92,11 +87,12 @@ reporters:
 **Configuration**:
 ```yaml
 reporters:
-  flatjson:
+  flat-json:              # Note the hyphen; 'flatjson' is not a reporter name
     enabled: true
     options:
-      pretty_print: true
       include_metadata: true
+      include_scanner_metrics: true
+      include_summary_metrics: true
 ```
 
 **Output Structure**:
@@ -130,11 +126,10 @@ reporters:
 **Configuration**:
 ```yaml
 reporters:
-  gitlab_sast:
+  gitlab-sast:            # Note the hyphen; 'gitlab_sast' is not a reporter name
     enabled: true
     options:
-      version: "15.0.4"
-      include_dismissed: false
+      exclude_suppressed: false
 ```
 
 **Key Features**:
@@ -160,7 +155,7 @@ reporters:
   gitlab-sast:
     enabled: true
     options:
-      include_suppressed: false
+      exclude_suppressed: false
 ```
 
 **Output Structure**:
@@ -276,11 +271,7 @@ jobs:
 reporters:
   html:
     enabled: true
-    options:
-      include_suppressed: false
-      theme: "light"  # light, dark
-      show_metrics: true
-      embed_assets: true
+    # The HTML reporter exposes no options.
 ```
 
 **Key Features**:
@@ -308,8 +299,7 @@ reporters:
   junitxml:
     enabled: true
     options:
-      suite_name: "ASH Security Scan"
-      failure_on_finding: true
+      respect_severity_threshold: true
 ```
 
 **Key Features**:
@@ -336,9 +326,13 @@ reporters:
   markdown:
     enabled: true
     options:
-      include_toc: true
-      include_suppressed: false
-      max_findings_per_scanner: 50
+      include_summary: true
+      include_findings_table: true
+      include_detailed_findings: true
+      max_detailed_findings: 50
+      use_collapsible_details: true
+      compact: false
+      top_hotspots_limit: 10
 ```
 
 **Key Features**:
@@ -364,9 +358,7 @@ reporters:
 reporters:
   ocsf:
     enabled: true
-    options:
-      version: "1.0.0"
-      include_raw_data: false
+    # The OCSF reporter exposes no options.
 ```
 
 **Key Features**:
@@ -392,10 +384,7 @@ reporters:
 reporters:
   sarif:
     enabled: true
-    options:
-      include_rule_metadata: true
-      schema_version: "2.1.0"
-      pretty_print: false
+    # The SARIF reporter exposes no options.
 ```
 
 **Key Features**:
@@ -421,10 +410,7 @@ reporters:
 reporters:
   spdx:
     enabled: true
-    options:
-      format: "json"  # json, yaml, tag-value
-      include_files: true
-      document_name: "ASH-SPDX-Report"
+    # The SPDX reporter exposes no options.
 ```
 
 **Key Features**:
@@ -451,10 +437,11 @@ reporters:
   text:
     enabled: true
     options:
-      show_summary: true
-      show_suppressed: false
-      max_line_length: 120
-      color_output: true
+      include_summary: true
+      include_findings_table: true
+      include_detailed_findings: true
+      max_detailed_findings: 50
+      top_hotspots_limit: 10
 ```
 
 **Key Features**:
@@ -480,10 +467,7 @@ reporters:
 reporters:
   yaml:
     enabled: true
-    options:
-      pretty_print: true
-      include_metadata: true
-      flow_style: false
+    # The YAML reporter exposes no options.
 ```
 
 **Key Features**:
@@ -524,27 +508,20 @@ reporters:
   text:
     enabled: true
     options:
-      show_summary: true
-      color_output: true
+      include_summary: true
+      include_detailed_findings: false
 
   # Detailed analysis
   html:
     enabled: true
-    options:
-      theme: "light"
-      include_suppressed: false
 
   # CI/CD integration
   sarif:
     enabled: true
-    options:
-      include_rule_metadata: true
 
   # Data processing
   csv:
     enabled: true
-    options:
-      include_suppressed: true
 ```
 
 ## Best Practices
@@ -570,15 +547,14 @@ reporters: [sarif, junitxml, gitlab-sast]
 ### Performance Considerations
 
 ```yaml
-# Optimize for speed
+# Optimize for speed. The HTML and CSV reporters expose no options, so the lever
+# is which reporters run at all rather than how each one behaves.
 reporters:
   html:
-    options:
-      embed_assets: false  # Faster generation
+    enabled: false          # Skip the largest artifact
 
   csv:
-    options:
-      include_suppressed: false  # Smaller files
+    enabled: true
 ```
 
 ### Output Organization
@@ -647,18 +623,16 @@ pipeline {
 **Large report files**:
 ```yaml
 reporters:
-  html:
+  markdown:                 # html has no options; markdown is the one that caps detail
     options:
-      max_findings_per_scanner: 100
-      include_suppressed: false
+      max_detailed_findings: 100
 ```
 
 **Encoding issues**:
 ```yaml
 reporters:
   csv:
-    options:
-      encoding: "utf-8"
+    enabled: true           # The CSV reporter exposes no options
 ```
 
 **CI/CD integration failures**:

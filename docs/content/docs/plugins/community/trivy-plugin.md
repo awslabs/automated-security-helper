@@ -207,18 +207,14 @@ The Trivy plugin integrates with ASH's unified reporting system, producing resul
 reporters:
   sarif:
     enabled: true
-    options:
-      output_file: "trivy-results.sarif"
-  
+    # Reporters write to the scan's output directory under a fixed name; there
+    # is no per-reporter output_file option.
+
   html:
     enabled: true
-    options:
-      output_file: "security-report.html"
-  
+
   markdown:
     enabled: true
-    options:
-      output_file: "SECURITY.md"
 ```
 
 ## Performance Considerations
@@ -825,12 +821,10 @@ scanners:
 reporters:
   csv:
     enabled: true
-    options:
-      output_file: "license-report.csv"
+    # Reporters write to the scan's output directory under a fixed name; there
+    # is no per-reporter output_file option.
   html:
     enabled: true
-    options:
-      output_file: "license-report.html"
 ```
 
 ```bash
@@ -1791,8 +1785,8 @@ scanners:
 reporters:
   csv:
     enabled: true
-    options:
-      output_file: "license-report.csv"
+    # Reporters write to the scan's output directory under a fixed name; there
+    # is no per-reporter output_file option.
 ```
 
 ```bash
@@ -1987,7 +1981,7 @@ trivy image --download-db-only
 ### Documentation
 - [Trivy Official Documentation](https://aquasecurity.github.io/trivy/)
 - [ASH Plugin Development Guide](../../plugins/development-guide.md)
-- [ASH Configuration Reference](../../configuration/reference.md)
+- [ASH Configuration Guide](../../configuration-guide.md)
 
 ### Community
 - [ASH GitHub Issues](https://github.com/aws-samples/automated-security-helper/issues)

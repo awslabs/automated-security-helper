@@ -198,9 +198,20 @@ class TestSyftExcludePathPreservation:
         scanner._pre_scan = MagicMock(return_value=True)
         scanner.dependencies_satisfied = True
         captured_commands = []
+        captured_envs = []
 
-        def capture_run(command, results_dir):
+        # Mirrors ScannerPluginBase._run_subprocess as syft_scanner calls it:
+        # command, results_dir and env. env carries the offline-mode overrides
+        # (self.extra_env) and is None when there are none, so it must be accepted
+        # here or scan() fails with a TypeError before the args can be inspected.
+        #
+        # **kwargs rather than an exhaustive parameter list, which is the same
+        # hazard the note above describes: pinning the signature made this test
+        # fail again when the real method gained a `timeout` argument. The double
+        # only inspects command and env, so it should ignore whatever else arrives.
+        def capture_run(command, results_dir, env=None, **kwargs):
             captured_commands.append(command)
+            captured_envs.append(env)
 
         scanner._run_subprocess = capture_run
         scanner._post_scan = MagicMock()

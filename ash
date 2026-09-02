@@ -85,11 +85,11 @@ while (("$#")); do
       INSTALL_ASH_REVISION="$1"
       ;;
     --help | -h)
-      source "${ASH_ROOT_DIR}/ash-multi" --help
+      python -m automated_security_helper.cli.main --help
       exit 0
       ;;
     --version | -v)
-      source "${ASH_ROOT_DIR}/ash-multi" --version
+      python -m automated_security_helper.cli.main --version
       exit 0
       ;;
     --no-color | -c)
@@ -171,6 +171,20 @@ else
         --build-arg BUILD_DATE="$(date +%s)" \
         ${DOCKER_EXTRA_ARGS} \
         "${ASH_ROOT_DIR}"
+      BUILD_RC=$?
+
+      # Captured on the line above, before anything else can overwrite $?.
+      #
+      # This script does not run under `set -e`, so without an explicit check a
+      # failed build falls straight through to the run below. The runner then
+      # cannot find the image locally, tries to pull it from docker.io and
+      # quay.io, and reports "reading manifest ci in docker.io/..." with exit
+      # 125 -- which reads like a registry or credentials problem and says
+      # nothing about the build step that actually failed.
+      if [ ${BUILD_RC} -ne 0 ]; then
+        echo "ERROR: failed to build image ${ASH_IMAGE_NAME} (exit ${BUILD_RC}). See the build output above for the failing step." >&2
+        exit ${BUILD_RC}
+      fi
     fi
 
     # Run the image if the --no-run flag is not set

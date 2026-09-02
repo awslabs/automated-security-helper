@@ -22,6 +22,41 @@ class PluginDependency(BaseModel):
     package_manager: PackageManager = PackageManager.APT
 
 
+# Version strings starting with one of these are PEP 440 specifiers (a range),
+# not a single version.
+_VERSION_SPECIFIER_START = ("<", ">", "!", "~", "=")
+
+
+def pep440_requirement(name: str, version: str) -> str:
+    """Render ``name`` and ``version`` as one pip/uv requirement string.
+
+    ``version`` is interpreted three ways:
+
+    - ``"latest"`` -- no constraint, so the resolver takes the newest release.
+    - a PEP 440 specifier such as ``">=0.1.0,<2.0.0"`` -- passed through verbatim.
+    - a bare version such as ``"1.2.3"`` -- pinned exactly, with ``==``.
+
+    The middle case is why this helper exists. Rendering every non-``latest``
+    version as ``f"{name}=={version}"`` turns a range into a requirement pip
+    cannot parse (``ferret-scan==>=0.1.0,<2.0.0``), so a plugin that declared a
+    supported *range* had no way to get it honoured. The observable failure was
+    not an error, which is what made it expensive: the range went undeclared,
+    the installer fell back to "latest", and CI installed whichever release
+    happened to be newest at the moment the job ran. ferret-scan 2.3.3 was
+    published mid-run on 2026-08-20 and turned every open PR red without a
+    single source change.
+
+    Only pip and uv use this. apt, npm, brew, yum and choco all spell ranges
+    differently, and guessing a translation between them would trade a loud
+    failure for a quiet mis-install.
+    """
+    if version == "latest":
+        return name
+    if version.startswith(_VERSION_SPECIFIER_START):
+        return f"{name}{version}"
+    return f"{name}=={version}"
+
+
 class CustomCommand(BaseModel):
     args: List[str]
     shell: bool = False  # Set to True only when shell expansion is absolutely necessary
@@ -170,7 +205,9 @@ class PluginBase(UVToolMixin, BaseModel):
         # Use abs() so negative codes (e.g. -1 for timeout) aren't
         # silently swallowed by max(0, -1).
         new_code = response.get("returncode", 1)
-        self.exit_code = max(self.exit_code, abs(new_code) if new_code < 0 else new_code)
+        self.exit_code = max(
+            self.exit_code, abs(new_code) if new_code < 0 else new_code
+        )
 
     def _run_subprocess(
         self,
@@ -180,6 +217,7 @@ class PluginBase(UVToolMixin, BaseModel):
         stderr_preference: Literal["return", "write", "both", "none"] = "write",
         cwd: Path | str | None = None,
         env: Dict[str, str] | None = None,
+        timeout: float | None = None,
     ) -> Dict[str, str]:
         """Run a subprocess with the given command.
 
@@ -216,6 +254,14 @@ class PluginBase(UVToolMixin, BaseModel):
             if self.use_uv_tool and self.command and len(command) > 0:
                 # Check if the first element of the command is our tool command
                 if command[0] == self.command:
+                    # timeout has to be handed to this path too, not just to the
+                    # direct-execution call below. This branch returns, so a
+                    # timeout passed only below would apply exclusively to
+                    # scanners for which uv is unavailable. bandit, checkov and
+                    # semgrep all set use_uv_tool=True unconditionally and only
+                    # clear it when uv is missing, and ASH ships via uv -- so on a
+                    # normal install the reported bandit hang went through here,
+                    # unbounded, no matter what scan_timeout said.
                     uv_result = self._try_uv_tool_execution(
                         command,
                         working_dir,
@@ -223,6 +269,7 @@ class PluginBase(UVToolMixin, BaseModel):
                         stdout_preference=stdout_preference,
                         stderr_preference=stderr_preference,
                         env=env,
+                        timeout=timeout,
                     )
                     if uv_result is not None:
                         return uv_result
@@ -240,6 +287,7 @@ class PluginBase(UVToolMixin, BaseModel):
                 class_name=self.__class__.__name__,
                 encoding="utf-8",
                 errors="replace",
+                timeout=timeout,
             )
 
             self._process_command_response(response)
@@ -283,7 +331,7 @@ class PluginBase(UVToolMixin, BaseModel):
                             "-m",
                             "pip",
                             "install",
-                            f"{dep.name}{f'=={dep.version}' if dep.version != 'latest' else ''}",
+                            pep440_requirement(dep.name, dep.version),
                         ]
                     )
                 elif dep.package_manager == PackageManager.UV:
@@ -292,7 +340,7 @@ class PluginBase(UVToolMixin, BaseModel):
                             "uv",
                             "tool",
                             "install",
-                            f"{dep.name}{f'=={dep.version}' if dep.version != 'latest' else ''}",
+                            pep440_requirement(dep.name, dep.version),
                         ]
                     )
                 elif dep.package_manager == PackageManager.NPM:

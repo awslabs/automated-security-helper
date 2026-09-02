@@ -58,7 +58,6 @@ ARG INSTALL_ASH_REVISION="LOCAL"
 ENV INSTALL_ASH_REVISION=${INSTALL_ASH_REVISION}
 
 ENV ASH_BIN_PATH="${ASH_BIN_PATH}"
-ENV BUILD_DATE_EPOCH="${BUILD_DATE_EPOCH}"
 ENV OFFLINE="${OFFLINE}"
 ENV OFFLINE_AT_BUILD_TIME="${OFFLINE}"
 ENV ASH_OFFLINE="${OFFLINE}"
@@ -86,27 +85,40 @@ RUN mkdir -p ${HOME}/.ssh && \
 #
 # Base dependency installation
 #
+# build-essential and ruby-dev are deliberately absent here: they are needed only
+# to build cfn-nag's gems, and this layer is never purged, so anything listed here
+# ships at runtime. They are installed and removed inside the gem build below.
+#
+# `ruby` is listed in its own right. It used to arrive only as a dependency of
+# ruby-dev, which meant removing ruby-dev would have taken the interpreter
+# cfn-nag runs on. Installing it explicitly also marks it manual, so the
+# --auto-remove in the gem build cannot collect it.
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
-    build-essential \
     ca-certificates \
     curl \
     git \
     gnupg \
     python3-venv \
     ripgrep \
-    ruby-dev \
+    ruby \
     tree && \
     rm -rf /var/lib/apt/lists/*
 
 #
-# Install nodejs@20 using latest recommended method
+# Install nodejs using latest recommended method.
+#
+# The major version has to satisfy the package managers cached below. pnpm 11
+# declares engines.node >=22.13 (pnpm 9 and 10 were >=18.12), and `corepack
+# prepare pnpm@latest` caches whatever the current major is, so Node 20 left the
+# image with a pnpm it could not run. tests/unit/test_dockerfile_node_toolchain.py
+# fails if this drops back below what pnpm needs.
 #
 RUN set -uex; \
     mkdir -p /etc/apt/keyrings; \
     with-retry 'curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg'; \
-    NODE_MAJOR=20; \
+    NODE_MAJOR=22; \
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_$NODE_MAJOR.x nodistro main" \
     > /etc/apt/sources.list.d/nodesource.list; \
     apt-get -qy update; \
@@ -136,14 +148,37 @@ RUN with-retry 'python3 -m pip install --no-cache-dir --upgrade pip'
 #
 COPY automated_security_helper/assets/Gemfile /deps/Gemfile
 ARG BUNDLER_VERSION="2.4.22"
+# One RUN for install, build and purge. `core` is the base for both `ci` and
+# `non-root`, so a C toolchain left here ships in every published image, which is
+# its own finding in a security scanner. Docker layers are additive, so purging in
+# a later RUN would remove the compiler from the container while the image still
+# carried it -- keeping all three steps in one layer means it never lands at all.
+#
+# apt-get update runs again because the base layer clears the package lists.
 RUN echo "gem: --no-document" >> /etc/gemrc && \
-    with-retry 'gem install bundler -v ${BUNDLER_VERSION}'
-RUN with-retry 'bundle install --jobs=4'
+    apt-get update && \
+    apt-get install -y --no-install-recommends build-essential ruby-dev && \
+    with-retry 'gem install bundler -v ${BUNDLER_VERSION}' && \
+    with-retry 'bundle install --jobs=4' && \
+    apt-get purge -y --auto-remove build-essential ruby-dev && \
+    rm -rf /var/lib/apt/lists/*
 
 #
 # JavaScript: corepack manages npm/yarn/pnpm versions via package.json engines
 # Prepare at build time so binaries are cached for offline runtime use
 #
+# A scanned repository pins its own version through `packageManager`, and corepack
+# honours that at runtime. When the pinned version is not the one cached above,
+# corepack asks before fetching it ("Do you want to continue? [Y/n]"). No tty is
+# attached here, so that prompt blocks on stdin indefinitely and the scan looks
+# like a hung `pnpm audit` rather than a failure. Setting this to 0 turns the
+# prompt into a decision corepack makes on its own, so the audit either runs or
+# fails with a message.
+#
+# ENV rather than a build-time export: the npm-audit scanner invokes pnpm at
+# runtime, which is the case that reported the hang.
+#
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN with-retry 'corepack enable && corepack prepare yarn@stable --activate && corepack prepare pnpm@latest --activate'
 
 
@@ -153,7 +188,8 @@ RUN with-retry 'corepack enable && corepack prepare yarn@stable --activate && co
 ENV GRYPE_DB_CACHE_DIR="/deps/.grype"
 ENV SEMGREP_RULES_CACHE_DIR="/deps/.semgrep"
 ENV OPENGREP_RULES_CACHE_DIR="/deps/.opengrep"
-RUN mkdir -p ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}
+RUN mkdir -p ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR} && \
+    chmod 777 /deps ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}
 ENV PATH="/usr/local/bin:$PATH"
 
 ARG SYFT_VERSION="v1.42.4"
@@ -171,7 +207,8 @@ RUN set -uex; if [[ "${OFFLINE}" == "YES" ]]; then \
         outfile="${SEMGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; \
         with-retry "curl -sSf https://semgrep.dev/c/${i} -o ${outfile}"; \
         cp "${outfile}" "${OPENGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; \
-    done \
+    done && \
+    chmod -R 777 ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}; \
     fi
 
 ARG TRIVY_VERSION="v0.69.3"
@@ -203,7 +240,7 @@ RUN uv pip install --system "$(ls *.whl)[cdk]" && rm -rf *.whl
 #
 # Make sure the ash script is executable
 #
-RUN chmod -R 755 /ash && chmod -R 777 /src /out /deps ${ASH_BIN_PATH}
+RUN chmod -R 755 /ash && chmod -R 777 /src /out ${ASH_BIN_PATH}
 
 #
 # Flag ASH as local execution mode since we are running in a container already
@@ -220,6 +257,20 @@ ENV PATH="${ASH_BIN_PATH}:$PATH"
 # Flag ASH as running in container to prevent ProgressBar panel from showing (causes output blocking)
 #
 ENV ASH_IN_CONTAINER="YES"
+
+#
+# Build metadata, deliberately last in this stage.
+#
+# BUILD_DATE_EPOCH changes on every invocation - run_ash_container.py passes
+# --build-arg BUILD_DATE_EPOCH=<now>. Referencing it near the top of the stage
+# invalidated every layer below it, so the apt/node/ruby/uv installs, the
+# pinned syft+grype+trivy downloads and `ash dependencies install` were all
+# rebuilt from scratch on every build, and no layer cache of any kind could
+# ever hit. Nothing reads this value at runtime - it is referenced only here
+# and in the ARG declaration - so evaluating it last keeps the metadata while
+# leaving everything above it cacheable.
+#
+ENV BUILD_DATE_EPOCH="${BUILD_DATE_EPOCH}"
 
 
 # CI stage -- any customizations specific to CI platform compatibility should be added
@@ -260,8 +311,8 @@ RUN adduser --disabled-password --disabled-login \
 
 # Change ownership and permissions now that we are running with a non-root
 # user by default.
-RUN chown -R ${UID}:${GID} ${ASHUSER_HOME} /src /out /deps && \
-    chmod 750 -R ${ASHUSER_HOME} /src /out /deps
+RUN chown -R ${UID}:${GID} ${ASHUSER_HOME} /src /out && \
+    chmod 750 -R ${ASHUSER_HOME} /src /out
 
 USER ${UID}:${GID}
 

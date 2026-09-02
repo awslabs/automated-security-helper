@@ -151,15 +151,11 @@ def install_dependencies(
     exit_code = 0
     for plugin_type in plugin_types:
         plugin_module_input = (
-            plugin_type
-            if isinstance(plugin_type, type)
-            else (
-                "converter"
-                if plugin_type == "converter"
-                else "reporter"
-                if plugin_type == "reporter"
-                else "scanner"
-            )
+            "converter"
+            if plugin_type == "converter"
+            else "reporter"
+            if plugin_type == "reporter"
+            else "scanner"
         )
         plugins = ash_plugin_manager.plugin_modules(plugin_module_input)
         for plugin_class in plugins:
@@ -173,7 +169,14 @@ def install_dependencies(
                         source_dir=source_dir,
                         output_dir=output_dir,
                         work_dir=work_dir,
+                        # config_path is what makes --config/ASH_CONFIG mean
+                        # anything here. Omitting it made the option accept a
+                        # path and then quietly ignore it, so
+                        # `ash dependencies install --config .ash/.ash_community_plugins.yaml`
+                        # resolved the default config instead and installed
+                        # dependencies for the wrong set of plugins.
                         config=resolve_config(
+                            config_path=config,
                             source_dir=source_dir,
                             config_overrides=config_overrides,
                         ),

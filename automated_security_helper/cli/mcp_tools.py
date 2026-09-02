@@ -47,6 +47,7 @@ async def mcp_scan_directory(
     directory_path: str,
     severity_threshold: str = "MEDIUM",
     config_path: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Start a security scan with file-based progress tracking.
@@ -61,15 +62,39 @@ async def mcp_scan_directory(
         directory_path: Path to the directory to scan
         severity_threshold: Minimum severity threshold (LOW, MEDIUM, HIGH, CRITICAL)
         config_path: Optional path to ASH configuration file
+        session_id: Optional MCP session id. When set, the scan acquires the
+            per-session lock (Track 10.5 #63) so two concurrent scans on the
+            same session serialize instead of racing on the shared output
+            dir. Distinct sessions never contend.
 
     Returns:
         Dictionary with scan ID and status information
     """
+    from automated_security_helper.cli.mcp.scan_target import (
+        ASH_MCP_ALLOWED_ROOTS_ENV,
+        validate_scan_target,
+    )
     from automated_security_helper.core.resource_management.error_handling import (
         validate_directory_path,
         validate_severity_threshold,
         validate_config_path,
     )
+
+    # Check the root policy before anything else looks at the target. This runs
+    # ahead of the existence check so that a refused target is reported as
+    # refused rather than as a missing directory, and ahead of the output
+    # directory creation below so that a refused target is not written into.
+    target_error = validate_scan_target(directory_path, session_id=session_id)
+    if target_error:
+        return create_error_response(
+            error=target_error,
+            operation="scan_directory",
+            suggestions=[
+                f"Add the directory to {ASH_MCP_ALLOWED_ROOTS_ENV} if the MCP "
+                "server should be able to scan it",
+                "Verify that the path is correct",
+            ],
+        )
 
     # Validate directory path
     dir_error = validate_directory_path(directory_path)
@@ -137,6 +162,7 @@ async def mcp_scan_directory(
                 output_dir=str(output_dir),
                 severity_threshold=severity_threshold,
                 config_path=config_path,
+                session_id=session_id,
             )
         )
 
@@ -188,6 +214,7 @@ async def _run_scan_async(
     output_dir: str,
     severity_threshold: str,
     config_path: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> None:
     """
     Run an ASH scan asynchronously.
@@ -195,12 +222,19 @@ async def _run_scan_async(
     This function runs the scan using direct Python calls to the ASH functionality
     and updates the scan registry with the scan status.
 
+    When ``session_id`` is provided, the scan acquires the per-session
+    lock from :class:`MCPSessionRegistry` for the duration of the
+    underlying ``run_ash_scan`` call. Two concurrent scans on the same
+    session serialize on this lock; distinct sessions never contend.
+
     Args:
         scan_id: ID of the scan
         directory_path: Path to the directory to scan
         output_dir: Path to the output directory
         severity_threshold: Minimum severity threshold
         config_path: Optional path to ASH configuration file
+        session_id: Optional MCP session id whose per-session lock guards
+            the scan. None means no session — equivalent to legacy behavior.
     """
     from automated_security_helper.core.enums import AshLogLevel, RunMode
     from automated_security_helper.interactions.run_ash_scan import run_ash_scan
@@ -211,48 +245,66 @@ async def _run_scan_async(
         _logger.error(f"Scan {scan_id} not found in registry")
         return
 
-    try:
-        # Mark the scan as running
-        registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
+    # Mark the scan as running
+    registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
 
-        # Log the scan start
-        _logger.info(
-            f"Starting scan process for scan {scan_id} in directory {directory_path}"
+    # Log the scan start
+    _logger.info(
+        f"Starting scan process for scan {scan_id} in directory {directory_path}"
+    )
+
+    # Resolve the per-session lock if a session_id was supplied. The lock is
+    # acquired inside the executor wrapper below — we MUST NOT hold it on the
+    # event-loop thread, since the underlying ``run_ash_scan`` blocks for the
+    # full scan duration.
+    session_lock = None
+    if session_id is not None:
+        from automated_security_helper.cli.mcp.sessions import (
+            get_default_registry as _get_session_registry,
         )
 
-        # Run the scan using direct Python calls
-        try:
-            # Create a task to run the scan in a separate thread to avoid blocking
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                None,
-                lambda: run_ash_scan(
+        session_lock = _get_session_registry().get_or_create(session_id).lock
+
+    def _scan_under_session_lock() -> None:
+        """Acquire the session lock (if any) and run the scan synchronously.
+
+        Wrapped in a function so the lock is acquired on the executor
+        worker thread, not the asyncio event-loop thread.
+        """
+        if session_lock is not None:
+            with session_lock:
+                run_ash_scan(
                     source_dir=directory_path,
                     output_dir=output_dir,
                     config=config_path,
                     mode=RunMode.local,
                     log_level=AshLogLevel.INFO,
-                    fail_on_findings=False,  # Don't exit on findings
-                    show_summary=False,  # Don't show summary
-                ),
+                    fail_on_findings=False,
+                    show_summary=False,
+                )
+        else:
+            run_ash_scan(
+                source_dir=directory_path,
+                output_dir=output_dir,
+                config=config_path,
+                mode=RunMode.local,
+                log_level=AshLogLevel.INFO,
+                fail_on_findings=False,
+                show_summary=False,
             )
 
-            # Update scan status based on result
-            registry.update_scan_status(scan_id, MCScanStatus.COMPLETED)
-            _logger.info(f"Scan {scan_id} completed successfully")
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _scan_under_session_lock)
 
-        except Exception as e:
-            # Handle scan execution errors
-            error_message = f"Error executing scan: {str(e)}"
-            registry.update_scan_status(scan_id, MCScanStatus.FAILED, error_message)
-            _logger.error(f"Scan {scan_id} failed: {error_message}")
-            return
+        # Update scan status based on result
+        registry.update_scan_status(scan_id, MCScanStatus.COMPLETED)
+        _logger.info(f"Scan {scan_id} completed successfully")
 
     except Exception as e:
-        # Handle unexpected errors
-        error_message = f"Unexpected error running scan: {str(e)}"
+        error_message = f"Error executing scan: {str(e)}"
         registry.update_scan_status(scan_id, MCScanStatus.FAILED, error_message)
-        _logger.error(error_message, exc_info=True)
+        _logger.error(f"Scan {scan_id} failed: {error_message}")
 
 
 async def mcp_get_scan_progress(scan_id: str) -> Dict[str, Any]:
@@ -343,6 +395,10 @@ async def mcp_get_scan_results(output_dir: str) -> Dict[str, Any]:
     Returns:
         Dictionary with scan results information
     """
+    from automated_security_helper.cli.mcp.scan_target import (
+        ASH_MCP_ALLOWED_ROOTS_ENV,
+        validate_scan_target,
+    )
     from automated_security_helper.core.resource_management.error_handling import (
         validate_directory_path,
     )
@@ -371,6 +427,22 @@ async def mcp_get_scan_results(output_dir: str) -> Dict[str, Any]:
 
         # Log the resolved path for debugging
         _logger.info(f"Using absolute output directory: {resolved_output_dir}")
+
+        # Results are read from a caller-named directory, so the same roots that
+        # bound what may be scanned bound what may be read back. A legitimate
+        # output directory sits at <source_dir>/.ash/ash_output, beneath the scan
+        # target, so a root that permits the scan permits its results too.
+        target_error = validate_scan_target(resolved_output_dir)
+        if target_error:
+            return create_error_response(
+                error=target_error,
+                operation="get_scan_results",
+                suggestions=[
+                    f"Add the directory to {ASH_MCP_ALLOWED_ROOTS_ENV} if the "
+                    "MCP server should be able to read results from it",
+                    "Verify that the path is correct",
+                ],
+            )
 
         # Validate that the directory exists and is accessible
         error = validate_directory_path(resolved_output_dir)
@@ -537,14 +609,9 @@ async def mcp_check_installation() -> Dict[str, Any]:
         # Get ASH version
         version = get_ash_version()
 
-        # Check if ASH is available using direct Python calls
-        try:
-            # We already have the version from get_ash_version()
-            ash_command_available = True
-            ash_command_output = f"ASH version {version}"
-        except Exception:
-            ash_command_available = False
-            ash_command_output = ""
+        # We already have the version from get_ash_version()
+        ash_command_available = True
+        ash_command_output = f"ASH version {version}"
 
         return {
             "success": True,
@@ -577,3 +644,819 @@ async def mcp_check_installation() -> Dict[str, Any]:
                 "Try reinstalling ASH",
             ],
         )
+
+
+_SEVERITY_RATIONALE: Dict[str, str] = {
+    "CRITICAL": "CRITICAL severity — above any threshold",
+    "HIGH": "HIGH severity — above MEDIUM threshold",
+    "MEDIUM": "MEDIUM severity — above LOW threshold",
+    "LOW": "LOW severity — below MEDIUM threshold",
+    "INFO": "INFO severity — below default threshold",
+}
+
+
+def _load_flat_vulns_for_explain(results_path: Optional[str]) -> list:
+    """Load FlatVulnerability list from an ash_aggregated_results.json directory."""
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+    if results_path is None:
+        output_dir = Path.cwd() / ".ash" / "ash_output"
+    else:
+        candidate = Path(results_path)
+        output_dir = candidate if candidate.is_dir() else candidate.parent
+
+    agg_file = output_dir / "ash_aggregated_results.json"
+    if not agg_file.exists():
+        raise FileNotFoundError(f"Results file not found: {agg_file}")
+    model = AshAggregatedResults.from_json(agg_file.read_text())
+    return model.to_flat_vulnerabilities()
+
+
+def mcp_explain_finding(
+    finding_id: str,
+    results_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Return structured details for a single finding by ID.
+
+    Purely a structured lookup — no LLM calls are made.
+
+    Args:
+        finding_id: The FlatVulnerability.id to look up.
+        results_path: Optional path to the output directory (or file inside it)
+                      containing ash_aggregated_results.json. Defaults to
+                      <cwd>/.ash/ash_output.
+
+    Returns:
+        Dict with ``success`` and ``finding`` keys on success, or
+        ``success: False`` with an ``error`` key when the ID is not found.
+    """
+    import json as _json
+
+    from automated_security_helper.cli.mcp.scan_target import (
+        ASH_MCP_ALLOWED_ROOTS_ENV,
+        validate_scan_target,
+    )
+
+    # Same roots as the other results readers: this reads
+    # ash_aggregated_results.json out of a caller-named output directory. The
+    # directory is derived from results_path exactly as
+    # _load_flat_vulns_for_explain derives it, so the path checked is the path
+    # read.
+    if results_path is not None:
+        _candidate = Path(results_path)
+        target_error = validate_scan_target(
+            _candidate if _candidate.is_dir() else _candidate.parent
+        )
+        if target_error:
+            return create_error_response(
+                error=target_error,
+                operation="explain_finding",
+                suggestions=[
+                    f"Add the directory to {ASH_MCP_ALLOWED_ROOTS_ENV} if the "
+                    "MCP server should be able to read results from it",
+                    "Verify that the path is correct",
+                ],
+            )
+
+    try:
+        flat_vulns = _load_flat_vulns_for_explain(results_path)
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Failed to load scan results: {e}",
+            "operation": "explain_finding",
+        }
+
+    match = next((v for v in flat_vulns if v.id == finding_id), None)
+    if match is None:
+        return {
+            "success": False,
+            "error": f"Finding '{finding_id}' not found in scan results",
+            "operation": "explain_finding",
+        }
+
+    if match.references:
+        try:
+            references: list = _json.loads(match.references)
+        except Exception:
+            references = [match.references]
+    else:
+        references = []
+
+    if match.raw_data:
+        try:
+            scanner_metadata: dict = _json.loads(match.raw_data)
+        except Exception:
+            scanner_metadata = {"raw": match.raw_data}
+    else:
+        scanner_metadata = {}
+
+    severity_upper = (match.severity or "").upper()
+    severity_rationale = _SEVERITY_RATIONALE.get(
+        severity_upper, f"{severity_upper} severity"
+    )
+
+    return {
+        "success": True,
+        "operation": "explain_finding",
+        "finding": {
+            "title": match.title,
+            "description": match.description,
+            "severity": match.severity,
+            "severity_rationale": severity_rationale,
+            "cwe_id": match.cwe_id,
+            "cve_id": match.cve_id,
+            "references": references,
+            "scanner": match.scanner,
+            "scanner_metadata": scanner_metadata,
+        },
+    }
+
+
+def mcp_diff_scan_results(before_path: str, after_path: str) -> Dict[str, Any]:
+    """Compare two ash_aggregated_results.json files and return a structured diff.
+
+    Args:
+        before_path: Path to the baseline ash_aggregated_results.json file.
+        after_path: Path to the comparison ash_aggregated_results.json file.
+
+    Returns:
+        Dict with keys:
+          - new: List[dict] — findings present in after but not in before.
+          - resolved: List[dict] — findings present in before but not in after.
+          - severity_changed: List[dict] — findings in both with a different severity,
+            each entry has {id, before_severity, after_severity}.
+        On error, returns {"success": False, "error": <message>}.
+    """
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+
+    before_file = Path(before_path)
+    after_file = Path(after_path)
+
+    if not before_file.exists():
+        return {
+            "success": False,
+            "error": f"before_path does not exist: {before_path}",
+        }
+    if not after_file.exists():
+        return {
+            "success": False,
+            "error": f"after_path does not exist: {after_path}",
+        }
+
+    try:
+        before_results = AshAggregatedResults.from_json(before_file.read_text())
+        after_results = AshAggregatedResults.from_json(after_file.read_text())
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Failed to parse result file: {e}",
+        }
+
+    before_vulns = before_results.to_flat_vulnerabilities()
+    after_vulns = after_results.to_flat_vulnerabilities()
+
+    before_by_id: Dict[str, Any] = {v.id: v for v in before_vulns}
+    after_by_id: Dict[str, Any] = {v.id: v for v in after_vulns}
+
+    before_ids = set(before_by_id)
+    after_ids = set(after_by_id)
+
+    new = [after_by_id[i].model_dump() for i in sorted(after_ids - before_ids)]
+    resolved = [before_by_id[i].model_dump() for i in sorted(before_ids - after_ids)]
+
+    severity_changed = []
+    for vid in sorted(before_ids & after_ids):
+        b_sev = (before_by_id[vid].severity or "").upper()
+        a_sev = (after_by_id[vid].severity or "").upper()
+        if b_sev != a_sev:
+            severity_changed.append(
+                {"id": vid, "before_severity": b_sev or None, "after_severity": a_sev or None}
+            )
+
+    return {"new": new, "resolved": resolved, "severity_changed": severity_changed}
+
+
+def mcp_list_scanners() -> list:
+    """Return per-scanner metadata for all registered ASH scanners.
+
+    Each entry contains:
+      name: scanner config name (e.g. "bandit")
+      version: detected version string, or None if unavailable without an active context
+      dependencies_satisfied: whether the scanner's dependencies are met
+      offline_strategy: OfflineStrategy enum value string
+      enabled: whether the scanner is enabled in the default config
+    """
+    from automated_security_helper.plugins import ash_plugin_manager
+    from automated_security_helper.plugins.loader import load_internal_plugins, load_additional_plugin_modules
+    from automated_security_helper.config.default_config import get_default_config
+
+    load_internal_plugins()
+
+    # Discover external plugin modules via importlib.metadata: any installed package
+    # whose top-level name matches the ash plugin namespace pattern is imported so its
+    # @ash_scanner_plugin decorators fire and register the scanner into ash_plugin_manager.
+    import importlib as _importlib
+    try:
+        from importlib.metadata import packages_distributions
+        _pkg_dist = packages_distributions()
+    except Exception:
+        _pkg_dist = {}
+
+    _external_mods: list[str] = []
+    for _top_level, _dists in _pkg_dist.items():
+        if any(
+            d.startswith("ash_") and d.endswith("_plugins")
+            for d in _dists
+        ):
+            _external_mods.append(f"automated_security_helper.plugin_modules.{_top_level}")
+
+    if _external_mods:
+        load_additional_plugin_modules(_external_mods)
+    else:
+        # Fallback: import well-known external plugin modules directly so their decorators fire.
+        # TODO: replace with entry-points once external packages declare 'ash.plugins' group.
+        for _mod in (
+            "automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner",
+            "automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner",
+            "automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner",
+        ):
+            try:
+                _importlib.import_module(_mod)
+            except ImportError:
+                pass
+
+    scanner_classes = ash_plugin_manager.plugin_modules("scanner")
+    default_config = get_default_config()
+
+    results = []
+    for cls in scanner_classes:
+        offline_strategy = getattr(cls, "offline_strategy", None)
+        offline_strategy_value = offline_strategy.value if offline_strategy is not None else "unknown"
+
+        scanner_name: Optional[str] = None
+        scanner_enabled: bool = True
+
+        # Derive the concrete config class from Pydantic model_fields.
+        # The 'config' field annotation is Union[ConcreteConfig, ScannerPluginConfigBase, None].
+        # The first arg of that Union is always the scanner-specific config.
+        config_class = None
+        config_field = getattr(cls, "model_fields", {}).get("config")
+        if config_field is not None:
+            annotation = getattr(config_field, "annotation", None)
+            type_args = getattr(annotation, "__args__", None)
+            if type_args:
+                for arg in type_args:
+                    if isinstance(arg, type) and arg.__name__.endswith("ScannerConfig") and arg.__name__ != "ScannerPluginConfigBase":
+                        config_class = arg
+                        break
+
+        if config_class is not None:
+            try:
+                cfg_instance = config_class()
+                raw_name = getattr(cfg_instance, "name", None)
+                # Normalize kebab-case config names to snake_case
+                scanner_name = raw_name.replace("-", "_") if raw_name else None
+                scanner_enabled_default = getattr(cfg_instance, "enabled", True)
+
+                if scanner_name:
+                    found_cfg = default_config.get_plugin_config("scanner", scanner_name)
+                    if found_cfg is not None:
+                        scanner_enabled = (
+                            found_cfg.get("enabled", scanner_enabled_default)
+                            if isinstance(found_cfg, dict)
+                            else getattr(found_cfg, "enabled", scanner_enabled_default)
+                        )
+                    else:
+                        scanner_enabled = scanner_enabled_default
+                else:
+                    scanner_enabled = scanner_enabled_default
+            except Exception:
+                scanner_enabled = True
+
+        if not scanner_name:
+            import re as _re
+            # Convert PascalCase class name to snake_case, strip trailing "Scanner"
+            raw = cls.__name__
+            raw = _re.sub(r"Scanner$", "", raw)
+            scanner_name = _re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", raw).lower()
+
+        results.append({
+            "name": scanner_name,
+            "version": None,
+            "dependencies_satisfied": False,
+            "offline_strategy": offline_strategy_value,
+            "enabled": scanner_enabled,
+        })
+
+    return results
+
+
+def mcp_get_config(
+    config_path: Optional[str] = None,
+    raw: bool = False,
+    search_dir: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Return the resolved ASH config (or raw file contents if raw=True).
+
+    Args:
+        config_path: Explicit path to config file. If None, auto-discovers.
+        raw: If True, returns the user file contents without merging defaults.
+        search_dir: Directory to search for config file when config_path is None.
+                    Defaults to cwd.
+
+    Returns:
+        Dict representation of the resolved AshConfig, or raw YAML dict if raw=True.
+    """
+    import yaml as _yaml
+    from automated_security_helper.config.resolve_config import (
+        resolve_config,
+        find_config_file,
+    )
+    from automated_security_helper.config.default_config import get_default_config
+
+    if config_path is not None:
+        path: Optional[Path] = Path(config_path)
+        if not path.exists():
+            return get_default_config().model_dump()
+    else:
+        search = Path(search_dir) if search_dir else None
+        path = find_config_file(search_dir=search)
+
+    if path is None:
+        return get_default_config().model_dump()
+
+    if raw:
+        return _yaml.safe_load(path.read_text()) or {}
+
+    # resolve_config short-circuits to default when source_dir is None,
+    # so supply source_dir to force it to read the specified file.
+    resolved = resolve_config(config_path=path, source_dir=path.parent)
+    return resolved.model_dump()
+
+
+def mcp_validate_config(
+    config_content: Optional[str] = None,
+    config_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Validate an ASH config supplied as a content string or file path.
+
+    Args:
+        config_content: YAML/JSON string to validate. Mutually exclusive with config_path.
+        config_path: Path to the config file to validate.
+
+    Returns:
+        Dict with keys:
+          - valid: bool
+          - errors: List[{field: str, message: str, type: str}]
+    """
+    import re
+    import tempfile
+
+    from automated_security_helper.config.config_validator import ConfigValidator
+
+    def _classify(raw: str) -> Dict[str, Any]:
+        if "YAML parsing error" in raw or "yaml" in raw.lower():
+            return {"field": "", "message": raw, "type": "yaml_parse_error"}
+        if "JSON parsing error" in raw:
+            return {"field": "", "message": raw, "type": "json_parse_error"}
+        if "Missing required" in raw:
+            m = re.search(r"'([^']+)'", raw)
+            field = m.group(1) if m else ""
+            return {"field": field, "message": raw, "type": "missing_required_field"}
+        if "internal-only field" in raw or "internal field" in raw:
+            m = re.search(r"field '([^']+)'", raw)
+            field = m.group(1) if m else ""
+            return {"field": field, "message": raw, "type": "internal_field"}
+        if "Unknown" in raw or "unknown" in raw:
+            m = re.search(r"'([^']+)'", raw)
+            field = m.group(1) if m else ""
+            return {"field": field, "message": raw, "type": "unknown_field"}
+        if "Invalid" in raw or "invalid" in raw:
+            m = re.search(r"'([^']+)'", raw)
+            field = m.group(1) if m else ""
+            return {"field": field, "message": raw, "type": "invalid_field"}
+        if "Duplicate" in raw:
+            m = re.search(r"'([^']+)'", raw)
+            field = m.group(1) if m else ""
+            return {"field": field, "message": raw, "type": "duplicate_field"}
+        return {"field": "", "message": raw, "type": "validation_error"}
+
+    if config_content is not None:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".yaml", delete=False
+        ) as tmp:
+            tmp.write(config_content)
+            tmp_path = Path(tmp.name)
+        try:
+            valid, raw_errors = ConfigValidator.validate_config_file(tmp_path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+    elif config_path is not None:
+        path = Path(config_path)
+        if not path.exists():
+            return {
+                "valid": False,
+                "errors": [
+                    {
+                        "field": "config_path",
+                        "message": f"Config file not found: {config_path}",
+                        "type": "file_not_found",
+                    }
+                ],
+            }
+        valid, raw_errors = ConfigValidator.validate_config_file(path)
+    else:
+        return {
+            "valid": False,
+            "errors": [
+                {
+                    "field": "",
+                    "message": "Either config_content or config_path must be provided.",
+                    "type": "missing_input",
+                }
+            ],
+        }
+
+    return {
+        "valid": valid,
+        "errors": [_classify(e) for e in raw_errors],
+    }
+
+
+def mcp_suggest_suppression(
+    finding_id: str,
+    results_path: Optional[str] = None,
+    expiration: Optional[str] = None,
+    justification: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Build a paste-ready AshSuppression entry for a specific finding.
+
+    Args:
+        finding_id: Stable hash ID of the finding to suppress.
+        results_path: Path to ash_aggregated_results.json. Defaults to
+                      .ash/ash_output/ash_aggregated_results.json in cwd.
+        expiration: Expiration date in YYYY-MM-DD format. Defaults to 90 days from today.
+        justification: Human-readable reason for the suppression.
+
+    Returns:
+        Dict with keys:
+          - success: bool
+          - yaml: str — paste-ready YAML block
+          - json: dict — same data as a dict
+        On error: {"success": False, "error": <message>}
+    """
+    import yaml as _yaml
+    from datetime import date, timedelta
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+    from automated_security_helper.models.core import AshSuppression
+
+    if results_path is None:
+        results_file = Path.cwd() / ".ash" / "ash_output" / "ash_aggregated_results.json"
+    else:
+        results_file = Path(results_path)
+
+    if not results_file.exists():
+        return {
+            "success": False,
+            "error": f"Results file not found: {results_file}",
+        }
+
+    try:
+        results = AshAggregatedResults.from_json(results_file.read_text())
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Failed to parse results file: {e}",
+        }
+
+    flat_vulns = results.to_flat_vulnerabilities()
+    finding = next((v for v in flat_vulns if v.id == finding_id), None)
+
+    if finding is None:
+        return {
+            "success": False,
+            "error": f"Finding not found: {finding_id}",
+        }
+
+    expiration_date = expiration or (date.today() + timedelta(days=90)).strftime("%Y-%m-%d")
+    reason = justification or "Suppressed via ASH MCP suggest_suppression tool — review before merging"
+
+    suppression = AshSuppression(
+        path=finding.file_path or "",
+        rule_id=finding.rule_id,
+        line_start=finding.line_start,
+        line_end=finding.line_end,
+        expiration=expiration_date,
+        reason=reason,
+    )
+
+    suppression_dict = suppression.model_dump(exclude_none=True)
+    suppression_yaml = _yaml.safe_dump(suppression_dict, default_flow_style=False, sort_keys=True)
+
+    return {
+        "success": True,
+        "yaml": suppression_yaml,
+        "json": suppression_dict,
+    }
+
+
+def mcp_list_profiles() -> Dict[str, Any]:
+    """List registered MCP config profiles by name + path SHA256.
+
+    The path itself is intentionally not exposed — operators may register
+    profiles with sensitive filesystem paths, and the SHA is sufficient for
+    a client to detect "is this the same profile as before".
+    """
+    from automated_security_helper.cli.mcp.profile_registry import (
+        get_profile_registry,
+    )
+
+    registry = get_profile_registry()
+    profiles = sorted(
+        ({"name": name, "path_sha256": entry.path_sha256} for name, entry in registry.items()),
+        key=lambda e: e["name"],
+    )
+    return {"profiles": profiles, "count": len(profiles)}
+
+
+def mcp_select_profile(
+    profile_name: str,
+    *,
+    patch_ops: Optional[list] = None,
+    override_yaml: Optional[str] = None,
+    session_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Bind a registered profile to the calling session.
+
+    Three modes:
+        * **static** — `patch_ops` and `override_yaml` are both None; the
+          profile's resolved config is bound as-is.
+        * **inherit-and-patch** — `patch_ops` is provided; the profile's
+          config is patched through `apply_runtime_patch` (which enforces the
+          MCP allowlist).
+        * **override** — `override_yaml` is provided; the profile is
+          replaced wholesale by the YAML, validated through `AshConfig`.
+
+    `patch_ops` and `override_yaml` are mutually exclusive.
+    """
+    from automated_security_helper.cli.mcp.profile_registry import (
+        bind_session_config,
+        get_profile_registry,
+    )
+    from automated_security_helper.config.runtime_patch import (
+        RuntimePatchDeniedError,
+        apply_runtime_patch,
+    )
+    from automated_security_helper.config.ash_config import (
+        AshConfig,
+        AshMcpConfig,
+        RuntimeOverridesConfig,
+    )
+    import yaml as _yaml
+    from pydantic import ValidationError as _ValidationError
+
+    if patch_ops is not None and override_yaml is not None:
+        return {
+            "success": False,
+            "error": "patch_ops and override_yaml are mutually exclusive",
+        }
+
+    registry = get_profile_registry()
+    if profile_name not in registry:
+        if not registry:
+            return {
+                "success": False,
+                "error": f"unknown profile {profile_name!r} (none registered)",
+            }
+        known = sorted(registry)
+        return {
+            "success": False,
+            "error": f"unknown profile {profile_name!r}; known: {', '.join(known)}",
+        }
+
+    entry = registry[profile_name]
+    base_cfg: AshConfig = entry.config
+
+    if override_yaml is not None:
+        try:
+            raw = _yaml.safe_load(override_yaml)
+        except _yaml.YAMLError as exc:
+            return {"success": False, "error": f"override_yaml parse error: {exc}"}
+        # Strict-extra gate: AshConfig.model_config has extra='ignore' for
+        # back-compat with end-user configs, but profiles are operator-
+        # controlled deployment artifacts and should fail on typos.
+        allowed = set(AshConfig.model_fields.keys())
+        for finfo in AshConfig.model_fields.values():
+            if finfo.alias:
+                allowed.add(finfo.alias)
+        unknown = sorted(set(raw or {}) - allowed)
+        if unknown:
+            return {
+                "success": False,
+                "error": (
+                    f"override_yaml validation error: unknown top-level "
+                    f"field(s): {', '.join(unknown)}"
+                ),
+            }
+        try:
+            new_cfg = AshConfig.model_validate(raw or {}, strict=True)
+        except _ValidationError as exc:
+            return {
+                "success": False,
+                "error": f"override_yaml validation error: {exc.errors()}",
+            }
+        bind_session_config(
+            session_id,
+            config=new_cfg,
+            profile_name=profile_name,
+            override_yaml=override_yaml,
+        )
+        return {
+            "success": True,
+            "mode": "override",
+            "profile_name": profile_name,
+            "session_id": session_id or _default_session_id(),
+        }
+
+    if patch_ops is not None:
+        mcp_cfg: Optional[AshMcpConfig] = getattr(
+            base_cfg.global_settings, "mcp", None
+        )
+        allowlist = (
+            mcp_cfg.runtime_overrides
+            if mcp_cfg is not None
+            else RuntimeOverridesConfig()
+        )
+        try:
+            patched = apply_runtime_patch(
+                base_cfg, patch_ops, allowlist=allowlist
+            )
+        except RuntimePatchDeniedError as exc:
+            return {"success": False, "error": f"patch denied: {exc}"}
+        bind_session_config(
+            session_id,
+            config=patched,
+            profile_name=profile_name,
+            patch_ops=patch_ops,
+        )
+        return {
+            "success": True,
+            "mode": "inherit_and_patch",
+            "profile_name": profile_name,
+            "session_id": session_id or _default_session_id(),
+        }
+
+    bind_session_config(
+        session_id,
+        config=base_cfg,
+        profile_name=profile_name,
+    )
+    return {
+        "success": True,
+        "mode": "static",
+        "profile_name": profile_name,
+        "session_id": session_id or _default_session_id(),
+    }
+
+
+def _default_session_id() -> str:
+    """Return the profile_registry DEFAULT_SESSION_ID without circular import."""
+    from automated_security_helper.cli.mcp.profile_registry import (
+        DEFAULT_SESSION_ID,
+    )
+
+    return DEFAULT_SESSION_ID
+
+
+# ---------------------------------------------------------------------------
+# Source delivery (Track 10.2): git-ref clone + chunked zip upload.
+# ---------------------------------------------------------------------------
+
+
+def mcp_set_source_git(
+    url: str,
+    ref: Optional[str] = None,
+    *,
+    ssh_key_id: Optional[str] = None,
+    depth: int = 1,
+    session_id: str,
+) -> Dict[str, Any]:
+    """Clone ``url`` at ``ref`` into the per-session workspace.
+
+    Args:
+        url: Remote URL to clone (https or ssh).
+        ref: Optional branch/tag/commit. ``None`` uses the remote default.
+        ssh_key_id: Opaque, server-side keyring identifier. Raw private keys
+            are not accepted over the wire.
+        depth: Shallow-clone depth. Defaults to 1.
+        session_id: MCP session identifier scoping the workspace.
+
+    Returns:
+        ``{"success": True, "source_dir": str}`` on success;
+        ``{"success": False, "error": str}`` on git failure.
+    """
+    from automated_security_helper.cli.mcp.source_delivery import set_source_git
+
+    try:
+        source_dir = set_source_git(
+            url=url,
+            ref=ref,
+            ssh_key_id=ssh_key_id,
+            depth=depth,
+            session_id=session_id,
+        )
+    except (RuntimeError, ValueError) as e:
+        return {"success": False, "error": str(e)}
+
+    return {"success": True, "source_dir": str(source_dir)}
+
+
+def mcp_set_source_zip_chunk(
+    upload_id: str,
+    sequence: int,
+    data_b64: str,
+    last: bool,
+    *,
+    session_id: str,
+) -> Dict[str, Any]:
+    """Append one base64-encoded chunk to an in-flight zipped-source upload.
+
+    Args:
+        upload_id: Caller-chosen identifier for this single upload.
+        sequence: Zero-based ordinal; chunks must arrive in order.
+        data_b64: Base64-encoded chunk payload (≤ 1 MiB decoded).
+        last: ``True`` on the final chunk.
+        session_id: MCP session identifier scoping the upload.
+
+    Returns:
+        ``{"success": True, "received": int, "next_sequence": int, "last": bool}``
+        on success; ``{"success": False, "error": str}`` on validation
+        failure (out-of-order, oversize, malformed b64).
+    """
+    from automated_security_helper.cli.mcp.source_delivery import set_source_zip_chunk
+
+    try:
+        result = set_source_zip_chunk(
+            upload_id=upload_id,
+            sequence=sequence,
+            data_b64=data_b64,
+            last=last,
+            session_id=session_id,
+        )
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+
+    return {"success": True, **result}
+
+
+def mcp_set_source_zip_finalize(
+    upload_id: str,
+    expected_sha256: str,
+    *,
+    session_id: str,
+) -> Dict[str, Any]:
+    """Finalize a chunked upload: verify checksum and extract.
+
+    Args:
+        upload_id: Identifier matching the prior chunk calls.
+        expected_sha256: Hex sha256 the assembled zip must match.
+        session_id: MCP session identifier.
+
+    Returns:
+        ``{"success": True, "source_dir": str}`` on success;
+        ``{"success": False, "error": str}`` on checksum mismatch,
+        oversize zip, oversize extraction, too-many-files, or any
+        path-traversal/symlink-out-of-tree entry.
+    """
+    from automated_security_helper.cli.mcp.source_delivery import (
+        set_source_zip_finalize,
+    )
+
+    try:
+        source_dir = set_source_zip_finalize(
+            upload_id=upload_id,
+            expected_sha256=expected_sha256,
+            session_id=session_id,
+        )
+    except (FileNotFoundError, ValueError) as e:
+        return {"success": False, "error": str(e)}
+
+    return {"success": True, "source_dir": str(source_dir)}
+
+
+def mcp_clear_source(session_id: str) -> Dict[str, Any]:
+    """Wipe the session workspace and forget any recorded ``source_dir``.
+
+    Idempotent: missing workspaces succeed.
+
+    Args:
+        session_id: MCP session identifier.
+
+    Returns:
+        ``{"success": True}``.
+    """
+    from automated_security_helper.cli.mcp.source_delivery import clear_source
+
+    clear_source(session_id=session_id)
+    return {"success": True}

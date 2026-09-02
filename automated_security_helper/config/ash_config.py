@@ -2,8 +2,8 @@ import json
 import os
 from pathlib import Path
 import re
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from typing import Annotated, Any, List, Dict, Literal
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationError
+from typing import Annotated, Any, List, Dict, Literal, Optional
 
 import yaml
 from automated_security_helper.base.converter_plugin import ConverterPluginConfigBase
@@ -427,6 +427,78 @@ class MCPResourceManagementConfig(BaseModel):
     ] = False
 
 
+class RuntimeOverridesConfig(BaseModel):
+    """Allowlist + denylist controlling which JSON-Patch ops the MCP server accepts.
+
+    The MCP server's streamable-HTTP transport lets clients apply JSON-Patch ops
+    to a profile-resolved config at session-bind time. This object is the security
+    boundary: by default, runtime overrides are disabled. When enabled, only ops
+    whose `path` matches `allowed_paths` AND does not match `denied_paths` are
+    accepted. `denied_value_patterns` blocks values that match a regex on a
+    per-path basis (e.g. shell metacharacters in extra_args).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: Annotated[
+        bool,
+        Field(description="Master switch — runtime patches are rejected unless True."),
+    ] = False
+
+    allowed_paths: Annotated[
+        List[str],
+        Field(
+            description=(
+                "JSON-Pointer glob patterns the client may target. `*` matches one segment, "
+                "`**` matches any subtree. Example: '/scanners/*/options/severity_threshold'."
+            )
+        ),
+    ] = []
+
+    denied_paths: Annotated[
+        List[str],
+        Field(
+            description=(
+                "JSON-Pointer glob patterns that are NEVER allowed (denied wins over allowed). "
+                "Defaults block the most dangerous fields on the real AshConfig schema."
+            )
+        ),
+    ] = [
+        # Top-level safety: never let a runtime patch flip the failure semantics.
+        "/fail_on_findings",
+        # Suppressions and ignore paths can hide findings outright.
+        "/global_settings/ignore_paths",
+        "/global_settings/suppressions",
+        # AWS-credential-bearing reporter options (plugin-provided, hyphenated names).
+        "/reporters/bedrock-summary-reporter/options/aws_*",
+        "/reporters/cloudwatch-logs/**",
+    ]
+
+    denied_value_patterns: Annotated[
+        Dict[str, str],
+        Field(
+            description=(
+                "Map of JSON-Pointer pattern → regex. add/replace ops are rejected when "
+                "any string leaf reachable from the op's value matches the regex; lists "
+                "and dicts are walked recursively so a forbidden token cannot be hidden "
+                "inside a nested structure. The `test` op is exempt because it is "
+                "read-only."
+            )
+        ),
+    ] = {}
+
+
+class AshMcpConfig(BaseModel):
+    """MCP-server-specific config bundle (transport-agnostic)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    runtime_overrides: Annotated[
+        RuntimeOverridesConfig,
+        Field(description="Allowlist for runtime JSON-Patch overrides."),
+    ] = RuntimeOverridesConfig()
+
+
 class AshConfigGlobalSettingsSection(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -453,6 +525,153 @@ class AshConfigGlobalSettingsSection(BaseModel):
         ),
     ] = []
 
+    mcp: Annotated[
+        AshMcpConfig,
+        Field(
+            description="MCP-server-specific configuration (runtime override allowlist, etc.)."
+        ),
+    ] = AshMcpConfig()
+
+
+# Distinguishes "caller did not pass cpu_count" from "caller passed None", which
+# is a real value here: os.cpu_count() returns None on hosts that cannot report it,
+# and a test needs to be able to say so explicitly.
+_UNSET_CPU_COUNT: Any = object()
+
+
+class WorkspaceExecutionConfig(BaseModel):
+    """How many projects a workspace scan runs at once, and how long each may take.
+
+    Why this is not read from the .code-workspace file
+    --------------------------------------------------
+    ``automated_security_helper.workspace.workspace_file`` deliberately ignores
+    that file's ``settings`` block, because it belongs to another tool whose
+    schema ASH does not control. So every ASH knob, including these two, lives in
+    ASH's own config -- here, in the config resolved for the workspace root.
+
+    Why these two land before the workspace policy block
+    ----------------------------------------------------
+    Neither can change any project's verdict. ``max_parallel_projects`` decides
+    scheduling and ``project_timeout`` decides how long to wait; the findings a
+    project reports and the threshold they are judged against are untouched. The
+    workspace-level *policy* fields -- a severity ceiling, workspace-wide
+    suppressions -- can change a verdict, and they arrive separately and visibly
+    rather than riding in on an execution change.
+
+    Wall clock is ``ceil(projects / bound)`` waves, and that is arithmetic
+    -----------------------------------------------------------------------
+    A workspace of N projects at a bound of B runs in ``ceil(N / B)`` waves, so
+    its wall clock is roughly that multiple of one project's. Reproduce with
+    ``scripts/measure_workspace_parallelism.py``; measured on a 192-CPU Linux
+    host on 2026-08-25, five projects, bound 4, three timed runs per arm, the
+    whole child process timed:
+
+    * five equal projects -- one alone 21.3s median (19.4-22.7), the workspace
+      43.4s median (41.5-45.8). Ratio of medians **2.036x**, range 1.823-2.365x.
+    * one larger project plus four small -- one alone 20.7s median (20.7-26.3),
+      the workspace 40.5s median (39.3-46.0). Ratio **1.958x**, range
+      1.495-2.227x.
+
+    Both sit on the ``ceil(5/4) = 2`` floor, so neither says much about the
+    implementation: an operator who wants a workspace to finish in about the time
+    of its slowest project has to set ``max_parallel_projects`` to at least the
+    project count and accept the thread product below. The default stays at 4
+    because that product is the thing worth defaulting conservatively.
+
+    Two earlier figures for this were wrong and are withdrawn. A reported 0.88x at
+    bound 5 -- a five-project workspace beating one project alone -- was an
+    artefact of timing a cold single-project arm against a warm workspace arm,
+    because ``uv_tool_runner`` caches tool probing across invocations. The
+    measurement script now runs a discard pass first and alternates the arms, and
+    nothing close to a sub-1.0 ratio reappears. A reported 2.35x at bound 4 was a
+    single unrepeated run; it lands at the top of the range measured here rather
+    than at its centre, which is why the figures above are medians with a spread.
+
+    The second shape did not do what it was designed to do, and that is worth
+    knowing before anyone repeats it. It gave one project five times the files, on
+    the theory that "the slowest project alone" would then be a real baseline and
+    the small projects could hide inside its wave. But 60 files scanned in 20.7s
+    and 12 files in 21.3s -- indistinguishable. Scan wall clock here is dominated
+    by per-scanner startup, not by file count, so the fixture produced no dominant
+    project and its number is really the equal case again. Testing the RFC's 1.5x
+    criterion properly needs a project large enough to be file-bound rather than
+    startup-bound, which is thousands of files, not sixty.
+
+    On this evidence the 1.5x criterion is not met at the default bound in either
+    shape, and for five projects at bound 4 it cannot be: two waves is 2.0x before
+    any implementation cost.
+
+    Failure modes and known limitations
+    -----------------------------------
+    * ``project_timeout`` bounds the *verdict*, not the worker. Python cannot
+      preempt a thread, so a timed-out project is recorded FAILED and the
+      workspace continues, but the abandoned worker keeps running -- and keeps
+      its pool slot. Once every slot is held by an abandoned project, nothing
+      still queued can start, so those projects are cancelled and recorded
+      FAILED rather than waited on. A workspace with more projects than
+      ``max_parallel_projects`` can therefore report several failures from one
+      slow project; raising either knob avoids it.
+    * The process still does not exit until every abandoned worker finishes,
+      because the interpreter joins them. Scanners run as subprocesses with
+      their own timeouts, so the residual exposure is a genuinely wedged
+      in-process scanner.
+    * The outer bound multiplies with the inner scanner pool. That pool is
+      ``min(32, cpu_count + 4)`` in ``ScanExecutionEngine.__init__``, not 4, and
+      not the unrelated ``thread_pool_max_workers`` MCP setting, so the
+      worst-case thread count is ``max_parallel_projects * min(32, cpu + 4)``.
+      On the 192-CPU host above, the default bound of 4 already permits up to
+      128 concurrent scanner threads.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_parallel_projects: Annotated[
+        Optional[int],
+        Field(
+            None,
+            ge=1,
+            le=64,
+            description=(
+                "Maximum number of projects scanned concurrently. Unset means "
+                "min(4, cpu_count). This is an outer bound over each project's "
+                "own scanner thread pool, not a replacement for it."
+            ),
+        ),
+    ] = None
+
+    project_timeout: Annotated[
+        Optional[float],
+        Field(
+            None,
+            gt=0,
+            description=(
+                "Seconds to allow a single project. Unset means no limit. On "
+                "timeout that project is recorded as failed and the remaining "
+                "projects still complete."
+            ),
+        ),
+    ] = None
+
+    def resolved_max_parallel_projects(
+        self, cpu_count: Optional[int] = _UNSET_CPU_COUNT
+    ) -> int:
+        """The bound to use, deriving the default when none is configured.
+
+        Stored as ``None`` and derived here rather than defaulted to 4 in the
+        field, so that a one-CPU host gets one worker instead of four and a
+        serialised config still shows the operator did not choose a number.
+
+        Args:
+            cpu_count: Override for the host CPU count, for tests. ``None`` and
+                ``0`` are both treated as one CPU, because ``os.cpu_count()``
+                can return ``None`` and a pool of zero workers never runs.
+        """
+        if self.max_parallel_projects is not None:
+            return self.max_parallel_projects
+        if cpu_count is _UNSET_CPU_COUNT:
+            cpu_count = os.cpu_count()
+        return max(1, min(4, cpu_count or 1))
+
 
 class AshConfig(BaseModel):
     """Main configuration model for Automated Security Helper."""
@@ -461,10 +680,17 @@ class AshConfig(BaseModel):
         str_strip_whitespace=True,
         arbitrary_types_allowed=True,
         extra="ignore",
+        # Accept BOTH the alias (e.g., 'mcp-resource-management') and the
+        # Python field name (e.g., 'mcp_resource_management') as input.
+        # Pydantic v2 default is alias-only when an alias is declared,
+        # which surfaced as an MCP-profile-loading error: the strict-extra
+        # gate accepted both spellings but model_validate(strict=True)
+        # accepted only the alias. See DA r6 #3.
+        populate_by_name=True,
     )
 
     # Internal field to track config resolution warnings (not serialized)
-    _resolution_warnings: List[str] = []
+    _resolution_warnings: List[str] = PrivateAttr(default_factory=list)
 
     # Project information
     project_name: Annotated[
@@ -532,6 +758,18 @@ class AshConfig(BaseModel):
         ),
     ] = MCPResourceManagementConfig()
 
+    workspace: Annotated[
+        WorkspaceExecutionConfig,
+        Field(
+            description=(
+                "Workspace-mode execution settings. Read from the config "
+                "resolved for the workspace root; a project's own copy of this "
+                "block is ignored, because how many projects run at once is not "
+                "a project's decision."
+            ),
+        ),
+    ] = WorkspaceExecutionConfig()
+
     @classmethod
     def from_file(cls, config_path: Path) -> "AshConfig":
         """Load configuration from a file."""
@@ -585,107 +823,10 @@ class AshConfig(BaseModel):
                 config_data = yaml.load(f, Loader=_AshConfigLoader)  # nosec B506 - This is using a custom SafeLoader to enable support of !ENV tag evaluation
         return cls.model_validate(config_data, strict=True)
 
-    @classmethod
-    def load_config(
-        cls,
-        config_path: Path | str | None = None,
-        source_dir: Path | None = None,
-    ) -> "AshConfig":
-        """Load configuration from file or return default configuration."""
-        if source_dir is None:
-            source_dir = Path.cwd()
-        try:
-            config = get_default_config()
-            if not config_path:
-                ASH_LOGGER.verbose(
-                    "No configuration file provided, checking for default paths"
-                )
-                for item in ASH_CONFIG_FILE_NAMES:
-                    possible_config_paths = [
-                        source_dir.joinpath(item),
-                        source_dir.joinpath(".ash", item),
-                    ]
-                    for possible_config_path in possible_config_paths:
-                        if possible_config_path.exists():
-                            config_path = possible_config_path
-                            ASH_LOGGER.verbose(
-                                f"Found configuration file at: {possible_config_path.as_posix()}"
-                            )
-                            break
-                    if config_path:
-                        break
-                ASH_LOGGER.verbose(
-                    "Configuration file not found or provided, using default config"
-                )
-
-            # We *always* want to evaluate this after the inverse block above runs, in
-            # case self.config_path is resolved from a default location.
-            # Do not use `else:` here!
-            if config_path:
-                ASH_LOGGER.verbose(
-                    f"Loading configuration from {config_path.as_posix()}"
-                )
-                try:
-                    with open(config_path, mode="r", encoding="utf-8") as f:
-                        if str(config_path).endswith(".json"):
-                            config_data = json.load(f)
-                        else:
-                            config_data = yaml.safe_load(f)
-
-                    if not isinstance(config_data, dict):
-                        raise ValueError("Configuration must be a dictionary")
-
-                    ASH_LOGGER.verbose("Validating file config")
-                    config = cls.model_validate(config_data)
-                    ASH_LOGGER.debug(f"Loaded config from file: {config}")
-                except (IOError, yaml.YAMLError, json.JSONDecodeError) as e:
-                    ASH_LOGGER.error(f"Failed to load configuration file: {str(e)}")
-                    raise ASHConfigValidationError(
-                        f"Failed to load configuration: {str(e)}"
-                    )
-                except ValidationError as e:
-                    ASH_LOGGER.error(f"Configuration validation failed: {str(e)}")
-                    raise ASHConfigValidationError(
-                        f"Configuration validation failed: {str(e)}"
-                    )
-
-            return config
-        except Exception as e:
-            raise e
-
     def save(self, config_path: Path):
         """Save configuration to a file."""
         with open(config_path, mode="w", encoding="utf-8") as f:
             yaml.safe_dump(self.model_dump(by_alias=True), f, indent=2)
-
-    def get_scanners(self) -> Dict[str, Any]:
-        """Get a dictionary of scanners and their corresponding configurations."""
-        scanner_configs: Dict[str, Any] = {
-            scanner.config.name: scanner for scanner in self.build.custom_scanners
-        }
-        scanner: (
-            BanditScannerConfig
-            | CdkNagScannerConfig
-            | CfnNagScannerConfig
-            | CheckovScannerConfig
-            | DetectSecretsScannerConfig
-            | GrypeScannerConfig
-            | NpmAuditScannerConfig
-            | SemgrepScannerConfig
-            | SyftScannerConfig
-            | OpengrepScannerConfig
-        )
-        for scanner in self.scanners.model_dump(by_alias=True).values():
-            sname = (
-                scanner.name
-                if hasattr(scanner, "name")
-                else scanner["name"]
-                if isinstance(scanner, dict)
-                else None
-            )
-            scanner_configs[sname] = scanner
-
-        return scanner_configs
 
     def get_plugin_config(
         self,
@@ -696,11 +837,25 @@ class AshConfig(BaseModel):
         # Reduce the provided plugin_name in case the class name was passed in,
         # as the config itself uses kebab-case keys while the classes use PascalCase
         # for class names.
+        #
+        # Punctuation is stripped as well as the type word. Stripping only the type
+        # word left a caller who passed the *config-key* spelling with a dangling
+        # separator -- "bedrock-summary-reporter" reduced to "bedrock-summary-",
+        # which matches no key and no candidate -- so the lookup missed even though
+        # the key was spelled exactly right. cli/report.py passes
+        # plugin_name=report_format straight from --output-format, and
+        # scanner_statistics_calculator passes the registered scanner name, so this
+        # is the spelling real callers use, not a hypothetical one.
         og_plugin_name = plugin_name
         plugin_name = re.sub(
-            r"(Converter|Scanner|Reporter)(Config)?",
+            r"[^a-z0-9+]+",
             "",
-            plugin_name,
+            re.sub(
+                r"(Converter|Scanner|Reporter)(Config)?",
+                "",
+                plugin_name,
+                flags=re.IGNORECASE,
+            ),
             flags=re.IGNORECASE,
         ).lower()
         match plugin_type:
@@ -712,30 +867,65 @@ class AshConfig(BaseModel):
                 item_dict = self.converters.model_dump(by_alias=True)
             case _:
                 item_dict = {}
+        # Exact and punctuation-stripped spellings of each config key, in that
+        # order of preference.
+        #
+        # (The previous version of this loop opened with `if found is not None:
+        # break`, but nothing assigns `found` before the loop ends, so it never
+        # fired.)
         key_map = {}
-        for item_name, item in item_dict.items():
-            if found is not None:
-                break
-            for possible in list(
-                sorted(
-                    set(
-                        [
-                            item_name,
-                            re.sub(
-                                r"[^a-z0-9+]+", "", item_name, flags=re.IGNORECASE
-                            ).lower(),
-                        ]
-                    )
-                )
+        for item_name in item_dict:
+            for possible in sorted(
+                {
+                    item_name,
+                    re.sub(r"[^a-z0-9+]+", "", item_name, flags=re.IGNORECASE).lower(),
+                }
             ):
                 key_map[possible] = item_name
-        # Try direct match first
-        if plugin_name in item_dict:
+
+        # The same suffix removal that was applied to plugin_name above, applied
+        # to the config keys. Without this the two forms can never meet: a query
+        # for BedrockSummaryReporter reduces to "bedrocksummary", while the key
+        # "bedrock-summary-reporter" reduces only to "bedrocksummaryreporter", so
+        # any plugin whose config key contains the plugin-type word was
+        # unreachable and silently fell back to its defaults. `csv` matched only
+        # because its key does not contain "reporter", which is why this looked
+        # like an external-plugin problem.
+        #
+        # setdefault, not assignment: a stripped spelling must never shadow a real
+        # key. With both "bedrock-summary" and "bedrock-summary-reporter" present,
+        # the second one's stripped form collides with the first, and adding a
+        # plugin should not repoint another plugin's config.
+        for item_name in item_dict:
+            stripped = re.sub(
+                r"[^a-z0-9+]+",
+                "",
+                re.sub(
+                    r"(Converter|Scanner|Reporter)(Config)?",
+                    "",
+                    item_name,
+                    flags=re.IGNORECASE,
+                ),
+                flags=re.IGNORECASE,
+            ).lower()
+            if stripped:
+                key_map.setdefault(stripped, item_name)
+        # The caller's spelling, before any reduction, wins. This is checked
+        # against og_plugin_name rather than plugin_name: by this point plugin_name
+        # has had its type word and punctuation removed, so an exactly-correct
+        # config key such as "bedrock-summary-reporter" no longer resembles itself
+        # and could never match item_dict here.
+        if og_plugin_name in item_dict:
+            ASH_LOGGER.debug(
+                f"Found {plugin_type} plugin {og_plugin_name} with direct match"
+            )
+            found = item_dict[og_plugin_name]
+        # Then the reduced form, against the reduced spellings of each key.
+        elif plugin_name in item_dict:
             ASH_LOGGER.debug(
                 f"Found {plugin_type} plugin {og_plugin_name} with direct match"
             )
             found = item_dict[plugin_name]
-        # Then try normalized match
         elif plugin_name in key_map:
             ASH_LOGGER.debug(
                 f"Found {plugin_type} plugin {og_plugin_name} under config key {key_map[plugin_name]}"
@@ -750,9 +940,7 @@ class AshConfig(BaseModel):
         return found
 
 
-def add_suppression_to_config(
-    config_path: Path, suppression: AshSuppression
-) -> None:
+def add_suppression_to_config(config_path: Path, suppression: AshSuppression) -> None:
     """Append a suppression to the suppressions list in an .ash.yaml config file.
 
     Uses an append-only strategy when the file already contains a suppressions
@@ -773,9 +961,7 @@ def add_suppression_to_config(
         # Duplicate detection: check if rule_id+path already suppressed
         data = yaml.safe_load(text) or {}
         if isinstance(data, dict):
-            existing = (
-                data.get("global_settings", {}).get("suppressions", []) or []
-            )
+            existing = data.get("global_settings", {}).get("suppressions", []) or []
             for existing_entry in existing:
                 if (
                     isinstance(existing_entry, dict)
@@ -791,7 +977,9 @@ def add_suppression_to_config(
             field_indent = list_indent + "  "
             items = list(entry.items())
             first_key, first_val = items[0]
-            formatted_lines = [f"{list_indent}- {first_key}: {_yaml_scalar(first_val)}\n"]
+            formatted_lines = [
+                f"{list_indent}- {first_key}: {_yaml_scalar(first_val)}\n"
+            ]
             for k, v in items[1:]:
                 formatted_lines.append(f"{field_indent}{k}: {_yaml_scalar(v)}\n")
             for line in reversed(formatted_lines):
@@ -871,7 +1059,11 @@ def _find_suppressions_append_point(lines: list) -> tuple:
                 list_indent = line[:indent_len]
                 last_item_end = idx + 1
                 continue
-            if indent_len > 0 and not stripped.startswith("- ") and not stripped.startswith("#"):
+            if (
+                indent_len > 0
+                and not stripped.startswith("- ")
+                and not stripped.startswith("#")
+            ):
                 last_item_end = idx + 1
                 continue
             if stripped == "" or stripped.startswith("#"):

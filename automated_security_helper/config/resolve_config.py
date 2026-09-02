@@ -1,13 +1,29 @@
 import json
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 from pydantic import ValidationError
 import yaml
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
+from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.utils.log import ASH_LOGGER
+
+
+def find_config_file(search_dir: Path | None = None) -> Optional[Path]:
+    """Search for an ASH config file in search_dir, then search_dir/.ash/.
+
+    Iterates ASH_CONFIG_FILE_NAMES in order; checks the directory itself first,
+    then the .ash/ subdirectory. Returns the first match, or None.
+    """
+    if search_dir is None:
+        search_dir = Path.cwd()
+    for name in ASH_CONFIG_FILE_NAMES:
+        for candidate in [search_dir / name, search_dir / ".ash" / name]:
+            if candidate.exists():
+                return candidate
+    return None
 
 
 def _apply_config_override(
@@ -118,6 +134,12 @@ def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> As
 
     Returns:
         The modified AshConfig object
+
+    Raises:
+        ASHConfigValidationError: If an override cannot be parsed or applied, or
+            if the merged configuration does not validate. Failing here is
+            deliberate: silently dropping an override would run the scan with
+            settings the operator did not choose and still report success.
     """
     if not config_overrides:
         return config
@@ -127,25 +149,27 @@ def apply_config_overrides(config: AshConfig, config_overrides: List[str]) -> As
 
     # Apply each override
     for override in config_overrides:
-        try:
-            # Split at the first equals sign
-            key_path, value = override.split("=", 1)
-            _apply_config_override(config_dict, key_path, value)
-        except ValueError:
-            ASH_LOGGER.warning(
-                f"Invalid config override format: {override}. Expected format: key.path=value"
+        key_path, separator, value = override.partition("=")
+        if not separator or not key_path.strip():
+            raise ASHConfigValidationError(
+                f"Invalid config override: '{override}'. "
+                "Expected format: key.path=value"
             )
+        try:
+            _apply_config_override(config_dict, key_path, value)
         except Exception as e:
-            ASH_LOGGER.warning(f"Failed to apply config override {override}: {str(e)}")
+            raise ASHConfigValidationError(
+                f"Failed to apply config override '{override}': {e}"
+            ) from e
 
     # Convert back to AshConfig
     try:
         return AshConfig.model_validate(config_dict)
     except ValidationError as e:
-        ASH_LOGGER.error(
-            f"Failed to validate config after applying overrides: {str(e)}"
-        )
-        return config  # Return original config if validation fails
+        raise ASHConfigValidationError(
+            "Configuration is invalid after applying the requested overrides "
+            f"{config_overrides}: {e}"
+        ) from e
 
 
 def resolve_config(
@@ -169,8 +193,18 @@ def resolve_config(
     try:
         # Start with default config
         config = get_default_config() if fallback_to_default else None
-        if source_dir is None and fallback_to_default:
-            ASH_LOGGER.verbose("source_dir is null, returning the default config")
+        # An explicit config_path has to survive a missing source_dir. source_dir
+        # only drives *discovery* of a config file; when the caller already named
+        # one, there is nothing to discover and no reason to bail out to the
+        # default. Testing source_dir alone here meant `ash report --config
+        # <file>` accepted the option and then reported against default settings,
+        # because cli/report.py passes config_path with no source_dir (as does
+        # cli/config.py). Below, source_dir falls back to Path.cwd(), which is
+        # only used to resolve a relative config_path at that point.
+        if source_dir is None and config_path is None and fallback_to_default:
+            ASH_LOGGER.verbose(
+                "source_dir and config_path are both null, returning the default config"
+            )
             # Apply overrides to default config if provided
             if config_overrides:
                 return apply_config_overrides(config, config_overrides)
@@ -261,24 +295,15 @@ def resolve_config(
 
         except ValidationError as e:
             ASH_LOGGER.error(f"Configuration validation failed: {str(e)}")
-            if fallback_to_default:
-                ASH_LOGGER.warning(
-                    "Using default configuration due to validation error"
-                )
-                # Apply overrides to default config if provided
-                if config_overrides and config:
-                    config = apply_config_overrides(config, config_overrides)
-                config._resolution_warnings.append(
-                    f"Configuration validation failed: {str(e)}. "
-                    "Using default configuration — suppressions and custom settings are NOT active. "
-                    "Run 'ash config lint' to identify and fix issues."
-                )
-                return config  # Return default config on validation error
-            else:
-                raise e
+            raise ASHConfigValidationError(
+                f"Configuration validation failed for '{config_path}': {str(e)}. "
+                "Run 'ash config lint' to identify and fix issues."
+            ) from e
 
         return config
 
+    except ASHConfigValidationError:
+        raise
     except Exception as e:
         # Always return a valid config, even in case of unexpected errors
         if fallback_to_default:

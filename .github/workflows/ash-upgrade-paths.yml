@@ -1,0 +1,177 @@
+---
+# Validates that the commit under test can be *upgraded into*, not just installed
+# fresh. A clean install passing tells you nothing about whether an existing
+# installation survives the upgrade - stale entry points, regenerated schemas,
+# renamed modules and moved console scripts all fail only on the upgrade path.
+#
+# Three arms, all installing the same new version (the checked-out tree):
+#
+#   direct            clean environment -> new                (baseline)
+#   from-release      latest release tag -> new               (what users do)
+#   from-prev-commit  HEAD~1 -> new                           (what CI/main does)
+#
+# Why the new version comes from the local checkout rather than a git ref:
+# on merge_group the ref is an ephemeral gh-readonly-queue/... branch that GitHub
+# deletes as soon as the queue entry is processed. Installing from it races that
+# deletion - and once the branch is gone the commit is unreachable, so its SHA is
+# not fetchable either. The checkout is already on disk and cannot disappear
+# mid-run, so it is the only stable source for "the code being merged".
+#
+# The old versions are materialised with `git worktree` from the local clone for
+# the same reason: no network fetch, so nothing here depends on a remote ref that
+# may have been deleted. That requires fetch-depth: 0 (history + tags).
+name: ASH Upgrade Paths
+
+on:
+  merge_group:
+  # Deliberately unfiltered. These three arms are meant to be required checks in
+  # the "Protect main" ruleset, and a required check that does not run never
+  # reports - which blocks the pull request forever. A `paths:` filter here would
+  # do exactly that on any PR that happens not to touch pyproject.toml,
+  # uv.lock or automated_security_helper/**. The cost of always running is three
+  # parallel jobs on a repo that already runs well over a hundred.
+  pull_request:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  # One in-flight run per pull request; pushing again supersedes the previous run.
+  #
+  # github.ref is refs/pull/<n>/merge on pull_request, and on merge_group it is the
+  # per-entry gh-readonly-queue/main/pr-<n>-<sha> branch, so every queue entry lands
+  # in its own group and entries never serialize behind one another.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Only pull_request runs may be cancelled. A merge_group run must finish or the
+  # queue loses its verdict, and push/tag runs feed docs and releases.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  upgrade-path:
+    name: "upgrade (${{ matrix.from }})"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - from: direct
+          - from: from-release
+          - from: from-prev-commit
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          # Full history and tags: the old versions are resolved locally, not fetched.
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Resolve the starting point for this arm
+        id: start
+        env:
+          ARM: ${{ matrix.from }}
+        run: |
+          set -euo pipefail
+          case "$ARM" in
+            direct)
+              echo "ref=" >> "$GITHUB_OUTPUT"
+              echo "label=clean environment" >> "$GITHUB_OUTPUT"
+              ;;
+            from-release)
+              # Highest semver release tag that is an ancestor of HEAD.
+              #
+              # Deliberately not `git describe --tags`: that picks the nearest tag
+              # by commit distance, which here returns the floating major-version
+              # tag `v3`. `v3` gets reattached over time, so upgrading "from v3"
+              # would mean upgrading from an unpredictable commit. Sorting by
+              # version and filtering to vX.Y.Z pins the arm to a real release.
+              ref=$(git tag --sort=-v:refname \
+                    | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+                    | while read -r t; do
+                        if git merge-base --is-ancestor "$t" HEAD 2>/dev/null; then
+                          echo "$t"; break
+                        fi
+                      done)
+              if [ -n "$ref" ]; then
+                echo "ref=${ref}" >> "$GITHUB_OUTPUT"
+                echo "label=release ${ref}" >> "$GITHUB_OUTPUT"
+              else
+                echo "::error::No semver release tag is an ancestor of HEAD - cannot validate the upgrade-from-release path."
+                exit 1
+              fi
+              ;;
+            from-prev-commit)
+              if ref=$(git rev-parse --verify HEAD~1 2>/dev/null); then
+                echo "ref=${ref}" >> "$GITHUB_OUTPUT"
+                echo "label=commit ${ref:0:8}" >> "$GITHUB_OUTPUT"
+              else
+                echo "::error::HEAD has no parent - cannot validate the upgrade-from-commit path."
+                exit 1
+              fi
+              ;;
+          esac
+
+      - name: Create the target environment
+        run: |
+          set -euo pipefail
+          # --seed so the venv has pip, matching how users upgrade in place.
+          uv venv --seed --python 3.12 "${RUNNER_TEMP}/venv"
+
+      - name: "Install the starting version (${{ steps.start.outputs.label }})"
+        if: steps.start.outputs.ref != ''
+        env:
+          START_REF: ${{ steps.start.outputs.ref }}
+        run: |
+          set -euo pipefail
+          # Materialise the old tree from the local clone. No fetch, so a deleted
+          # merge-queue ref cannot break this.
+          git worktree add --detach "${RUNNER_TEMP}/old" "$START_REF"
+          uv pip install --python "${RUNNER_TEMP}/venv/bin/python" -q "${RUNNER_TEMP}/old"
+          # Prove the starting point is genuinely functional before upgrading over
+          # it; otherwise a broken "before" state would make the upgrade look fine.
+          "${RUNNER_TEMP}/venv/bin/ash" --version
+
+      - name: Upgrade to the commit under test
+        run: |
+          set -euo pipefail
+          uv pip install --python "${RUNNER_TEMP}/venv/bin/python" -q .
+
+      - name: Verify the upgraded installation
+        run: |
+          set -euo pipefail
+          VENV="${RUNNER_TEMP}/venv/bin"
+          # Console script still resolves and reports the new version.
+          "${VENV}/ash" --version
+          "${VENV}/ash" --help > /dev/null
+          # Subcommands whose entry points or imports could have moved.
+          "${VENV}/ash" mcp --help > /dev/null
+          "${VENV}/ash" config get > /dev/null
+          # Import the package fresh: catches modules left behind by the old
+          # install shadowing the new one.
+          "${VENV}/python" -c "import automated_security_helper as m; print('import ok:', m.__file__)"
+
+      - name: Verify it can still scan after the upgrade
+        run: |
+          set -euo pipefail
+          VENV="${RUNNER_TEMP}/venv/bin"
+          FIX="${RUNNER_TEMP}/selftest"
+          mkdir -p "$FIX"
+          printf 'print("hello")\n' > "${FIX}/test_sample.py"
+          "${VENV}/ash" scan --source-dir "$FIX" --output-dir "${FIX}/output" \
+            --simple --phases scan --phases report
+
+      - name: Record the arm in the run summary
+        if: success() || failure()
+        env:
+          ARM: ${{ matrix.from }}
+          LABEL: ${{ steps.start.outputs.label }}
+          STATUS: ${{ job.status }}
+        run: |
+          printf '| %s | %s | %s |\n' "$ARM" "$LABEL" "$STATUS" >> "$GITHUB_STEP_SUMMARY"

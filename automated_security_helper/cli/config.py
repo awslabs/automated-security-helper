@@ -20,7 +20,10 @@ from automated_security_helper.config.ash_config import (
     ReporterConfigSegment,
     ScannerConfigSegment,
 )
-from automated_security_helper.config.resolve_config import resolve_config
+from automated_security_helper.config.resolve_config import (
+    find_config_file,
+    resolve_config,
+)
 from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
 from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.utils.log import get_logger
@@ -157,7 +160,11 @@ def get(
     if config_path is not None and not Path(config_path).exists():
         typer.secho(f"Config file does not exist at {config_path}", fg=typer.colors.RED)
         raise typer.Exit(1)
-    config = resolve_config(config_path, config_overrides=config_overrides)
+    try:
+        config = resolve_config(config_path, config_overrides=config_overrides)
+    except ASHConfigValidationError as e:
+        typer.secho(f"Invalid configuration: {e}", fg=typer.colors.RED)
+        raise typer.Exit(3)
     print(
         Syntax(
             code=yaml.dump(
@@ -212,18 +219,10 @@ def update(
 
     # Find the config file if not specified
     if config_path is None:
-        for config_file in ASH_CONFIG_FILE_NAMES:
-            def_paths = [
-                Path.cwd().joinpath(config_file),
-                Path.cwd().joinpath(".ash", config_file),
-            ]
-            for def_path in def_paths:
-                if def_path.exists():
-                    logger.info(f"Using config file found at: {def_path.as_posix()}")
-                    config_path = def_path.as_posix()
-                    break
-            if config_path is not None:
-                break
+        found = find_config_file()
+        if found is not None:
+            logger.info(f"Using config file found at: {found.as_posix()}")
+            config_path = found.as_posix()
 
     # Check if config file exists
     if config_path is None or not Path(config_path).exists():
@@ -426,7 +425,7 @@ def lint(
         bool,
         typer.Option(
             "--fix",
-            help="Auto-fix fixable issues (internal fields, missing line_end, expired suppressions)",
+            help="Auto-fix fixable issues (internal fields, missing line_end, expired suppressions, multi-line suppression reasons)",
         ),
     ] = False,
     fix_unused: Annotated[
@@ -461,10 +460,11 @@ def lint(
     - Duplicate field definitions
     - Suppressions with line_start but missing line_end
     - Expired suppressions
+    - Suppression reasons spanning multiple lines
     - Unused suppressions (from last scan report)
 
     Use --fix to auto-fix common issues (removes internal fields, sets missing
-    line_end, removes expired suppressions).
+    line_end, removes expired suppressions, collapses multi-line reasons).
 
     Use --fix-unused to remove suppressions that are no longer matching any
     findings (based on the unused suppressions report from the last scan).
@@ -691,8 +691,6 @@ def _apply_unused_fixes(
     )
 
 
-
-
 def _get_scanner_names() -> List[tuple]:
     """Return (python_name, display_name) tuples for built-in scanners.
 
@@ -856,8 +854,10 @@ def wizard(
         "  Offline mode skips tool installation. Set the ASH_OFFLINE "
         "environment variable at runtime to activate it."
     )
-    current_offline = (
-        os.environ.get("ASH_OFFLINE", "NO").upper() in ("YES", "TRUE", "1")
+    current_offline = os.environ.get("ASH_OFFLINE", "NO").upper() in (
+        "YES",
+        "TRUE",
+        "1",
     )
     enable_offline = typer.confirm(
         "  Set ASH_OFFLINE=YES in the generated config comments as a reminder?",
@@ -919,7 +919,9 @@ def wizard(
         "# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/automated_security_helper/schemas/AshConfig.json",
     ]
     if enable_offline:
-        config_strings.append("# Reminder: export ASH_OFFLINE=YES before running ASH for offline mode")
+        config_strings.append(
+            "# Reminder: export ASH_OFFLINE=YES before running ASH for offline mode"
+        )
 
     config_strings.append(
         yaml.dump(
@@ -953,8 +955,6 @@ def wizard(
 
 if __name__ == "__main__":
     config_app()
-
-
 
 
 if __name__ == "__main__":

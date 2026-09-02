@@ -15,7 +15,66 @@ jobs:
   create-release-pr:
     name: Bump version and create release PR
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
+      # GitHub does not start workflow runs for events authenticated with
+      # GITHUB_TOKEN. The release PR was opened with it, so it arrived with none of
+      # its required checks, and the ruleset waits for exactly those checks. The PR
+      # could not merge on its own; v3.6.0's needed a manual push to go green.
+      #
+      # An App is a separate identity, so a PR it opens does trigger the checks.
+      #
+      # Only the PR creation needs the App. Both required checks trigger on
+      # `pull_request`:
+      #
+      #   ASH - Unified CI     on: pull_request: branches: ["**"]
+      #   ASH - PR Title Check on: pull_request: types: [opened, edited, synchronize]
+      #
+      # so the event that has to fire is `pull_request` opened, which is generated
+      # by whoever *creates* the PR, not by whoever pushed the branch. The push
+      # below therefore stays on GITHUB_TOKEN, and the App needs no `contents:
+      # write` -- which matters, because Apps with direct write access to code are
+      # not granted on these organizations.
+      #
+      # Nothing is lost by leaving the push as it was: the workflow already sets
+      # its git identity to github-actions[bot], so the commit attribution is
+      # unchanged either way.
+      # Both secrets are required, not just the id. create-github-app-token fails
+      # the step if the key is missing or malformed, and the step has no
+      # continue-on-error, so a half-configured secret set would kill the whole
+      # release job -- strictly worse than the degraded-but-working state this
+      # replaces. The `||` fallback further down cannot rescue that: it only covers
+      # an absent output, never a failed step.
+      - name: Detect release App credentials
+        id: appcreds
+        env:
+          APP_ID: ${{ secrets.RELEASE_APP_ID }}
+          APP_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+        run: |
+          if [ -n "$APP_ID" ] && [ -n "$APP_KEY" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            if [ -n "$APP_ID" ] || [ -n "$APP_KEY" ]; then
+              echo "::warning::Only one of RELEASE_APP_ID / RELEASE_APP_PRIVATE_KEY is set. Both are required, so the App is being skipped and the release PR will be created with GITHUB_TOKEN. See issue #341."
+            else
+              echo "::warning::RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY are not set, so the release PR will be created with GITHUB_TOKEN and will not trigger its required checks. A maintainer will need to push to the branch to start them. See issue #341."
+            fi
+          fi
+
+      - name: Mint a GitHub App token
+        id: app-token
+        if: steps.appcreds.outputs.present == 'true'
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      # Deliberately left on the default GITHUB_TOKEN. Handing the App token to
+      # checkout would make `git push` authenticate as the App, which then needs
+      # `contents: write`. With an App scoped to `pull-requests: write` the push
+      # would 403, and it would not degrade gracefully: the `||` fallback picks the
+      # App token whenever one exists, insufficient or not.
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
@@ -76,7 +135,7 @@ jobs:
       - name: Create release PR
         if: steps.bump.outputs.bumped == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
           OLD_VERSION: ${{ steps.bump.outputs.old_version }}
           NEW_VERSION: ${{ steps.bump.outputs.new_version }}
           ACTOR: ${{ github.actor }}

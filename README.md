@@ -65,6 +65,7 @@ ASH v3 integrates multiple open-source security tools as scanners. Tools like Ba
 |---------------------------------------------------------------|-----------|----------------------------------------------------------------------------------------------|-------------------------------------------------------------------------|
 | [Bandit](https://github.com/PyCQA/bandit)                     | SAST      | Python                                                                                       | Managed via UV tool isolation (auto-installed: `bandit>=1.7.0`)        |
 | [Semgrep](https://github.com/semgrep/semgrep)                 | SAST      | Python, JavaScript, TypeScript, Java, Go, C#, Ruby, PHP, Kotlin, Swift, Bash, and more       | Managed via UV tool isolation (auto-installed: `semgrep>=1.125.0`)     |
+| [Opengrep](https://github.com/opengrep/opengrep)               | SAST      | Same rule surface as Semgrep (open-source fork)                                               | Managed via UV tool isolation                                           |
 | [detect-secrets](https://github.com/Yelp/detect-secrets)      | Secrets   | All text files                                                                               | Included with ASH                                                       |
 | [Checkov](https://github.com/bridgecrewio/checkov)            | IaC, SAST | Terraform, CloudFormation, Kubernetes, Dockerfile, ARM Templates, Serverless, Helm, and more | Managed via UV tool isolation (auto-installed: `checkov>=3.2.0,<4.0.0`) |
 | [cfn_nag](https://github.com/stelligent/cfn_nag)              | IaC       | CloudFormation                                                                               | `gem install cfn-nag`                                                   |
@@ -92,7 +93,7 @@ ASH v3 integrates multiple open-source security tools as scanners. Tools like Ba
 curl -sSfL https://astral.sh/uv/install.sh | sh
 
 # Create an alias for ASH
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.5.9"
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
 ```
 
 ```powershell
@@ -100,10 +101,10 @@ alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.5
 irm https://astral.sh/uv/install.ps1 | iex
 
 # Create a function for ASH
-function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.5.9 $args }
+function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.7.0 $args }
 ```
 
-> **Floating tag `v3`**: We also maintain a `v3` floating tag that always points to the latest stable v3.x release. You can use `@v3` instead of `@v3.5.9` to stay up to date automatically. Pin a specific version (e.g., `@v3.5.9`) when you need reproducible builds.
+> **Floating tag `v3`**: We also maintain a `v3` floating tag that always points to the latest stable v3.x release. You can use `@v3` instead of `@v3.7.0` to stay up to date automatically. Pin a specific version (e.g., `@v3.7.0`) when you need reproducible builds.
 
 ### Other Installation Methods
 
@@ -130,13 +131,13 @@ ash --help
 #### Using `pip`
 
 ```bash
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.5.9
+pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
 ```
 
 #### Clone the Repository
 
 ```bash
-git clone https://github.com/awslabs/automated-security-helper.git --branch v3.5.9
+git clone https://github.com/awslabs/automated-security-helper.git --branch v3.7.0
 cd automated-security-helper
 pip install .
 ```
@@ -225,7 +226,7 @@ The ASH MCP server provides:
     "ash": {
       "command": "uvx",
       "args": [
-        "--from=git+https://github.com/awslabs/automated-security-helper@v3.5.9",
+        "--from=git+https://github.com/awslabs/automated-security-helper@v3.7.0",
         "ash",
         "mcp"
       ],
@@ -243,7 +244,7 @@ The ASH MCP server provides:
     "ash-security": {
       "command": "uvx",
       "args": [
-        "--from=git+https://github.com/awslabs/automated-security-helper@v3.5.9",
+        "--from=git+https://github.com/awslabs/automated-security-helper@v3.7.0",
         "ash",
         "mcp"
       ]
@@ -259,7 +260,7 @@ The ASH MCP server provides:
     "ash": {
       "command": "uvx",
       "args": [
-        "--from=git+https://github.com/awslabs/automated-security-helper@v3.5.9",
+        "--from=git+https://github.com/awslabs/automated-security-helper@v3.7.0",
         "ash",
         "mcp"
       ],
@@ -287,6 +288,13 @@ The ASH MCP server provides these tools:
 | `list_active_scans` | List all active and recent scans | Manage multiple concurrent scans |
 | `cancel_scan` | Cancel a running scan | Stop unnecessary or problematic scans |
 | `check_installation` | Verify ASH installation and dependencies | Troubleshoot setup issues |
+| `run_ash_scan` | Run a scan synchronously and return results | Simple blocking scans |
+| `get_scan_summary` | Get a lightweight summary of a completed scan | Cheap status/severity overview without full results |
+| `get_scan_result_paths` | List on-disk paths of generated report files | Locate SARIF/HTML/CSV artefacts after a scan |
+| `explain_finding` | Return structured details for a single finding by ID | Inspect one finding without paging full results (structured lookup, no LLM calls) |
+| `get_config` | Get the resolved ASH config (defaults plus user overrides merged) | Confirm what configuration a scan will actually use |
+| `diff_scan_results` | Compare two `ash_aggregated_results.json` files and return a structured diff | Detect newly introduced or resolved findings between scans |
+| `suggest_suppression` | Build a paste-ready `AshSuppression` entry for a finding | Draft a correctly-shaped suppression without hand-writing YAML |
 
 ### Usage Examples
 
@@ -359,7 +367,7 @@ Add this to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/awslabs/automated-security-helper
-    rev: v3.5.9
+    rev: v3.7.0
     hooks:
       - id: ash-simple-scan
 ```

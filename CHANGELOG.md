@@ -44,6 +44,60 @@
 - [1.0.1-e-10Jan2023](#101-e-10jan2023)
 
 
+## v3.7.0 (2026-08-27)
+
+### Feat
+
+- severity ladder, path containment, and workspace path conversion (workspace mode phase 0) (#456)
+- **mcp**: confine MCP scan targets to configured roots (#477)
+
+### Fix
+
+- **config**: describe what a suppression without line_end actually matches (#457)
+- **ci**: let a release PR trigger the checks that gate it (#458)
+- **scanners**: bound the tool invocation so a scanner cannot run forever (#453)
+- **scanner**: name the cause when a scan fails, instead of the symptom (#476)
+- **config**: stop discarding a --config-overrides value that cannot be applied (#475)
+- **bedrock**: drop inference parameters a model reports as deprecated (#454)
+- **container**: keep the C toolchain out of the runtime image (#455)
+- **core**: let callers hand the orchestrator an already-resolved config (#474)
+- **validation**: restore the two reporters scan_phase calls, and the guard that discarded one (#473)
+- **ci**: make the schema freshness gate see a newly added schema (#466)
+- **reporters**: make yaml and spdx output loadable by a safe parser (#464)
+- **tests**: stop the integration conftest marking the whole repo slow (#463)
+- **config**: find plugin config when the config key contains the plugin type (#459)
+- **mcp**: report scanners that never ran instead of hiding them (#452)
+- **sarif**: relativize absolute URIs whose path crosses a symlink (#450)
+- **container**: stop pnpm audit hanging on a corepack prompt, and move to Node 22 (#451)
+- **config**: lint and auto-fix suppression reasons that span multiple lines (#449)
+- **homebrew**: bump the tap to v3.6.0 and keep it bumped (#448)
+- **mcp**: write command output to stderr so stdio JSON-RPC stays parseable (#447)
+- **config**: honor an explicit --config when source_dir is not supplied (#446)
+
+## v3.6.0 (2026-08-21)
+
+### Feat
+
+- agentic-coding transpiler — single-source-of-truth across 15 AI agent platforms (#331)
+- add 19 model methods (TDD) + fix to_flat_vulnerabilities bug + docs overhaul (#312)
+- **config**: lint detects + fixes legacy snake/kebab plugin name variants (#332)
+
+### Fix
+
+- make piped install retries actually retry, and stop the bash entrypoint continuing past a failed build (#427)
+- **ci**: stop the fork-PR comment failure from failing the required ASH scan check (#429)
+- enforce plugin-declared tool version constraints when installing scanner tools (#426)
+- **ci**: stop installing ASH from the ephemeral merge-queue ref, and gate all three upgrade paths (#424)
+- **logging**: restore UTF-8 console reconfiguration on Windows (#412)
+
+### Refactor
+
+- scan-phase decomposition + offline mode + lint sweep (#95) (#334)
+
+### Perf
+
+- **tests**: run the unit suite on all cores instead of pinning -n 1 (#417)
+
 ## v3.5.9 (2026-08-10)
 
 ### Fix

@@ -92,6 +92,20 @@
           "$ref": "#/$defs/AshConfigGlobalSettingsSection",
           "default": {
             "ignore_paths": [],
+            "mcp": {
+              "runtime_overrides": {
+                "allowed_paths": [],
+                "denied_paths": [
+                  "/fail_on_findings",
+                  "/global_settings/ignore_paths",
+                  "/global_settings/suppressions",
+                  "/reporters/bedrock-summary-reporter/options/aws_*",
+                  "/reporters/cloudwatch-logs/**"
+                ],
+                "denied_value_patterns": {},
+                "enabled": false
+              }
+            },
             "severity_threshold": "MEDIUM",
             "suppressions": []
           },
@@ -257,6 +271,7 @@
                 "excluded_paths": [],
                 "ignore_nosec": false,
                 "install_timeout": 300,
+                "scan_timeout": 1800,
                 "severity_threshold": null,
                 "tool_version": ">=1.7.0,<2.0.0"
               }
@@ -273,6 +288,7 @@
                   "NIST80053R5Checks": false,
                   "PCIDSS321Checks": false
                 },
+                "scan_timeout": 1800,
                 "severity_threshold": null
               }
             },
@@ -280,6 +296,7 @@
               "enabled": true,
               "name": "cfn-nag",
               "options": {
+                "scan_timeout": 1800,
                 "severity_threshold": null
               }
             },
@@ -296,6 +313,7 @@
                 ],
                 "install_timeout": 300,
                 "offline": false,
+                "scan_timeout": 1800,
                 "severity_threshold": null,
                 "skip_frameworks": [],
                 "skip_path": [],
@@ -314,7 +332,7 @@
                   "results": {},
                   "version": null
                 },
-                "scan_timeout": 300,
+                "scan_timeout": 1800,
                 "severity_threshold": null
               }
             },
@@ -324,6 +342,7 @@
               "options": {
                 "config_file": null,
                 "offline": false,
+                "scan_timeout": 1800,
                 "severity_threshold": null
               }
             },
@@ -332,6 +351,7 @@
               "name": "npm-audit",
               "options": {
                 "offline": false,
+                "scan_timeout": 1800,
                 "severity_threshold": null
               }
             },
@@ -348,6 +368,7 @@
                 "metrics": "auto",
                 "offline": false,
                 "patterns": [],
+                "scan_timeout": 1800,
                 "severity": [],
                 "severity_threshold": null,
                 "version": "v1.15.1"
@@ -366,6 +387,7 @@
                 "install_timeout": 300,
                 "metrics": "auto",
                 "offline": false,
+                "scan_timeout": 1800,
                 "severity": [],
                 "severity_threshold": null,
                 "tool_version": null
@@ -380,11 +402,21 @@
                 ],
                 "config_file": null,
                 "exclude": [],
+                "offline": false,
+                "scan_timeout": 1800,
                 "severity_threshold": null
               }
             }
           },
           "description": "Scanner configurations by name."
+        },
+        "workspace": {
+          "$ref": "#/$defs/WorkspaceExecutionConfig",
+          "default": {
+            "max_parallel_projects": null,
+            "project_timeout": null
+          },
+          "description": "Workspace-mode execution settings. Read from the config resolved for the workspace root; a project's own copy of this block is ignored, because how many projects run at once is not a project's decision."
         }
       },
       "title": "AshConfig",
@@ -401,6 +433,24 @@
           },
           "title": "Ignore Paths",
           "type": "array"
+        },
+        "mcp": {
+          "$ref": "#/$defs/AshMcpConfig",
+          "default": {
+            "runtime_overrides": {
+              "allowed_paths": [],
+              "denied_paths": [
+                "/fail_on_findings",
+                "/global_settings/ignore_paths",
+                "/global_settings/suppressions",
+                "/reporters/bedrock-summary-reporter/options/aws_*",
+                "/reporters/cloudwatch-logs/**"
+              ],
+              "denied_value_patterns": {},
+              "enabled": false
+            }
+          },
+          "description": "MCP-server-specific configuration (runtime override allowlist, etc.)."
         },
         "severity_threshold": {
           "default": "MEDIUM",
@@ -426,6 +476,30 @@
         }
       },
       "title": "AshConfigGlobalSettingsSection",
+      "type": "object"
+    },
+    "AshMcpConfig": {
+      "additionalProperties": false,
+      "description": "MCP-server-specific config bundle (transport-agnostic).",
+      "properties": {
+        "runtime_overrides": {
+          "$ref": "#/$defs/RuntimeOverridesConfig",
+          "default": {
+            "allowed_paths": [],
+            "denied_paths": [
+              "/fail_on_findings",
+              "/global_settings/ignore_paths",
+              "/global_settings/suppressions",
+              "/reporters/bedrock-summary-reporter/options/aws_*",
+              "/reporters/cloudwatch-logs/**"
+            ],
+            "denied_value_patterns": {},
+            "enabled": false
+          },
+          "description": "Allowlist for runtime JSON-Patch overrides."
+        }
+      },
+      "title": "AshMcpConfig",
       "type": "object"
     },
     "AshSuppression": {
@@ -524,6 +598,7 @@
             "excluded_paths": [],
             "ignore_nosec": false,
             "install_timeout": 300,
+            "scan_timeout": 1800,
             "severity_threshold": null,
             "tool_version": ">=1.7.0,<2.0.0"
           },
@@ -604,6 +679,20 @@
           "description": "Timeout in seconds for tool installation",
           "title": "Install Timeout",
           "type": "integer"
+        },
+        "scan_timeout": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 1800,
+          "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
+          "title": "Scan Timeout"
         },
         "severity_threshold": {
           "anyOf": [
@@ -776,6 +865,7 @@
               "NIST80053R5Checks": false,
               "PCIDSS321Checks": false
             },
+            "scan_timeout": 1800,
             "severity_threshold": null
           },
           "description": "Configure Bandit scanner"
@@ -804,6 +894,20 @@
             "PCIDSS321Checks": false
           },
           "description": "CDK Nag packs to enable"
+        },
+        "scan_timeout": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 1800,
+          "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
+          "title": "Scan Timeout"
         },
         "severity_threshold": {
           "anyOf": [
@@ -846,6 +950,7 @@
         "options": {
           "$ref": "#/$defs/CfnNagScannerConfigOptions",
           "default": {
+            "scan_timeout": 1800,
             "severity_threshold": null
           },
           "description": "Configure CFN Nag scanner"
@@ -857,6 +962,20 @@
     "CfnNagScannerConfigOptions": {
       "additionalProperties": true,
       "properties": {
+        "scan_timeout": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 1800,
+          "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
+          "title": "Scan Timeout"
+        },
         "severity_threshold": {
           "anyOf": [
             {
@@ -907,6 +1026,7 @@
             ],
             "install_timeout": 300,
             "offline": false,
+            "scan_timeout": 1800,
             "severity_threshold": null,
             "skip_frameworks": [],
             "skip_path": [],
@@ -1020,6 +1140,20 @@
           "description": "Run in offline mode, disabling policy downloads",
           "title": "Offline",
           "type": "boolean"
+        },
+        "scan_timeout": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 1800,
+          "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
+          "title": "Scan Timeout"
         },
         "severity_threshold": {
           "anyOf": [
@@ -1407,7 +1541,7 @@
               "results": {},
               "version": null
             },
-            "scan_timeout": 300,
+            "scan_timeout": 1800,
             "severity_threshold": null
           },
           "description": "Configure detect-secrets scanner"
@@ -1448,10 +1582,18 @@
           "description": "Settings to use with detect-secrets. Refer to the detect-secrets documentation for formatting information. By default, all plugins will be used and no filters are configured. scan_settings takes precedence over baseline_file"
         },
         "scan_timeout": {
-          "default": 300,
-          "description": "Maximum time in seconds to allow the detect-secrets scan to run before aborting. Prevents hangs on pathological files.",
-          "title": "Scan Timeout",
-          "type": "integer"
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 1800,
+          "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
+          "title": "Scan Timeout"
         },
         "severity_threshold": {
           "anyOf": [
@@ -1720,6 +1862,7 @@
           "default": {
             "config_file": null,
             "offline": false,
+            "scan_timeout": 1800,
             "severity_threshold": null
           },
           "description": "Configure Grype scanner"
@@ -1752,6 +1895,20 @@
           "description": "Run in offline mode, disabling database updates and validation",
           "title": "Offline",
           "type": "boolean"
+        },
+        "scan_timeout": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 1800,
+          "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
+          "title": "Scan Timeout"
         },
         "severity_threshold": {
           "anyOf": [
@@ -2164,6 +2321,7 @@
           "$ref": "#/$defs/NpmAuditScannerConfigOptions",
           "default": {
             "offline": false,
+            "scan_timeout": 1800,
             "severity_threshold": null
           },
           "description": "Configure NpmAudit scanner"
@@ -2179,6 +2337,20 @@
           "description": "Run in offline mode, using locally cached data",
           "title": "Offline",
           "type": "boolean"
+        },
+        "scan_timeout": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 1800,
+          "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
+          "title": "Scan Timeout"
         },
         "severity_threshold": {
           "anyOf": [
@@ -2263,6 +2435,7 @@
             "metrics": "auto",
             "offline": false,
             "patterns": [],
+            "scan_timeout": 1800,
             "severity": [],
             "severity_threshold": null,
             "version": "v1.15.1"
@@ -2327,6 +2500,20 @@
           },
           "title": "Patterns",
           "type": "array"
+        },
+        "scan_timeout": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 1800,
+          "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
+          "title": "Scan Timeout"
         },
         "severity": {
           "default": [],
@@ -2680,6 +2867,53 @@
       "title": "ReporterPluginConfigBase",
       "type": "object"
     },
+    "RuntimeOverridesConfig": {
+      "additionalProperties": false,
+      "description": "Allowlist + denylist controlling which JSON-Patch ops the MCP server accepts.\n\nThe MCP server's streamable-HTTP transport lets clients apply JSON-Patch ops\nto a profile-resolved config at session-bind time. This object is the security\nboundary: by default, runtime overrides are disabled. When enabled, only ops\nwhose `path` matches `allowed_paths` AND does not match `denied_paths` are\naccepted. `denied_value_patterns` blocks values that match a regex on a\nper-path basis (e.g. shell metacharacters in extra_args).",
+      "properties": {
+        "allowed_paths": {
+          "default": [],
+          "description": "JSON-Pointer glob patterns the client may target. `*` matches one segment, `**` matches any subtree. Example: '/scanners/*/options/severity_threshold'.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowed Paths",
+          "type": "array"
+        },
+        "denied_paths": {
+          "default": [
+            "/fail_on_findings",
+            "/global_settings/ignore_paths",
+            "/global_settings/suppressions",
+            "/reporters/bedrock-summary-reporter/options/aws_*",
+            "/reporters/cloudwatch-logs/**"
+          ],
+          "description": "JSON-Pointer glob patterns that are NEVER allowed (denied wins over allowed). Defaults block the most dangerous fields on the real AshConfig schema.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Denied Paths",
+          "type": "array"
+        },
+        "denied_value_patterns": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Map of JSON-Pointer pattern \u2192 regex. add/replace ops are rejected when any string leaf reachable from the op's value matches the regex; lists and dicts are walked recursively so a forbidden token cannot be hidden inside a nested structure. The `test` op is exempt because it is read-only.",
+          "title": "Denied Value Patterns",
+          "type": "object"
+        },
+        "enabled": {
+          "default": false,
+          "description": "Master switch \u2014 runtime patches are rejected unless True.",
+          "title": "Enabled",
+          "type": "boolean"
+        }
+      },
+      "title": "RuntimeOverridesConfig",
+      "type": "object"
+    },
     "SARIFReporterConfig": {
       "additionalProperties": true,
       "properties": {
@@ -2768,6 +3002,7 @@
               "excluded_paths": [],
               "ignore_nosec": false,
               "install_timeout": 300,
+              "scan_timeout": 1800,
               "severity_threshold": null,
               "tool_version": ">=1.7.0,<2.0.0"
             }
@@ -2788,6 +3023,7 @@
                 "NIST80053R5Checks": false,
                 "PCIDSS321Checks": false
               },
+              "scan_timeout": 1800,
               "severity_threshold": null
             }
           },
@@ -2799,6 +3035,7 @@
             "enabled": true,
             "name": "cfn-nag",
             "options": {
+              "scan_timeout": 1800,
               "severity_threshold": null
             }
           },
@@ -2819,6 +3056,7 @@
               ],
               "install_timeout": 300,
               "offline": false,
+              "scan_timeout": 1800,
               "severity_threshold": null,
               "skip_frameworks": [],
               "skip_path": [],
@@ -2841,7 +3079,7 @@
                 "results": {},
                 "version": null
               },
-              "scan_timeout": 300,
+              "scan_timeout": 1800,
               "severity_threshold": null
             }
           },
@@ -2855,6 +3093,7 @@
             "options": {
               "config_file": null,
               "offline": false,
+              "scan_timeout": 1800,
               "severity_threshold": null
             }
           },
@@ -2867,6 +3106,7 @@
             "name": "npm-audit",
             "options": {
               "offline": false,
+              "scan_timeout": 1800,
               "severity_threshold": null
             }
           },
@@ -2887,6 +3127,7 @@
               "metrics": "auto",
               "offline": false,
               "patterns": [],
+              "scan_timeout": 1800,
               "severity": [],
               "severity_threshold": null,
               "version": "v1.15.1"
@@ -2909,6 +3150,7 @@
               "install_timeout": 300,
               "metrics": "auto",
               "offline": false,
+              "scan_timeout": 1800,
               "severity": [],
               "severity_threshold": null,
               "tool_version": null
@@ -2927,6 +3169,8 @@
               ],
               "config_file": null,
               "exclude": [],
+              "offline": false,
+              "scan_timeout": 1800,
               "severity_threshold": null
             }
           },
@@ -2940,6 +3184,20 @@
       "additionalProperties": true,
       "description": "Base class for scanner options.",
       "properties": {
+        "scan_timeout": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 1800,
+          "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
+          "title": "Scan Timeout"
+        },
         "severity_threshold": {
           "anyOf": [
             {
@@ -3212,6 +3470,7 @@
         "options": {
           "$ref": "#/$defs/ScannerOptionsBase",
           "default": {
+            "scan_timeout": 1800,
             "severity_threshold": null
           },
           "description": "Scanner options"
@@ -3262,6 +3521,7 @@
             "install_timeout": 300,
             "metrics": "auto",
             "offline": false,
+            "scan_timeout": 1800,
             "severity": [],
             "severity_threshold": null,
             "tool_version": null
@@ -3323,6 +3583,20 @@
           "description": "Run in offline mode, using locally cached rules.",
           "title": "Offline",
           "type": "boolean"
+        },
+        "scan_timeout": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 1800,
+          "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
+          "title": "Scan Timeout"
         },
         "severity": {
           "default": [],
@@ -3397,6 +3671,8 @@
             ],
             "config_file": null,
             "exclude": [],
+            "offline": false,
+            "scan_timeout": 1800,
             "severity_threshold": null
           },
           "description": "Configure Syft scanner"
@@ -3451,6 +3727,25 @@
           },
           "title": "Exclude",
           "type": "array"
+        },
+        "offline": {
+          "description": "Run in offline mode, disabling update checks",
+          "title": "Offline",
+          "type": "boolean"
+        },
+        "scan_timeout": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 1800,
+          "description": "Maximum time in seconds to allow this scanner's tool invocation to run before it is killed. Set to null to leave the scanner unbounded, which risks a scan that never completes.",
+          "title": "Scan Timeout"
         },
         "severity_threshold": {
           "anyOf": [
@@ -3640,6 +3935,43 @@
         "key"
       ],
       "title": "ToolExtraArg",
+      "type": "object"
+    },
+    "WorkspaceExecutionConfig": {
+      "additionalProperties": false,
+      "description": "How many projects a workspace scan runs at once, and how long each may take.\n\nWhy this is not read from the .code-workspace file\n--------------------------------------------------\n``automated_security_helper.workspace.workspace_file`` deliberately ignores\nthat file's ``settings`` block, because it belongs to another tool whose\nschema ASH does not control. So every ASH knob, including these two, lives in\nASH's own config -- here, in the config resolved for the workspace root.\n\nWhy these two land before the workspace policy block\n----------------------------------------------------\nNeither can change any project's verdict. ``max_parallel_projects`` decides\nscheduling and ``project_timeout`` decides how long to wait; the findings a\nproject reports and the threshold they are judged against are untouched. The\nworkspace-level *policy* fields -- a severity ceiling, workspace-wide\nsuppressions -- can change a verdict, and they arrive separately and visibly\nrather than riding in on an execution change.\n\nWall clock is ``ceil(projects / bound)`` waves, and that is arithmetic\n-----------------------------------------------------------------------\nA workspace of N projects at a bound of B runs in ``ceil(N / B)`` waves, so\nits wall clock is roughly that multiple of one project's. Reproduce with\n``scripts/measure_workspace_parallelism.py``; measured on a 192-CPU Linux\nhost on 2026-08-25, five projects, bound 4, three timed runs per arm, the\nwhole child process timed:\n\n* five equal projects -- one alone 21.3s median (19.4-22.7), the workspace\n  43.4s median (41.5-45.8). Ratio of medians **2.036x**, range 1.823-2.365x.\n* one larger project plus four small -- one alone 20.7s median (20.7-26.3),\n  the workspace 40.5s median (39.3-46.0). Ratio **1.958x**, range\n  1.495-2.227x.\n\nBoth sit on the ``ceil(5/4) = 2`` floor, so neither says much about the\nimplementation: an operator who wants a workspace to finish in about the time\nof its slowest project has to set ``max_parallel_projects`` to at least the\nproject count and accept the thread product below. The default stays at 4\nbecause that product is the thing worth defaulting conservatively.\n\nTwo earlier figures for this were wrong and are withdrawn. A reported 0.88x at\nbound 5 -- a five-project workspace beating one project alone -- was an\nartefact of timing a cold single-project arm against a warm workspace arm,\nbecause ``uv_tool_runner`` caches tool probing across invocations. The\nmeasurement script now runs a discard pass first and alternates the arms, and\nnothing close to a sub-1.0 ratio reappears. A reported 2.35x at bound 4 was a\nsingle unrepeated run; it lands at the top of the range measured here rather\nthan at its centre, which is why the figures above are medians with a spread.\n\nThe second shape did not do what it was designed to do, and that is worth\nknowing before anyone repeats it. It gave one project five times the files, on\nthe theory that \"the slowest project alone\" would then be a real baseline and\nthe small projects could hide inside its wave. But 60 files scanned in 20.7s\nand 12 files in 21.3s -- indistinguishable. Scan wall clock here is dominated\nby per-scanner startup, not by file count, so the fixture produced no dominant\nproject and its number is really the equal case again. Testing the RFC's 1.5x\ncriterion properly needs a project large enough to be file-bound rather than\nstartup-bound, which is thousands of files, not sixty.\n\nOn this evidence the 1.5x criterion is not met at the default bound in either\nshape, and for five projects at bound 4 it cannot be: two waves is 2.0x before\nany implementation cost.\n\nFailure modes and known limitations\n-----------------------------------\n* ``project_timeout`` bounds the *verdict*, not the worker. Python cannot\n  preempt a thread, so a timed-out project is recorded FAILED and the\n  workspace continues, but the abandoned worker keeps running -- and keeps\n  its pool slot. Once every slot is held by an abandoned project, nothing\n  still queued can start, so those projects are cancelled and recorded\n  FAILED rather than waited on. A workspace with more projects than\n  ``max_parallel_projects`` can therefore report several failures from one\n  slow project; raising either knob avoids it.\n* The process still does not exit until every abandoned worker finishes,\n  because the interpreter joins them. Scanners run as subprocesses with\n  their own timeouts, so the residual exposure is a genuinely wedged\n  in-process scanner.\n* The outer bound multiplies with the inner scanner pool. That pool is\n  ``min(32, cpu_count + 4)`` in ``ScanExecutionEngine.__init__``, not 4, and\n  not the unrelated ``thread_pool_max_workers`` MCP setting, so the\n  worst-case thread count is ``max_parallel_projects * min(32, cpu + 4)``.\n  On the 192-CPU host above, the default bound of 4 already permits up to\n  128 concurrent scanner threads.",
+      "properties": {
+        "max_parallel_projects": {
+          "anyOf": [
+            {
+              "maximum": 64,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Maximum number of projects scanned concurrently. Unset means min(4, cpu_count). This is an outer bound over each project's own scanner thread pool, not a replacement for it.",
+          "title": "Max Parallel Projects"
+        },
+        "project_timeout": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Seconds to allow a single project. Unset means no limit. On timeout that project is recorded as failed and the remaining projects still complete.",
+          "title": "Project Timeout"
+        }
+      },
+      "title": "WorkspaceExecutionConfig",
       "type": "object"
     },
     "YAMLReporterConfig": {

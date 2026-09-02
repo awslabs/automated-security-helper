@@ -2,13 +2,14 @@
 
 import json
 import logging
+import os
 from pathlib import Path
-from typing import Annotated, Dict, List, Literal, Any
+from typing import Annotated, ClassVar, Dict, List, Literal, Any
 
 from pydantic import Field, model_validator
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
-from automated_security_helper.core.enums import ScannerToolType
+from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.models.core import ToolArgs
 from automated_security_helper.models.core import (
     IgnorePathWithReason,
@@ -62,6 +63,8 @@ class NpmAuditScannerConfig(ScannerPluginConfigBase):
 @ash_scanner_plugin
 class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
     """NpmAuditScanner implements IaC scanning using `npm/yarn/pnpm audit` based on the lock files discovered in the source directory."""
+
+    offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.CACHE_FLAGS
 
     def model_post_init(self, context):
         if self.config is None:
@@ -261,9 +264,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 # created above.  Build a minimal result from vuln_info.
                 if not has_dict_via and via_items:
                     vuln_id = f"npm-audit-transitive-{pkg_name}"
-                    via_refs = ", ".join(
-                        v for v in via_items if isinstance(v, str)
-                    )
+                    via_refs = ", ".join(v for v in via_items if isinstance(v, str))
                     title = f"Transitive vulnerability in {pkg_name} (via {via_refs})"
                     description = title
 
@@ -332,7 +333,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     invocations=[
                         Invocation(
                             commandLine="npm audit --json",
-                            executionSuccessful=(self.exit_code == 0 or self.exit_code == 1),
+                            executionSuccessful=(
+                                self.exit_code == 0 or self.exit_code == 1
+                            ),
                             exitCode=self.exit_code,
                             workingDirectory=ArtifactLocation(
                                 uri=get_shortest_name(input=target_path)
@@ -349,6 +352,12 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
         )
 
         return sarif_report
+
+    def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
+        """Abstract stub — NpmAudit overrides scan() directly; this is unreachable."""
+        raise NotImplementedError(
+            f"{self.__class__.__name__} overrides scan() directly."
+        )
 
     def scan(
         self,
@@ -388,7 +397,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                     invocations=[
                         Invocation(
                             commandLine="npm audit --json",
-                            executionSuccessful=(self.exit_code == 0 or self.exit_code == 1),
+                            executionSuccessful=(
+                                self.exit_code == 0 or self.exit_code == 1
+                            ),
                             exitCode=self.exit_code,
                             workingDirectory=ArtifactLocation(
                                 uri=get_shortest_name(input=target)
@@ -426,7 +437,6 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 target_type=target_type,
             )
             return False
-
 
         if not self.dependencies_satisfied:
             self._post_scan(
@@ -533,6 +543,26 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                     "npm audit offline mode validation failed, but continuing with scan"
                                 )
 
+                        # Corepack resolves the package manager version from the
+                        # repository's `packageManager` field, and fetches it if the
+                        # image has a different one cached. The Dockerfile sets
+                        # COREPACK_ENABLE_DOWNLOAD_PROMPT=0 so that fetch cannot
+                        # block on a stdin prompt that no one can answer -- but
+                        # disabling the prompt only stops the *asking*, not the
+                        # download.
+                        #
+                        # In offline mode a download is the wrong outcome twice
+                        # over: there is no network, so it fails, and it fails
+                        # instead of using the package manager already cached in the
+                        # image. COREPACK_ENABLE_NETWORK=0 makes corepack fall back
+                        # to the cached version rather than reach out.
+                        subprocess_env = None
+                        if self.config.options.offline:
+                            subprocess_env = {
+                                **os.environ,
+                                "COREPACK_ENABLE_NETWORK": "0",
+                            }
+
                         # Run from the lock file's parent directory so
                         # that pnpm (and yarn) can locate their lock
                         # files (#99).
@@ -542,6 +572,8 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                             stdout_preference="both",
                             stderr_preference="both",
                             cwd=package_dir,
+                            env=subprocess_env,
+                            timeout=self._effective_scan_timeout(),
                         )
                         ASH_LOGGER.info(result)
 
@@ -628,7 +660,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                             invocations=[
                                 Invocation(
                                     commandLine="npm audit --json",
-                                    executionSuccessful=(self.exit_code == 0 or self.exit_code == 1),
+                                    executionSuccessful=(
+                                        self.exit_code == 0 or self.exit_code == 1
+                                    ),
                                     exitCode=self.exit_code,
                                     workingDirectory=ArtifactLocation(
                                         uri=get_shortest_name(input=target)

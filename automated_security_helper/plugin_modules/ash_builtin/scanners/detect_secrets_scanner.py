@@ -1,4 +1,5 @@
 import logging
+
 """Module containing the detect-secrets security scanner implementation."""
 
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
@@ -8,7 +9,7 @@ import multiprocessing
 from pathlib import Path
 import re
 import sys
-from typing import Annotated, Any, Dict, List, Literal
+from typing import Annotated, Any, ClassVar, Dict, List, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from automated_security_helper.base.options import ScannerOptionsBase
@@ -17,7 +18,7 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
 from automated_security_helper.core.constants import KNOWN_LOCKFILE_NAMES
-from automated_security_helper.core.enums import ScannerToolType
+from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -40,6 +41,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
 from automated_security_helper.models.core import IgnorePathWithReason
 
 from detect_secrets import SecretsCollection
@@ -88,12 +90,13 @@ class DetectSecretsScannerConfigOptions(ScannerOptionsBase):
             description="Settings to use with detect-secrets. Refer to the detect-secrets documentation for formatting information. By default, all plugins will be used and no filters are configured. scan_settings takes precedence over baseline_file",
         ),
     ] = DetectSecretsScanSettings()
-    scan_timeout: Annotated[
-        int,
-        Field(
-            description="Maximum time in seconds to allow the detect-secrets scan to run before aborting. Prevents hangs on pathological files.",
-        ),
-    ] = 300
+    # scan_timeout is inherited from ScannerOptionsBase now. The local copy that
+    # used to live here declared `int` with no `ge`, so it shadowed the base field
+    # and gave detect-secrets a different contract from every other scanner:
+    # `scan_timeout: null` -- which the base field's own description documents as
+    # the way to run unbounded -- raised a validation error here only, and
+    # `scan_timeout: 0` was accepted here and rejected elsewhere, then passed
+    # straight to future.result(timeout=0) so every scan timed out instantly.
 
 
 class DetectSecretsScannerConfig(ScannerPluginConfigBase):
@@ -108,6 +111,8 @@ class DetectSecretsScannerConfig(ScannerPluginConfigBase):
 @ash_scanner_plugin
 class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
     """DetectSecretsScanner implements SECRET scanning using detect-secrets."""
+
+    offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
 
     def model_post_init(self, context):
         if self.config is None:
@@ -127,9 +132,19 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         Raises:
             ScannerError: If validation fails
         """
-        # detect-secrets is a dependency of this Python module and we interact with it
-        # purely through Python. If the Python import got this far then we know we're
-        # in a valid runtime for this scanner.
+        # detect-secrets is a dependency of this Python module and we interact
+        # with it purely through Python. If the Python import got this far then
+        # we know we're in a valid runtime for this scanner.
+        #
+        # We additionally consult the consolidated UV-or-direct-binary
+        # resolver for diagnostic logging only — its return value never gates
+        # the result because the Python import is the authoritative signal.
+        cmd = get_uv_tool_command("detect-secrets", fallback_binary="detect-secrets")
+        if cmd is not None:
+            ASH_LOGGER.debug(
+                f"detect-secrets CLI also reachable via {cmd[0]}; "
+                "scanner will continue to use the in-process Python API."
+            )
         return True
 
     def _process_config_options(self):
@@ -287,6 +302,12 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 # Already set — this is fine
                 pass
 
+    def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
+        """Abstract stub — DetectSecrets overrides scan() directly; this is unreachable."""
+        raise NotImplementedError(
+            f"{self.__class__.__name__} overrides scan() directly."
+        )
+
     def scan(
         self,
         target: Path,
@@ -358,7 +379,6 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 target_type=target_type,
             )
             return False
-
 
         if not self.dependencies_satisfied:
             self._post_scan(
@@ -450,7 +470,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     for file_path in scannable
                     if not any(
                         path_matches_pattern(
-                            file_path[len(source_prefix):]
+                            file_path[len(source_prefix) :]
                             if file_path.startswith(source_prefix)
                             else file_path,
                             ignore_path.path,

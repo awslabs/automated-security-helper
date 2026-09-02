@@ -8,8 +8,15 @@ from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
+    ReporterWorkspaceBehaviour,
+)
+from automated_security_helper.models.flat_vulnerability import (
+    extract_workspace_project,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
+from automated_security_helper.utils.severity_ladder import (
+    sarif_level_fails_threshold,
+)
 
 
 import defusedxml
@@ -30,7 +37,25 @@ class JUnitXMLReporterConfig(ReporterPluginConfigBase):
 
 @ash_reporter_plugin
 class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
-    """Formats results as JUnitXML."""
+    """Formats results as JUnitXML.
+
+    Workspace mode: one merged artefact, with the project in the testsuite name
+    as ``<project>/<scanner>``.
+
+    A deliberate deviation from the RFC, which said the project *becomes* the
+    testsuite name. Taken literally that discards the per-scanner grouping
+    single-directory mode has, and every CI front end that renders JUnit XML
+    groups by suite name -- so a reader would lose the ability to see that
+    bandit failed and checkov did not. The compound name costs nothing, keeps
+    the project as the primary sort key (it is the leading segment, so suites
+    for one project sort together), and makes the workspace artefact a strict
+    refinement of the per-project ones rather than a lossy reshape of them.
+
+    A single-directory scan is unaffected: with no project attribution the suite
+    name stays the bare scanner name it has always been.
+    """
+
+    workspace_behaviour = ReporterWorkspaceBehaviour.MERGED
 
     def model_post_init(self, context):
         with warnings.catch_warnings():
@@ -59,7 +84,7 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
 
         # Process SARIF report @ model.sarif
         if model.sarif is not None:
-            all_results = [r for run in (model.sarif.runs or []) for r in (run.results or [])]
+            all_results = model.sarif.get_all_results()
             for result in all_results:
                 # Create test case name from SARIF result details
                 test_name = (
@@ -118,19 +143,24 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                                     "severity_threshold"
                                 ]
 
-                        # If we have a threshold and level, check if the finding is actionable
+                        # If we have a threshold and level, check if the finding is
+                        # actionable. The gate lives in utils.severity_ladder, shared
+                        # with ScanResultsContainer.determine_status and matching the
+                        # qualifying-level table the exit code uses, so the reporter
+                        # can no longer call a finding actionable that the exit code
+                        # ignores. The cascade this replaced had branches for only
+                        # CRITICAL, HIGH and MEDIUM, so a level of `none` was treated
+                        # as actionable under a LOW threshold.
+                        #
+                        # The `threshold and result.level` guard is deliberate and is
+                        # not the ladder's None handling: the ladder reads a falsy
+                        # threshold as "no gate configured", but an absent property
+                        # here means "threshold not stated", which must leave the
+                        # finding actionable rather than silently gate it off.
                         if threshold and result.level:
-                            level = result.level.lower()
-                            # Simple mapping of SARIF levels to severity thresholds
-                            if threshold == "CRITICAL" and level != "error":
-                                is_actionable = False
-                            elif threshold == "HIGH" and level not in ["error"]:
-                                is_actionable = False
-                            elif threshold == "MEDIUM" and level not in [
-                                "error",
-                                "warning",
-                            ]:
-                                is_actionable = False
+                            is_actionable = sarif_level_fails_threshold(
+                                result.level, threshold
+                            )
 
                     # Only mark as error if it's actionable
                     if is_actionable:
@@ -181,11 +211,26 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
                 ):
                     if hasattr(result.properties.scanner_details, "tool_name"):
                         actual_scanner = result.properties.scanner_details.tool_name
-                if actual_scanner not in test_suite_dict:
-                    test_suite_dict[actual_scanner] = TestSuite(name=actual_scanner)
-                test_suite_dict[actual_scanner].add_testcase(test_case)
+                # In workspace mode the suite is named "<project>/<scanner>".
+                # Project leads so that one project's suites sort together in
+                # every CI front end that groups by suite name; the scanner is
+                # kept because discarding it -- the RFC's literal reading -- would
+                # lose a grouping single-directory mode has, for no gain.
+                #
+                # Read through the shared helper rather than inline, so this and
+                # the flattening path cannot disagree about where the attribution
+                # lives -- which is how a finding ends up under the wrong project
+                # in one report and the right one in another.
+                project = extract_workspace_project(result)
+                suite_name = (
+                    f"{project}/{actual_scanner}" if project else actual_scanner
+                )
+                if suite_name not in test_suite_dict:
+                    test_suite_dict[suite_name] = TestSuite(name=suite_name)
+                test_suite_dict[suite_name].add_testcase(test_case)
 
-        for scanner, test_suite in test_suite_dict.items():
+        for suite_name, test_suite in test_suite_dict.items():
+            del suite_name  # keyed for grouping; the name is already on the suite
             report.add_testsuite(test_suite)
         # Return the XML string representation of all test suites
         report_bytes: bytes = report.tostring()

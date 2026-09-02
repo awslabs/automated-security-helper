@@ -26,13 +26,13 @@ def mock_mcp_environment():
     """Mock MCP environment for integration tests."""
     # Mock MCP modules to be available
     mock_mcp = MagicMock()
-    mock_fastmcp = MagicMock()
+    mock_mcpserver = MagicMock()
     mock_context = MagicMock()
 
-    # Create a mock FastMCP server
+    # Create a mock MCPServer
     mock_server = MagicMock()
     mock_server.run = MagicMock()
-    mock_fastmcp.return_value = mock_server
+    mock_mcpserver.return_value = mock_server
 
     # Mock async methods for context
     async def mock_report_progress(current, total, message):
@@ -44,13 +44,15 @@ def mock_mcp_environment():
     modules_to_mock = {
         "mcp": mock_mcp,
         "mcp.server": MagicMock(),
-        "mcp.server.fastmcp": MagicMock(FastMCP=mock_fastmcp, Context=mock_context),
+        "mcp.server.mcpserver": MagicMock(
+            MCPServer=mock_mcpserver, Context=mock_context
+        ),
     }
 
     with patch.dict("sys.modules", modules_to_mock):
         yield {
             "mcp": mock_mcp,
-            "FastMCP": mock_fastmcp,
+            "MCPServer": mock_mcpserver,
             "Context": mock_context,
             "server": mock_server,
         }
@@ -211,11 +213,57 @@ def pytest_configure(config):
 
 # Test collection configuration
 def pytest_collection_modifyitems(config, items):
-    """Modify test collection to add markers automatically."""
+    """Modify test collection to add markers automatically.
+
+    Every rule here is scoped to this directory, and that scoping is the point.
+
+    ``pytest_collection_modifyitems`` receives *every* item in the session, not
+    only the ones under the conftest that defines the hook. The name-based rules
+    below were unscoped, so any test anywhere in the repository whose name
+    contained "workflow", "lifecycle" or "end_to_end" was marked slow -- and
+    ``tests/conftest.py`` then skips slow tests unless ``--run-slow`` is passed.
+    Any unit test whose name matched was therefore silently not running in a
+    full-suite run, including CI gates whose whole job is to fail when a workflow
+    drifts from its documented budget. Every affected test passes when executed
+    directly, which is how they were verified when written, so nothing was
+    hiding a real failure; they were simply providing no coverage while appearing
+    to.
+
+    The failure mode is worth naming because it is invisible from either end. The
+    test file gives no hint it will be skipped, and the conftest that skips it
+    lives in an unrelated directory the author had no reason to read. A green
+    suite plus a skip count nobody diffs is all the signal there was.
+
+    The same defect survived that fix in the ``integration`` marker, which kept
+    testing ``"integration" in str(item.fspath)`` while only the slow rules were
+    scoped -- with a comment saying the substring form would reach the whole repo
+    again. It did: a unit test at
+    ``tests/unit/workspace/test_workspace_policy_resolution.py``, originally
+    named ``..._integration.py``, had all fourteen of its tests skipped in a full
+    run while passing when the file was run on its own. Fixing one instance of a
+    pattern and documenting it is not the same as removing the pattern, so the
+    ``integration`` marker now hangs off the same path scoping as everything
+    else. Detected by diffing the skipped-test IDs against a baseline, which is
+    the only signal this failure emits.
+    """
+    integration_root = Path(__file__).resolve().parent.parent
+
     for item in items:
-        # Add integration marker to all tests in this directory
-        if "integration" in str(item.fspath):
-            item.add_marker(pytest.mark.integration)
+        # Scoped to the integration tree, which is what every heuristic below is
+        # about. Compared against a resolved path rather than by substring: a
+        # substring test is how the unscoped version reached the whole repo.
+        if not Path(item.fspath).resolve().is_relative_to(integration_root):
+            continue
+
+        # What makes a test an integration test is living in this tree, not
+        # having "integration" in its path. The previous version tested the
+        # substring and so marked -- and therefore skipped -- any test anywhere
+        # in the repository whose path happened to contain the word. That is the
+        # same defect this hook's docstring describes for the slow marker, left
+        # in place when that one was fixed; a unit test named
+        # test_workspace_policy_integration.py hit it and its fourteen tests
+        # were silently skipped in the full suite while passing in isolation.
+        item.add_marker(pytest.mark.integration)
 
         # Add slow marker to tests that might take longer
         if any(

@@ -2,10 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import shlex
 import logging
 import os
 from pathlib import Path
-from typing import Annotated, Any, List, Literal
+from typing import Annotated, Any, ClassVar, List, Literal
 from pydantic import Field
 
 from automated_security_helper.base.options import ScannerOptionsBase
@@ -17,7 +18,7 @@ from automated_security_helper.models.core import (
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
-from automated_security_helper.core.enums import ScannerToolType
+from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
@@ -48,6 +49,8 @@ class SnykCodeScannerConfig(ScannerPluginConfigBase):
 @ash_scanner_plugin
 class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
     """Example scanner plugin that demonstrates the decorator pattern."""
+
+    offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.SKIP_OFFLINE
 
     def model_post_init(self, context):
         if self.config is None:
@@ -152,6 +155,12 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
 
         return args
 
+    def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
+        """Abstract stub — SnykCodeScanner overrides scan() directly; this is unreachable."""
+        raise NotImplementedError(
+            f"{self.__class__.__name__} overrides scan() directly."
+        )
+
     def scan(
         self,
         target: Path,
@@ -202,7 +211,6 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             )
             return False
 
-
         if not self.dependencies_satisfied:
             self._post_scan(
                 target=target,
@@ -229,6 +237,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
             self._run_subprocess(
                 command=final_args,
                 results_dir=target_results_dir,
+                timeout=self._effective_scan_timeout(),
             )
 
             # Handle errors executing the scanner. For Snyk, non-zero response indicate the scanner was not
@@ -269,7 +278,7 @@ class SnykCodeScanner(ScannerPluginBase[SnykCodeScannerConfig]):
                     if sarif_report.runs:
                         sarif_report.runs[0].invocations = [
                             Invocation(
-                                commandLine=" ".join(final_args),
+                                commandLine=shlex.join(final_args),
                                 arguments=final_args[1:],
                                 startTimeUtc=self.start_time,
                                 endTimeUtc=self.end_time,

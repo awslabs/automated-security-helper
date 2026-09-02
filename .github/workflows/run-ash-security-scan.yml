@@ -108,6 +108,7 @@ jobs:
   ash:
     name: SAST, SCA, and IaC Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       COLUMNS: 140
     steps:
@@ -123,6 +124,39 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: ${{ inputs.python-version }}
+
+      - name: Compute cache keys
+        id: cachekeys
+        run: |
+          set -euo pipefail
+          # The grype database key rotates daily. grype refuses a database older
+          # than db.max-allowed-built-age (default 120h), so a key that never
+          # rotated would keep restoring an archive grype then rejects.
+          echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+          # Tool binaries rotate weekly, so a cache cannot pin a security scanner
+          # to one build indefinitely.
+          echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the grype vulnerability database
+        if: inputs.install-grype
+        uses: actions/cache@v6
+        with:
+          # grype's db.cache-dir default; equivalently GRYPE_DB_CACHE_DIR.
+          path: ~/.cache/grype/db
+          key: grype-db-${{ runner.os }}-${{ steps.cachekeys.outputs.day }}
+          # Falling back to an earlier day is safe: grype sets
+          # validate-by-hash-on-start and auto-update by default (throttled to
+          # max-update-check-frequency, 2h), so a slightly older database is
+          # verified and refreshed rather than trusted blindly.
+          restore-keys: |
+            grype-db-${{ runner.os }}-
+
+      - name: Cache the OpenGrep binary
+        if: inputs.install-opengrep
+        uses: actions/cache@v6
+        with:
+          path: ~/.opengrep/cli/latest
+          key: opengrep-${{ runner.os }}-${{ steps.cachekeys.outputs.week }}
 
       - name: Install Grype
         if: inputs.install-grype
@@ -141,8 +175,14 @@ jobs:
         run: |
           INSTALL_DIR="$HOME/.opengrep/cli/latest"
           mkdir -p "$INSTALL_DIR"
-          gh release download --repo opengrep/opengrep --pattern 'opengrep_manylinux_x86' --dir "$INSTALL_DIR"
-          chmod +x "$INSTALL_DIR/opengrep_manylinux_x86"
+          # Only download on a cache miss. The symlink and PATH export run either
+          # way, so a cache hit still leaves the job fully set up.
+          if [ ! -x "$INSTALL_DIR/opengrep_manylinux_x86" ]; then
+            gh release download --repo opengrep/opengrep --pattern 'opengrep_manylinux_x86' --dir "$INSTALL_DIR"
+            chmod +x "$INSTALL_DIR/opengrep_manylinux_x86"
+          else
+            echo "Reusing cached OpenGrep binary"
+          fi
           ln -sf "$INSTALL_DIR/opengrep_manylinux_x86" "$INSTALL_DIR/opengrep"
           echo "$INSTALL_DIR" >> $GITHUB_PATH
 
@@ -166,7 +206,12 @@ jobs:
         env:
           ASH_REPO_CLONE_URL: https://github.com/${{ github.repository }}.git
         run: |-
-          uvx --reinstall --from ${ASH_UVX_SOURCE} ash \
+          # No --reinstall here. The Run ASH step above already installed this exact
+          # source, so re-forcing a download makes the report step do a second git
+          # fetch it does not need - and if the ref has disappeared in the meantime
+          # (merge_group queue branches are deleted mid-run) that fetch is what
+          # fails, after the scan itself has already succeeded.
+          uvx --from ${ASH_UVX_SOURCE} ash \
             --output-dir "${ASH_OUTPUT_DIR}" report
 
       - name: Update step summary
@@ -176,11 +221,45 @@ jobs:
           cat "${ASH_OUTPUT_DIR}/reports/ash.summary.md" >> "${GITHUB_STEP_SUMMARY}"
           tree "${ASH_OUTPUT_DIR}"
 
+      # GITHUB_TOKEN is read-only for pull requests opened from a fork, whatever
+      # `permissions:` the caller declares -- GitHub downgrades it so untrusted
+      # code cannot write to the base repository. Commenting therefore cannot
+      # work on a fork PR, and because this job is a required status check, the
+      # failure took the whole check down *after the scan had already passed*:
+      #
+      #   ##[error]Resource not accessible by integration
+      #   https://docs.github.com/rest/issues/comments#create-an-issue-comment
+      #
+      # That made every external contributor's PR unmergeable for a cosmetic
+      # reason. The existing `github.repository_owner == inputs.repository-owner`
+      # guard does not catch it: for a fork PR *into* this repo the owner is
+      # still the base repo's owner, so the guard passes.
+      #
+      # Comparing head.repo.full_name against github.repository is the exact test
+      # for "same-repo PR". It is scoped to pull_request so merge_group and
+      # workflow_dispatch behaviour is unchanged.
       - name: Post ASH MarkdownReporter output as PR comment
         uses: mshick/add-pr-comment@v3
-        if: inputs.post-pr-comment && github.repository_owner == inputs.repository-owner && (success() || failure())
+        if: >-
+          inputs.post-pr-comment
+          && github.repository_owner == inputs.repository-owner
+          && (github.event_name != 'pull_request'
+              || github.event.pull_request.head.repo.full_name == github.repository)
+          && (success() || failure())
         with:
           message-path: ${{ inputs.output-dir }}/reports/ash.summary.md
+
+      # Say so rather than leaving a contributor wondering why the bot went
+      # quiet. Mirrors the ::warning:: the checks-permission probe below emits.
+      - name: Note that the PR comment was skipped for a fork
+        if: >-
+          inputs.post-pr-comment
+          && github.event_name == 'pull_request'
+          && github.event.pull_request.head.repo.full_name != github.repository
+          && (success() || failure())
+        shell: bash
+        run: |
+          echo "::notice::Scan results were not posted as a PR comment: GITHUB_TOKEN is read-only for fork pull requests. The full report is in this job's summary and in the ash_output artifact."
 
       - name: Collect ASH output artifact
         uses: actions/upload-artifact@v7

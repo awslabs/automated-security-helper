@@ -2,7 +2,6 @@ import pytest
 from datetime import date, timedelta
 from automated_security_helper.models.core import (
     ToolExtraArg,
-    ScanStatistics,
     IgnorePathWithReason,
     ToolArgs,
     AshSuppression,
@@ -30,23 +29,6 @@ def test_tool_extra_arg_model():
     arg = ToolExtraArg(key="config")
     assert arg.key == "config"
     assert arg.value is None
-
-
-def test_scan_statistics_model():
-    """Test the ScanStatistics model."""
-    stats = ScanStatistics(
-        files_scanned=100,
-        lines_of_code=5000,
-        total_findings=10,
-        findings_by_type={"critical": 2, "high": 3, "medium": 5},
-        scan_duration_seconds=15.5,
-    )
-
-    assert stats.files_scanned == 100
-    assert stats.lines_of_code == 5000
-    assert stats.total_findings == 10
-    assert stats.findings_by_type == {"critical": 2, "high": 3, "medium": 5}
-    assert stats.scan_duration_seconds == 15.5
 
 
 def test_ignore_path_with_reason_model():
@@ -170,25 +152,19 @@ def test_suppression_model_invalid_expiration_format():
 
 
 def test_suppression_model_past_expiration():
-    """Test the Suppression model with a past expiration date.
+    """Past expiration date must be stored; is_expired signals it at runtime.
 
-    Fixed in #171: past dates now warn and set expiration to None instead
-    of raising ValueError, so config parsing is not blocked by expired
-    suppressions.
+    Issue #171 updated: validator checks format only — past dates are preserved
+    so is_expired can return True instead of silently discarding the date.
     """
-    import warnings
-
     past_date = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
 
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        suppression = AshSuppression(
-            reason="Test suppression",
-            rule_id="TEST001",
-            path="src/main.py",
-            expiration=past_date,
-        )
+    suppression = AshSuppression(
+        reason="Test suppression",
+        rule_id="TEST001",
+        path="src/main.py",
+        expiration=past_date,
+    )
 
-    assert suppression.expiration is None
-    assert len(w) == 1
-    assert "past" in str(w[0].message).lower()
+    assert suppression.expiration == past_date
+    assert suppression.is_expired is True

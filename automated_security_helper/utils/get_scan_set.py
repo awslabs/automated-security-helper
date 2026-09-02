@@ -247,6 +247,48 @@ def get_files_not_matching_spec(
     return included
 
 
+def git_repository_root(path: Path) -> Optional[Path]:
+    """Return the root of the git repository containing *path*, or None.
+
+    Needed because ``git diff --name-only`` prints paths relative to the
+    repository root, not to the directory it was run from. Resolving those paths
+    against the scan directory is only correct when the two coincide -- true for a
+    single-directory scan of a checkout, and not true for a workspace project that
+    sits below a larger repository. Callers that need to turn a diff into absolute
+    paths must join against this, not against their own source directory.
+
+    Also the discriminator for "is this a git repository at all", which
+    ``get_changed_files`` cannot answer: it returns ``None`` both for "git is
+    missing" and for "the ref does not exist", and a non-repository is a third
+    thing that needs a different response.
+
+    Args:
+        path: Any directory. Its containing repository is returned, which may be
+            an ancestor.
+
+    Returns:
+        The absolute repository root, or ``None`` when *path* is not inside a git
+        repository, git is not on ``PATH``, or the command times out.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],  # nosec B603 B607
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=path,
+        )
+    except (FileNotFoundError, NotADirectoryError, subprocess.TimeoutExpired, OSError):
+        return None
+
+    if result.returncode != 0:
+        return None
+    top = result.stdout.strip()
+    if not top:
+        return None
+    return Path(top).resolve()
+
+
 def get_changed_files(
     base_ref: str = "origin/main", cwd: Optional[Path] = None
 ) -> Optional[List[Path]]:

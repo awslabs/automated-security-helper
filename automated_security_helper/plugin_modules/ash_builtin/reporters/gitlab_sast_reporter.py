@@ -12,6 +12,7 @@ from automated_security_helper.base.options import ReporterOptionsBase
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
+    ReporterWorkspaceBehaviour,
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
@@ -44,7 +45,26 @@ class GitLabSASTReporterConfig(ReporterPluginConfigBase):
 
 @ash_reporter_plugin
 class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
-    """Formats vulnerability findings report as GitLab SAST format."""
+    """Formats vulnerability findings report as GitLab SAST format.
+
+    Workspace mode: per project, one artefact each, never merged.
+
+    Not for the reason ``github_ghas`` is per project -- this reporter already
+    iterates every run correctly (see the ``runs[0]``-only regression pinned in
+    ``tests/unit/plugin_modules/test_reporter_regression.py``), so a merged
+    document would contain every finding. It is per project because of what the
+    document *is*: ``gl-sast-report.json`` is consumed as
+    ``artifacts:reports:sast`` for one GitLab project, and its
+    ``location.file`` paths are resolved against that project's repository root.
+    A merged report uploaded for one project would show findings at paths that do
+    not exist in it.
+
+    ``projects/<key>/reports/`` gives one report per project, each already
+    correct for its own upload, which is also the shape a monorepo pipeline with
+    a job per project wants.
+    """
+
+    workspace_behaviour = ReporterWorkspaceBehaviour.PER_PROJECT
 
     def model_post_init(self, context):
         if self.config is None:
@@ -56,11 +76,7 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
             # Extract vulnerabilities from SARIF report
             vulnerabilities = []
 
-            all_results = [
-                r
-                for run in (model.sarif.runs if model.sarif and model.sarif.runs else [])
-                for r in (run.results or [])
-            ]
+            all_results = model.sarif.get_all_results() if model.sarif else []
 
             if all_results:
                 ASH_LOGGER.trace("Creating rule dict")

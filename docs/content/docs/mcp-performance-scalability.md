@@ -6,6 +6,8 @@ This guide covers performance optimization and scalability considerations for th
 
 The ASH MCP server in v3 includes comprehensive resource management designed to handle concurrent operations efficiently while preventing memory leaks and resource exhaustion. This guide helps you optimize performance for your specific use case.
 
+The tuning described here applies to both transports the server supports. For the deployable streamable-HTTP transport — which adds per-session workspaces and cross-session parallelism on top of the primitives covered here — see [Streamable-HTTP MCP Deployment Guide](mcp/streamable-http.md).
+
 ## Performance Features
 
 ### Resource Management
@@ -27,7 +29,7 @@ The ASH MCP server in v3 includes comprehensive resource management designed to 
 ### Basic Performance Configuration
 
 ```yaml
-# .ash/ash.yaml - Optimized for performance
+# .ash/.ash.yaml - Optimized for performance
 mcp-resource-management:
   # Concurrent operations - adjust based on system resources
   max_concurrent_scans: 5              # Higher for powerful systems
@@ -48,7 +50,7 @@ mcp-resource-management:
 For powerful systems with ample resources:
 
 ```yaml
-# .ash/ash.yaml - High-performance setup
+# .ash/.ash.yaml - High-performance setup
 mcp-resource-management:
   # Maximize concurrent operations
   max_concurrent_scans: 8
@@ -74,7 +76,7 @@ mcp-resource-management:
 For systems with limited resources:
 
 ```yaml
-# .ash/ash.yaml - Resource-constrained setup
+# .ash/.ash.yaml - Resource-constrained setup
 mcp-resource-management:
   # Conservative limits
   max_concurrent_scans: 2
@@ -249,7 +251,7 @@ Test your configuration with representative projects:
 
 ```bash
 # Test with debug logging
-uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.0.0 ash mcp --debug
+uvx --from=git+https://github.com/awslabs/automated-security-helper@v3.4.1 ash mcp --debug
 
 # Monitor system resources during scans
 top -p $(pgrep -f "ash mcp")

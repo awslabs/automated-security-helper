@@ -3,7 +3,11 @@ class Ash < Formula
 
   desc "Automated Security Helper - security scanning tool for code repositories"
   homepage "https://github.com/awslabs/automated-security-helper"
-  url "https://github.com/awslabs/automated-security-helper.git", tag: "v3.4.1"
+  # Kept current by `cz bump` via [tool.commitizen] version_files in
+  # pyproject.toml. tests/unit/test_homebrew_formula_version.py fails if this
+  # drifts from the packaged version, because a stale-but-real tag installs an
+  # old ASH without failing anything.
+  url "https://github.com/awslabs/automated-security-helper.git", tag: "v3.7.0"
   license "Apache-2.0"
 
   depends_on "python@3.12"

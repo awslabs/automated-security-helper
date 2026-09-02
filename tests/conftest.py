@@ -1,5 +1,6 @@
 """Pytest configuration file for ASH tests."""
 
+import logging
 import os
 import sys
 import pytest
@@ -79,6 +80,60 @@ def pytest_collection_modifyitems(config, items):
         for item in items:
             if "integration" in item.keywords:
                 item.add_marker(skip_integration)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _keep_live_logging_off_the_ash_logger(request):
+    """Detach pytest's live-logging handler from the ``ash`` logger.
+
+    Why this exists. ``pytest.ini`` sets ``log_cli = True``, and
+    ``automated_security_helper.utils.log`` sets ``ASH_LOGGER.propagate = False``.
+    pytest adds its session-lifetime ``_LiveLoggingStreamHandler`` to the root
+    logger and -- because a non-propagating logger would never reach root -- to
+    every non-propagating logger that exists when the test loop starts
+    (``catching_logs.__enter__`` in ``_pytest/logging.py``). So every ASH record at
+    ``log_cli_level`` or above goes through that handler, and the handler suspends
+    and resumes pytest's capture around its write, via
+    ``CaptureManager.global_and_fixture_disabled``. Resuming assigns
+    ``sys.stdout``/``sys.stderr`` (``SysCapture.suspend`` in
+    ``_pytest/capture.py``).
+
+    That assignment is fatal inside ``typer.testing.CliRunner.invoke``. Its
+    ``isolation()`` puts a ``TextIOWrapper`` over each buffer it will read back
+    afterwards and keeps no reference to the wrapper other than ``sys.stdout`` /
+    ``sys.stderr``. Reassigning those drops the last reference, the wrapper is
+    finalized, finalizing closes the wrapped buffer, and ``invoke``'s ``finally``
+    clause raises ``ValueError: I/O operation on closed file`` where it would have
+    returned a ``Result``. A CLI test on any code path that logs then dies in the
+    harness instead of reporting what the CLI did -- and the CLI itself is fine,
+    which is what makes the failure so hard to read.
+
+    Only ``log_cli_handler`` is removed. ``LogCaptureHandler`` stays, so ``caplog``
+    and the "Captured log call" report section still see ASH records; those
+    handlers write to a ``StringIO`` and never touch capture.
+
+    What was tried and rejected. Dropping ``capsys`` from the affected test does
+    not help -- pytest's global fd-level capture reassigns the streams on suspend
+    as well, and the failure reproduces byte for byte without the fixture. Setting
+    ``log_cli = False`` in ``pytest.ini`` also works and is a shorter edit, but it
+    turns live logging off for every logger rather than for the one that is
+    incompatible with ``CliRunner``, and live logging is genuinely useful when
+    running a single test with ``-n0``.
+
+    Failure mode this prevents, and why it looked like a platform bug. Without
+    this fixture the outcome is order-dependent, because any test that clears the
+    ``ash`` logger's handlers permanently detaches the session-scoped handler for
+    the rest of that worker process -- ``cli/main.py``'s ``reset_logging_config``
+    and ``utils/log.py``'s ``get_logger`` both do exactly that, and seven files
+    under ``tests/unit/cli`` reach one of them. Under ``-n auto`` the xdist worker
+    count decides which tests share a process, so one commit was green on the
+    4-worker Linux and Windows runners and red on the 3-worker macOS runners.
+    """
+    plugin = request.config.pluginmanager.get_plugin("logging-plugin")
+    handler = getattr(plugin, "log_cli_handler", None)
+    if handler is not None:
+        logging.getLogger("ash").removeHandler(handler)
+    yield
 
 
 @pytest.fixture
@@ -346,6 +401,12 @@ def dummy_scanner(test_plugin_context, dummy_scanner_config):
 
         def validate_plugin_dependencies(self) -> bool:
             return True
+
+        def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
+            """Abstract stub — DummyScanner overrides scan() directly."""
+            raise NotImplementedError(
+                f"{self.__class__.__name__} overrides scan() directly."
+            )
 
         def scan(
             self,

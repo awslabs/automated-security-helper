@@ -24,14 +24,23 @@ Ferret Scan is a sensitive data detection tool that scans files for potential se
 Install Ferret Scan:
 
 ```bash
-# Via pip (recommended)
-pip install ferret-scan
+# Recommended: let ASH install the version this plugin is tested against
+ash dependencies install --config .ash/.ash_community_plugins.yaml
+
+# Or install by hand. Use the constraint, not a bare `pip install ferret-scan`:
+# the latter resolves to whatever is newest, which is how a release published
+# mid-CI-run once turned every open pull request red.
+pip install 'ferret-scan>=0.1.0,<2.0.0'
 
 # Or build from source
 git clone https://github.com/awslabs/ferret-scan.git
 cd ferret-scan
 make build
 ```
+
+The supported range is declared in `ferret_scanner.py` (`DEFAULT_VERSION_CONSTRAINT`)
+and is what `ash dependencies install` applies. If the two ever disagree, the
+constant is correct.
 
 ### Enable the Plugin
 
