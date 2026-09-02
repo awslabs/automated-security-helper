@@ -37,20 +37,70 @@ updates:
     labels:
       - "dependencies"
 
+  # Python dependencies, split so a scanner upgrade is never mistaken for an engine upgrade
+  # and a major is never mistaken for a routine bump.
+  #
+  # Why this shape rather than separate `updates:` entries per category: `commit-message.prefix`
+  # and `labels` are per-entry options, and two entries cannot share the same
+  # package-ecosystem and directory on one target branch. For grouped pull requests the branch
+  # name and title come from the group IDENTIFIER, so the group name is the only per-category
+  # label available -- hence names that read as prefixes.
+  #
+  # Group order is significant: a dependency lands in the FIRST group it matches, so the
+  # scanner groups must precede the catch-all engine groups or the wildcards would swallow
+  # them.
+  #
+  # Scope limit worth knowing before trusting this. Only these five scanner-related packages
+  # are declared in pyproject.toml. bandit, checkov, semgrep, grype, syft, trivy and opengrep
+  # are installed at runtime via utils/uv_tool_runner.py, so no Dependabot configuration can
+  # gate their upgrades. This file narrows the blast radius of the upgrades it can see; it is
+  # not a substitute for tests that detect a scanner that has stopped working.
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
       interval: "daily"
     cooldown:
       default-days: 7
+      # Majors wait the same week before a PR is opened, so a same-day upstream regression is
+      # not proposed immediately.
       semver-major-days: 7
     commit-message:
       prefix: "build"
     labels:
       - "dependencies"
     groups:
-      python-deps:
+      # A major bump of a scanner or its engine is the case that needs a human reading the
+      # upstream changelog before merge, so it gets its own PR with a name that says so.
+      scanner-major-upgrade:
+        patterns:
+          - "cdk-nag"
+          - "aws-cdk-lib"
+          - "constructs"
+          - "detect-secrets"
+          - "cfn-flip"
         update-types:
           - "major"
+
+      scanner-minor:
+        patterns:
+          - "cdk-nag"
+          - "aws-cdk-lib"
+          - "constructs"
+          - "detect-secrets"
+          - "cfn-flip"
+        update-types:
+          - "minor"
+          - "patch"
+
+      engine-major-upgrade:
+        patterns:
+          - "*"
+        update-types:
+          - "major"
+
+      engine-minor:
+        patterns:
+          - "*"
+        update-types:
           - "minor"
           - "patch"
