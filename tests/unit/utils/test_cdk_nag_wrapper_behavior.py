@@ -931,13 +931,22 @@ def test_a_plugin_report_with_null_violations_yields_an_empty_list_not_a_crash(
 def test_a_missing_report_is_reported_as_nothing_scanned(
     cdk_doubles, template_file, outdir, caplog
 ):
-    """A synth that writes no report must say so at error level.
+    """A synth that writes no report must report the failure on the response, not only log it.
 
     This is the defect that started all of this. An absent report is indistinguishable, in the
-    results, from a compliant template: both are an empty findings set. The distinction has to
-    live in the log and in the scanner's target-failure counters, because the results dict
-    cannot carry it. An empty dict is returned rather than None so the caller can tell "ran and
-    parsed nothing" from "the scanner is unavailable".
+    results, from a compliant template: both are an empty findings set. So the distinction is
+    carried on ``response.failure``, and that is the assertion that matters here.
+
+    An earlier version of this test asserted only ``results == {}`` plus the log line, while its
+    docstring claimed the distinction also lived "in the scanner's target-failure counters". It
+    did not: the scanner increments those only from its ``except`` block, and a report-less run
+    returned a non-None response and raised nothing, so a template that evaluated no rule was
+    counted as clean. The prose asserted more than the test did, which is how the two halves
+    were able to drift apart while this file stayed green. The scanner-side half now lives in
+    tests/unit/plugin_modules/ash_builtin/test_cdk_nag_scanner_behavior.py.
+
+    An empty dict is still returned rather than None, so the caller can tell "ran and parsed
+    nothing" from "the scanner is unavailable".
     """
     cdk_doubles.report_text = None
 
@@ -947,10 +956,86 @@ def test_a_missing_report_is_reported_as_nothing_scanned(
     assert isinstance(response, CdkNagWrapperResponse)
     assert response.results == {}
     assert cdk_doubles.synth_count == 1
+    assert response.failure is not None, (
+        "the response must carry the reason no rules were evaluated; a log line alone is not "
+        "readable by the scanner, which is what let this pass as a clean scan"
+    )
+    assert "NOT scanned" in response.failure
     assert any("NOT scanned" in record.message for record in caplog.records), (
         "an absent validation report must be logged as nothing having been scanned; "
         f"got {[r.message for r in caplog.records]}"
     )
+
+
+@pytest.mark.parametrize(
+    "label, report_text, expect_failure",
+    [
+        # Every way the report can be unreadable must set ``failure``.
+        ("no report written", None, True),
+        ("literal null", "null", True),
+        ("malformed json", "{not valid json", True),
+        (
+            "parsed but no plugin reported",
+            json.dumps(
+                {"version": "54.0.0", "title": "Validation Report", "pluginReports": []}
+            ),
+            True,
+        ),
+        # And every way it can be readable must leave it None, including the case that looks
+        # like the failures above -- a pack that ran and found nothing.
+        ("one violation", _one_violation_report(), False),
+        (
+            "pack ran, zero violations",
+            _report(_plugin_report(violations=[], conclusion="success")),
+            False,
+        ),
+        (
+            "pack ran, violations null",
+            json.dumps(
+                {
+                    "version": "54.0.0",
+                    "title": "Validation Report",
+                    "pluginReports": [
+                        {
+                            "pluginName": "AwsSolutions",
+                            "conclusion": "success",
+                            "violations": None,
+                        }
+                    ],
+                }
+            ),
+            False,
+        ),
+    ],
+)
+def test_failure_is_set_exactly_when_no_rule_was_evaluated(
+    cdk_doubles, template_file, outdir, label, report_text, expect_failure
+):
+    """``response.failure`` is the scanner's only readable signal, so pin both directions.
+
+    The negative rows are the point. "A pack ran and found nothing" and "no report existed at
+    all" both produce an empty findings set, and the whole defect was that the caller could not
+    tell them apart. Asserting only the positive rows would pass just as well against a wrapper
+    that marked every clean template as a failure, which would turn compliant repositories into
+    scanner errors.
+
+    A mutation that hardcoded ``failure=None`` on the response survived the scanner-side tests,
+    because those drive a wrapper double and never exercise this return. This is the test that
+    catches it.
+    """
+    cdk_doubles.report_text = report_text
+
+    response = _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert response is not None
+    if expect_failure:
+        assert response.failure is not None, (
+            f"{label}: no rule was evaluated, so the response must say so"
+        )
+    else:
+        assert response.failure is None, (
+            f"{label}: cdk-nag did evaluate this template; got failure={response.failure!r}"
+        )
 
 
 def test_findings_survive_the_synth_raise_that_violations_cause(

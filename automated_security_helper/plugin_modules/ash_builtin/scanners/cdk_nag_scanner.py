@@ -37,6 +37,7 @@ from automated_security_helper.utils.subprocess_utils import find_executable
 _CDK_AVAILABLE = True
 try:
     from importlib.metadata import version as _get_version
+
     _cdk_nag_version = _get_version("cdk_nag")
     from automated_security_helper.utils.cdk_nag_wrapper import (
         run_cdk_nag_against_cfn_template,
@@ -157,7 +158,9 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
 
     def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
         """Abstract stub — CdkNag overrides scan() directly; this is unreachable."""
-        raise NotImplementedError(f"{self.__class__.__name__} overrides scan() directly.")
+        raise NotImplementedError(
+            f"{self.__class__.__name__} overrides scan() directly."
+        )
 
     def scan(
         self,
@@ -225,7 +228,6 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         )
         if not validated:
             return False
-
 
         if not self.dependencies_satisfied:
             return False
@@ -311,6 +313,20 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                     # repository of plain JSON report ERROR.
                     self.targets_attempted -= 1
                     ASH_LOGGER.debug(f"Not a CloudFormation file: {cfn_file}")
+                    continue
+
+                if nag_result_dict.failure is not None:
+                    # The wrapper ran but could not read a validation report, so no rule was
+                    # evaluated against this template. Counted as a failed target because the
+                    # alternative is what this branch previously did: fall through to a
+                    # zero-iteration findings loop, raise nothing, and report the template as
+                    # clean. With one template that also defeated the "failed on all N" guard,
+                    # since no failure was ever recorded for it to count.
+                    self.targets_failed += 1
+                    ASH_LOGGER.error(
+                        f"cdk-nag did not evaluate {cfn_file}: {nag_result_dict.failure}"
+                    )
+                    self.errors.append(f"{cfn_file}: {nag_result_dict.failure}")
                     continue
 
                 for pack, findings in nag_result_dict.results.items():

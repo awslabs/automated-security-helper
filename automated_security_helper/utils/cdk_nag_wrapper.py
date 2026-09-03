@@ -33,15 +33,36 @@ from automated_security_helper.utils.log import ASH_LOGGER
 
 
 class CdkNagWrapperResponse:
+    """What one template's cdk-nag run produced, and whether it ran at all.
+
+    ``failure`` is the part worth explaining. This wrapper distinguishes three outcomes: None
+    returned from the call means the file was not a CloudFormation template and was skipped, a
+    response with ``failure=None`` means cdk-nag evaluated the template, and a response with
+    ``failure`` set means the run produced no readable validation report -- so no rule was
+    evaluated and the empty ``results`` says nothing about the template's compliance.
+
+    Before this field existed the caller could only see None-versus-response, and a report-less
+    run arrived as an ordinary response holding an empty dict. The scanner counted the target
+    as attempted, iterated zero findings, raised nothing, and reported a clean scan; with a
+    single template the "failed on all N" guard could not catch it either, because zero
+    failures were ever recorded. That is the same silent-pass this module exists to remove, so
+    the signal is carried explicitly rather than inferred from ``results`` being empty -- an
+    emptiness check would work today only because a genuinely clean pack yields
+    ``{pack: []}`` rather than ``{}``, which is exactly the kind of invariant that gets broken
+    later without anything failing.
+    """
+
     def __init__(
         self,
         results: Dict[str, List[Result]] | None = None,
         outdir: Path | None = None,
         template: CloudFormationTemplateModel | None = None,
+        failure: str | None = None,
     ):
         self.results = results
         self.outdir = outdir
         self.template = template
+        self.failure = failure
 
 
 _env_lock = threading.Lock()
@@ -160,8 +181,14 @@ def _level_and_kind(
 
 def _violations_from_validation_report(
     report_path: Path,
-) -> Dict[str, List["_NagFinding"]]:
+) -> tuple[Dict[str, List["_NagFinding"]], str | None]:
     """Read CDK's policy validation report into per-pack normalized finding dicts.
+
+    Returns ``(per_pack, failure)``. ``failure`` is None when the report was read, and a short
+    operator-readable reason when it was not. The reason is returned rather than only logged
+    because the caller has to be able to tell "no violations" from "no report", and those two
+    are indistinguishable in ``per_pack`` -- both are falsy. Logging alone left the scanner
+    reading an empty dict and reporting a clean scan; see :class:`CdkNagWrapperResponse`.
 
     Replaces the ``*-NagReport.json`` reader used with cdk-nag 2.x. In v3 the packs are
     ``IPolicyValidationPlugin`` implementations rather than aspects, and their output lands in
@@ -178,30 +205,31 @@ def _violations_from_validation_report(
     get nothing rather than a wrong answer.
     """
     if not report_path.exists():
-        ASH_LOGGER.error(
+        reason = (
             f"cdk-nag produced no validation report at {report_path}. No rules were "
             "evaluated, so this template was NOT scanned."
         )
-        return {}
+        ASH_LOGGER.error(reason)
+        return {}, reason
 
     try:
         report = json.loads(report_path.read_text(encoding="utf-8"))
     except Exception as exc:
-        ASH_LOGGER.error(
-            f"Could not parse cdk-nag validation report {report_path}: {exc}"
-        )
-        return {}
+        reason = f"Could not parse cdk-nag validation report {report_path}: {exc}"
+        ASH_LOGGER.error(reason)
+        return {}, reason
 
     # A file holding literal ``null`` is valid JSON that decodes to None, and a bare
     # ``report.get(...)`` on it raises AttributeError out of the scanner rather than reporting
     # an unreadable report. The type is checked instead of trusted because the only thing known
     # about the file at this point is that it parsed.
     if not isinstance(report, dict):
-        ASH_LOGGER.error(
+        reason = (
             f"cdk-nag validation report {report_path} is not a JSON object "
             f"(got {type(report).__name__}). No violations could be read from it."
         )
-        return {}
+        ASH_LOGGER.error(reason)
+        return {}, reason
 
     per_pack: Dict[str, List[_NagFinding]] = {}
     for plugin_report in report.get("pluginReports", []) or []:
@@ -235,7 +263,17 @@ def _violations_from_validation_report(
     ASH_LOGGER.debug(
         f"cdk-nag validation report: {len(per_pack)} pack(s), {total} violation record(s)"
     )
-    return per_pack
+    if not per_pack:
+        # The report parsed but named no plugin. Every registered pack writes an entry even
+        # when it found nothing -- a compliant template yields ``{pack: []}``, not ``{}`` -- so
+        # an empty mapping here means no pack reported, which is not a clean scan either.
+        reason = (
+            f"cdk-nag validation report {report_path} contains no plugin reports. No pack "
+            "evaluated this template."
+        )
+        ASH_LOGGER.error(reason)
+        return per_pack, reason
+    return per_pack, None
 
 
 def run_cdk_nag_against_cfn_template(
@@ -444,7 +482,7 @@ def run_cdk_nag_against_cfn_template(
             # 2.x produced. Globbing for those files against a v3 install finds nothing and
             # yields an empty result set -- a scan that looks clean because it read the wrong
             # place.
-            cdk_nag_report_lines = _violations_from_validation_report(
+            cdk_nag_report_lines, report_failure = _violations_from_validation_report(
                 Path(outdir) / "validation-report.json"
             )
 
@@ -562,7 +600,12 @@ def run_cdk_nag_against_cfn_template(
 
                     results[pack_name].append(finding)
 
-            return CdkNagWrapperResponse(results=results, outdir=outdir, template=model)
+            return CdkNagWrapperResponse(
+                results=results,
+                outdir=outdir,
+                template=model,
+                failure=report_failure,
+            )
         finally:
             sys.stderr = original_stderr
             if devnull_file:
