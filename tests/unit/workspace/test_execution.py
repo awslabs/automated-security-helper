@@ -549,6 +549,28 @@ class TestPerProjectThresholds:
 # Failures and timeouts
 # ---------------------------------------------------------------------------
 
+#: Budget for the tests that need a project to exceed its deadline.
+#
+# It was 0.2s, and that produced an intermittent CI failure in
+# test_a_project_timeout_fails_that_project_only: the assertion is that a timeout fails only the
+# offending project, and on one run BOTH the slow project AND the one configured to sleep not at
+# all exceeded the budget. A project with no work to do cannot overrun a deadline that covers the
+# cost of starting it, so 0.2s did not cover that cost on a loaded runner.
+#
+# The leading explanation is cold Pydantic validation under CPU contention -- FakeOrchestrator
+# validates a SarifReport, and first-use model validation is easily over 200ms on a contended
+# runner with several xdist workers competing. That would also explain why the sibling tests
+# below survived the same run: by the time they execute, the models are warm in that worker.
+# Stated as the best available reading rather than a measurement, because reproducing a hosted
+# runner's load was not attempted.
+#
+# The value does not depend on which explanation is right, which is the point. What was wrong was
+# a budget of the same order as the fixed overhead of running a project at all, so the fix is
+# headroom -- 15x the old value -- rather than a smaller number or a retry. The cost is that each
+# test here waits for this to elapse before the workspace gives up; under xdist that is
+# concurrent, and a deterministic three seconds beats an 0.2s race that lands on unrelated PRs.
+PROJECT_TIMEOUT = 3.0
+
 
 class TestFailureHandling:
     def test_a_failing_project_does_not_stop_the_others(self, tmp_path):
@@ -604,26 +626,57 @@ class TestFailureHandling:
     def test_a_project_timeout_fails_that_project_only(self, tmp_path):
         """The other projects still complete, and the workspace still reports.
 
-        The slow project sleeps only slightly longer than its budget, so the
-        abandoned worker finishes during the test rather than outliving it. That
-        is a property of the test, not of the timeout: see the module docstring in
-        workspace/execution.py for why a thread cannot be preempted.
+        The stalled project blocks on an event rather than sleeping past its budget, matching
+        the tests further down this class. A sleep makes the overrun depend on two durations
+        being ordered correctly -- sleep longer than budget, budget longer than startup -- and
+        the second of those is not under the test's control. Blocking removes one side of it:
+        a project waiting on an event that is never set overruns any budget, so only the
+        sibling's completion depends on timing, and PROJECT_TIMEOUT gives that room.
+
+        The event is released in a finally so the abandoned worker exits with the test rather
+        than outliving it. It cannot be interrupted -- see the module docstring in
+        workspace/execution.py for why a thread cannot be preempted -- so releasing it is the
+        only way to reclaim it.
         """
-        _, plan = _make_workspace(tmp_path, ("slow", "MEDIUM"), ("quick", "MEDIUM"))
-        FakeOrchestrator.behaviour["slow"] = {"sleep": 1.5}
-        outcome = _run(tmp_path, plan, project_timeout=0.2, max_parallel_projects=2)
+        _, plan = _make_workspace(tmp_path, ("stalled", "MEDIUM"), ("quick", "MEDIUM"))
+        release = threading.Event()
+        FakeOrchestrator.behaviour["stalled"] = {"block": release}
+        try:
+            outcome = _run(
+                tmp_path,
+                plan,
+                project_timeout=PROJECT_TIMEOUT,
+                max_parallel_projects=2,
+            )
+        finally:
+            release.set()
+
         statuses = {p.project: p.status for p in outcome.payload.projects}
-        assert statuses["slow"] is ProjectRunStatus.FAILED
-        assert statuses["quick"] is ProjectRunStatus.COMPLETED
+        assert statuses["stalled"] is ProjectRunStatus.FAILED
+        assert statuses["quick"] is ProjectRunStatus.COMPLETED, (
+            "a project configured to do nothing must finish inside the budget; if it did not, "
+            "the budget is smaller than the fixed cost of starting a project"
+        )
         assert outcome.exit_code == WorkspaceExitCode.INTERNAL_ERROR
 
     def test_a_timeout_says_so_in_the_error(self, tmp_path):
-        _, plan = _make_workspace(tmp_path, ("slow", "MEDIUM"))
-        FakeOrchestrator.behaviour["slow"] = {"sleep": 1.5}
-        outcome = _run(tmp_path, plan, project_timeout=0.2)
+        """The error names the budget, so the number is read from the constant.
+
+        Asserting a hardcoded "0.2" here was what tied this test to the old value: changing the
+        budget anywhere else would have failed this assertion for a reason unrelated to what it
+        checks, which is that the message reports the deadline it enforced.
+        """
+        _, plan = _make_workspace(tmp_path, ("stalled", "MEDIUM"))
+        release = threading.Event()
+        FakeOrchestrator.behaviour["stalled"] = {"block": release}
+        try:
+            outcome = _run(tmp_path, plan, project_timeout=PROJECT_TIMEOUT)
+        finally:
+            release.set()
+
         error = outcome.payload.projects[0].error or ""
         assert "timed out" in error.lower()
-        assert "0.2" in error
+        assert str(PROJECT_TIMEOUT) in error
 
     def test_the_timeout_bounds_wall_clock_when_the_bound_is_smaller(self, tmp_path):
         """The defect: a queued project was never given a deadline.
@@ -649,7 +702,9 @@ class TestFailureHandling:
         FakeOrchestrator.behaviour["wedged"] = {"block": release}
         try:
             started = time.monotonic()
-            outcome = _run(tmp_path, plan, project_timeout=0.2, max_parallel_projects=1)
+            outcome = _run(
+                tmp_path, plan, project_timeout=PROJECT_TIMEOUT, max_parallel_projects=1
+            )
             elapsed = time.monotonic() - started
         finally:
             release.set()
@@ -668,7 +723,9 @@ class TestFailureHandling:
         release = threading.Event()
         FakeOrchestrator.behaviour["wedged"] = {"block": release}
         try:
-            outcome = _run(tmp_path, plan, project_timeout=0.2, max_parallel_projects=1)
+            outcome = _run(
+                tmp_path, plan, project_timeout=PROJECT_TIMEOUT, max_parallel_projects=1
+            )
         finally:
             release.set()
 
@@ -690,7 +747,9 @@ class TestFailureHandling:
         release = threading.Event()
         FakeOrchestrator.behaviour["wedged"] = {"block": release}
         try:
-            outcome = _run(tmp_path, plan, project_timeout=0.2, max_parallel_projects=2)
+            outcome = _run(
+                tmp_path, plan, project_timeout=PROJECT_TIMEOUT, max_parallel_projects=2
+            )
         finally:
             release.set()
 
@@ -713,7 +772,7 @@ class TestFailureHandling:
             "sarif": _sarif(level="error", count=3),
         }
         try:
-            outcome = _run(tmp_path, plan, project_timeout=0.2)
+            outcome = _run(tmp_path, plan, project_timeout=PROJECT_TIMEOUT)
             # Let the abandoned worker finish and attempt its write.
             release.set()
             time.sleep(0.4)

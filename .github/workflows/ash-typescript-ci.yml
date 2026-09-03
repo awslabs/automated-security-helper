@@ -1,0 +1,236 @@
+name: TypeScript CI
+# Runs the jest suites under deploy/ with coverage thresholds.
+#
+# WHY THIS WORKFLOW EXISTS
+#
+# `jest` appeared nowhere under .github/ before this file, so neither TypeScript
+# package was tested in CI at all. Both had real suites -- 352 and 116 tests --
+# and both measured above 90% statement coverage, but nothing enforced either
+# number, so a regression would have landed unobserved.
+#
+# WHY THE THRESHOLDS ARE PASSED ON THE COMMAND LINE
+#
+# Rather than added to each package's jest.config.js. The thresholds are the
+# gate's policy, and keeping them here means the gate is readable in one file and
+# cannot be relaxed by editing a package's config without touching CI.
+#
+# WHY A DENOMINATOR CHECK RUNS ALONGSIDE THE THRESHOLD
+#
+# A percentage threshold on its own can be satisfied by measuring less. Both jest
+# configs previously set `roots: ['<rootDir>/test']`, which confines jest's
+# crawler so a source file no test imports is omitted from the report entirely
+# rather than reported at 0%. deploy/cdk-constructs read 97.35% that way while a
+# 0%-covered file sat in src/; the honest figure was 82.51%, and nothing errored.
+# assert-coverage-scope.mjs pins the file count, the statement denominator, and
+# the presence of specific files, so shrinking the measured scope fails loudly
+# instead of raising the percentage.
+#
+# WHY A COMPLETENESS CHECK RUNS ALONGSIDE THE DENOMINATOR CHECK
+#
+# Pinning the denominator stops it shrinking, which is the important half and not
+# the whole story. A floor on the file count cannot tell "we measure 20 of 21
+# production files and the 21st has no harness" from "we measure 20 and lost
+# track of one" -- from inside one report the two are identical, because jest
+# omits source no test imports ENTIRELY rather than listing it at 0%. Nothing in
+# the report's own contents can reveal a file that was never loaded.
+#
+# So the census has to come from outside the report. assert-coverage-completeness
+# .mjs takes it from `git ls-files`, which knows about files no harness has ever
+# seen, and requires every tracked production file to be either measured or named
+# in .github/typescript-coverage-exclusions.json with a reason. Today that list
+# holds three entries: each package's own jest.config.js, which jest loads before
+# instrumentation exists, and a node helper under the Python transpiler's tools/
+# whose tree has no package.json, tsconfig, jest or vitest config at all. The
+# third is the case the check exists to state precisely: "no harness exists to
+# measure this" is a different disposition from "measured and uncovered", and it
+# should be a committed claim rather than a reviewer's recollection. The entries
+# carry a kind, and the kind selects a staleness test, so an exclusion that stops
+# being true fails instead of being carried forward.
+#
+# THE SCOPES, AND THE ONE INVARIANT A REVIEWER HAS TO HOLD
+#
+# The packages run as a parallel matrix, so no single job holds both reports. A
+# whole-repo completeness check would need cross-job artifacts. Instead each
+# package job checks its own scope against its own report, and the
+# coverage-completeness-outside job checks what is left: production files that no
+# package scope covers, which must all be exclusions. That job's --package list
+# must name the same packages as the matrix above. A package added to the tree
+# but to neither list fails the outside job, which is the accident worth
+# catching. A package name added to the --package list without a matrix entry
+# would NOT fail -- it is a deliberate edit in this file, next to the matrix, and
+# review is what catches it.
+
+# PATH-FILTERED ON PURPOSE, AND THE FILTER IS LOAD-BEARING
+#
+# `deploy/` does not exist on the default branch yet -- it arrives with the pull
+# request that adds the CDK app. Without these filters this workflow would run on
+# every pull request and fail the presence check below on all of them, because
+# there would be no package to test.
+#
+# The alternative -- letting the presence check skip quietly when the directory is
+# absent -- was rejected. A job that reports success because it found nothing to
+# do is indistinguishable from a job that tested something, which is the failure
+# mode this repository has hit repeatedly. So the two behaviours are split: the
+# filter decides WHETHER the job runs, and the presence check makes it impossible
+# for a run to pass without a package. Neither is a silent pass.
+#
+# This workflow and its helper files are deliberately NOT in their own filter.
+# Self-referencing would make the pull request that ADDS this file trigger it,
+# against a tree where deploy/ does not exist yet, so the change introducing the
+# gate would fail its own gate on arrival. Once deploy/ is on the default branch,
+# adding all four back is safe and worth doing so edits to the gate are
+# themselves tested:
+#
+#   .github/workflows/ash-typescript-ci.yml
+#   .github/scripts/assert-coverage-scope.mjs
+#   .github/scripts/assert-coverage-completeness.mjs
+#   .github/typescript-coverage-exclusions.json
+#
+# The exclusions file matters most of the four. It is the one place where editing
+# a single line widens what the gate tolerates, and until it is in the filter an
+# edit to it alone runs nothing.
+#
+# Consequence to be aware of: a change outside these paths that breaks the
+# TypeScript build will not be caught here, because the job will not run.
+on:
+  push:
+    branches:
+      - "*"
+    tags:
+      - "*"
+    paths:
+      - "deploy/cdk/**"
+      - "deploy/cdk-constructs/**"
+  pull_request:
+    branches:
+      - "*"
+    paths:
+      - "deploy/cdk/**"
+      - "deploy/cdk-constructs/**"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  # One in-flight run per pull request; pushing again supersedes the previous run.
+  #
+  # github.ref is refs/pull/<n>/merge on pull_request, and on merge_group it is the
+  # per-entry gh-readonly-queue/main/pr-<n>-<sha> branch, so every queue entry lands
+  # in its own group and entries never serialize behind one another.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Only pull_request runs may be cancelled. A merge_group run must finish or the
+  # queue loses its verdict.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  typescript-tests:
+    name: ts (${{ matrix.package }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # min-statements and min-files are floors derived from a measured run,
+          # not estimates. Adding a source file raises both legitimately and a
+          # floor does not need editing for that. REMOVING measured code lowers
+          # them and fails, which is the case worth catching -- and it should
+          # require an explicit, reviewable edit to this file.
+          - package: cdk
+            threshold: '{"global":{"statements":90,"lines":90}}'
+            min_files: 11
+            min_statements: 400
+            # bin/ash.ts is the file that disappears first if roots is narrowed,
+            # so requiring it by name is the direct guard against that.
+            require: "--require bin/ash.ts --require lib/ash-config.ts"
+          - package: cdk-constructs
+            threshold: '{"global":{"statements":90,"lines":90}}'
+            min_files: 7
+            min_statements: 222
+            # buildspec-cli.ts is the file that was actually hidden this way.
+            require: "--require src/buildspec-cli.ts --require src/index.ts"
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # Fails rather than skips when the package is absent. A job that quietly
+      # succeeds because it found nothing to test is worse than no job: it
+      # reports a green check for work it never did.
+      - name: Confirm the package is present
+        run: |
+          if [ ! -f "deploy/${{ matrix.package }}/package.json" ]; then
+            echo "::error::deploy/${{ matrix.package }}/package.json is missing. This gate expects it to exist; it must not pass by finding nothing."
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci --prefix "deploy/${{ matrix.package }}"
+
+      - name: Run tests with coverage thresholds
+        run: |
+          npm --prefix "deploy/${{ matrix.package }}" test -- \
+            --ci \
+            --coverage \
+            --coverageReporters=text \
+            --coverageReporters=json-summary \
+            --coverageThreshold='${{ matrix.threshold }}'
+
+      - name: Assert the coverage scope was not narrowed
+        run: |
+          node .github/scripts/assert-coverage-scope.mjs \
+            --summary "deploy/${{ matrix.package }}/coverage/coverage-summary.json" \
+            --min-files ${{ matrix.min_files }} \
+            --min-statements ${{ matrix.min_statements }} \
+            ${{ matrix.require }}
+
+      # The floors above say the denominator did not shrink. This says nothing in
+      # the package is missing from it: every tracked production file under
+      # deploy/<package> is in the report, or is a named exclusion that still
+      # needs excluding.
+      - name: Assert every production file in the package is measured
+        run: |
+          node .github/scripts/assert-coverage-completeness.mjs \
+            --exclusions .github/typescript-coverage-exclusions.json \
+            --scope "deploy/${{ matrix.package }}" \
+            --summary "deploy/${{ matrix.package }}/coverage/coverage-summary.json"
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ts-coverage-${{ matrix.package }}
+          path: deploy/${{ matrix.package }}/coverage/
+          retention-days: 7
+          if-no-files-found: warn
+
+  # The other half of the completeness question: a production file that sits
+  # outside every package scope is measured by nothing, and no per-package job
+  # would ever look for it. Exactly the shape of
+  # transpiler/tools/zod_to_json_schema.mjs, which is why that file is a named
+  # exclusion rather than an unremarked absence.
+  #
+  # Separate from the matrix on purpose: this needs no npm install and no jest
+  # run, only the checkout and the git index, so it does not belong behind a
+  # per-package dependency install.
+  coverage-completeness-outside:
+    name: ts (files outside the packages)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      # --package must name the same packages as the matrix above. The check
+      # itself fails when a deploy/<pkg>/package.json exists that this list does
+      # not name, so a new package cannot slip past both.
+      - name: Assert no unnamed production file sits outside every package
+        run: |
+          node .github/scripts/assert-coverage-completeness.mjs \
+            --exclusions .github/typescript-coverage-exclusions.json \
+            --scope outside \
+            --package deploy/cdk \
+            --package deploy/cdk-constructs

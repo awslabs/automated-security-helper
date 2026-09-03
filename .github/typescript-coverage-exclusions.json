@@ -1,0 +1,66 @@
+{
+  "README": [
+    "Tracked JS/TS files that no coverage run measures, each with the reason it is not measured.",
+    "",
+    "WHY THIS FILE EXISTS",
+    "",
+    "assert-coverage-scope.mjs pins each package's denominator so it cannot shrink. That",
+    "catches a file being dropped from a report, but it cannot tell 'we measure 20 of 21",
+    "files and the 21st has no harness' from 'we measure 20 and lost track of one'. jest",
+    "omits unimported source from a report entirely rather than listing it at 0%, so an",
+    "unmeasured file is invisible, not visibly bad.",
+    "",
+    "assert-coverage-completeness.mjs closes that by taking a census of tracked production",
+    "files and requiring each one to be either measured or named here. So this list is the",
+    "difference between a file being deliberately out of scope and a file nobody noticed.",
+    "That is why the reasons are in the repository and not in a review comment: the claim",
+    "is auditable, and it is re-tested on every run.",
+    "",
+    "KINDS, AND WHAT MAKES AN ENTRY STALE",
+    "",
+    "The kind is not a label; it selects which staleness test runs. An entry that stops",
+    "being true fails the gate instead of being carried forward.",
+    "",
+    "  harness-config -- the file configures the test runner itself. Its package does have",
+    "    a harness, but the harness cannot measure its own config: jest loads",
+    "    jest.config.js in the parent process before any instrumentation exists, and",
+    "    collectCoverageFrom does not match it. Stale once the file stops being tracked,",
+    "    or once it does appear in the coverage report.",
+    "",
+    "  no-harness -- no JS/TS test harness exists anywhere in this file's directory tree,",
+    "    so nothing could measure it. This is a different disposition from 'measured and",
+    "    uncovered', and it must not be reported as a coverage gap. Stale once the file",
+    "    stops being tracked, once a package.json / tsconfig / jest or vitest config",
+    "    appears in any ancestor directory, or once it turns up in a coverage report.",
+    "",
+    "Both kinds are also reported when the census would not have asked about the file at",
+    "all -- a path that is not tracked production source needs no exclusion, and an entry",
+    "that guards nothing is a stale entry.",
+    "",
+    "WHAT DOES NOT BELONG HERE",
+    "",
+    "A file that a harness could measure but no test exercises. That is a coverage gap and",
+    "belongs in a test, not in this list. Excluding it would restore exactly the blind spot",
+    "the gate exists to remove.",
+    "",
+    "Paths are repository-relative and POSIX-separated. The census covers .ts, .tsx, .mts,",
+    ".cts, .js and .mjs, minus .d.ts declarations and test sources."
+  ],
+  "exclusions": [
+    {
+      "path": "deploy/cdk/jest.config.js",
+      "kind": "harness-config",
+      "reason": "jest's own config -- loaded before instrumentation exists, and collectCoverageFrom ['lib/**/*.ts','bin/**/*.ts'] cannot match a file at the package root."
+    },
+    {
+      "path": "deploy/cdk-constructs/jest.config.js",
+      "kind": "harness-config",
+      "reason": "jest's own config -- loaded before instrumentation exists, and collectCoverageFrom ['src/**/*.ts'] cannot match a file at the package root."
+    },
+    {
+      "path": "ash-agent-plugins/agentic-coding/transpiler/tools/zod_to_json_schema.mjs",
+      "kind": "no-harness",
+      "reason": "A node helper shelled out to by the Python transpiler's tools/refresh_schemas.py; its tree is a Python package (pyproject.toml, uv.lock) with no package.json, tsconfig, jest or vitest config, so no JS harness exists to measure it."
+    }
+  ]
+}
