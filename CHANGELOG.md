@@ -44,6 +44,29 @@
 - [1.0.1-e-10Jan2023](#101-e-10jan2023)
 
 
+## v3.7.1 (2026-09-03)
+
+### BREAKING CHANGE
+
+- a requested cdk-nag pack whose name cannot be resolved now raises instead
+of being skipped with a logged error, so a configuration naming a pack that does not exist
+fails the scan rather than silently evaluating a subset of the requested rules. Separately,
+`include_compliant_checks` no longer has any effect: cdk-nag 3.x reports through CDK's
+policy validation framework, whose report contains violations only, so the compliant and
+suppressed records 2.x listed alongside them are no longer available at any setting.
+- a scanner that attempted at least one target and failed on all
+of them now reports ERROR with a non-zero exit code and SARIF
+executionSuccessful=false, where it previously reported PASSED with zero
+findings. Pipelines running a scanner that cannot execute will begin failing
+rather than completing.
+
+### Fix
+
+- **backport**: keep v3.7.0's own lockfile, not main's
+- **cdk-nag**: count a template with no validation report as a failed target
+- **cdk-nag**: hold the v3 migration to a test suite that can fail
+- **cdk-nag**: migrate to cdk-nag 3.x and report per-target failures
+
 ## v3.7.0 (2026-08-27)
 
 ### Feat

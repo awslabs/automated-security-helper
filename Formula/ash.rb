@@ -7,7 +7,7 @@ class Ash < Formula
   # pyproject.toml. tests/unit/test_homebrew_formula_version.py fails if this
   # drifts from the packaged version, because a stale-but-real tag installs an
   # old ASH without failing anything.
-  url "https://github.com/awslabs/automated-security-helper.git", tag: "v3.7.0"
+  url "https://github.com/awslabs/automated-security-helper.git", tag: "v3.7.1"
   license "Apache-2.0"
 
   depends_on "python@3.12"
