@@ -26,6 +26,9 @@ global_settings:
     - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
       path: pyproject.toml
       reason: "Project configuration — base64 strings are dependency hashes"
+    - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
+      path: nix/opengrep.nix
+      reason: "Pinned SRI hashes of published release assets — they exist to be public"
     # === semgrep/opengrep Python compatibility (ASH requires 3.10+) ===
     - rule_id: "python.lang.compatibility.*"
       path: "automated_security_helper/**/*.py"

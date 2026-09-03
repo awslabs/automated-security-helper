@@ -1,0 +1,151 @@
+name: "Validate Nix Mode"
+description: "Installs Nix, scans a fixture with --mode nix, and asserts every flake-supplied scanner participated"
+
+runs:
+  using: "composite"
+  steps:
+    - name: "nix: install"
+      # Pinned to a published tag rather than a floating major, matching how the other
+      # workflows in this repository pin actions.
+      uses: cachix/install-nix-action@v31.11.1
+      with:
+        # Both features are disabled by default on a stock install, and every flake
+        # operation fails with "experimental Nix feature 'nix-command' is disabled"
+        # without them. ASH passes these per-invocation too, so this is belt and braces
+        # for anything in this job that calls nix directly.
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+
+    - name: "nix: verify"
+      shell: bash
+      run: |
+        nix --version
+        # Evaluates every flake output for this system. Catches an unbuildable derivation
+        # before a scan does, where it would surface as a confusing scanner failure.
+        nix flake check --no-build .
+
+    - name: "nix: install ASH"
+      shell: bash
+      run: pip install .
+
+    - name: "nix: create test fixture"
+      shell: bash
+      run: |
+        mkdir -p /tmp/ash-nix-selftest
+        # Deliberately flawed inputs so scanners have something to report. A fixture that
+        # triggers nothing would let this job pass while every scanner sat idle -- which is
+        # the exact failure mode Nix mode exists to prevent, so it must not be the shape of
+        # the test for it.
+        #
+        # These are scanner FIXTURES, never executed: the shell=True call and the
+        # hardcoded credential are the patterns bandit and detect-secrets should flag.
+        cat > /tmp/ash-nix-selftest/app.py <<'PY'
+        import subprocess
+        PASSWORD = "hunter2"
+        def run(cmd):
+            subprocess.call(cmd, shell=True)
+        PY
+        cat > /tmp/ash-nix-selftest/template.yaml <<'YAML'
+        Resources:
+          Bucket:
+            Type: AWS::S3::Bucket
+            Properties:
+              BucketName: ash-nix-selftest-bucket
+        YAML
+        printf '{ "name": "ash-nix-selftest", "version": "1.0.0", "dependencies": {} }\n' \
+          > /tmp/ash-nix-selftest/package.json
+
+    - name: "nix: scan"
+      shell: bash
+      env:
+        # Point at the flake in THIS checkout. ASH is pip-installed above, so it lives in
+        # site-packages with no flake beside it, and resolve_flake_ref correctly falls back
+        # to the published repository at the running version. That fallback cannot work
+        # here: flake.nix exists only on this branch, so the released tag has no flake and
+        # nix fails with "path '«github:...»/flake.nix' does not exist". CI must exercise
+        # the flake under review in any case, not a previously released one.
+        ASH_NIX_FLAKE_REF: "path:${{ github.workspace }}"
+      # ASH's documented exit codes: 0 success, 1 error during execution, 2 actionable
+      # findings with fail_on_findings. This fixture is built to produce findings, so 2 is
+      # the expected success case and gating on zero would fail precisely when the scan
+      # worked.
+      #
+      # Distinguishing 2 from 1 rather than using `|| true`: an earlier version swallowed
+      # every status, so when the scan died on a bad flake reference the job carried on and
+      # failed later at the assertion with "no results ... the scan did not complete". That
+      # reports a symptom and hides the cause, which cost a full CI round trip to diagnose.
+      run: |
+        set +e
+        ash scan \
+          --mode nix \
+          --source-dir /tmp/ash-nix-selftest \
+          --output-dir /tmp/ash-nix-selftest/output \
+          --simple
+        rc=$?
+        set -e
+        if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then
+          echo "::error::ash scan --mode nix exited $rc (expected 0, or 2 for findings)"
+          exit "$rc"
+        fi
+        echo "scan exited $rc"
+
+    - name: "nix: assert every flake-supplied scanner participated"
+      shell: bash
+      run: |
+        python3 <<'PY'
+        import json
+        import pathlib
+        import sys
+
+        results = pathlib.Path("/tmp/ash-nix-selftest/output/ash_aggregated_results.json")
+        if not results.exists():
+            sys.exit(f"FAIL: no results at {results}; the scan did not complete")
+
+        data = json.loads(results.read_text())
+        raw = data.get("scanner_results") or {}
+        rows = raw.items() if isinstance(raw, dict) else (
+            (r.get("scanner_name"), r) for r in raw
+        )
+        statuses = {
+            name: str(res.get("status", "?"))
+            for name, res in rows
+            if isinstance(res, dict)
+        }
+
+        if not statuses:
+            sys.exit("FAIL: the report carried no per-scanner statuses")
+
+        # The scanners this flake is responsible for supplying. cdk-nag is excluded
+        # deliberately: its scanner sets self.command = "python" and runs from ASH's own
+        # environment, so Nix never supplies it and its status says nothing about whether
+        # the flake worked. Gating on it would make this job fail for an unrelated reason.
+        flake_supplied = [
+            "bandit",
+            "cfn-nag",
+            "checkov",
+            "detect-secrets",
+            "grype",
+            "npm-audit",
+            "opengrep",
+            "semgrep",
+            "syft",
+        ]
+
+        for name in sorted(statuses):
+            print(f"  {name:<18} {statuses[name]}")
+        print()
+
+        # MISSING means the binary was absent: the scanner contributed zero findings and
+        # said so only in this table. That is the specific silent under-report this mode
+        # exists to eliminate, so it is the assertion. A scanner reporting FAILED is
+        # healthy -- that is ASH's word for "found actionable findings".
+        missing = [n for n in flake_supplied if statuses.get(n, "MISSING").upper() == "MISSING"]
+        absent = [n for n in flake_supplied if n not in statuses]
+
+        if absent:
+            sys.exit(f"FAIL: scanners absent from the report entirely: {absent}")
+        if missing:
+            sys.exit(f"FAIL: flake-supplied scanners reported MISSING: {missing}")
+
+        print(f"PASS: all {len(flake_supplied)} flake-supplied scanners participated")
+        PY
