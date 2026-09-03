@@ -160,6 +160,13 @@ def _drive_handler(gate, monkeypatch, tmp_path, scan_exit: int) -> _FakeCodeComm
     )
     monkeypatch.setattr(gate, "read_severity_counts", lambda *a, **k: None)
     monkeypatch.setenv("ASH_MANAGE_APPROVAL_STATE", "true")
+    # The handler reads os.environ["AWS_REGION"] directly (ash_pr_gate.py:330) -- a KeyError, not
+    # a .get with a default -- because Lambda always sets it. Set explicitly rather than inherited:
+    # the first version of this file passed locally only because this developer's shell had
+    # AWS_REGION exported, and failed on all 18 CI legs where it is absent. A test whose verdict
+    # depends on what happens to be in the environment is not testing the code, and local green
+    # was not evidence of anything.
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
 
     event = {
         "detail": {
