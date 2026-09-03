@@ -440,3 +440,88 @@ jobs:
 
       - uses: ./.github/actions/validate-mcp
         if: matrix.method == 'mcp'
+
+  # ---------------------------------------------------------------------------
+  # One check name that can actually be required
+  # ---------------------------------------------------------------------------
+  #
+  # Every job above names itself from its matrix, so this workflow contributes 84 distinct
+  # check-run names to a pull request and not one of them is stable. A ruleset's
+  # required_status_checks list holds literal context strings with no wildcard, so requiring
+  # `unit-test` means enumerating all 18 of its names -- and then any matrix edit either orphans
+  # a required context that no longer runs, which leaves a pull request pending forever, or
+  # quietly adds a leg that nothing requires. That maintenance cost is why the ruleset requires
+  # two contexts today while 150 of the 152 checks on a pull request are advisory.
+  #
+  # This job's name does not depend on the matrix, so it can be required once and stay correct
+  # across matrix changes. It reports the verdict the individual legs already computed.
+  #
+  # THE TWO WAYS A GATE LIKE THIS FAILS OPEN
+  #
+  # `if: always()` is load-bearing, not defensive. Without it a failed dependency makes this job
+  # *skipped*, and GitHub counts a skipped required check as a pass -- so the gate would
+  # disappear at exactly the moment it is supposed to speak. That is the whole failure mode this
+  # job exists to remove, so it must not reproduce it.
+  #
+  # The second way is drift: a job added to this workflow and not added to `needs` escapes the
+  # gate silently, and the gate keeps reporting success over a shrinking share of the suite. So
+  # the count is asserted rather than assumed. A census beats a list that nobody re-checks --
+  # the same reason .github/scripts/assert-coverage-completeness.mjs takes its file list from
+  # `git ls-files` rather than from the coverage report.
+  required-checks:
+    name: required-checks
+    if: always()
+    needs:
+      - lint
+      - unit-test
+      - scan-validation
+      - external-target-scan
+      - multi-project-attribution
+      - install-validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Assert every upstream job succeeded
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          # Bump deliberately when adding a job above, which is the point: the assertion below
+          # fails until this matches, so a new job cannot slip past the gate unnoticed.
+          EXPECTED_UPSTREAM_JOBS: "6"
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          needs = json.loads(os.environ["NEEDS_JSON"])
+          expected = int(os.environ["EXPECTED_UPSTREAM_JOBS"])
+
+          for name, data in sorted(needs.items()):
+              print(f"{data.get('result', '?'):<10} {name}")
+
+          problems = []
+
+          if len(needs) != expected:
+              problems.append(
+                  f"this gate depends on {len(needs)} job(s) but expects {expected}. A job was "
+                  "added to the workflow without being added to this job's `needs`, so it is "
+                  "not covered by the required check. Add it and bump "
+                  "EXPECTED_UPSTREAM_JOBS."
+              )
+
+          # Every job in this workflow is unconditional -- none carries a job-level `if` -- so a
+          # result of anything other than success means something went wrong, including
+          # 'skipped'. Tolerating 'skipped' here would let a job that never ran read as a pass.
+          for name, data in sorted(needs.items()):
+              result = data.get("result")
+              if result != "success":
+                  problems.append(f"{name}: {result}")
+
+          if problems:
+              for problem in problems:
+                  print(f"::error::{problem}")
+              sys.exit(1)
+
+          print(f"all {len(needs)} upstream job(s) succeeded")
+          PY
