@@ -276,6 +276,134 @@ def test_no_templates_returns_the_placeholder_report(
 
 
 # ---------------------------------------------------------------------------
+# A template the wrapper could not evaluate must not read as a clean scan
+#
+# These exist because the wrapper draws a three-way distinction -- None for "not a
+# CloudFormation file", a response carrying ``failure`` for "ran but produced no readable
+# validation report", and a raise for a hard error -- and the scanner used to read only two of
+# them. A report-less run arrived as an ordinary non-None response holding an empty results
+# dict: not None so it was not skipped, not an exception so the ``except`` never incremented
+# targets_failed, and a zero-iteration findings loop. targets_failed stayed 0, so
+# ``targets_failed < targets_attempted`` was 0 < 1 and the scan passed. With a single template
+# the "failed on all N" guard could not catch it either, because no failure was ever recorded
+# for it to count.
+#
+# The assertion that would have caught it lives here rather than in the wrapper tests: those
+# check the wrapper returns ``{}`` and logs, which was true the whole time the scanner was
+# dropping the signal.
+# ---------------------------------------------------------------------------
+
+
+def test_a_template_with_no_validation_report_is_a_failed_target(
+    scanner, cdk_available, wrapper_double, template_in_work_dir
+):
+    """A response carrying ``failure`` counts as a failed target, not a clean one."""
+    wrapper_double.return_value = CdkNagWrapperResponse(
+        results={},
+        failure="cdk-nag produced no validation report. This template was NOT scanned.",
+    )
+
+    scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert scanner.targets_attempted == 1
+    assert scanner.targets_failed == 1, (
+        "a template whose run produced no validation report must count as failed; "
+        "otherwise a synth that evaluated no rule reports as a clean scan"
+    )
+    assert any("NOT scanned" in err for err in scanner.errors), (
+        f"the reason must reach scanner.errors; got {scanner.errors}"
+    )
+
+
+def test_a_report_less_template_makes_the_whole_scan_unsuccessful(
+    scanner, cdk_available, wrapper_double, template_in_work_dir
+):
+    """With one template, a report-less run must leave the scan not-succeeded.
+
+    This is the shape the earlier defect took, and it is asserted on the derived predicate the
+    executor and status computation actually read, rather than on the counters alone.
+    """
+    wrapper_double.return_value = CdkNagWrapperResponse(
+        results={}, failure="no validation report"
+    )
+
+    scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert scanner.targets_attempted > 0
+    scan_succeeded = scanner.targets_failed < scanner.targets_attempted
+    assert not scan_succeeded, (
+        "every attempted template failed, so this is not a successful scan"
+    )
+
+
+def test_a_genuinely_clean_template_is_not_a_failed_target(
+    scanner, cdk_available, wrapper_double, template_in_work_dir
+):
+    """The negative control: a pack that ran and found nothing is a pass.
+
+    Without this, a fix that counted any empty result as a failure would look correct while
+    turning every compliant template into a scanner error. A compliant pack reports
+    ``{pack: []}`` -- an entry with no violations -- which is distinct from the ``{}`` an
+    unreadable report produces.
+    """
+    wrapper_double.return_value = CdkNagWrapperResponse(
+        results={"AwsSolutions": []}, failure=None
+    )
+
+    scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert scanner.targets_attempted == 1
+    assert scanner.targets_failed == 0
+    assert scanner.errors == [] or not any(
+        "NOT scanned" in err for err in scanner.errors
+    )
+
+
+def test_the_failure_field_decides_not_whether_results_happen_to_be_empty(
+    scanner, cdk_available, wrapper_double, template_in_work_dir
+):
+    """A response with ``failure`` set is a failed target even if it carries findings.
+
+    This pins the choice of an explicit field over ``if not response.results``. The two are
+    equivalent for anything the real wrapper produces today -- its failure paths all return an
+    empty mapping -- so a mutation replacing one with the other survived every other test here.
+    That equivalence is an invariant of the current wrapper, not of the interface, and the whole
+    lesson of this PR is that invariants nothing asserts get broken quietly.
+
+    Read the other way: this is what makes the docstring on ``CdkNagWrapperResponse`` true when
+    it says the signal is carried explicitly rather than inferred from emptiness.
+    """
+    wrapper_double.return_value = CdkNagWrapperResponse(
+        results={"AwsSolutions": [nag_result()]},
+        failure="report truncated after the first pack",
+    )
+
+    scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert scanner.targets_failed == 1, (
+        "the failure field is authoritative; a partially written report is not a clean scan "
+        "just because it happened to contain a finding"
+    )
+
+
+def test_a_non_cloudformation_file_is_still_neither_attempted_nor_failed(
+    scanner, cdk_available, wrapper_double
+):
+    """The other negative control: None still means skip, not failure.
+
+    The failure branch sits directly after the None branch, so a mistake there would turn a
+    repository of ordinary JSON into a scanner error.
+    """
+    (scanner.context.work_dir / "package.json").write_text('{"name": "x"}\n')
+    wrapper_double.return_value = None
+
+    scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert scanner.targets_failed == 0
+    assert scanner.targets_attempted == 0
+
+
+# ---------------------------------------------------------------------------
 # The scan body
 # ---------------------------------------------------------------------------
 
