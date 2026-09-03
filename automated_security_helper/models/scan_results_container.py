@@ -180,12 +180,7 @@ class ScanResultsContainer(BaseModel):
         or above the configured severity threshold fails the scanner. Does not
         mutate the container's current status — the caller assigns the result.
         """
-        # Treat a None/empty threshold the same as the most permissive level
-        # so severity counts are only ignored when configured to ignore.
-        if not threshold:
-            return ScannerStatus.PASSED
-
-        # Checked BEFORE the severity gate, and this ordering is the whole point.
+        # Checked BEFORE anything else, and this ordering is the whole point.
         #
         # Everything below reasons about finding counts, where zero means "nothing to
         # report". For a scanner that failed on every target, zero means "nothing was
@@ -195,8 +190,24 @@ class ScanResultsContainer(BaseModel):
         # ERROR rather than FAILED: FAILED means the scanner worked and found problems, which
         # a consumer may legitimately gate or waive on. This did not work, and there is
         # nothing to waive.
+        #
+        # It sits above the None-threshold early return below, not merely above the severity
+        # cascade, and on this branch that placement is load-bearing rather than tidy. An empty
+        # threshold is how an operator turns the severity gate off; returning PASSED there would
+        # mean a scanner that examined nothing reports clean precisely for the operators who
+        # switched the gate off, which is the failure this guard exists to remove. The upstream
+        # commit this was backported from had no such early return -- 3.7.0 replaced it with the
+        # shared severity ladder -- so cherry-picking it landed the guard after the return and a
+        # total failure still read as PASSED at threshold None. Caught by
+        # test_all_targets_failed_outranks_the_severity_threshold, which failed on every Python
+        # version until the guard moved here.
         if self.targets_attempted > 0 and self.targets_failed >= self.targets_attempted:
             return ScannerStatus.ERROR
+
+        # Treat a None/empty threshold the same as the most permissive level
+        # so severity counts are only ignored when configured to ignore.
+        if not threshold:
+            return ScannerStatus.PASSED
 
         counts = self.severity_counts
 
