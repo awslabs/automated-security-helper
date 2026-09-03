@@ -84,6 +84,7 @@ Failure modes and known limitations
 from __future__ import annotations
 
 import asyncio
+import os
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Tuple
@@ -545,17 +546,47 @@ async def _execute(
     The monitor is cancelled in a ``finally`` rather than left to finish: once
     execution has returned there is nothing left to report, and an orphaned poll
     loop would keep emitting progress for a scan that is over.
+
+    ``ASH_OFFLINE`` is set here because that environment variable is the only thing
+    scanners actually consult. ``settings.offline`` reaches the orchestrator as a
+    declared field (``core/orchestrator.py``) and is never read; the gate scanners use
+    is ``is_offline_mode()`` in ``core/constants.py``, which tests
+    ``os.environ["ASH_OFFLINE"]``. So before this, requesting ``offline=True`` over MCP
+    was accepted, threaded through two layers, and silently did nothing -- the scan ran
+    with full network access while reporting that it had not. The CLI already sets the
+    variable around its own invocations; this path bypassed that.
+
+    The value is snapshotted and restored rather than set-and-popped. The CLI pops it
+    unconditionally, which is safe there because the process runs one scan and exits, but
+    a long-lived MCP server started with ``ASH_OFFLINE=YES`` in its own environment would
+    have that deployment-level setting silently cleared by the first offline workspace
+    scan.
+
+    Known limitation, stated because it is reachable here and not in the CLI: the variable
+    is process-global while this server can run sessions concurrently. Two overlapping
+    workspace scans with different ``offline`` values share one variable, so the restore
+    of the first can land inside the second. Closing that properly means having scanners
+    consume the resolved setting instead of the environment, which is a change across
+    every scanner rather than a fix to this call site.
     """
     monitor: Optional["asyncio.Task[None]"] = None
     if progress_reporter is not None and project_outputs:
         monitor = asyncio.create_task(
             monitor_workspace_progress(progress_reporter, dict(project_outputs))
         )
+    offline_previous = os.environ.get("ASH_OFFLINE")
+    if settings.offline:
+        os.environ["ASH_OFFLINE"] = "YES"
     try:
         # Resolved from this module's globals at call time, so a test that
         # replaces cli.mcp.workspace.execute_workspace is what runs.
         return await asyncio.to_thread(execute_workspace, plan, settings)
     finally:
+        if settings.offline:
+            if offline_previous is None:
+                os.environ.pop("ASH_OFFLINE", None)
+            else:
+                os.environ["ASH_OFFLINE"] = offline_previous
         if monitor is not None:
             monitor.cancel()
             with suppress(asyncio.CancelledError):
