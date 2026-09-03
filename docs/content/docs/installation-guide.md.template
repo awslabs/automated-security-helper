@@ -19,6 +19,12 @@ ASH v3 uses UV's tool isolation system to automatically manage most scanner depe
 - Any OCI-compatible container runtime (Docker, Podman, Finch, etc.)
 - On Windows: WSL2 is typically required for running Linux containers
 
+### For Nix Mode
+- [Nix](https://nixos.org/download/) on Linux or macOS
+- On Windows: use WSL2, then follow the Linux instructions
+
+Nix mode supplies every scanner from a pinned flake, so nothing else needs installing. See [Nix mode](#nix-mode) below.
+
 ## Installation Options
 
 ### Standard Installation
@@ -106,6 +112,38 @@ ash mcp
 ash mcp --help
 ```
 
+## Nix mode
+
+Nix mode runs your scan inside a development shell that supplies every scanner, each pinned by hash:
+
+```bash
+ash scan --mode nix --source-dir . --output-dir .ash/ash_output
+```
+
+Use it when you want the reproducibility of container mode without building an image. ASH publishes no container image, so `--mode container` requires every adopter to build one first. Nix mode needs no image and no registry.
+
+It also avoids a quieter problem. In local mode, a scanner whose binary is missing reports `MISSING`, contributes zero findings, and the run still writes a complete-looking report, so a scan can under-report without saying so. Nix mode supplies all ten scanners, and if Nix itself is absent it fails with an explanation rather than falling back to local mode.
+
+### How it works
+
+Like container mode, this is an outer wrapper: ASH re-executes itself inside `nix develop` and the inner run is an ordinary local scan. A development shell changes `PATH` but not the filesystem, so no path translation is involved.
+
+The shell sets `ASH_OFFLINE=YES` for the inner run. Several scanners prefer to install their own tools with `uv tool install`, and without this they would fetch copies that shadow the pinned ones, leaving a report that describes versions the flake never supplied.
+
+### Choosing the flake
+
+By default ASH uses the flake in your checkout when you are running from source, and otherwise the published repository at the version of ASH you are running. Override it with:
+
+```bash
+export ASH_NIX_FLAKE_REF="github:awslabs/automated-security-helper/v3.5.9"
+```
+
+### Platform support
+
+Linux and macOS, on both x86-64 and ARM. Windows users should run ASH under WSL2, which uses the Linux path.
+
+Native Windows Nix is not supported, and this is an upstream limitation rather than a gap in ASH. Windows Nix has no fixed-output derivations, which is the mechanism by which any of these tools would be downloaded, and no build sandbox. Nix's own installation documentation lists Windows as WSL2 only.
+
 ## Windows-Specific Installation Notes
 
 ASH v3 provides the same experience on Windows as on other platforms:
@@ -114,6 +152,7 @@ ASH v3 provides the same experience on Windows as on other platforms:
 - For container mode, you'll need:
   1. Windows Subsystem for Linux (WSL2) installed
   2. A container runtime like Docker Desktop, Rancher Desktop, or Podman Desktop with WSL2 integration enabled
+- For Nix mode, you'll need WSL2; native Windows Nix cannot supply the toolchain
 
 ## Verifying Your Installation
 

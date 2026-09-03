@@ -38,6 +38,7 @@ from automated_security_helper.core.unified_metrics import (
     get_unified_scanner_metrics,
 )
 from automated_security_helper.interactions.run_ash_container import run_ash_container
+from automated_security_helper.interactions.run_ash_nix import run_ash_nix
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.workspace import WorkspaceExitCode
 from automated_security_helper.workspace.plan import WorkspacePlan
@@ -505,6 +506,49 @@ def _run_container_mode(
             sys.exit(1)
     else:
         logger.error(f"Results file not found at {output_file}")
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# _run_nix_mode
+# ---------------------------------------------------------------------------
+
+def _run_nix_mode(opts: ScanOptions, logger) -> AshAggregatedResults:
+    """Run the scan inside a Nix shell that supplies the pinned scanner toolchain.
+
+    An outer wrapper like container mode: ASH re-executes itself inside `nix develop` and
+    the inner run is an ordinary local scan. Simpler than container mode in one respect,
+    since a development shell changes PATH but not the filesystem, so there is no mount
+    translation and none of that path-mapping logic belongs here.
+    """
+    nix_result = run_ash_nix(debug=opts.debug)
+
+    if nix_result.returncode != 0:
+        # Logged rather than fatal. A scan that finds something exits non-zero by design,
+        # so treating any non-zero status as a failure here would turn a working scan into
+        # an error. Whether findings should fail the run is decided from the loaded
+        # results, exactly as in container mode.
+        logger.debug(f"Nix shell exited with code {nix_result.returncode}")
+
+    # The inner scan wrote to the same output directory this process was given, so unlike
+    # container mode there is no path to translate back.
+    output_file = opts.output_dir / "ash_aggregated_results.json"
+    if output_file.exists():
+        with open(output_file, mode="r", encoding="utf-8") as f:
+            content = f.read()
+        try:
+            return AshAggregatedResults.model_validate_json(content)
+        except Exception as e:
+            logger.error(f"Failed to parse results file: {e}")
+            sys.exit(1)
+    else:
+        # No results file means the inner scan never got far enough to write one, so the
+        # shell's own exit code is the only diagnostic available. Reporting it here is the
+        # difference between an actionable error and a bare "file not found".
+        logger.error(
+            f"Results file not found at {output_file}. The Nix shell exited with "
+            f"code {nix_result.returncode}."
+        )
         sys.exit(1)
 
 
@@ -1280,6 +1324,15 @@ def run_ash_scan(
             resolved_fail_on_findings=config_fail_on_findings,
             resolved_fail_on_incomplete_scanners=config_fail_on_incomplete_scanners,
         )
+    elif opts.mode == RunMode.nix:
+        # No resolved-flag arguments here, unlike container mode, and that asymmetry is
+        # deliberate rather than an oversight in the merge that brought these two together.
+        # Container mode forwards the flags into the CLI invocation it runs inside the
+        # container, because that inner process computes its own verdict. Nix mode returns
+        # the parsed results and the verdict is computed once, below, by
+        # _compute_exit_code -- which already receives config_fail_on_incomplete_scanners,
+        # so nix runs honour it through the shared path.
+        results = _run_nix_mode(opts, logger)
     else:
         results, _local_config_fof = _run_local_mode(opts, logger)
         # _run_local_mode resolves config via the live orchestrator; prefer that

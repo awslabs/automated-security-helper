@@ -613,6 +613,13 @@ global_settings:
     - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
       path: pyproject.toml
       reason: "Project configuration — base64 strings are dependency hashes"
+    # Same rule, same category, on the opengrep derivation's pinned asset hashes.
+    # Arrived from main with the nix tool-executor work; kept alongside the
+    # template entries below rather than merged into them, because these are two
+    # unrelated sets of generated hashes that happen to trip one detector.
+    - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
+      path: nix/opengrep.nix
+      reason: "Pinned SRI hashes of published release assets — they exist to be public"
     # === detect-secrets on the synthesized CloudFormation templates ===
     #
     # These templates are `cdk synth` output, committed so the stacks are
