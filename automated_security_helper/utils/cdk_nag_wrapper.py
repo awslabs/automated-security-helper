@@ -33,18 +33,247 @@ from automated_security_helper.utils.log import ASH_LOGGER
 
 
 class CdkNagWrapperResponse:
+    """What one template's cdk-nag run produced, and whether it ran at all.
+
+    ``failure`` is the part worth explaining. This wrapper distinguishes three outcomes: None
+    returned from the call means the file was not a CloudFormation template and was skipped, a
+    response with ``failure=None`` means cdk-nag evaluated the template, and a response with
+    ``failure`` set means the run produced no readable validation report -- so no rule was
+    evaluated and the empty ``results`` says nothing about the template's compliance.
+
+    Before this field existed the caller could only see None-versus-response, and a report-less
+    run arrived as an ordinary response holding an empty dict. The scanner counted the target
+    as attempted, iterated zero findings, raised nothing, and reported a clean scan; with a
+    single template the "failed on all N" guard could not catch it either, because zero
+    failures were ever recorded. That is the same silent-pass this module exists to remove, so
+    the signal is carried explicitly rather than inferred from ``results`` being empty -- an
+    emptiness check would work today only because a genuinely clean pack yields
+    ``{pack: []}`` rather than ``{}``, which is exactly the kind of invariant that gets broken
+    later without anything failing.
+    """
+
     def __init__(
         self,
         results: Dict[str, List[Result]] | None = None,
         outdir: Path | None = None,
         template: CloudFormationTemplateModel | None = None,
+        failure: str | None = None,
     ):
         self.results = results
         self.outdir = outdir
         self.template = template
+        self.failure = failure
 
 
 _env_lock = threading.Lock()
+
+
+def _build_nag_pack(pack_name: str):
+    """Construct one nag pack by class name.
+
+    Extracted to module level so a test can assert that the keyword arguments passed here are
+    ones the installed cdk-nag actually accepts. That single line is where a breaking major
+    bump lands, and while it was buried inside the per-template loop the only way to exercise
+    it was a full synthesis -- which nothing in the suite did.
+
+    ``verbose=True`` is the only property worth setting: as of cdk-nag 3.x ``NagPackProps``
+    has exactly ``verbose`` and ``writeSuppressionsToCloudFormation``. Earlier majors also
+    accepted ``reports`` and ``reportFormats``, which drove a file-based report; v3 replaced
+    that with CDK's policy validation report, so passing them now raises TypeError.
+    """
+    import cdk_nag
+
+    pack_type = getattr(cdk_nag, pack_name, None)
+    if pack_type is None:
+        raise ValueError(f"Unknown cdk-nag pack: {pack_name}")
+    return pack_type(verbose=True)
+
+
+class _NagFinding:
+    """One cdk-nag violation, exposing the field names the downstream mapping reads.
+
+    Mirrors the attribute surface of cdk-nag 2.x's ``NagReportLine`` (``rule_id``,
+    ``resource_id``, ``compliance``, ``exception_reason``, ``rule_level``, ``rule_info``) so
+    the SARIF construction below is untouched by the v3 migration. ``NagReportLine`` itself is
+    not used because v3 no longer ships the file-report schema it belonged to.
+    """
+
+    __slots__ = (
+        "rule_id",
+        "resource_id",
+        "compliance",
+        "exception_reason",
+        "rule_level",
+        "rule_info",
+    )
+
+    def __init__(
+        self,
+        rule_id: str,
+        resource_id: str,
+        compliance: str,
+        exception_reason: str,
+        rule_level: str,
+        rule_info: str,
+    ) -> None:
+        self.rule_id = rule_id
+        self.resource_id = resource_id
+        self.compliance = compliance
+        self.exception_reason = exception_reason
+        self.rule_level = rule_level
+        self.rule_info = rule_info
+
+    def as_dict(self) -> Dict[str, str]:
+        """The raw finding record, attached to the SARIF result's property bag.
+
+        Kept a plain dict because the scanner reads it back out of
+        ``result.properties.model_extra["cdk_nag_finding"]`` and indexes it by these keys.
+        """
+        return {
+            "rule_id": self.rule_id,
+            "resource_id": self.resource_id,
+            "compliance": self.compliance,
+            "exception_reason": self.exception_reason,
+            "rule_level": self.rule_level,
+            "rule_info": self.rule_info,
+        }
+
+
+def _normalize_rule_level(severity: str) -> str:
+    """Map a v3 severity onto the capitalized level the SARIF mapping compares against.
+
+    This matters more than it looks. The SARIF construction below tests
+    ``rule_level == "Error"``, while the validation report emits ``"error"`` in lower case.
+    Passing the raw value through would classify every finding as a warning, quietly demoting
+    real errors below a severity gate and turning a failing scan into a passing one.
+    """
+    normalized = (severity or "").strip().lower()
+    return {"error": "Error", "warning": "Warning", "info": "Info"}.get(
+        normalized, "Error" if normalized else "Error"
+    )
+
+
+def _level_and_kind(
+    compliance: str, rule_level: str, exception_reason: str
+) -> tuple[Level, Kind]:
+    """Map one finding's compliance state onto its SARIF level and kind.
+
+    Lifted verbatim out of the ``Result(...)`` construction below, where it was two nested
+    conditional expressions covering about forty lines and reachable only by driving a full
+    synthesis. Being a plain function it can be called directly, which matters more after the
+    v3 migration than it did before: the validation report carries violations only, so three
+    of the four rows here cannot arise from a real scan, and a test that faked a report to
+    reach them would be asserting against a payload cdk-nag is incapable of writing.
+
+    Those three rows are kept rather than deleted. ``_NagFinding`` is a shared shape, the
+    scanner reads ``compliance`` back out of the SARIF property bag, and a report format that
+    restores suppression records would need the mapping intact. They are, today, unreachable
+    from the report path -- see the note in :func:`_violations_from_validation_report`.
+    """
+    if compliance == "Non-Compliant":
+        if rule_level == "Error":
+            return Level.error, Kind.fail
+        return Level.warning, Kind.informational
+    if compliance == "Suppressed" and exception_reason != "N/A":
+        return Level.none, Kind.review
+    return Level.none, Kind.informational
+
+
+def _violations_from_validation_report(
+    report_path: Path,
+) -> tuple[Dict[str, List["_NagFinding"]], str | None]:
+    """Read CDK's policy validation report into per-pack normalized finding dicts.
+
+    Returns ``(per_pack, failure)``. ``failure`` is None when the report was read, and a short
+    operator-readable reason when it was not. The reason is returned rather than only logged
+    because the caller has to be able to tell "no violations" from "no report", and those two
+    are indistinguishable in ``per_pack`` -- both are falsy. Logging alone left the scanner
+    reading an empty dict and reporting a clean scan; see :class:`CdkNagWrapperResponse`.
+
+    Replaces the ``*-NagReport.json`` reader used with cdk-nag 2.x. In v3 the packs are
+    ``IPolicyValidationPlugin`` implementations rather than aspects, and their output lands in
+    a single ``validation-report.json`` written by CDK, keyed by plugin.
+
+    The returned shape deliberately matches the fields the downstream mapping already
+    consumes, so the resource lookup and template line-number search are reused rather than
+    rewritten. That mapping depends on the last path segment of the construct path being the
+    template's logical ID, which holds under CfnInclude -- measured as
+    ``ASHCDKNagScanner/<template>/<LogicalId>``.
+
+    One behavior change that cannot be preserved: the validation report contains violations
+    only, so there is no compliant-check record to return. Callers asking for compliant checks
+    get nothing rather than a wrong answer.
+    """
+    if not report_path.exists():
+        reason = (
+            f"cdk-nag produced no validation report at {report_path}. No rules were "
+            "evaluated, so this template was NOT scanned."
+        )
+        ASH_LOGGER.error(reason)
+        return {}, reason
+
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        reason = f"Could not parse cdk-nag validation report {report_path}: {exc}"
+        ASH_LOGGER.error(reason)
+        return {}, reason
+
+    # A file holding literal ``null`` is valid JSON that decodes to None, and a bare
+    # ``report.get(...)`` on it raises AttributeError out of the scanner rather than reporting
+    # an unreadable report. The type is checked instead of trusted because the only thing known
+    # about the file at this point is that it parsed.
+    if not isinstance(report, dict):
+        reason = (
+            f"cdk-nag validation report {report_path} is not a JSON object "
+            f"(got {type(report).__name__}). No violations could be read from it."
+        )
+        ASH_LOGGER.error(reason)
+        return {}, reason
+
+    per_pack: Dict[str, List[_NagFinding]] = {}
+    for plugin_report in report.get("pluginReports", []) or []:
+        pack_name = plugin_report.get("pluginName") or "cdk-nag"
+        rows = per_pack.setdefault(pack_name, [])
+        for violation in plugin_report.get("violations", []) or []:
+            rule_id = violation.get("ruleName") or ""
+            rule_info = violation.get("description") or ""
+            rule_level = _normalize_rule_level(violation.get("severity", ""))
+            # One violation can cite several constructs; each becomes its own finding so the
+            # SARIF result points at a single resource, as it did under 2.x.
+            for construct in violation.get("violatingConstructs", []) or []:
+                construct_path = construct.get("constructPath") or ""
+                if not construct_path:
+                    continue
+                rows.append(
+                    _NagFinding(
+                        rule_id=rule_id,
+                        resource_id=construct_path,
+                        # The validation report carries violations only. "Non-Compliant" is
+                        # therefore the sole possible value, and include_compliant_checks has
+                        # nothing to include -- see the note in the docstring.
+                        compliance="Non-Compliant",
+                        exception_reason="N/A",
+                        rule_level=rule_level,
+                        rule_info=rule_info,
+                    )
+                )
+
+    total = sum(len(v) for v in per_pack.values())
+    ASH_LOGGER.debug(
+        f"cdk-nag validation report: {len(per_pack)} pack(s), {total} violation record(s)"
+    )
+    if not per_pack:
+        # The report parsed but named no plugin. Every registered pack writes an entry even
+        # when it found nothing -- a compliant template yields ``{pack: []}``, not ``{}`` -- so
+        # an empty mapping here means no pack reported, which is not a clean scan either.
+        reason = (
+            f"cdk-nag validation report {report_path} contains no plugin reports. No pack "
+            "evaluated this template."
+        )
+        ASH_LOGGER.error(reason)
+        return per_pack, reason
+    return per_pack, None
 
 
 def run_cdk_nag_against_cfn_template(
@@ -105,8 +334,8 @@ def run_cdk_nag_against_cfn_template(
                 return None
             from aws_cdk import (
                 App,
-                Aspects,
                 Stack,
+                Validations,
             )
             from aws_cdk.cloudformation_include import (
                 CfnInclude,
@@ -196,20 +425,47 @@ def run_cdk_nag_against_cfn_template(
             with open(template_path, mode="r", encoding="utf-8") as f:
                 template_lines = f.readlines()
 
-            # loggers: Sequence[MemoryLogger] = [MemoryLogger()]
+            # Registered as policy validation plugins on the APP, not as aspects on the stack.
+            #
+            # cdk-nag 2.x packs implemented IAspect and were added with
+            # Aspects.of(stack).add(...). From 3.0.0 they implement IPolicyValidationPlugin
+            # instead -- `hasattr(pack, "visit")` is False and `hasattr(pack, "validate")` is
+            # True -- so an aspect registration attaches nothing and evaluates no rules.
+            # An unresolvable pack name is raised, not skipped. Logging it and continuing
+            # would let a request for three packs evaluate two and still exit zero, with a
+            # single log line as the only record that a third of the requested rules never
+            # ran. That is the same partial-scan-reports-whole shape this migration exists to
+            # remove, reintroduced one level up: the total-failure case below would not catch
+            # it, because some packs did register.
             for pack in nag_packs:
+                if pack not in nag_pack_lookup:
+                    raise KeyError(
+                        f"Unknown cdk-nag pack requested: {pack}. Available packs: "
+                        f"{sorted(nag_pack_lookup)}"
+                    )
                 ASH_LOGGER.debug(f"Adding nag pack '{pack}'")
-                pack_type: type[cdk_nag.NagPack] = nag_pack_lookup[pack]["packType"]
-                pack_instance = pack_type(
-                    # additional_loggers=loggers,
-                    reports=True,
-                    report_formats=[
-                        cdk_nag.NagReportFormat.JSON,
-                    ],
-                )
-                Aspects.of(stack).add(pack_instance)
+                Validations.of(app).add_plugins(_build_nag_pack(pack))
 
-            app.synth()
+            if not nag_packs:
+                # No pack means no rule can fire, which would otherwise yield an empty report
+                # indistinguishable from a compliant template.
+                ASH_LOGGER.error(
+                    f"No cdk-nag packs were registered for {template_path}; nothing was "
+                    "evaluated."
+                )
+                return None
+
+            # Synth is where validation runs, and CDK raises when a plugin reports violations.
+            # For this wrapper a raise is the ordinary case -- findings are the product -- so
+            # it is caught and the report is read regardless. Letting it propagate would turn
+            # every non-compliant template into a scanner error.
+            try:
+                app.synth()
+            except Exception as exc:
+                ASH_LOGGER.debug(
+                    f"cdk-nag validation reported violations during synth for "
+                    f"{template_path}: {type(exc).__name__}"
+                )
             outdir = app.outdir
             ASH_LOGGER.debug(f"app.outdir: {outdir}")
 
@@ -220,57 +476,32 @@ def run_cdk_nag_against_cfn_template(
             ASH_LOGGER.debug(json.dumps(included, default=str, indent=2))
 
             results: Dict[str, List[Result]] = {}
-            cdk_nag_report_lines: Dict[str, List[cdk_nag.NagReportLine]] = {}
 
-            # enumerate files under app.outdir ending in *-NagReport.json
-            for file in Path(outdir).glob("*-NagReport.json"):
-                ASH_LOGGER.debug(f"Processing NagReport file: {file}")
-                nag_dict = None
-                pack_name = re.sub(
-                    pattern=rf"-{re.escape(stack_name)}-NagReport\.json",
-                    repl="",
-                    string=file.name,
-                )
-                if pack_name not in cdk_nag_report_lines:
-                    cdk_nag_report_lines[pack_name] = []
+            # cdk-nag 3.x reports through CDK's policy validation framework, which writes a
+            # single validation-report.json rather than the per-pack *-NagReport.json files
+            # 2.x produced. Globbing for those files against a v3 install finds nothing and
+            # yields an empty result set -- a scan that looks clean because it read the wrong
+            # place.
+            cdk_nag_report_lines, report_failure = _violations_from_validation_report(
+                Path(outdir) / "validation-report.json"
+            )
 
-                with open(file, mode="r", encoding="utf-8") as f:
-                    nag_dict: dict = json.load(f)
-                if nag_dict is None:
-                    ASH_LOGGER.debug(f"Could not load file as dict: {file}")
-                    continue
-                try:
-                    nag_report = cdk_nag.NagReportSchema(
-                        **nag_dict,
-                    )
-                    cdk_nag_report_lines[pack_name].extend(nag_report.lines)
-                    ASH_LOGGER.debug(f"Loaded NagReport file: {file}")
-                    ASH_LOGGER.debug(
-                        f"Pack '{pack_name}' lines added: {len(nag_report.lines)}"
-                    )
-                except Exception as exc:
-                    ASH_LOGGER.warning(
-                        f"Could not parse loaded JSON dict as NagReport: {file}. Exception: {exc}"
-                    )
+            if not cdk_nag_report_lines:
+                ASH_LOGGER.debug(f"cdk-nag reported no violations for {template_path}")
 
             for pack_name, report_lines in cdk_nag_report_lines.items():
                 if pack_name not in results:
                     results[pack_name] = []
-                line: cdk_nag.NagReportLine
+                line: _NagFinding
                 for line in report_lines:
-                    line_dict = dict(
-                        rule_id=line["ruleId"],
-                        resource_id=line["resourceId"],
-                        compliance=line["compliance"],
-                        exception_reason=line["exceptionReason"],
-                        rule_level=line["ruleLevel"],
-                        rule_info=line["ruleInfo"],
-                    )
-                    line = cdk_nag.NagReportLine(**line_dict)
                     if line.compliance == "Compliant" and not include_compliant_checks:
                         ASH_LOGGER.debug(f"Skipping compliant check: {line.rule_id}")
                         continue
 
+                    # Under CfnInclude the construct path is
+                    # "<stack>/<template>/<LogicalId>", so the last segment is the template's
+                    # own logical ID -- the same property 2.x's resourceId had, which is why
+                    # the lookup and line-number search below are unchanged.
                     resource_log_id = line.resource_id.split("/")[-1]
 
                     cfn_file_rel_path = get_shortest_name(input=template_path)
@@ -287,7 +518,9 @@ def run_cdk_nag_against_cfn_template(
                     resource_line = None
                     resource_column = None
                     resource_log_id_pattern = re.compile(
-                        r"(?<![a-zA-Z0-9_])" + re.escape(resource_log_id) + r"(?![a-zA-Z0-9_])"
+                        r"(?<![a-zA-Z0-9_])"
+                        + re.escape(resource_log_id)
+                        + r"(?![a-zA-Z0-9_])"
                     )
                     for i, line_str in enumerate(template_lines, start=1):
                         match = resource_log_id_pattern.search(line_str)
@@ -301,9 +534,14 @@ def run_cdk_nag_against_cfn_template(
                             resource_log_id: cfn_resource.model_dump(by_alias=True)
                         }
                     }
+                    level, kind = _level_and_kind(
+                        compliance=line.compliance,
+                        rule_level=line.rule_level,
+                        exception_reason=line.exception_reason,
+                    )
                     finding = Result(
                         properties=PropertyBag(
-                            cdk_nag_finding=line_dict,
+                            cdk_nag_finding=line.as_dict(),
                             cfn_resource=cfn_resource_dict,
                             tags=[
                                 "aws",
@@ -318,28 +556,8 @@ def run_cdk_nag_against_cfn_template(
                             ],
                         ),
                         ruleId=line.rule_id,
-                        level=(
-                            Level.error
-                            if line.compliance == "Non-Compliant"
-                            and line.rule_level == "Error"
-                            else (
-                                Level.warning
-                                if line.compliance == "Non-Compliant"
-                                and line.rule_level != "Error"
-                                else Level.none
-                            )
-                        ),
-                        kind=(
-                            Kind.fail
-                            if line.compliance == "Non-Compliant"
-                            and line.rule_level == "Error"
-                            else (
-                                Kind.review
-                                if line.compliance == "Suppressed"
-                                and line.exception_reason != "N/A"
-                                else Kind.informational
-                            )
-                        ),
+                        level=level,
+                        kind=kind,
                         message=Message(
                             root=Message1(
                                 text=f"{line.rule_info}\n\nException Reason: {line.exception_reason}"
@@ -382,7 +600,12 @@ def run_cdk_nag_against_cfn_template(
 
                     results[pack_name].append(finding)
 
-            return CdkNagWrapperResponse(results=results, outdir=outdir, template=model)
+            return CdkNagWrapperResponse(
+                results=results,
+                outdir=outdir,
+                template=model,
+                failure=report_failure,
+            )
         finally:
             sys.stderr = original_stderr
             if devnull_file:
@@ -421,4 +644,3 @@ if __name__ == "__main__":
         .joinpath("scanners")
         .joinpath("cdknag"),
     )
-
