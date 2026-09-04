@@ -331,13 +331,26 @@ def validate_severity_threshold(severity_threshold: str) -> Optional[MCPResource
     """
     Validate a severity threshold with comprehensive error handling.
 
+    The accepted set is the full set of values ASH's own configuration allows:
+    ``AshConfig.global_settings.severity_threshold`` is
+    ``Literal['ALL', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL']``. "ALL" was missing
+    here, so a caller passing a threshold read straight out of a valid ASH config
+    was refused, and the MCP layer's only options were to fail the scan or to
+    substitute a different value. Substituting is the worse of the two: nothing
+    gates on the threshold recorded in the scan registry, but ``get_scan_progress``
+    reports it, so a scan configured at the strictest setting was reported at a
+    middling one -- a loosening direction, in a security tool.
+
+    Widening an accepted set cannot break an input that already worked, so this is
+    additive for every existing caller.
+
     Args:
         severity_threshold: Severity threshold to validate
 
     Returns:
         None if valid, MCPResourceError if invalid
     """
-    valid_severities = ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+    valid_severities = ["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
 
     if not severity_threshold:
         return MCPResourceError(

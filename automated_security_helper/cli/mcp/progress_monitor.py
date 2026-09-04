@@ -8,7 +8,7 @@ Background scan-progress monitor for the ASH MCP server.
 import asyncio
 import json
 from pathlib import Path
-from typing import Awaitable, Callable, Optional, Tuple
+from typing import Awaitable, Callable, Dict, Optional, Tuple
 
 from mcp.server.mcpserver import Context
 
@@ -24,6 +24,14 @@ _HEARTBEAT_INTERVAL_SECONDS = 15
 _MAX_WAIT_SECONDS = 1800
 _INITIAL_SCANNER_ESTIMATE = 5
 _PROGRESS_CEILING = 0.95
+
+#: How often the workspace monitor looks for a newly-finished project. Slower than
+#: the single-scan loop's 5 seconds because the unit being watched is a whole
+#: project scan rather than one scanner.
+_WORKSPACE_POLL_INTERVAL_SECONDS = 5.0
+
+#: What a finished project scan leaves in its output directory.
+_AGGREGATED_RESULTS_FILENAME = "ash_aggregated_results.json"
 
 
 async def _safe_send(
@@ -365,6 +373,91 @@ async def _run_monitor_loop(
             last_progress_time = current_time
 
         await asyncio.sleep(_sleep_interval_for(len(completed_scanners)))
+
+
+async def monitor_workspace_progress(
+    report_progress: Callable[..., Awaitable[None]],
+    project_outputs: Dict[str, Path],
+    *,
+    poll_interval: float = _WORKSPACE_POLL_INTERVAL_SECONDS,
+) -> None:
+    """Report a workspace scan's progress as completed projects over total projects.
+
+    Why the denominator is projects and not scanners
+    -----------------------------------------------
+    ``ctx.report_progress`` carries three fields -- progress, total, message -- and
+    none of them is a project, so a workspace scan's shape has to be flattened into
+    them. Counting projects is the only flattening that terminates.
+
+    Summing per-project scanner fractions does not. ``_update_scanner_estimate``
+    only ever raises its estimate (``max`` against the current value) as more
+    scanner result files appear, and ``_PROGRESS_CEILING`` caps each project below
+    1.0, so a project's own fraction never reaches one and its denominator keeps
+    growing. Adding N of those together produces a number that drifts and never
+    arrives, which is worse than a coarse count: a client watching it cannot tell
+    a stalled scan from a slow one.
+
+    So progress is the count of finished projects and total is the count of
+    projects, which is what an MCP client renders as "3/7". The project key travels
+    in the message, since there is no field for it.
+
+    Args:
+        report_progress: An awaitable taking ``progress``, ``total`` and
+            ``message`` as keywords. ``Context.report_progress`` satisfies this;
+            it is taken as a callable rather than a ``Context`` so the caller can
+            run a workspace scan with no client attached.
+        project_outputs: ``{project key: that project's output directory}``. The
+            monitor watches for ``ash_aggregated_results.json`` appearing in each.
+        poll_interval: Seconds between sweeps.
+
+    Failure modes
+    -------------
+    * A project whose scan fails writes no aggregated-results file, so it never
+      counts as complete and the monitor simply stops short. The verdict comes from
+      the tool's return value, not from here; this is a liveness signal.
+    * The caller cancels this task once execution returns, so the loop does not
+      have to detect the end of the run.
+    * A send that fails means the client is gone, and the monitor stops rather
+      than looping for the rest of the scan emitting into a closed connection.
+    """
+    total = len(project_outputs)
+    if total == 0:
+        return
+
+    completed: set = set()
+    connection_alive = await _safe_send(
+        True,
+        lambda: report_progress(
+            progress=0.0,
+            total=float(total),
+            message=f"Workspace scan started: 0/{total} projects complete",
+        ),
+        "Failed to send initial workspace progress update",
+    )
+
+    while connection_alive and len(completed) < total:
+        for key, output_dir in project_outputs.items():
+            if key in completed:
+                continue
+            if not (output_dir / _AGGREGATED_RESULTS_FILENAME).exists():
+                continue
+            completed.add(key)
+            connection_alive = await _safe_send(
+                connection_alive,
+                # key and count bound now: the loop rebinds both, and a late
+                # closure would report whichever project the sweep reached last.
+                lambda k=key, done=len(completed): report_progress(
+                    progress=float(done),
+                    total=float(total),
+                    message=f"{k} complete ({done}/{total} projects)",
+                ),
+                "Failed to send workspace progress update",
+            )
+            if not connection_alive:
+                return
+        if len(completed) >= total:
+            return
+        await asyncio.sleep(poll_interval)
 
 
 async def monitor_scan_progress(ctx: Context, scan_id: str) -> None:

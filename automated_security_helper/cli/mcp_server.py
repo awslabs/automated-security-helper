@@ -32,6 +32,7 @@ from automated_security_helper.cli.mcp_tools import (
     mcp_suggest_suppression,
 )
 from automated_security_helper.core.constants import ASH_EXIT_CODES
+from automated_security_helper.models.workspace import WorkspaceExitCode
 
 from automated_security_helper.core.resource_management.scan_registry import (
     get_scan_registry,
@@ -48,6 +49,10 @@ from automated_security_helper.core.resource_management.result_filters import (
 )
 from automated_security_helper.cli.mcp.progress_monitor import monitor_scan_progress
 from automated_security_helper.cli.mcp.scan_target import validate_scan_target
+from automated_security_helper.cli.mcp.workspace import (
+    mcp_resolve_workspace,
+    mcp_scan_workspace,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 
 logger = ASH_LOGGER
@@ -214,6 +219,161 @@ async def run_ash_scan(
             "success": False,
             "error": f"Error running scan: {str(e)}",
             "error_type": type(e).__name__,
+        }
+
+
+@mcp.tool()
+async def resolve_ash_workspace(
+    ctx: Context,
+    workspace_file: str,
+    workspace_config: Optional[str] = None,
+    allow_missing_projects: bool = False,
+    config_overrides: Optional[list] = None,
+) -> Dict[str, Any]:
+    """Resolve a VS Code workspace file into a scan plan without scanning anything.
+
+    The MCP equivalent of `ash --workspace <file> --dry-run`. Reads the workspace
+    definition and every project's own ASH config, then reports which directories
+    became projects, what key each was given, which scanners its config enables,
+    which severity threshold it will be judged against, and which projects were
+    dropped and why. Nothing is scanned and no output tree is written, so this is
+    the cheap way to check a workspace before committing to N repository scans.
+
+    Call this first when a workspace is unfamiliar, then run_ash_workspace_scan on
+    the same arguments: the scan resolves the same plan from the same inputs.
+
+    Args:
+        workspace_file: Absolute path to the .code-workspace file.
+        workspace_config: Optional path to a workspace policy file. Must exist if
+            given; ASH will not fall back to searching for one.
+        allow_missing_projects: Mark project directories that are absent or
+            unreadable as skipped instead of refusing the workspace.
+        config_overrides: Optional list of `key=value` config overrides, applied to
+            each project's config so the reported threshold is the enforced one.
+
+    Returns:
+        Dict with `plan` (the rendered plan, for a human to read), `projects` (the
+        same decisions structured), and `exit_code` -- 0 on success, 4 for a
+        workspace definition or policy problem, 3 for a project whose own config is
+        invalid.
+    """
+    try:
+        await ctx.info(f"Resolving ASH workspace: {workspace_file}")
+        response = await mcp_resolve_workspace(
+            workspace_file=workspace_file,
+            workspace_config=workspace_config,
+            allow_missing_projects=allow_missing_projects,
+            config_overrides=list(config_overrides) if config_overrides else None,
+        )
+        if not response.get("success", False):
+            await ctx.error(str(response.get("error", "Unknown error")))
+        return response
+    except Exception as e:
+        logger.exception(f"Error in resolve_ash_workspace: {str(e)}")
+        await ctx.error(f"Error resolving workspace: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Error resolving workspace: {str(e)}",
+            "error_type": type(e).__name__,
+            "exit_code": int(WorkspaceExitCode.INTERNAL_ERROR),
+        }
+
+
+@mcp.tool()
+async def run_ash_workspace_scan(
+    ctx: Context,
+    workspace_file: str,
+    workspace_config: Optional[str] = None,
+    allow_missing_projects: bool = False,
+    config_overrides: Optional[list] = None,
+    output_dir: Optional[str] = None,
+    scanners: Optional[list] = None,
+    excluded_scanners: Optional[list] = None,
+    offline: bool = False,
+    clean_output: bool = True,
+) -> Dict[str, Any]:
+    """Scan every project in a VS Code workspace and return the per-project verdict.
+
+    The MCP equivalent of `ash --workspace <file>`. Each project is scanned with
+    its own ASH config and its own severity threshold, a workspace policy file can
+    impose a ceiling over all of them, and the results are aggregated into one
+    workspace payload.
+
+    Unlike run_ash_scan this call does not return early: it waits for the whole
+    workspace and returns the verdict. Progress is reported as completed projects
+    over total projects, with the project key in the message, so a client watching
+    progress notifications can see which project is finishing.
+
+    Every project gets its own entry in the scan registry, so the `scan_ids` map in
+    the response can be used with get_scan_progress and get_scan_results per
+    project. A project skipped at resolution gets no entry and no id.
+
+    Confinement: `ASH_MCP_ALLOWED_ROOTS` governs the project directories, and one
+    project outside the permitted roots refuses the whole workspace rather than
+    scanning the rest -- a green result covering fewer projects than you asked for
+    is the outcome that refusal exists to prevent. The .code-workspace file itself
+    and the workspace policy file are config inputs and are not confined.
+
+    Not available in container mode; workspace mode runs locally.
+
+    Args:
+        workspace_file: Absolute path to the .code-workspace file.
+        workspace_config: Optional path to a workspace policy file.
+        allow_missing_projects: Skip absent or unreadable project directories
+            rather than refusing the workspace.
+        config_overrides: Optional list of `key=value` config overrides.
+        output_dir: Where to write the workspace output tree. Defaults to
+            `<workspace root>/.ash/ash_output`.
+        scanners: Restrict every project to these scanner names.
+        excluded_scanners: Exclude these scanners from every project. Takes
+            precedence over `scanners`.
+        offline: Run without network access.
+        clean_output: Remove each project's previous aggregated-results file first.
+
+    Returns:
+        Dict with `scan_ids` (project key to registry scan id), `projects` (each
+        project's status, finding counts and threshold verdict), `results_path`, and
+        `exit_code` -- 0 clean, 2 actionable findings above a threshold, 3 an
+        invalid project config, 4 a workspace definition, policy or confinement
+        refusal, 1 an internal error. `success` reports whether the scan ran; the
+        verdict is `exit_code`.
+    """
+    try:
+        await ctx.info(f"Starting ASH workspace scan: {workspace_file}")
+        # No filesystem work happens here. The confinement check needs the
+        # resolved project directories, so it lives inside mcp_scan_workspace,
+        # which runs it immediately after resolution and before its first mkdir or
+        # clean_output deletion -- the same ordering run_ash_scan enforces above by
+        # checking the policy before touching the target.
+        response = await mcp_scan_workspace(
+            workspace_file=workspace_file,
+            workspace_config=workspace_config,
+            allow_missing_projects=allow_missing_projects,
+            config_overrides=list(config_overrides) if config_overrides else None,
+            output_dir=output_dir,
+            scanners=list(scanners) if scanners else None,
+            excluded_scanners=list(excluded_scanners) if excluded_scanners else None,
+            offline=offline,
+            clean_output=clean_output,
+            progress_reporter=ctx.report_progress,
+        )
+        if not response.get("success", False):
+            await ctx.error(str(response.get("error", "Unknown error")))
+            return response
+
+        await ctx.info(
+            f"Workspace scan finished with exit code {response.get('exit_code')} "
+            f"across {len(response.get('scan_ids', {}))} project(s)"
+        )
+        return response
+    except Exception as e:
+        logger.exception(f"Error in run_ash_workspace_scan: {str(e)}")
+        await ctx.error(f"Error running workspace scan: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Error running workspace scan: {str(e)}",
+            "error_type": type(e).__name__,
+            "exit_code": int(WorkspaceExitCode.INTERNAL_ERROR),
         }
 
 
