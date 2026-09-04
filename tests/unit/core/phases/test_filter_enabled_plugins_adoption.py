@@ -175,12 +175,17 @@ def test_scan_phase_uses_filter_enabled_plugins(
             "filter_enabled_plugins",
             wraps=phase.filter_enabled_plugins,
         ) as spy:
-            try:
-                phase._execute_phase(
-                    aggregated_results=agg,
-                    python_based_plugins_only=False,
-                )
-            except Exception:
-                pass  # We only care that the helper was called
+            # Called unguarded. This was wrapped in ``except Exception: pass``
+            # under the comment "we only care that the helper was called", but
+            # with ScannerExecutor stubbed the call completes without raising --
+            # measured by instrumenting the handler and finding it never runs.
+            # The guard therefore protected nothing and cost something: a phase
+            # that started blowing up before reaching filter_enabled_plugins
+            # would have failed below with a bare "not called" and no sign of
+            # the real error.
+            phase._execute_phase(
+                aggregated_results=agg,
+                python_based_plugins_only=False,
+            )
 
     spy.assert_called()

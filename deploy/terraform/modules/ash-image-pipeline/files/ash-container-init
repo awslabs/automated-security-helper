@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""Container ENTRYPOINT: materialize ASH configuration, then exec the command.
+
+This runs before every ASH invocation in every deployment target, so the same
+code path serves the AgentCore runtime, the Fargate service, the pull-request
+gate Lambda, and the CodeBuild shard and merge jobs.
+
+Two pieces of deployment state cannot travel as plain container environment
+variables:
+
+*   The base ASH configuration is a long-form YAML document. AgentCore Runtime
+    exposes only a flat ``environment_variables`` map, and a full ``.ash.yaml``
+    routinely exceeds what is reasonable to carry there, so the deployment
+    stores it in an SSM parameter (Advanced tier when large) and this script
+    writes it to disk.
+*   The MCP auth header value is a credential. It lives in Secrets Manager and
+    is resolved here rather than being baked into a task definition or an
+    AgentCore environment variable, both of which are readable by anyone with
+    describe permissions on the resource.
+
+Both are optional. With neither variable set this script is a pass-through, so
+targets that supply configuration another way are unaffected.
+
+Failure policy: if a caller names a parameter or secret and it cannot be read,
+this exits non-zero rather than starting ASH with configuration the operator did
+not ask for. A silent fallback to defaults would turn a misconfigured deployment
+into a scan that quietly checks the wrong things.
+"""
+
+from __future__ import annotations
+
+import os
+import pathlib
+import sys
+
+#: Written under this name so the file is discoverable by ASH's own config
+#: resolution (which checks a directory, then its ``.ash/`` subdirectory) even
+#: if ``ASH_CONFIG`` is later cleared by a wrapper.
+CONFIG_RELATIVE_PATH = pathlib.PurePosixPath(".ash/.ash.yaml")
+
+#: Default parent directory for the materialized config. Deliberately a
+#: temporary path: several targets run with a read-only root filesystem, and
+#: /tmp is writable in all four.
+DEFAULT_CONFIG_DIR = "/tmp/ash"
+
+CONFIG_DIR_ENV = "ASH_CONFIG_DIR"
+CONFIG_PARAMETER_ENV = "ASH_BASE_CONFIG_SSM_PARAMETER"
+AUTH_SECRET_ENV = "ASH_MCP_AUTH_SECRET_ARN"
+AUTH_VALUE_ENV = "ASH_MCP_AUTH_HEADER_VALUE"
+
+
+def _fail(message: str) -> None:
+    print(f"ash-container-init: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def _log(message: str) -> None:
+    print(f"ash-container-init: {message}", file=sys.stderr)
+
+
+def _boto3_client(service: str):
+    try:
+        import boto3
+    except ImportError:  # pragma: no cover - boto3 is an ASH runtime dependency
+        _fail(
+            "boto3 is unavailable, so SSM and Secrets Manager cannot be read. "
+            "Unset ASH_BASE_CONFIG_SSM_PARAMETER and ASH_MCP_AUTH_SECRET_ARN, "
+            "or rebuild the image from an ASH release that ships boto3."
+        )
+    return boto3.client(service)
+
+
+def materialize_config() -> None:
+    """Write the SSM-held base config to disk and point ASH at it."""
+    parameter = os.environ.get(CONFIG_PARAMETER_ENV, "").strip()
+    if not parameter:
+        return
+
+    client = _boto3_client("ssm")
+    try:
+        # with_decryption covers SecureString parameters; it is a no-op for the
+        # String and StringList types.
+        response = client.get_parameter(Name=parameter, WithDecryption=True)
+    except Exception as exc:  # noqa: BLE001 - surface the cause and stop
+        _fail(f"could not read SSM parameter {parameter!r}: {exc}")
+
+    body = response["Parameter"]["Value"]
+
+    config_dir = pathlib.Path(os.environ.get(CONFIG_DIR_ENV) or DEFAULT_CONFIG_DIR)
+    destination = config_dir / CONFIG_RELATIVE_PATH
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(body, encoding="utf-8")
+    except OSError as exc:
+        _fail(f"could not write {destination}: {exc}")
+
+    # ASH consults ASH_CONFIG before searching the filesystem, so setting it
+    # makes the resolution independent of the process working directory. That
+    # matters because the working directory differs per target: a scan runs from
+    # the source tree, the MCP server does not.
+    os.environ["ASH_CONFIG"] = str(destination)
+    _log(f"wrote base config from {parameter} to {destination}")
+
+
+def resolve_auth_header_value() -> None:
+    """Resolve the MCP auth header value from Secrets Manager, if configured."""
+    secret_id = os.environ.get(AUTH_SECRET_ENV, "").strip()
+    if not secret_id:
+        return
+
+    client = _boto3_client("secretsmanager")
+    try:
+        response = client.get_secret_value(SecretId=secret_id)
+    except Exception as exc:  # noqa: BLE001 - surface the cause and stop
+        _fail(f"could not read secret {secret_id!r}: {exc}")
+
+    value = response.get("SecretString")
+    if value is None:
+        _fail(
+            f"secret {secret_id!r} holds a binary value; the MCP auth header "
+            "value must be stored as a string."
+        )
+
+    os.environ[AUTH_VALUE_ENV] = value
+    # Deliberately not logged, not even a length: this is a bearer credential
+    # and container stdout lands in CloudWatch Logs.
+    _log("resolved MCP auth header value from Secrets Manager")
+
+
+def main(argv: list[str]) -> None:
+    materialize_config()
+    resolve_auth_header_value()
+
+    if not argv:
+        _fail("no command to exec; the image should supply a CMD")
+
+    try:
+        os.execvp(argv[0], argv)
+    except OSError as exc:
+        _fail(f"could not exec {argv[0]!r}: {exc}")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

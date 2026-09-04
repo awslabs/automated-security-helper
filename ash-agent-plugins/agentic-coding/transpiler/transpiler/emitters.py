@@ -17,6 +17,7 @@ import yaml
 from .core import (
     BaseBackend,
     Manifest,
+    SkillConfig,
 )
 from .install_scripts import INSTALL_SCRIPT_BUILDERS
 from .jinja_renderer import render
@@ -207,25 +208,35 @@ def emit_mcp(b: BaseBackend, m: Manifest, out: Path, base_dir: Path) -> None:
         _write_text(out / path, rendered)
 
 
-def _render_skill(b: BaseBackend, m: Manifest, base_dir: Path) -> str:
-    assert b.SKILL is not None
+def _render_skill(skill: SkillConfig, m: Manifest, base_dir: Path) -> str:
+    """Render a backend's SKILL.md.
+
+    Takes the `SkillConfig` rather than the backend it came from. This used to
+    take `BaseBackend` and open with `assert b.SKILL is not None`, which was the
+    only thing the parameter was used for — every other reference was
+    `b.SKILL.*`. The assert was doing two jobs badly: narrowing the type for the
+    checker, and re-checking something the sole caller had already established.
+    `emit_skill` returns early when `SKILL` is None, so the condition was
+    unreachable, and an `assert` is stripped under `python -O` regardless.
+    Rewriting it as a raise would have added a branch no test could ever cover.
+    Taking the non-optional value removes the question instead of re-answering
+    it.
+    """
     values = _skill_frontmatter_values(m)
-    fm_values = {f: values[f] for f in b.SKILL.frontmatter_fields}
+    fm_values = {f: values[f] for f in skill.frontmatter_fields}
     rendered = render(
         "skill.md.j2",
-        frontmatter_fields=list(b.SKILL.frontmatter_fields),
+        frontmatter_fields=list(skill.frontmatter_fields),
         frontmatter_values=fm_values,
         body=_read_base(base_dir, "skill.md"),
         single_quote_strings=False,
     )
-    if b.SKILL.truncate_bytes is not None:
-        if len(rendered.encode("utf-8")) > b.SKILL.truncate_bytes:
+    if skill.truncate_bytes is not None:
+        if len(rendered.encode("utf-8")) > skill.truncate_bytes:
             footer = (
-                f"\n\n{b.SKILL.truncation_footer}\n"
-                if b.SKILL.truncation_footer
-                else ""
+                f"\n\n{skill.truncation_footer}\n" if skill.truncation_footer else ""
             )
-            keep = b.SKILL.truncate_bytes - len(footer.encode("utf-8")) - 50
+            keep = skill.truncate_bytes - len(footer.encode("utf-8")) - 50
             rendered = rendered[:keep].rstrip() + footer
     return rendered
 
@@ -234,7 +245,7 @@ def emit_skill(b: BaseBackend, m: Manifest, out: Path, base_dir: Path) -> None:
     if b.SKILL is None:
         return
     skill_path = _interpolate_path(b.SKILL.path, skill_name=m.skill_name)
-    _write_text(out / skill_path, _render_skill(b, m, base_dir))
+    _write_text(out / skill_path, _render_skill(b.SKILL, m, base_dir))
 
     if b.SKILL.include_references == "separate_files":
         if b.SKILL.references_path is None:

@@ -44,26 +44,56 @@ The server logs the bound address and the registered profile names on startup. I
 
 A profile is a named, pre-validated `AshConfig` registered at server startup via `--profile NAME=path/yaml`. Profiles are immutable for the lifetime of the process. Clients select a profile per session and may optionally patch it within the runtime-override allowlist (Track 10.3).
 
-The three selection modes:
-
-1. **Static.** `mcp__ash__select_profile(name="default")` — bind the profile as-is. No patching.
-2. **Inherit-and-patch.** `mcp__ash__select_profile(name="default", patch_ops=[...])` — start from the named profile and apply a JSON-Patch document. Each op is checked against the runtime-override allowlist before application; any rejected op fails the whole call without mutating the session config. See [Runtime config overrides](#runtime-config-overrides).
-3. **Full override.** `mcp__ash__select_profile(name=None, override_yaml="...")` — replace the resolved config with a client-supplied YAML string. Still parsed through `AshConfig` validation and still subject to the runtime-override allowlist on the resulting structure.
-
-Discover available profiles with:
+Discover the profiles a deployment offers with:
 
 ```python
 profiles = await mcp__ash__list_profiles()
-# -> {"profiles": [{"name": "default", "path_hash": "sha256:..."}, ...]}
+# -> {"profiles": [{"name": "default", "path_sha256": "..."}], "count": 1}
 ```
 
-Path hashes let clients detect that the operator rotated a profile file underneath them; profile contents themselves are never returned.
+Path hashes let clients detect that the operator rotated a profile file underneath them; the paths and the profile contents themselves are never returned. An empty list means the operator registered no profiles, not that the call failed.
 
-Once a profile is selected, every subsequent tool call in that session that takes a config (`run_ash_scan`, `mcp_validate_config`, `mcp_get_config`) prefers the session-bound config over any `config_path` argument.
+### Selecting a profile is not available yet
+
+`mcp__ash__select_profile` is **not currently a callable tool.** The three selection modes below are implemented and tested at the function level, and the runtime-override allowlist that guards them is enforced, but the tool is not registered and no client can invoke it.
+
+The reason is worth being precise about, because the function working is not the same as the feature working. Selecting a profile resolves a config and binds it to the session, and nothing in ASH reads that binding: the scan entry point takes a config *path*, not a resolved config object, so a bound config has nowhere to go. Registering the tool in that state would give you a call that returns success and changes nothing about the scan that follows. Until the config is threaded through to the scan, the honest surface is one that does not offer it.
+
+Use `--profile NAME=path` at startup and `config_path` per call in the meantime. When it lands, the three modes will be:
+
+1. **Static.** `select_profile(profile_name="default")` — bind the profile as-is.
+2. **Inherit-and-patch.** `select_profile(profile_name="default", patch_ops=[...])` — apply a JSON-Patch document, each op checked against the runtime-override allowlist first; a rejected op fails the whole call without mutating the session config. See [Runtime config overrides](#runtime-config-overrides).
+3. **Full override.** `select_profile(profile_name="default", override_yaml="...")` — replace the resolved config with a client-supplied YAML string, still validated through `AshConfig`.
+
+Note that `patch_ops` and `override_yaml` are mutually exclusive, and that the parameter is `profile_name` — a profile must be named in every mode, including override.
 
 ## Source delivery
 
-A streamable-HTTP client typically does not share a filesystem with the server, so the source tree to scan must arrive over the protocol. ASH offers two paths (Track 10.2):
+A streamable-HTTP client typically does not share a filesystem with the server, so the source tree to scan must arrive over the protocol. ASH offers two paths (Track 10.2).
+
+Both land the tree in the calling session's own workspace and record it as that session's `source_dir`. The session is taken from the `Mcp-Session-Id` request header, not from a tool argument — so a client cannot name someone else's session. On stdio there is no header and a single client, so everything resolves to one default session.
+
+Having delivered a tree, call `run_ash_scan` with **no** `source_dir`:
+
+```python
+result = await mcp__ash__set_source_zip_finalize(upload_id=..., expected_sha256=...)
+await mcp__ash__run_ash_scan()
+```
+
+An omitted `source_dir` means "the tree I just gave you" whenever the session has one. Passing a path explicitly still works and still has to satisfy [the root policy](#restricting-scan-targets). Naming a path you never delivered is how you scan a repository the operator mounted into the server, not one you uploaded.
+
+The no-argument form depends on the session id being the same on both calls, which holds whenever the client's own connection carries a stable `Mcp-Session-Id`. When it does not hold, the call is **refused rather than redirected**:
+
+| Situation | Result |
+| --- | --- |
+| This session delivered a tree | it is scanned |
+| No session header at all (stdio) and nothing delivered | the working directory is scanned, as it always has been |
+| This session delivered nothing, another session did | refused, `error_type: session_source_mismatch` |
+| This session delivered nothing, nor has any other | refused, `error_type: no_source_delivered` |
+
+The two refusals exist because the alternative is worse than an error. Falling back to the server's working directory on a network transport scans a tree that holds none of the caller's code, completes normally, and reports no findings — a result a caller cannot distinguish from a clean repository. A scan that examined nothing and reads as clean is the failure mode this whole surface is meant to avoid, so the ambiguous cases say so instead. The mismatch error reports how many *other* sessions hold source, never which, so it diagnoses a rotating session id without disclosing one caller's session to another.
+
+This matters most on Bedrock AgentCore Runtime, where it is **not** established that the id is stable: that platform mints its own session ids and, measured against live runtimes, returns a fresh one on nearly every response while honoring only the id from `initialize`. What the container sees per request could not be determined from outside. On that target, capture the `source_dir` the delivery tool returns and pass it back to `run_ash_scan(source_dir=...)`; see [deploy/cdk/README.md](../../../../deploy/cdk/README.md) for the detail and for a two-call probe that settles the question.
 
 ### Git ref
 
@@ -189,10 +219,8 @@ patch_ops = [
     },
 ]
 
-await mcp__ash__select_profile(name="default", patch_ops=patch_ops)
+select_profile(profile_name="default", patch_ops=patch_ops)
 ```
-
-Pre-flight (without binding) with `mcp__ash__validate_patch(profile_name, patch_ops)` to discover rejection reasons before committing.
 
 ### Unsafe example
 
@@ -207,7 +235,7 @@ patch_ops = [
     },
 ]
 
-await mcp__ash__select_profile(name="default", patch_ops=patch_ops)
+select_profile(profile_name="default", patch_ops=patch_ops)
 # raises RuntimePatchDeniedError:
 # {
 #   "rejected_op": {"op": "replace", "path": "/global_settings/fail_on_findings", ...},
@@ -248,7 +276,7 @@ This is sufficient for **single-tenant** deploys where one trusted client owns t
 
 - Run ASH behind a reverse proxy (nginx, traefik, an API gateway) that terminates TLS and authenticates the caller.
 - Have the proxy inject the static `--auth-header-value` so ASH only accepts traffic that has already been authenticated upstream.
-- Map each tenant to a distinct profile name so per-tenant config differences are expressed via `--profile NAME=...` and selected with `mcp__ash__select_profile`.
+- Run one server per tenant if their configs must differ. Per-tenant config selection over the protocol is not available yet — see [Selecting a profile is not available yet](#selecting-a-profile-is-not-available-yet) — so a single server cannot currently give two tenants two different configs.
 
 The runtime-override allowlist (Track 10.4) plus per-session workspaces (Track 10.5) are the in-process isolation primitives. They are not a substitute for upstream tenant authentication.
 

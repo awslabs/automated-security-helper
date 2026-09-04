@@ -831,125 +831,330 @@ def mcp_diff_scan_results(before_path: str, after_path: str) -> Dict[str, Any]:
         a_sev = (after_by_id[vid].severity or "").upper()
         if b_sev != a_sev:
             severity_changed.append(
-                {"id": vid, "before_severity": b_sev or None, "after_severity": a_sev or None}
+                {
+                    "id": vid,
+                    "before_severity": b_sev or None,
+                    "after_severity": a_sev or None,
+                }
             )
 
     return {"new": new, "resolved": resolved, "severity_changed": severity_changed}
+
+
+#: Scanner plugin packages that ship inside ASH but are not loaded by
+#: ``load_internal_plugins()``, which imports ``ash_builtin`` only.
+#:
+#: These are package paths, not the module paths inside them, because
+#: ``ASH_SCANNERS`` is declared in each package's ``__init__``. That list is what
+#: ``load_additional_plugin_modules`` returns, and pointing at
+#: ``ash_ferret_plugins.ferret_scanner`` instead imports the scanner but returns
+#: nothing, since the leaf module declares no ``ASH_SCANNERS``. Measured: the leaf
+#: paths yield 0 scanners, the package paths yield 3.
+_VENDORED_SCANNER_PLUGIN_PACKAGES = (
+    "automated_security_helper.plugin_modules.ash_ferret_plugins",
+    "automated_security_helper.plugin_modules.ash_snyk_plugins",
+    "automated_security_helper.plugin_modules.ash_trivy_plugins",
+)
+
+
+def _discover_external_scanner_plugin_packages() -> list:
+    """Package paths for installed distributions matching the ash plugin namespace.
+
+    Deliberately returns only what installed metadata claims. Loading the vendored
+    packages as well is the caller's job: the two sources find different scanners,
+    so treating either one as the complete set loses the other.
+    """
+    try:
+        from importlib.metadata import packages_distributions
+
+        pkg_dist = packages_distributions()
+    except Exception:
+        # packages_distributions() reads installed metadata, which can be missing
+        # or unreadable in a frozen or vendored install. Discovery coming back
+        # empty is not fatal, and must not be: the vendored packages are loaded
+        # either way.
+        pkg_dist = {}
+
+    return [
+        f"automated_security_helper.plugin_modules.{top_level}"
+        for top_level, dists in pkg_dist.items()
+        if any(d.startswith("ash_") and d.endswith("_plugins") for d in dists)
+    ]
+
+
+def _loaded_scanner_classes() -> list:
+    """Every scanner class ASH ships, taken from what the loaders report loading.
+
+    Why this does not call ``ash_plugin_manager.plugin_modules("scanner")``
+    ---------------------------------------------------------------------
+    That method memoises its resolved class list into ``_resolved_plugins`` and
+    never invalidates it, so the first resolve in a process decides the answer for
+    every later one. Registration is not what breaks: measured here, the registry
+    held all 13 scanners while the memo, built before the vendored packages were
+    loaded, kept serving the 10 it was created with. Any earlier resolve is
+    enough -- a CLI command, another test, an in-flight scan -- which is how a
+    caller asking an ASH server which scanners it has got an answer three short,
+    with nothing logged and no error raised.
+
+    Two alternatives were rejected. Clearing the memo breaks callers that depend
+    on it holding still: ``workspace.execution.prewarm_plugin_registry`` exists so
+    the resolved set is frozen once, up front, for a whole workspace run, and
+    clearing it from an MCP tool can resize the registry under a scan thread that
+    is mid-iteration -- the ``dictionary changed size during iteration`` failure
+    prewarming was added to close. Reading ``plugin_library`` directly instead
+    fails the sweep in ``tests/unit/workspace/test_project_isolation.py``, which
+    forbids reaching into the manager's registry from outside the class that owns
+    it, because that is the shape the original defect arrived in.
+
+    What is left is the loaders' own return values. Both
+    ``load_internal_plugins`` and ``load_additional_plugin_modules`` return the
+    ``ASH_SCANNERS`` each package declares, which is a public result, is fixed per
+    package rather than accumulated per process, and touches no shared state at
+    all. Nothing here can be stale, and nothing here can perturb a running scan.
+    """
+    from automated_security_helper.plugins.loader import (
+        load_additional_plugin_modules,
+        load_internal_plugins,
+    )
+
+    # Load both sources rather than choosing between them. Metadata discovery and
+    # the vendored list find different packages, so picking one on whether
+    # discovery happened to return anything drops whatever the winner does not
+    # cover: install any ash_*_plugins distribution and discovery wins, taking
+    # ferret, snyk and trivy out of the answer. Loading both is safe because
+    # import_module is cached and register_plugin_module skips names already
+    # registered, so the result does not depend on the order either.
+    package_paths = _discover_external_scanner_plugin_packages()
+    package_paths.extend(_VENDORED_SCANNER_PLUGIN_PACKAGES)
+
+    internal = load_internal_plugins()
+    # load_additional_plugin_modules logs a warning when a package fails to
+    # import, which the bare `except ImportError: pass` this replaces did not: a
+    # scanner missing because its package is broken now leaves a trace.
+    external = load_additional_plugin_modules(package_paths)
+
+    scanner_classes: list = []
+    for cls in list(internal.get("scanners", [])) + list(external.get("scanners", [])):
+        if cls not in scanner_classes:
+            scanner_classes.append(cls)
+
+    return scanner_classes
+
+
+#: Version strings a scanner reports when it could not detect one. Mapped to None
+#: so "no version" has a single representation in the tool's output instead of
+#: three that a consumer would each have to know about.
+_ABSENT_VERSION_MARKERS = frozenset({"", "unavailable", "unknown", "none"})
+
+
+def _declared_config_class(cls):
+    """The scanner's own config class, read from its Pydantic ``model_fields``.
+
+    Only consulted when the scanner itself cannot be instantiated. The preferred path reads
+    ``plugin.config`` off a live instance, which reflects any config actually resolved for the
+    run; this reads what the class *declares* instead, which is all that remains available
+    when construction fails.
+
+    Without it, a scanner that cannot be built reports ``enabled: True`` no matter what its
+    config declares, because the optimistic default set before construction is never revised.
+    A config saying ``enabled = False`` then reads to a caller as enabled -- wrong in the
+    direction that matters, since it describes a scanner as participating when it is switched
+    off.
+
+    The ``config`` field's annotation is a Union of the concrete config, the shared base and
+    None. The concrete one is identified by name rather than by position: relying on the first
+    argument would break the moment the Union's order changed, and would do so silently by
+    picking the base class, whose ``enabled`` default is the very value being corrected.
+    """
+    config_field = getattr(cls, "model_fields", {}).get("config")
+    if config_field is None:
+        return None
+    annotation = getattr(config_field, "annotation", None)
+    for arg in getattr(annotation, "__args__", None) or ():
+        if (
+            isinstance(arg, type)
+            and arg.__name__.endswith("ScannerConfig")
+            and arg.__name__ != "ScannerPluginConfigBase"
+        ):
+            return arg
+    return None
+
+
+def _scanner_name_from_class(cls) -> str:
+    """Derive a scanner's name from its class name.
+
+    The fallback for when a scanner cannot be instantiated at all. Produces the
+    same snake_case form the instantiated path produces -- ``CdkNagScanner``
+    yields ``cdk_nag``, matching config name ``cdk-nag`` normalized -- so a
+    scanner that fails to construct still appears under the name callers expect
+    rather than vanishing or appearing twice under two spellings.
+    """
+    import re as _re
+
+    raw = _re.sub(r"Scanner$", "", cls.__name__)
+    return _re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", raw).lower()
+
+
+def _normalized_version(raw) -> Optional[str]:
+    """Return a scanner's reported version, or None when it reports none.
+
+    Whitespace is stripped because at least one scanner's ``tool_version`` carries
+    a trailing newline from the subprocess it shells out to.
+
+    Deliberately does NOT try to extract a bare version number. Scanners disagree
+    about the format -- bandit reports "bandit 1.9.4" while checkov reports
+    "3.3.11" -- and a parser that guessed would silently mangle whichever format
+    it was not written for. The raw string each scanner chose is reported as-is;
+    normalizing that inconsistency belongs with the scanners, not here.
+    """
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    return None if text.lower() in _ABSENT_VERSION_MARKERS else text
+
+
+def _describe_scanner(cls, context, default_config) -> Dict[str, Any]:
+    """Describe one scanner by instantiating it and asking it about itself.
+
+    Every field here except ``offline_strategy`` needs an *instance*: the config
+    name, the enabled flag, the detected tool version and the dependency check are
+    all instance state. That is why the previous version of this function could
+    report none of them -- it worked from classes only, reconstructed the config
+    class by walking the ``config`` field's Union annotation to reach ``name``, and
+    filled ``version`` and ``dependencies_satisfied`` with the literals None and
+    False.
+
+    ``dependencies_satisfied`` comes from calling ``validate_plugin_dependencies()``
+    and not from reading ``plugin.dependencies_satisfied``. The two disagree, and
+    reading the attribute is the trap: it is declared ``bool = False`` on
+    ``ScannerPluginBase``, so before the method runs it holds False for every
+    scanner including the working ones. ``ScanPhase`` does
+    ``plugin.dependencies_satisfied = plugin.validate_plugin_dependencies()``,
+    making the return value the authoritative signal, and this follows it.
+
+    A scanner that cannot be constructed or whose check raises reports
+    ``dependencies_satisfied: None``, meaning "could not determine", rather than
+    False. Reporting False for an unmeasured scanner is the defect this function
+    exists to remove: it under-reports capability, and an operator reading it
+    concludes a working deployment is broken.
+    """
+    offline_strategy = getattr(cls, "offline_strategy", None)
+    entry: Dict[str, Any] = {
+        "name": _scanner_name_from_class(cls),
+        "version": None,
+        "dependencies_satisfied": None,
+        "offline_strategy": (
+            offline_strategy.value if offline_strategy is not None else "unknown"
+        ),
+        "enabled": True,
+    }
+
+    try:
+        plugin = cls(context=context)
+    except Exception as exc:
+        # Listed with what is knowable rather than dropped. A scanner missing from
+        # the list reads as "this build has 12 scanners", which is a wrong answer;
+        # a scanner present with dependencies_satisfied None reads as "could not
+        # determine", which is the true one.
+        ASH_LOGGER.debug(f"Could not instantiate {cls.__name__} to describe it: {exc}")
+
+        # The instance is gone, but the class still declares its config, and that declaration
+        # is the only remaining source for `enabled`. Skipping this leaves the optimistic
+        # default in place and reports a disabled scanner as enabled.
+        declared_cls = _declared_config_class(cls)
+        if declared_cls is not None:
+            try:
+                declared = declared_cls()
+            except Exception:
+                # A config class that cannot be built either tells us nothing, so the
+                # optimistic default stands rather than being replaced by a guess.
+                return entry
+            entry["enabled"] = getattr(declared, "enabled", True)
+        return entry
+
+    config = getattr(plugin, "config", None)
+    raw_name = getattr(config, "name", None)
+    if raw_name:
+        entry["name"] = str(raw_name).replace("-", "_")
+
+    # Resolved whether or not the config carried a name.
+    #
+    # This used to sit inside the `if raw_name:` branch, which meant a config declaring
+    # `enabled = False` was reported as enabled whenever its `name` was absent -- the entry
+    # kept the optimistic default from above. That is a wrong answer in the dangerous
+    # direction: it tells a caller a scanner is on when its own config says it is off.
+    #
+    # The name is still taken from the class in that case (set when the entry was built), so
+    # the config lookup below has a key to search on either way.
+    if config is not None:
+        enabled_default = getattr(config, "enabled", True)
+        found_cfg = default_config.get_plugin_config("scanner", entry["name"])
+        if found_cfg is None:
+            entry["enabled"] = enabled_default
+        elif isinstance(found_cfg, dict):
+            entry["enabled"] = found_cfg.get("enabled", enabled_default)
+        else:
+            entry["enabled"] = getattr(found_cfg, "enabled", enabled_default)
+
+    try:
+        entry["dependencies_satisfied"] = bool(plugin.validate_plugin_dependencies())
+    except Exception as exc:
+        # Left as None. Several scanners raise ScannerError from their dependency
+        # check rather than returning False, and mapping that to False would put a
+        # real failure and an unmeasurable one under the same value.
+        ASH_LOGGER.debug(
+            f"Dependency check for {entry['name']} raised {type(exc).__name__}: {exc}"
+        )
+
+    # Read AFTER the dependency check, which is not merely tidier -- it is the only
+    # order that works. Some scanners populate tool_version as a side effect of
+    # validating: npm-audit shells out to `npm --version` inside
+    # validate_plugin_dependencies and assigns the result. Reading first reported
+    # None for those scanners while the version was sitting there a moment later,
+    # which is how this was found -- the reported set was missing npm-audit's
+    # version even though a probe that validated first could see it.
+    entry["version"] = _normalized_version(getattr(plugin, "tool_version", None))
+
+    return entry
 
 
 def mcp_list_scanners() -> list:
     """Return per-scanner metadata for all registered ASH scanners.
 
     Each entry contains:
-      name: scanner config name (e.g. "bandit")
-      version: detected version string, or None if unavailable without an active context
-      dependencies_satisfied: whether the scanner's dependencies are met
+      name: scanner config name, snake_cased (e.g. "bandit", "cdk_nag")
+      version: detected version string, or None when the scanner reports none
+      dependencies_satisfied: True, False, or None when it could not be determined
       offline_strategy: OfflineStrategy enum value string
       enabled: whether the scanner is enabled in the default config
+
+    Scanners are probed in a throwaway directory, not the working tree. Dependency
+    checks ask the environment -- is this module importable, is that binary on PATH
+    -- so no source tree is needed, and pointing them at one would let a file in
+    the caller's directory change the answer to a question about the deployment.
     """
-    from automated_security_helper.plugins import ash_plugin_manager
-    from automated_security_helper.plugins.loader import load_internal_plugins, load_additional_plugin_modules
+    import tempfile
+
+    from automated_security_helper.base.plugin_context import PluginContext
+    from automated_security_helper.config.ash_config import AshConfig
     from automated_security_helper.config.default_config import get_default_config
 
-    load_internal_plugins()
-
-    # Discover external plugin modules via importlib.metadata: any installed package
-    # whose top-level name matches the ash plugin namespace pattern is imported so its
-    # @ash_scanner_plugin decorators fire and register the scanner into ash_plugin_manager.
-    import importlib as _importlib
-    try:
-        from importlib.metadata import packages_distributions
-        _pkg_dist = packages_distributions()
-    except Exception:
-        _pkg_dist = {}
-
-    _external_mods: list[str] = []
-    for _top_level, _dists in _pkg_dist.items():
-        if any(
-            d.startswith("ash_") and d.endswith("_plugins")
-            for d in _dists
-        ):
-            _external_mods.append(f"automated_security_helper.plugin_modules.{_top_level}")
-
-    if _external_mods:
-        load_additional_plugin_modules(_external_mods)
-    else:
-        # Fallback: import well-known external plugin modules directly so their decorators fire.
-        # TODO: replace with entry-points once external packages declare 'ash.plugins' group.
-        for _mod in (
-            "automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner",
-            "automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner",
-            "automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner",
-        ):
-            try:
-                _importlib.import_module(_mod)
-            except ImportError:
-                pass
-
-    scanner_classes = ash_plugin_manager.plugin_modules("scanner")
+    scanner_classes = _loaded_scanner_classes()
     default_config = get_default_config()
 
-    results = []
-    for cls in scanner_classes:
-        offline_strategy = getattr(cls, "offline_strategy", None)
-        offline_strategy_value = offline_strategy.value if offline_strategy is not None else "unknown"
-
-        scanner_name: Optional[str] = None
-        scanner_enabled: bool = True
-
-        # Derive the concrete config class from Pydantic model_fields.
-        # The 'config' field annotation is Union[ConcreteConfig, ScannerPluginConfigBase, None].
-        # The first arg of that Union is always the scanner-specific config.
-        config_class = None
-        config_field = getattr(cls, "model_fields", {}).get("config")
-        if config_field is not None:
-            annotation = getattr(config_field, "annotation", None)
-            type_args = getattr(annotation, "__args__", None)
-            if type_args:
-                for arg in type_args:
-                    if isinstance(arg, type) and arg.__name__.endswith("ScannerConfig") and arg.__name__ != "ScannerPluginConfigBase":
-                        config_class = arg
-                        break
-
-        if config_class is not None:
-            try:
-                cfg_instance = config_class()
-                raw_name = getattr(cfg_instance, "name", None)
-                # Normalize kebab-case config names to snake_case
-                scanner_name = raw_name.replace("-", "_") if raw_name else None
-                scanner_enabled_default = getattr(cfg_instance, "enabled", True)
-
-                if scanner_name:
-                    found_cfg = default_config.get_plugin_config("scanner", scanner_name)
-                    if found_cfg is not None:
-                        scanner_enabled = (
-                            found_cfg.get("enabled", scanner_enabled_default)
-                            if isinstance(found_cfg, dict)
-                            else getattr(found_cfg, "enabled", scanner_enabled_default)
-                        )
-                    else:
-                        scanner_enabled = scanner_enabled_default
-                else:
-                    scanner_enabled = scanner_enabled_default
-            except Exception:
-                scanner_enabled = True
-
-        if not scanner_name:
-            import re as _re
-            # Convert PascalCase class name to snake_case, strip trailing "Scanner"
-            raw = cls.__name__
-            raw = _re.sub(r"Scanner$", "", raw)
-            scanner_name = _re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", raw).lower()
-
-        results.append({
-            "name": scanner_name,
-            "version": None,
-            "dependencies_satisfied": False,
-            "offline_strategy": offline_strategy_value,
-            "enabled": scanner_enabled,
-        })
-
-    return results
+    with tempfile.TemporaryDirectory(prefix="ash-list-scanners-") as probe_root:
+        source_dir = Path(probe_root) / "source"
+        output_dir = Path(probe_root) / "output"
+        source_dir.mkdir()
+        output_dir.mkdir()
+        context = PluginContext(
+            source_dir=source_dir,
+            output_dir=output_dir,
+            config=AshConfig(),
+        )
+        return [
+            _describe_scanner(cls, context, default_config) for cls in scanner_classes
+        ]
 
 
 def mcp_get_config(
@@ -1043,9 +1248,7 @@ def mcp_validate_config(
         return {"field": "", "message": raw, "type": "validation_error"}
 
     if config_content is not None:
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".yaml", delete=False
-        ) as tmp:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as tmp:
             tmp.write(config_content)
             tmp_path = Path(tmp.name)
         try:
@@ -1112,7 +1315,9 @@ def mcp_suggest_suppression(
     from automated_security_helper.models.core import AshSuppression
 
     if results_path is None:
-        results_file = Path.cwd() / ".ash" / "ash_output" / "ash_aggregated_results.json"
+        results_file = (
+            Path.cwd() / ".ash" / "ash_output" / "ash_aggregated_results.json"
+        )
     else:
         results_file = Path(results_path)
 
@@ -1139,8 +1344,13 @@ def mcp_suggest_suppression(
             "error": f"Finding not found: {finding_id}",
         }
 
-    expiration_date = expiration or (date.today() + timedelta(days=90)).strftime("%Y-%m-%d")
-    reason = justification or "Suppressed via ASH MCP suggest_suppression tool — review before merging"
+    expiration_date = expiration or (date.today() + timedelta(days=90)).strftime(
+        "%Y-%m-%d"
+    )
+    reason = (
+        justification
+        or "Suppressed via ASH MCP suggest_suppression tool — review before merging"
+    )
 
     suppression = AshSuppression(
         path=finding.file_path or "",
@@ -1152,7 +1362,9 @@ def mcp_suggest_suppression(
     )
 
     suppression_dict = suppression.model_dump(exclude_none=True)
-    suppression_yaml = _yaml.safe_dump(suppression_dict, default_flow_style=False, sort_keys=True)
+    suppression_yaml = _yaml.safe_dump(
+        suppression_dict, default_flow_style=False, sort_keys=True
+    )
 
     return {
         "success": True,
@@ -1174,7 +1386,10 @@ def mcp_list_profiles() -> Dict[str, Any]:
 
     registry = get_profile_registry()
     profiles = sorted(
-        ({"name": name, "path_sha256": entry.path_sha256} for name, entry in registry.items()),
+        (
+            {"name": name, "path_sha256": entry.path_sha256}
+            for name, entry in registry.items()
+        ),
         key=lambda e: e["name"],
     )
     return {"profiles": profiles, "count": len(profiles)}
@@ -1280,18 +1495,14 @@ def mcp_select_profile(
         }
 
     if patch_ops is not None:
-        mcp_cfg: Optional[AshMcpConfig] = getattr(
-            base_cfg.global_settings, "mcp", None
-        )
+        mcp_cfg: Optional[AshMcpConfig] = getattr(base_cfg.global_settings, "mcp", None)
         allowlist = (
             mcp_cfg.runtime_overrides
             if mcp_cfg is not None
             else RuntimeOverridesConfig()
         )
         try:
-            patched = apply_runtime_patch(
-                base_cfg, patch_ops, allowlist=allowlist
-            )
+            patched = apply_runtime_patch(base_cfg, patch_ops, allowlist=allowlist)
         except RuntimePatchDeniedError as exc:
             return {"success": False, "error": f"patch denied: {exc}"}
         bind_session_config(

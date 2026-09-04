@@ -1,0 +1,33 @@
+# Node / TypeScript build artifacts.
+#
+# The repository root .gitignore already covers `lib/` and `dist/`, but it does
+# NOT cover node_modules, and jsii generates several files in this directory
+# that must not be committed. Keep this file local to the package so the two
+# concerns stay separate.
+node_modules/
+
+# jsii writes tsconfig.json itself and refuses to reuse a hand-written one, so
+# it is a build artifact here. tsconfig.dev.json (used by jest) IS committed.
+tsconfig.json
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+
+# jsii assembly and per-language packages.
+.jsii
+.jsii.gz
+dist/
+lib/
+
+# Compiled output that can land next to sources if outDir is overridden.
+src/**/*.js
+src/**/*.d.ts
+test/**/*.js
+test/**/*.d.ts
+
+# Test/coverage output.
+coverage/
+.nyc_output/
+
+# Nothing in here should carry credentials. Listed defensively so a stray
+# registry token cannot be committed by accident.
+.npmrc

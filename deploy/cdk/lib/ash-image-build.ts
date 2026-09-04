@@ -1,0 +1,841 @@
+/**
+ * The shared building block: an ECR repository plus the CodeBuild project that
+ * fills it with ASH images.
+ *
+ * WHY THIS EXISTS AT ALL — READ THIS FIRST
+ * ----------------------------------------
+ * ASH publishes no container image to any public registry, and that is a settled
+ * decision rather than a gap waiting to be filled. Every deployment target here
+ * therefore has to build ASH into the ADOPTER'S OWN ECR repository as part of
+ * deployment. This construct is the BOOTSTRAP, not a freshness mechanism bolted
+ * onto a prebuilt image: without it there is no image, and the workload cannot
+ * start. The scheduled rebuild is the secondary purpose.
+ *
+ * HOW THE BOOTSTRAP ORDERING WORKS, AND WHY IT IS NOT A LAMBDA POLLING LOOP
+ * ------------------------------------------------------------------------
+ * `AWS::BedrockAgentCore::Runtime`, an ECS service and a container Lambda all
+ * need the image to exist when CloudFormation creates them. So the image build
+ * has to finish BEFORE those resources are created, and they have to depend on
+ * it. Three designs were considered:
+ *
+ * 1. `AwsCustomResource` calling StartBuild. Rejected: it returns as soon as the
+ *    build starts, so the workload would still be created against an empty
+ *    repository.
+ * 2. A Lambda that starts the build and polls until it finishes. Rejected: an
+ *    ASH image build installs a dozen scanners and routinely runs longer than
+ *    Lambda's 900-second ceiling
+ *    (https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html),
+ *    so the bootstrap would time out on exactly the slow builds that matter.
+ * 3. WHAT IS IMPLEMENTED: a Lambda starts the build, passing CloudFormation's
+ *    own response URL into the build as an environment variable, and does not
+ *    respond. The buildspec's `post_build` phase sends the CloudFormation
+ *    response itself. CodeBuild's timeout, not Lambda's, becomes the bound.
+ *
+ * FAILURE MODE OF DESIGN 3, STATED PLAINLY: if the build is *stopped* or exceeds
+ * the project timeout, `post_build` may not run, nothing answers CloudFormation,
+ * and the stack sits in CREATE_IN_PROGRESS on this resource until its internal
+ * timeout. Cancel the stack operation if that happens. A build that merely
+ * *fails* is fine — `post_build` still runs and reports FAILED, and the stack
+ * rolls back with the CodeBuild log id in the reason.
+ *
+ * THE BOOTSTRAP AND THE SCHEDULE MUST NOT RUN TOGETHER
+ * ---------------------------------------------------
+ * Both start the same project, and every build pushes the same moving tag into
+ * the same MUTABLE repository, so two of them at once resolve by whichever
+ * finishes last — and only the bootstrap answers CloudFormation. Three things
+ * keep them apart, and each covers a case the others do not: the default schedule
+ * is a cron expression so a new rule does not fire on creation, the rule depends
+ * on the bootstrap so even a `rate()` value cannot fire during it, and the project
+ * allows one concurrent build so a stack UPDATE cannot overlap a rebuild already
+ * in flight. See `DEFAULT_REBUILD_SCHEDULE`, `rebuildRule` and
+ * `concurrentBuildLimit` respectively.
+ *
+ * WHY THE SOURCE IS `NO_SOURCE` AND THE BUILDSPEC CLONES
+ * -----------------------------------------------------
+ * A CodeBuild GitHub source needs a stored source credential in the account,
+ * which an adopter launching a template from the console has not set up. An
+ * anonymous HTTPS clone of a public repository needs nothing. So the project
+ * takes no source and the buildspec clones the pinned ASH ref itself. That also
+ * makes `AshVersion` a plain deploy-time parameter rather than a synth-time
+ * source configuration.
+ */
+
+import { Aws, CfnCondition, CfnParameter, CustomResource, Duration, Fn, RemovalPolicy } from 'aws-cdk-lib';
+import * as codebuild from 'aws-cdk-lib/aws-codebuild';
+import * as ecr from 'aws-cdk-lib/aws-ecr';
+import * as events from 'aws-cdk-lib/aws-events';
+import * as targets from 'aws-cdk-lib/aws-events-targets';
+import * as iam from 'aws-cdk-lib/aws-iam';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as kms from 'aws-cdk-lib/aws-kms';
+import * as logs from 'aws-cdk-lib/aws-logs';
+import { Construct } from 'constructs';
+
+import { AshCustomerKey, diagnosticLogGroupProps } from './ash-config';
+import { suppressCodeBuildRoleWildcards, suppressLambdaLogWildcard, suppressUnevaluableRules } from './ash-nag-suppressions';
+import { MCP_ENTRYPOINT_SCRIPT, CODECOMMIT_GATE_HANDLER, ASH_MATERIALIZED_CONFIG_PATH } from './ash-container-scripts';
+
+/** Upstream ASH repository. Public, so an anonymous clone works. */
+export const ASH_REPOSITORY_URL = 'https://github.com/awslabs/automated-security-helper.git';
+
+/**
+ * Which image is being produced.
+ *
+ * - `mcp`    — the MCP server entrypoint baked in. Used by AgentCore and Fargate.
+ * - `lambda` — the Lambda Runtime Interface Client plus the gate handler.
+ * - `cli`    — plain ASH, used as a CodeBuild environment image by the sharded
+ *              executor, where `ash scan` is invoked directly.
+ */
+export type AshImageFlavor = 'mcp' | 'lambda' | 'cli';
+
+/** Target CPU architecture. AgentCore requires `arm64`. */
+export type AshBuildPlatform = 'arm64' | 'amd64';
+
+/**
+ * Which ASH Dockerfile stage each flavor builds from.
+ *
+ * `non-root` runs as UID 500 and is the right base for a long-lived server.
+ * `ci` runs as root, which the Lambda flavor needs so it can pip-install the
+ * runtime interface client, and which the CLI flavor needs to work as a
+ * CodeBuild environment image.
+ */
+const DOCKER_TARGET_FOR_FLAVOR: Record<AshImageFlavor, string> = {
+  mcp: 'non-root',
+  lambda: 'ci',
+  cli: 'ci',
+};
+
+/**
+ * Longest string a Docker tag may be.
+ *
+ * From the canonical grammar, `tag := /[\w][\w.-]{0,127}/` — one leading
+ * `[A-Za-z0-9_]` followed by up to 127 more of `[A-Za-z0-9_.-]`, so 128
+ * characters, no `/`, and no leading `.` or `-`.
+ * https://pkg.go.dev/github.com/distribution/reference
+ *
+ * ECR's own API accepts an `imageTag` of up to 300 characters, but that ceiling
+ * never applies: `docker tag` parses the reference on the client and rejects it
+ * before ECR is ever contacted.
+ * https://docs.aws.amazon.com/AmazonECR/latest/APIReference/API_ImageIdentifier.html
+ */
+const DOCKER_TAG_MAX_LENGTH = 128;
+
+/** Hex digits of the ref digest appended to the audit tag. See `sanitizeRefCommand`. */
+const REF_DIGEST_LENGTH = 8;
+
+export interface AshImageBuildProps {
+  /** Architecture to build. `arm64` builds natively on ARM CodeBuild compute. */
+  readonly platform: AshBuildPlatform;
+  /** Flavors to produce. Each becomes one tag in the repository. */
+  readonly flavors: AshImageFlavor[];
+  /** ASH git ref to build. */
+  readonly ashVersion: CfnParameter;
+  /** `YES`/`NO`, forwarded to the ASH Dockerfile's `OFFLINE` build argument. */
+  readonly offlineMode: CfnParameter;
+  /** Rebuild cadence. */
+  readonly rebuildSchedule: CfnParameter;
+  /**
+   * Optional tag override for the WORKLOAD's image reference.
+   *
+   * Only pass this from a stack that actually runs a workload. It deliberately
+   * does NOT affect what the build pushes — see `workloadTagForFlavor`.
+   */
+  readonly imageTag?: CfnParameter;
+  /**
+   * Run a build during stack creation and make it gate the workload.
+   *
+   * Leave this on for any stack whose workload cannot be created against an
+   * empty repository. Turn it off where the deployment bootstraps itself another
+   * way — the sharded executor builds the image in its own first pipeline stage.
+   */
+  readonly bootstrapOnDeploy?: boolean;
+  /**
+   * Customer-managed key for the build project's encryption.
+   *
+   * Shared across every project in a stack rather than created per project: one
+   * key is enough to encrypt build output for all of them, and a key per project
+   * would multiply the standing charge for no additional isolation.
+   */
+  readonly encryptionKey: kms.IKey;
+  /**
+   * The adopter's optional customer-managed key, for the repository and the logs.
+   *
+   * Distinct from `encryptionKey` above, and deliberately so. `encryptionKey` is a
+   * CMK this stack creates and owns, scoped to CodeBuild output. This one is a key
+   * the ADOPTER owns and may not have supplied at all, so every use of it has to
+   * survive being absent. See `AshCustomerKey` in ash-config.ts.
+   */
+  readonly customerKey: AshCustomerKey;
+}
+
+export class AshImageBuild extends Construct {
+  /** The adopter's repository. Retained on stack deletion; see below. */
+  public readonly repository: ecr.Repository;
+  public readonly project: codebuild.Project;
+  /**
+   * The gate to hang workloads off. Undefined when `bootstrapOnDeploy` is false.
+   *
+   * Call `workload.node.addDependency(build.bootstrap!)` — or `addDependency` on
+   * the L1 — so CloudFormation does not create the workload before an image
+   * exists.
+   */
+  public readonly bootstrap?: CustomResource;
+
+  private readonly platform: AshBuildPlatform;
+  /** Set only when the stack supplied an `imageTag` parameter. */
+  private readonly imageTagParameter?: CfnParameter;
+  private readonly imageTagCondition?: CfnCondition;
+
+  constructor(scope: Construct, id: string, props: AshImageBuildProps) {
+    super(scope, id);
+    this.platform = props.platform;
+
+    if (props.flavors.length === 0) {
+      throw new Error('AshImageBuild needs at least one flavor to build.');
+    }
+
+    // The condition is created once here rather than per flavor, so a stack with
+    // several flavors pins them together rather than emitting one condition each.
+    if (props.imageTag) {
+      this.imageTagParameter = props.imageTag;
+      this.imageTagCondition = new CfnCondition(this, 'ImageTagPinned', {
+        expression: Fn.conditionNot(Fn.conditionEquals(props.imageTag.valueAsString, '')),
+      });
+    }
+
+    /*
+     * ENCRYPTION IS `KMS` UNCONDITIONALLY AND THE KEY IS THE CONDITIONAL PART.
+     *
+     * The obvious shape is one `Fn::If` around the whole `EncryptionConfiguration`
+     * so an adopter who supplies no key gets the template that shipped before.
+     * That does not work, and the reason is worth stating because it is the
+     * opposite of every other property in this change: a reader looking for
+     * `EncryptionConfiguration.EncryptionType` finds nothing at all inside an
+     * `Fn::If`, so the repository reads as unencrypted whatever the parameter says.
+     * Measured against checkov's CKV_AWS_136, which inspects exactly that path.
+     *
+     * `KMS` with no `KmsKey` is not a downgrade from the previous `AES256`: ECR
+     * falls back to the AWS-managed `aws/ecr` key, which costs nothing and is
+     * still KMS. So the unconditional half is free.
+     *
+     * THE COST, STATED PLAINLY: `EncryptionConfiguration` IS FORCE-NEW. AWS
+     * documents it as "Update requires: Replacement" and offers no way to
+     * re-encrypt a repository in place. An EXISTING stack that updates onto this
+     * template therefore gets a NEW, EMPTY repository. Nothing is lost, because the
+     * old one is retained rather than deleted, but nothing has pushed to the new
+     * one either - and the bootstrap custom resource only re-runs when
+     * `AshVersion`, `AshOfflineMode` or the flavor list changed, none of which
+     * this is. So a workload pointed at the new repository has no image to pull
+     * until the build project is started by hand. That is what the
+     * `ImageBuildProjectName` stack output is for.
+     * https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-ecr-repository.html
+     *
+     * RETAIN, deliberately, and unchanged. `emptyOnDelete` would make CDK
+     * synthesize an asset-backed custom resource to purge images, which drags in a
+     * staging bucket and therefore `cdk bootstrap` - and these templates are meant
+     * to launch straight from the CloudFormation console. Retaining also means a
+     * rolled-back stack does not throw away an image that took 20 minutes to
+     * build.
+     */
+    this.repository = new ecr.Repository(this, 'Repository', {
+      imageScanOnPush: true,
+      imageTagMutability: ecr.TagMutability.MUTABLE,
+      encryption: ecr.RepositoryEncryption.KMS,
+      // Resolves to `{"Fn::If": ["HasKmsKey", {"Ref": "KmsKeyArn"}, {"Ref":
+      // "AWS::NoValue"}]}`, so `KmsKey` disappears when no key was supplied.
+      encryptionKey: props.customerKey.key,
+      removalPolicy: RemovalPolicy.RETAIN,
+      lifecycleRules: [
+        {
+          description: 'Keep the ten most recent images; older rebuilds are unreachable.',
+          maxImageCount: 10,
+        },
+      ],
+    });
+
+    // Retained on purpose: these logs are the only account of why an image build
+    // failed, and a failed build rolls the stack back. See
+    // `diagnosticLogGroupProps`.
+    const logGroup = new logs.LogGroup(this, 'BuildLogs', diagnosticLogGroupProps(props.customerKey));
+
+    this.project = new codebuild.Project(this, 'Build', {
+      description:
+        `Builds the ASH ${props.platform} image (${props.flavors.join(', ')}) into this ` +
+        "account's ECR repository. ASH publishes no public image, so this build is what " +
+        'makes the deployment possible.',
+      environment: {
+        buildImage:
+          props.platform === 'arm64'
+            ? codebuild.LinuxArmBuildImage.AMAZON_LINUX_2023_STANDARD_3_0
+            : codebuild.LinuxBuildImage.AMAZON_LINUX_2023_5,
+        // An ASH image build compiles and installs a dozen scanners. SMALL runs
+        // out of disk on an offline build.
+        computeType: codebuild.ComputeType.LARGE,
+        // Required to run `docker build`. There is no way to build a container
+        // image in CodeBuild without it.
+        privileged: true,
+      },
+      // An offline build vendors scanner rulesets and tools into the image and
+      // is markedly slower than an online one. This is the ceiling, not the
+      // expectation.
+      timeout: Duration.hours(2),
+      /**
+       * One build at a time, because two builds of this project race each other.
+       *
+       * Every build pushes the same moving tag into the same MUTABLE repository,
+       * so two builds running together resolve by whichever finishes last. On a
+       * stack UPDATE that is not merely wasteful: if `AshVersion` changed, a
+       * scheduled rebuild that overlaps the update's bootstrap can republish the
+       * tag from the other revision, and CloudFormation reports success while the
+       * workload runs the wrong ASH.
+       *
+       * The dependency on the bootstrap already prevents this at stack CREATE.
+       * This closes the update case, which no ordering can, because by then the
+       * rule exists and fires on its own schedule.
+       *
+       * THE COST, STATED PLAINLY: CodeBuild does not queue past this limit — AWS
+       * documents that "if the current build count meets this limit, new builds
+       * are throttled and are not run". So a bootstrap that collides with an
+       * in-flight scheduled rebuild fails to start, and the starter reports FAILED
+       * to CloudFormation, so the stack operation fails and has to be retried.
+       * That is the better failure: it is loud, it names the cause, and retrying
+       * is safe. The alternative is a silent last-writer-wins publish, which looks
+       * like a successful deployment.
+       * https://docs.aws.amazon.com/codebuild/latest/userguide/create-project.html
+       */
+      concurrentBuildLimit: 1,
+      logging: { cloudWatch: { logGroup } },
+      encryptionKey: props.encryptionKey,
+      environmentVariables: {
+        ASH_ECR_REPOSITORY_URI: { value: this.repository.repositoryUri },
+        ASH_VERSION: { value: props.ashVersion.valueAsString },
+        ASH_OFFLINE: { value: props.offlineMode.valueAsString },
+        ASH_REPOSITORY_URL: { value: ASH_REPOSITORY_URL },
+        ASH_BUILD_PLATFORM: { value: props.platform },
+        ASH_BUILD_FLAVORS: { value: props.flavors.join(' ') },
+      },
+      buildSpec: codebuild.BuildSpec.fromObject(
+        this.buildSpecObject(props.flavors),
+      ),
+    });
+
+    this.repository.grantPullPush(this.project);
+    // ECR's authorization token is account-wide and not addressable per
+    // repository, so it cannot be scoped further than `*`.
+    this.project.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['ecr:GetAuthorizationToken'],
+        resources: ['*'],
+      }),
+    );
+
+    if (props.bootstrapOnDeploy ?? true) {
+      this.bootstrap = this.addBootstrap(props);
+    }
+
+    /**
+     * The rebuild schedule is created AFTER the bootstrap, and depends on it.
+     *
+     * WHY THE ORDER MATTERS — A REAL DEPLOYMENT, NOT A HYPOTHETICAL
+     * ------------------------------------------------------------
+     * With the old `rate(1 day)` default this rule fired the moment
+     * CloudFormation created it, because an EventBridge rate expression is
+     * anchored at rule creation. On a real stack that put a scheduled build 43
+     * seconds behind a bootstrap build that was still running: two concurrent
+     * ARM64 LARGE builds, both pushing the same moving tag into the same MUTABLE
+     * repository, with only the bootstrap visible to CloudFormation. The workload
+     * got whichever image landed last.
+     *
+     * `DEFAULT_REBUILD_SCHEDULE` is now a cron expression, which does not fire on
+     * creation. That fixes the default but not an adopter who sets `rate(...)`,
+     * which is a legitimate value and still fires immediately. The dependency is
+     * what makes that safe: the bootstrap custom resource does not complete until
+     * its build has finished and answered CloudFormation, so a rule created after
+     * it cannot fire alongside it. Worst case for a `rate()` adopter is one extra
+     * build after the deployment, sequentially, which wastes money but cannot
+     * publish a tag out from under the workload.
+     */
+    const rebuildRule = new events.Rule(this, 'RebuildSchedule', {
+      description:
+        'Rebuilds the ASH image so a long-lived deployment keeps receiving base-image, ' +
+        'OS and scanner patches for the pinned ASH revision.',
+      schedule: events.Schedule.expression(props.rebuildSchedule.valueAsString),
+      targets: [new targets.CodeBuildProject(this.project)],
+    });
+    if (this.bootstrap) {
+      rebuildRule.node.addDependency(this.bootstrap);
+    }
+
+    suppressCodeBuildRoleWildcards(this.project);
+    // AwsSolutions-CB5 pins the build image; it cannot evaluate one supplied as
+    // an Fn::Join over ECR attributes, which is how every consumer of this
+    // construct references the image it just built.
+    suppressUnevaluableRules(this.project, ['AwsSolutions-CB5']);
+  }
+
+  /**
+   * The image URI a workload should reference, for one flavor.
+   *
+   * Follows `workloadTagForFlavor`, so it is the moving tag unless the stack
+   * supplied an `imageTag` parameter and the adopter set it.
+   */
+  public imageUriForFlavor(flavor: AshImageFlavor): string {
+    return this.repository.repositoryUriForTag(this.workloadTagForFlavor(flavor));
+  }
+
+  /**
+   * The tag a WORKLOAD should pull. Distinct from `tagForFlavor` on purpose.
+   *
+   * WHY THE BUILD AND THE WORKLOAD MUST NOT SHARE ONE ACCESSOR
+   * ---------------------------------------------------------
+   * `tagForFlavor` is what the buildspec tags and pushes, and what
+   * `sanitizeRefCommand` measures to budget the folded ref against the 128-character
+   * Docker tag limit. Both need a real string. If the override leaked into either,
+   * the build would push to a tag derived from an `Fn::If` — so the moving tag would
+   * stop being published at all, and the length budget would be computed from a
+   * token's placeholder rather than the tag.
+   *
+   * So the override applies here and nowhere else: the build always publishes both
+   * the moving tag and the version-qualified one, and this decides which of them the
+   * workload pulls.
+   *
+   * `Fn::If` rather than a synth-time choice, because `AshImageTag` is a deploy-time
+   * parameter. When no parameter was supplied — `AshImagePipeline`, which has no
+   * workload — this returns the plain moving tag and emits no condition.
+   */
+  public workloadTagForFlavor(flavor: AshImageFlavor): string {
+    const moving = this.tagForFlavor(flavor);
+    if (!this.imageTagCondition || !this.imageTagParameter) {
+      return moving;
+    }
+    return Fn.conditionIf(
+      this.imageTagCondition.logicalId,
+      this.imageTagParameter.valueAsString,
+      moving,
+    ).toString();
+  }
+
+  /** The moving tag for a flavor, for example `mcp-arm64`. */
+  public tagForFlavor(flavor: AshImageFlavor): string {
+    return `${flavor}-${this.platform}`;
+  }
+
+  /**
+   * Start a build during stack creation and answer CloudFormation from the build.
+   *
+   * The handler deliberately does NOT respond on the success path. Responding
+   * there is the bug this design exists to avoid: it would unblock the workload
+   * while the image was still building.
+   */
+  private addBootstrap(props: AshImageBuildProps): CustomResource {
+    // Its own log group, so the role can be scoped to exactly one group instead
+    // of carrying the AWS managed AWSLambdaBasicExecutionRole.
+    // Retained: this is where a build that never STARTED is explained, which
+    // `concurrentBuildLimit` gives a real trigger — CodeBuild refuses a colliding
+    // StartBuild rather than queueing it. See `diagnosticLogGroupProps`.
+    const starterLogs = new logs.LogGroup(
+      this,
+      'BootstrapStarterLogs',
+      diagnosticLogGroupProps(props.customerKey),
+    );
+    const starterRole = new iam.Role(this, 'BootstrapStarterRole', {
+      assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
+      description:
+        'Execution role for the image-build bootstrap. Deliberately not using ' +
+        'AWSLambdaBasicExecutionRole: the only logging grant it needs is on one log group.',
+    });
+    starterRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ['logs:CreateLogStream', 'logs:PutLogEvents'],
+        resources: [starterLogs.logGroupArn, `${starterLogs.logGroupArn}:*`],
+      }),
+    );
+
+    const starter = new lambda.Function(this, 'BootstrapStarter', {
+      role: starterRole,
+      logGroup: starterLogs,
+      // Inline code, not an asset: an asset needs a staging bucket and therefore
+      // `cdk bootstrap`, which an adopter launching this template from the
+      // console has not run.
+      code: lambda.Code.fromInline(BOOTSTRAP_STARTER_CODE),
+      handler: 'index.handler',
+      runtime: lambda.Runtime.PYTHON_3_14,
+      timeout: Duration.minutes(1),
+      description:
+        'Starts the ASH image build during stack creation and hands CloudFormation’s ' +
+        'response URL to the build, which answers once the image exists.',
+      environment: { PROJECT_NAME: this.project.projectName },
+      // Encrypts PROJECT_NAME at rest with the adopter's key when one was
+      // supplied, and disappears when it was not. See `AshCustomerKey`.
+      environmentEncryption: props.customerKey.key,
+      /*
+       * ONE, because one is the most CloudFormation will ever ask for.
+       *
+       * This handler is a custom-resource responder. CloudFormation invokes it once
+       * per lifecycle event on one resource in one stack, and it does not run two
+       * operations against the same stack at once, so there is no second concurrent
+       * invocation for a second slot to serve. The project it starts also allows
+       * exactly one concurrent build, so a second invocation could not do useful
+       * work even if it happened.
+       *
+       * WHAT A RESERVATION COSTS, STATED BECAUSE IT IS NOT FREE: reserved
+       * concurrency is subtracted from the account's unreserved pool for as long as
+       * the stack exists, whether or not the function is running. One execution out
+       * of an account's limit is a small price, but it is a price, and a stack that
+       * deploys several of these targets pays it once per target.
+       */
+      reservedConcurrentExecutions: 1,
+    });
+    // codebuild.Project exposes no grantStartBuild, so the statement is written
+    // out. Scoped to this one project's ARN.
+    starter.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['codebuild:StartBuild'],
+        resources: [this.project.projectArn],
+      }),
+    );
+
+    suppressLambdaLogWildcard(starterRole);
+
+    return new CustomResource(this, 'BootstrapBuild', {
+      serviceToken: starter.functionArn,
+      resourceType: 'Custom::AshImageBootstrap',
+      properties: {
+        // These are read by nobody. They exist so that changing the ASH version
+        // or the offline flag changes the custom resource's properties, which is
+        // what makes CloudFormation re-invoke it on a stack update. Without them
+        // a version bump would leave the old image in place and the workload
+        // would keep running the previous ASH.
+        AshVersion: props.ashVersion.valueAsString,
+        AshOfflineMode: props.offlineMode.valueAsString,
+        Flavors: props.flavors.join(' '),
+      },
+    });
+  }
+
+  private buildSpecObject(flavors: AshImageFlavor[]): Record<string, unknown> {
+    const targetsNeeded = Array.from(new Set(flavors.map((f) => DOCKER_TARGET_FOR_FLAVOR[f])));
+
+    return {
+      version: '0.2',
+      phases: {
+        pre_build: {
+          commands: [
+            'echo "Building ASH ${ASH_VERSION} for ${ASH_BUILD_PLATFORM}: ${ASH_BUILD_FLAVORS}"',
+            `aws ecr get-login-password --region ${Aws.REGION} | docker login --username AWS --password-stdin ${Aws.ACCOUNT_ID}.dkr.ecr.${Aws.REGION}.${Aws.URL_SUFFIX}`,
+            // Shallow, single-ref clone of the public repository. No credential
+            // needed, which is the whole reason the project takes no source.
+            'git clone --depth 1 --branch "${ASH_VERSION}" "${ASH_REPOSITORY_URL}" ash-src',
+          ],
+        },
+        build: {
+          commands: [
+            // First, so a build that cannot compute a usable tag dies in seconds
+            // rather than after twenty minutes of `docker build`.
+            this.sanitizeRefCommand(flavors),
+
+            // The container scripts are written by the flavor that COPYs them,
+            // in `flavorBuildCommands`. They used to be written here, both of
+            // them, on every build — which put the CodeCommit gate handler into
+            // all five committed templates, including the two that build no
+            // Lambda at all. See the note on `flavorBuildCommands`.
+
+            // Build each ASH Dockerfile stage this image set needs. --platform is
+            // explicit even though the compute already matches, so a build on the
+            // wrong fleet fails loudly instead of producing an image AgentCore
+            // will refuse.
+            ...targetsNeeded.map(
+              (target) =>
+                'docker build ' +
+                '--platform "linux/${ASH_BUILD_PLATFORM}" ' +
+                `--target ${target} ` +
+                '--build-arg "OFFLINE=${ASH_OFFLINE}" ' +
+                '--build-arg "INSTALL_ASH_REVISION=${ASH_VERSION}" ' +
+                `-t "ash-base-${target}:local" ash-src`,
+            ),
+
+            ...flavors.flatMap((flavor) => this.flavorBuildCommands(flavor)),
+          ],
+        },
+        post_build: {
+          commands: [
+            // Runs whether the build phase passed or failed, which is what makes
+            // it a usable CloudFormation responder.
+            CFN_SIGNAL_COMMAND,
+          ],
+        },
+      },
+    };
+  }
+
+  /**
+   * Fold `$ASH_VERSION` into something a Docker tag may hold, once per build.
+   *
+   * WHY THIS EXISTS — A REAL DEPLOYMENT, NOT A HYPOTHETICAL
+   * ------------------------------------------------------
+   * `AshVersion` is a git ref handed to `git clone --branch`, and branch refs
+   * routinely contain a `/`, which a Docker tag may not. Deployed with
+   * `AshVersion=feat/distributed-execute-and-collect`, a CodeBuild run built the
+   * image successfully and then died on the version-qualified tag:
+   *
+   *   docker tag "ash-mcp:local" "<repo-uri>:mcp-arm64-feat/distributed-execute-and-collect"
+   *   Error parsing reference: "<repo-uri>:mcp-arm64-feat/distributed-execute-and-collect"
+   *   Phase complete: BUILD State: FAILED
+   *
+   * The expensive work had already succeeded; the tag threw it away and nothing
+   * reached ECR. `feat/`, `release/`, `dependabot/` and `users/` refs all did
+   * this, so it was the normal case rather than an edge one.
+   *
+   * WHY IT IS SHELL AND NOT A TYPESCRIPT STRING OPERATION
+   * -----------------------------------------------------
+   * `ASH_VERSION` carries `props.ashVersion.valueAsString`, a deploy-time
+   * CloudFormation parameter. At synth time its value is an `Fn::Ref`, so there
+   * is no string to fold. Sanitizing in TypeScript would synthesize cleanly and
+   * then fail in CodeBuild in exactly the same way.
+   *
+   * WHAT IT DOES ABOUT COLLISIONS
+   * -----------------------------
+   * Folding is many-to-one: `feat/x` and `feat-x` land on the same string, and so
+   * do two refs that differ only past the truncation point. The repository is
+   * MUTABLE by design — the moving tag depends on it — so a collision would let
+   * one build silently overwrite another build's audit tag, destroying the one
+   * property that tag exists to provide. The first eight hex digits of the
+   * SHA-256 of the RAW ref are therefore appended: distinct refs get distinct
+   * tags, and the same ref always gets the same tag, so a rebuild republishes
+   * instead of accumulating. Digesting the raw value rather than the folded one
+   * is what makes truncated refs distinguishable. The build echoes the result,
+   * because an operator looking for a rollback target reads it out of the log
+   * rather than recomputing it.
+   *
+   * The digest is appended UNCONDITIONALLY, which is a deliberate cost: a plain
+   * `v3.7.0` now tags as `mcp-arm64-v3.7.0-<digest>` rather than
+   * `mcp-arm64-v3.7.0`. Appending it only when folding changed something was
+   * considered and rejected — it makes the tag's shape depend on the ref, so an
+   * operator cannot predict it, and it is no longer injective, because a branch
+   * literally named `feat-x-<somedigest>` could still collide with a folded
+   * `feat/x`. Nothing in this repository reads the version-qualified tag
+   * programmatically; workloads reference `tagForFlavor`, the moving tag.
+   *
+   * WHY `tr` RATHER THAN `sed`
+   * -------------------------
+   * `AshVersion` declares no `AllowedPattern`, so CloudFormation accepts a value
+   * containing a newline. `sed` substitutes within a line and would pass one
+   * straight through into the tag; `tr` folds it like any other byte.
+   *
+   * The grammar's leading-character rule needs no work here. Every tag this
+   * construct writes is `<flavor>-<platform>-<suffix>`, so the first character
+   * always comes from a flavor name, and a ref like `-foo` or `.hidden` lands
+   * mid-tag where `[\w.-]` allows it. Drop that prefix and this stops being true.
+   */
+  private sanitizeRefCommand(flavors: AshImageFlavor[]): string {
+    // Budget the folded ref against the longest tag this build will compose, so
+    // the result is provably inside the grammar's 128 characters rather than
+    // inside a number someone once guessed. Two hyphens: `<tag>-<ref>-<digest>`.
+    const longestTag = Math.max(...flavors.map((f) => this.tagForFlavor(f).length));
+    const refBudget = DOCKER_TAG_MAX_LENGTH - longestTag - REF_DIGEST_LENGTH - 2;
+
+    return [
+      `ASH_SAFE_REF="$(printf '%s' "\${ASH_VERSION}" | tr -c 'A-Za-z0-9._-' '-' | cut -c1-${refBudget})"`,
+      `ASH_REF_DIGEST="$(printf '%s' "\${ASH_VERSION}" | sha256sum | cut -c1-${REF_DIGEST_LENGTH})"`,
+      '# The digest is what keeps two refs that fold to the same string on separate',
+      '# tags. A pipeline reports only its last command\'s status, so a missing',
+      '# sha256sum would leave it empty and let one build overwrite another\'s audit',
+      '# tag. Fail here instead.',
+      `[ \${#ASH_REF_DIGEST} -eq ${REF_DIGEST_LENGTH} ] || { echo "cannot digest ASH_VERSION" >&2; exit 1; }`,
+      'ASH_VERSION_TAG_SUFFIX="${ASH_SAFE_REF}-${ASH_REF_DIGEST}"',
+      'echo "version-qualified audit tag suffix: ${ASH_VERSION_TAG_SUFFIX}"',
+    ].join('\n');
+  }
+
+  /**
+   * The `docker` work for one flavor, including the scripts only that flavor needs.
+   *
+   * WHY THE SCRIPT WRITES LIVE HERE RATHER THAN ONCE PER BUILD
+   * ---------------------------------------------------------
+   * They were emitted unconditionally, so every build wrote both the MCP
+   * entrypoint and the CodeCommit gate handler whether or not it built an image
+   * that COPYs them. Because the buildspec is inlined into the synthesized
+   * template, that put the whole gate handler into all five committed templates —
+   * including `AshImagePipeline`, whose ARM64 build has no Lambda flavor, and
+   * `AshDistributedPipeline`, which builds only the `cli` flavor and needs
+   * neither script.
+   *
+   * That matters beyond tidiness: CloudFormation caps an inline
+   * `--template-body` at 51,200 bytes, and these templates are committed
+   * precisely so they can be launched directly. Pairing each script with the
+   * flavor whose Dockerfile COPYs it also means the two cannot drift apart — a
+   * new flavor that forgets its script fails at `docker build` rather than
+   * shipping an image with a stale one.
+   */
+  private flavorBuildCommands(flavor: AshImageFlavor): string[] {
+    const base = `ash-base-${DOCKER_TARGET_FOR_FLAVOR[flavor]}:local`;
+    const tag = this.tagForFlavor(flavor);
+    // Composed from the folded suffix, never from `$ASH_VERSION` directly — see
+    // `sanitizeRefCommand`. The moving tag above is untouched.
+    const versionedTag = `${tag}-\${ASH_VERSION_TAG_SUFFIX}`;
+    const push = [
+      `docker tag "ash-${flavor}:local" "\${ASH_ECR_REPOSITORY_URI}:${tag}"`,
+      `docker tag "ash-${flavor}:local" "\${ASH_ECR_REPOSITORY_URI}:${versionedTag}"`,
+      `docker push "\${ASH_ECR_REPOSITORY_URI}:${tag}"`,
+      `docker push "\${ASH_ECR_REPOSITORY_URI}:${versionedTag}"`,
+    ];
+
+    if (flavor === 'cli') {
+      // Nothing to derive: the sharded executor invokes `ash scan` directly, so
+      // ASH's own image is exactly what it needs.
+      return [`docker tag "${base}" "ash-cli:local"`, ...push];
+    }
+
+    if (flavor === 'mcp') {
+      return [
+        this.writeFileCommand('ash-src/ash-mcp-entrypoint.sh', MCP_ENTRYPOINT_SCRIPT),
+        this.writeFileCommand(
+          'ash-src/Dockerfile.mcp',
+          [
+            `FROM ${base}`,
+            '# The ASH stage already dropped to UID 500; step back up to install.',
+            'USER root',
+            'COPY ash-mcp-entrypoint.sh /usr/local/bin/ash-mcp-entrypoint.sh',
+            'RUN chmod 0755 /usr/local/bin/ash-mcp-entrypoint.sh',
+            `ENV ASH_CONFIG=${ASH_MATERIALIZED_CONFIG_PATH}`,
+            '# 500:100 are the ASH Dockerfile UID/GID defaults, and this build',
+            '# overrides neither.',
+            'USER 500:100',
+            '# Documentation only; AgentCore fixes the port at 8000 regardless.',
+            'EXPOSE 8000',
+            'ENTRYPOINT ["/usr/local/bin/ash-mcp-entrypoint.sh"]',
+          ].join('\n'),
+        ),
+        'docker build --platform "linux/${ASH_BUILD_PLATFORM}" -f ash-src/Dockerfile.mcp -t "ash-mcp:local" ash-src',
+        ...push,
+      ];
+    }
+
+    return [
+      this.writeFileCommand('ash-src/ash_gate_handler.py', CODECOMMIT_GATE_HANDLER),
+      this.writeFileCommand(
+        'ash-src/Dockerfile.lambda',
+        [
+          `FROM ${base}`,
+          '# A container Lambda must speak the Lambda Runtime API, so the runtime',
+          '# interface client is mandatory — ASH’s image has no notion of Lambda.',
+          '# git-remote-codecommit gives git the codecommit:// transport so the',
+          '# handler can clone using the function role. boto3 is named explicitly',
+          '# rather than relied on transitively: the handler imports it from the',
+          '# system interpreter, while `ash` runs from its own environment.',
+          'RUN python3 -m pip install --no-cache-dir --break-system-packages \\',
+          '      awslambdaric boto3 git-remote-codecommit',
+          // Lambda requires the image to run on a READ-ONLY root filesystem with only
+          // /tmp writable, and it also sets its own PATH
+          // (/usr/local/bin:/usr/bin/:/bin:/opt/bin), shadowing the one the ASH stages
+          // built up. Both break the scanners, so the handler undoes them at scan time
+          // -- see the note above CODECOMMIT_GATE_HANDLER in ash-container-scripts.ts.
+          // The handler cannot reconstruct these two values itself: by the time it
+          // runs, Lambda has already replaced PATH, and nothing records where ASH put
+          // its uv tools. So capture both here, at build time, under names Lambda does
+          // not touch. The `ci` stage runs as root, which is why the tool dir is under
+          // /root; recorded here rather than hardcoded in the handler so a change to
+          // the ASH stage layout shows up next to the FROM that selected it.
+          //
+          // Deliberately TypeScript comments, not Dockerfile `#` ones: this body is
+          // copied verbatim into the synthesized template, and AshCodeCommitGate is
+          // launched inline against CloudFormation's 51,200-byte TemplateBody cap.
+          'ENV ASH_IMAGE_PATH="${PATH}"',
+          'ENV ASH_BAKED_UV_TOOL_DIR="/root/.local/share/uv/tools"',
+          'COPY ash_gate_handler.py /var/task/ash_gate_handler.py',
+          'WORKDIR /var/task',
+          'ENTRYPOINT ["/usr/local/bin/python3", "-m", "awslambdaric"]',
+          'CMD ["ash_gate_handler.handler"]',
+        ].join('\n'),
+      ),
+      'docker build --platform "linux/${ASH_BUILD_PLATFORM}" -f ash-src/Dockerfile.lambda -t "ash-lambda:local" ash-src',
+      ...push,
+    ];
+  }
+
+  /**
+   * Emit a shell command that writes `content` to `path`.
+   *
+   * A quoted heredoc is used so nothing inside the payload is expanded — these
+   * files are full of `${...}` that must survive verbatim into the container.
+   * The delimiter is quoted for exactly that reason; an unquoted one would let
+   * the build shell eat every variable reference and every backtick.
+   */
+  private writeFileCommand(path: string, content: string): string {
+    return [`cat > ${path} <<'ASH_CDK_EOF'`, content, 'ASH_CDK_EOF'].join('\n');
+  }
+}
+
+/**
+ * Signals CloudFormation from `post_build`, when a bootstrap started this build.
+ *
+ * Skipped entirely for scheduled rebuilds, which carry no response URL. The
+ * physical id is the logical id so it stays stable across stack updates —
+ * returning a fresh one would make CloudFormation delete the "replaced"
+ * resource.
+ */
+const CFN_SIGNAL_COMMAND = `if [ -n "\${CFN_RESPONSE_URL:-}" ]; then
+  if [ "\${CODEBUILD_BUILD_SUCCEEDING:-0}" = "1" ]; then
+    ASH_STATUS=SUCCESS
+    ASH_REASON="ASH image build succeeded"
+  else
+    ASH_STATUS=FAILED
+    ASH_REASON="ASH image build failed; see CodeBuild build \${CODEBUILD_BUILD_ID:-unknown}"
+  fi
+  python3 -c "import json, os, sys, urllib.request; body = json.dumps({'Status': sys.argv[1], 'Reason': sys.argv[2], 'PhysicalResourceId': os.environ['CFN_LOGICAL_ID'], 'StackId': os.environ['CFN_STACK_ID'], 'RequestId': os.environ['CFN_REQUEST_ID'], 'LogicalResourceId': os.environ['CFN_LOGICAL_ID'], 'Data': {}}).encode(); req = urllib.request.Request(os.environ['CFN_RESPONSE_URL'], data=body, method='PUT', headers={'content-type': '', 'content-length': str(len(body))}); urllib.request.urlopen(req)" "\$ASH_STATUS" "\$ASH_REASON"
+fi`;
+
+/**
+ * Inline handler that starts the build and stays silent on success.
+ *
+ * Kept small on purpose: `lambda.Code.fromInline` writes into the template's
+ * `ZipFile`, which CloudFormation caps at 4096 characters.
+ */
+const BOOTSTRAP_STARTER_CODE = `import json
+import os
+import urllib.request
+
+import boto3
+
+
+def send(event, status, reason):
+    body = json.dumps({
+        "Status": status,
+        "Reason": reason,
+        "PhysicalResourceId": event["LogicalResourceId"],
+        "StackId": event["StackId"],
+        "RequestId": event["RequestId"],
+        "LogicalResourceId": event["LogicalResourceId"],
+        "Data": {},
+    }).encode()
+    urllib.request.urlopen(urllib.request.Request(
+        event["ResponseURL"], data=body, method="PUT",
+        headers={"content-type": "", "content-length": str(len(body))}))
+
+
+def handler(event, context):
+    # Never block a teardown on an image build.
+    if event["RequestType"] == "Delete":
+        send(event, "SUCCESS", "Nothing to undo")
+        return
+    try:
+        boto3.client("codebuild").start_build(
+            projectName=os.environ["PROJECT_NAME"],
+            environmentVariablesOverride=[
+                {"name": "CFN_RESPONSE_URL", "value": event["ResponseURL"], "type": "PLAINTEXT"},
+                {"name": "CFN_STACK_ID", "value": event["StackId"], "type": "PLAINTEXT"},
+                {"name": "CFN_REQUEST_ID", "value": event["RequestId"], "type": "PLAINTEXT"},
+                {"name": "CFN_LOGICAL_ID", "value": event["LogicalResourceId"], "type": "PLAINTEXT"},
+            ],
+        )
+    except Exception as exc:
+        # The build never started, so nothing else will ever answer. The most
+        # likely cause is a scheduled rebuild holding the project's only
+        # concurrent build slot, which is why the reason says so: retrying the
+        # stack operation once the rebuild finishes is safe.
+        send(event, "FAILED", "Could not start the ASH image build. A scheduled "
+             "rebuild may hold the project's only build slot; retrying is safe. "
+             "Cause: %s" % exc)
+    # Success path is silent by design: the build itself responds when the image
+    # exists. Responding here would let the workload be created too early.
+`;

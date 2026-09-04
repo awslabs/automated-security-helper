@@ -1,0 +1,134 @@
+version: 0.2
+
+# Collect action: merge every shard's results and let ASH decide the verdict.
+#
+# This action produces the pipeline's pass or fail, but it does not *compute* it.
+# `ash merge` does, and its exit code is propagated unchanged:
+#
+#   0  no actionable findings at or above --min-severity
+#   1  refused to merge - shard coverage is incomplete, so the findings are
+#      unknown, which ASH is careful to distinguish from "no findings"
+#   2  actionable findings at or above --min-severity
+#
+# Nothing here re-derives that judgment. ASH already routes it through
+# _compute_exit_code, the same function `ash scan` uses, precisely so a merged
+# verdict and a scanned verdict cannot disagree. A severity comparison written
+# here would be a third copy of a table that has already drifted once in this
+# codebase, and when it drifted again the pipeline would report a different
+# verdict than `ash scan` does for the same findings, silently.
+#
+# Shard coverage is likewise ASH's to check. `merge_shard_results` raises
+# ShardCoverageError when the shard space is not fully covered, which is stronger
+# than anything this buildspec could do: it reads the shard_index and shard_count
+# recorded inside each shard's own results rather than trusting an external count.
+#
+# The build runs inside the ASH image, so `ash` is on PATH directly. That image
+# carries no AWS CLI, so S3 transfers go through a small boto3 helper.
+#
+# Shell variables use the $NAME form so the template renderer and the shell cannot
+# be confused for one another.
+
+phases:
+  pre_build:
+    commands:
+      - |
+        set -eu
+        : "$SHARD_COUNT"
+        : "$PIPELINE_EXECUTION_ID"
+        : "$RESULTS_BUCKET"
+        : "$RESULTS_PREFIX"
+        : "$MIN_SEVERITY"
+
+        # Refuse to run against zero shards. The Terraform variable validates
+        # shard_count >= 1, but SHARD_COUNT arrives here as an environment
+        # variable and can be overridden at the project or action level, below
+        # that validation. At zero the loop below would pass no --results at all,
+        # and this check is about the buildspec's own inputs rather than about
+        # the scan results, so it is not something ASH can do for us.
+        case "$SHARD_COUNT" in
+          ''|*[!0-9]*)
+            echo "SHARD_COUNT=$SHARD_COUNT is not a non-negative integer" >&2
+            exit 1
+            ;;
+        esac
+        if [ "$SHARD_COUNT" -lt 1 ]; then
+          echo "SHARD_COUNT=$SHARD_COUNT: refusing to merge zero shards." >&2
+          exit 1
+        fi
+
+        echo "Merging $SHARD_COUNT shard(s) for execution $PIPELINE_EXECUTION_ID"
+        echo "  min severity: $MIN_SEVERITY"
+      - |
+        set -eu
+        printf '%s' '${s3_sync_b64}' | base64 -d > ash_s3_sync.py
+
+  build:
+    commands:
+      - |
+        set -eu
+        rm -rf shard-results merged
+        mkdir -p shard-results merged
+        python3 ash_s3_sync.py download \
+          "$RESULTS_BUCKET" \
+          "$RESULTS_PREFIX/$PIPELINE_EXECUTION_ID" \
+          shard-results
+
+      # --results is repeatable and accepts a file or a directory. One flag per
+      # shard directory rather than a single parent, so a shard whose upload never
+      # landed names itself in the error instead of being quietly absent.
+      #
+      # ash-container-init is invoked explicitly because CodeBuild runs buildspec
+      # commands through its own agent rather than the image ENTRYPOINT. Without
+      # it the base config would never reach disk and the merge would run against
+      # different configuration than the shards did.
+      #
+      # errexit is disabled around the merge so its exit code can be captured and
+      # propagated from post_build after the results are safely uploaded. The
+      # explicit set +e / set -e pair is used rather than `if ! ash merge`,
+      # because that form disables errexit for the whole compound statement.
+      - |
+        set -eu
+        set -- /usr/local/bin/ash-container-init ash merge \
+          --output-dir merged \
+          --min-severity "$MIN_SEVERITY"
+
+        if [ "$FAIL_ON_FINDINGS" = "true" ]; then
+          set -- "$@" --fail-on-findings
+        fi
+
+        i=0
+        while [ "$i" -lt "$SHARD_COUNT" ]; do
+          set -- "$@" --results "shard-results/shard-$i"
+          i=$((i + 1))
+        done
+
+        echo "running: $*"
+        set +e
+        "$@"
+        MERGE_EXIT=$?
+        set -e
+        echo "ash merge exited $MERGE_EXIT"
+        printf '%s' "$MERGE_EXIT" > merge_exit_code
+
+  post_build:
+    commands:
+      # Upload first, then fail. A threshold breach is the case where somebody
+      # most wants the merged report, so the evidence is published before the
+      # exit code is propagated rather than after.
+      - |
+        set -eu
+        python3 ash_s3_sync.py upload merged "$RESULTS_BUCKET" \
+          "$RESULTS_PREFIX/$PIPELINE_EXECUTION_ID/merged" || true
+        echo "merged results at s3://$RESULTS_BUCKET/$RESULTS_PREFIX/$PIPELINE_EXECUTION_ID/merged/"
+
+      # Propagate ASH's verdict verbatim. Not recomputed, not remapped.
+      - |
+        set -eu
+        MERGE_EXIT="$(cat merge_exit_code 2>/dev/null || echo 1)"
+        case "$MERGE_EXIT" in
+          0) echo "ash merge: no actionable findings at or above $MIN_SEVERITY" ;;
+          1) echo "ash merge: refused to merge - shard coverage incomplete, findings UNKNOWN" >&2 ;;
+          2) echo "ash merge: actionable findings at or above $MIN_SEVERITY" >&2 ;;
+          *) echo "ash merge: exited $MERGE_EXIT" >&2 ;;
+        esac
+        exit "$MERGE_EXIT"

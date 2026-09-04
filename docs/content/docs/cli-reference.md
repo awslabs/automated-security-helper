@@ -19,6 +19,7 @@ These parameters are available across multiple ASH commands:
 | `--container-uid` | UID to use for the container user | |  | `scan` |
 | `--custom-build-arg` | Custom build arguments to pass to the container build | |  | `scan` |
 | `--custom-containerfile` | Path to a custom container definition (e.g. | |  | `scan` |
+| `--fail-on-incomplete-scanners` | Exit 1 when a selected scanner did not complete (`ERROR` or `MISSING`). Off by default; see [An incomplete scan is not a clean scan](#an-incomplete-scan-is-not-a-clean-scan). | |  | `scan` |
 | `--formats` | The output formats to use (comma-separated). | |  | `scan` |
 | `--min-severity` | Minimum severity to trigger non-zero exit code (critical, high, medium, low, none). | |  | `scan` |
 | `--progress` | Show progress of each job live in the console. Defaults to True. | |  | `scan` |
@@ -70,6 +71,7 @@ ash [command] [options]
 | Command           | Description                                                |
 |-------------------|------------------------------------------------------------|
 | `scan`            | Run security scans on source code (default command)        |
+| `merge`           | Recombine the results of a sharded scan into one report     |
 | `config`          | Manage ASH configuration                                   |
 | `plugin`          | Manage ASH plugins                                         |
 | `report`          | Generate reports from scan results                         |
@@ -115,6 +117,8 @@ ash [options]
 | `--use-existing`              | Use existing results file                               | `False`               |                         |
 | `--phases`                    | Phases to run: `convert`, `scan`, `report`, `inspect`   | `convert,scan,report` |                         |
 | `--inspect`                   | Enable inspection of SARIF fields                       | `False`               |                         |
+| `--shard-index`               | Zero-based index of this shard when one scan is split across several executors. Requires `--shard-count` | None | `ASH_SHARD_INDEX` |
+| `--shard-count`               | Total number of shards the scan is split across. Requires `--shard-index` | None | `ASH_SHARD_COUNT` |
 | `--workspace`                 | Path to a `.code-workspace` file, or `auto` to find the one in the current directory. Mutually exclusive with `--source-dir` | None | `ASH_WORKSPACE` |
 | `--workspace-config`          | Path to the workspace policy file. Defaults to `ash-workspace.{yaml,yml,json}` in the workspace root or its `.ash` directory | None | `ASH_WORKSPACE_CONFIG` |
 | `--allow-missing-projects`    | Skip workspace projects that are absent or unreadable   | `False`               |                         |
@@ -264,6 +268,41 @@ When several projects end differently, the code is chosen by how specific the di
 
 Comments are not supported in the workspace file. VS Code tolerates them; ASH reads strict JSON and reports a commented file as malformed.
 
+### Sharding
+
+`--shard-index` and `--shard-count` split one scan across several CI executors. Both are required together, and the index is zero-based, so a three-way split uses `0`, `1`, and `2`:
+
+```bash
+# Run in each of three parallel CI jobs. SHARD_INDEX comes from the job matrix
+# and is 0, 1, or 2; every job passes the same --shard-count.
+ash --source-dir . --output-dir "./shard-${SHARD_INDEX}" \
+  --shard-index "${SHARD_INDEX}" --shard-count 3
+```
+
+Each shard scans the whole tree with a disjoint subset of the **scanners**, not a subset of the files. Scanners are handed a directory and most of them walk it themselves, so a file-level split would be honored by roughly a third of them and ignored by the rest: every shard's semgrep would scan the whole repository, and because merging deliberately does not deduplicate, an n-shard run would report every semgrep finding n times. That is a wrong report, not merely a slow one. Partitioning the scanner set instead is honored by every scanner without any scanner knowing that sharding exists.
+
+The partition is a pure function of the scanner names, the index, and the count — names are deduplicated, lowercased, sorted, then dealt round-robin — so executors never coordinate and every shard computes the same partition on its own. It is taken over every *registered* scanner, before the enabled and dependency filters. Partitioning the post-filter set instead would make the split depend on which tools happen to be installed on each runner, so a runner missing semgrep would shift every later scanner onto a different shard than its siblings computed, running some scanners twice and others not at all. As it stands, a tool missing on one runner is reported `MISSING` by the shard that owns it, which is a visible failure rather than a silent gap.
+
+Each shard records the scanners it was assigned in its own `ash_aggregated_results.json`. That record is what `ash merge` verifies coverage from, which is also why merge refuses a results file produced without these flags.
+
+#### Per-shard exit codes are not the verdict
+
+A shard that owned only `syft` and `grype` finds nothing and exits 0. Five such shards mean five green CI jobs and a repository full of critical findings that nobody was told about. The verdict for a sharded run belongs to [`ash merge`](#merge-command), computed over the union. Gate CI on that command, not on per-shard success.
+
+#### What sharding does and does not buy
+
+Balance is by scanner count, not by scanner cost. `semgrep` and `checkov` dominate ASH's runtime, so a shard holding semgrep finishes long after a shard holding syft: wall clock is bounded by the slowest single scanner, and counts above about four buy very little. Nothing models or measures per-scanner cost.
+
+A `--shard-count` above the number of scanners leaves the surplus shards with nothing assigned. They run, produce a valid empty report, and merge correctly, so this is wasteful rather than wrong. It is allowed on purpose, so that a pipeline can parameterize its shard count without knowing how many scanners are registered — ASH ships ten built-in scanners, and any scanner plugins you register count too.
+
+#### Interaction with other options
+
+`--exclude-scanners` is carried through rather than replaced. A scanner you excluded stays excluded on every shard, instead of quietly running on whichever shard it happened to land on.
+
+Sharding cannot be combined with `--workspace`, and the combination is refused rather than ignored. Both spread one scan over more compute, but only sharding is recombinable: workspace mode's unified results file is assembled from the per-project payloads and carries none of each project's scan metadata, so a sharded workspace run would write results that merge has no provenance to verify coverage from — and an unverifiable partial scan reads as a clean one. Either scan the workspace whole on one executor, or give each CI job one project via `--source-dir` and shard that.
+
+In container mode both flags are forwarded to the in-container `ash` invocation rather than dropped.
+
 ### Examples
 
 ```bash
@@ -296,6 +335,94 @@ ash --workspace auto --dry-run
 
 # Tolerate project folders that have not been cloned on this machine
 ash --workspace ./dev.code-workspace --allow-missing-projects --dry-run
+
+# Run shard 0 of a three-way split; run indices 1 and 2 on other executors
+ash --shard-index 0 --shard-count 3 --output-dir ./shard-0
+```
+
+## Merge Command
+
+The `merge` command recombines the results of a sharded scan into one unified report. Each executor of `ash --shard-index k --shard-count n` writes its own `ash_aggregated_results.json`. This command checks that the shards given reconstruct exactly one whole scan, merges them, writes the unified results file and every requested report format, and exits with the verdict for the union.
+
+```bash
+ash merge --results <file-or-dir> [--results ...] --output-dir <dir> [options]
+```
+
+### Merge Options
+
+| Option                 | Description                                                                  | Default                                           | Environment Variable |
+|------------------------|------------------------------------------------------------------------------|---------------------------------------------------|----------------------|
+| `--results`            | A shard's `ash_aggregated_results.json`, or a directory containing one. Repeat once per shard. Required | | |
+| `--output-dir`         | Directory to write the merged results and reports to. Required                |                                                   | `ASH_OUTPUT_DIR`     |
+| `--output-formats`     | Comma-separated report formats to generate                                    | The formats the scan's own configuration asks for |                      |
+| `--min-severity`       | Minimum severity that counts as actionable for the exit code                  | `low`                                             |                      |
+| `--fail-on-findings`   | Exit non-zero when the merged report has actionable findings                   | The scan configuration's value, then `True`       |                      |
+| `--fail-on-incomplete-scanners` | Refuse the merge when a shard completed none of the scanners it owned, and exit 1 when any scanner in the union is `ERROR` or `MISSING` | The scan configuration's value, then `False` | |
+| `--log-level`          | Set the log level                                                             | `INFO`                                            |                      |
+| `--verbose`, `-v`      | Enable verbose logging                                                        | `False`                                           |                      |
+| `--debug`, `-d`        | Enable debug logging                                                          | `False`                                           |                      |
+| `--color`              | Enable/disable colorized output                                               | `True`                                            |                      |
+
+`--results` accepts a directory because CI artifact downloads land as directories. A directory is searched for `ash_aggregated_results.json` at `./`, `ash_output/`, and `.ash/ash_output/` in that order, and only then recursively. The recursive search must find exactly one file, so pointing `--results` at a parent holding every shard's artifact directory is refused with a message naming what it found — picking one of several would silently drop shards. Pass one `--results` per shard instead.
+
+The merged report does not depend on the order the shards are listed in. They are sorted by shard index before anything is merged, and the report's identity — its configuration, converter results, name, and description — comes from the lowest-indexed shard, because those are properties of the scan rather than of a shard.
+
+The reporters and severity thresholds come from the scan's own configuration, carried through the shard results, rather than from a config file resolved on the collector host. The collector job need not have the source tree checked out at all, and a config file found there could disagree with the one the shards actually scanned under, which would move the verdict without moving the findings.
+
+### What Merge Refuses
+
+Coverage is verified before anything is merged, so a bad set of shards fails without leaving a half-written report behind. A merge is refused when:
+
+- a results file carries no shard provenance, meaning it was not produced by a scan run with `--shard-index` and `--shard-count`
+- the shards disagree about the total shard count, which means they came from different runs or the count changed mid-flight
+- a shard index is missing, repeated, or outside the declared count
+- two shards claim the same scanner, which would count its findings once per shard
+- a scanner appears in some shard's results but no shard was assigned it — the executors resolved different scanner sets, so no shard ran it and the union has a hole
+- the shard that owned a scanner recorded no result for it, leaving another shard's skip marker as the only trace
+
+With `--fail-on-incomplete-scanners`, one more:
+
+- a shard owned at least one scanner and completed none of them — every scanner it was asked to run came back `ERROR`, came back `MISSING`, or produced no entry at all
+
+That is the distributed form of the false-clean exit code, and none of the checks above can see it: they read shard indices and scanner names, never a status. A shard whose every scanner was `MISSING` satisfies all of them, contributes no findings because it ran nothing, and merges into a report that reads as a complete scan of the whole tree. The refusal happens before the merged report is written, so a downstream job that consumes the artifact rather than the exit code cannot pick up a partial report either.
+
+This one check is opt-in while the rest are unconditional. The others describe a set of shards that cannot reconstruct one scan whatever the environment; this one describes an environment — four of the ten default scanners are `MISSING` on a machine without their tools — so refusing by default would break merges that have nothing wrong with them. A shard that owned nothing is never an offender: a shard count above the scanner count leaves surplus shards with an empty assignment, and a shard asked to run nothing cannot have failed to run it.
+
+An unstamped results file is refused rather than treated as "probably the only shard". A whole unsharded scan and one shard of five are indistinguishable without that record, and guessing would let `ash merge` accept a single scan as a complete merge of a five-way split.
+
+The merged output carries no shard provenance of its own; it records `merged_shard_count` and `merged_shard_indices` instead. Copying the base shard's assignment through would make the merged file look like shard 0 of n, so a second `ash merge` over an output directory would accept it and report a whole scan as one fifth of itself.
+
+### Merge Exit Codes
+
+| Code | Meaning                                                                       |
+|------|-------------------------------------------------------------------------------|
+| 0    | The shards reconstructed one whole scan and the union has no actionable findings |
+| 1    | The merge was refused, or a scanner in the union did not complete — the scan's findings are unknown, not absent |
+| 2    | The union has findings at or above `--min-severity`                            |
+
+Codes 1 and 2 are genuinely different situations. Code 2 means the merge succeeded and the union failed the threshold. Code 1 means no verdict was reached at all, which a CI gate must not read as a clean scan.
+
+An invocation missing a required option also exits 2, from the argument parser rather than from any finding, so confirm the command is well-formed before reading 2 as a statement about the code.
+
+### Examples
+
+```bash
+# Merge three shards' artifact directories downloaded by a CI collector job
+ash merge \
+  --results ./artifacts/shard-0 \
+  --results ./artifacts/shard-1 \
+  --results ./artifacts/shard-2 \
+  --output-dir ./ash-merged
+
+# Merge explicit results files and generate only the formats CI consumes
+ash merge \
+  --results ./shard-0/ash_aggregated_results.json \
+  --results ./shard-1/ash_aggregated_results.json \
+  --output-dir ./ash-merged \
+  --output-formats sarif,markdown
+
+# Fail the collector job only on medium-or-worse findings across the union
+ash merge --results ./shard-0 --results ./shard-1 --output-dir ./ash-merged --min-severity medium
 ```
 
 ## Config Command
@@ -818,6 +945,44 @@ The MCP server provides a standardized interface for AI assistants to:
 - **Configuration Support**: Full support for ASH configuration files and environment variables
 - **Result Filtering**: Filter results by severity, scanner, or response size
 
+### MCP Options
+
+| Option                                      | Description                                                                        | Default                |
+|---------------------------------------------|------------------------------------------------------------------------------------|------------------------|
+| `--transport`                               | Transport to serve on: `stdio`, `streamable-http`, or `sse`                         | `stdio`                |
+| `--host`                                    | Host to bind for HTTP transports                                                    | `127.0.0.1`            |
+| `--port`                                    | Port to bind for HTTP transports                                                    | `8000`                 |
+| `--mount-path`                              | HTTP path the transport listens on. With `--transport sse`, an unchanged default becomes `/sse` | `/mcp`     |
+| `--auth-header-name`                        | Required HTTP header name for single-tenant auth. Must be set with `--auth-header-value` | None              |
+| `--auth-header-value`                       | Expected value of `--auth-header-name`                                              | None                   |
+| `--stateless-http` / `--no-stateless-http`  | Handle each streamable-HTTP request independently instead of binding it to a server-held session | `--no-stateless-http` |
+| `--allowed-host`                            | Host header value to accept. Repeatable                                             | None                   |
+| `--log-level`                               | Set the log level                                                                   | `INFO`                 |
+| `--verbose`, `-v`                           | Enable verbose logging                                                              | `False`                |
+| `--debug`, `-d`                             | Enable debug logging                                                                | `False`                |
+| `--quiet`                                   | Hide all log output                                                                 | `True`                 |
+| `--color`                                   | Enable/disable colorized output                                                     | `True`                 |
+
+Setting `--auth-header-name` without `--auth-header-value`, or the reverse, is rejected: partial auth configuration would look configured and enforce nothing.
+
+Everything this command writes goes to stderr. On the `stdio` transport stdout is the JSON-RPC channel, so one human-readable line there makes the client fail to parse the stream.
+
+### Session Handling and Host Allowlisting
+
+`--stateless-http` makes the server handle each request on its own instead of binding it to a session the server is holding. Two situations require it: a load balancer that may route consecutive requests from one client to different replicas, where the next request reaches a replica that never saw the session; and managed runtimes that inject their own `Mcp-Session-Id`, which a stateful server refuses as a session it did not issue. The difference is observable — given a session id the server never issued, a stateful server answers `404` and a stateless one answers `200`.
+
+The flag is only valid with `--transport streamable-http`, and passing it on another transport is refused rather than ignored. `stdio` has a single implicit session and `sse` holds an open connection per client, so neither has a session to make stateless; silently dropping the flag would leave you running a stateful server and finding out only when a request landed on the wrong replica in production. `--no-stateless-http` is indistinguishable from the default, so it is accepted on every transport.
+
+`--allowed-host` is repeatable and names the Host header values the server will accept. The MCP SDK enables DNS-rebinding protection automatically when the bind address is loopback, and the allowlist it installs then holds only `127.0.0.1`, `localhost`, and `[::1]`; bind anywhere else and that autodetect leaves protection off. `--allowed-host` is how you keep protection on for a non-loopback bind, because supplying it replaces the SDK's autodetect with an explicit allowlist. That is the right posture behind a proxy whose hostname you know:
+
+```bash
+ash mcp --transport streamable-http --host 0.0.0.0 --port 8000 \
+  --stateless-http \
+  --allowed-host ash-mcp.internal.example.com
+```
+
+The `Origin` allowlist is left empty rather than mirroring the host list. `Origin` is a browser-supplied header, and an MCP server reached through a proxy has no reason to trust one.
+
 ### Usage
 
 The MCP server is typically configured in AI assistant clients (Amazon Q CLI, Claude Desktop, Cline) rather than run directly. See the [MCP Server Guide](mcp-server-guide.md) for detailed setup instructions.
@@ -874,3 +1039,51 @@ ASH returns the following exit codes:
 Code 4 is distinct from code 2 on purpose. Code 2 means a scan ran and found
 issues; code 4 means the workspace definition could not be used and no project
 was scanned at all.
+
+### An incomplete scan is not a clean scan
+
+By default the exit code is derived from finding counts alone, so a run where no
+scanner managed to start exits 0 — the same code as a clean scan, because no
+scanner produced any finding. A machine without cdk-nag, cfn-nag, grype and syft
+installed reports those four as `MISSING` and still exits 0.
+
+`--fail-on-incomplete-scanners` (config: `fail_on_incomplete_scanners: true`)
+makes that case exit 1 and prints which scanners did not run:
+
+```console
+$ ash scan --fail-on-incomplete-scanners
+ERROR (1) Exiting because the scan was incomplete: 4 selected scanner(s) did not run
+  cdk-nag: MISSING
+  cfn-nag: MISSING
+  grype: MISSING
+  syft: MISSING
+```
+
+Two statuses count as incomplete:
+
+- `ERROR` — the scanner ran and failed.
+- `MISSING` — the scanner's dependencies were unavailable, so it never ran.
+
+`SKIPPED` does not. A skipped scanner is one you did not select, which is also
+how sharding divides work between executors: each shard excludes the scanners its
+siblings own, and those land as `SKIPPED`. Gating on `SKIPPED` would fail every
+shard of a healthy sharded scan.
+
+The flag is off by default and turning it on is the only behaviour change. Two
+things to know before you enable it:
+
+- It takes precedence over `--fail-on-findings`. A run with both actionable
+  findings and an incomplete scanner exits 1, not 2, because clearing the
+  findings that were reported would not make the scan complete.
+- It is independent of `--fail-on-findings` in the other direction too:
+  `fail_on_findings: false` still reports an incomplete scan, since it says
+  nothing about whether the scanners ran.
+- `--scanners` does not mark the scanners it leaves out as excluded, so one whose
+  tool is absent still reports `MISSING` and will trip the gate even though you
+  did not ask for it. Narrow a gated run with `--exclude-scanners` instead, which
+  does mark them, or install the missing tools.
+
+`ash merge` uses the same vocabulary over the union of a sharded run: `0` clean,
+`1` the merge was refused so the union's findings are unknown, `2` findings at or
+above the threshold. See [Merge Exit Codes](#merge-exit-codes). A shard's own exit
+code is not the verdict for a sharded run — see [Sharding](#sharding).

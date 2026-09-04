@@ -1,0 +1,80 @@
+{
+  "_comment": [
+    "The 2026-08-28 observation, recorded so the defect can be replayed without",
+    "AWS, without Docker, and without a working scanner set.",
+    "",
+    "PROVENANCE, field by field. Be strict about this: a reconstruction quietly",
+    "treated as a capture is how a fixture starts asserting something nobody",
+    "measured.",
+    "",
+    "  scanner_statuses  TRANSCRIBED from the pull request comments in this",
+    "                    directory. The comment's markdown table IS the observed",
+    "                    artifact -- these five names and five statuses are read",
+    "                    straight off it, not inferred.",
+    "  verdict           QUOTED from the comment's first line ('## ASH scan passed').",
+    "  ash_exit_code     INFERRED, not observed. The gate discards ASH's exit code",
+    "                    after mapping it, so it was never logged. 0 is the only",
+    "                    code that _verdict() maps to 'passed', so the inference is",
+    "                    sound, but it is an inference.",
+    "  scanners_absent   DERIVED by differencing against the 10 scanners observed",
+    "                    in the local run of the same image. The comment lists only",
+    "                    5; these 5 never appeared at all.",
+    "",
+    "The full aggregated results JSON was NOT captured -- it lived in the Lambda's",
+    "ephemeral /tmp and is gone. Do not fabricate one and label it a capture."
+  ],
+
+  "date": "2026-08-28",
+  "region": "us-west-2",
+  "stack": "AshCodeCommitGateV2",
+  "ash_version": "v3.7.0",
+  "image_digest": "sha256:5898cea9c3e298dc8dea5638f86a0ee9c13f37768890807987206776bc8abf07",
+
+  "scanner_statuses": {
+    "bandit": "MISSING",
+    "checkov": "MISSING",
+    "detect-secrets": "ERROR",
+    "opengrep": "ERROR",
+    "semgrep": "MISSING"
+  },
+  "scanners_absent": ["cdk-nag", "cfn-nag", "grype", "npm-audit", "syft"],
+  "scanners_expected": 10,
+
+  "observations": [
+    {
+      "pull_request_id": 1,
+      "case": "vulnerable",
+      "comment_file": "comment-vulnerable.md",
+      "content_should_have_blocked": true,
+      "actual_verdict": "passed",
+      "inferred_ash_exit_code": 0,
+      "lambda_duration_ms": 81825.76,
+      "lambda_max_memory_mb": 641,
+      "note": "Carried bandit B602 HIGH, B605 HIGH, B307 MEDIUM. Locally the same image on the same fixture reported 3 actionable findings and exit 2."
+    },
+    {
+      "pull_request_id": 2,
+      "case": "clean",
+      "comment_file": "comment-clean.md",
+      "content_should_have_blocked": false,
+      "actual_verdict": "passed",
+      "inferred_ash_exit_code": 0,
+      "lambda_duration_ms": 9896.67,
+      "lambda_max_memory_mb": 659,
+      "note": "Correct verdict, but reached without scanning anything, so it is not evidence of a working gate. The two comment bodies differ only in the commit SHA."
+    }
+  ],
+
+  "why_this_replay_survives_the_fix": [
+    "The assertion is a conjunction, not a verdict comparison: a 'passed' verdict",
+    "is only legitimate when no scanner is MISSING or ERROR. That property is",
+    "checkable against any (verdict, scanner-table) pair.",
+    "",
+    "Today this record violates it -- five faulted scanners and a passing verdict.",
+    "After the exit-code fix, the same scanner table must yield a non-passing",
+    "verdict ('errored'), so the record still satisfies the invariant and the",
+    "replay keeps testing the thing it was built to test. Nothing about the fixture",
+    "needs rewriting when the fix lands; only the expected verdict changes, and",
+    "that value lives in expected.json."
+  ]
+}

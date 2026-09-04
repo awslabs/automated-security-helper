@@ -501,8 +501,17 @@ class TestListScanners:
         patches = [
             patch(f"{loader}.load_internal_plugins"),
             patch(f"{loader}.load_additional_plugin_modules"),
+            # Patches _loaded_scanner_classes, which is what mcp_list_scanners now calls.
+            #
+            # It used to reach ash_plugin_manager.plugin_modules("scanner"), and patching that
+            # is why this helper returned an empty list: the tool no longer goes through it.
+            # The move was deliberate -- plugin_modules memoises its resolved classes into
+            # _resolved_plugins and never invalidates, so the first resolve in a process fixes
+            # the answer for every later caller, and a server was measured reporting 10
+            # scanners while the registry held 13. Patching the seam the tool actually uses
+            # keeps this suite testing the tool rather than a path it abandoned.
             patch(
-                "automated_security_helper.plugins.ash_plugin_manager.plugin_modules",
+                "automated_security_helper.cli.mcp_tools._loaded_scanner_classes",
                 return_value=scanner_classes,
             ),
         ]
@@ -556,13 +565,16 @@ class TestListScanners:
     def test_an_external_plugin_distribution_is_loaded_as_a_plugin_module(self):
         loader = "automated_security_helper.plugins.loader"
 
+        # _loaded_scanner_classes is deliberately NOT stubbed here. This test's subject is
+        # that an installed distribution reaches the loader, and stubbing the function that
+        # calls the loader would remove exactly that. The loader mocks below return real
+        # dicts because _loaded_scanner_classes now consumes their "scanners" key.
         with (
-            patch(f"{loader}.load_internal_plugins"),
-            patch(f"{loader}.load_additional_plugin_modules") as load_extra,
+            patch(f"{loader}.load_internal_plugins", return_value={"scanners": []}),
             patch(
-                "automated_security_helper.plugins.ash_plugin_manager.plugin_modules",
-                return_value=[],
-            ),
+                f"{loader}.load_additional_plugin_modules",
+                return_value={"scanners": []},
+            ) as load_extra,
             patch(
                 "importlib.metadata.packages_distributions",
                 return_value={
@@ -573,8 +585,19 @@ class TestListScanners:
         ):
             mcp_list_scanners()
 
+        # Discovered package AND the vendored ones, in that order.
+        #
+        # The expectation used to be the discovered package alone. Loading both sources is
+        # deliberate: metadata discovery and the vendored list find different packages, so
+        # passing only the discovered one drops ferret, snyk and trivy from the answer the
+        # moment any ash_*_plugins distribution is installed.
         load_extra.assert_called_once_with(
-            ["automated_security_helper.plugin_modules.acme_scan"]
+            [
+                "automated_security_helper.plugin_modules.acme_scan",
+                "automated_security_helper.plugin_modules.ash_ferret_plugins",
+                "automated_security_helper.plugin_modules.ash_snyk_plugins",
+                "automated_security_helper.plugin_modules.ash_trivy_plugins",
+            ]
         )
 
     def test_unavailable_distribution_metadata_does_not_break_the_listing(self):
@@ -597,7 +620,7 @@ class TestListScanners:
         with (
             patch(f"{loader}.load_internal_plugins"),
             patch(
-                "automated_security_helper.plugins.ash_plugin_manager.plugin_modules",
+                "automated_security_helper.cli.mcp_tools._loaded_scanner_classes",
                 return_value=[PlainThingScanner],
             ),
             patch("importlib.metadata.packages_distributions", return_value={}),

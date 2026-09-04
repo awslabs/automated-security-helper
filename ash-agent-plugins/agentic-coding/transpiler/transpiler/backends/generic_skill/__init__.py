@@ -98,10 +98,14 @@ class GenericSkillBackend(BaseBackend):
                 }
 
         # If skills-ref is on PATH, run it for spec-compliance verification.
-        if shutil.which("skills-ref") is not None:
+        # The resolved absolute path goes in argv[0], not the bare name: a bare
+        # name is looked up again by the child against whatever PATH it inherits,
+        # so the binary that runs need not be the one found here.
+        skills_ref = shutil.which("skills-ref")
+        if skills_ref is not None:
             try:
                 subprocess.run(
-                    ["skills-ref", "validate", str(ctx.out.resolve())],
+                    [skills_ref, "validate", str(ctx.out.resolve())],
                     check=True, capture_output=True, timeout=30,
                 )
             except subprocess.CalledProcessError as e:

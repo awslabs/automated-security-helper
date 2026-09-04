@@ -94,6 +94,12 @@ dev = [
  "mcp>=2.1.1",
  "commitizen>=4.18.0",
  "httpx>=0.28.1,<1.0.0",
+ # The [server] extra, not bare moto: tests/unit/deploy exercises the deploy
+ # trees' helpers as SUBPROCESSES, the way a buildspec runs them. moto's in-process
+ # decorator patches botocore in the current interpreter only and cannot reach a
+ # child, so those tests need a real HTTP endpoint. The extra is what pulls in
+ # flask/flask-cors for moto.server.ThreadedMotoServer.
+ "moto[server]>=5.2.3,<6",
 ]
 
 [build-system]

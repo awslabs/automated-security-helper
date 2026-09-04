@@ -39,7 +39,15 @@ def _get_type_name(annotation: Any) -> str:
                 args = typing.get_args(annotation)
                 if args:
                     return _get_type_name(args[0])
-    except Exception:
+    except (AttributeError, TypeError):
+        # Falling through to the next branch is the intended handling: each of
+        # these blocks asks "is the annotation shaped like X?", and a no means try
+        # the next shape. Only the two errors such a probe can actually produce
+        # are caught -- AttributeError if a typing member is absent on the running
+        # interpreter, TypeError if get_origin/get_args/isinstance is handed
+        # something that is not a type. Catching Exception also swallowed anything
+        # raised by the recursive _get_type_name call below, which would put a
+        # wrong type name in published docs with no other symptom.
         pass
 
     # Handle Union types (Optional[X] = Union[X, None])
@@ -52,8 +60,8 @@ def _get_type_name(annotation: Any) -> str:
             if len(inner) == 1:
                 return _get_type_name(inner[0])
             return " | ".join(_get_type_name(a) for a in inner)
-    except Exception:
-        pass
+    except (AttributeError, TypeError):
+        pass  # Not a types.UnionType; see the Annotated block above.
 
     # typing.Union
     try:
@@ -63,8 +71,8 @@ def _get_type_name(annotation: Any) -> str:
             if len(inner) == 1:
                 return _get_type_name(inner[0])
             return " | ".join(_get_type_name(a) for a in inner)
-    except Exception:
-        pass
+    except (AttributeError, TypeError):
+        pass  # Not a typing.Union; see the Annotated block above.
 
     # Handle List[X]
     if origin is list:
@@ -80,8 +88,8 @@ def _get_type_name(annotation: Any) -> str:
             args = get_args(annotation)
             if args:
                 return _get_type_name(args[0])
-    except Exception:
-        pass
+    except (AttributeError, TypeError):
+        pass  # Not a typing.Optional; see the Annotated block above.
 
     # Enum types
     import enum
@@ -437,6 +445,7 @@ def generate_cli_docs() -> str:
     from automated_security_helper.cli.scan import run_ash_scan_cli_command
     from automated_security_helper.cli.image import build_ash_image_cli_command
     from automated_security_helper.cli.report import report_command
+    from automated_security_helper.cli.merge import merge_command
     from automated_security_helper.cli.config import config_app
     from automated_security_helper.cli.inspect import inspect_app
     from automated_security_helper.cli.main import _mcp_wrapper, get_genai_guide
@@ -479,6 +488,10 @@ def generate_cli_docs() -> str:
 
     # report command
     sections.append(render_command_section("report", report_command))
+
+    # merge command
+    sections.append(render_command_section("merge", merge_command,
+        "Merges the results of a sharded scan into one unified report."))
 
     # mcp command
     sections.append(render_command_section("mcp", _mcp_wrapper,

@@ -348,6 +348,79 @@ jobs:
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
+  # Deploy-tree AWS helpers: run them against a real moto endpoint.
+  #
+  # The boto3 rewrite replaced `aws s3 cp --recursive` and `aws ssm get-parameter`
+  # in the CDK buildspecs, because the ASH image those builds run in ships boto3
+  # and no AWS CLI. A deployed pipeline had failed all four shards at `aws: not
+  # found` AFTER a successful scan, so the scan stage went red and the merge never
+  # ran. The CDK tests assert the rendered template contains the right strings,
+  # which is what caught that -- but a string can be present and still wrong. A
+  # recursive download that reads only the first ListObjectsV2 page, flattens the
+  # key hierarchy, or writes outside its destination renders identically.
+  #
+  # So this job EXECUTES the command strings extracted from the committed
+  # deploy/cdk/templates/*.template.json against a moto server, plus the Terraform
+  # sibling helper, with every behavior test parametrized across both copies.
+  #
+  # WHY IT IS ITS OWN JOB WHEN unit-test ALREADY RUNS THESE: moto is a declared dev
+  # dependency, so `uv sync && uv run pytest` in the unit-test matrix does run this
+  # suite on all five OSes. That is good, and it is not sufficient -- the matrix's
+  # check is pytest's exit status, which stays 0 while the suite shrinks. Measured
+  # on this suite: marking one class skip, dropping one parametrization, or
+  # renaming one module out of the discovery pattern each deletes about a third of
+  # the coverage and leaves pytest exiting 0. scripts/verify_moto_server_suite.py
+  # asserts on the run instead -- a floor on tests executed, zero skips, both
+  # helper copies exercised, both modules present.
+  #
+  # Linux only, and deliberately: the buildspec commands under test are POSIX shell
+  # destined for a Linux CodeBuild container, and the suite skips those on Windows.
+  # The gate refuses ANY skip, so running it here is what makes "zero skips"
+  # meaningful. Python 3.12 only for the same reason the other gates pin it -- the
+  # unit-test matrix already covers this suite across every version.
+  # ---------------------------------------------------------------------------
+  deploy-aws-helpers:
+    name: deploy-tree AWS helpers (moto server)
+    runs-on: ubuntu-latest
+    # The suite's own slowest test uploads 1050 objects to force a second
+    # ListObjectsV2 page; the whole run measures ~30s at 4 workers. 15 leaves room
+    # for a slow runner without letting a hang sit for half an hour.
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-ash
+        with:
+          python-version: "3.12"
+          install-ash: "false"
+      # The suite needs the dev group, which is where moto[server] lives. The
+      # [server] extra is the part that provides ThreadedMotoServer; bare moto
+      # only patches botocore in-process and cannot reach the subprocesses these
+      # tests run.
+      - name: Install dependencies
+        run: uv sync
+      # No AWS credentials are configured for this job, and the fixture sets fake
+      # ones plus AWS_CONFIG_FILE/AWS_SHARED_CREDENTIALS_FILE pointing at paths
+      # that do not exist. Both matter: without AWS_ENDPOINT_URL a bare
+      # boto3.client("s3") resolves s3.amazonaws.com and really does send the
+      # request, so the fake credentials are the backstop and the suite has a test
+      # asserting the endpoint variable is what routes it to moto.
+      - name: Verify the deploy-tree AWS helpers against a moto server
+        run: uv run python scripts/verify_moto_server_suite.py --workers 4
+      # The gate writes its own report so a red run leaves per-test evidence
+      # rather than only the summary line that failed the step.
+      - name: Collect the suite report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: moto-server-suite-report
+          path: test-results/moto-server-suite.junit.xml
+          retention-days: 7
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
   # Install methods: method x OS x Python (matches ash-install-methods.yml)
   # ---------------------------------------------------------------------------
   install-validation:

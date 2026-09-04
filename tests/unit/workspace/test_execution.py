@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import subprocess  # nosec B404 -- builds throwaway git repositories for the changed-files gate
+import sys
 import threading
 import time
 from pathlib import Path
@@ -1110,33 +1111,84 @@ class TestWorkspaceOutput:
     ):
         """Pin the arithmetic by driving the clock instead of racing it.
 
-        The first ``monotonic()`` call in ``execute_workspace`` is the start
-        stamp; every later call here returns a fixed later instant, so the
-        recorded wall clock must be exactly the difference. ``calls`` is the
-        control: if the start stamp were ever *not* the first call, or the clock
-        were consulted only once, the subtraction below would be meaningless, so
-        the count is asserted rather than assumed.
+        WHY THIS IS NOT "first call is the start stamp"
+
+        It was, and that form failed on one CI row with ``Obtained: 0.0,
+        Expected: 42.5`` while passing on the other seventeen. The reason is that
+        ``monkeypatch.setattr`` on ``time.monotonic`` replaces the attribute on
+        the ``time`` MODULE, so the fake is process-global: thread-pool warmup,
+        logging and executor internals consult it too, and how many calls they
+        take before ``execute_workspace`` reaches its own ``started`` varies by
+        platform. When one of them consumed the single 100.0, the workspace's
+        start stamp became the same value as its end stamp and the difference
+        was exactly zero.
+
+        Note the old assertion ``calls[0] == 100.0`` still passed in that state,
+        because it only proved SOMETHING read 100.0 first -- not that the
+        workspace's own start stamp was that read. A control that cannot fail on
+        the thing it is guarding is not a control.
+
+        The fix is to stop patching the global clock at all. This module reads
+        ``time.monotonic`` and nothing else from ``time`` -- nine call sites, no
+        ``sleep``, no ``time()`` -- so replacing the module's own ``time``
+        reference with a stand-in confines the fake to the code under test.
+        Thread pools, logging and executors keep the real clock and cannot
+        consume a read.
+
+        That restores the premise the exact assertion needs: among this module's
+        own calls, ``execute_workspace``'s ``started`` really is the first,
+        because the per-project stamps are taken by workers it launches later.
+        So the recorded wall clock must be exactly the difference, and a
+        constant fails.
+
+        A weaker form was tried first -- a strictly increasing clock, asserting
+        only that the result was *some* difference of two observed reads. It was
+        rejected on review: with reads one apart, every integer up to the call
+        count is a valid difference, so a hardcoded constant passes as soon as
+        enough reads happen. It survived a mutation check only by luck of how
+        many calls that run made.
+
+        The control records the CALLER, not the value. `calls[0] == 100.0` would be
+        a tautology: the fake returns 100.0 exactly when `calls` is empty, so the
+        first recorded value is 100.0 in every possible execution. Asserting it
+        proves nothing, and giving it a message about the start stamp moving is
+        worse than omitting it, because that message can never fire. Recording
+        which function took each read is what makes "execute_workspace's stamp is
+        the first one" falsifiable.
+
+        WHAT THIS STILL DOES NOT CATCH, stated so nobody assumes otherwise
+
+        Moving ``started`` LATER inside ``execute_workspace`` -- after the plugin
+        prewarm, say, or after the changed-file gate loop -- leaves it the first
+        read by this module and by this function, so the caller check passes and
+        the difference is still exactly 42.5. Production would then under-report
+        the wall clock by however long that skipped work took, which under
+        ``--precommit`` is real seconds. This test pins "the field is a
+        subtraction of the first module read from a later one"; it does not pin
+        "the first read happens before all the work". A hardcoded 42.5 also
+        passes, for the same reason any exact-value assertion does.
+        WHY THE PATCH TARGETS THE NAME AND NOT THE ATTRIBUTE
 
         The stand-in replaces the ``time`` *name* in ``execution``'s namespace
         rather than the ``monotonic`` attribute on the module that name refers
-        to. ``execution.time`` is the stdlib ``time`` module itself, so patching
-        ``execution.time.monotonic`` mutates it process-wide and every unrelated
-        caller of ``time.monotonic()`` lands in ``calls``. That defeats the
-        control instead of tripping it: a foreign call consumes the ``100.0``,
-        so ``calls[0] == 100.0`` and ``len(calls) >= 2`` still hold while
-        ``execute_workspace`` reads ``142.5`` for both of its own stamps and
-        records a difference of ``0.0``. The test then failed only once enough
-        other tests ran first to warm the plugin caches, which made it look like
-        flake rather than an order-dependent patch. Keep the patch narrow:
+        to. ``execution.time`` IS the stdlib ``time`` module, so patching
+        ``execution.time.monotonic`` would mutate it process-wide and every
+        unrelated caller of ``time.monotonic()`` would land in ``calls``. That
+        defeats the control instead of tripping it: a foreign call consumes the
+        ``100.0``, so ``execute_workspace`` reads ``142.5`` for both of its own
+        stamps and records a difference of ``0.0``. The failure surfaces only
+        once enough other tests have run to warm the plugin caches, which reads
+        as flake rather than as an order-dependent patch. Keep the patch narrow:
         ``execution`` only ever uses ``time.monotonic``, so a stand-in exposing
-        that one name is sufficient, and ``calls`` records solely the calls made
-        by the code under test.
+        that one name is sufficient, and ``calls`` then records solely the reads
+        made by the code under test.
         """
-        calls: List[float] = []
+        calls: List[tuple[str, float]] = []
 
         def fake_monotonic() -> float:
+            caller = sys._getframe(1).f_code.co_name
             value = 100.0 if not calls else 142.5
-            calls.append(value)
+            calls.append((caller, value))
             return value
 
         monkeypatch.setattr(
@@ -1146,7 +1198,10 @@ class TestWorkspaceOutput:
         _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
         outcome = _run(tmp_path, plan)
         assert len(calls) >= 2, "the clock was consulted too few times to subtract"
-        assert calls[0] == 100.0
+        assert calls[0] == ("execute_workspace", 100.0), (
+            "the module's first clock read was not execute_workspace's start stamp, "
+            f"so the subtraction below is not the one under test: {calls!r}"
+        )
         assert outcome.payload.wall_clock_seconds == pytest.approx(42.5)
 
     def test_the_payload_status_is_completed(self, tmp_path):

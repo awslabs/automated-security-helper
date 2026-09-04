@@ -536,6 +536,9 @@ def _assemble_run_command(
     python_based_plugins_only: bool,
     cleanup: bool,
     inspect: bool,
+    # See fail_on_incomplete_scanners at the end of this signature: its sibling,
+    # kept there rather than here only because it needs a default and every
+    # parameter between the two has none.
     fail_on_findings: bool | None,
     phases: List,
     scanners: List[str],
@@ -550,10 +553,24 @@ def _assemble_run_command(
     container_network: str = "bridge",
     workspace_relative_file: str | None = None,
     allow_missing_projects: bool = False,
+    shard_index: int | None = None,
+    shard_count: int | None = None,
+    fail_on_incomplete_scanners: bool | None = None,
 ) -> List[str]:
     """Assemble the full `docker run` command list.
 
     Args:
+        fail_on_incomplete_scanners: Whether the in-container scan should fail
+            when a selected scanner did not complete, or None for unset. Defaults
+            to None so that the many existing callers -- most of them tests
+            building a command from a kwargs helper -- keep working; a required
+            parameter here buys nothing, because the host recomputes the verdict
+            from the results it reads back either way.
+        shard_index: Zero-based shard index, or None for an unsharded scan.
+        shard_count: Total shard count, or None. Emitted as a pair or not at all:
+            the in-container CLI refuses a lone flag, so emitting one without the
+            other would turn a host-side selection into a container-side usage
+            error with no obvious cause.
         workspace_relative_file: In workspace mode, the workspace definition's
             path relative to *source_dir* -- which is the workspace root, and is
             what gets mounted at ``/src``. The in-container invocation then uses
@@ -650,6 +667,15 @@ def _assemble_run_command(
         ash_args.append("--fail-on-findings")
     elif fail_on_findings is not None:
         ash_args.append("--no-fail-on-findings")
+    # Forwarded so the in-container scan reaches the same verdict the host will.
+    # The host recomputes the exit code from the results it reads back, so a
+    # dropped flag would not change the final code -- but it would make the
+    # container print a clean summary for a scan the host then fails, and the
+    # container's log is what an operator reads first.
+    if fail_on_incomplete_scanners:
+        ash_args.append("--fail-on-incomplete-scanners")
+    elif fail_on_incomplete_scanners is not None:
+        ash_args.append("--no-fail-on-incomplete-scanners")
 
     for phase in phases:
         ash_args.extend(["--phases", phase.value if hasattr(phase, "value") else str(phase)])
@@ -678,6 +704,20 @@ def _assemble_run_command(
     if strategy:
         ash_args.extend(
             ["--strategy", strategy.value if hasattr(strategy, "value") else str(strategy)]
+        )
+
+    # Both or neither, and not via the ASH_SHARD_* environment variables: this
+    # command forwards only a fixed set of variables into the container, so a
+    # matrix that set the env vars on the host would otherwise get an unsharded
+    # container scan while every job believed it was one shard of several.
+    if shard_index is not None and shard_count is not None:
+        ash_args.extend(
+            [
+                "--shard-index",
+                str(shard_index),
+                "--shard-count",
+                str(shard_count),
+            ]
         )
 
     ash_args.append("--no-show-summary")
@@ -735,6 +775,7 @@ def run_ash_container(
     debug: bool = False,
     color: bool = True,
     fail_on_findings: bool | None = None,
+    fail_on_incomplete_scanners: bool | None = None,
     # Container-specific args
     build: bool = True,
     run: bool = True,
@@ -751,6 +792,8 @@ def run_ash_container(
     container_network: str = "bridge",
     workspace_relative_file: str | None = None,
     allow_missing_projects: bool = False,
+    shard_index: int | None = None,
+    shard_count: int | None = None,
 ):
     """Build and run the ASH container image.
 
@@ -776,6 +819,11 @@ def run_ash_container(
             rather than a project, and the container resolves the workspace and
             scans each project below the single /src mount.
         allow_missing_projects: Passed through to the in-container invocation.
+        shard_index: Zero-based shard index, forwarded to the in-container
+            invocation. Forwarded rather than dropped because dropping it would
+            have every shard scan the whole repository, and merging does not
+            deduplicate -- see _run_container_mode's docstring.
+        shard_count: Total shard count, forwarded alongside shard_index.
 
     Returns:
         CompletedProcess: The result of the container execution
@@ -981,6 +1029,7 @@ def run_ash_container(
             cleanup=cleanup,
             inspect=inspect,
             fail_on_findings=fail_on_findings,
+            fail_on_incomplete_scanners=fail_on_incomplete_scanners,
             phases=phases,
             scanners=scanners,
             exclude_scanners=exclude_scanners,
@@ -994,6 +1043,8 @@ def run_ash_container(
             container_network=container_network,
             workspace_relative_file=workspace_relative_file,
             allow_missing_projects=allow_missing_projects,
+            shard_index=shard_index,
+            shard_count=shard_count,
         )
 
         return _execute_container(run_cmd, debug=debug)
