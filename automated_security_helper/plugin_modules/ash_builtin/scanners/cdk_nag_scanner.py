@@ -448,6 +448,15 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                     ],
                     outdir=outdir,
                     include_compliant_checks=config_options.include_compliant_checks,
+                    # A template synthesized by a CDK app records that app's reviewed
+                    # cdk-nag suppressions in its own resource metadata, and cdk-nag 3.x
+                    # does not read them back when it re-scans the template. Honoring them
+                    # is therefore ASH's job; gating on ignore_suppressions keeps the flag
+                    # meaning what it says, which is that an audit sees everything the
+                    # repository accepted, including what it accepted in-band.
+                    honor_template_suppressions=not getattr(
+                        self.context, "ignore_suppressions", False
+                    ),
                 )
                 if nag_result_dict is None:
                     # Not counted as a failure: a non-CloudFormation file in the scan set is

@@ -6,6 +6,7 @@ import inspect
 import re
 import json
 import threading
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Dict, List, Literal
 
@@ -13,6 +14,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactContent,
     ArtifactLocation,
     Kind,
+    Kind1,
     Level,
     Message,
     Message1,
@@ -21,6 +23,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     PropertyBag,
     Region,
     Result,
+    Suppression,
 )
 from automated_security_helper.utils.cfn_template_model import (
     CloudFormationTemplateModel,
@@ -179,6 +182,81 @@ def _level_and_kind(
     return Level.none, Kind.informational
 
 
+def _template_suppression_reason(cfn_resource, rule_id: str) -> str | None:
+    """The reason the scanned template itself gives for suppressing ``rule_id`` here.
+
+    Returns None when this resource declares no suppression covering the rule.
+
+    WHY THIS IS NEEDED AT ALL
+    -------------------------
+    A CloudFormation template synthesized by a CDK app that ran cdk-nag carries that
+    app's reviewed suppressions in-band, as ``Metadata.cdk_nag.rules_to_suppress`` on
+    each resource. That is where ``NagSuppressions`` writes them, and once the app has
+    been synthesized it is the ONLY record of them that survives into the template --
+    the TypeScript that declared them is not part of what gets scanned.
+
+    cdk-nag 2.x honored those on a re-scan, because the packs were aspects that read
+    construct metadata. From 3.0.0 the packs are ``IPolicyValidationPlugin``s that judge
+    the synthesized template, and they do not read that key: 3.x only ever WRITES it, via
+    ``WriteNagSuppressionsToCloudFormationAspect`` and the ``writeSuppressionsToCloudFormation``
+    pack property. There is no ``NagSuppressions`` class in 3.x to read one back.
+
+    The metadata is not lost on the way in -- ``CfnInclude`` copies it into the wrapper
+    assembly, and it is present in the template CDK hands the plugin. The plugin simply
+    never looks. So a template whose author wrote a reason for every accepted finding
+    gets all of them reported back as unexplained violations, and the reason they went to
+    the trouble of writing is sitting in the same file.
+
+    WHY A SUPPRESSION AND NOT A DROP
+    --------------------------------
+    The finding stays in the report and keeps the level cdk-nag gave it; only a
+    ``suppressions`` entry is added, carrying the template's own reason as the
+    justification. That is how ASH represents every other suppression, so these land in
+    the suppressed column and stay auditable -- a reviewer can see what was accepted and
+    on what grounds. Dropping them would make the accepted set invisible, which is the
+    failure mode the rest of this module is written against.
+
+    Honoring this is gated by the caller on ``--ignore-suppressions``, matching how ASH
+    treats its own inline ``ash-ignore`` directives: someone auditing a repository with
+    that flag wants to see what the template silently accepted.
+    """
+    metadata = (cfn_resource.model_extra or {}).get("Metadata")
+    if not isinstance(metadata, Mapping):
+        return None
+    cdk_nag_metadata = metadata.get("cdk_nag")
+    if not isinstance(cdk_nag_metadata, Mapping):
+        return None
+    declared = cdk_nag_metadata.get("rules_to_suppress")
+    if not isinstance(declared, (list, tuple)):
+        return None
+
+    # cdk-nag reports a wildcard-scoped finding with its scope appended, as
+    # ``AwsSolutions-IAM5[Resource::*]``, while the suppression that covers it is written
+    # against the bare ``AwsSolutions-IAM5``. A bare-id suppression covering every
+    # appliesTo variant is cdk-nag's own semantics, so the bracketed qualifier is stripped
+    # before comparing. Matching the full string only would leave the granular findings
+    # unsuppressed, and on a real template those are the majority of them -- the fix would
+    # look applied and change almost nothing.
+    base_rule_id = rule_id.split("[", 1)[0]
+
+    for entry in declared:
+        if not isinstance(entry, Mapping):
+            continue
+        suppressed_id = entry.get("id")
+        if not isinstance(suppressed_id, str):
+            continue
+        if suppressed_id != rule_id and suppressed_id != base_rule_id:
+            continue
+        reason = entry.get("reason")
+        if isinstance(reason, str) and reason.strip():
+            return reason.strip()
+        # cdk-nag requires a reason, but a hand-edited template can omit it. The
+        # suppression is still honored -- the author's intent is unambiguous -- and the
+        # missing rationale is stated rather than passed off as one.
+        return "No reason provided"
+    return None
+
+
 def _violations_from_validation_report(
     report_path: Path,
 ) -> tuple[Dict[str, List["_NagFinding"]], str | None]:
@@ -291,6 +369,7 @@ def run_cdk_nag_against_cfn_template(
     outdir: Path | None = None,
     include_compliant_checks: bool = False,
     stack_name: str = "ASHCDKNagScanner",
+    honor_template_suppressions: bool = True,
 ) -> CdkNagWrapperResponse | None:
     if nag_packs is None:
         nag_packs = ["AwsSolutionsChecks"]
@@ -539,7 +618,36 @@ def run_cdk_nag_against_cfn_template(
                         rule_level=line.rule_level,
                         exception_reason=line.exception_reason,
                     )
+                    # The template may already say why this finding is accepted. See
+                    # _template_suppression_reason: cdk-nag 3.x cannot read its own in-band
+                    # suppressions back off a template it is re-scanning, so if this is not
+                    # done here the author's reason is never applied to anything.
+                    template_suppression = (
+                        _template_suppression_reason(cfn_resource, line.rule_id)
+                        if honor_template_suppressions
+                        else None
+                    )
+                    if template_suppression is not None:
+                        ASH_LOGGER.verbose(
+                            f"Suppressing rule '{line.rule_id}' on resource "
+                            f"'{resource_log_id}' in '{cfn_file_rel_path}' based on the "
+                            f"template's own cdk_nag metadata: "
+                            f"[yellow]{template_suppression}[/yellow]"
+                        )
                     finding = Result(
+                        suppressions=(
+                            [
+                                Suppression(
+                                    kind=Kind1.inSource,
+                                    justification=(
+                                        "(ASH cdk-nag in-template suppression) "
+                                        f"{template_suppression}"
+                                    ),
+                                )
+                            ]
+                            if template_suppression is not None
+                            else None
+                        ),
                         properties=PropertyBag(
                             cdk_nag_finding=line.as_dict(),
                             cfn_resource=cfn_resource_dict,

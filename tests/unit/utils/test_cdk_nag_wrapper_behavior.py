@@ -51,7 +51,7 @@ from pathlib import Path
 
 import pytest
 
-from automated_security_helper.schemas.sarif_schema_model import Kind, Level
+from automated_security_helper.schemas.sarif_schema_model import Kind, Kind1, Level
 from automated_security_helper.utils import cdk_nag_wrapper
 from automated_security_helper.utils.cdk_nag_wrapper import (
     CdkNagWrapperResponse,
@@ -1264,3 +1264,292 @@ def test_shortest_name_failure_falls_back_to_the_posix_path(
 
     assert stub.calls > failures, "the stub should have been called past its failures"
     assert len(response.results["AwsSolutions"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# In-band suppressions: Metadata.cdk_nag.rules_to_suppress
+# ---------------------------------------------------------------------------
+#
+# A template synthesized by a CDK app that ran cdk-nag carries that app's reviewed
+# suppressions in its own resource metadata, because that is where NagSuppressions writes
+# them and it is the only record that survives into the committed template.
+#
+# cdk-nag 2.x honored them on a re-scan; its packs were aspects that read construct
+# metadata. The 3.x packs are IPolicyValidationPlugins that judge the synthesized template
+# and never read that key -- 3.x has no NagSuppressions class at all and only ever WRITES
+# the metadata, via WriteNagSuppressionsToCloudFormationAspect. CfnInclude does copy the
+# metadata through, so it is present and simply unread.
+#
+# Measured against the real library at cdk-nag 3.0.2 / aws-cdk-lib 2.267.0: a template
+# resource carrying `AwsSolutions-SMG4` in rules_to_suppress has that exact rule reported
+# back as a violation with `Exception Reason: N/A`. So without the wrapper honoring it, an
+# author's reason applies to nothing.
+
+
+SUPPRESSED_RULE = "AwsSolutions-S1"
+SUPPRESSION_REASON = (
+    "Access logs for this bucket are delivered by the bucket in front of it, so pointing "
+    "it at itself would recurse."
+)
+WILDCARD_SUPPRESSION_REASON = (
+    "The only wildcard is object access inside a bucket this stack creates."
+)
+
+# Shaped like CDK synth output. ``MyDataBucket`` suppresses two rules; ``MyDataBucketPolicy``
+# suppresses nothing and is the per-resource negative control -- a suppression must not leak
+# from one resource to another in the same template.
+TEMPLATE_WITH_SUPPRESSIONS_YAML = f"""Resources:
+  MyDataBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: placeholder-name
+  MyDataBucket:
+    Type: AWS::S3::Bucket
+    Metadata:
+      cdk_nag:
+        rules_to_suppress:
+          - id: {SUPPRESSED_RULE}
+            reason: "{SUPPRESSION_REASON}"
+          - id: AwsSolutions-IAM5
+            reason: "{WILDCARD_SUPPRESSION_REASON}"
+    Properties:
+      BucketName: placeholder-name
+"""
+
+
+@pytest.fixture
+def suppressing_template_file(tmp_path):
+    path = tmp_path / "suppressed-s3-template.yaml"
+    path.write_text(TEMPLATE_WITH_SUPPRESSIONS_YAML, encoding="utf-8")
+    return path
+
+
+def _only_finding(response, pack="AwsSolutions"):
+    findings = response.results[pack]
+    assert len(findings) == 1, f"expected exactly 1 finding, got {len(findings)}"
+    return findings[0]
+
+
+def test_a_rule_the_template_suppresses_is_marked_suppressed_with_the_templates_reason(
+    cdk_doubles, suppressing_template_file, outdir
+):
+    """The template's own reason becomes the finding's suppression justification."""
+    cdk_doubles.report_text = _one_violation_report(rule_name=SUPPRESSED_RULE)
+
+    response = _run(suppressing_template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    finding = _only_finding(response)
+    assert finding.suppressions is not None, (
+        "the template suppresses this exact rule on this exact resource; reporting it as "
+        "unsuppressed makes the author's recorded reason apply to nothing"
+    )
+    assert len(finding.suppressions) == 1
+    suppression = finding.suppressions[0]
+    assert suppression.kind == Kind1.inSource
+    assert SUPPRESSION_REASON in suppression.justification
+    # The prefix names where the suppression came from, so a reader of the report can tell
+    # a template-declared acceptance from an .ash.yaml one.
+    assert suppression.justification.startswith(
+        "(ASH cdk-nag in-template suppression) "
+    )
+
+
+def test_a_suppressed_finding_keeps_the_level_and_kind_cdk_nag_gave_it(
+    cdk_doubles, suppressing_template_file, outdir
+):
+    """Suppression is recorded alongside the verdict, not by rewriting it.
+
+    ASH decides "suppressed" from the ``suppressions`` field and severity from ``level``, so
+    demoting the level here would throw away what cdk-nag actually said and make these
+    findings render differently from every other suppressed finding in the report.
+    """
+    cdk_doubles.report_text = _one_violation_report(rule_name=SUPPRESSED_RULE)
+
+    finding = _only_finding(
+        _run(suppressing_template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+    )
+
+    assert finding.level == Level.error
+    assert finding.kind == Kind.fail
+    assert finding.properties.model_extra["cdk_nag_finding"]["compliance"] == (
+        "Non-Compliant"
+    )
+
+
+def test_a_bare_rule_suppression_covers_the_applies_to_variant(
+    cdk_doubles, suppressing_template_file, outdir
+):
+    """``AwsSolutions-IAM5`` suppresses ``AwsSolutions-IAM5[Resource::*]``.
+
+    cdk-nag reports a wildcard-scoped finding with its scope appended and treats a bare-id
+    suppression as covering every variant. Comparing the full rule id only would leave the
+    granular findings unsuppressed -- on a real synthesized template those are the majority,
+    so the honoring would look implemented and change almost nothing.
+    """
+    cdk_doubles.report_text = _one_violation_report(
+        rule_name="AwsSolutions-IAM5[Resource::*]"
+    )
+
+    finding = _only_finding(
+        _run(suppressing_template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+    )
+
+    assert finding.ruleId == "AwsSolutions-IAM5[Resource::*]", (
+        "the reported rule id must be preserved verbatim; only the match is widened"
+    )
+    assert finding.suppressions is not None
+    assert WILDCARD_SUPPRESSION_REASON in finding.suppressions[0].justification
+
+
+def test_a_rule_the_template_does_not_suppress_stays_actionable(
+    cdk_doubles, suppressing_template_file, outdir
+):
+    """The negative control: honoring metadata must not suppress everything.
+
+    Without this, a bug that returned a reason unconditionally would pass every other test
+    in this section while silencing the whole scanner.
+    """
+    cdk_doubles.report_text = _one_violation_report(rule_name="AwsSolutions-S10")
+
+    finding = _only_finding(
+        _run(suppressing_template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+    )
+
+    assert finding.suppressions is None
+
+
+def test_a_suppression_on_one_resource_does_not_cover_another_resource(
+    cdk_doubles, suppressing_template_file, outdir
+):
+    """Matching is per resource, not per template.
+
+    ``MyDataBucketPolicy`` declares no suppressions, so the same rule that is accepted on
+    ``MyDataBucket`` must still be reported against the policy.
+    """
+    cdk_doubles.report_text = _one_violation_report(
+        rule_name=SUPPRESSED_RULE,
+        construct_paths=[_construct_path(logical_id="MyDataBucketPolicy")],
+    )
+
+    finding = _only_finding(
+        _run(suppressing_template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+    )
+
+    assert "MyDataBucketPolicy" in finding.properties.tags
+    assert finding.suppressions is None
+
+
+def test_honoring_can_be_turned_off_so_ignore_suppressions_still_shows_everything(
+    cdk_doubles, suppressing_template_file, outdir
+):
+    """``honor_template_suppressions=False`` reports the finding unsuppressed.
+
+    This is what ``--ignore-suppressions`` is plumbed to. An audit run with that flag has to
+    see what the template accepted in-band, otherwise the flag stops meaning "show me
+    everything" as soon as the scanned repository is CDK output.
+    """
+    cdk_doubles.report_text = _one_violation_report(rule_name=SUPPRESSED_RULE)
+
+    finding = _only_finding(
+        _run(
+            suppressing_template_file,
+            outdir,
+            nag_packs=["AwsSolutionsChecks"],
+            honor_template_suppressions=False,
+        )
+    )
+
+    assert finding.suppressions is None
+
+
+def test_a_template_with_no_cdk_nag_metadata_is_unaffected(
+    cdk_doubles, template_file, outdir
+):
+    """The ordinary case stays ordinary.
+
+    ``template_file`` carries no ``Metadata`` at all, which is what a hand-written template
+    looks like. Locked down explicitly so the metadata lookup cannot start inventing
+    suppressions for templates that declare none.
+    """
+    cdk_doubles.report_text = _one_violation_report(rule_name=SUPPRESSED_RULE)
+
+    finding = _only_finding(
+        _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+    )
+
+    assert finding.suppressions is None
+
+
+def test_a_suppression_with_no_reason_is_honored_and_says_the_reason_is_missing(
+    cdk_doubles, tmp_path, outdir
+):
+    """cdk-nag requires a reason; a hand-edited template can still omit one.
+
+    The suppression is honored because the author's intent is unambiguous, but the report
+    says the rationale is missing rather than presenting an empty string as one.
+    """
+    path = tmp_path / "reasonless-template.yaml"
+    path.write_text(
+        """Resources:
+  MyDataBucket:
+    Type: AWS::S3::Bucket
+    Metadata:
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-S1
+    Properties:
+      BucketName: placeholder-name
+""",
+        encoding="utf-8",
+    )
+    cdk_doubles.report_text = _one_violation_report(rule_name=SUPPRESSED_RULE)
+
+    finding = _only_finding(_run(path, outdir, nag_packs=["AwsSolutionsChecks"]))
+
+    assert finding.suppressions is not None
+    assert finding.suppressions[0].justification == (
+        "(ASH cdk-nag in-template suppression) No reason provided"
+    )
+
+
+@pytest.mark.parametrize(
+    "metadata_block, why",
+    [
+        ("    Metadata: not-a-mapping\n", "Metadata is a scalar"),
+        ("    Metadata:\n      cdk_nag: not-a-mapping\n", "cdk_nag is a scalar"),
+        (
+            "    Metadata:\n      cdk_nag:\n        rules_to_suppress: not-a-list\n",
+            "rules_to_suppress is a scalar",
+        ),
+        (
+            "    Metadata:\n      cdk_nag:\n        rules_to_suppress:\n          - just-a-string\n",
+            "an entry is not a mapping",
+        ),
+        (
+            "    Metadata:\n      cdk_nag:\n        rules_to_suppress:\n          - reason: no id here\n",
+            "an entry has no id",
+        ),
+    ],
+)
+def test_malformed_suppression_metadata_is_ignored_not_raised(
+    cdk_doubles, tmp_path, outdir, metadata_block, why
+):
+    """Unparseable metadata leaves the finding actionable instead of failing the scan.
+
+    A template is arbitrary user input, and cdk-nag's metadata is a convention rather than a
+    validated schema. Raising here would turn one malformed resource into a failed target,
+    which this module reports as "the template was NOT scanned" -- a worse outcome than
+    reporting the finding.
+    """
+    path = tmp_path / f"malformed-{abs(hash(why))}.yaml"
+    path.write_text(
+        "Resources:\n  MyDataBucket:\n    Type: AWS::S3::Bucket\n"
+        + metadata_block
+        + "    Properties:\n      BucketName: placeholder-name\n",
+        encoding="utf-8",
+    )
+    cdk_doubles.report_text = _one_violation_report(rule_name=SUPPRESSED_RULE)
+
+    finding = _only_finding(_run(path, outdir, nag_packs=["AwsSolutionsChecks"]))
+
+    assert finding.suppressions is None, f"{why}: should be ignored, not honored"
