@@ -610,6 +610,1336 @@ global_settings:
         will meet it rather than only here -- a scanned repository that resolves
         dependencies from a registry on another port fails to fetch, and the
         TaskSecurityGroupId output is the handle for authorizing that port.
+
+    # === cdk-nag on the synthesized CloudFormation templates ===
+    #
+    # WHY THIS BLOCK ARRIVED SO LATE, WHEN checkov AND cfn-nag WERE DONE ABOVE
+    #
+    # cdk-nag reports MISSING in the `ash / SAST, SCA, and IaC Scan` check, because
+    # that leg installs no `cdk` extra and the scanner needs aws-cdk-lib, cdk-nag and
+    # constructs to run at all. A MISSING scanner contributes no findings, so whoever
+    # wrote the checkov and cfn-nag blocks above was reading a report in which cdk-nag
+    # had produced nothing. Its 437 findings on these same five templates were never
+    # visible to that work. They surface only in a run where the extra is installed,
+    # which is the run this block was derived from.
+    #
+    # WHAT ASH EVALUATES HERE THAT THE TEMPLATES WERE NOT AUTHORED AGAINST
+    #
+    # deploy/cdk/bin/ash.ts:76 registers exactly one nag pack, AwsSolutionsChecks. That
+    # is the pack the CDK app is gated on, the pack whose findings were fixed or
+    # suppressed in deploy/cdk/lib/ash-nag-suppressions.ts, and the pack these
+    # templates were designed to pass. This repository's own scan config enables four
+    # more -- HIPAASecurityChecks, NIST80053R4Checks, NIST80053R5Checks and
+    # PCIDSS321Checks -- so the self-scan judges these templates against three
+    # compliance regimes and a payment-card standard that no part of this project
+    # claims to implement.
+    #
+    # Saying that plainly matters more than it might look. Clearing a HIPAA or PCI rule
+    # id is not the same as being HIPAA- or PCI-compliant, and suppressing one is not a
+    # claim of non-compliance either. ASH has adopted no compliance posture; these
+    # packs are enabled here because they exercise more of the scanner. The entries
+    # below therefore say what each rule wants, what satisfying it would cost, and why
+    # it is out of scope for a template an adopter parameterizes -- not that a risk was
+    # weighed and accepted against a control ASH is audited on.
+    #
+    # 116 of the 437 findings are already suppressed and do not appear below. Those
+    # carry reviewed reasons in the templates' own Metadata.cdk_nag blocks, written by
+    # ash-nag-suppressions.ts and honored by ASH; 95 of them are the CodeBuild and ECR
+    # wildcard grants and 12 the pipeline's object-level bucket access. The 321 that
+    # remain are what this block covers, and they fall into three kinds an audit reader
+    # should not have to squint to tell apart:
+    #
+    #   * 284 compliance-pack findings -- real rules from the four packs above,
+    #     evaluating properties these templates deliberately leave to the adopter.
+    #   * 15 rules that THREW during validation and were never evaluated. Not findings
+    #     about the template at all; see the block above them.
+    #   * 22 from CDK's own `CloudFormation Validate` plugin, which cdk-nag reports
+    #     alongside its packs and ASH attributes to cdk-nag. Also not findings about
+    #     the template; see the block above them.
+    #
+    # Worth recording because it contradicts a plausible reading of the severity
+    # columns: the 31 findings ASH counts at MEDIUM are NOT the same set as the
+    # not-a-compliance-finding group. 27 of the 37 in that group are Warning-level and
+    # so land in MEDIUM, but AwsSolutions-IAM5, AwsSolutions-EC23 and the eight
+    # EC2Restricted* crashes are Error-level, while the four VPCDefaultSecurityGroupClosed
+    # findings are Warning-level genuine compliance results. Split the categories by
+    # message text, not by severity.
+    #
+    # PATHS ARE NAMED FILE BY FILE, AND SO ARE RULES
+    #
+    # No entry below globs. `deploy/cdk/templates/**` with a `*-IAMNoInlinePolicy` rule
+    # id would collapse 20 entries into one, and it was written that way first; the
+    # problem is that a sixth template, or a fifth pack, then inherits a suppression
+    # nobody read. The five files and the four pack-qualified rule ids are named
+    # individually for the same reason the detect-secrets block below gives. Counts
+    # quoted per entry are the counts measured on THIS revision -- `cdk synth`
+    # regenerates these templates, so treat a drifted count as a prompt to re-measure
+    # rather than as a defect in the reason.
+    #
+    # --- IAMNoInlinePolicy: the rule's own subject is not what these templates hold ---
+    #
+    # 35 policies per pack, 140 findings, the largest single group in this block. The
+    # rule reads "The IAM Group, User, or Role contains an inline policy" and asks for
+    # customer-managed policies instead, for reusability, versioning and rollback.
+    #
+    # Measured before writing this, not assumed: not one AWS::IAM::Role in any of the
+    # five templates carries a `Policies` array. Every finding is on a standalone
+    # AWS::IAM::Policy resource attached through `Roles`, which is what CDK emits for
+    # `grant*` and `addToPolicy`, and the per-file finding counts equal the
+    # AWS::IAM::Policy counts exactly -- 5, 4, 15, 7 and 4. So the rule is not reacting
+    # to a policy embedded in a role; it treats a role's separately-attached Policy
+    # resource as one.
+    #
+    # Two reasons no code change here is the right answer. First, the CDK grant model
+    # produces these: a customer-managed policy per grant would mean hand-writing every
+    # statement CDK derives today, and hand-writing grants is how least-privilege
+    # mistakes get made. Second, the change the rule asks for is the same trade
+    # AwsSolutions-IAM4 was fixed to AVOID -- that finding was cleared by replacing the
+    # managed AWSLambdaBasicExecutionRole with a narrow one-log-group policy, and
+    # cfn-nag CFN_NAG_W58 above is suppressed because satisfying IT would mean granting
+    # a logs:CreateLogGroup the functions do not use. Moving back to managed policies
+    # to satisfy this rule would undo both.
+    - rule_id: HIPAA.Security-IAMNoInlinePolicy
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        Five CDK-generated AWS::IAM::Policy resources, none of them a policy
+        embedded in a role: ImageBuildRoleDefaultPolicy,
+        ImageBuildEventsRoleDefaultPolicy, ImageBootstrapStarterRoleDefaultPolicy,
+        RuntimeRoleDefaultPolicy, and ConfigKeyAccess, which grants the AgentCore
+        runtime role use of the adopter-supplied KMS key. No role in this template
+        declares a Policies array at all. See the block comment above for why the
+        rule's subject is not what this template holds.
+    - rule_id: NIST.800.53.R4-IAMNoInlinePolicy
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        IAMNoInlinePolicy as the NIST 800-53 Revision 4 pack raises it, against
+        AshAgentCore: the same five CDK DefaultPolicy resources, ConfigKeyAccess
+        among them. The argument is the HIPAA Security entry for this same file
+        immediately above and is not restated. The entry exists because a
+        suppression is keyed by rule id and the pack prefix makes this a distinct
+        id, so leaving it out would keep these findings actionable.
+    - rule_id: NIST.800.53.R5-IAMNoInlinePolicy
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        IAMNoInlinePolicy as the NIST 800-53 Revision 5 pack raises it, against
+        AshAgentCore: the same five CDK DefaultPolicy resources, ConfigKeyAccess
+        among them. The argument is the HIPAA Security entry for this same file
+        immediately above and is not restated. The entry exists because a
+        suppression is keyed by rule id and the pack prefix makes this a distinct
+        id, so leaving it out would keep these findings actionable.
+    - rule_id: PCI.DSS.321-IAMNoInlinePolicy
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        IAMNoInlinePolicy as the PCI DSS 3.2.1 pack raises it, against AshAgentCore:
+        the same five CDK DefaultPolicy resources, ConfigKeyAccess among them. The
+        argument is the HIPAA Security entry for this same file immediately above
+        and is not restated. The entry exists because a suppression is keyed by rule
+        id and the pack prefix makes this a distinct id, so leaving it out would
+        keep these findings actionable.
+    - rule_id: HIPAA.Security-IAMNoInlinePolicy
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: >-
+        Four CDK-generated AWS::IAM::Policy resources: the image-build pair,
+        ImageBootstrapStarterRoleDefaultPolicy, and ScanFunctionRoleDefaultPolicy,
+        which is the pull-request scan function's grant set -- the grants that let
+        it read the repository, write its own log stream and publish the gate
+        verdict. As in the other four templates, no role here carries a Policies
+        array. See the block comment above for why the rule's subject is not what
+        this template holds.
+    - rule_id: NIST.800.53.R4-IAMNoInlinePolicy
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: >-
+        IAMNoInlinePolicy as the NIST 800-53 Revision 4 pack raises it, against
+        AshCodeCommitGate: the same four CDK DefaultPolicy resources, including the
+        scan function's. The argument is the HIPAA Security entry for this same file
+        immediately above and is not restated. The entry exists because a
+        suppression is keyed by rule id and the pack prefix makes this a distinct
+        id, so leaving it out would keep these findings actionable.
+    - rule_id: NIST.800.53.R5-IAMNoInlinePolicy
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: >-
+        IAMNoInlinePolicy as the NIST 800-53 Revision 5 pack raises it, against
+        AshCodeCommitGate: the same four CDK DefaultPolicy resources, including the
+        scan function's. The argument is the HIPAA Security entry for this same file
+        immediately above and is not restated. The entry exists because a
+        suppression is keyed by rule id and the pack prefix makes this a distinct
+        id, so leaving it out would keep these findings actionable.
+    - rule_id: PCI.DSS.321-IAMNoInlinePolicy
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: >-
+        IAMNoInlinePolicy as the PCI DSS 3.2.1 pack raises it, against
+        AshCodeCommitGate: the same four CDK DefaultPolicy resources, including the
+        scan function's. The argument is the HIPAA Security entry for this same file
+        immediately above and is not restated. The entry exists because a
+        suppression is keyed by rule id and the pack prefix makes this a distinct
+        id, so leaving it out would keep these findings actionable.
+    - rule_id: HIPAA.Security-IAMNoInlinePolicy
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        Fifteen CDK-generated AWS::IAM::Policy resources, the most of any template
+        here: the image-build pair, one project-role policy per scan shard plus the
+        merge project, the pipeline role, and one CodePipeline action-role policy
+        per stage. The count scales with the shardCount context value rather than
+        with anything about the grants, the same way cfn-nag CFN_NAG_W12 does above,
+        so a shard-count change moves this number without changing what is
+        permitted. See the block comment above for why the rule's subject is not
+        what this template holds.
+    - rule_id: NIST.800.53.R4-IAMNoInlinePolicy
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        IAMNoInlinePolicy as the NIST 800-53 Revision 4 pack raises it, against
+        AshDistributedPipeline: the same fifteen CDK DefaultPolicy resources, one
+        per shard and stage. The argument is the HIPAA Security entry for this same
+        file immediately above and is not restated. The entry exists because a
+        suppression is keyed by rule id and the pack prefix makes this a distinct
+        id, so leaving it out would keep these findings actionable.
+    - rule_id: NIST.800.53.R5-IAMNoInlinePolicy
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        IAMNoInlinePolicy as the NIST 800-53 Revision 5 pack raises it, against
+        AshDistributedPipeline: the same fifteen CDK DefaultPolicy resources, one
+        per shard and stage. The argument is the HIPAA Security entry for this same
+        file immediately above and is not restated. The entry exists because a
+        suppression is keyed by rule id and the pack prefix makes this a distinct
+        id, so leaving it out would keep these findings actionable.
+    - rule_id: PCI.DSS.321-IAMNoInlinePolicy
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        IAMNoInlinePolicy as the PCI DSS 3.2.1 pack raises it, against
+        AshDistributedPipeline: the same fifteen CDK DefaultPolicy resources, one
+        per shard and stage. The argument is the HIPAA Security entry for this same
+        file immediately above and is not restated. The entry exists because a
+        suppression is keyed by rule id and the pack prefix makes this a distinct
+        id, so leaving it out would keep these findings actionable.
+    - rule_id: HIPAA.Security-IAMNoInlinePolicy
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        Seven CDK-generated AWS::IAM::Policy resources: the image-build pair,
+        ImageBootstrapStarterRoleDefaultPolicy, the ECS task and task-execution role
+        policies, VpcIAMRoleDefaultPolicy which lets the VPC deliver flow logs, and
+        ConfigKeyAccess for the adopter-supplied KMS key. The task role's policy is
+        the one worth a second look and it is the narrowest here: it grants the task
+        its own log group and the config parameter and secret it reads at start. See
+        the block comment above for why the rule's subject is not what this template
+        holds.
+    - rule_id: NIST.800.53.R4-IAMNoInlinePolicy
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        IAMNoInlinePolicy as the NIST 800-53 Revision 4 pack raises it, against
+        AshFargate: the same seven CDK DefaultPolicy resources, including the ECS
+        task role's. The argument is the HIPAA Security entry for this same file
+        immediately above and is not restated. The entry exists because a
+        suppression is keyed by rule id and the pack prefix makes this a distinct
+        id, so leaving it out would keep these findings actionable.
+    - rule_id: NIST.800.53.R5-IAMNoInlinePolicy
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        IAMNoInlinePolicy as the NIST 800-53 Revision 5 pack raises it, against
+        AshFargate: the same seven CDK DefaultPolicy resources, including the ECS
+        task role's. The argument is the HIPAA Security entry for this same file
+        immediately above and is not restated. The entry exists because a
+        suppression is keyed by rule id and the pack prefix makes this a distinct
+        id, so leaving it out would keep these findings actionable.
+    - rule_id: PCI.DSS.321-IAMNoInlinePolicy
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        IAMNoInlinePolicy as the PCI DSS 3.2.1 pack raises it, against AshFargate:
+        the same seven CDK DefaultPolicy resources, including the ECS task role's.
+        The argument is the HIPAA Security entry for this same file immediately
+        above and is not restated. The entry exists because a suppression is keyed
+        by rule id and the pack prefix makes this a distinct id, so leaving it out
+        would keep these findings actionable.
+    - rule_id: HIPAA.Security-IAMNoInlinePolicy
+      path: deploy/cdk/templates/AshImagePipeline.template.json
+      reason: >-
+        Four CDK-generated AWS::IAM::Policy resources, a build-role policy and an
+        events-role policy per architecture. This template runs no workload and
+        publishes its image tags as stack outputs, so these four are the only IAM
+        resources it creates. See the block comment above for why the rule's subject
+        is not what this template holds.
+    - rule_id: NIST.800.53.R4-IAMNoInlinePolicy
+      path: deploy/cdk/templates/AshImagePipeline.template.json
+      reason: >-
+        IAMNoInlinePolicy as the NIST 800-53 Revision 4 pack raises it, against
+        AshImagePipeline: the same four CDK DefaultPolicy resources, two per
+        architecture. The argument is the HIPAA Security entry for this same file
+        immediately above and is not restated. The entry exists because a
+        suppression is keyed by rule id and the pack prefix makes this a distinct
+        id, so leaving it out would keep these findings actionable.
+    - rule_id: NIST.800.53.R5-IAMNoInlinePolicy
+      path: deploy/cdk/templates/AshImagePipeline.template.json
+      reason: >-
+        IAMNoInlinePolicy as the NIST 800-53 Revision 5 pack raises it, against
+        AshImagePipeline: the same four CDK DefaultPolicy resources, two per
+        architecture. The argument is the HIPAA Security entry for this same file
+        immediately above and is not restated. The entry exists because a
+        suppression is keyed by rule id and the pack prefix makes this a distinct
+        id, so leaving it out would keep these findings actionable.
+    - rule_id: PCI.DSS.321-IAMNoInlinePolicy
+      path: deploy/cdk/templates/AshImagePipeline.template.json
+      reason: >-
+        IAMNoInlinePolicy as the PCI DSS 3.2.1 pack raises it, against
+        AshImagePipeline: the same four CDK DefaultPolicy resources, two per
+        architecture. The argument is the HIPAA Security entry for this same file
+        immediately above and is not restated. The entry exists because a
+        suppression is keyed by rule id and the pack prefix makes this a distinct
+        id, so leaving it out would keep these findings actionable.
+
+    # --- CodeBuildProjectSourceRepoUrl: there is no source repository to authorize ---
+    #
+    # 11 projects per pack, 33 findings, raised by HIPAA, NIST R4 and PCI but not by
+    # NIST R5. The rule asks that a CodeBuild project using a GitHub or BitBucket
+    # source repository authenticate with OAuth rather than a personal access token or
+    # a username and password.
+    #
+    # Every AWS::CodeBuild::Project in all five templates declares
+    # `Source: {Type: NO_SOURCE}` -- checked resource by resource, not sampled. These
+    # projects take no source repository: the buildspec is inline in the template and
+    # the input, where there is one, arrives from the pipeline's artifact bucket. There
+    # is no repository URL for the OAuth requirement to apply to, and no property that
+    # could be set to satisfy it. That makes these false positives rather than accepted
+    # risk, which is why the entries below name the projects and their source type
+    # instead of arguing about cost.
+    - rule_id: HIPAA.Security-CodeBuildProjectSourceRepoUrl
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        One project, ImageBuild, which builds the container image from the inline
+        buildspec in this template and declares Source.Type NO_SOURCE. With no
+        source repository the rule's OAuth requirement has nothing to apply to; see
+        the block comment above.
+    - rule_id: NIST.800.53.R4-CodeBuildProjectSourceRepoUrl
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        CodeBuildProjectSourceRepoUrl as the NIST 800-53 Revision 4 pack raises it,
+        against AshAgentCore: the same ImageBuild project, Source.Type NO_SOURCE.
+        The argument is the HIPAA Security entry for this same file immediately
+        above and is not restated. The entry exists because a suppression is keyed
+        by rule id and the pack prefix makes this a distinct id, so leaving it out
+        would keep these findings actionable.
+    - rule_id: PCI.DSS.321-CodeBuildProjectSourceRepoUrl
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        CodeBuildProjectSourceRepoUrl as the PCI DSS 3.2.1 pack raises it, against
+        AshAgentCore: the same ImageBuild project, Source.Type NO_SOURCE. The
+        argument is the HIPAA Security entry for this same file immediately above
+        and is not restated. The entry exists because a suppression is keyed by rule
+        id and the pack prefix makes this a distinct id, so leaving it out would
+        keep these findings actionable.
+    - rule_id: HIPAA.Security-CodeBuildProjectSourceRepoUrl
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: >-
+        One project, ImageBuild, Source.Type NO_SOURCE. Note that the repository
+        this stack gates is a CodeCommit repository reached by the scan Lambda, not
+        a CodeBuild source, so no project here has a source repository even
+        indirectly. With no source repository the rule's OAuth requirement has
+        nothing to apply to; see the block comment above.
+    - rule_id: NIST.800.53.R4-CodeBuildProjectSourceRepoUrl
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: >-
+        CodeBuildProjectSourceRepoUrl as the NIST 800-53 Revision 4 pack raises it,
+        against AshCodeCommitGate: the same ImageBuild project, Source.Type
+        NO_SOURCE. The argument is the HIPAA Security entry for this same file
+        immediately above and is not restated. The entry exists because a
+        suppression is keyed by rule id and the pack prefix makes this a distinct
+        id, so leaving it out would keep these findings actionable.
+    - rule_id: PCI.DSS.321-CodeBuildProjectSourceRepoUrl
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: >-
+        CodeBuildProjectSourceRepoUrl as the PCI DSS 3.2.1 pack raises it, against
+        AshCodeCommitGate: the same ImageBuild project, Source.Type NO_SOURCE. The
+        argument is the HIPAA Security entry for this same file immediately above
+        and is not restated. The entry exists because a suppression is keyed by rule
+        id and the pack prefix makes this a distinct id, so leaving it out would
+        keep these findings actionable.
+    - rule_id: HIPAA.Security-CodeBuildProjectSourceRepoUrl
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        Six projects, all Source.Type NO_SOURCE: ImageBuild plus the four scan
+        shards and the merge project. The shard and merge projects read their input
+        from the pipeline's artifact bucket, which is an S3 input artifact rather
+        than a repository the rule could ask OAuth for. With no source repository
+        the rule's OAuth requirement has nothing to apply to; see the block comment
+        above.
+    - rule_id: NIST.800.53.R4-CodeBuildProjectSourceRepoUrl
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        CodeBuildProjectSourceRepoUrl as the NIST 800-53 Revision 4 pack raises it,
+        against AshDistributedPipeline: the same six NO_SOURCE projects, shards and
+        merge included. The argument is the HIPAA Security entry for this same file
+        immediately above and is not restated. The entry exists because a
+        suppression is keyed by rule id and the pack prefix makes this a distinct
+        id, so leaving it out would keep these findings actionable.
+    - rule_id: PCI.DSS.321-CodeBuildProjectSourceRepoUrl
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        CodeBuildProjectSourceRepoUrl as the PCI DSS 3.2.1 pack raises it, against
+        AshDistributedPipeline: the same six NO_SOURCE projects, shards and merge
+        included. The argument is the HIPAA Security entry for this same file
+        immediately above and is not restated. The entry exists because a
+        suppression is keyed by rule id and the pack prefix makes this a distinct
+        id, so leaving it out would keep these findings actionable.
+    - rule_id: HIPAA.Security-CodeBuildProjectSourceRepoUrl
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        One project, ImageBuild, Source.Type NO_SOURCE. This template's workload is
+        the ECS service; the project exists only to populate the ECR repository.
+        With no source repository the rule's OAuth requirement has nothing to apply
+        to; see the block comment above.
+    - rule_id: NIST.800.53.R4-CodeBuildProjectSourceRepoUrl
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        CodeBuildProjectSourceRepoUrl as the NIST 800-53 Revision 4 pack raises it,
+        against AshFargate: the same ImageBuild project, Source.Type NO_SOURCE. The
+        argument is the HIPAA Security entry for this same file immediately above
+        and is not restated. The entry exists because a suppression is keyed by rule
+        id and the pack prefix makes this a distinct id, so leaving it out would
+        keep these findings actionable.
+    - rule_id: PCI.DSS.321-CodeBuildProjectSourceRepoUrl
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        CodeBuildProjectSourceRepoUrl as the PCI DSS 3.2.1 pack raises it, against
+        AshFargate: the same ImageBuild project, Source.Type NO_SOURCE. The argument
+        is the HIPAA Security entry for this same file immediately above and is not
+        restated. The entry exists because a suppression is keyed by rule id and the
+        pack prefix makes this a distinct id, so leaving it out would keep these
+        findings actionable.
+    - rule_id: HIPAA.Security-CodeBuildProjectSourceRepoUrl
+      path: deploy/cdk/templates/AshImagePipeline.template.json
+      reason: >-
+        Two projects, Amd64Build and Arm64Build, one per architecture, both
+        Source.Type NO_SOURCE. With no source repository the rule's OAuth
+        requirement has nothing to apply to; see the block comment above.
+    - rule_id: NIST.800.53.R4-CodeBuildProjectSourceRepoUrl
+      path: deploy/cdk/templates/AshImagePipeline.template.json
+      reason: >-
+        CodeBuildProjectSourceRepoUrl as the NIST 800-53 Revision 4 pack raises it,
+        against AshImagePipeline: the same two per-architecture NO_SOURCE projects.
+        The argument is the HIPAA Security entry for this same file immediately
+        above and is not restated. The entry exists because a suppression is keyed
+        by rule id and the pack prefix makes this a distinct id, so leaving it out
+        would keep these findings actionable.
+    - rule_id: PCI.DSS.321-CodeBuildProjectSourceRepoUrl
+      path: deploy/cdk/templates/AshImagePipeline.template.json
+      reason: >-
+        CodeBuildProjectSourceRepoUrl as the PCI DSS 3.2.1 pack raises it, against
+        AshImagePipeline: the same two per-architecture NO_SOURCE projects. The
+        argument is the HIPAA Security entry for this same file immediately above
+        and is not restated. The entry exists because a suppression is keyed by rule
+        id and the pack prefix makes this a distinct id, so leaving it out would
+        keep these findings actionable.
+
+    # --- S3BucketReplicationEnabled: replicating objects the stack is configured to delete ---
+    #
+    # 7 buckets per pack, 28 findings. The rule wants Cross-Region Replication for
+    # capacity and availability.
+    #
+    # CRR needs a destination bucket in a second Region the adopter owns and pays for,
+    # a replication role, and per-GB replication data transfer out of the source Region
+    # on every object. What it would protect is scan input and output that the next run
+    # regenerates: every bucket flagged here either receives access logs or holds
+    # pipeline artifacts, and the template gives them lifecycle rules whose job is to
+    # DELETE their contents -- 30 days for log-delivery records and shard results, 30
+    # noncurrent days for superseded artifacts. Replicating objects the stack expires
+    # is cost with no recovery story attached. Versioning is already enabled on all
+    # seven, which covers the accidental-overwrite case CRR is usually reached for.
+    - rule_id: HIPAA.Security-S3BucketReplicationEnabled
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        Five buckets: AccessLogs and AccessLogsArchive for log delivery, and Source,
+        Results and Artifacts for the pipeline. Results expires shard output after
+        30 days and Artifacts expires superseded artifacts after 30 noncurrent days,
+        so replication here would copy objects this stack is configured to delete.
+        Source holds only what an adopter uploads to start a scan. Versioning is
+        enabled on all of them. See the block comment above.
+    - rule_id: NIST.800.53.R4-S3BucketReplicationEnabled
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        S3BucketReplicationEnabled as the NIST 800-53 Revision 4 pack raises it,
+        against AshDistributedPipeline: the same five buckets, three of them under
+        expiration lifecycle rules. The argument is the HIPAA Security entry for
+        this same file immediately above and is not restated. The entry exists
+        because a suppression is keyed by rule id and the pack prefix makes this a
+        distinct id, so leaving it out would keep these findings actionable.
+    - rule_id: NIST.800.53.R5-S3BucketReplicationEnabled
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        S3BucketReplicationEnabled as the NIST 800-53 Revision 5 pack raises it,
+        against AshDistributedPipeline: the same five buckets, three of them under
+        expiration lifecycle rules. The argument is the HIPAA Security entry for
+        this same file immediately above and is not restated. The entry exists
+        because a suppression is keyed by rule id and the pack prefix makes this a
+        distinct id, so leaving it out would keep these findings actionable.
+    - rule_id: PCI.DSS.321-S3BucketReplicationEnabled
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        S3BucketReplicationEnabled as the PCI DSS 3.2.1 pack raises it, against
+        AshDistributedPipeline: the same five buckets, three of them under
+        expiration lifecycle rules. The argument is the HIPAA Security entry for
+        this same file immediately above and is not restated. The entry exists
+        because a suppression is keyed by rule id and the pack prefix makes this a
+        distinct id, so leaving it out would keep these findings actionable.
+    - rule_id: HIPAA.Security-S3BucketReplicationEnabled
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        Two buckets, AccessLogs and AccessLogsArchive, which exist to receive the
+        internal load balancer's access logs. AccessLogsArchive expires delivery
+        records after 30 days. Neither holds anything the stack cannot reproduce.
+        Versioning is enabled on all of them. See the block comment above.
+    - rule_id: NIST.800.53.R4-S3BucketReplicationEnabled
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        S3BucketReplicationEnabled as the NIST 800-53 Revision 4 pack raises it,
+        against AshFargate: the same two log-delivery buckets. The argument is the
+        HIPAA Security entry for this same file immediately above and is not
+        restated. The entry exists because a suppression is keyed by rule id and the
+        pack prefix makes this a distinct id, so leaving it out would keep these
+        findings actionable.
+    - rule_id: NIST.800.53.R5-S3BucketReplicationEnabled
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        S3BucketReplicationEnabled as the NIST 800-53 Revision 5 pack raises it,
+        against AshFargate: the same two log-delivery buckets. The argument is the
+        HIPAA Security entry for this same file immediately above and is not
+        restated. The entry exists because a suppression is keyed by rule id and the
+        pack prefix makes this a distinct id, so leaving it out would keep these
+        findings actionable.
+    - rule_id: PCI.DSS.321-S3BucketReplicationEnabled
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        S3BucketReplicationEnabled as the PCI DSS 3.2.1 pack raises it, against
+        AshFargate: the same two log-delivery buckets. The argument is the HIPAA
+        Security entry for this same file immediately above and is not restated. The
+        entry exists because a suppression is keyed by rule id and the pack prefix
+        makes this a distinct id, so leaving it out would keep these findings
+        actionable.
+
+    # --- S3DefaultEncryptionKMS: these buckets are encrypted, with SSE-S3 rather than KMS ---
+    #
+    # 7 buckets per pack, 21 findings, raised by HIPAA, NIST R5 and PCI. The rule wants
+    # default encryption by a KMS key specifically; SSE-S3 does not pass it.
+    #
+    # Every bucket flagged here already carries
+    # `BucketEncryption.ServerSideEncryptionByDefault.SSEAlgorithm: AES256`, applied
+    # unconditionally, so none of them is unencrypted at rest. What the rule asks for
+    # on top of that is a customer-managed key, which bills per KMS request on every
+    # object read and write and has to be owned, rotated and granted by the adopter.
+    #
+    # Being exact about the gap rather than overstating the opt-in, because the
+    # neighbouring checkov block does describe a KmsKeyArn parameter: these templates
+    # DO take one, and it is wired to the log groups, the ECR repositories and the
+    # auth-header secret, each of which switches to the supplied key through
+    # `Fn::If: HasKmsKey`. Bucket encryption is NOT wired to it. AES256 is hardcoded
+    # there, because it is free and the KMS path is not. Clearing this rule would mean
+    # extending HasKmsKey to BucketEncryption -- a cost change to the adopter's
+    # deployment, not a defect being left in place.
+    - rule_id: HIPAA.Security-S3DefaultEncryptionKMS
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        Five buckets -- AccessLogs, AccessLogsArchive, Source, Results and Artifacts
+        -- each with AES256 default encryption applied unconditionally, so none is
+        unencrypted. Results and Artifacts are the two that hold scan data, and both
+        are also under expiration lifecycle rules, so the window in which a KMS key
+        would be protecting anything is bounded at 30 days. KmsKeyArn is wired to
+        the log groups, ECR and the secret but not to bucket encryption; see the
+        block comment above.
+    - rule_id: NIST.800.53.R5-S3DefaultEncryptionKMS
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        S3DefaultEncryptionKMS as the NIST 800-53 Revision 5 pack raises it, against
+        AshDistributedPipeline: the same five AES256-encrypted buckets. The argument
+        is the HIPAA Security entry for this same file immediately above and is not
+        restated. The entry exists because a suppression is keyed by rule id and the
+        pack prefix makes this a distinct id, so leaving it out would keep these
+        findings actionable.
+    - rule_id: PCI.DSS.321-S3DefaultEncryptionKMS
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        S3DefaultEncryptionKMS as the PCI DSS 3.2.1 pack raises it, against
+        AshDistributedPipeline: the same five AES256-encrypted buckets. The argument
+        is the HIPAA Security entry for this same file immediately above and is not
+        restated. The entry exists because a suppression is keyed by rule id and the
+        pack prefix makes this a distinct id, so leaving it out would keep these
+        findings actionable.
+    - rule_id: HIPAA.Security-S3DefaultEncryptionKMS
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        Two buckets, AccessLogs and AccessLogsArchive, both with AES256 default
+        encryption applied unconditionally. Their contents are load balancer access
+        logs, which record request metadata for an internal balancer. KmsKeyArn is
+        wired to the log groups, ECR and the secret but not to bucket encryption;
+        see the block comment above.
+    - rule_id: NIST.800.53.R5-S3DefaultEncryptionKMS
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        S3DefaultEncryptionKMS as the NIST 800-53 Revision 5 pack raises it, against
+        AshFargate: the same two AES256-encrypted log-delivery buckets. The argument
+        is the HIPAA Security entry for this same file immediately above and is not
+        restated. The entry exists because a suppression is keyed by rule id and the
+        pack prefix makes this a distinct id, so leaving it out would keep these
+        findings actionable.
+    - rule_id: PCI.DSS.321-S3DefaultEncryptionKMS
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        S3DefaultEncryptionKMS as the PCI DSS 3.2.1 pack raises it, against
+        AshFargate: the same two AES256-encrypted log-delivery buckets. The argument
+        is the HIPAA Security entry for this same file immediately above and is not
+        restated. The entry exists because a suppression is keyed by rule id and the
+        pack prefix makes this a distinct id, so leaving it out would keep these
+        findings actionable.
+
+    # --- S3BucketDefaultLockEnabled: Object Lock would stop the stack's own cleanup ---
+    #
+    # 7 buckets, one pack. Only NIST 800-53 Revision 4 raises this; the other three
+    # packs enabled here do not, which is worth knowing before reading the count as
+    # under-coverage.
+    #
+    # Object Lock is write-once-read-many retention, and it can only be turned on when
+    # a bucket is created -- an existing deployment cannot adopt it through a stack
+    # update, so this is not a setting an adopter can add later either. It also
+    # contradicts what these buckets are configured to do: each one that holds anything
+    # durable has a lifecycle rule whose job is to DELETE objects, and under a
+    # retention lock those deletions fail until the retention period expires. An
+    # adopter would be left paying to store scan artifacts they had asked the template
+    # to expire.
+    - rule_id: NIST.800.53.R4-S3BucketDefaultLockEnabled
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        Five buckets. Results expires shard output after 30 days and Artifacts
+        expires superseded artifacts after 30 noncurrent days, so a retention lock
+        would block the two rules this template relies on to keep a long-lived
+        pipeline from accumulating every scan it has ever run. See the block comment
+        above.
+    - rule_id: NIST.800.53.R4-S3BucketDefaultLockEnabled
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        Two log-delivery buckets. AccessLogsArchive expires delivery records after
+        30 days, which a retention lock would prevent; the effect on this template
+        is smaller than on AshDistributedPipeline above because only one of the two
+        buckets carries a lifecycle rule. See the block comment above.
+
+    # --- LambdaInsideVPC: the cost argument already recorded against CKV_AWS_117 ---
+    #
+    # 4 functions per pack, 16 findings, on exactly the functions checkov's CKV_AWS_117
+    # and cfn-nag's CFN_NAG_W89 fire on above, asking for the same change. The full
+    # accounting is recorded against CKV_AWS_117 and is not repeated here: a VPC
+    # attachment costs either a NAT gateway, billed hourly plus per-GB, or six
+    # interface endpoints, each billed hourly per Availability Zone. These functions
+    # are invoked by EventBridge and by CloudFormation, hold no listener, and reach no
+    # private resource, so a VPC buys egress control rather than reachability control.
+    # VpcSubnetIds is the reserved parameter name for that opt-in.
+    #
+    # Listed separately from the checkov and cfn-nag entries because a suppression is
+    # keyed by rule id: covering those two rules does nothing for these four.
+    - rule_id: HIPAA.Security-LambdaInsideVPC
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        ImageBootstrapStarter, the CloudFormation custom-resource responder that
+        kicks off the first image build. It talks to CodeBuild and to the
+        CloudFormation response URL and nothing else, both public endpoints, so a
+        VPC would add a NAT gateway to reach services it already reaches. See the
+        block comment above and the CKV_AWS_117 entries earlier in this file.
+    - rule_id: NIST.800.53.R4-LambdaInsideVPC
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        LambdaInsideVPC as the NIST 800-53 Revision 4 pack raises it, against
+        AshAgentCore: the same ImageBootstrapStarter custom-resource responder. The
+        argument is the HIPAA Security entry for this same file immediately above
+        and is not restated. The entry exists because a suppression is keyed by rule
+        id and the pack prefix makes this a distinct id, so leaving it out would
+        keep these findings actionable.
+    - rule_id: NIST.800.53.R5-LambdaInsideVPC
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        LambdaInsideVPC as the NIST 800-53 Revision 5 pack raises it, against
+        AshAgentCore: the same ImageBootstrapStarter custom-resource responder. The
+        argument is the HIPAA Security entry for this same file immediately above
+        and is not restated. The entry exists because a suppression is keyed by rule
+        id and the pack prefix makes this a distinct id, so leaving it out would
+        keep these findings actionable.
+    - rule_id: PCI.DSS.321-LambdaInsideVPC
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        LambdaInsideVPC as the PCI DSS 3.2.1 pack raises it, against AshAgentCore:
+        the same ImageBootstrapStarter custom-resource responder. The argument is
+        the HIPAA Security entry for this same file immediately above and is not
+        restated. The entry exists because a suppression is keyed by rule id and the
+        pack prefix makes this a distinct id, so leaving it out would keep these
+        findings actionable.
+    - rule_id: HIPAA.Security-LambdaInsideVPC
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: >-
+        Both functions in this template. ImageBootstrapStarter is the same custom-
+        resource responder as in AshAgentCore. ScanFunction is the EventBridge-
+        invoked pull-request handler, and it is the one where a VPC would be least
+        useful: it reaches CodeCommit, ECR and CloudWatch Logs, all public
+        endpoints, which is six interface endpoints or a NAT gateway for a function
+        that runs per pull request. See the block comment above and the CKV_AWS_117
+        entries earlier in this file.
+    - rule_id: NIST.800.53.R4-LambdaInsideVPC
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: >-
+        LambdaInsideVPC as the NIST 800-53 Revision 4 pack raises it, against
+        AshCodeCommitGate: the same two functions, bootstrap starter and pull-
+        request scanner. The argument is the HIPAA Security entry for this same file
+        immediately above and is not restated. The entry exists because a
+        suppression is keyed by rule id and the pack prefix makes this a distinct
+        id, so leaving it out would keep these findings actionable.
+    - rule_id: NIST.800.53.R5-LambdaInsideVPC
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: >-
+        LambdaInsideVPC as the NIST 800-53 Revision 5 pack raises it, against
+        AshCodeCommitGate: the same two functions, bootstrap starter and pull-
+        request scanner. The argument is the HIPAA Security entry for this same file
+        immediately above and is not restated. The entry exists because a
+        suppression is keyed by rule id and the pack prefix makes this a distinct
+        id, so leaving it out would keep these findings actionable.
+    - rule_id: PCI.DSS.321-LambdaInsideVPC
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: >-
+        LambdaInsideVPC as the PCI DSS 3.2.1 pack raises it, against
+        AshCodeCommitGate: the same two functions, bootstrap starter and pull-
+        request scanner. The argument is the HIPAA Security entry for this same file
+        immediately above and is not restated. The entry exists because a
+        suppression is keyed by rule id and the pack prefix makes this a distinct
+        id, so leaving it out would keep these findings actionable.
+    - rule_id: HIPAA.Security-LambdaInsideVPC
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        ImageBootstrapStarter only. The ECS tasks in this template already run in
+        private subnets with assignPublicIp disabled, so the finding is on the
+        Lambda alone and the VPC the rule wants already exists in the stack -- what
+        is missing is the egress path that would make attaching the function to it
+        work. See the block comment above and the CKV_AWS_117 entries earlier in
+        this file.
+    - rule_id: NIST.800.53.R4-LambdaInsideVPC
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        LambdaInsideVPC as the NIST 800-53 Revision 4 pack raises it, against
+        AshFargate: the same ImageBootstrapStarter function. The argument is the
+        HIPAA Security entry for this same file immediately above and is not
+        restated. The entry exists because a suppression is keyed by rule id and the
+        pack prefix makes this a distinct id, so leaving it out would keep these
+        findings actionable.
+    - rule_id: NIST.800.53.R5-LambdaInsideVPC
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        LambdaInsideVPC as the NIST 800-53 Revision 5 pack raises it, against
+        AshFargate: the same ImageBootstrapStarter function. The argument is the
+        HIPAA Security entry for this same file immediately above and is not
+        restated. The entry exists because a suppression is keyed by rule id and the
+        pack prefix makes this a distinct id, so leaving it out would keep these
+        findings actionable.
+    - rule_id: PCI.DSS.321-LambdaInsideVPC
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        LambdaInsideVPC as the PCI DSS 3.2.1 pack raises it, against AshFargate: the
+        same ImageBootstrapStarter function. The argument is the HIPAA Security
+        entry for this same file immediately above and is not restated. The entry
+        exists because a suppression is keyed by rule id and the pack prefix makes
+        this a distinct id, so leaving it out would keep these findings actionable.
+
+    # --- LambdaDLQ: the same wrong mechanism checkov's CKV_AWS_116 asks for ---
+    #
+    # 4 functions per pack, 8 findings, raised by HIPAA and NIST R5 only. The rule
+    # reads Properties.DeadLetterConfig, which is Lambda's ASYNCHRONOUS invocation
+    # dead-letter target, and neither function here is invoked in a way that fits.
+    #
+    # The reasoning is recorded in full against CKV_AWS_116 above and holds unchanged.
+    # ImageBootstrapStarter is a CloudFormation custom-resource responder whose whole
+    # contract is to answer the response URL; a DLQ receives an event only after
+    # asynchronous retries are exhausted, by which point the stack is already waiting
+    # on its own timeout, and Lambda's asynchronous retry would call StartBuild a
+    # second time. ScanFunction is invoked by an EventBridge rule, where the idiomatic
+    # dead-letter target sits on the RULE TARGET rather than on the function --
+    # retryAttempts and maxEventAge are already set there -- and a target-side DLQ does
+    # not satisfy a rule that reads only the function's own DeadLetterConfig.
+    - rule_id: HIPAA.Security-LambdaDLQ
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        ImageBootstrapStarter. The correct failure signal for this function is the
+        FAILED CloudFormation response it already sends from its own exception
+        handler, which surfaces in the stack events an operator is already watching.
+        A queue would report the same failure later and to nobody. See the block
+        comment above and the CKV_AWS_116 entries earlier in this file.
+    - rule_id: NIST.800.53.R5-LambdaDLQ
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        LambdaDLQ as the NIST 800-53 Revision 5 pack raises it, against
+        AshAgentCore: the same ImageBootstrapStarter custom-resource responder. The
+        argument is the HIPAA Security entry for this same file immediately above
+        and is not restated. The entry exists because a suppression is keyed by rule
+        id and the pack prefix makes this a distinct id, so leaving it out would
+        keep these findings actionable.
+    - rule_id: HIPAA.Security-LambdaDLQ
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: >-
+        Both functions. ImageBootstrapStarter is the custom-resource responder
+        described in the AshAgentCore entry above. ScanFunction is the EventBridge
+        case: its dead-letter target belongs on the rule target, where retryAttempts
+        and maxEventAge are already configured, and this rule does not read that.
+        See the block comment above and the CKV_AWS_116 entries earlier in this
+        file.
+    - rule_id: NIST.800.53.R5-LambdaDLQ
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: >-
+        LambdaDLQ as the NIST 800-53 Revision 5 pack raises it, against
+        AshCodeCommitGate: the same two functions, one custom-resource and one
+        EventBridge-invoked. The argument is the HIPAA Security entry for this same
+        file immediately above and is not restated. The entry exists because a
+        suppression is keyed by rule id and the pack prefix makes this a distinct
+        id, so leaving it out would keep these findings actionable.
+    - rule_id: HIPAA.Security-LambdaDLQ
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        ImageBootstrapStarter, the same custom-resource responder, with the same
+        CloudFormation response as its failure signal. This template's workload
+        failures surface through the ECS service and its awslogs stream rather than
+        through a Lambda at all. See the block comment above and the CKV_AWS_116
+        entries earlier in this file.
+    - rule_id: NIST.800.53.R5-LambdaDLQ
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        LambdaDLQ as the NIST 800-53 Revision 5 pack raises it, against AshFargate:
+        the same ImageBootstrapStarter function. The argument is the HIPAA Security
+        entry for this same file immediately above and is not restated. The entry
+        exists because a suppression is keyed by rule id and the pack prefix makes
+        this a distinct id, so leaving it out would keep these findings actionable.
+
+    # --- SecretsManagerRotationEnabled: rotation would break the authentication it protects ---
+    #
+    # One secret in each of four templates, two packs, 8 findings. This is the
+    # compliance-pack twin of AwsSolutions-SMG4, which these templates already suppress
+    # in-band; the argument below is the one recorded there, restated because a
+    # suppression is keyed by rule id and covering SMG4 does nothing for these.
+    #
+    # ConfigMcpAuthHeaderSecret holds the expected value of the MCP auth header. The
+    # container is handed the secret ARN and resolves the value once at start -- the
+    # secret's own Description in the template says so -- which is what keeps the value
+    # out of any task definition or runtime environment map. Automatic rotation changes
+    # that value on a schedule with nothing to re-read it, turning working header auth
+    # into rejected requests: the rule's mechanism makes this secret less safe here,
+    # not more. There is also no rotation function to point at, because the correct
+    # value is whatever the calling client sends and cannot be generated.
+    - rule_id: HIPAA.Security-SecretsManagerRotationEnabled
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        ConfigMcpAuthHeaderSecret. This stack serves MCP, so the secret holds a real
+        header value supplied through the NoEcho McpAuthHeaderValue parameter and
+        resolved once when the AgentCore runtime starts. Rotating it would
+        invalidate the value every configured client is sending, with no mechanism
+        to distribute the replacement. See the block comment above.
+    - rule_id: NIST.800.53.R5-SecretsManagerRotationEnabled
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        SecretsManagerRotationEnabled as the NIST 800-53 Revision 5 pack raises it,
+        against AshAgentCore: the same ConfigMcpAuthHeaderSecret, holding a real
+        header value. The argument is the HIPAA Security entry for this same file
+        immediately above and is not restated. The entry exists because a
+        suppression is keyed by rule id and the pack prefix makes this a distinct
+        id, so leaving it out would keep these findings actionable.
+    - rule_id: HIPAA.Security-SecretsManagerRotationEnabled
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: >-
+        ConfigMcpAuthHeaderSecret, and here the finding is emptier still: this stack
+        does not serve MCP. It is built with includeMcpParameters off and the secret
+        holds SECRET_PLACEHOLDER, the literal recorded in the CKV_SECRET_6 and
+        SECRET-SECRET-KEYWORD entries for this same file above. Nothing reads it, so
+        rotation would schedule paid KMS and Secrets Manager operations against a
+        value with no consumer. See the block comment above.
+    - rule_id: NIST.800.53.R5-SecretsManagerRotationEnabled
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: >-
+        SecretsManagerRotationEnabled as the NIST 800-53 Revision 5 pack raises it,
+        against AshCodeCommitGate: the same ConfigMcpAuthHeaderSecret, holding the
+        placeholder nothing reads. The argument is the HIPAA Security entry for this
+        same file immediately above and is not restated. The entry exists because a
+        suppression is keyed by rule id and the pack prefix makes this a distinct
+        id, so leaving it out would keep these findings actionable.
+    - rule_id: HIPAA.Security-SecretsManagerRotationEnabled
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        ConfigMcpAuthHeaderSecret. Like AshCodeCommitGate, this stack runs the
+        sharded executor rather than serving MCP, so it gets the placeholder secret
+        and has no consumer to rotate for. The secret exists only so the shared
+        construct keeps one shape across MCP-serving and non-MCP stacks. See the
+        block comment above.
+    - rule_id: NIST.800.53.R5-SecretsManagerRotationEnabled
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        SecretsManagerRotationEnabled as the NIST 800-53 Revision 5 pack raises it,
+        against AshDistributedPipeline: the same ConfigMcpAuthHeaderSecret, holding
+        the placeholder nothing reads. The argument is the HIPAA Security entry for
+        this same file immediately above and is not restated. The entry exists
+        because a suppression is keyed by rule id and the pack prefix makes this a
+        distinct id, so leaving it out would keep these findings actionable.
+    - rule_id: HIPAA.Security-SecretsManagerRotationEnabled
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        ConfigMcpAuthHeaderSecret. This stack serves MCP behind the internal load
+        balancer, so the value is real and the ECS task reads it once at start.
+        Rotation would break in-flight clients exactly as in AshAgentCore, and here
+        it would do so behind a balancer whose ingress the adopter has deliberately
+        opened. See the block comment above.
+    - rule_id: NIST.800.53.R5-SecretsManagerRotationEnabled
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        SecretsManagerRotationEnabled as the NIST 800-53 Revision 5 pack raises it,
+        against AshFargate: the same ConfigMcpAuthHeaderSecret, holding a real
+        header value. The argument is the HIPAA Security entry for this same file
+        immediately above and is not restated. The entry exists because a
+        suppression is keyed by rule id and the pack prefix makes this a distinct
+        id, so leaving it out would keep these findings actionable.
+
+    # --- The load balancer rules: one HTTP listener, and no certificate to give it ---
+    #
+    # 13 findings across four rules, all on the single listener and load balancer in
+    # AshFargate, the only template with either. checkov's CKV_AWS_2 and CKV_AWS_103
+    # and cfn-nag's CFN_NAG_W56 above already carry the certificate argument, so it is
+    # summarized rather than repeated: an HTTPS listener needs an ACM certificate, ACM
+    # issues one only against a domain the requester can prove control of, and there is
+    # no default this template could supply. The balancer is `Scheme: internal` and the
+    # template creates no ingress rule at all until an operator sets McpIngressCidr, so
+    # nothing reaches the HTTP listener in a default deployment. CertificateArn is the
+    # reserved parameter name for the opt-in; once set, the redirection and ACM rules
+    # pass without further work.
+    - rule_id: HIPAA.Security-ALBHttpToHttpsRedirection
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        LoadBalancerListener, the template's only listener, which is HTTP on port
+        80. This rule wants a redirect action, and a redirect needs an HTTPS
+        listener to redirect TO -- so it cannot be satisfied by adding a property to
+        the listener that exists; it needs the certificate the block comment above
+        describes. CertificateArn is the reserved name for that opt-in.
+    - rule_id: NIST.800.53.R4-ALBHttpToHttpsRedirection
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        The NIST 800-53 Revision 4 variant of the same rule, on the same HTTP
+        LoadBalancerListener. The argument is the HIPAA Security entry above; listed
+        separately because a suppression is keyed by rule id.
+    - rule_id: NIST.800.53.R5-ALBHttpToHttpsRedirection
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        The NIST 800-53 Revision 5 variant of the same rule, on the same HTTP
+        LoadBalancerListener. The argument is the HIPAA Security entry above; listed
+        separately because a suppression is keyed by rule id.
+    - rule_id: PCI.DSS.321-ALBHttpToHttpsRedirection
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        The PCI DSS 3.2.1 variant of the same rule, on the same HTTP
+        LoadBalancerListener. The argument is the HIPAA Security entry above; listed
+        separately because a suppression is keyed by rule id.
+    - rule_id: HIPAA.Security-ELBv2ACMCertificateRequired
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        LoadBalancerListener again, and the most direct statement of the same
+        constraint: the rule wants an ACM certificate ARN on the listener, and ACM
+        will not issue a certificate without a validated domain the adopter owns.
+        Supplying a placeholder ARN would make the template fail to deploy rather
+        than make it safer, which is why this is an opt-in parameter and not a
+        default. CertificateArn is the reserved name.
+    - rule_id: NIST.800.53.R5-ELBv2ACMCertificateRequired
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        The NIST 800-53 Revision 5 variant of the same rule, on the same
+        certificate-less LoadBalancerListener. The argument is the HIPAA Security
+        entry above; listed separately because a suppression is keyed by rule id.
+    - rule_id: PCI.DSS.321-ELBv2ACMCertificateRequired
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        The PCI DSS 3.2.1 variant of the same rule, on the same certificate-less
+        LoadBalancerListener. The argument is the HIPAA Security entry above; listed
+        separately because a suppression is keyed by rule id.
+    - rule_id: HIPAA.Security-ELBDeletionProtectionEnabled
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        LoadBalancer, whose deletion_protection.enabled attribute is explicitly
+        false. Turning it on makes the balancer refuse deletion, and since
+        CloudFormation deletes it as part of deleting the stack, an adopter trying
+        to remove this stack would get a failed delete and an orphaned balancer to
+        clean up by hand. This template is a deployable sample an adopter is
+        expected to be able to tear down, and the rule's own rationale -- guarding
+        against accidental deletion -- is about a production balancer somebody
+        depends on, which this is not until an adopter makes it one.
+    - rule_id: NIST.800.53.R4-ELBDeletionProtectionEnabled
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        The NIST 800-53 Revision 4 variant of the same rule, on the same
+        LoadBalancer with deletion_protection.enabled false. The tear-down cost is
+        the HIPAA Security entry above; listed separately because a suppression is
+        keyed by rule id.
+    - rule_id: NIST.800.53.R5-ELBDeletionProtectionEnabled
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        The NIST 800-53 Revision 5 variant of the same rule, on the same
+        LoadBalancer with deletion_protection.enabled false. The tear-down cost is
+        the HIPAA Security entry above; listed separately because a suppression is
+        keyed by rule id.
+    - rule_id: NIST.800.53.R4-ALBWAFEnabled
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        LoadBalancer. A web ACL is a separate resource billed monthly per ACL and
+        per rule plus per million requests, and what it inspects is traffic arriving
+        from clients. This balancer is Scheme: internal with no ingress rule until
+        an operator sets McpIngressCidr, so a default deployment has no client
+        traffic for an ACL to inspect and would be paying the monthly charge for
+        nothing. An adopter who opens it to a wider CIDR is the one with the
+        information needed to decide whether a web ACL earns its cost.
+    - rule_id: NIST.800.53.R5-ALBWAFEnabled
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        The NIST 800-53 Revision 5 variant of the same rule, on the same internal
+        LoadBalancer that has no ingress rule by default. The cost argument is the
+        NIST 800-53 Revision 4 entry above; listed separately because a suppression
+        is keyed by rule id.
+    - rule_id: PCI.DSS.321-ALBWAFEnabled
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        The PCI DSS 3.2.1 variant of the same rule, on the same internal
+        LoadBalancer that has no ingress rule by default. The cost argument is the
+        NIST 800-53 Revision 4 entry above; listed separately because a suppression
+        is keyed by rule id.
+
+    # --- The VPC rules: the public route is the NAT gateway's, and the default group is unused ---
+    #
+    # 10 findings across two rules on AshFargate, the only template that creates a VPC.
+    - rule_id: HIPAA.Security-VPCNoUnrestrictedRouteToIGW
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        The two public-subnet default routes, VpcPublicSubnet1DefaultRoute and
+        VpcPublicSubnet2DefaultRoute. A 0.0.0.0/0 route to an internet gateway is
+        what makes a public subnet public, and these two exist only to give the NAT
+        gateways a path out; the template puts no workload in those subnets. The ECS
+        tasks and the load balancer sit in the private subnets, whose default routes
+        point at the NAT gateways rather than at the internet gateway, and the task
+        runs with assignPublicIp disabled. Removing these two routes would break the
+        image pull and log delivery described in the CFN_NAG_W5 entry above without
+        removing any path INTO the VPC, since a route table governs egress and the
+        security groups govern ingress.
+    - rule_id: NIST.800.53.R5-VPCNoUnrestrictedRouteToIGW
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        The NIST 800-53 Revision 5 variant of the same rule, on the same two public-
+        subnet default routes that carry the NAT gateways' egress and no workload.
+        The argument is the HIPAA Security entry above; listed separately because a
+        suppression is keyed by rule id.
+    - rule_id: PCI.DSS.321-VPCNoUnrestrictedRouteToIGW
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        The PCI DSS 3.2.1 variant of the same rule, on the same two public-subnet
+        default routes that carry the NAT gateways' egress and no workload. The
+        argument is the HIPAA Security entry above; listed separately because a
+        suppression is keyed by rule id.
+    - rule_id: HIPAA.Security-VPCDefaultSecurityGroupClosed
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        Vpc, and the rule is right about the mechanism: CloudFormation always
+        creates a VPC's default security group open, so closing it needs a post-
+        creation action. Two measurements bound what that is worth here. The default
+        group is referenced by nothing -- the string DefaultSecurityGroup does not
+        appear anywhere in this template, the load balancer and the ECS service each
+        get their own group, and a group attached to no network interface carries no
+        traffic. And closing it in CDK means enabling restrictDefaultSecurityGroup,
+        which adds a custom resource and a Lambda function of its own to every stack
+        with a VPC, so the change trades an unattached open group for a new function
+        with IAM permissions to modify security groups. AwsSolutionsChecks, the pack
+        these templates are gated on, does not raise this at all.
+    - rule_id: NIST.800.53.R4-VPCDefaultSecurityGroupClosed
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        The NIST 800-53 Revision 4 variant of the same rule, on the same Vpc default
+        security group that this template attaches to nothing. The argument,
+        including what enabling restrictDefaultSecurityGroup would add, is the HIPAA
+        Security entry above; listed separately because a suppression is keyed by
+        rule id.
+    - rule_id: NIST.800.53.R5-VPCDefaultSecurityGroupClosed
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        The NIST 800-53 Revision 5 variant of the same rule, on the same Vpc default
+        security group that this template attaches to nothing. The argument,
+        including what enabling restrictDefaultSecurityGroup would add, is the HIPAA
+        Security entry above; listed separately because a suppression is keyed by
+        rule id.
+    - rule_id: PCI.DSS.321-VPCDefaultSecurityGroupClosed
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        The PCI DSS 3.2.1 variant of the same rule, on the same Vpc default security
+        group that this template attaches to nothing. The argument, including what
+        enabling restrictDefaultSecurityGroup would add, is the HIPAA Security entry
+        above; listed separately because a suppression is keyed by rule id.
+
+    # === NOT COMPLIANCE FINDINGS (1 of 2): rules that threw and never ran ===
+    #
+    # READ THIS BEFORE TREATING THE 15 ENTRIES BELOW AS ACCEPTED RISK. They are not.
+    # Each is a rule that raised an exception during validation and therefore evaluated
+    # nothing: it neither passed nor failed, and every record says so in its own
+    # message text, which begins "Rule threw an error during validation". Suppressing
+    # these suppresses a scanner malfunction report, not a judgement about the
+    # template. An audit reader comparing this group against the compliance-pack
+    # entries above should read these as UNEVALUATED, not as risks weighed and
+    # accepted, and should not count them toward either a compliant or a
+    # non-compliant tally.
+    #
+    # WHY THE RULES THROW
+    #
+    # These templates are environment-agnostic on purpose -- deploy/cdk/scripts/
+    # synth-templates.sh depends on it, because a template with a baked-in account id
+    # is neither reproducible nor launchable by an adopter -- and they are
+    # parameterized so an adopter can point them at their own key, CIDR and image tag.
+    # The consequence is that the properties these rules want to inspect are
+    # CloudFormation intrinsics rather than literals: an Fn::Join over ECR repository
+    # attributes, a Ref to a parameter, an Fn::If over a condition. Three of the four
+    # messages say exactly that, naming the value that "resolved to a non-primitive".
+    # The fourth, "items.map is not a function", is the same shape reaching a rule that
+    # does not handle it.
+    #
+    # WHY THE TEMPLATE'S OWN SUPPRESSION DOES NOT ALREADY COVER THEM
+    #
+    # It looks as though it should, and this is the part worth being precise about.
+    # Every resource named below already carries a reviewed in-template suppression for
+    # exactly this case: Metadata.cdk_nag.rules_to_suppress with id
+    # CdkNagValidationFailure, written by deploy/cdk/lib/ash-nag-suppressions.ts, whose
+    # reason names the intrinsics and the affected rules. ASH honors in-template
+    # suppressions -- 116 of this scanner's 437 findings are suppressed that way -- but
+    # the honoring is keyed by rule id: _template_suppression_reason in
+    # automated_security_helper/utils/cdk_nag_wrapper.py compares the suppression's id
+    # against the finding's rule id, and against that id with any bracketed scope
+    # stripped. cdk-nag emits a validation failure under the CRASHED RULE's own id, so
+    # a record arrives as AwsSolutions-EC23 while the suppression covering it is filed
+    # under CdkNagValidationFailure. The two never compare equal, and the reviewed
+    # reason sitting in the same file is never reached.
+    #
+    # That is a mechanism worth fixing upstream of these entries rather than papering
+    # over indefinitely -- either by having the wrapper treat a CdkNagValidationFailure
+    # suppression as covering any rule that threw on that resource, or by having it
+    # report crashes under a rule id of their own so they are filterable as a class.
+    # Until one of those lands, naming the records here is the only way to keep the
+    # exit code honest, and it is why they are grouped and labelled separately instead
+    # of being mixed in with the compliance findings above.
+    - rule_id: AwsSolutions-CB5
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        Five records, on the four scan-shard projects and the merge project. CB5
+        checks whether a CodeBuild project uses an image the CodeBuild service
+        provides, and it threw because Environment.Image on these five is an
+        Fn::Join that assembles the ASH ECR image URI from the repository's ARN plus
+        an Fn::If over AshImageTag -- a non-primitive, which the message quotes in
+        full. The rule never ran, so this says nothing about the image. All five
+        resources already carry a CdkNagValidationFailure suppression ASH cannot
+        match to this id; see the block comment above. ImageBuild is absent from
+        this list because it uses a standard CodeBuild image, so the rule evaluated
+        it normally and it passed.
+    - rule_id: AwsSolutions-EC23
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        One record, on McpIngress. The rule checks a security group for an 0.0.0.0/0
+        or ::/0 CIDR and threw because CidrIp is a Ref to the McpIngressCidr
+        parameter, which the message reports as resolving to a non-primitive. The
+        rule never ran, so this record says nothing about whether the CIDR an
+        adopter supplies is open -- and the resource itself only exists when
+        McpIngressCidrSupplied is true, so a default deployment has no ingress rule
+        for it to have judged. McpIngress already carries a CdkNagValidationFailure
+        suppression ASH cannot match to this id; see the block comment above.
+    - rule_id: AwsSolutions-IAM5
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        One record, on RuntimeRoleDefaultPolicy, and the one in this block most
+        likely to be misread -- IAM5 is the wildcard-permissions rule, and 95 of
+        this scanner's already-suppressed findings are wildcard grants. This is not
+        one of them and is not a wildcard being accepted. The message is "Rule threw
+        an error during validation. items.map is not a function": the rule crashed
+        on this policy's intrinsic-valued resources and evaluated no statement at
+        all. This policy's real wildcard grants ARE evaluated, and they are
+        suppressed elsewhere, in-template, with per-action reasons --
+        ecr:GetAuthorizationToken, the X-Ray sampling and write APIs, and
+        cloudwatch:PutMetricData narrowed by a StringEquals condition on
+        cloudwatch:namespace. Nothing about this record widens that set. The
+        resource also already carries a CdkNagValidationFailure suppression ASH
+        cannot match to this id; see the block comment above.
+    - rule_id: HIPAA.Security-EC2RestrictedSSH
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        One record, on McpIngress, and a crash rather than a finding, the same one
+        AwsSolutions-EC23 above reports. The rule checks for unrestricted ingress on
+        port 22 and threw because CidrIp is a Ref to the McpIngressCidr parameter,
+        resolving to a non-primitive; it evaluated nothing. McpIngress declares
+        tcp/80 only, so even had the rule run there is no port 22 rule in this
+        template for it to find. See the block comment above.
+    - rule_id: NIST.800.53.R4-EC2RestrictedSSH
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        EC2RestrictedSSH as the NIST 800-53 Revision 4 pack raises it, and the same
+        crash rather than a finding: McpIngress again, and the same unresolved Ref
+        to McpIngressCidr, so this rule evaluated nothing either. The HIPAA Security
+        entry for this rule above carries the detail. Listed separately because a
+        suppression is keyed by rule id, and because leaving any one of the four
+        live keeps the exit code non-zero on a record no rule produced.
+    - rule_id: NIST.800.53.R5-EC2RestrictedSSH
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        EC2RestrictedSSH as the NIST 800-53 Revision 5 pack raises it, and the same
+        crash rather than a finding: McpIngress again, and the same unresolved Ref
+        to McpIngressCidr, so this rule evaluated nothing either. The HIPAA Security
+        entry for this rule above carries the detail. Listed separately because a
+        suppression is keyed by rule id, and because leaving any one of the four
+        live keeps the exit code non-zero on a record no rule produced.
+    - rule_id: PCI.DSS.321-EC2RestrictedSSH
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        EC2RestrictedSSH as the PCI DSS 3.2.1 pack raises it, and the same crash
+        rather than a finding: McpIngress again, and the same unresolved Ref to
+        McpIngressCidr, so this rule evaluated nothing either. The HIPAA Security
+        entry for this rule above carries the detail. Listed separately because a
+        suppression is keyed by rule id, and because leaving any one of the four
+        live keeps the exit code non-zero on a record no rule produced.
+    - rule_id: HIPAA.Security-EC2RestrictedCommonPorts
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        One record, on McpIngress, and a crash rather than a finding, the same one
+        AwsSolutions-EC23 above reports. The rule checks for unrestricted ingress on
+        a set of common ports and threw because CidrIp is a Ref to the
+        McpIngressCidr parameter, resolving to a non-primitive; it evaluated
+        nothing. McpIngress declares tcp/80, which is in that set, so this is the
+        one of the two whose verdict an adopter would actually want -- and it is the
+        one the crash denies them. The value it could not resolve is the adopter's
+        own McpIngressCidr, which is the thing that decides the answer. See the
+        block comment above.
+    - rule_id: NIST.800.53.R4-EC2RestrictedCommonPorts
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        EC2RestrictedCommonPorts as the NIST 800-53 Revision 4 pack raises it, and
+        the same crash rather than a finding: McpIngress again, and the same
+        unresolved Ref to McpIngressCidr, so this rule evaluated nothing either. The
+        HIPAA Security entry for this rule above carries the detail. Listed
+        separately because a suppression is keyed by rule id, and because leaving
+        any one of the four live keeps the exit code non-zero on a record no rule
+        produced.
+    - rule_id: NIST.800.53.R5-EC2RestrictedCommonPorts
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        EC2RestrictedCommonPorts as the NIST 800-53 Revision 5 pack raises it, and
+        the same crash rather than a finding: McpIngress again, and the same
+        unresolved Ref to McpIngressCidr, so this rule evaluated nothing either. The
+        HIPAA Security entry for this rule above carries the detail. Listed
+        separately because a suppression is keyed by rule id, and because leaving
+        any one of the four live keeps the exit code non-zero on a record no rule
+        produced.
+    - rule_id: PCI.DSS.321-EC2RestrictedCommonPorts
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        EC2RestrictedCommonPorts as the PCI DSS 3.2.1 pack raises it, and the same
+        crash rather than a finding: McpIngress again, and the same unresolved Ref
+        to McpIngressCidr, so this rule evaluated nothing either. The HIPAA Security
+        entry for this rule above carries the detail. Listed separately because a
+        suppression is keyed by rule id, and because leaving any one of the four
+        live keeps the exit code non-zero on a record no rule produced.
+
+    # === NOT COMPLIANCE FINDINGS (2 of 2): CDK's schema check on an unbound parameter ===
+    #
+    # 22 records, and like the block above they are not judgements about the template's
+    # security. They come from a different tool again: the scanner labels their pack
+    # `CloudFormation Validate`, which is CDK's own template validation, reported
+    # through the same validation report cdk-nag writes and therefore attributed by ASH
+    # to cdk-nag. Taken from the report's own pack label rather than inferred from the
+    # F-prefixed rule ids.
+    #
+    # What they are is a re-inclusion artifact. Running cdk-nag against a committed,
+    # parameterized template means loading it into a throwaway CDK app with CfnInclude
+    # and synthesizing that app. No parameter has a value there, so an
+    # `Fn::If: [HasKmsKey, {Ref: KmsKeyArn}, {Ref: AWS::NoValue}]` collapses to an
+    # empty string on the way through, and CDK's schema check then compares "" against
+    # the property's pattern or minimum length and objects. Neither state occurs in a
+    # real deployment: CloudFormation either substitutes the adopter's key ARN or
+    # removes the property entirely via AWS::NoValue, and the drift gate in
+    # deploy/cdk/scripts/synth-templates.sh keeps the committed template equal to what
+    # `cdk synth` emits, so there is no third possibility where the empty string is
+    # what deploys.
+    #
+    # So the value being rejected is one no deployed stack ever has. Nothing in the
+    # template can be changed to satisfy these without deleting the KmsKeyArn opt-in,
+    # which would remove the encryption choice the checkov work above added -- the
+    # scanner would go quiet and the templates would get less configurable, which is
+    # the wrong trade.
+    - rule_id: F3031
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        Three records: the ImageBuild and ImageBootstrapStarter log groups, and the
+        AgentCore Runtime. Each writes KmsKeyId as an Fn::If over HasKmsKey, so each
+        presents as '' with no parameter bound. The check is KmsKeyId against the
+        KMS key-or-alias ARN pattern. See the block comment above.
+    - rule_id: F3031
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: >-
+        Three records: the ImageBuild, ImageBootstrapStarter and ScanLogs log
+        groups. ScanLogs is the group the pull-request scan function writes to, and
+        it is created by the stack precisely so the function's role can be granted
+        one group rather than all of them. The check is KmsKeyId against the KMS
+        key-or-alias ARN pattern. See the block comment above.
+    - rule_id: F3031
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        One record, the ImageBuild log group -- the only KmsKeyId this template
+        writes as an Fn::If, because the CodeBuild projects log to groups CodeBuild
+        manages. The check is KmsKeyId against the KMS key-or-alias ARN pattern. See
+        the block comment above.
+    - rule_id: F3031
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        Four records, the most of any template here: the ImageBuild,
+        ImageBootstrapStarter, TaskLogs and VpcFlowLogs log groups. VpcFlowLogs is
+        the one that exists only because a scanner asked for it, so an empty
+        KmsKeyId on it is a validation artifact layered on a hardening addition. The
+        check is KmsKeyId against the KMS key-or-alias ARN pattern. See the block
+        comment above.
+    - rule_id: F3031
+      path: deploy/cdk/templates/AshImagePipeline.template.json
+      reason: >-
+        Two records, the Amd64Build and Arm64Build log groups, one per architecture.
+        This template creates no other resource with a KmsKeyId. The check is
+        KmsKeyId against the KMS key-or-alias ARN pattern. See the block comment
+        above.
+    - rule_id: F3033
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        Three records, on ConfigMcpAuthHeaderSecret, ImageRepository and the
+        AgentCore Runtime. The secret's SecretString and the repository's
+        EncryptionConfiguration.KmsKey are both Fn::If expressions, so both measure
+        as length 0 with no parameter bound. The check is a minimum length of 1 on a
+        property an unbound Fn::If presents as ''. See the block comment above.
+    - rule_id: F3033
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: >-
+        One record, ImageRepository, whose EncryptionConfiguration.KmsKey is an
+        Fn::If over HasKmsKey. This template's secret escapes the rule only because
+        it passes the placeholder literal rather than an Fn::If, which is the same
+        asymmetry the SECRET-SECRET-KEYWORD entries above record from the other
+        direction. The check is a minimum length of 1 on a property an unbound
+        Fn::If presents as ''. See the block comment above.
+    - rule_id: F3033
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        One record, ImageRepository, EncryptionConfiguration.KmsKey as an Fn::If
+        over HasKmsKey. Same single-resource shape as AshCodeCommitGate, and for the
+        same reason: this stack does not serve MCP, so its secret carries a literal.
+        The check is a minimum length of 1 on a property an unbound Fn::If presents
+        as ''. See the block comment above.
+    - rule_id: F3033
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        Two records, ConfigMcpAuthHeaderSecret and ImageRepository. The secret's
+        SecretString is an Fn::If whose true branch is the NoEcho McpAuthHeaderValue
+        parameter -- which is exactly why it cannot be a literal, and why a schema
+        check that wants a non-empty string here is asking for the one thing a
+        NoEcho parameter exists to prevent. The check is a minimum length of 1 on a
+        property an unbound Fn::If presents as ''. See the block comment above.
+    - rule_id: F3033
+      path: deploy/cdk/templates/AshImagePipeline.template.json
+      reason: >-
+        Two records, Amd64Repository and Arm64Repository, one per architecture, both
+        with EncryptionConfiguration.KmsKey as an Fn::If over HasKmsKey. This
+        template creates no secret, so the ECR repositories are the only resources
+        it trips this on. The check is a minimum length of 1 on a property an
+        unbound Fn::If presents as ''. See the block comment above.
+
     - rule_id: SECRET-BASE64-HIGH-ENTROPY-STRING
       path: pyproject.toml
       reason: "Project configuration — base64 strings are dependency hashes"
