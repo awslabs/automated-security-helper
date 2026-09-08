@@ -550,6 +550,7 @@ jobs:
       - scan-validation
       - external-target-scan
       - multi-project-attribution
+      - deploy-aws-helpers
       - install-validation
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -559,7 +560,7 @@ jobs:
           NEEDS_JSON: ${{ toJSON(needs) }}
           # Bump deliberately when adding a job above, which is the point: the assertion below
           # fails until this matches, so a new job cannot slip past the gate unnoticed.
-          EXPECTED_UPSTREAM_JOBS: "6"
+          EXPECTED_UPSTREAM_JOBS: "7"
         shell: bash
         run: |
           python3 - <<'PY'
