@@ -241,6 +241,7 @@ class ScanResultsContainer(BaseModel):
         # ERROR rather than FAILED: FAILED means the scanner worked and found problems, which
         # a consumer may legitimately gate or waive on. This did not work, and there is
         # nothing to waive.
+        #
         # ``self.targets_attempted and ...`` rather than ``> 0 and ...``: the field is now
         # tri-state, and comparing None with an int raises TypeError. Truthiness rejects both
         # None and 0, which are exactly the two values that must not reach this comparison.
@@ -268,7 +269,6 @@ class ScanResultsContainer(BaseModel):
         # every scanner that does not track targets -- bandit, checkov, semgrep, grype, syft,
         # detect-secrets, opengrep, cfn-nag, npm-audit -- and turn an entire clean report
         # yellow.
-        #
         if self.targets_attempted is not None and self.targets_attempted <= 0:
             return ScannerStatus.SKIPPED
 
