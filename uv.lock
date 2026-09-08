@@ -237,7 +237,7 @@ dev = [
     { name = "mkdocs-awesome-nav", specifier = ">=3.3,<4.0.0" },
     { name = "mkdocs-material", specifier = ">=9.7.7,<10.0.0" },
     { name = "mkdocs-mermaid2-plugin", specifier = ">=1.2,<2.0.0" },
-    { name = "mkdocstrings", extras = ["python"], specifier = ">=1.0,<2.0.0" },
+    { name = "mkdocstrings", extras = ["python"], specifier = ">=1.0.6,<2.0.0" },
     { name = "mypy", specifier = ">=2.3,<3.0.0" },
     { name = "pymdown-extensions", specifier = ">=11.0.2,<12.0.0" },
     { name = "pytest", specifier = ">=9.1,<10.0.0" },
