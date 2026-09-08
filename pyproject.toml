@@ -17,7 +17,7 @@ dependencies = [
  "GitPython>=3.1.61,<4.0.0",  # floor is advisory-driven: GHSA-wvpp-8hx9-p66j and others affect <= 3.1.57
  "gitdb>=4.0,<5.0.0",
  "pyrsistent>=0.20,<1.0.0",
- "pydantic[email]>=2.13,<2.14",
+ "pydantic[email]>=2.13.5,<2.14",
  "typer>=0.27,<0.28",
  "rich>=15.0,<16",
  "igittigitt>=2.2,<3.0.0",
