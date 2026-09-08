@@ -2,6 +2,8 @@
 
 from unittest.mock import patch
 
+import pytest
+
 from automated_security_helper.core.unified_metrics import (
     ScannerMetrics,
     format_duration,
@@ -123,6 +125,7 @@ class TestUnifiedMetrics:
                     "excluded": False,
                     "dependencies_missing": False,
                     "error": False,
+                    "evaluated_nothing": False,
                 },
                 "scanner2": {
                     "suppressed": 0,
@@ -139,6 +142,7 @@ class TestUnifiedMetrics:
                     "excluded": True,
                     "dependencies_missing": False,
                     "error": False,
+                    "evaluated_nothing": False,
                 },
                 "scanner3": {
                     "suppressed": 0,
@@ -155,6 +159,7 @@ class TestUnifiedMetrics:
                     "excluded": False,
                     "dependencies_missing": True,
                     "error": False,
+                    "evaluated_nothing": False,
                 },
             }
 
@@ -224,6 +229,7 @@ class TestUnifiedMetrics:
                     "excluded": False,
                     "dependencies_missing": False,
                     "error": True,
+                    "evaluated_nothing": False,
                 },
             }
 
@@ -242,3 +248,69 @@ class TestUnifiedMetrics:
             assert error_metrics.duration is None
             assert error_metrics.total == 0
             assert error_metrics.actionable == 0
+
+    @pytest.mark.parametrize(
+        "flags,expected",
+        [
+            ({}, "PASSED"),
+            ({"error": True}, "ERROR"),
+            ({"actionable": 4}, "FAILED"),
+            ({"excluded": True}, "SKIPPED"),
+            ({"dependencies_missing": True}, "MISSING"),
+            ({"evaluated_nothing": True}, "SKIPPED"),
+            # Findings outrank every "did not run" flag. Each of those three resolves to a
+            # status whose ``passed`` is True, so a row reaching one of them while carrying
+            # findings leaves the summary table with no red row while the exit code -- computed
+            # from this same actionable count -- still fails the build.
+            ({"actionable": 4, "excluded": True}, "FAILED"),
+            ({"actionable": 4, "dependencies_missing": True}, "FAILED"),
+            ({"actionable": 4, "evaluated_nothing": True}, "FAILED"),
+            # An excluded scanner cannot also have evaluated nothing in production -- it never
+            # ran, so it wrote no per-target report -- but the branch order is pinned anyway so
+            # a refactor cannot quietly swap which of the two a row reports.
+            ({"excluded": True, "evaluated_nothing": True}, "SKIPPED"),
+        ],
+    )
+    def test_the_status_branch_table(self, flags, expected):
+        """The full precedence table of get_unified_scanner_metrics, one row per branch.
+
+        Written against the stats dict rather than a model so each branch is reachable
+        independently. The end-to-end proof that these flags are populated honestly from a real
+        container lives in tests/unit/core/test_nothing_scanned_reaches_the_summary_table.py;
+        this pins what the table does once they are.
+        """
+        from automated_security_helper.config.ash_config import AshConfig
+        from automated_security_helper.config.default_config import get_default_config
+
+        AshConfig.model_rebuild()
+        AshAggregatedResults.model_rebuild()
+
+        model = AshAggregatedResults()
+        model.ash_config = get_default_config()
+
+        stats = {
+            "suppressed": 0,
+            "critical": 0,
+            "high": 0,
+            "medium": 0,
+            "low": 0,
+            "info": 0,
+            "total": 0,
+            "actionable": 0,
+            "duration": 1.0,
+            "threshold": "MEDIUM",
+            "threshold_source": "global",
+            "excluded": False,
+            "dependencies_missing": False,
+            "error": False,
+            "evaluated_nothing": False,
+        }
+        stats.update(flags)
+
+        with patch(
+            "automated_security_helper.core.scanner_statistics_calculator.ScannerStatisticsCalculator.extract_scanner_statistics"
+        ) as mock_extract:
+            mock_extract.return_value = {"probe": stats}
+            metrics = get_unified_scanner_metrics(model)
+
+        assert metrics[0].status == expected
