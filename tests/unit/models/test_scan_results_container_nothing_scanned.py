@@ -249,3 +249,167 @@ class TestExecutorBoundaryPreservesTheTriState:
         container.targets_failed = _non_negative_int_attr(plugin, "targets_failed")
 
         assert container.determine_status("MEDIUM") == ScannerStatus.SKIPPED
+
+
+class TestABrokenCounterIsNotSilent:
+    """A negative counter is dropped at the boundary. It must not be dropped quietly.
+
+    This is the one place where reading each half separately gives the wrong answer about the
+    whole. ``TestTrackedAndAttemptedNothing.test_a_negative_miscount_is_error_not_passed`` shows
+    the model sends -1 to ERROR, and ``test_an_unusable_counter_makes_no_claim`` shows the
+    boundary answers None for -1. Both pass, and together they mean the model's ERROR guard never
+    sees a negative from a real plugin: the boundary has already turned it into "no claim", so a
+    plugin miscounting its targets reaches the severity gate and reports PASSED off a broken
+    counter. Neither half is wrong; the composition is, and only a test spanning both can say so.
+
+    The fix is to keep the coercion and make it audible rather than to let the negative through.
+    Returning it would have the model report ERROR -- "it tried and everything broke" -- which is
+    a claim nobody has evidence for: all that is known is that the plugin's accounting is wrong.
+    Its findings come from SARIF rather than from the counter and are still usable, so failing
+    the scan on an accounting bug would be a worse answer than a warning that names it. Raising
+    was rejected for the same reason, and because absorbing untrusted values at the boundary
+    instead of propagating them is the whole argument for ``_target_count_attr`` existing.
+    """
+
+    @staticmethod
+    def _read_with_logging(plugin, name="targets_attempted"):
+        """Read the counter, returning (value, warning messages).
+
+        ``ASH_LOGGER`` is patched rather than captured with caplog: it logs under the name "ash"
+        with propagate=False, so a caplog assertion here reads an empty list and would pass no
+        matter what the boundary did.
+        """
+        from unittest.mock import patch
+
+        from automated_security_helper.core.phases import scanner_executor
+
+        with patch.object(scanner_executor, "ASH_LOGGER") as logger:
+            value = scanner_executor._target_count_attr(plugin, name)
+
+        warnings = [
+            str(call.args[0]) if call.args else str(call)
+            for call in logger.warning.call_args_list
+        ]
+        return value, warnings
+
+    @pytest.mark.parametrize("negative", [-1, -3, -100])
+    def test_a_negative_counter_is_warned_about(self, negative):
+        class Plugin:
+            targets_attempted = negative
+
+        value, warnings = self._read_with_logging(Plugin())
+
+        assert value is None, "the negative must still not reach the field"
+        assert warnings, (
+            "dropping a negative counter must produce an operator-visible warning; otherwise a "
+            "scanner that miscounts its targets is indistinguishable from one that does not "
+            "track them, and reports PASSED"
+        )
+        joined = " ".join(warnings)
+        assert "targets_attempted" in joined, (
+            f"the warning must name the counter so it is actionable; got {warnings}"
+        )
+        assert str(negative) in joined, (
+            f"the warning must carry the offending value; got {warnings}"
+        )
+
+    def test_the_warning_names_the_plugin_it_came_from(self):
+        """A warning that does not say which scanner is broken is not actionable.
+
+        A run has a dozen scanners and the counters are read for each of them, so the message has
+        to identify the source or an operator cannot act on it.
+        """
+
+        class WidgetScanner:
+            targets_attempted = -2
+
+        _, warnings = self._read_with_logging(WidgetScanner())
+
+        assert any("WidgetScanner" in message for message in warnings), (
+            f"expected the plugin class name in the warning; got {warnings}"
+        )
+
+    @pytest.mark.parametrize(
+        "bad", [True, False, "7", 2.0, None, object(), MagicMock()]
+    )
+    def test_only_negatives_are_warned_about(self, bad):
+        """The negative control, and it is what stops this becoming log noise.
+
+        Every other unusable value is a scanner that simply does not track targets -- the normal
+        case for nine of the builtins and for the MagicMock every test suite passes in. Warning
+        about those would fire on every clean run and train operators to ignore the message,
+        which costs more than the silence it replaces. Only a negative is evidence of a counter
+        that was tracked and then miscounted.
+        """
+
+        class Plugin:
+            targets_attempted = bad
+
+        value, warnings = self._read_with_logging(Plugin())
+
+        assert value is None
+        assert warnings == [], (
+            f"a non-tracking or absent counter is not a defect and must stay quiet; got "
+            f"{warnings}"
+        )
+
+    def test_an_absent_counter_is_warned_about_for_neither_name(self):
+        for name in ("targets_attempted", "targets_failed"):
+            value, warnings = self._read_with_logging(object(), name=name)
+            assert value is None
+            assert warnings == [], f"{name}: {warnings}"
+
+    def test_a_negative_targets_failed_is_warned_about_too(self):
+        """``_non_negative_int_attr`` shares the coercion, so it shares the warning.
+
+        The two helpers deliberately have one rule about what counts as usable. A negative
+        failure count is the same kind of accounting bug and must not be quieter just because
+        this caller collapses None to 0.
+        """
+        from unittest.mock import patch
+
+        from automated_security_helper.core.phases import scanner_executor
+
+        class Plugin:
+            targets_failed = -5
+
+        with patch.object(scanner_executor, "ASH_LOGGER") as logger:
+            value = scanner_executor._non_negative_int_attr(Plugin(), "targets_failed")
+
+        assert value == 0
+        assert logger.warning.called, (
+            "a negative targets_failed must be reported as well"
+        )
+
+    def test_the_composed_negative_still_passes_and_says_why(self):
+        """The composition, end to end: what an operator gets for a miscounting plugin.
+
+        PASSED is the deliberate outcome, not a residual bug -- see the class docstring. What
+        changes is that it is no longer silent. This test is the one that fails if someone
+        removes the warning while leaving both halves individually correct, which is exactly how
+        the gap arose.
+        """
+        from unittest.mock import patch
+
+        from automated_security_helper.core.phases import scanner_executor
+
+        class Plugin:
+            targets_attempted = -1
+            targets_failed = 0
+
+        plugin = Plugin()
+        container = _container()
+        with patch.object(scanner_executor, "ASH_LOGGER") as logger:
+            container.targets_attempted = scanner_executor._target_count_attr(
+                plugin, "targets_attempted"
+            )
+            container.targets_failed = scanner_executor._non_negative_int_attr(
+                plugin, "targets_failed"
+            )
+
+        assert container.targets_attempted is None
+        assert container.determine_status("MEDIUM") == ScannerStatus.PASSED
+        assert logger.warning.called, (
+            "the status is PASSED, so the warning is the only signal that this scanner's "
+            "counters are broken; without it the run is indistinguishable from a clean one"
+        )

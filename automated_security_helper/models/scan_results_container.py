@@ -260,10 +260,20 @@ class ScanResultsContainer(BaseModel):
         # an operator more than "it evaluated nothing", and a negative counter means something
         # is genuinely wrong with the scanner rather than with its input.
         #
-        # The overlap is also why this guard keeps ``<= 0`` instead of ``== 0``: the two are
-        # then defense in depth. Narrowing the ERROR guard to an explicit ``> 0`` later would
-        # send negatives here rather than into the severity gate, where they would report
-        # PASSED off a broken counter.
+        # The overlap is also why this guard keeps ``<= 0`` instead of ``== 0``: narrowing the
+        # ERROR guard to an explicit ``> 0`` later would send negatives here, rather than past
+        # both guards and into the severity gate.
+        #
+        # That is worth less than an earlier version of this comment claimed. It said the ``<= 0``
+        # prevents "PASSED off a broken counter", and PASSED off a broken counter is in fact the
+        # outcome today, by the only route negatives actually travel. Counters reach this model
+        # through ``_target_count_attr`` in the executor, which rejects anything below zero and
+        # hands over None -- so a plugin exposing ``targets_attempted = -1`` arrives here as a
+        # no-claim scanner, reaches the severity gate, and reports PASSED no matter what these two
+        # guards say. That boundary now logs a warning naming the plugin and the value, which is
+        # where a broken counter is actually made visible; these guards are not what does it.
+        # A negative only gets in front of this line from a caller constructing the container
+        # directly, which today means tests and any future in-process producer.
         #
         # ``is not None`` is the load-bearing half of this condition. Dropping it would fire on
         # every scanner that does not track targets -- bandit, checkov, semgrep, grype, syft,

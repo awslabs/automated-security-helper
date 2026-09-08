@@ -36,12 +36,38 @@ def _target_count_attr(obj: Any, name: str) -> int | None:
 
     Coercing at this boundary keeps the trust boundary where the untrusted value enters,
     rather than teaching every consumer to be defensive about a field typed ``int``.
+
+    A negative is the one unusable value that gets a warning, because it is the only one that is
+    evidence of a defect rather than of a scanner that simply does not count targets. An absent
+    attribute, a MagicMock, a string or a float all mean "no counter here", which is the normal
+    state for nine of the builtin scanners; warning about those would fire on every clean run.
+
+    The warning matters because the silence used to be total, and the silence is what made two
+    individually-correct halves compose into a wrong answer. ``determine_status`` sends a negative
+    ``targets_attempted`` to ERROR, so the model looks defended -- but the negative never reaches
+    it, because this function turns it into None first. The scanner then reads as making no claim,
+    falls past both per-target guards into the severity gate, and reports PASSED off a broken
+    counter with nothing anywhere to say so.
+
+    The value is still dropped rather than passed through. Letting it reach the model would report
+    ERROR, which asserts "it tried and everything broke" -- a claim nobody has evidence for. All
+    that is known is that the plugin's accounting is wrong; its findings come from SARIF rather
+    than from the counter and remain usable, so failing the scan over an accounting bug would be
+    a worse answer than naming it. Raising is rejected for the same reason.
     """
     value = getattr(obj, name, None)
     # bool is an int subclass; excluded because a True/False counter is a caller bug and
     # silently reading it as 1/0 would hide that.
-    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
-        return value
+    if isinstance(value, int) and not isinstance(value, bool):
+        if value >= 0:
+            return value
+        ASH_LOGGER.warning(
+            f"Scanner plugin {type(obj).__name__} reported {name}={value}. A target count "
+            "cannot be negative, so it is being ignored and the scanner treated as making no "
+            "claim about targets. Its status will come from findings alone, which means a scan "
+            "that evaluated nothing cannot be reported as SKIPPED. This is a defect in the "
+            "scanner plugin's own accounting."
+        )
     return None
 
 
@@ -51,7 +77,8 @@ def _non_negative_int_attr(obj: Any, name: str) -> int:
     ``targets_failed`` is such a counter: it is only ever read against ``targets_attempted``,
     so "no claim" and "zero failures" lead to the same decision and there is nothing to gain
     from keeping them apart. One coercion rule serves both callers, so the two cannot drift
-    apart on what counts as a usable value.
+    apart on what counts as a usable value -- including on warning about a negative, which is
+    just as much an accounting defect in a failure count as in an attempt count.
     """
     return _target_count_attr(obj, name) or 0
 
