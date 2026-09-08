@@ -59,6 +59,18 @@ class ScanResultsContainer(BaseModel):
     exception: str | None = None
     stack_trace: str | None = None
 
+    # How much work the scanner set out to do, and how much of it failed.
+    #
+    # Without these, status can only be derived from findings, and "found nothing" is
+    # indistinguishable from "scanned nothing". A scanner whose every target failed then
+    # reports PASSED with zero findings, which reads exactly like a clean project. These two
+    # counters are what let ``determine_status`` tell those apart.
+    #
+    # Scanners that do not track per-target outcomes leave both at 0, which preserves their
+    # existing behavior: the guard only triggers once a scanner has said it attempted work.
+    targets_attempted: int = 0
+    targets_failed: int = 0
+
     def add_metadata(self, key: str, value: Any) -> None:
         """Add metadata to the container.
 
@@ -76,6 +88,33 @@ class ScanResultsContainer(BaseModel):
         """
         if error not in self.errors:
             self.errors.append(error)
+
+    def record_target_attempt(self, count: int = 1) -> None:
+        """Record that the scanner is about to process ``count`` more targets."""
+        self.targets_attempted += count
+
+    def record_target_failure(self, target: Any, error: str) -> None:
+        """Record that one target could not be scanned.
+
+        Callers must use this rather than a local list. A local accumulator is invisible to
+        status computation, so appending to one and never reading it produces a scanner that
+        fails on every target and still reports success -- which is exactly the defect this
+        method exists to make impossible to reintroduce quietly.
+        """
+        self.targets_failed += 1
+        self.add_error(f"{target}: {error}")
+
+    @property
+    def scan_succeeded(self) -> bool:
+        """False when the scanner attempted targets and failed all of them.
+
+        Feeds SARIF ``executionSuccessful``. A report claiming success while carrying no
+        results is worse than an absent report, because a consumer cannot tell the difference
+        between a clean scan and one that never ran.
+        """
+        if self.targets_attempted <= 0:
+            return True
+        return self.targets_failed < self.targets_attempted
 
     def set_exception(self, exception: Exception) -> None:
         """Set exception information including stack trace.
@@ -151,6 +190,19 @@ class ScanResultsContainer(BaseModel):
         from automated_security_helper.utils.severity_ladder import (
             severity_fails_threshold,
         )
+
+        # Checked BEFORE the severity gate, and this ordering is the whole point.
+        #
+        # Everything below reasons about finding counts, where zero means "nothing to
+        # report". For a scanner that failed on every target, zero means "nothing was
+        # examined" -- the same number carrying the opposite meaning. Deciding on findings
+        # first would return PASSED and discard that distinction permanently.
+        #
+        # ERROR rather than FAILED: FAILED means the scanner worked and found problems, which
+        # a consumer may legitimately gate or waive on. This did not work, and there is
+        # nothing to waive.
+        if self.targets_attempted > 0 and self.targets_failed >= self.targets_attempted:
+            return ScannerStatus.ERROR
 
         counts = self.severity_counts
         counts_by_severity = (

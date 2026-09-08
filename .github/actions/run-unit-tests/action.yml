@@ -17,11 +17,36 @@ runs:
   steps:
     - name: Install dependencies
       shell: bash
-      run: uv sync
+      # --extra cdk is required, not cosmetic. A plain `uv sync` installs no optional
+      # extras, so cdk-nag was absent from every test run and nothing could exercise the
+      # cdk-nag scanner against its real dependency. A breaking major bump of that
+      # dependency was therefore invisible to CI.
+      run: uv sync --extra cdk
 
     - name: Run PyTest
       shell: bash
       run: uv run pytest
+
+    # Runs the cdk-nag integration tests, which the default pytest invocation above does
+    # NOT run: tests/conftest.py skips anything whose keywords include "integration", and
+    # pytest picks that up from the tests/integration directory name. Every integration
+    # test in the repository has therefore been skipped in CI, and a skipped suite exits 0.
+    #
+    # Scoped to this one file on purpose. Enabling --run-integration across the whole tree
+    # currently surfaces 35 pre-existing failures unrelated to cdk-nag, which would make
+    # this check meaningless noise. Repairing and enabling the rest of the suite is separate
+    # work; this step secures the specific coverage that was missing.
+    #
+    # ASH_REQUIRE_CDK_EXTRA turns a missing extra into a hard failure instead of a skip, so
+    # this step cannot silently stop testing anything if the install step above changes.
+    - name: Run cdk-nag integration tests
+      shell: bash
+      env:
+        ASH_REQUIRE_CDK_EXTRA: "1"
+      run: |
+        uv run pytest \
+          tests/integration/scanners/test_cdk_nag_real_pack.py \
+          --run-integration -p no:randomly --no-cov -v
 
     - name: Publish PyTest JUnit Test Report
       uses: mikepenz/action-junit-report@v6
