@@ -11,14 +11,14 @@ dependencies = [
  "requests>=2.34,<3.0.0",
  "attrs>=26.1,<27.0.0",
  "jsonschema>=4.26,<5.0.0",
- "importlib-metadata>=9.0,<10.0.0",
+ "importlib-metadata>=9.0.1,<10.0.0",
  "cattrs>=26.1,<27.0.0",
  "docker>=7.2,<8.0.0",
  "GitPython>=3.1.61,<4.0.0",  # floor is advisory-driven: GHSA-wvpp-8hx9-p66j and others affect <= 3.1.57
  "gitdb>=4.0,<5.0.0",
  "pyrsistent>=0.20,<1.0.0",
  "pydantic[email]>=2.13,<2.14",
- "typer>=0.27,<0.28",
+ "typer>=0.27.2,<0.28",
  "rich>=15.0,<16",
  "igittigitt>=2.2,<3.0.0",
  "defusedxml>=0.7,<0.8",
@@ -73,7 +73,7 @@ email = "ntheule@amazon.com"
 
 [dependency-groups]
 dev = [
- "ruff>=0.16,<1.0.0",
+ "ruff>=0.16.5,<1.0.0",
  "pytest>=9.1,<10.0.0",
  "pytest-cov>=7.1,<8.0.0",
  "pytest-mock>=3.15,<4.0.0",
