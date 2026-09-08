@@ -454,9 +454,18 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                     # is therefore ASH's job; gating on ignore_suppressions keeps the flag
                     # meaning what it says, which is that an audit sees everything the
                     # repository accepted, including what it accepted in-band.
-                    honor_template_suppressions=not getattr(
-                        self.context, "ignore_suppressions", False
-                    ),
+                    #
+                    # Read directly rather than through getattr(..., False).
+                    # ``ignore_suppressions`` is a declared field on PluginContext, so the
+                    # default can only ever be reached by the field being renamed away -- and
+                    # then it silently resolves to the lenient direction, honoring every
+                    # in-template suppression even on a run that asked to ignore them. A
+                    # direct read raises instead, which the handler below records as a failed
+                    # target: loud, and consistent with the rest of this scanner, where a
+                    # target that was not evaluated as requested must never read as clean.
+                    # Every other consumer of this field in the codebase reads it directly
+                    # too, so this is also the house form.
+                    honor_template_suppressions=not self.context.ignore_suppressions,
                 )
                 if nag_result_dict is None:
                     # Not counted as a failure: a non-CloudFormation file in the scan set is
