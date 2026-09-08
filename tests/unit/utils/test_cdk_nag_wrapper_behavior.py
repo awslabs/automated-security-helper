@@ -1683,7 +1683,9 @@ def test_one_member_of_a_multi_member_scope_is_enough(cdk_doubles, tmp_path, out
     path = _scoped_suppression_template(
         tmp_path,
         "multi-scope",
-        _applies_to_block("Action::sts:AssumeRole", NARROW_SCOPE, "Action::kms:Decrypt"),
+        _applies_to_block(
+            "Action::sts:AssumeRole", NARROW_SCOPE, "Action::kms:Decrypt"
+        ),
     )
     cdk_doubles.report_text = _one_violation_report(
         rule_name=f"{SCOPED_RULE}[Action::kms:Decrypt]"
@@ -1944,7 +1946,9 @@ def test_an_encoded_reason_is_decoded_into_the_justification(
     cdk_doubles, tmp_path, outdir
 ):
     """The audit trail has to be readable, or suppressing is no better than dropping."""
-    assert ENCODED_REASON_B64 != ENCODED_REASON_TEXT, "the fixture must really be encoded"
+    assert ENCODED_REASON_B64 != ENCODED_REASON_TEXT, (
+        "the fixture must really be encoded"
+    )
     path = _scoped_suppression_template(
         tmp_path,
         "encoded-reason",

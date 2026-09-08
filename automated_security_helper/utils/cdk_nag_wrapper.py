@@ -327,9 +327,9 @@ def _suppression_reason_text(entry: Mapping) -> str:
     if not entry.get("is_reason_encoded"):
         return reason.strip()
     try:
-        decoded = base64.b64decode(
-            re.sub(r"\s+", "", reason), validate=True
-        ).decode("utf-8")
+        decoded = base64.b64decode(re.sub(r"\s+", "", reason), validate=True).decode(
+            "utf-8"
+        )
     except Exception as exc:
         ASH_LOGGER.debug(
             f"An in-template cdk-nag suppression is marked is_reason_encoded but did not "
