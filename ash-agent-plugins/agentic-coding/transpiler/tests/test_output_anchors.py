@@ -163,7 +163,14 @@ def test_check_drift_hands_every_build_a_fully_sandboxed_anchor_pair(tmp_path, m
                 f"build; that build would rmtree and rewrite {got}"
             )
             assert tmp_path not in got.parents, (
-                f"sandboxed {field_name} anchor {got} is not in a throwaway directory"
+                f"check_drift put the sandboxed {field_name} anchor at {got}, "
+                f"inside {tmp_path} -- the tree holding the real anchors. The "
+                "sandbox must be an independent throwaway directory: a build "
+                "rmtree's its output first, so a sandbox carved out of the "
+                "caller's tree destroys the very tree the check compares "
+                "against. Note that tmp_path is the real-anchor tree here and "
+                "not the sandbox root, so containment is the failure, not the "
+                "passing condition."
             )
 
 
