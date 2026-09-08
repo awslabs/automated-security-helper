@@ -182,6 +182,39 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         """
         if global_ignore_paths is None:
             global_ignore_paths = []
+
+        # Per-call state, reset before anything else in the method can return.
+        #
+        # These are instance attributes on a plugin object that ScanPhase reuses:
+        # ``_scanner_tasks`` carries one task per scanner holding ``[source, converted]``, and
+        # ``ScannerExecutor._execute_scanner`` loops that list against the same instance, reading
+        # the counters off it after each call. So whatever a target leaves behind is what the
+        # next target starts with.
+        #
+        # Initializing them further down, next to the loop that increments them, reads naturally
+        # and was wrong in both directions. A target returning early inherited the previous
+        # target's totals -- an empty converted tree after a clean source pass reported PASSED
+        # over two attempts it never made, and after a failed source pass reported ERROR for a
+        # target where no file was ever opened. On the first call there was nothing to inherit,
+        # so the attributes stayed unset, which is how a scanner says "I do not track targets":
+        # the executor recorded no claim and the empty report resolved to PASSED, defeating the
+        # SKIPPED status outright.
+        #
+        # Top of the method rather than merely above the empty-target check, because there are
+        # three early returns above the old initialization point and the next one added would
+        # have inherited the same bug. Nothing between here and the first return can be
+        # meaningfully counted, so there is no ordering left to get wrong.
+        #
+        # The counters stay on the instance rather than moving to the per-call
+        # ``ScanResultsContainer``, which would remove this class of leak by construction. The
+        # container is built by the executor *around* the ``scan()`` call and is not passed in,
+        # and ``scan()``'s signature is the plugin contract every scanner -- including
+        # third-party ones -- implements. Threading the container through it is a breaking API
+        # change, and stashing it on ``self`` instead would be the same shared mutable state
+        # wearing a different name.
+        self.targets_attempted = 0
+        self.targets_failed = 0
+
         tool_component = ToolComponent(
             name="ash-cdk-nag-wrapper",
             fullName="awslabs/automated-security-helper",
@@ -256,15 +289,10 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             ):
                 scannable.append(pf.as_posix())
 
-        # Initialized here rather than just before the loop, because the empty-scan-set return
-        # below happens first. Leaving the attributes unset on that path made this scanner
-        # indistinguishable from one that does not track targets at all: the executor found no
-        # attribute, recorded no claim, and the zero-finding report resolved to PASSED -- green,
-        # with nothing examined. Setting them to 0 before any early exit is what turns that into
-        # SKIPPED.
-        self.targets_attempted = 0
-        self.targets_failed = 0
-
+        # The counters are already at 0 here, set at the top of the method. Deliberately not
+        # re-initialized at this point: the empty-scan-set return just below is one of four
+        # places this method can leave, and an initialization sitting here covers only the ones
+        # underneath it.
         if len(scannable) == 0:
             self._plugin_log(
                 f"No JSON/YAML files found in {target_type} directory to scan. Exiting.",
@@ -285,10 +313,10 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
 
         # Process each template file.
         #
-        # The counters set above replace a local `failed_files` list that was appended to on
-        # both failure paths and never read, so a run that failed on every template still
-        # produced an empty-but-successful report. They are attributes rather than locals
-        # precisely so the executor can read them and status computation can see them.
+        # The counters set at the top of this method replace a local `failed_files` list that was
+        # appended to on both failure paths and never read, so a run that failed on every
+        # template still produced an empty-but-successful report. They are attributes rather than
+        # locals precisely so the executor can read them and status computation can see them.
         target_rel_path = get_shortest_name(input=target)
 
         outdir = self.results_dir.joinpath(target_type)
