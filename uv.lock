@@ -247,7 +247,7 @@ dev = [
     { name = "pytest-xdist", specifier = ">=3.8,<4.0.0" },
     { name = "ruff", specifier = ">=0.16,<1.0.0" },
     { name = "toml", specifier = ">=0.10" },
-    { name = "types-boto3", extras = ["essential", "logs", "s3", "securityhub", "securitylake", "sts"], specifier = ">=1.43,<2.0.0" },
+    { name = "types-boto3", extras = ["essential", "logs", "s3", "securityhub", "securitylake", "sts"], specifier = ">=1.43.86,<2.0.0" },
     { name = "types-pyyaml", specifier = ">=6.0" },
 ]
 
@@ -2972,16 +2972,16 @@ wheels = [
 
 [[package]]
 name = "types-boto3"
-version = "1.43.81"
+version = "1.43.86"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "botocore-stubs" },
     { name = "types-s3transfer" },
     { name = "typing-extensions", marker = "python_full_version < '3.12'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/98/dc/aad14124346930439a846b0563afb854dd5c4343f8f03a140b26985b103f/types_boto3-1.43.81.tar.gz", hash = "sha256:7ca466d08b9aa422e29369fa520157244a266801a7aada31e2f8beac78678923", size = 104923, upload-time = "2026-08-26T22:11:18.434Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e8/87/f351cea1d1d7087b2e3578d6a4fb2a30fc97a40ac27a3f1d2608543f406d/types_boto3-1.43.86.tar.gz", hash = "sha256:c47e957a0579f0fe65487be662cdce08ad8233c5ee3abe07a159b3909d4f0b0f", size = 104900, upload-time = "2026-09-01T19:41:49.978Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/69/76/4661d5c9c14d5055b1dd76d8c58fbef145302a9a65b499f71e49c4abccb2/types_boto3-1.43.81-py3-none-any.whl", hash = "sha256:69ad51c06c43ed2c0bef142cef97d407c2ac07771987b02f244ee92bc520fbd8", size = 71418, upload-time = "2026-08-26T22:11:15.477Z" },
+    { url = "https://files.pythonhosted.org/packages/25/20/9fe40150bada223adcae35b333666729fe6605884f447921b535e63a17dc/types_boto3-1.43.86-py3-none-any.whl", hash = "sha256:17f4afb8e207f9010680b622bd3b19c574540df93e84c77948dfa9637c1e8c85", size = 71417, upload-time = "2026-09-01T19:41:45.009Z" },
 ]
 
 [package.optional-dependencies]
