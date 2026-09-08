@@ -55,7 +55,7 @@ updates:
   # are installed at runtime via utils/uv_tool_runner.py, so no Dependabot configuration can
   # gate their upgrades. This file narrows the blast radius of the upgrades it can see; it is
   # not a substitute for tests that detect a scanner that has stopped working.
-  - package-ecosystem: "pip"
+  - package-ecosystem: "uv"
     directory: "/"
     schedule:
       interval: "daily"
@@ -68,6 +68,18 @@ updates:
       prefix: "build"
     labels:
       - "dependencies"
+    # Leave a floor alone when the new release already satisfies it, and move the locked
+    # version instead. The default strategy for an application is `increase`, which raises
+    # the minimum to match every release -- that is what turned each upstream patch into a
+    # pull request whose whole diff was one digit of a lower bound. Out-of-range releases
+    # still widen the requirement, so a major is not silently skipped the way
+    # `lockfile-only` would skip it.
+    #
+    # This pairs with the ecosystem above being `uv` rather than `pip`. Under `pip` this
+    # repository's uv.lock was never updated -- 22 of the last 22 Python bumps changed
+    # pyproject.toml alone -- so a strategy that only moves the locked version would have
+    # had nothing to move, and updates would have stopped instead of flowing.
+    versioning-strategy: increase-if-necessary
     groups:
       # A major bump of a scanner or its engine is the case that needs a human reading the
       # upstream changelog before merge, so it gets its own PR with a name that says so.
@@ -99,6 +111,40 @@ updates:
           - "major"
 
       engine-minor:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # The transpiler is a separate uv project with its own pyproject.toml and uv.lock, and
+  # nothing above covers it: `directory` scopes an ecosystem entry to one manifest, so the
+  # root entry monitors the root project only. Its dependencies were unmonitored entirely.
+  #
+  # Same strategy as the root project, for the same reason: leave a requirement alone when
+  # it already admits the new release and move the locked version instead.
+  - package-ecosystem: "uv"
+    directory: "/ash-agent-plugins/agentic-coding/transpiler"
+    schedule:
+      interval: "daily"
+    cooldown:
+      default-days: 7
+      semver-major-days: 7
+    commit-message:
+      prefix: "build"
+    labels:
+      - "dependencies"
+    versioning-strategy: increase-if-necessary
+    groups:
+      # No scanner packages here -- this project depends on templating and codegen
+      # libraries only -- so the split is major versus everything else, with no
+      # scanner/engine distinction to draw.
+      transpiler-major-upgrade:
+        patterns:
+          - "*"
+        update-types:
+          - "major"
+      transpiler-minor:
         patterns:
           - "*"
         update-types:
