@@ -37,6 +37,7 @@ from automated_security_helper.utils.subprocess_utils import find_executable
 _CDK_AVAILABLE = True
 try:
     from importlib.metadata import version as _get_version
+
     _cdk_nag_version = _get_version("cdk_nag")
     from automated_security_helper.utils.cdk_nag_wrapper import (
         run_cdk_nag_against_cfn_template,
@@ -157,7 +158,9 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
 
     def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
         """Abstract stub — CdkNag overrides scan() directly; this is unreachable."""
-        raise NotImplementedError(f"{self.__class__.__name__} overrides scan() directly.")
+        raise NotImplementedError(
+            f"{self.__class__.__name__} overrides scan() directly."
+        )
 
     def scan(
         self,
@@ -226,7 +229,6 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         if not validated:
             return False
 
-
         if not self.dependencies_satisfied:
             return False
 
@@ -272,13 +274,20 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                 f"Found {len(scannable)} JSON/YAML files:\n- {joined_files}"
             )
 
-        # Process each template file
-        failed_files = []
+        # Process each template file.
+        #
+        # These counters replace a local `failed_files` list that was appended to on both
+        # failure paths and never read, so a run that failed on every template still produced
+        # an empty-but-successful report. They are attributes rather than locals precisely so
+        # the executor can read them and status computation can see them.
+        self.targets_attempted = 0
+        self.targets_failed = 0
         target_rel_path = get_shortest_name(input=target)
 
         outdir = self.results_dir.joinpath(target_type)
         sarif_results: List[Result] = []
         for cfn_file in scannable:
+            self.targets_attempted += 1
             try:
                 # Run CDK synthesis for this file
                 config_options: CdkNagScannerConfigOptions = (
@@ -299,8 +308,25 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                     include_compliant_checks=config_options.include_compliant_checks,
                 )
                 if nag_result_dict is None:
-                    ASH_LOGGER.trace(f"Not a CloudFormation file: {cfn_file}")
-                    failed_files.append(cfn_file)
+                    # Not counted as a failure: a non-CloudFormation file in the scan set is
+                    # an expected skip, not a scanner malfunction. Counting it would make a
+                    # repository of plain JSON report ERROR.
+                    self.targets_attempted -= 1
+                    ASH_LOGGER.debug(f"Not a CloudFormation file: {cfn_file}")
+                    continue
+
+                if nag_result_dict.failure is not None:
+                    # The wrapper ran but could not read a validation report, so no rule was
+                    # evaluated against this template. Counted as a failed target because the
+                    # alternative is what this branch previously did: fall through to a
+                    # zero-iteration findings loop, raise nothing, and report the template as
+                    # clean. With one template that also defeated the "failed on all N" guard,
+                    # since no failure was ever recorded for it to count.
+                    self.targets_failed += 1
+                    ASH_LOGGER.error(
+                        f"cdk-nag did not evaluate {cfn_file}: {nag_result_dict.failure}"
+                    )
+                    self.errors.append(f"{cfn_file}: {nag_result_dict.failure}")
                     continue
 
                 for pack, findings in nag_result_dict.results.items():
@@ -309,8 +335,26 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                     )
                     sarif_results.extend(findings)
             except Exception as e:
-                ASH_LOGGER.trace(f"Error scanning {cfn_file}: {e}")
-                failed_files.append((cfn_file, str(e)))
+                # error, not trace. trace sits below debug, so this was invisible even with
+                # --debug: a scanner failing on every template produced no operator-visible
+                # signal anywhere.
+                self.targets_failed += 1
+                ASH_LOGGER.error(
+                    f"cdk-nag failed to scan {cfn_file}: {type(e).__name__}: {e}"
+                )
+                self.errors.append(f"{cfn_file}: {type(e).__name__}: {e}")
+
+        # Every template failed. Say so loudly here as well as through the returned status:
+        # this is the one line that distinguishes "your templates are compliant" from "cdk-nag
+        # never evaluated a rule", and the two produce identical reports otherwise.
+        scan_succeeded = (
+            self.targets_attempted <= 0 or self.targets_failed < self.targets_attempted
+        )
+        if not scan_succeeded:
+            ASH_LOGGER.error(
+                f"cdk-nag failed on all {self.targets_attempted} template(s) in {target}. "
+                "No rules were evaluated, so this result is NOT a clean scan."
+            )
 
         self._post_scan(
             target=target,
@@ -377,8 +421,11 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                             ],
                             startTimeUtc=self.start_time,
                             endTimeUtc=self.end_time,
-                            executionSuccessful=True,
-                            exitCode=0,
+                            # Derived, not hardcoded. A SARIF run asserting success while
+                            # carrying zero results is indistinguishable to any consumer from
+                            # a clean scan, so a total failure has to say so here.
+                            executionSuccessful=scan_succeeded,
+                            exitCode=0 if scan_succeeded else 1,
                             exitCodeDescription="\n".join(self.errors),
                             workingDirectory=ArtifactLocation(
                                 uri=get_shortest_name(input=self.context.source_dir),
