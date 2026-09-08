@@ -1268,38 +1268,38 @@ global_settings:
     - rule_id: HIPAA.Security-LambdaInsideVPC
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
       reason: >-
-        Both functions in this template. ImageBootstrapStarter is the same custom-
-        resource responder as in AshAgentCore. ScanFunction is the EventBridge-
-        invoked pull-request handler, and it is the one where a VPC would be least
-        useful: it reaches CodeCommit, ECR and CloudWatch Logs, all public
-        endpoints, which is six interface endpoints or a NAT gateway for a function
-        that runs per pull request. See the block comment above and the CKV_AWS_117
-        entries earlier in this file.
+        Both functions in this template. ImageBootstrapStarter is the same
+        custom-resource responder as in AshAgentCore. ScanFunction is the
+        EventBridge-invoked pull-request handler, and it is the one where a VPC
+        would be least useful: it reaches CodeCommit, ECR and CloudWatch Logs, all
+        public endpoints, which is six interface endpoints or a NAT gateway for a
+        function that runs per pull request. See the block comment above and the
+        CKV_AWS_117 entries earlier in this file.
     - rule_id: NIST.800.53.R4-LambdaInsideVPC
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
       reason: >-
         LambdaInsideVPC as the NIST 800-53 Revision 4 pack raises it, against
-        AshCodeCommitGate: the same two functions, bootstrap starter and pull-
-        request scanner. The argument is the HIPAA Security entry for this same file
-        immediately above and is not restated. The entry exists because a
+        AshCodeCommitGate: the same two functions, bootstrap starter and
+        pull-request scanner. The argument is the HIPAA Security entry for this same
+        file immediately above and is not restated. The entry exists because a
         suppression is keyed by rule id and the pack prefix makes this a distinct
         id, so leaving it out would keep these findings actionable.
     - rule_id: NIST.800.53.R5-LambdaInsideVPC
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
       reason: >-
         LambdaInsideVPC as the NIST 800-53 Revision 5 pack raises it, against
-        AshCodeCommitGate: the same two functions, bootstrap starter and pull-
-        request scanner. The argument is the HIPAA Security entry for this same file
-        immediately above and is not restated. The entry exists because a
+        AshCodeCommitGate: the same two functions, bootstrap starter and
+        pull-request scanner. The argument is the HIPAA Security entry for this same
+        file immediately above and is not restated. The entry exists because a
         suppression is keyed by rule id and the pack prefix makes this a distinct
         id, so leaving it out would keep these findings actionable.
     - rule_id: PCI.DSS.321-LambdaInsideVPC
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
       reason: >-
         LambdaInsideVPC as the PCI DSS 3.2.1 pack raises it, against
-        AshCodeCommitGate: the same two functions, bootstrap starter and pull-
-        request scanner. The argument is the HIPAA Security entry for this same file
-        immediately above and is not restated. The entry exists because a
+        AshCodeCommitGate: the same two functions, bootstrap starter and
+        pull-request scanner. The argument is the HIPAA Security entry for this same
+        file immediately above and is not restated. The entry exists because a
         suppression is keyed by rule id and the pack prefix makes this a distinct
         id, so leaving it out would keep these findings actionable.
     - rule_id: HIPAA.Security-LambdaInsideVPC
@@ -1618,10 +1618,10 @@ global_settings:
     - rule_id: NIST.800.53.R5-VPCNoUnrestrictedRouteToIGW
       path: deploy/cdk/templates/AshFargate.template.json
       reason: >-
-        The NIST 800-53 Revision 5 variant of the same rule, on the same two public-
-        subnet default routes that carry the NAT gateways' egress and no workload.
-        The argument is the HIPAA Security entry above; listed separately because a
-        suppression is keyed by rule id.
+        The NIST 800-53 Revision 5 variant of the same rule, on the same two
+        public-subnet default routes that carry the NAT gateways' egress and no
+        workload. The argument is the HIPAA Security entry above; listed separately
+        because a suppression is keyed by rule id.
     - rule_id: PCI.DSS.321-VPCNoUnrestrictedRouteToIGW
       path: deploy/cdk/templates/AshFargate.template.json
       reason: >-
@@ -1633,16 +1633,17 @@ global_settings:
       path: deploy/cdk/templates/AshFargate.template.json
       reason: >-
         Vpc, and the rule is right about the mechanism: CloudFormation always
-        creates a VPC's default security group open, so closing it needs a post-
-        creation action. Two measurements bound what that is worth here. The default
-        group is referenced by nothing -- the string DefaultSecurityGroup does not
-        appear anywhere in this template, the load balancer and the ECS service each
-        get their own group, and a group attached to no network interface carries no
-        traffic. And closing it in CDK means enabling restrictDefaultSecurityGroup,
-        which adds a custom resource and a Lambda function of its own to every stack
-        with a VPC, so the change trades an unattached open group for a new function
-        with IAM permissions to modify security groups. AwsSolutionsChecks, the pack
-        these templates are gated on, does not raise this at all.
+        creates a VPC's default security group open, so closing it needs a
+        post-creation action. Two measurements bound what that is worth here. The
+        default group is referenced by nothing -- the string DefaultSecurityGroup
+        does not appear anywhere in this template, the load balancer and the ECS
+        service each get their own group, and a group attached to no network
+        interface carries no traffic. And closing it in CDK means enabling
+        restrictDefaultSecurityGroup, which adds a custom resource and a Lambda
+        function of its own to every stack with a VPC, so the change trades an
+        unattached open group for a new function with IAM permissions to modify
+        security groups. AwsSolutionsChecks, the pack these templates are gated on,
+        does not raise this at all.
     - rule_id: NIST.800.53.R4-VPCDefaultSecurityGroupClosed
       path: deploy/cdk/templates/AshFargate.template.json
       reason: >-
