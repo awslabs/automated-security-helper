@@ -256,6 +256,15 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             ):
                 scannable.append(pf.as_posix())
 
+        # Initialized here rather than just before the loop, because the empty-scan-set return
+        # below happens first. Leaving the attributes unset on that path made this scanner
+        # indistinguishable from one that does not track targets at all: the executor found no
+        # attribute, recorded no claim, and the zero-finding report resolved to PASSED -- green,
+        # with nothing examined. Setting them to 0 before any early exit is what turns that into
+        # SKIPPED.
+        self.targets_attempted = 0
+        self.targets_failed = 0
+
         if len(scannable) == 0:
             self._plugin_log(
                 f"No JSON/YAML files found in {target_type} directory to scan. Exiting.",
@@ -276,12 +285,10 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
 
         # Process each template file.
         #
-        # These counters replace a local `failed_files` list that was appended to on both
-        # failure paths and never read, so a run that failed on every template still produced
-        # an empty-but-successful report. They are attributes rather than locals precisely so
-        # the executor can read them and status computation can see them.
-        self.targets_attempted = 0
-        self.targets_failed = 0
+        # The counters set above replace a local `failed_files` list that was appended to on
+        # both failure paths and never read, so a run that failed on every template still
+        # produced an empty-but-successful report. They are attributes rather than locals
+        # precisely so the executor can read them and status computation can see them.
         target_rel_path = get_shortest_name(input=target)
 
         outdir = self.results_dir.joinpath(target_type)
@@ -311,6 +318,13 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                     # Not counted as a failure: a non-CloudFormation file in the scan set is
                     # an expected skip, not a scanner malfunction. Counting it would make a
                     # repository of plain JSON report ERROR.
+                    #
+                    # Decrementing back to a running total of zero is not a silent success
+                    # either. When every file in the scan set lands here the count ends at 0,
+                    # which the container reads as "tracked, attempted none" and reports
+                    # SKIPPED. The wrapper also returns None when no nag pack is enabled and
+                    # when NodeJS is unavailable, so those two reach the same place: nothing was
+                    # evaluated, and the report says so instead of rendering green.
                     self.targets_attempted -= 1
                     ASH_LOGGER.debug(f"Not a CloudFormation file: {cfn_file}")
                     continue
@@ -347,6 +361,12 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         # Every template failed. Say so loudly here as well as through the returned status:
         # this is the one line that distinguishes "your templates are compliant" from "cdk-nag
         # never evaluated a rule", and the two produce identical reports otherwise.
+        #
+        # The zero case is success here, and it feeds SARIF executionSuccessful below. That
+        # field is about whether the tool's run completed, not about whether it had anything to
+        # look at, so a scan with an empty template set is a successful run that produced no
+        # results. The "nothing was evaluated" signal is carried by the container's SKIPPED
+        # status instead, which is what the summary table shows a human.
         scan_succeeded = (
             self.targets_attempted <= 0 or self.targets_failed < self.targets_attempted
         )

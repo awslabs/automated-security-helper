@@ -66,9 +66,28 @@ class ScanResultsContainer(BaseModel):
     # reports PASSED with zero findings, which reads exactly like a clean project. These two
     # counters are what let ``determine_status`` tell those apart.
     #
-    # Scanners that do not track per-target outcomes leave both at 0, which preserves their
-    # existing behavior: the guard only triggers once a scanner has said it attempted work.
-    targets_attempted: int = 0
+    # ``targets_attempted`` is deliberately tri-state, because two counters cannot carry three
+    # distinct facts:
+    #
+    #   None -- the scanner makes no claim about targets. It does not track per-target
+    #           outcomes, so nothing can be concluded from the count and status falls through
+    #           to the severity gate exactly as it always has. bandit, checkov, semgrep, grype,
+    #           syft, detect-secrets, opengrep, cfn-nag and npm-audit are all in this state, so
+    #           this is the case that must stay untouched.
+    #   0    -- the scanner tracks targets and attempted none. It ran, evaluated nothing, and
+    #           has no findings because it had no input -- not because the input was clean.
+    #   > 0  -- the scanner tracks targets and attempted some. ``targets_failed`` is then
+    #           meaningful relative to it.
+    #
+    # A plain ``int`` default of 0 would collapse the first two, which is the whole hazard
+    # here: treating "no claim" as "attempted zero" would flip every non-tracking scanner from
+    # PASSED to SKIPPED and turn an entire clean report yellow. That is a worse defect than the
+    # one this distinction exists to fix.
+    #
+    # ``targets_failed`` stays a plain int because it has no independent meaning: it is only
+    # ever read against ``targets_attempted``, and a failure count with no attempt count is a
+    # caller bug rather than a third state.
+    targets_attempted: int | None = None
     targets_failed: int = 0
 
     def add_metadata(self, key: str, value: Any) -> None:
@@ -90,8 +109,14 @@ class ScanResultsContainer(BaseModel):
             self.errors.append(error)
 
     def record_target_attempt(self, count: int = 1) -> None:
-        """Record that the scanner is about to process ``count`` more targets."""
-        self.targets_attempted += count
+        """Record that the scanner is about to process ``count`` more targets.
+
+        Calling this at all is the claim. A scanner that never calls it leaves
+        ``targets_attempted`` at None and is read as making no claim; the first call moves it
+        off None even when ``count`` is 0, which is how a scanner says "I looked, there was
+        nothing to look at" rather than staying silent.
+        """
+        self.targets_attempted = (self.targets_attempted or 0) + count
 
     def record_target_failure(self, target: Any, error: str) -> None:
         """Record that one target could not be scanned.
@@ -111,8 +136,20 @@ class ScanResultsContainer(BaseModel):
         Feeds SARIF ``executionSuccessful``. A report claiming success while carrying no
         results is worse than an absent report, because a consumer cannot tell the difference
         between a clean scan and one that never ran.
+
+        Stays True for a tracked-but-zero scan, and that is intentional. SARIF defines the
+        field as "specifies whether the tool's execution completed successfully" -- it is about
+        the run, not about the yield. A scanner that started, found no applicable input and
+        exited cleanly did complete successfully; reporting False would tell every consumer
+        that gates on ``executionSuccessful`` that the run broke, which would start failing
+        builds on repositories that simply contain no CloudFormation. "Nothing was evaluated"
+        is a different fact, and it belongs in ``status`` (SKIPPED), which is the field the
+        summary table renders and a human reads.
+
+        The falsy test covers both None (no claim) and 0 (tracked, attempted none). Comparing
+        with ``<= 0`` would raise TypeError on None.
         """
-        if self.targets_attempted <= 0:
+        if not self.targets_attempted:
             return True
         return self.targets_failed < self.targets_attempted
 
@@ -174,11 +211,12 @@ class ScanResultsContainer(BaseModel):
     # ---- Threshold evaluation ------------------------------------------
 
     def determine_status(self, threshold: str | None) -> ScannerStatus:
-        """Determine PASSED/FAILED status by comparing severity_counts to threshold.
+        """Determine status from per-target outcomes first, then severity_counts vs threshold.
 
-        Any finding at or above the configured severity threshold fails the
-        scanner. Does not mutate the container's current status — the caller
-        assigns the result.
+        Returns ERROR when a tracking scanner failed every target, SKIPPED when a tracking
+        scanner attempted none, and otherwise PASSED/FAILED from the severity gate: any finding
+        at or above the configured severity threshold fails the scanner. Does not mutate the
+        container's current status — the caller assigns the result.
 
         The gate itself lives in ``utils.severity_ladder``, shared with the
         junitxml reporter so the two cannot disagree about the same finding.
@@ -191,18 +229,48 @@ class ScanResultsContainer(BaseModel):
             severity_fails_threshold,
         )
 
-        # Checked BEFORE the severity gate, and this ordering is the whole point.
+        # Both per-target guards are checked BEFORE the severity gate, and that ordering is the
+        # whole point.
         #
         # Everything below reasons about finding counts, where zero means "nothing to
-        # report". For a scanner that failed on every target, zero means "nothing was
-        # examined" -- the same number carrying the opposite meaning. Deciding on findings
-        # first would return PASSED and discard that distinction permanently.
+        # report". For a scanner that failed on every target, or one that attempted none, zero
+        # means "nothing was examined" -- the same number carrying the opposite meaning.
+        # Deciding on findings first would return PASSED and discard that distinction
+        # permanently.
         #
         # ERROR rather than FAILED: FAILED means the scanner worked and found problems, which
         # a consumer may legitimately gate or waive on. This did not work, and there is
         # nothing to waive.
-        if self.targets_attempted > 0 and self.targets_failed >= self.targets_attempted:
+        # ``self.targets_attempted and ...`` rather than ``> 0 and ...``: the field is now
+        # tri-state, and comparing None with an int raises TypeError. Truthiness rejects both
+        # None and 0, which are exactly the two values that must not reach this comparison.
+        if self.targets_attempted and self.targets_failed >= self.targets_attempted:
             return ScannerStatus.ERROR
+
+        # Tracked, and attempted nothing. PASSED has to mean "evaluated and clean"; it must
+        # never mean "evaluated nothing", because those render identically -- green, no
+        # findings -- and an operator reads the first one off a report that shows the second.
+        #
+        # Ordered after the ERROR guard on purpose, and the order is observable rather than
+        # cosmetic. The two conditions overlap on a negative count: the guard above tests
+        # truthiness, so -1 is truthy and ``0 >= -1`` holds, and a miscounted scanner reports
+        # ERROR instead of reaching this line. That is the intended precedence -- ERROR is the
+        # louder and more actionable of the two, because "it tried and everything broke" tells
+        # an operator more than "it evaluated nothing", and a negative counter means something
+        # is genuinely wrong with the scanner rather than with its input.
+        #
+        # The overlap is also why this guard keeps ``<= 0`` instead of ``== 0``: the two are
+        # then defense in depth. Narrowing the ERROR guard to an explicit ``> 0`` later would
+        # send negatives here rather than into the severity gate, where they would report
+        # PASSED off a broken counter.
+        #
+        # ``is not None`` is the load-bearing half of this condition. Dropping it would fire on
+        # every scanner that does not track targets -- bandit, checkov, semgrep, grype, syft,
+        # detect-secrets, opengrep, cfn-nag, npm-audit -- and turn an entire clean report
+        # yellow.
+        #
+        if self.targets_attempted is not None and self.targets_attempted <= 0:
+            return ScannerStatus.SKIPPED
 
         counts = self.severity_counts
         counts_by_severity = (
