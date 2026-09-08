@@ -44,6 +44,7 @@ rather than just its plumbing:
    would be asserting on fiction.
 """
 
+import base64
 import json
 import sys
 import types
@@ -1908,3 +1909,107 @@ def test_a_qualified_id_does_not_cover_the_unqualified_rule(
     finding = _only_finding(_run(path, outdir, nag_packs=["AwsSolutionsChecks"]))
 
     assert finding.suppressions is None
+
+
+# ---------------------------------------------------------------------------
+# Encoded reasons: is_reason_encoded
+# ---------------------------------------------------------------------------
+#
+# `toCfnFormat` base64-encodes the reason and sets `is_reason_encoded: true` whenever the
+# reason contains a codepoint above 255; `toApiFormat` decodes it on the way back. The flag is
+# cdk-nag's own, so a template written by any 2.x app whose author used a dash, a quotation
+# mark or a non-Latin script carries one.
+#
+# Taking the stored string verbatim puts base64 in the report's justification field. That
+# defeats the reason this module suppresses rather than drops: the whole point is that a
+# reviewer can read what was accepted and on what grounds. This is live in this repository --
+# deploy/cdk/templates/AshFargate.template.json carries eleven encoded entries, five of them
+# on AwsSolutions-ECS2, a rule the AwsSolutions pack does evaluate.
+
+# cdk-nag encodes a reason exactly when some codepoint exceeds 255, so a faithful fixture has
+# to contain one. Spelled by codepoint rather than pasted so the trigger is visible.
+_ABOVE_LATIN1 = chr(0x2014)
+ENCODED_REASON_TEXT = (
+    "No secret is in this environment map "
+    + _ABOVE_LATIN1
+    + " it carries a port, a mount path and two booleans, and the value itself is fetched "
+    "inside the container from the ARN named here."
+)
+ENCODED_REASON_B64 = base64.b64encode(ENCODED_REASON_TEXT.encode("utf-8")).decode(
+    "ascii"
+)
+
+
+def test_an_encoded_reason_is_decoded_into_the_justification(
+    cdk_doubles, tmp_path, outdir
+):
+    """The audit trail has to be readable, or suppressing is no better than dropping."""
+    assert ENCODED_REASON_B64 != ENCODED_REASON_TEXT, "the fixture must really be encoded"
+    path = _scoped_suppression_template(
+        tmp_path,
+        "encoded-reason",
+        rule_id=SUPPRESSED_RULE,
+        reason=ENCODED_REASON_B64,
+        extra_entry_lines="            is_reason_encoded: true\n",
+    )
+    cdk_doubles.report_text = _one_violation_report(rule_name=SUPPRESSED_RULE)
+
+    finding = _only_finding(_run(path, outdir, nag_packs=["AwsSolutionsChecks"]))
+
+    assert finding.suppressions is not None
+    justification = finding.suppressions[0].justification
+    assert ENCODED_REASON_TEXT in justification, (
+        f"expected the decoded reason; got {justification!r}"
+    )
+    assert ENCODED_REASON_B64 not in justification, (
+        "the base64 must not survive into the report"
+    )
+
+
+def test_a_reason_labeled_encoded_that_is_not_base64_falls_back_to_the_raw_text(
+    cdk_doubles, tmp_path, outdir
+):
+    """A mislabeled entry degrades to readable-ish rather than failing the target.
+
+    A hand-edited template can set the flag on plain text. Raising there would turn one
+    resource's metadata into a failed target, which this scanner reports as "the template was
+    NOT scanned" -- strictly worse than showing the author's own words.
+    """
+    plain = "Not base64 at all, just a sentence somebody mislabeled."
+    path = _scoped_suppression_template(
+        tmp_path,
+        "mislabeled-reason",
+        rule_id=SUPPRESSED_RULE,
+        reason=plain,
+        extra_entry_lines="            is_reason_encoded: true\n",
+    )
+    cdk_doubles.report_text = _one_violation_report(rule_name=SUPPRESSED_RULE)
+
+    finding = _only_finding(_run(path, outdir, nag_packs=["AwsSolutionsChecks"]))
+
+    assert finding.suppressions is not None
+    assert plain in finding.suppressions[0].justification
+
+
+def test_a_reason_not_labeled_encoded_is_left_alone_even_when_it_looks_like_base64(
+    cdk_doubles, tmp_path, outdir
+):
+    """Decoding is driven by the flag, never by whether the string happens to decode.
+
+    The negative control for the decode: ``ENCODED_REASON_B64`` is valid base64, so a
+    matcher that tried a decode unconditionally would replace a perfectly good reason with
+    whatever those bytes spell.
+    """
+    path = _scoped_suppression_template(
+        tmp_path,
+        "unlabeled-reason",
+        rule_id=SUPPRESSED_RULE,
+        reason=ENCODED_REASON_B64,
+    )
+    cdk_doubles.report_text = _one_violation_report(rule_name=SUPPRESSED_RULE)
+
+    finding = _only_finding(_run(path, outdir, nag_packs=["AwsSolutionsChecks"]))
+
+    assert finding.suppressions is not None
+    assert ENCODED_REASON_B64 in finding.suppressions[0].justification
+    assert ENCODED_REASON_TEXT not in finding.suppressions[0].justification

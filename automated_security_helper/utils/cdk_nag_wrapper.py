@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import base64
 import os
 import inspect
 import re
@@ -297,6 +298,47 @@ def _scope_covers_qualifier(scope, qualifier: str | None, rule_id: str) -> bool:
     return False
 
 
+def _suppression_reason_text(entry: Mapping) -> str:
+    """The entry's reason, base64-decoded when cdk-nag marked it encoded.
+
+    ``is_reason_encoded`` is cdk-nag's own field. ``toCfnFormat`` sets it and base64-encodes
+    the reason whenever the reason contains a codepoint above 255, and ``toApiFormat`` decodes
+    it on the way back -- so a template written by any 2.x app whose author used a dash, a
+    quotation mark or a non-Latin script carries one. Taking the stored string verbatim puts
+    base64 in the justification field, which defeats the point of suppressing rather than
+    dropping: a reviewer is supposed to be able to read what was accepted and why.
+
+    A decode failure falls back to the raw string rather than raising. A hand-edited template
+    can set the flag on plain text, and raising would turn one resource's metadata into a
+    failed target -- which this scanner reports as "the template was NOT scanned", strictly
+    worse than showing the author's own words.
+
+    Whitespace is stripped before decoding because a YAML template can fold a long base64
+    scalar across lines. Node's decoder ignores whitespace, so doing the same keeps a folded
+    value readable; ``validate=True`` then still rejects genuinely non-base64 text instead of
+    discarding characters from it and returning mojibake.
+    """
+    reason = entry.get("reason")
+    if not isinstance(reason, str) or not reason.strip():
+        # cdk-nag requires a reason, but a hand-edited template can omit it. The suppression
+        # is still honored -- the author's intent is unambiguous -- and the missing rationale
+        # is stated rather than passed off as one.
+        return "No reason provided"
+    if not entry.get("is_reason_encoded"):
+        return reason.strip()
+    try:
+        decoded = base64.b64decode(
+            re.sub(r"\s+", "", reason), validate=True
+        ).decode("utf-8")
+    except Exception as exc:
+        ASH_LOGGER.debug(
+            f"An in-template cdk-nag suppression is marked is_reason_encoded but did not "
+            f"decode ({type(exc).__name__}); using the stored text as written."
+        )
+        return reason.strip()
+    return decoded.strip() or "No reason provided"
+
+
 def _template_suppression_reason(cfn_resource, rule_id: str) -> str | None:
     """The reason the scanned template itself gives for suppressing ``rule_id`` here.
 
@@ -377,13 +419,7 @@ def _template_suppression_reason(cfn_resource, rule_id: str) -> str | None:
         scope = _granular_scope(entry)
         if scope is not None and not _scope_covers_qualifier(scope, qualifier, rule_id):
             continue
-        reason = entry.get("reason")
-        if isinstance(reason, str) and reason.strip():
-            return reason.strip()
-        # cdk-nag requires a reason, but a hand-edited template can omit it. The
-        # suppression is still honored -- the author's intent is unambiguous -- and the
-        # missing rationale is stated rather than passed off as one.
-        return "No reason provided"
+        return _suppression_reason_text(entry)
     return None
 
 
