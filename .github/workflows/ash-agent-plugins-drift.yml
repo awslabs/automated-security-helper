@@ -52,8 +52,32 @@ name: Agent Plugins Drift
 # default branch yet, everything this gate checks is present, so the change that
 # edits the gate is tested by the gate.
 #
-# Consequence to be aware of: a change outside these paths cannot break the
-# plugin trees, but it also will not run this job.
+# Consequence to be aware of: on push and pull_request, a change outside these
+# paths cannot break the plugin trees, but it also will not run this job. The
+# merge_group leg carries no such filter, for the reasons below.
+#
+# THE MERGE QUEUE LEG
+#
+# This repository runs a merge queue -- ash-unified-ci.yml declares merge_group
+# -- and merge_group is a distinct event from both pull_request and push. A gate
+# that omits it does not run on queue entries, which is exactly where this one
+# earns its keep: PR A edits _base/, PR B edits a generated tree, each passes
+# alone, and the queue combines them into the drift the gate exists to catch.
+# Skipping the queue is how a permanent drift failure reaches main a second way.
+#
+# merge_group takes no paths filter. GitHub scopes paths and paths-ignore to
+# push, pull_request and pull_request_target -- the workflow-syntax heading is
+# literally on.<push|pull_request|pull_request_target>.<paths|paths-ignore> --
+# and the merge_group reference documents only types. So this leg is unfiltered
+# and runs on every queue entry.
+#
+# That is the wanted behavior rather than a limitation worked around. A queue
+# entry is a merge of several pull requests, so the change that introduces drift
+# may itself have touched none of the filtered paths; a per-entry path filter
+# would reintroduce the very hole the merge_group trigger closes. Filtering here
+# would also break the queue outright once this becomes a required check: a
+# skipped required check never reports, so the merge waits on a verdict that
+# never arrives.
 
 on:
   push:
@@ -76,6 +100,8 @@ on:
       - "ash-agent-plugins/.gitignore"
       - "skills/**"
       - ".github/workflows/ash-agent-plugins-drift.yml"
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch: {}
 
 # Least privilege: this workflow only reads the repository and runs the checker.
