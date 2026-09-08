@@ -1,0 +1,117 @@
+name: Agent Plugins Drift
+
+# WHY THIS LIVES AT THE REPOSITORY ROOT
+#
+# ash-agent-plugins/ ships its own workflow at
+# ash-agent-plugins/.github/workflows/validate.yml, and ash-agent-plugins/README.md
+# describes it as the gate that keeps the committed plugin files matching
+# transpiler output. That is true only when ash-agent-plugins/ is checked out as
+# its own repository, which it is designed to be. Inside this monorepo the file is
+# inert: GitHub reads workflows only from .github/workflows/ at the repository
+# root, so nothing in that nested directory has ever run here. The root
+# .pre-commit-config.yaml has no transpiler hook either.
+#
+# The cost of that gap was not theoretical. It let a permanent drift failure sit
+# on main undetected: ash-agent-plugins/.gitignore ignored .vscode/, which
+# silently swallowed the copilot backend's generated .vscode/mcp.json, so
+# `agentic-plugins check` reported drift on a clean checkout and no amount of
+# re-running the transpiler could clear it.
+#
+# This workflow is the same check, invoked from the root with
+# ash-agent-plugins/agentic-coding/transpiler prefixes so it runs in ASH's own CI.
+# The nested workflow is left alone -- it remains correct for the standalone
+# layout, and the two do not conflict.
+#
+# WHAT THE CHECK ACTUALLY PROVES
+#
+# `agentic-plugins check` rebuilds every backend into a temporary directory and
+# byte-compares against the committed output, then runs schema and structural
+# validation over the result. It fails if a committed plugin file disagrees with
+# what _base/ would generate today -- which is what stops the generated trees from
+# drifting away from their single source of truth. The repository-root skills/
+# tree is covered by the same comparison, so it cannot silently diverge from the
+# generic-skill artifact either.
+#
+# PATH FILTERS, WRITTEN FROM SCRATCH
+#
+# The nested workflow has no path filters at all, so there was nothing to copy.
+# These four cover every input the check reads and every output it compares
+# against:
+#
+#   - the transpiler itself, which includes _base/ (the source of truth),
+#     templates/, schemas/ and tests/
+#   - the generated per-platform plugin trees, the right-hand side of the
+#     byte comparison
+#   - the generated repository-root skills/ tree, likewise
+#   - ash-agent-plugins/.gitignore, because a pattern added there can make a
+#     generated file untrackable and reintroduce exactly the permanent drift
+#     described above -- an edit to that one file, alone, must run this gate
+#
+# This workflow file is in its own filter. Unlike ash-typescript-ci.yml, which
+# deliberately omits itself because its target directory does not exist on the
+# default branch yet, everything this gate checks is present, so the change that
+# edits the gate is tested by the gate.
+#
+# Consequence to be aware of: a change outside these paths cannot break the
+# plugin trees, but it also will not run this job.
+
+on:
+  push:
+    branches:
+      - "*"
+    tags:
+      - "*"
+    paths:
+      - "ash-agent-plugins/agentic-coding/transpiler/**"
+      - "ash-agent-plugins/agentic-coding/plugins/**"
+      - "ash-agent-plugins/.gitignore"
+      - "skills/**"
+      - ".github/workflows/ash-agent-plugins-drift.yml"
+  pull_request:
+    branches:
+      - "*"
+    paths:
+      - "ash-agent-plugins/agentic-coding/transpiler/**"
+      - "ash-agent-plugins/agentic-coding/plugins/**"
+      - "ash-agent-plugins/.gitignore"
+      - "skills/**"
+      - ".github/workflows/ash-agent-plugins-drift.yml"
+  workflow_dispatch: {}
+
+# Least privilege: this workflow only reads the repository and runs the checker.
+permissions:
+  contents: read
+
+concurrency:
+  # One in-flight run per pull request; pushing again supersedes the previous run.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Only pull_request runs may be cancelled. A merge_group run must finish or the
+  # queue loses its verdict.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  drift-and-validate:
+    name: Plugin output matches _base/
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      # The transpiler resolves its own paths from __file__ and discovers the
+      # repository root by walking up for .git, so neither command depends on the
+      # working directory. Both are run from the root anyway, because that is
+      # where the checkout puts us and because a repository-anchored backend needs
+      # the real .git to be present.
+      - name: Check drift and validate generated output
+        run: uv run --project ash-agent-plugins/agentic-coding/transpiler agentic-plugins check
+
+      - name: Run transpiler regression suite
+        run: uv run --project ash-agent-plugins/agentic-coding/transpiler --extra test pytest ash-agent-plugins/agentic-coding/transpiler/tests/
