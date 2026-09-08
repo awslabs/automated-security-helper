@@ -39,6 +39,17 @@ class TestResolvedParallelism:
         config = WorkspaceExecutionConfig()
         assert config.resolved_max_parallel_projects(cpu_count=64) == 4
 
+    def test_a_host_exactly_at_the_cap_gets_the_cap(self):
+        """The boundary itself, which 64-above and 2-below both step over.
+
+        Worth its own case because callers assert the literal 4 for a host at or
+        above the cap. A macOS runner reports 3 and so lands below it, which is
+        what turned an unpatched `== 4` in the builder tests into `assert 3 == 4`
+        on every macOS row while Linux stayed green.
+        """
+        config = WorkspaceExecutionConfig()
+        assert config.resolved_max_parallel_projects(cpu_count=4) == 4
+
     def test_the_derived_default_follows_a_small_host(self):
         config = WorkspaceExecutionConfig()
         assert config.resolved_max_parallel_projects(cpu_count=2) == 2

@@ -29,6 +29,34 @@ from automated_security_helper.core.resource_management.scan_tracking import (
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
+def _canonical_directory(directory_path: str) -> Path:
+    """Reduce a caller-supplied directory string to one comparable form.
+
+    Every directory-keyed decision in this module used to compare the raw string
+    it was handed. That made ``/proj`` and ``/proj/`` two different directories,
+    as it did ``/proj/../proj`` and ``/proj``, so ``register_scan`` admitted a
+    second active scan on a tree that already had one and both then wrote into
+    ``<proj>/.ash/ash_output``: the same source examined twice, its findings
+    attributed twice, its suppressions applied twice, and two writers racing on
+    one output tree.
+
+    ``Path.resolve()`` and not a trailing-separator strip or a prefix test. A
+    prefix test collapses ``proj`` and ``proj-backup``, which are two
+    directories; resolve() also follows symlinks and collapses ``..``, which a
+    string rule cannot.
+
+    Returns the path unresolved on an OSError rather than raising. Callers here
+    have already run ``validate_directory_path``, which requires the directory to
+    exist, so this is a guard against a platform refusing to resolve a path that
+    exists rather than an expected branch -- and falling back to the raw form
+    restores the old comparison for that one entry instead of failing the call.
+    """
+    try:
+        return Path(directory_path).resolve()
+    except OSError:
+        return Path(directory_path)
+
+
 class MCScanStatus(Enum):
     """Status of a scan."""
 
@@ -229,9 +257,24 @@ class ScanRegistry:
                     },
                 )
 
-            # Check if there's already an active scan for this directory
+            # Check if there's already an active scan for this directory.
+            #
+            # Compared canonically, because two spellings of one directory are
+            # one directory and the caller's string is untrusted -- a workspace
+            # scan derives N of these from a file an operator wrote, and
+            # str(Path) never ends in a separator, so a trailing one only ever
+            # arrives from outside.
+            #
+            # is_active() stays in the condition. The rule is about concurrent
+            # scans, not about a directory ever having been scanned: without it,
+            # the first scan of a directory would permanently block every later
+            # one.
+            requested = _canonical_directory(directory_path)
             for entry in self._registry.values():
-                if entry.directory_path == directory_path and entry.is_active():
+                if (
+                    _canonical_directory(entry.directory_path) == requested
+                    and entry.is_active()
+                ):
                     raise MCPResourceError(
                         f"Directory {directory_path} already has an active scan",
                         context={
@@ -299,10 +342,19 @@ class ScanRegistry:
 
         Returns:
             Active scan registry entry or None if not found
+
+        Canonicalised on both sides, matching :meth:`register_scan`. The two have
+        to agree: a caller told "directory /proj/ already has an active scan" and
+        given that scan's id has to be able to reach the same entry by the same
+        string, and before this they could not.
         """
+        requested = _canonical_directory(directory_path)
         with self._registry_lock:
             for entry in self._registry.values():
-                if entry.directory_path == directory_path and entry.is_active():
+                if (
+                    _canonical_directory(entry.directory_path) == requested
+                    and entry.is_active()
+                ):
                     return entry
             return None
 
@@ -349,13 +401,21 @@ class ScanRegistry:
 
         Returns:
             List of scan entries as dictionaries
+
+        The ``directory_path`` filter is canonicalised on both sides, for the
+        reason :meth:`get_scan_by_directory` gives: one directory has to answer to
+        one query however the caller spelled it.
         """
+        requested = _canonical_directory(directory_path) if directory_path else None
         with self._registry_lock:
             result = []
             for entry in self._registry.values():
                 if active_only and not entry.is_active():
                     continue
-                if directory_path and entry.directory_path != directory_path:
+                if (
+                    requested is not None
+                    and _canonical_directory(entry.directory_path) != requested
+                ):
                     continue
                 result.append(entry.to_dict())
             return result
