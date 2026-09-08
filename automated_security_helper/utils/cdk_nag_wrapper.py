@@ -182,6 +182,121 @@ def _level_and_kind(
     return Level.none, Kind.informational
 
 
+def _rule_id_parts(rule_id: str) -> tuple[str, str | None]:
+    """Split a reported rule id into its bare id and its granular qualifier.
+
+    cdk-nag builds a granular finding's id by appending the finding to the rule: 3.0.2's
+    ``applyRule`` does ``f"{ruleId}[{finding}]"`` literally, and 2.x renders the same shape.
+    So ``AwsSolutions-IAM5[Resource::*]`` splits into ``AwsSolutions-IAM5`` and
+    ``Resource::*``, and an id with no brackets has no qualifier at all.
+
+    The closing bracket is taken as the LAST character rather than the first ``]`` found,
+    because the qualifier is an untouched finding string that cdk-nag places no restriction
+    on -- an IAM finding can carry one. The id was built by appending ``]`` last, so that is
+    the bracket which closes it.
+
+    An empty qualifier is reported as absent. cdk-nag's own matcher guards its membership
+    test on ``findingId`` being non-empty, so an empty one can never be a scope member.
+    """
+    open_at = rule_id.find("[")
+    if open_at == -1 or not rule_id.endswith("]"):
+        return rule_id, None
+    return rule_id[:open_at], rule_id[open_at + 1 : -1] or None
+
+
+def _granular_scope(entry: Mapping):
+    """The suppression's declared scope, or None when it declares none.
+
+    cdk-nag's on-template key is ``applies_to``: ``NagSuppressionHelper.toCfnFormat`` renames
+    the API's ``appliesTo`` on the way into a template and ``toApiFormat`` renames it back.
+    Both spellings are read, snake_case first, because a template is hand-editable and the
+    camelCase name is the one cdk-nag's documentation shows. Reading only one would treat an
+    entry written with the other as having no scope, which widens it to every variant -- the
+    over-suppression this scope check exists to stop, reintroduced through a spelling.
+
+    Returns None for an absent key AND for an explicit null, which is how JSON spells absent
+    here and how cdk-nag reads it: ``toApiFormat`` only sets ``appliesTo`` when the stored
+    value is truthy.
+
+    An empty list is returned as an empty list, not as None. That distinction is the whole
+    reason this is a presence test rather than a truthiness test: in JavaScript an empty array
+    is truthy, so cdk-nag's ``!suppression.appliesTo`` shortcut is not taken and its
+    membership test then matches nothing. A truthiness check here would turn "covers nothing"
+    into "covers everything".
+    """
+    if "applies_to" in entry:
+        scope = entry["applies_to"]
+    elif "appliesTo" in entry:
+        scope = entry["appliesTo"]
+    else:
+        return None
+    return None if scope is None else scope
+
+
+def _scope_covers_qualifier(scope, qualifier: str | None, rule_id: str) -> bool:
+    """Whether a granular suppression's scope covers this finding's qualifier.
+
+    Mirrors the membership half of cdk-nag 2.38.2's ``NagSuppressionHelper.doesApply``: the
+    scope is an array whose elements are either a plain string compared with ``===`` against
+    the finding's qualifier, or an object ``{"regex": "/pattern/flags"}`` evaluated as a
+    JavaScript regular expression.
+
+    A finding with no qualifier is never covered. cdk-nag guards its membership test on
+    ``findingId`` being non-empty, so a scoped suppression says nothing about a rule that
+    reported no scope.
+
+    THE REGEX ELEMENT FORM IS REFUSED, NOT APPROXIMATED
+    ---------------------------------------------------
+    cdk-nag's ``toRegEx`` parses ``/pattern/flags`` and runs ``regex.test(findingId)``, an
+    unanchored partial match under JavaScript's engine. Python's ``re`` is a different engine
+    and the differences run both ways: ``\\d`` and ``\\w`` cover different characters, ``\\A``
+    is start-of-string in Python and a literal ``A`` in JavaScript, ``$`` tolerates a trailing
+    newline in Python and not in JavaScript, and named groups and ``\\p{...}`` property
+    escapes use incompatible syntax. Some of those divergences make Python match a string
+    JavaScript would reject, and a scope that matches too much silently over-suppresses --
+    exactly the defect this function was added to remove.
+
+    Evaluating the pattern in Node instead was considered and rejected: it puts a subprocess
+    in a per-finding loop and hands an untrusted pattern from a scanned file to a regex
+    engine, which is a denial-of-service surface for no gain.
+
+    So an element this cannot evaluate faithfully fails closed. The finding stays actionable
+    and the log names the rule, because a suppression dropped without a signal leaves the
+    author wondering why the reason they wrote did nothing. The cost is under-suppression on
+    a template that uses regex scopes, which is the safe direction and the same direction as
+    the stack-level suppressions this wrapper also does not read.
+    """
+    if qualifier is None:
+        return False
+    if not isinstance(scope, (list, tuple)):
+        # cdk-nag types appliesTo as an array and calls .some() on it, so a scalar makes the
+        # real library throw. Coercing it to a one-element list would honor a suppression
+        # cdk-nag itself refuses to process.
+        ASH_LOGGER.warning(
+            f"Ignoring the in-template cdk-nag suppression for '{rule_id}': its "
+            f"applies_to is {type(scope).__name__}, not a list. The finding is reported."
+        )
+        return False
+    for member in scope:
+        if isinstance(member, str):
+            if member == qualifier:
+                return True
+            continue
+        if isinstance(member, Mapping) and "regex" in member:
+            ASH_LOGGER.warning(
+                f"Ignoring the in-template cdk-nag suppression for '{rule_id}': its "
+                f"applies_to uses the regex form ({member['regex']!r}), which is a "
+                "JavaScript pattern this scanner will not reinterpret under Python's "
+                "regex engine. The finding is reported rather than silenced on a guess."
+            )
+            continue
+        ASH_LOGGER.warning(
+            f"Ignoring an unrecognized applies_to entry on the in-template cdk-nag "
+            f"suppression for '{rule_id}': {member!r}."
+        )
+    return False
+
+
 def _template_suppression_reason(cfn_resource, rule_id: str) -> str | None:
     """The reason the scanned template itself gives for suppressing ``rule_id`` here.
 
@@ -230,14 +345,21 @@ def _template_suppression_reason(cfn_resource, rule_id: str) -> str | None:
     if not isinstance(declared, (list, tuple)):
         return None
 
-    # cdk-nag reports a wildcard-scoped finding with its scope appended, as
-    # ``AwsSolutions-IAM5[Resource::*]``, while the suppression that covers it is written
-    # against the bare ``AwsSolutions-IAM5``. A bare-id suppression covering every
-    # appliesTo variant is cdk-nag's own semantics, so the bracketed qualifier is stripped
-    # before comparing. Matching the full string only would leave the granular findings
-    # unsuppressed, and on a real template those are the majority of them -- the fix would
-    # look applied and change almost nothing.
-    base_rule_id = rule_id.split("[", 1)[0]
+    # cdk-nag reports a granular finding with its scope appended, as
+    # ``AwsSolutions-IAM5[Resource::*]``, while the suppression that covers it is normally
+    # written against the bare ``AwsSolutions-IAM5``. Widening a bare id to cover every
+    # qualifier is cdk-nag 2.x's semantics specifically -- ``doesApply`` in 2.38.2's
+    # ``nag-suppression-helper.js`` compares the bare rule id and carries the qualifier as a
+    # separate ``findingId`` argument. It is NOT 3.x's: ``isAcknowledged`` in 3.0.2's
+    # ``nag-pack.js`` is ``ids.includes(ruleId)``, exact equality with no stripping, against
+    # the fully qualified id ``applyRule`` built. Both are honored here because a scanned
+    # template can have been synthesized by either major -- 2.x writes a bare id plus
+    # ``applies_to``, 3.x writes the qualified id verbatim and no ``applies_to`` at all.
+    #
+    # Matching the full string only would leave the 2.x-authored granular findings
+    # unsuppressed, and on a real template those are the majority of them -- the honoring
+    # would look applied and change almost nothing.
+    base_rule_id, qualifier = _rule_id_parts(rule_id)
 
     for entry in declared:
         if not isinstance(entry, Mapping):
@@ -246,6 +368,14 @@ def _template_suppression_reason(cfn_resource, rule_id: str) -> str | None:
         if not isinstance(suppressed_id, str):
             continue
         if suppressed_id != rule_id and suppressed_id != base_rule_id:
+            continue
+        # Only an entry that declares no granular scope may ride on the bare-id match. One
+        # that does declare a scope has to name this finding's own qualifier, because that is
+        # what cdk-nag requires of it and because the alternative is strictly more permissive
+        # than either major: a reason written about a single S3 prefix would otherwise silence
+        # ``Resource::*``, and would attach that narrow reason to it as the justification.
+        scope = _granular_scope(entry)
+        if scope is not None and not _scope_covers_qualifier(scope, qualifier, rule_id):
             continue
         reason = entry.get("reason")
         if isinstance(reason, str) and reason.strip():

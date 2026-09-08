@@ -1553,3 +1553,358 @@ def test_malformed_suppression_metadata_is_ignored_not_raised(
     finding = _only_finding(_run(path, outdir, nag_packs=["AwsSolutionsChecks"]))
 
     assert finding.suppressions is None, f"{why}: should be ignored, not honored"
+
+
+# ---------------------------------------------------------------------------
+# Granular suppressions: the applies_to scope
+# ---------------------------------------------------------------------------
+#
+# cdk-nag narrows a suppression to particular findings with `appliesTo`, which
+# `NagSuppressionHelper.toCfnFormat` renames to `applies_to` on its way into a template. Read
+# from the installed bundles rather than from memory: cdk-nag 2.38.2's
+# `lib/utils/nag-suppression-helper.js` decides applicability in three steps -- the bare rule
+# id must match, a suppression with no `appliesTo` applies to every variant, and a suppression
+# WITH one applies only when the finding's own qualifier is a member of it. The last step
+# returns false, so a narrow suppression does not fall back to covering everything.
+#
+# Ignoring the key is more permissive than either cdk-nag major. 2.x rejects the suppression as
+# non-matching. 3.0.2 never widens at all: `lib/nag-pack.js` builds the finding's id as
+# `${ruleId}[${finding}]` and asks `isAcknowledged`, which is `ids.includes(ruleId)` -- exact
+# string equality with no stripping. So a reason written about one S3 prefix must not silence
+# `Resource::*`, which is an unrestricted resource wildcard.
+
+# The shape a CDK asset-bucket suppression really has. 123456789012 is the account id AWS's own
+# documentation uses as its example, and appears elsewhere in this repository already.
+NARROW_SCOPE = "Resource::arn:aws:s3:::cdk-hnb659fds-assets-123456789012-us-east-1/*"
+NARROW_SCOPE_REASON = "Only object access inside the CDK asset bucket this stack owns."
+SCOPED_RULE = "AwsSolutions-IAM5"
+
+# The qualifier the narrow suppression above must NOT silence. An unrestricted resource
+# wildcard is the finding the rule exists to raise.
+WILDCARD_QUALIFIER = "Resource::*"
+
+
+def _scoped_suppression_template(
+    tmp_path,
+    name,
+    scope_block="",
+    rule_id=SCOPED_RULE,
+    reason=NARROW_SCOPE_REASON,
+    extra_entry_lines="",
+):
+    """One resource whose sole suppression is ``rule_id``, plus whatever scope is given.
+
+    ``scope_block`` and ``extra_entry_lines`` are raw YAML indented to sit inside the
+    ``rules_to_suppress`` entry, so a test can express a scope cdk-nag would accept, one it
+    would reject, and one this wrapper cannot evaluate -- without a helper that quietly
+    normalizes any of them into something well-formed.
+    """
+    path = tmp_path / f"{name}.yaml"
+    path.write_text(
+        "Resources:\n"
+        "  MyDataBucket:\n"
+        "    Type: AWS::S3::Bucket\n"
+        "    Metadata:\n"
+        "      cdk_nag:\n"
+        "        rules_to_suppress:\n"
+        f"          - id: {rule_id}\n"
+        f'            reason: "{reason}"\n'
+        + extra_entry_lines
+        + scope_block
+        + "    Properties:\n"
+        "      BucketName: placeholder-name\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _applies_to_block(*members, key="applies_to"):
+    """A YAML ``applies_to`` sequence, or an empty one when no members are given."""
+    if not members:
+        return f"            {key}: []\n"
+    lines = [f"            {key}:\n"]
+    lines += [f'              - "{member}"\n' for member in members]
+    return "".join(lines)
+
+
+def test_a_granular_suppression_does_not_cover_a_qualifier_it_does_not_name(
+    cdk_doubles, tmp_path, outdir
+):
+    """The finding this whole section exists for.
+
+    The template accepts wildcard access to one asset bucket's object keys. The finding is
+    ``AwsSolutions-IAM5[Resource::*]`` -- permission on every resource in the account. Treating
+    the narrow reason as covering it both hides a real finding and attaches a justification
+    that is untrue of it, which is worse than reporting it: a reader auditing the suppressed
+    column is told the wildcard is scoped to a bucket.
+    """
+    path = _scoped_suppression_template(
+        tmp_path, "narrow-scope", _applies_to_block(NARROW_SCOPE)
+    )
+    cdk_doubles.report_text = _one_violation_report(
+        rule_name=f"{SCOPED_RULE}[{WILDCARD_QUALIFIER}]"
+    )
+
+    finding = _only_finding(_run(path, outdir, nag_packs=["AwsSolutionsChecks"]))
+
+    assert finding.suppressions is None, (
+        "a suppression scoped to one bucket prefix must not silence Resource::*; both "
+        "cdk-nag majors refuse this match"
+    )
+
+
+def test_a_granular_suppression_covers_the_qualifier_it_names(
+    cdk_doubles, tmp_path, outdir
+):
+    """The positive half: narrowing must not become "never suppress".
+
+    Without this, a fix that simply stopped honoring any entry carrying ``applies_to`` would
+    pass the negative test above while throwing away every scoped suppression an author wrote.
+    """
+    path = _scoped_suppression_template(
+        tmp_path, "narrow-scope-hit", _applies_to_block(NARROW_SCOPE)
+    )
+    cdk_doubles.report_text = _one_violation_report(
+        rule_name=f"{SCOPED_RULE}[{NARROW_SCOPE}]"
+    )
+
+    finding = _only_finding(_run(path, outdir, nag_packs=["AwsSolutionsChecks"]))
+
+    assert finding.suppressions is not None, (
+        "the finding's qualifier is a member of the declared scope, so the author's reason "
+        "applies to exactly this finding"
+    )
+    assert NARROW_SCOPE_REASON in finding.suppressions[0].justification
+
+
+def test_one_member_of_a_multi_member_scope_is_enough(cdk_doubles, tmp_path, outdir):
+    """Membership, not identity: cdk-nag tests the qualifier against every element."""
+    path = _scoped_suppression_template(
+        tmp_path,
+        "multi-scope",
+        _applies_to_block("Action::sts:AssumeRole", NARROW_SCOPE, "Action::kms:Decrypt"),
+    )
+    cdk_doubles.report_text = _one_violation_report(
+        rule_name=f"{SCOPED_RULE}[Action::kms:Decrypt]"
+    )
+
+    finding = _only_finding(_run(path, outdir, nag_packs=["AwsSolutionsChecks"]))
+
+    assert finding.suppressions is not None
+
+
+def test_the_camel_case_spelling_of_applies_to_is_also_read(
+    cdk_doubles, tmp_path, outdir
+):
+    """A hand-written template can carry cdk-nag's API spelling.
+
+    ``toCfnFormat`` writes ``applies_to``, but nothing stops an author from writing the
+    ``appliesTo`` they read in cdk-nag's own documentation. Reading only the snake_case key
+    would treat such an entry as having no scope at all and widen it to every variant -- the
+    exact over-suppression this section is about, reintroduced through a spelling.
+    """
+    path = _scoped_suppression_template(
+        tmp_path,
+        "camel-scope",
+        _applies_to_block(NARROW_SCOPE, key="appliesTo"),
+    )
+    cdk_doubles.report_text = _one_violation_report(
+        rule_name=f"{SCOPED_RULE}[{WILDCARD_QUALIFIER}]"
+    )
+
+    finding = _only_finding(_run(path, outdir, nag_packs=["AwsSolutionsChecks"]))
+
+    assert finding.suppressions is None
+
+
+def test_a_granular_suppression_does_not_cover_an_unqualified_finding(
+    cdk_doubles, tmp_path, outdir
+):
+    """A scoped suppression says nothing about a rule that reported no scope.
+
+    cdk-nag agrees by construction: ``doesApply`` guards the membership test on ``findingId``
+    being non-empty, so a granular suppression cannot match a finding that has no qualifier.
+    """
+    path = _scoped_suppression_template(
+        tmp_path, "scope-vs-bare", _applies_to_block(NARROW_SCOPE)
+    )
+    cdk_doubles.report_text = _one_violation_report(rule_name=SCOPED_RULE)
+
+    finding = _only_finding(_run(path, outdir, nag_packs=["AwsSolutionsChecks"]))
+
+    assert finding.suppressions is None
+
+
+@pytest.mark.parametrize(
+    "reported_rule_id",
+    [f"{SCOPED_RULE}[{WILDCARD_QUALIFIER}]", SCOPED_RULE],
+    ids=["qualified-finding", "unqualified-finding"],
+)
+def test_an_empty_applies_to_covers_nothing(
+    cdk_doubles, tmp_path, outdir, reported_rule_id
+):
+    """``applies_to: []`` is a scope with no members, not an absent scope.
+
+    This is the case a truthiness check gets exactly backwards, and JavaScript is the reason
+    it is worth a test: an empty array is truthy, so cdk-nag's ``!suppression.appliesTo``
+    shortcut is not taken and the membership test then finds nothing. Reading the key with
+    ``if not scope`` in Python would flip "covers nothing" into "covers everything".
+    """
+    path = _scoped_suppression_template(tmp_path, "empty-scope", _applies_to_block())
+    cdk_doubles.report_text = _one_violation_report(rule_name=reported_rule_id)
+
+    finding = _only_finding(_run(path, outdir, nag_packs=["AwsSolutionsChecks"]))
+
+    assert finding.suppressions is None
+
+
+def test_a_regex_scoped_suppression_is_not_honored_and_says_so(
+    cdk_doubles, tmp_path, outdir, caplog
+):
+    """The ``{regex: ...}`` scope element form fails closed, loudly.
+
+    cdk-nag 2.x accepts an object element and evaluates it as a JavaScript regular
+    expression: ``toRegEx`` parses ``/pattern/flags`` and ``regex.test(findingId)`` runs an
+    unanchored partial match. Python's ``re`` is a different engine -- ``\\d`` and ``\\w`` have
+    different widths, ``\\A`` means start-of-string here and a literal ``A`` there, ``$``
+    tolerates a trailing newline here and not there, and named groups and property escapes
+    use incompatible syntax. Translating one into the other would be an approximation, and an
+    approximation that matches too much silently over-suppresses, which is the defect this
+    whole section removes.
+
+    So the element is refused rather than guessed at. The finding stays actionable and the log
+    says which rule was affected, because the alternative -- dropping the suppression with no
+    signal -- leaves an author wondering why their reason did nothing.
+    """
+    path = _scoped_suppression_template(
+        tmp_path,
+        "regex-scope",
+        '            applies_to:\n              - regex: "/^Resource::.*$/"\n',
+    )
+    cdk_doubles.report_text = _one_violation_report(
+        rule_name=f"{SCOPED_RULE}[{WILDCARD_QUALIFIER}]"
+    )
+
+    with caplog.at_level("WARNING"):
+        finding = _only_finding(_run(path, outdir, nag_packs=["AwsSolutionsChecks"]))
+
+    assert finding.suppressions is None
+    assert any(
+        "regex" in record.message and SCOPED_RULE in record.message
+        for record in caplog.records
+    ), (
+        "an unevaluated suppression must name itself in the log; got "
+        f"{[r.message for r in caplog.records]}"
+    )
+
+
+def test_a_non_list_applies_to_is_not_honored(cdk_doubles, tmp_path, outdir):
+    """A scalar where cdk-nag requires an array is refused, not coerced.
+
+    cdk-nag types ``appliesTo`` as an array and calls ``.some`` on it, so a bare string makes
+    the real library throw. Coercing it to a one-element list here would honor a suppression
+    cdk-nag itself would refuse to process, and a substring or membership test against a bare
+    string is a different question from membership in a list.
+    """
+    path = _scoped_suppression_template(
+        tmp_path,
+        "scalar-scope",
+        f'            applies_to: "{WILDCARD_QUALIFIER}"\n',
+    )
+    cdk_doubles.report_text = _one_violation_report(
+        rule_name=f"{SCOPED_RULE}[{WILDCARD_QUALIFIER}]"
+    )
+
+    finding = _only_finding(_run(path, outdir, nag_packs=["AwsSolutionsChecks"]))
+
+    assert finding.suppressions is None
+
+
+def test_an_explicit_null_applies_to_leaves_the_suppression_ungranular(
+    cdk_doubles, tmp_path, outdir
+):
+    """``applies_to: null`` is how JSON spells absent, and cdk-nag reads it that way.
+
+    ``toApiFormat`` only sets ``appliesTo`` when the value is truthy, so a null leaves the
+    suppression non-granular and it covers every variant. Distinguishing this from
+    ``applies_to: []`` is why the key's presence cannot be the whole test.
+    """
+    path = _scoped_suppression_template(
+        tmp_path, "null-scope", "            applies_to: null\n"
+    )
+    cdk_doubles.report_text = _one_violation_report(
+        rule_name=f"{SCOPED_RULE}[{WILDCARD_QUALIFIER}]"
+    )
+
+    finding = _only_finding(_run(path, outdir, nag_packs=["AwsSolutionsChecks"]))
+
+    assert finding.suppressions is not None
+    assert NARROW_SCOPE_REASON in finding.suppressions[0].justification
+
+
+# ---------------------------------------------------------------------------
+# The cdk-nag 3.x round trip: a qualified id written into the template
+# ---------------------------------------------------------------------------
+#
+# 3.0.2's `WriteNagSuppressionsToCloudFormationAspect` is the only thing in 3.x that writes
+# this metadata, and it writes the acknowledged id verbatim -- it strips an `annotation::`
+# prefix and nothing else. Since `applyRule` acknowledges granular findings under
+# `${ruleId}[${finding}]`, a template synthesized by a 3.x app that used
+# `writeSuppressionsToCloudFormation` carries `id: AwsSolutions-IAM5[Resource::*]`, brackets
+# included, and carries no `applies_to` at all.
+#
+# These three lock that shape in. They are guards rather than reproductions: the shipped
+# matcher already handles all three, and it is the fix for the section above that could break
+# them -- narrowing implemented as "a bracketed rule id requires an applies_to" would refuse
+# every 3.x-written suppression.
+
+
+def test_a_three_x_written_qualified_id_matches_the_finding_verbatim(
+    cdk_doubles, tmp_path, outdir
+):
+    """An id carrying its own qualifier suppresses exactly that finding."""
+    qualified = f"{SCOPED_RULE}[{WILDCARD_QUALIFIER}]"
+    path = _scoped_suppression_template(tmp_path, "v3-roundtrip", rule_id=qualified)
+    cdk_doubles.report_text = _one_violation_report(rule_name=qualified)
+
+    finding = _only_finding(_run(path, outdir, nag_packs=["AwsSolutionsChecks"]))
+
+    assert finding.suppressions is not None, (
+        "a 3.x-synthesized template records the acknowledged id with its brackets; refusing "
+        "it would discard every suppression such an app wrote"
+    )
+    assert NARROW_SCOPE_REASON in finding.suppressions[0].justification
+
+
+def test_a_qualified_id_does_not_widen_to_a_different_qualifier(
+    cdk_doubles, tmp_path, outdir
+):
+    """``id: X[Action::sts:AssumeRole]`` says nothing about ``X[Resource::*]``."""
+    path = _scoped_suppression_template(
+        tmp_path,
+        "v3-other-qualifier",
+        rule_id=f"{SCOPED_RULE}[Action::sts:AssumeRole]",
+    )
+    cdk_doubles.report_text = _one_violation_report(
+        rule_name=f"{SCOPED_RULE}[{WILDCARD_QUALIFIER}]"
+    )
+
+    finding = _only_finding(_run(path, outdir, nag_packs=["AwsSolutionsChecks"]))
+
+    assert finding.suppressions is None
+
+
+def test_a_qualified_id_does_not_cover_the_unqualified_rule(
+    cdk_doubles, tmp_path, outdir
+):
+    """Widening runs one way only: bare covers qualified, never the reverse."""
+    path = _scoped_suppression_template(
+        tmp_path,
+        "v3-narrow-vs-bare",
+        rule_id=f"{SCOPED_RULE}[{WILDCARD_QUALIFIER}]",
+    )
+    cdk_doubles.report_text = _one_violation_report(rule_name=SCOPED_RULE)
+
+    finding = _only_finding(_run(path, outdir, nag_packs=["AwsSolutionsChecks"]))
+
+    assert finding.suppressions is None
