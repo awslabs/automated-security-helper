@@ -116,3 +116,37 @@ updates:
         update-types:
           - "minor"
           - "patch"
+
+  # The transpiler is a separate uv project with its own pyproject.toml and uv.lock, and
+  # nothing above covers it: `directory` scopes an ecosystem entry to one manifest, so the
+  # root entry monitors the root project only. Its dependencies were unmonitored entirely.
+  #
+  # Same strategy as the root project, for the same reason: leave a requirement alone when
+  # it already admits the new release and move the locked version instead.
+  - package-ecosystem: "uv"
+    directory: "/ash-agent-plugins/agentic-coding/transpiler"
+    schedule:
+      interval: "daily"
+    cooldown:
+      default-days: 7
+      semver-major-days: 7
+    commit-message:
+      prefix: "build"
+    labels:
+      - "dependencies"
+    versioning-strategy: increase-if-necessary
+    groups:
+      # No scanner packages here -- this project depends on templating and codegen
+      # libraries only -- so the split is major versus everything else, with no
+      # scanner/engine distinction to draw.
+      transpiler-major-upgrade:
+        patterns:
+          - "*"
+        update-types:
+          - "major"
+      transpiler-minor:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
