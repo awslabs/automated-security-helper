@@ -12,16 +12,18 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
+    { name = "email-validator" },
     { name = "jinja2" },
     { name = "jsonschema" },
-    { name = "pydantic", extra = ["email"] },
+    { name = "pydantic" },
     { name = "python-frontmatter" },
     { name = "pyyaml" },
 ]
 
 [package.optional-dependencies]
 refresh = [
-    { name = "datamodel-code-generator", extra = ["http"] },
+    { name = "datamodel-code-generator" },
+    { name = "httpx" },
 ]
 test = [
     { name = "pytest" },
@@ -30,10 +32,12 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.1" },
-    { name = "datamodel-code-generator", extras = ["http"], marker = "extra == 'refresh'", specifier = ">=0.64" },
+    { name = "datamodel-code-generator", marker = "extra == 'refresh'", specifier = ">=0.64" },
+    { name = "email-validator", specifier = ">=2.0" },
+    { name = "httpx", marker = "extra == 'refresh'", specifier = ">=0.24.1" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "jsonschema", specifier = ">=4.0" },
-    { name = "pydantic", extras = ["email"], specifier = ">=2.0" },
+    { name = "pydantic", specifier = ">=2.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0" },
     { name = "python-frontmatter", specifier = ">=1.1" },
     { name = "pyyaml", specifier = ">=6.0" },
@@ -164,11 +168,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/57/e8/8a46c8de96ec5c3b891172bf5db4bcf4797e75c31aa03d540d528e61ccd8/datamodel_code_generator-0.74.0.tar.gz", hash = "sha256:db0998d920e774f48442ca2702b901049be60c35ccb547086c574b1d261f1444", size = 2055535, upload-time = "2026-08-17T17:06:40.393Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d3/81/5b79e507f1fab62ac953d3343708a345d8e74cbe862ca2f61ccc90c2c600/datamodel_code_generator-0.74.0-py3-none-any.whl", hash = "sha256:5e7d0b41d25077ac54f23775904573fc8b608bdabc7fc762885204322f596190", size = 592333, upload-time = "2026-08-17T17:06:38.185Z" },
-]
-
-[package.optional-dependencies]
-http = [
-    { name = "httpx" },
 ]
 
 [[package]]
@@ -459,11 +458,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/18/a5/b60d21ac674192f8ab0ba4e9fd860690f9b4a6e51ca5df118733b487d8d6/pydantic-2.13.4.tar.gz", hash = "sha256:c40756b57adaa8b1efeeced5c196f3f3b7c435f90e84ea7f443901bec8099ef6", size = 844775, upload-time = "2026-05-06T13:43:05.343Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/fd/7b/122376b1fd3c62c1ed9dc80c931ace4844b3c55407b6fb2d199377c9736f/pydantic-2.13.4-py3-none-any.whl", hash = "sha256:45a282cde31d808236fd7ea9d919b128653c8b38b393d1c4ab335c62924d9aba", size = 472262, upload-time = "2026-05-06T13:43:02.641Z" },
-]
-
-[package.optional-dependencies]
-email = [
-    { name = "email-validator" },
 ]
 
 [[package]]
