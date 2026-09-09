@@ -112,11 +112,59 @@ automated-security-helper = "automated_security_helper.cli.main:app"
 [tool.commitizen]
 name = "cz_conventional_commits"
 version = "3.7.0"
+# Every entry below names a file that pins an ASH git tag someone else installs
+# from. They are listed here because a pin nothing rewrites goes stale silently:
+# the release succeeds, the package version moves, and the stale pin keeps
+# resolving to a real-but-old tag, so nothing fails until a user runs the
+# install command and gets the wrong ASH.
+#
 # Formula/ash.rb pins the git tag Homebrew builds from. It was absent here, so
 # releases bumped the package and left the tap on an older tag until `brew
 # install` broke. The `tag:` pattern matches the url line; commitizen rewrites
 # the version substring within it and leaves the leading "v" alone.
-version_files = ["pyproject.toml:^version", "Formula/ash.rb:tag:"]
+#
+# The four transpiler _base/ files are the same failure, found the same way --
+# a reviewer noticed a generated plugin still advertising v3.4.0 long after
+# v3.7.0 shipped. _base/ is the single source of truth the transpiler renders
+# into AGENTS.md plus 17 per-platform plugin trees and the repository-root
+# skills/ tree, so one stale literal there reaches every one of them, and
+# editing a generated copy is pointless because the next transpiler run
+# overwrites it. Two of the four carry the tag as structured data
+# (manifest.json's ash_version, mcp.json's uvx --from argument) and two carry
+# it as prose a user is told to paste, but all four break identically: uvx
+# resolves the ref, so a wrong tag is a wrong ASH and a deleted tag is a hard
+# failure.
+#
+# On pattern choice: commitizen matches each regex per line, then replaces the
+# bare current version within the matching lines. `ash_version` is used rather
+# than `version` because manifest.json also carries the plugin's own unrelated
+# "version": "1.0.0", and a pattern that matched both would depend on the two
+# never colliding. `automated-security-helper@` is the narrowest string that
+# identifies an install ref in the other three.
+#
+# Keep the value here in step with `version` above. commitizen searches for the
+# CURRENT version and replaces it, so a _base/ file written ahead of
+# [tool.commitizen] version is not "already up to date" -- it is a line the
+# next bump cannot match, which means it stops being maintained from then on
+# and drifts silently again. That is why these say v3.7.0 and not the newest
+# published tag.
+version_files = [
+    "pyproject.toml:^version",
+    "Formula/ash.rb:tag:",
+    "ash-agent-plugins/agentic-coding/transpiler/_base/manifest.json:ash_version",
+    "ash-agent-plugins/agentic-coding/transpiler/_base/mcp.json:automated-security-helper@",
+    "ash-agent-plugins/agentic-coding/transpiler/_base/commands/scan.md:automated-security-helper@",
+    "ash-agent-plugins/agentic-coding/transpiler/_base/references/troubleshooting.md:automated-security-helper@",
+]
+# Rewriting _base/ is only half the chain: the 17 generated trees are still on
+# the old tag until the transpiler reruns, and `agentic-plugins check` byte-
+# compares them, so a bump that only touched _base/ would hand CI a guaranteed
+# drift failure on the release commit. This hook runs after version_files are
+# rewritten and before the bump commit is made, and commitizen commits with
+# `git commit -a`, so the regenerated trees land in that same commit.
+pre_bump_hooks = [
+    "uv run --project ash-agent-plugins/agentic-coding/transpiler agentic-plugins build",
+]
 tag_format = "v$version"
 changelog_file = "CHANGELOG.md"
 update_changelog_on_bump = true
