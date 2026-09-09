@@ -261,11 +261,22 @@ def _scope_covers_qualifier(scope, qualifier: str | None, rule_id: str) -> bool:
     in a per-finding loop and hands an untrusted pattern from a scanned file to a regex
     engine, which is a denial-of-service surface for no gain.
 
-    So an element this cannot evaluate faithfully fails closed. The finding stays actionable
-    and the log names the rule, because a suppression dropped without a signal leaves the
-    author wondering why the reason they wrote did nothing. The cost is under-suppression on
-    a template that uses regex scopes, which is the safe direction and the same direction as
-    the stack-level suppressions this wrapper also does not read.
+    So an element this cannot evaluate faithfully fails closed: that ELEMENT is skipped and
+    the rest of the scope is still compared, which is why a scope whose only element is a
+    regex covers nothing and the finding stays actionable. The log names the rule either
+    way, because a suppression dropped without a signal leaves the author wondering why the
+    reason they wrote did nothing.
+
+    What the warning may NOT claim is the outcome. It fires per element, and the loop keeps
+    going, so it also fires on scopes that go on to match -- and even a False return here
+    only rejects one ``rules_to_suppress`` entry, while the caller tries the rest. A message
+    asserting the suppression was dropped and the finding reported is therefore wrong on
+    exactly the templates where it is loudest, and it sends someone debugging a genuinely
+    dropped suppression after the regex instead of the missing qualifier.
+
+    The cost is under-suppression on a template that uses regex scopes, which is the safe
+    direction and the same direction as the stack-level suppressions this wrapper also does
+    not read.
     """
     if qualifier is None:
         return False
@@ -274,8 +285,9 @@ def _scope_covers_qualifier(scope, qualifier: str | None, rule_id: str) -> bool:
         # real library throw. Coercing it to a one-element list would honor a suppression
         # cdk-nag itself refuses to process.
         ASH_LOGGER.warning(
-            f"Ignoring the in-template cdk-nag suppression for '{rule_id}': its "
-            f"applies_to is {type(scope).__name__}, not a list. The finding is reported."
+            f"Skipping the in-template cdk-nag suppression entry for '{rule_id}': its "
+            f"applies_to is {type(scope).__name__}, not a list, so it covers no qualifier. "
+            "Write applies_to as a list of qualifier strings."
         )
         return False
     for member in scope:
@@ -285,10 +297,13 @@ def _scope_covers_qualifier(scope, qualifier: str | None, rule_id: str) -> bool:
             continue
         if isinstance(member, Mapping) and "regex" in member:
             ASH_LOGGER.warning(
-                f"Ignoring the in-template cdk-nag suppression for '{rule_id}': its "
-                f"applies_to uses the regex form ({member['regex']!r}), which is a "
-                "JavaScript pattern this scanner will not reinterpret under Python's "
-                "regex engine. The finding is reported rather than silenced on a guess."
+                f"Skipping one applies_to element on the in-template cdk-nag suppression "
+                f"for '{rule_id}': the regex form ({member['regex']!r}) is a JavaScript "
+                "pattern this scanner will not reinterpret under Python's regex engine. "
+                "Only that element is skipped -- the rest of applies_to is still compared, "
+                "so this alone does not mean the finding went unsuppressed. To have the "
+                "regex honored here, list the qualifier verbatim alongside it; plain "
+                "strings are compared exactly."
             )
             continue
         ASH_LOGGER.warning(
