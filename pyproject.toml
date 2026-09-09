@@ -124,30 +124,43 @@ version = "3.7.0"
 # the version substring within it and leaves the leading "v" alone.
 #
 # The four transpiler _base/ files are the same failure, found the same way --
-# a reviewer noticed a generated plugin still advertising v3.4.0 long after
-# v3.7.0 shipped. _base/ is the single source of truth the transpiler renders
-# into AGENTS.md plus 17 per-platform plugin trees and the repository-root
-# skills/ tree, so one stale literal there reaches every one of them, and
-# editing a generated copy is pointless because the next transpiler run
-# overwrites it. Two of the four carry the tag as structured data
+# a reviewer noticed a generated plugin still advertising a tag several minor
+# releases behind what shipped. _base/ is the single source of truth the
+# transpiler renders into AGENTS.md plus 17 per-platform plugin trees and the
+# repository-root skills/ tree, so one stale literal there reaches every one of
+# them, and editing a generated copy is pointless because the next transpiler
+# run overwrites it. Two of the four carry the tag as structured data
 # (manifest.json's ash_version, mcp.json's uvx --from argument) and two carry
 # it as prose a user is told to paste, but all four break identically: uvx
 # resolves the ref, so a wrong tag is a wrong ASH and a deleted tag is a hard
 # failure.
 #
+# The three docs/ entries are the same failure again, and they are the reason
+# this list is not the only guard. Each holds a paste-in install command that
+# nothing rewrote: cli-reference.md and mcp-performance-scalability.md sat three
+# minor releases behind, and trivy-plugin.md six. They were missed because the
+# repository had three separate hand-maintained lists of files that pin the
+# version -- this one, scripts/version_template_manager.py's target_files, and
+# the test's own list -- and a file absent from all three is invisible to every
+# one of them. tests/unit/test_agent_plugin_ash_version.py now walks the whole
+# tree for install refs instead of consulting a list, so the next omission fails
+# a test rather than shipping. Adding a pin here without adding it there is
+# safe; the reverse is what this comment exists to prevent.
+#
 # On pattern choice: commitizen matches each regex per line, then replaces the
 # bare current version within the matching lines. `ash_version` is used rather
 # than `version` because manifest.json also carries the plugin's own unrelated
 # "version": "1.0.0", and a pattern that matched both would depend on the two
-# never colliding. `automated-security-helper@` is the narrowest string that
-# identifies an install ref in the other three.
+# never colliding. The install-ref entries match `automated-security-helper@`
+# or, where the URL carries a `.git` suffix, `automated-security-helper.git@`.
 #
-# Keep the value here in step with `version` above. commitizen searches for the
-# CURRENT version and replaces it, so a _base/ file written ahead of
-# [tool.commitizen] version is not "already up to date" -- it is a line the
-# next bump cannot match, which means it stops being maintained from then on
-# and drifts silently again. That is why these say v3.7.0 and not the newest
-# published tag.
+# Keep these values in step with `version` above -- not with the newest
+# published tag. commitizen searches for the CURRENT version and replaces it, so
+# a target written ahead of [tool.commitizen] version is not "already up to
+# date": it is a line the next bump cannot match, so it stops being maintained
+# from then on and drifts silently again. `--check-consistency` in
+# .github/workflows/ash-create-release.yml turns that into a failed release
+# rather than a silent skip.
 version_files = [
     "pyproject.toml:^version",
     "Formula/ash.rb:tag:",
@@ -155,6 +168,9 @@ version_files = [
     "ash-agent-plugins/agentic-coding/transpiler/_base/mcp.json:automated-security-helper@",
     "ash-agent-plugins/agentic-coding/transpiler/_base/commands/scan.md:automated-security-helper@",
     "ash-agent-plugins/agentic-coding/transpiler/_base/references/troubleshooting.md:automated-security-helper@",
+    "docs/content/docs/cli-reference.md:automated-security-helper@",
+    "docs/content/docs/mcp-performance-scalability.md:automated-security-helper@",
+    "docs/content/docs/plugins/community/trivy-plugin.md:automated-security-helper.git@",
 ]
 # Rewriting _base/ is only half the chain: the 17 generated trees are still on
 # the old tag until the transpiler reruns, and `agentic-plugins check` byte-
