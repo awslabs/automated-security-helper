@@ -8,9 +8,23 @@ import pytest
 from automated_security_helper.utils.uv_tool_runner import (
     UVToolRunner,
     UVToolRunnerError,
+    _reset_uv_tool_runner_caches,
     get_uv_tool_runner,
     reset_uv_tool_runner,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_module_caches():
+    """Clear the module-level memo caches around every test in this file.
+
+    ``get_tool_version`` memoizes per ``tool::package``, so without this the
+    version one test mocks would be served to the next -- and a test asserting
+    a *failed* probe would instead see the previous test's success.
+    """
+    _reset_uv_tool_runner_caches()
+    yield
+    _reset_uv_tool_runner_caches()
 
 
 @pytest.fixture
