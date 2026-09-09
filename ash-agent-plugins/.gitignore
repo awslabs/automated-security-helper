@@ -5,6 +5,14 @@ __pycache__/
 *.swp
 *.swo
 .vscode/
+# ...but the copilot backend's output tree legitimately contains a .vscode/
+# directory: VS Code reads MCP server config from .vscode/mcp.json, so that is
+# where the transpiler has to emit it. The pattern above is meant to ignore a
+# developer's own editor settings, and it was silently swallowing generated
+# output instead, which made `agentic-plugins check` permanently report drift
+# for a file git would not let anyone commit. Re-include the directory itself
+# (a file cannot be re-included while its parent directory stays excluded).
+!agentic-coding/plugins/*/.vscode/
 .idea/
 *.log
 .ash/ash_output/
