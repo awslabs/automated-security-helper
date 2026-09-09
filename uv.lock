@@ -138,6 +138,7 @@ dependencies = [
     { name = "defusedxml" },
     { name = "detect-secrets" },
     { name = "docker" },
+    { name = "email-validator" },
     { name = "gitdb" },
     { name = "gitpython" },
     { name = "igittigitt" },
@@ -146,7 +147,7 @@ dependencies = [
     { name = "jsonschema" },
     { name = "junitparser" },
     { name = "mcp" },
-    { name = "pydantic", extra = ["email"] },
+    { name = "pydantic" },
     { name = "pyrsistent" },
     { name = "python-multipart" },
     { name = "requests" },
@@ -177,7 +178,8 @@ dev = [
     { name = "mkdocs-awesome-nav" },
     { name = "mkdocs-material" },
     { name = "mkdocs-mermaid2-plugin" },
-    { name = "mkdocstrings", extra = ["python"] },
+    { name = "mkdocstrings" },
+    { name = "mkdocstrings-python" },
     { name = "mypy" },
     { name = "pymdown-extensions" },
     { name = "pytest" },
@@ -187,7 +189,18 @@ dev = [
     { name = "pytest-xdist" },
     { name = "ruff" },
     { name = "toml" },
-    { name = "types-boto3", extra = ["essential", "logs", "s3", "securityhub", "securitylake", "sts"] },
+    { name = "types-boto3" },
+    { name = "types-boto3-cloudformation" },
+    { name = "types-boto3-dynamodb" },
+    { name = "types-boto3-ec2" },
+    { name = "types-boto3-lambda" },
+    { name = "types-boto3-logs" },
+    { name = "types-boto3-rds" },
+    { name = "types-boto3-s3" },
+    { name = "types-boto3-securityhub" },
+    { name = "types-boto3-securitylake" },
+    { name = "types-boto3-sqs" },
+    { name = "types-boto3-sts" },
     { name = "types-pyyaml" },
 ]
 
@@ -204,6 +217,7 @@ requires-dist = [
     { name = "defusedxml", specifier = ">=0.7,<0.8" },
     { name = "detect-secrets", specifier = ">=1.5,<2" },
     { name = "docker", specifier = ">=7.2,<8.0.0" },
+    { name = "email-validator", specifier = ">=2.0,<3.0.0" },
     { name = "gitdb", specifier = ">=4.0,<5.0.0" },
     { name = "gitpython", specifier = ">=3.1.61,<4.0.0" },
     { name = "igittigitt", specifier = ">=2.2,<3.0.0" },
@@ -212,7 +226,7 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4.26,<5.0.0" },
     { name = "junitparser", specifier = ">=5.0,<6" },
     { name = "mcp", specifier = ">=2.1,<3" },
-    { name = "pydantic", extras = ["email"], specifier = ">=2.13,<2.14" },
+    { name = "pydantic", specifier = ">=2.13,<2.14" },
     { name = "pyrsistent", specifier = ">=0.20,<1.0.0" },
     { name = "python-multipart", specifier = ">=0.0.32,<0.1" },
     { name = "requests", specifier = ">=2.34,<3.0.0" },
@@ -237,7 +251,8 @@ dev = [
     { name = "mkdocs-awesome-nav", specifier = ">=3.3,<4.0.0" },
     { name = "mkdocs-material", specifier = ">=9.7.7,<10.0.0" },
     { name = "mkdocs-mermaid2-plugin", specifier = ">=1.2,<2.0.0" },
-    { name = "mkdocstrings", extras = ["python"], specifier = ">=1.0,<2.0.0" },
+    { name = "mkdocstrings", specifier = ">=1.0,<2.0.0" },
+    { name = "mkdocstrings-python", specifier = ">=2.0,<3.0.0" },
     { name = "mypy", specifier = ">=2.3,<3.0.0" },
     { name = "pymdown-extensions", specifier = ">=11.0.2,<12.0.0" },
     { name = "pytest", specifier = ">=9.1,<10.0.0" },
@@ -247,7 +262,18 @@ dev = [
     { name = "pytest-xdist", specifier = ">=3.8,<4.0.0" },
     { name = "ruff", specifier = ">=0.16,<1.0.0" },
     { name = "toml", specifier = ">=0.10" },
-    { name = "types-boto3", extras = ["essential", "logs", "s3", "securityhub", "securitylake", "sts"], specifier = ">=1.43,<2.0.0" },
+    { name = "types-boto3", specifier = ">=1.43,<2.0.0" },
+    { name = "types-boto3-cloudformation", specifier = ">=1.43,<2.0.0" },
+    { name = "types-boto3-dynamodb", specifier = ">=1.43,<2.0.0" },
+    { name = "types-boto3-ec2", specifier = ">=1.43,<2.0.0" },
+    { name = "types-boto3-lambda", specifier = ">=1.43,<2.0.0" },
+    { name = "types-boto3-logs", specifier = ">=1.43,<2.0.0" },
+    { name = "types-boto3-rds", specifier = ">=1.43,<2.0.0" },
+    { name = "types-boto3-s3", specifier = ">=1.43,<2.0.0" },
+    { name = "types-boto3-securityhub", specifier = ">=1.43,<2.0.0" },
+    { name = "types-boto3-securitylake", specifier = ">=1.43,<2.0.0" },
+    { name = "types-boto3-sqs", specifier = ">=1.43,<2.0.0" },
+    { name = "types-boto3-sts", specifier = ">=1.43,<2.0.0" },
     { name = "types-pyyaml", specifier = ">=6.0" },
 ]
 
@@ -1785,11 +1811,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/5d/5b/4c1902e8bdd5c4db63284e9d101dece4038d4025d6d88850ffe0a1578980/mkdocstrings-1.0.6-py3-none-any.whl", hash = "sha256:2703708697487d1b6d6d7b412e176fa436edf120c1bf81dc9e126b12d00893c7", size = 35787, upload-time = "2026-07-11T19:38:04.417Z" },
 ]
 
-[package.optional-dependencies]
-python = [
-    { name = "mkdocstrings-python" },
-]
-
 [[package]]
 name = "mkdocstrings-python"
 version = "2.0.3"
@@ -2062,11 +2083,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/18/a5/b60d21ac674192f8ab0ba4e9fd860690f9b4a6e51ca5df118733b487d8d6/pydantic-2.13.4.tar.gz", hash = "sha256:c40756b57adaa8b1efeeced5c196f3f3b7c435f90e84ea7f443901bec8099ef6", size = 844775, upload-time = "2026-05-06T13:43:05.343Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/fd/7b/122376b1fd3c62c1ed9dc80c931ace4844b3c55407b6fb2d199377c9736f/pydantic-2.13.4-py3-none-any.whl", hash = "sha256:45a282cde31d808236fd7ea9d919b128653c8b38b393d1c4ab335c62924d9aba", size = 472262, upload-time = "2026-05-06T13:43:02.641Z" },
-]
-
-[package.optional-dependencies]
-email = [
-    { name = "email-validator" },
 ]
 
 [[package]]
@@ -2982,32 +2998,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/98/dc/aad14124346930439a846b0563afb854dd5c4343f8f03a140b26985b103f/types_boto3-1.43.81.tar.gz", hash = "sha256:7ca466d08b9aa422e29369fa520157244a266801a7aada31e2f8beac78678923", size = 104923, upload-time = "2026-08-26T22:11:18.434Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/69/76/4661d5c9c14d5055b1dd76d8c58fbef145302a9a65b499f71e49c4abccb2/types_boto3-1.43.81-py3-none-any.whl", hash = "sha256:69ad51c06c43ed2c0bef142cef97d407c2ac07771987b02f244ee92bc520fbd8", size = 71418, upload-time = "2026-08-26T22:11:15.477Z" },
-]
-
-[package.optional-dependencies]
-essential = [
-    { name = "types-boto3-cloudformation" },
-    { name = "types-boto3-dynamodb" },
-    { name = "types-boto3-ec2" },
-    { name = "types-boto3-lambda" },
-    { name = "types-boto3-rds" },
-    { name = "types-boto3-s3" },
-    { name = "types-boto3-sqs" },
-]
-logs = [
-    { name = "types-boto3-logs" },
-]
-s3 = [
-    { name = "types-boto3-s3" },
-]
-securityhub = [
-    { name = "types-boto3-securityhub" },
-]
-securitylake = [
-    { name = "types-boto3-securitylake" },
-]
-sts = [
-    { name = "types-boto3-sts" },
 ]
 
 [[package]]
