@@ -33,7 +33,7 @@ runs:
   steps:
     - name: Set up Docker Buildx on Linux
       if: contains(inputs.os, 'ubuntu') && inputs.method != 'python-local' && inputs.oci-runner != 'finch'
-      uses: docker/setup-buildx-action@v4
+      uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
     # ASH's container build exports and restores its layers through the GitHub
     # Actions cache (buildx type=gha) when it can see the cache credentials. Actions
@@ -67,7 +67,7 @@ runs:
         contains(inputs.os, 'ubuntu')
         && inputs.method != 'python-local'
         && inputs.oci-runner == 'docker'
-      uses: actions/github-script@v8
+      uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
       with:
         script: |
           for (const name of ['ACTIONS_RUNTIME_TOKEN', 'ACTIONS_CACHE_URL', 'ACTIONS_RESULTS_URL']) {
@@ -373,7 +373,7 @@ runs:
 
     # Common post-scan validation
     - name: Collect ASH output artifact
-      uses: actions/upload-artifact@v7
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       if: success() || failure()
       with:
         name: ash_output-${{ inputs.os }}-${{ inputs.method }}-${{ inputs.config-file }}${{ inputs.oci-runner && format('-{0}', inputs.oci-runner) || '' }}${{ inputs.offline == 'true' && '-offline' || '' }}
