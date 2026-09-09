@@ -18,8 +18,112 @@ import re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import ClassVar, Literal
+
+
+# ---------------------------------------------------------------------------
+# Output anchors — the roots a backend's OUTPUT_DIR can hang from
+# ---------------------------------------------------------------------------
+
+
+OutputAnchor = Literal["plugins", "repository"]
+
+
+@dataclass(frozen=True)
+class OutputAnchors:
+    """The roots available to backends, as two independent explicit fields.
+
+    Neither is derived from the other, and that is load-bearing rather than
+    stylistic. `orchestrator.check_drift` sandboxes a build by handing it a
+    temporary directory and byte-comparing the result. If `repository` were
+    computed by walking up from `plugins` (or vice versa), a sandboxed build
+    would resolve outside its own tempdir, and because
+    `emitters.run_section_emitters` starts with `reset(out)` ->
+    `shutil.rmtree(out)`, it would delete whatever it landed on. Keeping the
+    two fields separate means sandboxing one cannot silently fail to sandbox
+    the other: `sandbox()` sets both, and there is no code path that fills in
+    one from the other.
+    """
+
+    plugins: Path
+    """agentic-coding/plugins/ — where per-platform plugin trees are written."""
+
+    repository: Path
+    """The repository root — where tooling that scans a checkout expects to
+    find things, e.g. the `skills` CLI's `skills/<name>/` layout."""
+
+    @classmethod
+    def sandbox(cls, tmp: Path) -> OutputAnchors:
+        """Anchors confined to `tmp`, for drift checks and tests.
+
+        Both anchors become distinct subdirectories of `tmp`. Distinct rather
+        than both equal to `tmp` so that two backends anchored differently can
+        never resolve to the same output directory inside a sandbox, which
+        would make a drift comparison silently compare the wrong trees.
+        """
+        return cls(plugins=tmp / "plugins", repository=tmp / "repository")
+
+    def root_for(self, anchor: OutputAnchor) -> Path:
+        if anchor == "plugins":
+            return self.plugins
+        if anchor == "repository":
+            return self.repository
+        raise ValueError(
+            f"unknown OUTPUT_ANCHOR {anchor!r}; expected 'plugins' or 'repository'"
+        )
+
+
+def validated_output_dir(name: str, output_dir: str) -> str:
+    """Reject an OUTPUT_DIR that does not stay strictly inside its anchor.
+
+    This is a safety guard, not input validation. The resolved output directory
+    is passed to `emitters.run_section_emitters`, whose first act is
+    `reset(out)` -> `shutil.rmtree(out)`. Under the `repository` anchor an
+    empty, `.`-valued, absolute, or `..`-containing OUTPUT_DIR resolves to the
+    repository root or above it, so a build would delete the checkout. Raising
+    here is the only acceptable outcome; there is no sensible fallback.
+
+    Both POSIX and Windows path flavors are consulted because they disagree
+    about what is absolute and what a separator is: `PurePosixPath` does not
+    treat `C:\\x` as absolute and does not split on backslash, while
+    `PureWindowsPath` does not treat a bare `/x` as absolute (it has no drive).
+    A value that is dangerous on either platform is rejected on both.
+    """
+    if not isinstance(output_dir, str) or not output_dir.strip():
+        raise ValueError(
+            f"backend {name!r} declares an empty OUTPUT_DIR; it would resolve to "
+            f"its anchor root, which the build then deletes"
+        )
+    flavors = (PurePosixPath(output_dir), PureWindowsPath(output_dir))
+    for p in flavors:
+        if p.is_absolute() or p.anchor:
+            raise ValueError(
+                f"backend {name!r} declares an absolute OUTPUT_DIR "
+                f"{output_dir!r}; it must be relative to its anchor"
+            )
+        if ".." in p.parts:
+            raise ValueError(
+                f"backend {name!r} declares OUTPUT_DIR {output_dir!r}, which "
+                f"escapes its anchor via '..'"
+            )
+    if not any(p.parts for p in flavors):
+        raise ValueError(
+            f"backend {name!r} declares OUTPUT_DIR {output_dir!r}, which resolves "
+            f"to its anchor root; the build would delete the anchor"
+        )
+    return output_dir
+
+
+def resolve_output_dir(backend_cls: type[BaseBackend], anchors: OutputAnchors) -> Path:
+    """The single funnel from (backend, anchors) to an output directory.
+
+    Every site that needs a backend's output path goes through here so the
+    escape guard cannot be bypassed by a caller that reassembles the path
+    itself.
+    """
+    output_dir = validated_output_dir(backend_cls.NAME, backend_cls.OUTPUT_DIR)
+    return anchors.root_for(backend_cls.OUTPUT_ANCHOR) / output_dir
 
 
 # ---------------------------------------------------------------------------
@@ -353,6 +457,19 @@ class BaseBackend:
 
     NAME: ClassVar[str] = ""
     OUTPUT_DIR: ClassVar[str] = ""
+
+    OUTPUT_ANCHOR: ClassVar[OutputAnchor] = "plugins"
+    """Which root OUTPUT_DIR is relative to. Almost always "plugins" — a
+    backend's output is a plugin tree under agentic-coding/plugins/.
+
+    "repository" is for output that external tooling only finds at a fixed
+    location in a checkout, where a copy under plugins/ would be invisible to
+    it. Today only `skills-root`: the `skills` CLI discovers skills at a
+    repository-root `skills/<name>/` directory and does not search the tree.
+
+    Resolve through `resolve_output_dir`, never by joining a root and
+    OUTPUT_DIR by hand — the join is where the escape guard lives, and the
+    resolved directory is rmtree'd at the start of every build."""
 
     FORMAT: ClassVar[Format | None] = None
     """Optional Format this backend produces. Today informational only —

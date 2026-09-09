@@ -49,10 +49,16 @@ class TestTotalFailureIsNotPassed:
         assert c.determine_status("MEDIUM") == ScannerStatus.PASSED
 
     def test_untracked_scanners_keep_existing_behavior(self):
-        # Scanners that do not report per-target outcomes leave both counters at 0. The guard
-        # must not fire for them, or every such scanner would regress to ERROR.
+        # Scanners that do not report per-target outcomes leave targets_attempted at None, the
+        # no-claim state. The guard must not fire for them, or every such scanner would regress
+        # to ERROR.
+        #
+        # This asserted ``== 0`` when the field was a plain int. The default moved to None so
+        # that "makes no claim" and "tracked, attempted none" stop sharing a value -- the second
+        # of those now reports SKIPPED, and reading the first as the second would flip every
+        # non-tracking scanner. See test_scan_results_container_nothing_scanned.py.
         c = _container()
-        assert c.targets_attempted == 0
+        assert c.targets_attempted is None
         assert c.determine_status("MEDIUM") == ScannerStatus.PASSED
 
     def test_failed_exceeding_attempted_still_errors(self):

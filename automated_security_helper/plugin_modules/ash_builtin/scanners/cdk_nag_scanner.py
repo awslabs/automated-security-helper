@@ -182,6 +182,39 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         """
         if global_ignore_paths is None:
             global_ignore_paths = []
+
+        # Per-call state, reset before anything else in the method can return.
+        #
+        # These are instance attributes on a plugin object that ScanPhase reuses:
+        # ``_scanner_tasks`` carries one task per scanner holding ``[source, converted]``, and
+        # ``ScannerExecutor._execute_scanner`` loops that list against the same instance, reading
+        # the counters off it after each call. So whatever a target leaves behind is what the
+        # next target starts with.
+        #
+        # Initializing them further down, next to the loop that increments them, reads naturally
+        # and was wrong in both directions. A target returning early inherited the previous
+        # target's totals -- an empty converted tree after a clean source pass reported PASSED
+        # over two attempts it never made, and after a failed source pass reported ERROR for a
+        # target where no file was ever opened. On the first call there was nothing to inherit,
+        # so the attributes stayed unset, which is how a scanner says "I do not track targets":
+        # the executor recorded no claim and the empty report resolved to PASSED, defeating the
+        # SKIPPED status outright.
+        #
+        # Top of the method rather than merely above the empty-target check, because there are
+        # three early returns above the old initialization point and the next one added would
+        # have inherited the same bug. Nothing between here and the first return can be
+        # meaningfully counted, so there is no ordering left to get wrong.
+        #
+        # The counters stay on the instance rather than moving to the per-call
+        # ``ScanResultsContainer``, which would remove this class of leak by construction. The
+        # container is built by the executor *around* the ``scan()`` call and is not passed in,
+        # and ``scan()``'s signature is the plugin contract every scanner -- including
+        # third-party ones -- implements. Threading the container through it is a breaking API
+        # change, and stashing it on ``self`` instead would be the same shared mutable state
+        # wearing a different name.
+        self.targets_attempted = 0
+        self.targets_failed = 0
+
         tool_component = ToolComponent(
             name="ash-cdk-nag-wrapper",
             fullName="awslabs/automated-security-helper",
@@ -256,6 +289,10 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             ):
                 scannable.append(pf.as_posix())
 
+        # The counters are already at 0 here, set at the top of the method. Deliberately not
+        # re-initialized at this point: the empty-scan-set return just below is one of four
+        # places this method can leave, and an initialization sitting here covers only the ones
+        # underneath it.
         if len(scannable) == 0:
             self._plugin_log(
                 f"No JSON/YAML files found in {target_type} directory to scan. Exiting.",
@@ -276,12 +313,10 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
 
         # Process each template file.
         #
-        # These counters replace a local `failed_files` list that was appended to on both
-        # failure paths and never read, so a run that failed on every template still produced
-        # an empty-but-successful report. They are attributes rather than locals precisely so
-        # the executor can read them and status computation can see them.
-        self.targets_attempted = 0
-        self.targets_failed = 0
+        # The counters set at the top of this method replace a local `failed_files` list that was
+        # appended to on both failure paths and never read, so a run that failed on every
+        # template still produced an empty-but-successful report. They are attributes rather than
+        # locals precisely so the executor can read them and status computation can see them.
         target_rel_path = get_shortest_name(input=target)
 
         outdir = self.results_dir.joinpath(target_type)
@@ -311,6 +346,13 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                     # Not counted as a failure: a non-CloudFormation file in the scan set is
                     # an expected skip, not a scanner malfunction. Counting it would make a
                     # repository of plain JSON report ERROR.
+                    #
+                    # Decrementing back to a running total of zero is not a silent success
+                    # either. When every file in the scan set lands here the count ends at 0,
+                    # which the container reads as "tracked, attempted none" and reports
+                    # SKIPPED. The wrapper also returns None when no nag pack is enabled and
+                    # when NodeJS is unavailable, so those two reach the same place: nothing was
+                    # evaluated, and the report says so instead of rendering green.
                     self.targets_attempted -= 1
                     ASH_LOGGER.debug(f"Not a CloudFormation file: {cfn_file}")
                     continue
@@ -347,6 +389,12 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         # Every template failed. Say so loudly here as well as through the returned status:
         # this is the one line that distinguishes "your templates are compliant" from "cdk-nag
         # never evaluated a rule", and the two produce identical reports otherwise.
+        #
+        # The zero case is success here, and it feeds SARIF executionSuccessful below. That
+        # field is about whether the tool's run completed, not about whether it had anything to
+        # look at, so a scan with an empty template set is a successful run that produced no
+        # results. The "nothing was evaluated" signal is carried by the container's SKIPPED
+        # status instead, which is what the summary table shows a human.
         scan_succeeded = (
             self.targets_attempted <= 0 or self.targets_failed < self.targets_attempted
         )
