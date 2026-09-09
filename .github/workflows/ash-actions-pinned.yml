@@ -1,0 +1,81 @@
+name: ASH - Action Pinning Check
+# Fails when any `uses:` reference names a tag or branch instead of a commit sha.
+#
+# WHY THIS WORKFLOW EXISTS
+#
+# Pinning the refs was a one-time act. They drift back the moment someone adds a
+# step, because `uses: actions/checkout@v7` is what every example on the internet
+# shows and a new unpinned step looks exactly like a new pinned one in review. The
+# invariant only holds if something re-tests it, so this runs the check on every
+# pull request rather than trusting the commit that established it.
+#
+# What is being protected: a tag is a mutable pointer, so an upstream force-push --
+# or a compromised maintainer account -- changes the code executing inside a
+# workflow that already holds this repository's tokens, with no diff here for
+# anyone to review.
+#
+# WHY THERE IS NO paths FILTER
+#
+# It would be the obvious optimization: only run when .github/ changes. Two reasons
+# not to.
+#
+# First, `merge_group` accepts no `paths` filter at all. A gate filtered on
+# pull_request but unfiltered on merge_group runs in one place and not the other,
+# and a required check that cannot report for a queued entry blocks the merge queue
+# on a verdict that will never arrive. Keeping both triggers unfiltered keeps the
+# two events behaving identically, which is one less asymmetry to reason about.
+#
+# Second, the check censuses the whole tracked tree rather than the diff, so it is
+# meaningful on every run regardless of what changed. The job is a checkout and one
+# node invocation with no dependency install, so there is nothing to save.
+#
+# WHY THE EXEMPTION IS A FLAG HERE RATHER THAN A LIST IN THE SCRIPT
+#
+# Same reason .github/typescript-coverage-exclusions.json is a committed file: the
+# carve-out and the reason for it belong where a reviewer reads them, next to the
+# call. And like the entries in that file, this exemption carries a staleness test
+# -- the script fails when an exempted file has no unpinned refs left, so the
+# carve-out cannot outlive its reason by being forgotten.
+
+on:
+  pull_request:
+  merge_group:
+
+permissions:
+  contents: read
+
+concurrency:
+  # One in-flight run per pull request; pushing again supersedes the previous run.
+  #
+  # github.ref is refs/pull/<n>/merge on pull_request, and on merge_group it is the
+  # per-entry gh-readonly-queue/main/pr-<n>-<sha> branch, so every queue entry lands
+  # in its own group and entries never serialize behind one another.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Only pull_request runs may be cancelled. A merge_group run must finish or the
+  # queue loses its verdict.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  actions-pinned:
+    name: Assert every action is pinned to a commit sha
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # TEMPORARY EXEMPTION -- REMOVE THE FLAG WHEN THE OTHER CHANGE MERGES
+      #
+      # ash-agent-plugins-drift.yml has its two refs pinned in a separate in-flight
+      # pull request. Pinning them here as well would put two changes in conflict
+      # over the same two lines, so this run tolerates them instead.
+      #
+      # This does not rot quietly. The script fails when an --allow-unpinned file
+      # has no unpinned refs left, so the moment that other change lands, this gate
+      # goes red and stays red until the flag below is deleted. Deleting it is the
+      # whole follow-up.
+      - name: Assert no action is referenced by a mutable tag or branch
+        run: |
+          node .github/scripts/assert-actions-pinned.mjs \
+            --allow-unpinned .github/workflows/ash-agent-plugins-drift.yml
