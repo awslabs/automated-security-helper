@@ -38,7 +38,7 @@ rejected because it would fail an entire workspace run for any external plugin.
 from abc import abstractmethod
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Annotated, ClassVar, Generic, TypeVar
+from typing import Annotated, ClassVar, Generic, Iterable, TypeVar
 from typing_extensions import Self
 
 from pydantic import Field, model_validator
@@ -104,6 +104,74 @@ class ReporterPluginConfigBase(PluginConfigBase):
 
 
 T = TypeVar("T", bound=ReporterPluginConfigBase)
+
+
+def reporter_format_name(instance: "ReporterPluginBase") -> str | None:
+    """The name ``--output-formats`` selects this reporter by.
+
+    This is the reporter's configured ``name`` -- ``markdown``, ``sarif``,
+    ``flat-json`` -- which is the string an operator writes on the command line
+    and which every built-in reporter pins as a ``Literal``.
+
+    Deliberately *not* the ``extension``. The two happen to be equal for four
+    reporters (``csv``, ``html``, ``sarif``, ``yaml``) and differ for the rest:
+    the markdown reporter's extension is ``summary.md``, ocsf's is ``ocsf.json``.
+    Selecting on extension therefore matched only the four coincidences and
+    silently skipped everything else -- see :func:`reporter_matches_requested_formats`.
+
+    Returns ``None`` for a reporter whose config carries no name, which cannot be
+    selected by name at all. Callers treat that as "does not match any explicit
+    request" rather than as "matches everything", so an unnameable reporter is
+    never emitted on the strength of a format the operator asked for by name.
+    """
+    return getattr(getattr(instance, "config", None), "name", None)
+
+
+def reporter_matches_requested_formats(
+    instance: "ReporterPluginBase", output_formats: "Iterable[object]"
+) -> bool:
+    """Whether ``--output-formats`` selected this reporter.
+
+    Why this function exists
+    ------------------------
+    Both ``ReportPhase`` and ``workspace.reporting`` filter reporters against the
+    operator's requested formats, and both used to do it inline by comparing
+    ``config.extension`` against the requested list. That comparison is wrong,
+    because the requested list holds :class:`ExportFormat` *values* (format
+    names) and an extension is a filename suffix. Of the fifteen reporters only
+    four have an extension equal to their name, so ``--output-formats markdown``
+    matched no reporter, the run exited 0, and ``reports/`` was empty with no
+    warning.
+
+    The obvious-looking alternative -- setting each reporter's ``extension`` to
+    its format name -- was rejected: the extension also builds the output
+    filename (``ash.{extension}``), so that would rename ``ash.summary.md`` to
+    ``ash.markdown`` and break every consumer, document and test that reads the
+    current names. Selection and filename are two different concerns that were
+    being served by one field, so selection moved to ``name`` and the filename
+    kept ``extension``.
+
+    Shared rather than duplicated because the two call sites diverging would be
+    invisible: a reporter could be selected by a single-directory scan and
+    skipped by a workspace scan of the same directory, with nothing to say why.
+
+    Args:
+        instance: The reporter being considered.
+        output_formats: What the operator asked for. Accepts ``ExportFormat``
+            members as well as plain strings, because ``ScanExecutionEngine``
+            threads the enum through unconverted while the CLI paths convert to
+            ``.value`` first. Normalised here so neither caller has to.
+
+    Returns:
+        ``True`` if this reporter should run. An empty request means every
+        reporter runs -- an operator who passed no ``--output-formats`` asked for
+        the configured default set, not for nothing.
+    """
+    if not output_formats:
+        return True
+    requested = {str(getattr(fmt, "value", fmt)) for fmt in output_formats}
+    name = reporter_format_name(instance)
+    return name is not None and str(name) in requested
 
 
 class ReporterPluginBase(PluginBase, Generic[T]):

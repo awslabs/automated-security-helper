@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    // outDir is load-bearing, not tidiness. With tsc emitting beside each
+    // source, `npm run build` leaves lib/*.js next to lib/*.ts, and jest's
+    // default moduleFileExtensions puts "js" ahead of "ts" — so `npm test`
+    // silently loads the STALE compiled copy and reports a green run against
+    // code that is no longer there. Emitting into dist/ removes that class of
+    // bug rather than working around it.
+    "outDir": "dist",
+    "target": "ES2022",
+    "module": "commonjs",
+    "lib": ["es2022"],
+    "declaration": true,
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "noImplicitThis": true,
+    "alwaysStrict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": false,
+    "inlineSourceMap": true,
+    "inlineSources": true,
+    "experimentalDecorators": true,
+    "strictPropertyInitialization": false,
+    "typeRoots": ["./node_modules/@types"]
+  },
+  "include": ["bin/**/*.ts", "lib/**/*.ts", "test/**/*.ts"],
+  "exclude": ["node_modules", "cdk.out"]
+}

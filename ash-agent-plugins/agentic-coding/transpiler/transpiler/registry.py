@@ -1,7 +1,9 @@
 """Backend registration + discovery.
 
 @register_backend on a class adds it to BackendRegistry. Importing
-transpiler.backends triggers all 15 platform modules, populating the registry.
+transpiler.backends triggers every backend module, populating the registry.
+`BackendRegistry.names()` is the authoritative list; nothing should restate its
+length, since a stated count goes stale the next time a backend is added.
 """
 from __future__ import annotations
 

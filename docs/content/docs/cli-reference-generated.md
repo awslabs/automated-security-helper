@@ -37,12 +37,19 @@ Runs an ASH scan against the source-dir, outputting results to the output-dir.
 | `-d` | bool | False |  | Enable debug logging |
 | `--color` | bool | True |  | Enable/disable colorized output |
 | `--fail-on-findings` | bool |  |  | Enable/disable throwing non-successful exit codes if any actionable findings are found. Defaults to unset, which prefers the configuration value. If this is set directly, it takes precedence over the configuration value. |
+| `--fail-on-incomplete-scanners` | bool |  |  | Exit 1 when a selected scanner did not complete -- ERROR (ran and failed) or MISSING (dependencies unavailable, so it never ran). Without this, a run where nothing ran exits 0, the same code as a clean scan, because no scanner produced any finding. SKIPPED scanners are ones you did not select and never trip it. Independent of --fail-on-findings, and takes precedence over it when both would fail: a partial scan's findings are real but its clean bill of health is not. Defaults to unset, which prefers the configuration value and then off. Note that --scanners does not mark the scanners it leaves out as excluded, so one whose tool is absent still reports MISSING; use --exclude-scanners to narrow a run you intend to gate this way. |
 | `--simple` | bool | False |  | Simplified output mode with minimal logging |
 | `--ignore-suppressions` | bool | False |  | Ignore all suppression rules and report all findings regardless of suppression status. |
 | `--min-severity` | str | `low` |  | Minimum severity to trigger non-zero exit code (critical, high, medium, low, none). 'critical' and 'high' are equivalent because SARIF does not distinguish them. Findings below this threshold are still reported but don't affect the exit code. |
 | `--compact-report` | bool | False |  | Produce a shorter markdown report suitable for PR comments. Omits the severity legend, scan metadata, footer, and rows for scanners that were skipped or had zero findings. |
 | `--changed-files-only` | bool | False | ASH_CHANGED_FILES_ONLY | Limit the scan to files changed between the base branch and HEAD. Useful in CI to scan only PR changes. Falls back to a full scan when git is unavailable. |
 | `--base-ref` | str | `origin/main` | ASH_BASE_REF | Git ref to diff against when --changed-files-only is set. |
+| `--shard-index` | int |  | ASH_SHARD_INDEX | Zero-based index of this shard when one scan is split across several executors. Requires --shard-count. A 3-way split uses indices 0, 1 and 2. Each shard runs a disjoint subset of the scanners and records which ones in its results; recombine them with 'ash merge'. |
+| `--shard-count` | int |  | ASH_SHARD_COUNT | Total number of shards this scan is split across. Requires --shard-index. Balance is by scanner count rather than scanner cost, so counts above about four buy little: wall clock is bounded by the slowest single scanner. |
+| `--workspace` | str |  | ASH_WORKSPACE | Path to a '.code-workspace' file whose folders are scanned as separate, independently-scoped projects. Pass 'auto' to use the single '*.code-workspace' file in the current directory. Mutually exclusive with --source-dir. |
+| `--workspace-config` | str |  | ASH_WORKSPACE_CONFIG | Path to the workspace policy file (severity ceiling, workspace-wide suppressions and ignore paths, additional scanners). Without this, ASH looks for 'ash-workspace.{yaml,yml,json}' in the workspace root or its '.ash' directory; finding none is not an error. Must not be any project's own ASH config: workspace policy governs every project, so reading one project's config as policy would apply its settings to its siblings. |
+| `--allow-missing-projects` | bool | False |  | In workspace mode, skip project folders that are absent or unreadable instead of failing. Skipped projects are recorded in the plan. Without this, a missing project fails the whole workspace, so a typo or an un-cloned repository cannot pass as a clean scan. |
+| `--dry-run` | bool | False |  | In workspace mode, print the resolved execution plan and exit without scanning anything. |
 | `-b/-B` | bool | True |  | Whether to build the ASH container image |
 | `-r/-R` | bool | True |  | Whether to run the ASH container image |
 | `--force` | bool | False |  | Force rebuild of the ASH container image |
@@ -60,8 +67,11 @@ Builds the ASH container image then runs a scan with it.
 
 | Flag | Type | Default | Env Var | Description |
 |------|------|---------|---------|-------------|
+| `--no-build` | bool | False |  | Skip building the ASH container image; reuse an existing image if present |
+| `--no-run` | bool | False |  | Build the ASH container image but do not run a scan |
 | `-f` | bool | False |  | Force rebuild of the ASH container image |
-| `--oci`, `--runner`, `-r` | str |  | OCI_RUNNER | Use the specified OCI runner instead of docker to run the containerized tools |
+| `--oci`, `--runner`, `-r` | str |  | OCI_RUNNER | Use the specified OCI runner instead of docker to run the containerized tools. To prefix every OCI command with a wrapper (e.g. sudo), set the OCI_RUNNER_WRAPPER environment variable instead of using this option (e.g. OCI_RUNNER_WRAPPER=sudo ash ...). |
+| `--container-network` | str | `bridge` |  | Docker network mode for the container run (e.g. 'bridge', 'none', 'host'). Pass 'none' to force offline/airgapped network isolation independently of --offline. |
 | `--build-target` | enum(non-root, ci) | `BuildTarget.NON_ROOT` |  | Specify the target stage of the ASH image to build |
 | `--offline-semgrep-rulesets` | str | `p/ci` |  | Specify Semgrep rulesets for use in ASH offline mode |
 | `-u` | str |  |  | UID to use for the container user |
@@ -93,6 +103,7 @@ Generate a report from ASH scan results using the specified reporter plugin.
 | `-d` | bool | False |  | Enable debug logging |
 | `--color` | bool | True |  | Enable/disable colorized output |
 
+
 ### `ash mcp`
 
 Start the ASH MCP server (Model Context Protocol).
@@ -104,6 +115,14 @@ Start the ASH MCP server (Model Context Protocol).
 | `--debug` | bool | False |  | Debug output |
 | `--color` | bool | True |  | Enable color output |
 | `--quiet` | bool | False |  | Quiet output |
+| `--transport` | str | `stdio` |  | Transport: 'stdio' (default), 'streamable-http', or 'sse'. |
+| `--host` | str | `127.0.0.1` |  | Host to bind for HTTP transports. |
+| `--port` | int | 8000 |  | Port to bind for HTTP transports. |
+| `--mount-path` | str | `/mcp` |  | HTTP path the transport listens on (default: /mcp for streamable-http, /sse for sse). |
+| `--auth-header-name` | str |  |  | Required HTTP header name for single-tenant auth (HTTP transports only). |
+| `--auth-header-value` | str |  |  | Expected value of --auth-header-name. |
+| `--stateless-http/--no-stateless-http` | bool | False |  | Handle each streamable-HTTP request independently instead of binding it to a server-held session. Required behind a load balancer that may route consecutive requests to different replicas, and by managed runtimes that inject their own Mcp-Session-Id. Only valid with --transport streamable-http. |
+| `--allowed-host` | List[str] |  |  | Host header value to accept, repeatable. Keeps DNS-rebinding protection enabled while allowing a known proxy or load balancer hostname. Without this, protection is enabled only when --host is loopback, matching the MCP SDK's own default. |
 
 ### `ash get-genai-guide`
 
@@ -183,7 +202,7 @@ Lint an ASH configuration file for issues and optionally auto-fix them.
 |------|------|---------|---------|-------------|
 | `-c` | str | `.ash/.ash.yaml` | ASH_CONFIG | The path to the configuration file to lint. By default, ASH looks for config files in .ash/.ash.yaml |
 | `-o` | str |  |  | Path to the ASH output directory (for unused suppressions report). Defaults to .ash/ash_output |
-| `--fix` | bool | False |  | Auto-fix fixable issues (internal fields, missing line_end, expired suppressions) |
+| `--fix` | bool | False |  | Auto-fix fixable issues (internal fields, missing line_end, expired suppressions, multi-line suppression reasons) |
 | `--fix-unused` | bool | False |  | Comment out unused suppressions based on the last scan's unused suppressions report |
 | `--yes`, `-y` | bool | False |  | Accept all changes without prompting. Useful for pre-commit hooks and CI/CD |
 | `-v` | bool | False |  | Enable verbose logging |
@@ -247,6 +266,33 @@ Cancel a running scan and clean up its resources.
 
 Check if ASH is properly installed and ready to use.
 
+### `diff_scan_results`
+
+Compare two ash_aggregated_results.json files and return a structured diff.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `before_path` | str | *required* | Path to the baseline ash_aggregated_results.json file. |
+| `after_path` | str | *required* | Path to the comparison ash_aggregated_results.json file. |
+
+### `explain_finding`
+
+Return structured details for a single finding by ID.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `finding_id` | str | *required* | The FlatVulnerability ID to look up (e.g. "bandit-B601-deadbeef"). |
+| `results_path` | str |  | Optional path to the output directory containing |
+
+### `get_config`
+
+Get the resolved ASH config (defaults + user overrides merged).
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `config_path` | str |  | Optional explicit path to config file. If None, auto-discovers. |
+| `raw` | bool | False | If True, returns the user file contents without merging defaults. |
+
 ### `get_scan_progress`
 
 Get current progress and partial results for a running scan.
@@ -287,6 +333,14 @@ Get a lightweight summary of scan results without detailed findings.
 
 List all active and recent scans with their current status.
 
+### `monitor_scan_progress`
+
+Monitor scan progress and report updates via the MCP context.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `scan_id` | str | *required* | The scan ID returned by run_ash_scan. |
+
 ### `run_ash_scan`
 
 Start a security scan and return immediately.
@@ -297,3 +351,14 @@ Start a security scan and return immediately.
 | `severity_threshold` | str | `MEDIUM` | Minimum severity threshold (LOW, MEDIUM, HIGH, CRITICAL) |
 | `config_path` | str |  | Optional path to ASH configuration file |
 | `clean_output` | bool | True | Whether to clean up existing output files before starting the scan |
+
+### `suggest_suppression`
+
+Build a paste-ready AshSuppression entry for a specific finding.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `finding_id` | str | *required* | Stable hash ID of the finding (from get_scan_results or explain_finding). |
+| `results_path` | str |  | Path to ash_aggregated_results.json. Defaults to |
+| `expiration` | str |  | Expiration date in YYYY-MM-DD format. Defaults to 90 days from today. |
+| `justification` | str |  | Human-readable reason for the suppression. |

@@ -63,6 +63,16 @@
       "reason": "A node helper shelled out to by the Python transpiler's tools/refresh_schemas.py; its tree is a Python package (pyproject.toml, uv.lock) with no package.json, tsconfig, jest or vitest config, so no JS harness exists to measure it."
     },
     {
+      "path": ".github/scripts/assert-coverage-completeness.mjs",
+      "kind": "no-harness",
+      "reason": "This census script itself. Invoked as `node .github/scripts/...` from a workflow step, and neither .github/scripts/, .github/ nor the repository root carries a package.json, tsconfig, jest or vitest config -- verified against `git ls-files` -- so no JS harness exists anywhere in its tree to measure it. Named here rather than left unlisted because the gate is deliberately self-inclusive: it censuses every tracked JS/TS file, including its own, and an unexplained absence is what it exists to reject."
+    },
+    {
+      "path": ".github/scripts/assert-coverage-scope.mjs",
+      "kind": "no-harness",
+      "reason": "The denominator-pinning script, same disposition as assert-coverage-completeness.mjs above: run by `node` from a workflow step, in a tree with no JS harness in any ancestor directory. Every tracked JS/TS file under .github/ is a gate script of this kind -- this one, assert-coverage-completeness.mjs above and assert-actions-pinned.mjs below -- so the subtree is fully accounted for, and the list grows only when another workflow helper is added."
+    },
+    {
       "path": ".github/scripts/assert-actions-pinned.mjs",
       "kind": "no-harness",
       "reason": "A CI gate invoked as `node .github/scripts/...` from ash-actions-pinned.yml. Neither .github/scripts nor .github holds a package.json, tsconfig, jest or vitest config, so no JS harness exists to measure it. It is not untested: the gate is exercised by mutation in CI's own terms -- reverting a pinned ref to a tag makes it exit 1 -- and its failure paths are the reason the pull request that added it was reviewable."

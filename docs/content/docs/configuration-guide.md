@@ -37,6 +37,7 @@ project_name: my-project
 global_settings:
   severity_threshold: MEDIUM
   ignore_paths: []
+fail_on_incomplete_scanners: false
 converters:
   # Converter plugins configuration
 scanners:
@@ -45,6 +46,30 @@ reporters:
   # Reporter plugins configuration
 ash_plugin_modules: []
 ```
+
+### Failing on an incomplete scan
+
+`fail_on_incomplete_scanners` is a top-level key, and it is off by default:
+
+```yaml
+fail_on_incomplete_scanners: true
+```
+
+With it on, ASH exits 1 when a scanner you selected did not complete — status
+`ERROR` (it ran and failed) or `MISSING` (its dependencies were unavailable, so it
+never ran) — and prints which ones. Without it, the exit code comes from finding
+counts alone, so a run where no scanner managed to start produces no findings and
+exits 0, the same code as a clean scan.
+
+`SKIPPED` scanners are ones you did not select and never trip it, which is what
+keeps a sharded scan working: each shard excludes the scanners its siblings own,
+and those are recorded as `SKIPPED`.
+
+It is independent of `fail_on_findings` in both directions. `fail_on_findings:
+false` still reports an incomplete scan, and when both would fail the exit code is
+1 rather than 2, because clearing the findings that were reported would not make
+the scan complete. See
+[An incomplete scan is not a clean scan](cli-reference.md#an-incomplete-scan-is-not-a-clean-scan).
 
 ### Global Settings
 

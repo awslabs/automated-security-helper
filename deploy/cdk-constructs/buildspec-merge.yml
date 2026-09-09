@@ -1,0 +1,37 @@
+# GENERATED FILE - DO NOT EDIT.
+#
+# Rendered from deploy/cdk-constructs/src/private/buildspec.ts, which is also
+# what the ASHScanStep CDK construct renders its CodeBuild projects from.
+# Editing this file by hand makes the construct and the committed buildspec
+# disagree, and CI byte-compares the two.
+#
+# Regenerate with:
+#   cd deploy/cdk-constructs && npm ci && npm run generate:buildspec
+#
+# Merges every shard's partial results into one report and one exit code.
+# Set ASH_SHARD_RESULTS to a space-separated list of shard output
+# directories, one per shard.
+#
+# This step is the verdict for the whole scan, so `ash merge` must exit
+# non-zero when the merged findings breach the configured threshold.
+version: 0.2
+env:
+  variables:
+    ASH_OUTPUT_DIR: '.ash/ash_output'
+    ASH_VERSION: v3.7.0
+    ASH_MIN_SEVERITY: low
+    ASH_SHARD_RESULTS: ''
+phases:
+  install:
+    runtime-versions:
+      python: '3.12'
+    commands:
+      - 'python3 -m pip install --no-cache-dir --disable-pip-version-check "git+https://github.com/awslabs/automated-security-helper.git@$ASH_VERSION"'
+  build:
+    commands:
+      - 'if [ -z "$ASH_SHARD_RESULTS" ]; then echo "ASH_SHARD_RESULTS is empty; refusing to report a verdict for zero shards." >&2; exit 1; fi'
+      - 'set --; for shard_dir in $ASH_SHARD_RESULTS; do set -- "$@" --results "$shard_dir"; done; ash merge "$@" --output-dir "$ASH_OUTPUT_DIR" --min-severity "$ASH_MIN_SEVERITY"'
+artifacts:
+  base-directory: '$ASH_OUTPUT_DIR'
+  files:
+    - '**/*'

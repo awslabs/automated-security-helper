@@ -106,7 +106,25 @@ jobs:
           OLD_VERSION=$(uv run cz version --project)
           echo "old_version=$OLD_VERSION" >> "$GITHUB_OUTPUT"
 
-          uv run cz bump --changelog --yes
+          # --check-consistency makes commitizen raise CurrentVersionNotFoundError
+          # when a [tool.commitizen] version_files target exists but does not
+          # contain the version being bumped from. Without it that is silent: the
+          # target matches no line commitizen can rewrite, the release succeeds,
+          # the pin stays behind, and the only signal is a user installing the
+          # wrong ASH from a tag that resolves perfectly well. That is how
+          # several install commands in docs/ and in the agent plugin sources
+          # drifted multiple minor releases behind. Failing here is the right
+          # place to stop, because no tag exists yet.
+          #
+          # What this flag does NOT cover, verified rather than assumed: a
+          # version_files entry whose path no longer resolves. Entries are
+          # expanded with iglob, so a renamed or deleted target yields no file,
+          # and there is nothing left for the consistency check to inspect --
+          # `cz bump --check-consistency` exits 0 with the pin silently
+          # unmaintained. tests/unit/test_agent_plugin_ash_version.py asserts
+          # every configured path exists, which is the half of the problem this
+          # flag cannot see.
+          uv run cz bump --changelog --yes --check-consistency
           NEW_VERSION=$(uv run cz version --project)
           echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
 

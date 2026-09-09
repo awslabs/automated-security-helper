@@ -64,6 +64,15 @@ class _StubPhase:
         self.kwargs = kwargs
         self.execute_kwargs = None
         self._completed_scanners = ["stub_scanner"]
+        # Modelled for the same reason as _completed_scanners: the engine reads it off the
+        # scan phase directly. None is the value a non-sharded run produces.
+        #
+        # The engine reads this as a plain attribute rather than through getattr with a
+        # fallback, deliberately -- a fallback would let a refactor that stopped setting it
+        # degrade into stamping no shard metadata, which makes a partial scan report itself
+        # as whole. That guard is worth keeping, so the stub gains the attribute instead of
+        # the engine gaining a default.
+        self._shard_assignment = None
         type(self).instances.append(self)
 
     def execute(self, **kwargs):
@@ -379,10 +388,13 @@ class TestExecutePhases:
         def _record(event_type, **kwargs):
             notified.append((event_type, kwargs))
 
-        with patch(
-            "automated_security_helper.plugins.ash_plugin_manager.notify",
-            side_effect=_record,
-        ), pytest.raises(RuntimeError, match="scan phase exploded"):
+        with (
+            patch(
+                "automated_security_helper.plugins.ash_plugin_manager.notify",
+                side_effect=_record,
+            ),
+            pytest.raises(RuntimeError, match="scan phase exploded"),
+        ):
             self._run(engine, ["scan"], phase_stubs={"scan": failing})
 
         from automated_security_helper.plugins.events import AshEventType
@@ -401,10 +413,13 @@ class TestExecutePhases:
 
         failing.execute = execute
 
-        with patch(
-            "automated_security_helper.plugins.ash_plugin_manager.notify",
-            side_effect=RuntimeError("notify is broken too"),
-        ), pytest.raises(RuntimeError, match="original failure"):
+        with (
+            patch(
+                "automated_security_helper.plugins.ash_plugin_manager.notify",
+                side_effect=RuntimeError("notify is broken too"),
+            ),
+            pytest.raises(RuntimeError, match="original failure"),
+        ):
             self._run(engine, ["scan"], phase_stubs={"scan": failing})
 
     def test_completion_notification_failure_does_not_abort(self, engine):

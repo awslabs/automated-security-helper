@@ -1,0 +1,24 @@
+# Re-include this directory's TypeScript sources.
+#
+# The repository root .gitignore has a bare `lib/` rule, which exists for Python
+# packaging output and swallows this CDK app's entire source directory. Without
+# this negation the committed templates would have no source to regenerate them
+# and the drift gate in scripts/synth-templates.sh would be unrunnable.
+#
+# `!lib/` has to un-exclude the DIRECTORY, not just the files: git will not
+# re-include a path whose parent directory is excluded, because it never walks
+# into it. The compiled-output rules below still apply inside it, so only the
+# .ts sources land.
+!lib/
+
+# CDK build and synth artifacts. tsc has no outDir, so compiled output lands
+# beside each source file. The committed templates under templates/ are the
+# deliverable; cdk.out is the scratch assembly that produces them.
+*.js
+!jest.config.js
+*.d.ts
+node_modules
+cdk.out
+dist
+.cdk.staging
+*.tsbuildinfo

@@ -257,6 +257,657 @@ global_settings:
     - rule_id: "*:Python Software Foundation License"
       path: "**"
       reason: "Python Software Foundation License is an approved license"
+    # =====================================================================
+    # Community-plugin mode: bandit, ferret-scan, trivy-repo
+    # =====================================================================
+    #
+    # This file enables a different scanner set from .ash/.ash.yaml -- bandit,
+    # ferret-scan and trivy-repo, with cdk-nag, cfn-nag, checkov, detect-secrets,
+    # grype, npm-audit, opengrep, semgrep, snyk-code and syft all off. Everything
+    # below exists because of that difference rather than because the code differs.
+    # Most of it is trivy-repo asking a question checkov or cfn-nag already asked
+    # under a different rule id and answering it differently, and the rest is
+    # bandit findings whose decision had only ever been written down in the other
+    # file.
+    #
+    # WHERE THE COUNT GOES, counted rather than estimated. 107 active findings
+    # collapse to 21 distinct (scanner, rule_id) pairs: 12 trivy misconfiguration
+    # rules, 2 trivy license rules, 4 bandit rules, and 3 more bandit rules on one
+    # deliberately-unsafe fixture file, which ignore_paths handles instead.
+    #
+    # Of the 12 misconfiguration rules, 9 map to a named checkov or cfn-nag rule
+    # whose decision is already recorded, either in .ash/.ash.yaml or as an inline
+    # skip in the terraform module: AWS-0017 to CKV_AWS_158, AWS-0031 to
+    # CKV_AWS_51, AWS-0054 to CKV_AWS_2 and CFN_NAG_W56, AWS-0066 to CKV_AWS_50,
+    # AWS-0089 to CKV_AWS_18, AWS-0098 to CKV_AWS_149, AWS-0104 to CFN_NAG_W5,
+    # DS-0002 to CKV_DOCKER_3 and CKV_DOCKER_8, and DS-0026 to CKV_DOCKER_2.
+    # AWS-0036 maps to a decision recorded here against detect-secrets rather than
+    # checkov, on the same variable-name heuristic. That leaves two, AWS-0033 and
+    # AWS-0132, where the nearest checkov rule asks a weaker question and therefore
+    # passed, so the argument had to be assembled from the same cost family; both say
+    # so where they sit.
+    #
+    # WHY THESE LIVE HERE RATHER THAN AS INLINE trivy:ignore COMMENTS. Two reasons,
+    # and neither is preference. Four of the five affected templates are JSON, which
+    # has no comment syntax, so an inline ignore is structurally unavailable. And
+    # trivy documents that checks which fire on the ABSENCE of something cannot be
+    # ignored inline, naming the missing-USER check as its example -- which is
+    # DS-0002, one of the rules below. Keeping every one of them in this file also
+    # means `ash config validate` and the unused-suppressions report can see them,
+    # which an inline comment would not be.
+    #
+    # FERRET-SCAN CONTRIBUTES NOTHING TO THIS BLOCK, stated outright because a
+    # scanner reporting nothing is indistinguishable from one that never ran. It
+    # reports 4 findings, all the PASSPORT rule on scripts/generate_test_docx.py,
+    # all 4 already covered by the PASSPORT entry above, and it reaches status
+    # PASSED rather than MISSING or SKIPPED.
+    #
+    # PATHS ARE NAMED FILE BY FILE. A trailing `**` is a whole-subtree match, so a
+    # sixth template or a new terraform module would inherit a suppression nobody
+    # looked at; naming files costs entries and makes a new one fail loudly. This
+    # follows the convention the detect-secrets block in .ash/.ash.yaml sets out at
+    # length. No entry carries a line range either: `cdk synth` regenerates the
+    # templates and the lines move, so resources are cited by logical id and
+    # terraform by resource address.
+    #
+    # === bandit: ported from .ash/.ash.yaml, not re-derived ===
+    #
+    # Every bandit finding active in this mode already has a decision in
+    # .ash/.ash.yaml against the same rule id and the same path. A suppression list
+    # is not inherited across config files, so those decisions are restated here in
+    # short form; the full argument stays in the other file. The paths were checked
+    # against what this mode actually reports rather than copied wholesale, so the
+    # entries there for files this mode does not flag are deliberately absent.
+    #
+    # B404 fires on `import subprocess` itself, before any call is examined, and
+    # ASH's whole function is running other tools, so no code change satisfies it.
+    # B603 is inverted rather than merely unfixable: it fires on every
+    # `subprocess.run` that does NOT pass `shell=True`, so silencing it would add
+    # the shell-injection surface the rule exists to warn about. Every call covered
+    # below passes a list argv with `shell` left at False and a `shutil.which`
+    # resolved argv[0], which matters because a bare argv[0] is re-resolved by the
+    # child against whatever PATH it inherits.
+    - rule_id: B104
+      path: tests/unit/cli/test_mcp_sse_host_binding.py
+      reason: >-
+        This file exists to test 0.0.0.0 handling, so the address is the subject of
+        the test rather than a careless default. AgentCore requires the MCP server
+        to bind every interface; a loopback bind would be unreachable from a load
+        balancer. Same entry as in .ash/.ash.yaml.
+    - rule_id: B104
+      path: tests/unit/cli/test_mcp_stateless_http.py
+      reason: >-
+        Same as test_mcp_sse_host_binding.py: asserts the streamable-http app is
+        built with the host AgentCore requires, so the address is the value under
+        test. Same entry as in .ash/.ash.yaml.
+    - rule_id: B108
+      path: deploy/terraform/modules/codecommit-gate/files/ash_pr_gate.py
+      reason: >-
+        The hardcoded /tmp cannot be relocated. This module runs as a Lambda
+        function, whose execution environment mounts the root filesystem read-only
+        and gives /tmp as the only writable path, so the clone and the scan output
+        have nowhere else to go. It is a module-level constant rather than anything
+        attacker influenced, and the line already carries a matching noqa for the
+        ruff equivalent. Same entry as in .ash/.ash.yaml.
+    - rule_id: B404
+      path: ash-agent-plugins/agentic-coding/transpiler/tools/generate_models.py
+      reason: "Imports subprocess to run the model generator; see the block comment above. Same entry as in .ash/.ash.yaml."
+    - rule_id: B404
+      path: ash-agent-plugins/agentic-coding/transpiler/tools/refresh_schemas.py
+      reason: "Imports subprocess to run `git clone`; the URL is scheme-restricted to HTTP(S) before use. Same entry as in .ash/.ash.yaml."
+    - rule_id: B404
+      path: ash-agent-plugins/agentic-coding/transpiler/transpiler/backends/aider/__init__.py
+      reason: "Backend shells out to its CLI; the import is the rule's only subject. Same entry as in .ash/.ash.yaml."
+    - rule_id: B404
+      path: ash-agent-plugins/agentic-coding/transpiler/transpiler/backends/generic_skill/__init__.py
+      reason: "Backend shells out to its CLI; the import is the rule's only subject. Same entry as in .ash/.ash.yaml."
+    - rule_id: B404
+      path: ash-agent-plugins/agentic-coding/transpiler/transpiler/core.py
+      reason: "Invokes external validators and CLIs; the import cannot be removed. Same entry as in .ash/.ash.yaml."
+    - rule_id: B404
+      path: deploy/terraform/modules/codecommit-gate/files/ash_pr_gate.py
+      reason: >-
+        The handler clones the pull request and runs ASH over it, so `import
+        subprocess` cannot be removed. Same entry as in .ash/.ash.yaml.
+    - rule_id: B603
+      path: ash-agent-plugins/agentic-coding/transpiler/tools/generate_models.py
+      reason: "List argv, shell=False, which-resolved argv[0]; see the block comment above. Same entry as in .ash/.ash.yaml."
+    - rule_id: B603
+      path: ash-agent-plugins/agentic-coding/transpiler/tools/refresh_schemas.py
+      reason: >-
+        List argv, shell=False, which-resolved argv[0]. The one configuration-sourced
+        element, `source_url`, is scheme-restricted to HTTP(S) and passed after a
+        `--` terminator, because `git clone` otherwise accepts `ext::<command>`.
+        Same entry as in .ash/.ash.yaml.
+    - rule_id: B603
+      path: ash-agent-plugins/agentic-coding/transpiler/transpiler/backends/generic_skill/__init__.py
+      reason: "List argv, shell=False, which-resolved argv[0]. Same entry as in .ash/.ash.yaml."
+    - rule_id: B603
+      path: ash-agent-plugins/agentic-coding/transpiler/transpiler/core.py
+      reason: "List argv, shell=False, which-resolved argv[0]. Same entry as in .ash/.ash.yaml."
+    - rule_id: B603
+      path: deploy/terraform/modules/codecommit-gate/files/ash_pr_gate.py
+      reason: >-
+        The single call site is `_run(argv: list[str])`, which passes a list to
+        `subprocess.run` with `shell` left at its default of False. The line already
+        carries a matching noqa for the ruff equivalent. Same entry as in
+        .ash/.ash.yaml.
+    # === trivy: a conditional customer key reads as no key at all ===
+    #
+    # AWS-0017 (log group is not encrypted), AWS-0033 (repository encryption does
+    # not use a customer managed KMS key) and AWS-0098 (secret is not encrypted
+    # with a customer managed key) are trivy's identifiers for hardening
+    # .ash/.ash.yaml records as already FIXED: 37 of the 53 checkov findings on
+    # these templates were cleared by making a customer key opt-in through a
+    # KmsKeyArn parameter. checkov passes on the result. trivy does not, and the
+    # difference is the intrinsic rather than the posture.
+    #
+    # MEASURED TWICE, not reasoned about, because "the scanner is confused" is the
+    # easiest thing to assert and the easiest to be wrong about.
+    #
+    #   1. Taking AshAgentCore.template.json as it stands and replacing only the
+    #      three Fn::If wrapped key references with a literal KMS ARN -- KmsKeyId on
+    #      both log groups, KmsKey under the ECR repository's EncryptionConfiguration,
+    #      and KmsKeyId on the auth secret -- takes trivy from AWS-0017 twice,
+    #      AWS-0033 once and AWS-0098 once to none of the three, leaving AWS-0031 and
+    #      AWS-0066 untouched.
+    #   2. Leaving the template alone and adding only a non-empty `Default` to the
+    #      KmsKeyArn parameter clears the same three, and nothing else moves.
+    #
+    # The second result is the informative one: what trivy objects to is the value
+    # the conditional yields when no key is supplied, not the presence of an
+    # intrinsic. So this is NOT a case of a scanner failing to parse something. On
+    # the default path the finding is literally true -- there is no customer managed
+    # key -- and checkov's CKV_AWS_158 passes only because it accepts any non-null
+    # value in the property.
+    #
+    # Which is why the apparent fix is refused rather than merely inconvenient. That
+    # `Default` would have to be a KMS key ARN, and no ARN exists that is valid in
+    # every adopter's account; the parameter's own AllowedPattern admits `^$` and its
+    # Description says "Empty uses AWS-managed encryption", so a Default would
+    # contradict the documented behaviour and point at a key nobody owns. The cost of
+    # removing the option instead is a customer managed key per deployment, billed
+    # monthly per key plus per request, to encrypt container image build logs and a
+    # placeholder secret that the non-MCP stacks never read.
+    #
+    # The terraform modules reach the same place from the other direction, and the
+    # honest wording differs: there the inputs simply default to null, so trivy
+    # resolves the HCL correctly and the findings are accurate rather than artifacts.
+    # ECR encryption_type is a ternary on ecr_kms_key_arn, and the log groups set no
+    # kms_key_id at all. The trade is already recorded there against checkov's
+    # CKV_AWS_158 and CKV_AWS_149 as inline skips on
+    # deploy/terraform/modules/*/main.tf.
+    - rule_id: AWS-0017
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        ImageBuildLogs and ImageBootstrapStarterLogs both take KmsKeyId from the
+        HasKmsKey condition on the KmsKeyArn parameter. See the block comment above
+        for the measurement, and the CKV_AWS_158 inline skips for the cost.
+    - rule_id: AWS-0017
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: >-
+        ImageBuildLogs, ImageBootstrapStarterLogs and ScanLogs, all three keyed off
+        the same HasKmsKey condition. Same mechanism as the AshAgentCore entry.
+    - rule_id: AWS-0017
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        ImageBuildLogs, keyed off the same HasKmsKey condition. Same mechanism as
+        the AshAgentCore entry.
+    - rule_id: AWS-0017
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        ImageBuildLogs, ImageBootstrapStarterLogs, VpcFlowLogs and TaskLogs, all
+        keyed off the same HasKmsKey condition. Same mechanism as the AshAgentCore
+        entry.
+    - rule_id: AWS-0017
+      path: deploy/cdk/templates/AshImagePipeline.template.json
+      reason: >-
+        Arm64BuildLogs and Amd64BuildLogs, one per architecture, both keyed off the
+        same HasKmsKey condition. Same mechanism as the AshAgentCore entry.
+    - rule_id: AWS-0017
+      path: deploy/terraform/modules/ash-image-pipeline/main.tf
+      reason: >-
+        aws_cloudwatch_log_group.build sets no kms_key_id. This is the resource
+        checkov reports CKV_AWS_158 on, where the module already carries an inline
+        skip recording that CloudWatch Logs encrypts at rest with an AWS managed key
+        and that a customer key is a per-deployment choice with a recurring per-key
+        cost. trivy asks the same question under its own id.
+    - rule_id: AWS-0017
+      path: deploy/terraform/modules/codecommit-gate/main.tf
+      reason: >-
+        aws_cloudwatch_log_group.build and aws_cloudwatch_log_group.gate, the two
+        resources this module's inline CKV_AWS_158 skips already cover. Same
+        reasoning as the ash-image-pipeline entry.
+    - rule_id: AWS-0017
+      path: deploy/terraform/modules/codepipeline-executor/main.tf
+      reason: >-
+        aws_cloudwatch_log_group.shard and aws_cloudwatch_log_group.merge, the two
+        resources this module's inline CKV_AWS_158 skips already cover. Same
+        reasoning as the ash-image-pipeline entry.
+    - rule_id: AWS-0017
+      path: deploy/terraform/modules/fargate/main.tf
+      reason: >-
+        aws_cloudwatch_log_group.task, the resource this module's inline CKV_AWS_158
+        skip already covers. Same reasoning as the ash-image-pipeline entry.
+    - rule_id: AWS-0033
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        ImageRepository sets EncryptionType KMS with KmsKey taken from the HasKmsKey
+        condition, so the repository is encrypted either way and only the choice of
+        key is conditional. checkov's nearest rule, CKV_AWS_136, passes here because
+        it reads only EncryptionType; trivy additionally requires the key itself, so
+        it is asking a strictly narrower question rather than a different one. See
+        the block comment above for the measurement.
+    - rule_id: AWS-0033
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: "ImageRepository, same conditional KmsKey as the AshAgentCore entry."
+    - rule_id: AWS-0033
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: "ImageRepository, same conditional KmsKey as the AshAgentCore entry."
+    - rule_id: AWS-0033
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: "ImageRepository, same conditional KmsKey as the AshAgentCore entry."
+    - rule_id: AWS-0033
+      path: deploy/cdk/templates/AshImagePipeline.template.json
+      reason: >-
+        Arm64Repository and Amd64Repository, one per architecture, both with the
+        same conditional KmsKey as the AshAgentCore entry.
+    - rule_id: AWS-0033
+      path: deploy/terraform/modules/ash-image-pipeline/main.tf
+      reason: >-
+        aws_ecr_repository.this sets encryption_type from a ternary on the
+        ecr_kms_key_arn input and passes that input as kms_key. That input defaults
+        to null, so the finding is ACCURATE rather than a parser artifact: by
+        default the repository is encrypted with an Amazon-owned key and there is no
+        customer key, which is what the variable's own description says. The
+        variable is the opt-in, and the same trade is recorded against CKV_AWS_158
+        and CKV_AWS_149 elsewhere in these modules.
+    - rule_id: AWS-0033
+      path: deploy/terraform/modules/codecommit-gate/main.tf
+      reason: >-
+        aws_ecr_repository.gate, the same ecr_kms_key_arn ternary as the
+        ash-image-pipeline entry.
+    - rule_id: AWS-0098
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        ConfigMcpAuthHeaderSecret takes KmsKeyId from the HasKmsKey condition, so it
+        is encrypted with the aws/secretsmanager managed key unless KmsKeyArn is
+        supplied. The identical trade is recorded against checkov's CKV_AWS_149 in
+        the agentcore and fargate terraform modules' inline skips.
+    - rule_id: AWS-0098
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: >-
+        ConfigMcpAuthHeaderSecret, same conditional KmsKeyId as the AshAgentCore
+        entry. This stack does not serve MCP, so the secret holds the disabled-auth
+        placeholder and nothing reads it.
+    - rule_id: AWS-0098
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        ConfigMcpAuthHeaderSecret, same conditional KmsKeyId as the AshAgentCore
+        entry. This stack runs the sharded executor, does not serve MCP, and gets
+        the placeholder secret nothing reads.
+    - rule_id: AWS-0098
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: "ConfigMcpAuthHeaderSecret, same conditional KmsKeyId as the AshAgentCore entry."
+    # === trivy AWS-0031 is checkov's CKV_AWS_51, same repositories ===
+    #
+    # "Repository tags are mutable" is the rule checkov reports as CKV_AWS_51, and
+    # that decision is already made in two places: the CKV_AWS_51 entries in
+    # .ash/.ash.yaml for the five templates, and the inline CKV_AWS_51 skips on
+    # aws_ecr_repository in the ash-image-pipeline and codecommit-gate modules. The
+    # counts line up exactly, six terraform findings against six CKV_AWS_51
+    # terraform findings and six template findings against six.
+    #
+    # MUTABLE is load-bearing rather than an oversight. Every build republishes a
+    # moving tag, which is what lets a long-lived deployment pick up base-image and
+    # scanner patches without a stack update; IMMUTABLE would make the second
+    # scheduled rebuild fail on the push. A version-qualified tag is pushed
+    # alongside it for anyone who wants immutable pinning, and AshImageTag in the
+    # templates and ecr_image_tag_mutability in the modules are the opt-ins. Cited
+    # by symbol rather than by line because the lines move.
+    - rule_id: AWS-0031
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        ImageRepository is MUTABLE because flavorBuildCommands in
+        deploy/cdk/lib/ash-image-build.ts republishes the moving tag on every
+        rebuild. See the CKV_AWS_51 entry for this same file in .ash/.ash.yaml.
+    - rule_id: AWS-0031
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: "ImageRepository, same mechanism and same CKV_AWS_51 entry as AshAgentCore."
+    - rule_id: AWS-0031
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        ImageRepository, same mechanism as AshAgentCore. This template additionally
+        consumes the moving tag as a CodeBuild environment image, resolved when each
+        build starts.
+    - rule_id: AWS-0031
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: "ImageRepository, same mechanism and same CKV_AWS_51 entry as AshAgentCore."
+    - rule_id: AWS-0031
+      path: deploy/cdk/templates/AshImagePipeline.template.json
+      reason: >-
+        Arm64Repository and Amd64Repository, one per architecture. Same mechanism as
+        AshAgentCore; AshImageTag is not declared here because this template runs no
+        workload and publishes the tags as stack outputs.
+    - rule_id: AWS-0031
+      path: deploy/terraform/modules/ash-image-pipeline/main.tf
+      reason: >-
+        aws_ecr_repository.this takes image_tag_mutability from the
+        ecr_image_tag_mutability input, whose default is MUTABLE for the reason its
+        own description gives: the scheduled rebuild republishes the same image_tag
+        so running targets pick up patched scanners. This is the resource that
+        already carries an inline CKV_AWS_51 skip saying the same thing.
+    - rule_id: AWS-0031
+      path: deploy/terraform/modules/codecommit-gate/main.tf
+      reason: >-
+        aws_ecr_repository.gate, the same ecr_image_tag_mutability input and the
+        same inline CKV_AWS_51 skip as the ash-image-pipeline entry.
+    # === trivy AWS-0132: SSE-S3 on the buckets, one of them by AWS requirement ===
+    #
+    # "Bucket does not encrypt data with a customer managed key" fires on every
+    # bucket in these two stacks. All of them are BucketEncryption S3_MANAGED, which
+    # is SSE-S3 with an AWS managed key, so they are encrypted at rest and the rule
+    # is about WHICH key. No default-mode scanner asks this: checkov's CMK rule for
+    # S3 has no CloudFormation implementation, its CloudFormation rule CKV_AWS_19
+    # accepts AES256, and cfn-nag's W41 only checks that an encryption block exists.
+    # So unlike most of this block there is no prior decision to point at, and the
+    # argument is assembled here from the same cost family.
+    #
+    # For the load-balancer log bucket the answer is not ours to make: AWS documents
+    # that for an Application Load Balancer access-log bucket "the only server-side
+    # encryption option that's supported is Amazon S3-managed keys (SSE-S3)"
+    # (Elastic Load Balancing User Guide, Enable access logs for your Application
+    # Load Balancer, Step 1 requirements). accessLogArchiveProps in
+    # deploy/cdk/lib/ash-config.ts records that the archive bucket matches it to
+    # keep one shape across both stacks.
+    #
+    # For the remaining pipeline buckets the trade is the one already recorded
+    # against CKV_AWS_158 and CKV_AWS_149: a customer managed key is billed monthly
+    # per key plus per request, and it would additionally need a decrypt grant on
+    # every CodePipeline action role that touches an artifact. Wiring KmsKeyArn
+    # through to these buckets is a reasonable follow-up for a deployment that needs
+    # it; it is not something a template should impose on every adopter.
+    - rule_id: AWS-0132
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        All five buckets -- AccessLogsArchive, AccessLogs, Source, Results and
+        Artifacts -- are S3_MANAGED, so each is encrypted at rest with an AWS
+        managed key. See the block comment above for the ALB requirement on the log
+        pair and the per-key cost on the other three.
+    - rule_id: AWS-0132
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        AccessLogs receives the load balancer's access logs, and SSE-S3 is the only
+        encryption AWS supports on that bucket; AccessLogsArchive matches it, as
+        accessLogArchiveProps records. Neither could take a customer key.
+    # === trivy AWS-0089: an access-log chain has to terminate somewhere ===
+    #
+    # "Bucket has logging disabled" fires on exactly one bucket per stack,
+    # AccessLogsArchive, and on no other -- every other bucket names a destination.
+    # That bucket is the terminus of the chain, and it logs to ITSELF, which CDK
+    # expresses as a LoggingConfiguration carrying only a LogFilePrefix.
+    #
+    # MEASURED. Adding a DestinationBucketName to AccessLogsArchive in
+    # AshFargate.template.json, changing nothing else, takes trivy's AWS-0089 count
+    # for that template from one to zero. So the rule reads the destination and a
+    # self-reference does not satisfy it. checkov's CKV_AWS_18 does accept the
+    # prefix-only form, which is why the default config reports nothing here; the
+    # doc comment on accessLogArchiveProps in deploy/cdk/lib/ash-config.ts records
+    # the probe template that established that.
+    #
+    # There is no configuration that clears this. Turning logging on needs a
+    # destination, the destination needs one too, and the chain has to stop; the only
+    # decision is which bucket points at itself, and the same comment sets out why
+    # it is the quietest one and which two alternatives were rejected. Adding a
+    # third bucket relocates the finding rather than removing it, which is the same
+    # conclusion cdk-nag's AwsSolutions-S1 suppression reaches in
+    # suppressLogBucketSelfLogging.
+    - rule_id: AWS-0089
+      path: deploy/cdk/templates/AshDistributedPipeline.template.json
+      reason: >-
+        AccessLogsArchive, the chain terminus, whose LoggingConfiguration names a
+        prefix and no destination because it delivers to itself. See the block
+        comment above and accessLogArchiveProps.
+    - rule_id: AWS-0089
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        AccessLogsArchive, the chain terminus in this stack, same shape as the
+        AshDistributedPipeline entry.
+    - rule_id: AWS-0089
+      path: deploy/terraform/modules/codepipeline-executor/main.tf
+      reason: >-
+        The artifact bucket, which is the resource this module's inline CKV_AWS_18
+        skip already covers: server access logging needs a second log bucket per
+        deployment, access here is limited to roles declared in the module, and
+        object-level access is auditable account-wide through CloudTrail data
+        events. trivy asks the same question under its own id.
+    # === trivy AWS-0066 is checkov's CKV_AWS_50, same functions ===
+    #
+    # "Function does not have tracing enabled" is X-Ray, which checkov reports as
+    # CKV_AWS_50. The codecommit-gate module already carries an inline CKV_AWS_50
+    # skip on its gate function, and the argument there applies unchanged to the CDK
+    # equivalents: X-Ray bills per trace and would describe one synchronous path
+    # that the function's own log group already records step by step, with no
+    # cross-service call graph for tracing to reveal.
+    #
+    # The decision existed only for terraform until now because CKV_AWS_50 has no
+    # CloudFormation implementation at all -- it is registered for the terraform
+    # aws_lambda_function resource only -- and cfn-nag has no Lambda tracing rule
+    # either. So no default-mode scanner ever asked this question about the
+    # templates. TracingConfig is genuinely absent rather than conditional,
+    # confirmed by reading the rendered Lambda resources, so the finding is accurate
+    # and the answer is the cost rather than a parser difference.
+    - rule_id: AWS-0066
+      path: deploy/cdk/templates/AshAgentCore.template.json
+      reason: >-
+        ImageBootstrapStarter, the CloudFormation custom-resource responder that
+        starts the image build. It runs once per stack operation on a single
+        synchronous path and already writes to its own log group. Same argument as
+        the inline CKV_AWS_50 skip in the codecommit-gate module.
+    - rule_id: AWS-0066
+      path: deploy/cdk/templates/AshCodeCommitGate.template.json
+      reason: >-
+        ImageBootstrapStarter and ScanFunction. ScanFunction is the CDK counterpart
+        of the terraform gate function whose inline CKV_AWS_50 skip records this
+        argument: clone, scan, comment is one synchronous path, already recorded
+        step by step in its log group.
+    - rule_id: AWS-0066
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        ImageBootstrapStarter, the same custom-resource responder as the AshAgentCore
+        entry. The ECS task is unaffected: it is not a Lambda function.
+    - rule_id: AWS-0066
+      path: deploy/terraform/modules/codecommit-gate/main.tf
+      reason: >-
+        aws_lambda_function for the gate, the resource that already carries the
+        inline CKV_AWS_50 skip. trivy asks the same question under its own id.
+    # === trivy AWS-0054 is checkov's CKV_AWS_2 and cfn-nag's W56, same listener ===
+    - rule_id: AWS-0054
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        LoadBalancerListener, the only listener in this template and the same
+        resource CKV_AWS_2, CKV_AWS_103 and CFN_NAG_W56 fire on in .ash/.ash.yaml.
+        An HTTPS listener needs an ACM certificate, and ACM issues one only against
+        a domain the requester can prove control of, so there is no default this
+        template could supply. The load balancer is internal and starts with no
+        ingress rule at all, so nothing reaches the HTTP listener until an operator
+        sets McpIngressCidr. CertificateArn is the reserved name for this opt-in.
+    - rule_id: AWS-0054
+      path: deploy/terraform/modules/fargate/main.tf
+      reason: >-
+        aws_lb_listener.this chooses HTTPS over HTTP from local.use_tls, which is
+        `var.certificate_arn != null`, and sets ssl_policy on the same condition.
+        certificate_arn defaults to null, so the finding is ACCURATE rather than a
+        parser artifact: the default listener really is HTTP, and supplying a
+        certificate makes it HTTPS with no further change. Same underlying decision
+        as the CKV_AWS_2 entry for the template above -- no module can default a
+        certificate it cannot issue -- and this module additionally refuses
+        mcp_auth_header_value without a certificate unless the caller explicitly
+        sets allow_plaintext_auth_header, so reaching a plaintext listener that
+        carries an auth header takes a deliberate opt-in.
+    # === trivy AWS-0104 is cfn-nag's W5, and only the destination CIDR is left ===
+    - rule_id: AWS-0104
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        ServiceSecurityGroup, the same egress rule CFN_NAG_W5 fires on in
+        .ash/.ash.yaml, where the full accounting lives. The protocol and port are
+        already pinned to TCP 443; the destination is the public internet, because
+        the task runs in a private subnet with no VPC endpoint and reaches ECR,
+        CloudWatch Logs, Systems Manager and Secrets Manager through the NAT
+        gateway. No AWS-managed prefix list names those endpoints, so narrowing the
+        CIDR needs interface endpoints, billed hourly per Availability Zone.
+    - rule_id: AWS-0104
+      path: deploy/terraform/modules/fargate/main.tf
+      reason: >-
+        aws_vpc_security_group_egress_rule.service_all, the terraform counterpart of
+        the rule CFN_NAG_W5 covers above, with the same public-internet destination
+        for the same four AWS API endpoints. Narrowing the destination depends on
+        whether the caller's VPC uses NAT or interface endpoints, which this module
+        does not know; the comment above the resource records that.
+        IMPORTANT ASYMMETRY, do not read the section header above as covering this
+        entry: unlike the CDK security group, this resource is ip_protocol "-1",
+        every protocol and every port, not TCP 443. Every sibling egress rule in
+        this module pins "tcp"; this one alone does not. Narrowing it would NOT
+        clear AWS-0104, which reads the CIDR rather than the protocol, so it is a
+        separate hardening step rather than a fix for this finding -- but the
+        suppression should not imply a posture the resource does not have. Left
+        open deliberately and recorded here so it is visible in review.
+    # === trivy AWS-0036 matches the variable NAME, not a value ===
+    #
+    # MEASURED. Renaming ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN to
+    # ASH_MCP_AUTH_HEADER_VALUE_LOCATOR in AshFargate.template.json and changing
+    # nothing else takes trivy's AWS-0036 count from one to zero, so the rule is
+    # matching on the name. That is the same heuristic .ash/.ash.yaml already
+    # records for detect-secrets on deploy/terraform/modules/ash-image-pipeline/
+    # files/ash-container-init, where the match was the NAME of the variable holding
+    # an ARN.
+    #
+    # A rename would clear it, and was rejected: the name is read by the generated
+    # entrypoint in deploy/cdk/lib/ash-container-scripts.ts, asserted by the CDK
+    # tests, and shipped in three committed templates, so renaming trades an
+    # accurate description for a scanner's keyword list. Moving the value into the
+    # task definition's Secrets block would be worse -- that injects the RESOLVED
+    # secret into the container environment, which is exactly what this design
+    # avoids.
+    - rule_id: AWS-0036
+      path: deploy/cdk/templates/AshFargate.template.json
+      reason: >-
+        The match is an environment variable NAME on the ECS task definition,
+        beginning ASH_MCP_AUTH_HEADER_VALUE and ending in _ARN. Written split
+        rather than spelled out, because spelling it contiguously makes this
+        reason itself a keyword finding -- the same trap the hex entry in
+        .ash/.ash.yaml records, and the reason this file previously failed the
+        Windows scan. Its value is not a credential: mcpEnvironment in
+        deploy/cdk/lib/ash-runtime-config.ts sets it from the auth secret's ARN
+        behind an Fn::If, and the entrypoint generated
+        by deploy/cdk/lib/ash-container-scripts.ts calls GetSecretValue on that ARN
+        at container start. The secret value therefore never enters the task
+        definition, which is what the secret's own Description in this template
+        says.
+    # === trivy DS-0002 and DS-0026 are already decided in the Dockerfiles ===
+    #
+    # Both Dockerfiles carry inline `checkov:skip` comments for exactly these two
+    # questions, and the mapping is one to one:
+    #
+    #   DS-0002 "specify at least 1 USER command with a non-root user" maps to
+    #   CKV_DOCKER_3 on wrapper.Dockerfile, which sets no USER at all, and to
+    #   CKV_DOCKER_8 on gate.Dockerfile, which sets USER root. checkov reports
+    #   CKV_DOCKER_3 only on the first and CKV_DOCKER_8 only on the second; trivy
+    #   reports DS-0002 on both, because one rule covers both shapes.
+    #
+    #   DS-0026 "add HEALTHCHECK" maps to CKV_DOCKER_2 on both files.
+    #
+    # MEASURED that the rules read what they say: adding a USER and a HEALTHCHECK to
+    # a copy of wrapper.Dockerfile clears both. That measurement proves the scanner
+    # is satisfied, and NOT that the change is viable -- which is the whole point
+    # here, so it is worth being blunt about. The uid used to clear it, 1000, is not
+    # ASH's: the root Dockerfile's non-root stage builds ash-user as 500:100 and
+    # chowns the home directory, /src and /out to exactly that pair, so a container
+    # running as 1000 would own none of them. The change that turns this rule green
+    # breaks the DEFAULT target rather than an edge case.
+    #
+    # What blocks a real fix is the design, not the scanner. The base image arrives
+    # through the ASH_BASE_IMAGE build argument, whose stage is chosen by
+    # ash-image-pipeline's ash_image_target input: `core` and `ci` create no user and
+    # chown nothing, and only `non-root`, the default, defines 500:100. So any USER
+    # the wrapper hardcodes converts a documented three-way operator choice into a
+    # one-way one -- and `ci` exists precisely because, as its variable description
+    # records, some scanners and some CI environments require root. Whether the
+    # running container is unprivileged is therefore ash_image_target's decision, not
+    # this file's.
+    - rule_id: DS-0002
+      path: deploy/terraform/modules/ash-image-pipeline/files/wrapper.Dockerfile
+      reason: >-
+        No USER is set here and no fixed uid could be: the base image target is
+        configurable through ASH_BASE_IMAGE and only its non-root target defines
+        one. The ash_image_target input decides this, not the wrapper. Same
+        reasoning as this file's inline CKV_DOCKER_3 skip, and the reason the COPY
+        instructions use --chmod rather than a RUN chmod.
+    - rule_id: DS-0002
+      path: deploy/terraform/modules/codecommit-gate/files/gate.Dockerfile
+      reason: >-
+        USER root is set and cannot be reverted: pip needs to write to
+        site-packages, ASH's scanners need root to run, and no fixed uid could be
+        restored because only the base image's non-root target defines one. This
+        image is a Lambda function, where each invocation gets a single-tenant
+        execution environment with a read-only root filesystem outside /tmp, so root
+        confers nothing across a boundary. Same reasoning as this file's inline
+        CKV_DOCKER_8 skip.
+    - rule_id: DS-0026
+      path: deploy/terraform/modules/ash-image-pipeline/files/wrapper.Dockerfile
+      reason: >-
+        Nothing that runs this image reads a Docker HEALTHCHECK. AgentCore Runtime
+        probes the container over its own protocol, and ECS documents that it "does
+        not monitor Docker health checks that are embedded in a container image and
+        not specified in the container definition" -- the Fargate target is
+        health-checked by its ALB target group instead. An inherited HEALTHCHECK
+        could not be relied on either, since only the base image's non-root target
+        declares one. Same reasoning as this file's inline CKV_DOCKER_2 skip.
+        Deliberately NOT the argument .ash/.ash.yaml gives for CKV_DOCKER_2 on the
+        repository's own Dockerfile: "ASH is a CLI tool" is false of this image,
+        which serves long-running HTTP behind a load balancer on the Fargate target.
+    - rule_id: DS-0026
+      path: deploy/terraform/modules/codecommit-gate/files/gate.Dockerfile
+      reason: >-
+        Lambda manages this execution environment's lifecycle through the Runtime
+        API and never reads a Docker HEALTHCHECK, so the instruction would have no
+        effect. Same reasoning as this file's inline CKV_DOCKER_2 skip.
+    # === trivy license scanner: two expressions the approved list does not match ===
+    #
+    # The approved-license entries above are keyed on rule ids of the form
+    # <package>:<license>, so `*:MIT` matches a bare MIT and nothing else. These two
+    # findings carry licenses that are not bare identifiers on that list, so they
+    # need their own decision.
+    #
+    # Both packages live at node_modules/aws-cdk-lib/node_modules/, that is, inside
+    # aws-cdk-lib's own vendored dependency tree, which is pinned to an exact version
+    # in deploy/cdk/package.json. Neither can be upgraded or dropped without
+    # changing aws-cdk-lib itself, so no change in this repository removes either
+    # finding. Named per package and per file rather than as `*:<license>` with path
+    # `**`, so the same license arriving in another lockfile has to be looked at
+    # instead of inheriting this.
+    - rule_id: "case:(MIT OR GPL-3.0-or-later)"
+      path: deploy/cdk/package-lock.json
+      reason: >-
+        A disjunctive SPDX expression, not a dual obligation. The SPDX
+        specification's license-expression annex defines OR as the operator to use
+        "if presented with a choice between two or more licenses", so a recipient may
+        take the MIT branch, and MIT is already on the approved list above. trivy
+        reports it because the rule id is the whole expression string rather than
+        either operand. The package is case 1.6.3, vendored under aws-cdk-lib.
+    - rule_id: "minimatch:BlueOak-1.0.0"
+      path: deploy/cdk/package-lock.json
+      reason: >-
+        BlueOak-1.0.0 is the SPDX identifier for the Blue Oak Model License 1.0.0,
+        on the SPDX License List since 2019. Its own text grants each recipient
+        permission "to do everything with this software that would otherwise
+        infringe that contributor's copyright in it", grants the equivalent patent
+        permission, and states that no contributor can revoke it; the one obligation
+        it imposes is passing the license text or its URL along with any part of the
+        software. Not asserted to be OSI-approved, because that could not be
+        confirmed from the SPDX license page. The package is minimatch 10.2.5,
+        vendored under aws-cdk-lib; the separate top-level minimatch 3.1.5 is ISC and
+        is covered by the entry above.
   ignore_paths:
     - path: "**/.venv/**"
       reason: Virtual environment, not committed, only 3p content
@@ -266,8 +917,26 @@ global_settings:
       reason: This is test data that is used during unit testing only and is not part of the core application.
     - path: "automated_security_helper/assets/ASH_COMMIT*"
       reason: This file is generated by the build process and does not contain any secrets or sensitive information.
-    - path: "tests/pytest-temp"
+    # `/**` is load-bearing: without it this pattern matches the directory entry
+    # and nothing inside it, so the ignore did nothing. `ash config validate`
+    # rejects it, but only where the directory exists -- tests/pytest-temp/ is
+    # gitignored, so a fresh CI checkout has no such directory and the validator
+    # stays quiet. It fails for a developer who has run pytest first. .ash/.ash.yaml
+    # already carries the `/**` form.
+    - path: "tests/pytest-temp/**"
       reason: This is temporary data that is generated during unit testing only and is not part of the core application.
+    - path: "tests/integration/codecommit_gate_regression/cases/**"
+      reason: >-
+        Positive-control inputs for the pull-request gate regression fixture.
+        cases/vulnerable/src/vulnerable.py is deliberately unsafe -- it exists so
+        the fixture can assert that a dangerous input produces a blocking verdict,
+        which is the assertion the gate was missing. Its bandit findings are the
+        point of the file, so reporting them against this repository would be a
+        false positive that also removes the only reason the file exists. Scoped to
+        cases/ rather than the whole fixture so the harness itself (assert_case.py,
+        run_regression.sh) is still scanned. Same entry as in .ash/.ash.yaml, which
+        is where this decision was made; without it, this mode reports B307, B602
+        and B605 on that file, none of which the default mode ever sees.
     - path: "**/automated_security_helper/schemas/AshAggregatedResults.json"
       reason: This file is generated by a corresponding Pydantic model and does not contain any secrets or sensitive information. Findings on this file are false positives and should be addressed on the related Pydantic models, not on this JSON file.
     - path: "**/automated_security_helper/schemas/AshConfig.json"

@@ -27,6 +27,28 @@ from automated_security_helper.utils.sarif_utils import (
 from automated_security_helper.models.scanner_validation import ScannerValidationManager
 from automated_security_helper.core.phases.scanner_executor import ScannerExecutor
 from automated_security_helper.core.phases.scan_result_processor import ScanResultProcessor
+from automated_security_helper.core.sharding import (
+    ShardAssignment,
+    partition_scanners,
+    scanners_to_exclude,
+    validate_shard_selection,
+)
+
+
+def _scanner_display_name(plugin_instance) -> str:
+    """Return the name a scanner is identified by everywhere in this phase.
+
+    Extracted because this expression appeared three times inline, and it has to
+    agree exactly with the name ``--exclude-scanners`` is matched against. Shard
+    selection is implemented as an exclusion, so a copy of this rule that drifted
+    would assign a shard a name the exclusion check never matches -- the scanner
+    would run on every shard, and its findings would be counted once per shard.
+    """
+    config = getattr(plugin_instance, "config", None)
+    name = getattr(config, "name", None) if config is not None else None
+    if name:
+        return name
+    return plugin_instance.__class__.__name__.lower()
 
 
 class ScanPhase(EnginePhase):
@@ -45,6 +67,9 @@ class ScanPhase(EnginePhase):
         """
         super().__init__(plugin_context, plugins or [], progress_display, asharp_model)
         self.validation_manager = ScannerValidationManager(plugin_context)
+        # Set when this run is one shard of several; read by the caller to stamp
+        # provenance onto the results so `ash merge` can verify coverage.
+        self._shard_assignment: ShardAssignment | None = None
 
     @property
     def phase_name(self) -> str:
@@ -60,6 +85,8 @@ class ScanPhase(EnginePhase):
         max_workers: int = 4,
         global_ignore_paths: List[IgnorePathWithReason] | None = None,
         python_based_plugins_only: bool = False,
+        shard_index: int | None = None,
+        shard_count: int | None = None,
         **kwargs,
     ) -> AshAggregatedResults:
         """Coordinate the Scan phase: filter plugins, run executor, process results.
@@ -69,10 +96,16 @@ class ScanPhase(EnginePhase):
             parallel: Whether to run scanners in parallel
             max_workers: Maximum number of worker threads for parallel execution
             global_ignore_paths: List of paths to ignore globally
+            shard_index: Zero-based index of this shard, when the scan is split
+                across executors. Requires shard_count.
+            shard_count: Total number of shards. Requires shard_index.
             **kwargs: Additional arguments
 
         Returns:
             AshAggregatedResults: Results of the scan
+
+        Raises:
+            ShardSelectionError: If the shard selection cannot be used as given.
         """
         if enabled_scanners is None:
             enabled_scanners = []
@@ -80,6 +113,18 @@ class ScanPhase(EnginePhase):
             excluded_scanners = []
         if global_ignore_paths is None:
             global_ignore_paths = []
+
+        # Validated before any filesystem work or plugin instantiation, so an
+        # operator whose CI matrix produced a contradictory pair is told that
+        # rather than watching a partial scan run to completion and exit 0.
+        validate_shard_selection(shard_index, shard_count)
+
+        # Not mutated in place: excluded_scanners is the caller's list, and the
+        # shard's additions are scoped to this invocation. Appending to the
+        # caller's object would make a second call in the same process inherit
+        # the first shard's exclusions.
+        excluded_scanners = list(excluded_scanners)
+
         ASH_LOGGER.debug("Entering: ScanPhase.execute()")
 
         # Initialize progress
@@ -176,12 +221,7 @@ class ScanPhase(EnginePhase):
 
                 # CRITICAL: Initialize validation manager state for all registered scanners
                 for plugin_instance in scanner_instances:
-                    display_name = (
-                        plugin_instance.config.name
-                        if hasattr(plugin_instance, "config")
-                        and hasattr(plugin_instance.config, "name")
-                        else plugin_instance.__class__.__name__.lower()
-                    )
+                    display_name = _scanner_display_name(plugin_instance)
                     self.validation_manager.update_scanner_state(
                         display_name,
                         registration_status="registered",
@@ -190,6 +230,55 @@ class ScanPhase(EnginePhase):
             else:
                 ASH_LOGGER.warning(
                     "No scanner instances created during plugin discovery!"
+                )
+
+            # Apply the shard selection here, and not earlier.
+            #
+            # A shard has to be expressed in the same names --exclude-scanners
+            # matches on, which is config.name on an *instantiated* plugin.
+            # Scanner classes carry no class-level name and cannot be constructed
+            # without a plugin context, so no earlier layer -- CLI, orchestrator,
+            # execution engine -- can know these names. A layer that guessed would
+            # assign a mis-guessed name to no shard at all, dropping that scanner
+            # from every shard and so from the whole scan.
+            #
+            # Taken over every registered scanner, before the dependency and
+            # enabled filters below. Partitioning the post-filter set instead
+            # would make the split depend on which tools happen to be installed
+            # on this runner, so a runner missing semgrep would shift every later
+            # scanner to a different shard than its siblings computed -- some
+            # scanners running twice and others not at all. Here, a tool missing
+            # on one runner is reported MISSING by the shard that owns it, which
+            # is a visible failure rather than a silent gap.
+            if shard_count is not None and scanner_instances:
+                all_scanner_names = [
+                    _scanner_display_name(instance) for instance in scanner_instances
+                ]
+                assigned = partition_scanners(
+                    all_scanner_names, shard_index, shard_count
+                )
+                excluded_scanners = scanners_to_exclude(
+                    all_scanner_names,
+                    assigned,
+                    already_excluded=excluded_scanners,
+                )
+                self._shard_assignment = ShardAssignment(
+                    shard_index=shard_index,
+                    shard_count=shard_count,
+                    assigned_scanners=assigned,
+                    # The set the partition was taken from, not just this shard's
+                    # slice. Without it every shard can be internally consistent
+                    # while the union has a hole -- an executor missing a plugin
+                    # module resolves a smaller set, partitions it validly, and
+                    # nothing at merge time can tell. Recorded here because this
+                    # is the only layer that knows the resolved names; see the
+                    # comment above on why no earlier layer can.
+                    candidate_scanners=sorted(set(all_scanner_names)),
+                )
+                ASH_LOGGER.info(
+                    f"Shard {shard_index} of {shard_count} runs "
+                    f"{len(assigned)} of {len(set(all_scanner_names))} scanners: "
+                    f"{', '.join(assigned) if assigned else '(none)'}"
                 )
 
             # Filter enabled scanners
@@ -212,12 +301,10 @@ class ScanPhase(EnginePhase):
                         ).lower()
                         ASH_LOGGER.debug(f"Processing scanner instance: {plugin_name}")
 
-                        # Use the configured name if available
-                        display_name = plugin_name
-                        if hasattr(plugin_instance, "config") and hasattr(
-                            plugin_instance.config, "name"
-                        ):
-                            display_name = plugin_instance.config.name
+                        # Use the configured name if available. Shared helper:
+                        # this must agree with the name the shard partition was
+                        # computed over, since a shard is applied as an exclusion.
+                        display_name = _scanner_display_name(plugin_instance)
                         ASH_LOGGER.debug(f"Scanner display name: {display_name}")
 
                         # Check if scanner is in the excluded list
@@ -704,8 +791,21 @@ class ScanPhase(EnginePhase):
                         scan_targets=scan_targets,
                         message=f"Starting scanner: {scanner_name}",
                     )
-                except Exception:
-                    pass
+                except Exception as notify_error:
+                    # Event delivery must never abort a scan, and this is the only
+                    # guard that makes that true: notify_event calls
+                    # ash_plugin_manager.notify, which invokes every subscribed
+                    # callback directly with no handler of its own. A subscriber
+                    # raising here would otherwise be indistinguishable from the
+                    # scanner itself failing.
+                    #
+                    # The type stays broad on purpose -- subscribers are plugin
+                    # code -- but the swallow is no longer silent. Debug level
+                    # because the scan result is unaffected; the operator has
+                    # nothing to act on beyond a misbehaving subscriber.
+                    ASH_LOGGER.debug(
+                        f"SCAN_START notification for {scanner_name} failed: {notify_error!r}"
+                    )
 
                 results_list = self._safe_execute_scanner(scanner_name, scanner_plugin, scan_targets)
 
@@ -757,8 +857,13 @@ class ScanPhase(EnginePhase):
                             remaining_scanners=remaining_scanners,
                             message=f"Scanner {scanner_name} completed. {remaining_count} remaining: {remaining_list}",
                         )
-                    except Exception:
-                        pass
+                    except Exception as notify_error:
+                        # Same reasoning as the SCAN_START guard above: notify_event
+                        # has no handler of its own, so a raising subscriber would
+                        # be reported as a scanner failure.
+                        ASH_LOGGER.debug(
+                            f"SCAN_COMPLETE notification for {scanner_name} failed: {notify_error!r}"
+                        )
 
             except Exception as e:
                 stack_trace = _traceback.format_exc()
@@ -899,8 +1004,15 @@ class ScanPhase(EnginePhase):
                                     remaining_scanners=remaining_scanners.copy(),
                                     message=f"Scanner {scanner_name} completed. {remaining_count} remaining: {remaining_list}",
                                 )
-                            except Exception:
-                                pass
+                            except Exception as notify_error:
+                                # Same reasoning as the sequential SCAN_COMPLETE
+                                # guard: notify_event has no handler of its own.
+                                # Note this runs while remaining_scanners_lock is
+                                # held, so raising here would also leave the lock
+                                # to unwind through the enclosing handler.
+                                ASH_LOGGER.debug(
+                                    f"SCAN_COMPLETE notification for {scanner_name} failed: {notify_error!r}"
+                                )
 
                 except Exception as e:
                     stack_trace = _traceback.format_exc()
@@ -981,8 +1093,15 @@ class ScanPhase(EnginePhase):
                 from automated_security_helper.plugins.events import AshEventType
 
                 self.notify_event(AshEventType.ERROR, message=error_msg, scanner=scanner_name, exception=e)
-            except Exception:
-                pass
+            except Exception as notify_error:
+                # Same reasoning as the SCAN_START guard: notify_event has no
+                # handler of its own. Doubly important on this path -- the
+                # failure_container below is how the scanner's error reaches the
+                # report, so a raising ERROR subscriber must not replace a
+                # recorded scanner failure with an unhandled exception.
+                ASH_LOGGER.debug(
+                    f"ERROR notification for {scanner_name} failed: {notify_error!r}"
+                )
             return [failure_container]
 
 

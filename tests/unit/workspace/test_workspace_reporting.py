@@ -733,13 +733,42 @@ class TestUnsupportedReportersRefuseLoudly:
 
 class TestTheOutputFormatFilter:
     def test_a_reporter_outside_the_requested_formats_is_skipped(self, workspace):
+        """A reporter is selected by its configured name, not by its extension.
+
+        This test previously requested ``("scoped.json",)`` -- the reporter's
+        *extension* -- and asserted that it was selected. That was pinning a bug:
+        ``--output-formats`` carries ``ExportFormat`` values, which are format
+        names, and matching them against extensions silently skipped every
+        reporter whose two strings differ. Eleven of the fifteen shipped reporters
+        differ, so ``--output-formats markdown`` wrote no report and said nothing.
+
+        The expectation is therefore inverted deliberately, not relaxed: the name
+        selects and the extension does not. The extension still names the output
+        file -- ``ash.scoped.json``, asserted elsewhere in this file -- which is
+        why the fix moved selection to ``name`` rather than renaming extensions.
+        """
+        outcome = _emit(
+            workspace,
+            FakeMergedReporter,
+            FakeWorkspaceScopedReporter,
+            output_formats=("fake-workspace-scoped",),
+        )
+        assert set(outcome.workspace_artifacts) == {"fake-workspace-scoped"}
+
+    def test_a_reporters_extension_does_not_select_it(self, workspace):
+        """Requesting an extension selects nothing, and withholds every artefact.
+
+        The direct inverse of the old behaviour. Kept as its own test so that a
+        regression to extension matching fails loudly here rather than merely
+        making the test above pass for the wrong reason.
+        """
         outcome = _emit(
             workspace,
             FakeMergedReporter,
             FakeWorkspaceScopedReporter,
             output_formats=("scoped.json",),
         )
-        assert set(outcome.workspace_artifacts) == {"fake-workspace-scoped"}
+        assert set(outcome.workspace_artifacts) == set()
 
     def test_an_empty_format_filter_means_every_reporter(self, workspace):
         """Matches ``ReportPhase``: no ``--output-format`` is not "none"."""
