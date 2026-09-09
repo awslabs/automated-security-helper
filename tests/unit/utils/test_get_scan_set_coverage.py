@@ -9,7 +9,7 @@ The POSIX-rooted paths that do appear (``/subdir/a.log``) are ignore-spec match
 keys, not filesystem paths -- ``igittigitt`` matches them as pattern text and
 never opens them, so they carry no Windows ``is_absolute()``/``as_uri()`` hazard.
 
-Two things about this file are worth knowing before changing it.
+Three things about this file are worth knowing before changing it.
 
 Five tests are skipped on Windows, across two distinct defects in the code under
 test. Neither is flakiness, and both reasons are spelled out in the constants
@@ -39,8 +39,18 @@ anchored at. For the two nested-marker cases that agreement is the only reason
 they pass, because the same relative path under a real source root does not
 match -- measured, not assumed. The root-level cases compile to a base of ``/``
 and do generalize, since every absolute POSIX path is under ``/``.
+
+One test takes the ``ash_records_stay_off_stdout`` fixture and the others do not.
+``test_scan_set_is_silent_by_default`` is the only one here that asserts on
+captured stdout being *empty*, and ``ASH_LOGGER`` is a process-global whose
+handlers any earlier test in the same worker may have replaced with one that
+writes to stdout. The fixture's docstring has the mechanism; the short version is
+that the assertion measures ``scan_set`` only once that handler list is pinned.
+The other two stdout tests assert that a substring is present, which extra output
+cannot break, so they are left alone.
 """
 
+import logging
 import os
 import re
 import subprocess
@@ -105,6 +115,89 @@ POSIX_ANCHORED_REWRITE = (
     "emits a corrupted '${SOURCE_DIR}gitignore'. The fix is to derive the marker "
     "from the real scan root, the same change DRIVE_ANCHORED_RULES needs."
 )
+
+
+@pytest.fixture
+def ash_records_stay_off_stdout(caplog):
+    """Give ``ASH_LOGGER`` pytest's capture handlers and nothing else, for one test.
+
+    Why this exists. ``get_scan_set`` writes through the module-global
+    ``ASH_LOGGER``, which is ``logging.getLogger("ash")`` -- one object for the
+    whole process. ``utils.log.get_logger`` defaults its ``name`` to ``"ash"``, so
+    every call reconfigures that same object: it clears the handler list, raises
+    the level to TRACE, and -- when ``show_progress`` is False -- attaches a
+    ``RichHandler`` whose ``Console`` was built with no explicit ``file`` and
+    ``stderr=False``. rich resolves ``sys.stdout`` at emit time rather than at
+    construction, so that handler writes into whichever capture fixture is active
+    in *any later test in the same worker process*, and nothing removes it.
+
+    Nine production call sites reconfigure that global logger: five in
+    ``cli/config.py``, one each in ``cli/dependencies.py``, ``cli/plugin.py`` and
+    ``cli/report.py``, and ``run_ash_scan._setup_logger``. Eight pass
+    ``show_progress=False`` outright and ``_setup_logger`` does so whenever
+    progress is off, so all nine attach the stdout handler. Two further
+    ``get_logger`` calls in ``cli/config.py`` pass an explicit ``name=`` and build
+    child loggers instead, so they are not contaminators. Any test that drives one
+    of the nine through ``CliRunner`` leaks the handler. The earliest in collection
+    order is
+    ``tests/unit/cli/test_config_commands.py::TestConfigInit::test_init_creates_config_file``,
+    and running just that test and the silence test below in one process
+    reproduces the failure: two INFO records from ``report_ignore_file_exclusions``
+    land on stdout.
+
+    Whether the leak is *visible* turns on two further process-globals this test
+    cannot see. ``cli/mcp/__init__.py`` sets ``ASH_LOG_TO_STDERR=1`` and never
+    restores it, after which every later ``get_logger`` builds a stderr Console
+    and the leaked handler is harmless; and ``cli/main.py``'s
+    ``reset_logging_config`` clears the handler list outright. Both happen to sit
+    between the contaminator and this test in serial collection order, which is
+    why the suite is green with ``-n0`` and green in most CI cells. Under xdist's
+    ``--dist load`` the worker packing decides which of the adder, the
+    stderr-flipper and the remover share a process with this test, so one commit
+    passed seventeen of eighteen matrix cells and failed the eighteenth.
+
+    What this fixture deliberately does not do. It does not reset logging for the
+    suite. A blanket autouse reset would also silence the next test that depends
+    on ambient handler state, and would paper over both leaks named above -- which
+    are worth keeping visible, because ASH's default logger writing to stdout is a
+    real product behavior and not an accident.
+
+    Rejected alternative: weakening the assertion to ``"one.py" not in out``. That
+    drops the only check that ``scan_set`` prints *nothing* when ``print_results``
+    is False, which is the entire contract of that flag, and it would still be
+    order-dependent -- the leaked handler renders the scan root's path, and a
+    tmp_path can contain any substring pytest chooses.
+
+    Known limitation. The pin covers the ``ash`` logger's handler list, level and
+    propagate flag. It does not stop a test from writing to ``sys.stdout``
+    directly, which is what the assertion is there to catch.
+    """
+    logger = gss.ASH_LOGGER
+    saved_handlers = logger.handlers
+    saved_propagate = logger.propagate
+
+    # Keep pytest's own capture handlers -- one feeds ``caplog.records``, the other
+    # the "Captured log call" report section -- and drop every other handler. Their
+    # class is read off ``caplog.handler`` so this needs no private pytest import.
+    capture_handlers = [
+        handler
+        for handler in saved_handlers
+        if isinstance(handler, type(caplog.handler))
+    ]
+    if caplog.handler not in capture_handlers:
+        capture_handlers.append(caplog.handler)
+
+    logger.handlers = capture_handlers
+    logger.propagate = False
+    # The leaked level is the third uncontrolled input: a WARNING left behind by an
+    # earlier test would drop the INFO records the positive control asserts on.
+    # set_level restores the level itself at teardown.
+    caplog.set_level(logging.INFO, logger=logger.name)
+    try:
+        yield caplog
+    finally:
+        logger.handlers = saved_handlers
+        logger.propagate = saved_propagate
 
 
 # ---------------------------------------------------------------------------
@@ -646,12 +739,30 @@ def test_scan_set_prints_each_selected_file_when_asked(tmp_path, capsys):
     assert "two.py" in out
 
 
-def test_scan_set_is_silent_by_default(tmp_path, capsys):
+def test_scan_set_is_silent_by_default(tmp_path, capsys, ash_records_stay_off_stdout):
+    """``print_results=False`` prints nothing, and the exclusion report still logs.
+
+    Both halves are asserted, because an empty stdout only means something if the
+    code that would have written to it ran. ``report_ignore_file_exclusions`` logs
+    at INFO unconditionally -- deliberately, so that a scan set which shrank after
+    an upgrade cannot shrink silently -- so its records are the positive control
+    for the emptiness above them.
+
+    That INFO record reaches stdout in a real ASH run, because ``get_logger``
+    builds its Console with ``stderr=False`` by default; ``ASH_LOG_TO_STDERR`` is
+    the switch that moves it. So "silent" here is a claim about ``print_results``,
+    not about the logger, and the fixture pins the logger so the claim can only be
+    read the one way.
+    """
     (tmp_path / "one.py").write_text("o = 1\n")
 
     scan_set(source=str(tmp_path))
 
     assert capsys.readouterr().out == ""
+    assert any(
+        "ASH_INCLUSIONS excluded 0 files from the scan set" in record.getMessage()
+        for record in ash_records_stay_off_stdout.records
+    )
 
 
 def test_scan_set_applies_a_filter_pattern_to_the_result(tmp_path):
