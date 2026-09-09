@@ -265,7 +265,24 @@ class TestCommitizenMaintainsTheReferences:
         `ash_versionX` instead of `ash_version`, say -- is skipped in silence,
         and asserting only that the path appears in the entry string would not
         notice, because the path is a substring of the broken entry too.
+
+        Resolution goes through commitizen's own function rather than a local
+        reimplementation, so this tracks what `cz bump` actually does instead of
+        what this file believes it does.
         """
+        # This import MUST stay inside the test, and the reason is not style.
+        # commitizen/__init__.py runs logging.config.dictConfig with
+        # disable_existing_loggers true, so importing it sets disabled=True on
+        # every logger already created -- including `ash`. A disabled logger drops
+        # records before any handler runs, so every later caplog assertion on an
+        # ASH record silently reads an empty list.
+        #
+        # At module scope the import would run during collection, on every worker,
+        # before any test -- poisoning the whole session rather than one test. Here
+        # it is contained: tests/conftest.py's _restore_ash_logger_switches
+        # snapshots and restores that flag around each test. Both halves are load
+        # bearing; moving this line to the top of the file reintroduces the bug it
+        # is commented against.
         from commitizen.bump import _resolve_files_and_regexes
 
         settings = _commitizen_settings()
