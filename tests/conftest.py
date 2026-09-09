@@ -136,6 +136,51 @@ def _keep_live_logging_off_the_ash_logger(request):
     yield
 
 
+@pytest.fixture(autouse=True)
+def _restore_ash_logger_switches():
+    """Stop one test's logging side effects from blinding another's ``caplog``.
+
+    ``level``, ``propagate`` and ``disabled`` live on a process-global logger
+    object, so a test that changes any of them changes it for every later test on
+    the same xdist worker. ``disabled`` is the dangerous one: a disabled logger
+    drops records inside ``Logger.handle``, before any handler is consulted, so
+    ``caplog.records`` comes back empty and the assertion reads as the code under
+    test not having logged at all. Nothing in the record says logging was off.
+
+    No test sets ``disabled`` on purpose. It gets set from a distance: any
+    ``logging.config.dictConfig`` call whose payload has
+    ``disable_existing_loggers`` true -- the default -- disables every logger not
+    named in that payload, and libraries do this at import time. ``commitizen``
+    is one, at ``commitizen/__init__.py``, so a single ``import commitizen`` from
+    inside a test disables the ``ash`` logger for the rest of that worker.
+
+    That is how this was found, and the shape is worth remembering because none
+    of the signals point at the cause. Two ``test_cdk_nag_wrapper_behavior``
+    assertions went red on eleven CI cells after an unrelated test file was added
+    in a different directory; they passed with that file removed, passed when run
+    alone, and passed at a different ``-n`` because the worker count decides which
+    tests share a process. The failing tests were not at fault, the added file did
+    not touch logging, and nothing in either was near cdk-nag.
+
+    Snapshotting the three switches per test keeps the blast radius of any such
+    import inside the test that caused it. Handlers are deliberately left alone:
+    the session fixture above manages those, and rebuilding the handler list here
+    would fight it.
+    """
+    ash_logger = logging.getLogger("ash")
+    level, propagate, disabled = (
+        ash_logger.level,
+        ash_logger.propagate,
+        ash_logger.disabled,
+    )
+    try:
+        yield
+    finally:
+        ash_logger.level = level
+        ash_logger.propagate = propagate
+        ash_logger.disabled = disabled
+
+
 @pytest.fixture
 def ash_temp_path():
     """Create a temporary directory using the gitignored tests/pytest-temp directory.

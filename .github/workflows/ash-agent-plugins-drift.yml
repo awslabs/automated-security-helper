@@ -123,11 +123,29 @@ jobs:
     permissions:
       contents: read
 
+    # THIRD-PARTY ACTIONS ARE PINNED BY COMMIT SHA, NOT BY TAG
+    #
+    # A tag is a mutable pointer. Whoever controls the action's repository can move
+    # `v7` to any commit at any time, and every workflow that names the tag picks up
+    # that commit on its next run with no diff here to review. A 40-character commit
+    # SHA is immutable, so a compromised or simply retagged upstream cannot change
+    # what this job executes. That matters more than usual for these two steps:
+    # checkout handles the repository token and setup-uv runs with enough access to
+    # populate the dependency cache this job then builds from.
+    #
+    # The trailing comment is not decoration. Dependabot reads it to know which
+    # human-readable release a SHA corresponds to, and rewrites both the SHA and the
+    # comment together when a new release appears -- so pinning does not mean going
+    # stale. The `github-actions` ecosystem entry in .github/dependabot.yml is what
+    # keeps that promise; without it these pins would freeze permanently.
+    #
+    # Do not "simplify" these back to `@v7`. Resolve a replacement SHA from the
+    # upstream tag and update the comment alongside it.
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           enable-cache: true
 
