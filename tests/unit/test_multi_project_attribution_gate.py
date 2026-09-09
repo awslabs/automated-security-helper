@@ -1074,3 +1074,132 @@ class TestWorkflowWiring:
         ]
         assert uploads
         assert any("failure()" in str(step.get("if", "")) for step in uploads)
+
+
+class TestOneDeadScannerIsReportedAsOneProblem:
+    """A dead scanner is one root cause, not ten independent defects.
+
+    When bandit dies, only checkov findings survive, so every B-prefixed marker
+    vanishes, the suppression probes find nothing, and the two thresholds see
+    identical sets. Reporting those as peers of the ERROR sends the reader
+    chasing symptoms. The counts and the exit status do not change -- only how
+    the list is grouped.
+    """
+
+    def test_healthy_results_name_no_root_cause(self, healthy, output_dir):
+        outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
+        assert outcome.passed
+        assert outcome.root_violations == []
+        assert outcome.errored_scanners == []
+
+    def test_a_scanner_error_is_the_single_root_cause(self, healthy, output_dir):
+        healthy["scanner_results"]["bandit"]["status"] = "ERROR"
+        outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
+
+        assert outcome.errored_scanners == ["bandit"]
+        assert len(outcome.root_violations) == 1
+        assert "reported status ERROR" in outcome.root_violations[0]
+        # The root cause is reported once, not twice, and the split is a
+        # partition of the full list -- nothing invented, nothing dropped.
+        assert set(outcome.root_violations) <= set(outcome.violations)
+        assert len(outcome.consequential_violations) == len(outcome.violations) - 1
+        assert (
+            outcome.root_violations[0] not in outcome.consequential_violations
+        )
+
+    def test_the_downstream_marker_failures_are_not_root_causes(
+        self, healthy, output_dir
+    ):
+        """The nine consequences of one dead scanner must not be named as causes."""
+        healthy["scanner_results"]["bandit"]["status"] = "ERROR"
+        for run in healthy["sarif"]["runs"]:
+            run["results"] = []
+        outcome = _evaluate(healthy, output_dir, exit_code=2, repo_root=REPO_ROOT)
+        assert len(outcome.violations) > 1
+        assert len(outcome.root_violations) == 1
+        assert any("marker rule" in v for v in outcome.consequential_violations)
+
+
+class TestScannerErrorEvidenceIsSurfaced:
+    """The gate must print the log that names the cause.
+
+    The aggregated results record only ``status: ERROR``. ASH writes the
+    traceback to the scanner's own stderr log, which the gate uploaded but never
+    printed -- so the one artifact explaining the failure went unread.
+    """
+
+    TRACEBACK = (
+        "Traceback (most recent call last):\n"
+        '  File "/home/runner/.local/share/uv/tools/bandit/bin/bandit", line 4\n'
+        "    from bandit.cli.main import main\n"
+        '  File ".../stevedore/_cache.py", line 193, in get_group_all\n'
+        "    result.append(importlib.metadata.EntryPoint(*vals))\n"
+        "TypeError: EntryPoint.__init__() missing 2 required positional "
+        "arguments: 'value' and 'group'\n"
+    )
+
+    def _write_logs(self, output_dir):
+        written = []
+        for project in gate.FIXTURE_PROJECTS:
+            log = (
+                output_dir
+                / "projects"
+                / project.key
+                / "scanners"
+                / "bandit"
+                / "source"
+                / "BanditScanner.stderr.log"
+            )
+            log.parent.mkdir(parents=True, exist_ok=True)
+            log.write_text(self.TRACEBACK, encoding="utf-8")
+            written.append(log)
+        return written
+
+    def test_it_finds_every_projects_stderr_log(self, output_dir):
+        written = self._write_logs(output_dir)
+        found = gate.find_scanner_error_logs(output_dir, "bandit")
+        assert sorted(found) == sorted(written)
+
+    def test_a_scanner_that_wrote_no_log_finds_nothing(self, output_dir):
+        assert gate.find_scanner_error_logs(output_dir, "bandit") == []
+
+    def test_it_prints_the_deepest_frame_and_the_exception(self, output_dir, capsys):
+        """Not tail-truncated: the line naming the failing library must survive.
+
+        This is the specific reporting defect -- the frame that identifies the
+        library and the exception type is what a reader needs, and cutting it is
+        what made these failures cost an extra debugging cycle.
+        """
+        self._write_logs(output_dir)
+        gate.print_scanner_error_evidence(output_dir, ["bandit"])
+        out = capsys.readouterr().out
+        assert "stevedore/_cache.py" in out
+        assert "EntryPoint.__init__() missing 2 required positional" in out
+        assert "Traceback (most recent call last)" in out
+
+    def test_identical_logs_are_collapsed_not_repeated_per_project(
+        self, output_dir, capsys
+    ):
+        """One tool failing the same way in four projects is one traceback."""
+        self._write_logs(output_dir)
+        gate.print_scanner_error_evidence(output_dir, ["bandit"])
+        out = capsys.readouterr().out
+        assert out.count("Traceback (most recent call last)") == 1
+        assert f"identical in {len(gate.FIXTURE_PROJECTS)} projects" in out
+
+    def test_differing_logs_are_all_printed(self, output_dir, capsys):
+        """Collapsing must key on content, so genuinely different logs survive."""
+        logs = self._write_logs(output_dir)
+        logs[0].write_text(
+            self.TRACEBACK + "ValueError: a different failure\n", encoding="utf-8"
+        )
+        gate.print_scanner_error_evidence(output_dir, ["bandit"])
+        out = capsys.readouterr().out
+        assert out.count("Traceback (most recent call last)") == 2
+        assert "ValueError: a different failure" in out
+
+    def test_an_errored_scanner_with_no_log_says_so(self, output_dir, capsys):
+        """Silence is worse than a note that the evidence is missing."""
+        gate.print_scanner_error_evidence(output_dir, ["bandit"])
+        out = capsys.readouterr().out
+        assert "reported ERROR but wrote no stderr log" in out
