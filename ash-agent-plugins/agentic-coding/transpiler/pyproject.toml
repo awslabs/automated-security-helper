@@ -1,7 +1,7 @@
 [project]
 name = "agentic-plugin-transpiler"
 version = "0.1.0"
-description = "Transpile a single _base/ source-of-truth into plugin packages for 14 AI coding agent platforms (Claude Code, Codex CLI, Kiro, GitHub Copilot, OpenCode, Cursor, Windsurf, Cline, Roo Code, Continue.dev, Gemini CLI, Goose, Amazon Q, Aider)."
+description = "Transpile a single _base/ source-of-truth into plugin packages for AI coding agent platforms, plus standalone agentskills.io skill releases. `agentic-plugins formats` lists the registered backends and the formats they emit."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
