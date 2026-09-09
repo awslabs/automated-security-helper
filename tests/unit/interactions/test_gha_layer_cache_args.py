@@ -101,3 +101,63 @@ class TestCacheDeclined:
         ):
             monkeypatch.delenv(key, raising=False)
         assert _gha_layer_cache_args("docker", "ci", force=False) == []
+
+
+class TestRunnerArrivesResolved:
+    """The runner reaches this gate already resolved to a path, never as a name.
+
+    ``_resolve_oci_runner`` returns whatever ``find_executable`` produced, and that
+    is a full path -- ``/usr/bin/docker``, plus a ``.exe`` suffix on Windows. Every
+    test above passes the bare string ``docker``, which no caller supplies, so the
+    suite could pass while the gate rejected the only value it is ever handed.
+    These pin the resolved shape instead.
+    """
+
+    @pytest.mark.parametrize(
+        "runner",
+        [
+            "/usr/bin/docker",
+            "/usr/local/bin/docker",
+            "/opt/homebrew/bin/docker",
+            # The Windows shape. Spelled with forward slashes so the final
+            # component is the same one pathlib sees on either platform.
+            "C:/Program Files/Docker/docker.exe",
+            # Still accepted: a bare name remains valid input.
+            "docker",
+        ],
+    )
+    def test_resolved_docker_paths_enable_the_cache(self, in_actions, runner):
+        assert _gha_layer_cache_args(runner, "ci", force=False) == [
+            "--cache-from",
+            "type=gha,scope=ash-ci",
+            "--cache-to",
+            "type=gha,mode=max,scope=ash-ci",
+        ]
+
+    @pytest.mark.parametrize(
+        "runner",
+        [
+            "/usr/bin/podman",
+            "/usr/local/bin/finch",
+            "/usr/bin/nerdctl",
+        ],
+    )
+    def test_resolved_non_docker_paths_still_decline(self, in_actions, runner):
+        assert _gha_layer_cache_args(runner, "ci", force=False) == []
+
+    @pytest.mark.parametrize(
+        "runner",
+        [
+            "/usr/bin/docker-compose",
+            "/usr/bin/docker-credential-ecr-login",
+            "/usr/bin/not-docker",
+        ],
+    )
+    def test_neighbors_of_docker_on_path_decline(self, in_actions, runner):
+        """Matching must be on the whole final component, not a substring of it.
+
+        ``docker`` is a prefix of several unrelated binaries that sit in the same
+        directory, so a substring test would enable a buildx-only cache for a
+        runner that cannot honor it.
+        """
+        assert _gha_layer_cache_args(runner, "ci", force=False) == []

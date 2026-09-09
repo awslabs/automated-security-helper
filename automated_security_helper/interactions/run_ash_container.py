@@ -368,7 +368,13 @@ def _gha_layer_cache_args(
     the run's token. Distributing an image is a separate ``--push`` operation that
     this does not perform.
     """
-    if resolved_oci_runner != "docker":
+    # Compare the final path component, not the whole string. The runner arrives
+    # here already resolved: _resolve_oci_runner returns find_executable's output,
+    # which is a full path such as /usr/bin/docker, and carries a .exe suffix on
+    # Windows. ``stem`` reduces every one of those shapes -- and a bare name -- to
+    # ``docker``, while still declining neighbors like /usr/bin/docker-compose
+    # that a substring test would wrongly accept.
+    if Path(resolved_oci_runner).stem != "docker":
         return []
     if force:
         return []
