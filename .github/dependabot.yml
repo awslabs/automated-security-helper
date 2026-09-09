@@ -1,3 +1,44 @@
+# Every catch-all "minor" group below deliberately omits `update-types`. That is not an
+# oversight, and restoring the filter reintroduces a measured bug.
+#
+# What was observed. On 2026-09-08 the first run after the `uv` switch opened one grouped pull
+# request and three ungrouped ones inside the same 36 seconds. The grouped one, #537 on branch
+# dependabot/uv/engine-minor-b50b6cf414, carried three updates and described each as a version
+# bump: "Updates `importlib-metadata` from 9.0.0 to 9.0.1". The three that escaped -- #538
+# mkdocstrings[python], #539 pydantic[email], #540 types-boto3[...] -- were each described as
+# "Updates the requirements on [pydantic[email]] to permit the latest version", with no
+# from/to version pair anywhere in the body. #537 and #538 were eight seconds apart, so
+# grouping was plainly switched on and working; the question was only which updates it admits.
+#
+# Why the second kind escaped. A group that declares `update-types` can only admit an update
+# whose semantic-version level Dependabot managed to compute. A requirement-permit update has
+# no from/to pair, so there is no level to compare, it satisfies no `update-types` list, and
+# the documented fallback takes over: "Any outdated dependencies that do not match a rule are
+# updated in individual pull requests." A group with no `update-types` has no level for an
+# update to fail -- the documentation says such a group "will include updates for all semantic
+# versions (SemVer)". Note this mechanism is not stated anywhere in the documentation; it was
+# read out of Dependabot's own grouping code and confirmed against the run above.
+#
+# Why this does not collapse majors into the minor pull requests. Within one ecosystem entry
+# Dependabot walks groups in declaration order and refuses to put a dependency into a later
+# group once an earlier group has claimed it. Every `*-major-upgrade` group is declared ahead
+# of its matching minor group and still carries `update-types: ["major"]`, so a genuine major
+# is claimed there first and never reaches the untyped group; a minor, a patch, or an untyped
+# requirement bump is refused by the major group and falls through to it. The separation
+# depends on that ordering, so do not reorder the groups and do not add `update-types` back.
+#
+# Cooldown, recorded here so the next reader is not misled. Dependabot applies a default
+# cooldown of three days to version updates even when `cooldown` is absent, and that default
+# does not apply to security updates. The seven-day `default-days` below therefore lengthens a
+# soak that already existed rather than creating one, and deleting `cooldown` would not make
+# updates arrive immediately.
+#
+# Security updates are intentionally left ungrouped. `applies-to` defaults to
+# `version-updates`, so every group here batches version updates only and security advisories
+# keep arriving one per advisory. Two reasons not to add security groups: batching them lets a
+# single failing check hold up every fix in the batch, which is the opposite of what an
+# advisory needs; and `cooldown` does not apply to security updates at all, so a security
+# group could not inherit the soak the rest of this file is built around.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
@@ -15,6 +56,10 @@ updates:
         patterns:
           - "*"
 
+  # Both docker entries had no groups at all, so every base-image change arrived as its own
+  # pull request. Same two-group shape as the Python entries and for the same reason: a base
+  # image crossing a major boundary is the case a human should look at on its own, everything
+  # else can travel together.
   - package-ecosystem: "docker"
     directory: "/"
     schedule:
@@ -25,7 +70,20 @@ updates:
       prefix: "build"
     labels:
       - "dependencies"
+    groups:
+      base-image-major-upgrade:
+        patterns:
+          - "*"
+        update-types:
+          - "major"
+      # No `update-types`, for the reason given in the header.
+      base-image:
+        patterns:
+          - "*"
 
+  # Separate entry because `directory` scopes an ecosystem entry to one location, so the entry
+  # above does not see this Dockerfile. Group names differ from the ones above on purpose: a
+  # pull request titled "bump the base-image group" would otherwise not say which image moved.
   - package-ecosystem: "docker"
     directory: "/automated_security_helper/assets"
     schedule:
@@ -36,6 +94,15 @@ updates:
       prefix: "build"
     labels:
       - "dependencies"
+    groups:
+      asset-image-major-upgrade:
+        patterns:
+          - "*"
+        update-types:
+          - "major"
+      asset-image:
+        patterns:
+          - "*"
 
   # Python dependencies, split so a scanner upgrade is never mistaken for an engine upgrade
   # and a major is never mistaken for a routine bump.
@@ -93,6 +160,13 @@ updates:
         update-types:
           - "major"
 
+      # No `update-types`, and it has to stay absent here too -- not only on the engine group.
+      # An exact package name outranks the engine groups' wildcard when Dependabot decides
+      # which group is the better home for a dependency, so these five are offered to the
+      # scanner groups and to nothing else. If this group filtered on level, an untyped
+      # requirement bump for cdk-nag or aws-cdk-lib would be refused by both scanner groups and
+      # never reach `engine-minor` either, and would end up in a pull request of its own filed
+      # as neither a scanner change nor an engine change.
       scanner-minor:
         patterns:
           - "cdk-nag"
@@ -100,9 +174,6 @@ updates:
           - "constructs"
           - "detect-secrets"
           - "cfn-flip"
-        update-types:
-          - "minor"
-          - "patch"
 
       engine-major-upgrade:
         patterns:
@@ -110,12 +181,11 @@ updates:
         update-types:
           - "major"
 
+      # No `update-types`. This is the group that has to be able to catch an update whose
+      # semver level Dependabot could not compute, which is what #538, #539 and #540 were.
       engine-minor:
         patterns:
           - "*"
-        update-types:
-          - "minor"
-          - "patch"
 
   # The transpiler is a separate uv project with its own pyproject.toml and uv.lock, and
   # nothing above covers it: `directory` scopes an ecosystem entry to one manifest, so the
@@ -144,9 +214,10 @@ updates:
           - "*"
         update-types:
           - "major"
+      # No `update-types`, same reason as `engine-minor`. This entry already produced a working
+      # grouped pull request (#536, transpiler-minor, three updates), so the filter is not
+      # blocking everything here -- it would only drop an untyped requirement bump, and this
+      # project has the same `increase-if-necessary` strategy that produced them at the root.
       transpiler-minor:
         patterns:
           - "*"
-        update-types:
-          - "minor"
-          - "patch"
