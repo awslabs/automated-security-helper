@@ -458,10 +458,31 @@ class GateOutcome:
     projects: Tuple[ProjectOutcome, ...] = ()
     runs: Tuple[RunEvidence, ...] = ()
     scanner_statuses: Dict[str, str] = field(default_factory=dict)
+    #: Violations that explain other violations. A scanner reporting ERROR
+    #: produced no findings, so every downstream "rule X is missing from project
+    #: Y" and "two thresholds saw equal counts" follows from it rather than being
+    #: an independent defect. Reporting one dead scanner as ten problems sends
+    #: the reader chasing nine symptoms. Kept as a subset of ``violations`` so
+    #: ``passed`` and the exit status are unchanged.
+    root_violations: List[str] = field(default_factory=list)
 
     @property
     def passed(self) -> bool:
         return not self.violations
+
+    @property
+    def consequential_violations(self) -> List[str]:
+        """Violations that are not themselves a named root cause."""
+        roots = set(self.root_violations)
+        return [v for v in self.violations if v not in roots]
+
+    @property
+    def errored_scanners(self) -> List[str]:
+        return sorted(
+            name
+            for name, status in self.scanner_statuses.items()
+            if status == STATUS_ERROR
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1458,7 +1479,12 @@ def evaluate_results(
     # marker, the attribution checks below cannot fail and say nothing about it.
     outcome.violations.extend(check_the_fixture_can_discriminate())
     outcome.violations.extend(check_every_project_ran(projects))
-    outcome.violations.extend(check_no_scanner_errors(statuses))
+    scanner_errors = check_no_scanner_errors(statuses)
+    outcome.violations.extend(scanner_errors)
+    # A dead scanner explains the marker-rule, suppression and threshold
+    # violations below, so name it as the root cause rather than letting it sit
+    # first in a flat list of ten.
+    outcome.root_violations.extend(scanner_errors)
     outcome.violations.extend(check_one_run_per_project(projects, runs))
     outcome.violations.extend(check_findings_are_attributed_to_their_own_project(runs))
     outcome.violations.extend(check_each_project_shows_only_its_own_marker_rule(runs))
@@ -1696,6 +1722,83 @@ def _print_block(title: str, body: Any) -> None:
     print(sanitize_for_console(text))
 
 
+#: Cap on a single scanner stderr log printed as evidence. Generous enough that
+#: no real traceback is touched, small enough that a pathological log cannot push
+#: the scan stdout/stderr blocks after it past a truncated job log. "Not tailed"
+#: and "unbounded" are separable, and only the first is wanted.
+SCANNER_LOG_PRINT_BUDGET_BYTES = 200_000
+
+
+def _clamp_keeping_both_ends(text: str, budget: int) -> str:
+    """Trim the middle, never the ends.
+
+    A tail cut loses the head; a head cut loses the deepest frame and the
+    exception line. When a log has to be trimmed at all, the ends are the part
+    worth keeping, so the middle goes and says how much it took.
+    """
+    if len(text) <= budget:
+        return text
+    half = budget // 2
+    omitted = len(text) - (half * 2)
+    return (
+        text[:half]
+        + f"\n\n... {omitted} byte(s) omitted from the middle of this log ...\n\n"
+        + text[-half:]
+    )
+
+
+def find_scanner_error_logs(output_dir: Path, scanner: str) -> List[Path]:
+    """Every stderr log a scanner wrote, across projects and target types.
+
+    ASH sends each scanner's stderr to
+    ``projects/<project>/scanners/<scanner>/<target>/<Name>Scanner.stderr.log``.
+    When a scanner dies at import, that file holds the whole traceback while the
+    aggregated results hold only ``status: ERROR``. The gate used to print
+    neither, so the one artifact naming the cause went unread and every failure
+    of this kind cost a round trip into the uploaded evidence.
+    """
+    scanner_dir = output_dir / "projects"
+    if not scanner_dir.is_dir():
+        return []
+    return sorted(scanner_dir.glob(f"*/scanners/{scanner}/*/*.stderr.log"))
+
+
+def print_scanner_error_evidence(output_dir: Path, scanners: Sequence[str]) -> None:
+    """Print, in full, the stderr of each scanner that reported ERROR.
+
+    Deliberately not tail-truncated: the useful frames of an import-time
+    traceback are the *last* ones, but the deepest frame is what names the
+    failing library, and a tail cut mid-frame is what makes these reports
+    unactionable. Bounded rather than unbounded, though -- a log over
+    ``SCANNER_LOG_PRINT_BUDGET_BYTES`` loses its middle, not either end, so the
+    blocks printed after it still reach a truncated job log. Identical logs are
+    collapsed, since a workspace scan runs the same tool once per project and
+    typically fails the same way in each.
+    """
+    for scanner in scanners:
+        logs = find_scanner_error_logs(output_dir, scanner)
+        if not logs:
+            print(
+                f"--- scanner '{scanner}' reported ERROR but wrote no stderr log "
+                f"under {output_dir / 'projects'} ---"
+            )
+            continue
+        by_content: Dict[str, List[Path]] = {}
+        for log in logs:
+            try:
+                body = log.read_text(encoding="utf-8", errors="replace")
+            except OSError as err:  # pragma: no cover - unreadable evidence
+                body = f"<could not read {log}: {err}>"
+            by_content.setdefault(body, []).append(log)
+        for body, paths in by_content.items():
+            shown = ", ".join(str(p.relative_to(output_dir)) for p in paths)
+            suffix = f" (identical in {len(paths)} projects)" if len(paths) > 1 else ""
+            _print_block(
+                f"scanner '{scanner}' stderr{suffix}: {shown}",
+                _clamp_keeping_both_ends(body, SCANNER_LOG_PRINT_BUDGET_BYTES),
+            )
+
+
 def _configure_stdout_for_utf8() -> None:
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
@@ -1824,10 +1927,35 @@ def main(argv: Iterable[str] | None = None) -> int:
             succeeded = True
             return 0
 
-        print(f"FAIL: {len(outcome.violations)} problem(s) found")
-        for violation in outcome.violations:
-            print(f"  - {violation}")
+        roots = outcome.root_violations
+        downstream = outcome.consequential_violations
+        if roots:
+            print(
+                f"FAIL: {len(outcome.violations)} problem(s) found -- "
+                f"{len(roots)} root cause, {len(downstream)} likely consequence(s)"
+            )
+            print()
+            print("ROOT CAUSE:")
+            for violation in roots:
+                print(f"  - {violation}")
+            if downstream:
+                print()
+                print(
+                    "DOWNSTREAM of the above -- a scanner that reported ERROR "
+                    "produced no findings, so these should clear once the root "
+                    "cause is fixed, and are not evidence of separate defects:"
+                )
+                for violation in downstream:
+                    print(f"  - {violation}")
+        else:
+            print(f"FAIL: {len(outcome.violations)} problem(s) found")
+            for violation in outcome.violations:
+                print(f"  - {violation}")
         print()
+        # The scanner's own stderr log names the cause; the aggregated results
+        # only say ERROR. Print it before the scan's console output, which is
+        # tail-truncated and much noisier.
+        print_scanner_error_evidence(output_dir, outcome.errored_scanners)
         _print_block("scan stdout (tail)", _tail(completed.stdout))
         _print_block("scan stderr (tail)", _tail(completed.stderr))
         return 1
