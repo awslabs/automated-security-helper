@@ -50,13 +50,25 @@ Each backend is a class that subclasses `BaseBackend` and declares its layout vi
 ```
 agentic-coding/
 ├── transpiler/                         # The build tool
-│   ├── pyproject.toml                  # Declares jinja2, pydantic, pyyaml deps
-│   ├── transpile.py                    # ~700 lines — orchestrator + section emitters
-│   ├── schema.py                       # Pydantic models that validate configs.yaml
-│   ├── configs.yaml                    # Per-platform layout descriptions (15 entries)
+│   ├── pyproject.toml                  # Deps + the agentic-plugins, refresh-schemas, generate-models entry points
+│   ├── validate.py                     # Output validation, invoked by `check`
+│   ├── transpiler/                     # The package
+│   │   ├── cli.py                      # Click CLI — the commands listed under Development workflow
+│   │   ├── core.py                     # BaseBackend, Manifest, output-anchor resolution
+│   │   ├── orchestrator.py             # build / release / drift across backends
+│   │   ├── emitters.py                 # Section emitters + the run_section_emitters dispatch
+│   │   ├── registry.py                 # BackendRegistry + @register_backend
+│   │   ├── formats.py                  # Format descriptors (see `agentic-plugins formats`)
+│   │   ├── backends/<name>/            # One sub-package per backend — the class and its class vars
+│   │   └── ...                         # jinja_renderer, manifest_builders, mcp_builders, install_scripts, packagers, cli_tools
+│   ├── tools/                          # refresh-schemas + generate-models
+│   ├── schemas/                        # Vendored external JSON Schemas + the schemas.json index
+│   ├── generated_models/               # Pydantic models generated from those schemas (committed)
+│   ├── tests/
 │   ├── _base/                          # SOURCE OF TRUTH — humans only edit here
 │   │   ├── manifest.json               # Plugin metadata: name, description, etc.
 │   │   ├── skill.md                    # Main skill body (no frontmatter)
+│   │   ├── cli_versions.json           # Platform CLI version pins, used by smoke-test
 │   │   ├── references/
 │   │   │   ├── tool-reference.md
 │   │   │   └── troubleshooting.md
@@ -70,21 +82,25 @@ agentic-coding/
 │
 └── plugins/                            # GENERATED — committed for browse-by-platform
     ├── AGENTS.md                       # Universal repo-root instruction file
-    ├── claude/, codex/, kiro/,         # 14 directory-style plugins
+    ├── claude/, codex/, kiro/,         # 14 directory-style platform plugins
     ├── copilot/, opencode/, cursor/,
     ├── windsurf/, cline/, roo/,
     ├── continue/, gemini/, goose/,
     ├── amazonq/, aider/
-    └── mcpb/                           # MCPB archive (manifest.json + ash.mcpb ZIP)
+    ├── mcpb/                           # MCPB archive (manifest.json + ash.mcpb ZIP)
+    └── generic-skill/                  # Standalone agentskills.io release (row 16 above)
 ```
+
+The seventeenth backend, `skills-root`, writes outside this tree — to `skills/`
+at the repository root, per row 17 above.
 
 ## How transpilation works
 
-The transpiler reads `_base/` content and `configs.yaml` layout descriptions, then dispatches each platform through a generic `render_platform()` function. Each section in a platform's config (`plugin_manifest`, `mcp`, `skill`, `commands`, `agents`, `instruction_file`, `rules_dir`, `custom_modes`, `config_file`, `marketplace`, `extension_manifest`, `mcpb_bundle`) is handled by a corresponding emitter.
+The transpiler reads `_base/` content and each backend's class vars, then dispatches through `emitters.run_section_emitters`. Every section a backend declares (`PLUGIN_MANIFEST`, `MCP`, `SKILL`, `COMMANDS`, `AGENTS`, `INSTRUCTION_FILE`, `RULES_DIR`, `CUSTOM_MODES`, `CONFIG_FILE`, `MARKETPLACE`, `EXTENSION_MANIFEST`, `MCPB_BUNDLE`) is handled by a corresponding `emit_*` function; sections it leaves unset are skipped.
 
-**Adding a new platform** is typically just a `configs.yaml` entry plus possibly one Jinja template if the layout has a genuinely new shape. No new Python render function is needed unless the platform requires output formats outside the existing dispatcher (JSON manifests, YAML configs, MCPB archives, install scripts).
+**Adding a new platform** is typically just a backend class declaring those class vars, plus possibly one Jinja template if the layout has a genuinely new shape. No new emitter is needed unless the platform requires an output shape outside the existing dispatch (JSON manifests, YAML configs, MCPB archives, install scripts).
 
-**Each Jinja template stays under 20 lines.** The single `skill.md.j2` template handles all frontmatter+body files (skills, commands, agents) by parameterizing over `frontmatter_fields`. Per-platform templates exist only where a platform's shape is genuinely different (Roo `.roomodes`, Continue YAML mcpServers, Goose YAML extensions, instruction files like POWER.md / GEMINI.md / .goosehints / CONVENTIONS.md / copilot-instructions.md, Aider config).
+**Jinja templates stay small** — 24 of the 26 are under 20 lines. The single `skill.md.j2` template handles all frontmatter+body files (skills, commands, agents) by parameterizing over `frontmatter_fields`, which is why it is the longest at 34. Per-platform templates exist only where a platform's shape is genuinely different (Roo `.roomodes`, Continue YAML mcpServers, Goose YAML extensions, instruction files like POWER.md / GEMINI.md / .goosehints / CONVENTIONS.md / copilot-instructions.md, Aider config).
 
 ## Development workflow
 
@@ -124,17 +140,20 @@ CI runs `agentic-plugins check` on every push and pull request that touches the 
 
 The transpiler validates every generated file against its platform's spec via three tiers:
 
-1. **External JSON Schemas** — `mcpb/manifest.json` validates against the official [MCPB Draft 07 schema](https://github.com/modelcontextprotocol/mcpb), and `opencode/opencode.json` validates against the [OpenCode Draft 2020-12 schema](https://opencode.ai/config.json). Both schemas are vendored at `agentic-coding/transpiler/schemas/`.
-2. **Structural sanity** — every generated `.json` parses as JSON, every `.yaml`/`.yml` parses as YAML, every markdown file with `---` frontmatter has parseable YAML, and every path declared in `configs.yaml` exists in the output tree.
+1. **External JSON Schemas** — `mcpb/manifest.json` validates against the official [MCPB Draft 07 schema](https://github.com/modelcontextprotocol/mcpb), `opencode/opencode.json` against the [OpenCode Draft 2020-12 schema](https://opencode.ai/config.json), and `amazonq/agent.json` against the [Amazon Q agent-v1 Draft 07 schema](https://github.com/aws/amazon-q-developer-cli/blob/main/docs/agent-format.md). All are vendored at `agentic-coding/transpiler/schemas/`; `validate.EXTERNAL_SCHEMAS` is the list.
+2. **Structural sanity** — every generated `.json` parses as JSON, every `.yaml`/`.yml` parses as YAML, every markdown file with `---` frontmatter has parseable YAML, and every path a backend declares exists in the output tree.
 3. **Known platform constraints** — Claude plugin name kebab-case, Roo customMode slug regex, Windsurf `trigger` enum, Copilot 4000-char `copilot-instructions.md` cap, Windsurf 12000-byte rule cap, MCPB archive integrity (must contain `manifest.json` at root, manifest must validate against the MCPB schema).
 
 To refresh the cached external schemas after upstream changes:
 
 ```bash
-bash agentic-coding/transpiler/schemas/refresh.sh
+uv run --project agentic-coding/transpiler refresh-schemas
 git diff agentic-coding/transpiler/schemas/   # review what changed
 uv run --project agentic-coding/transpiler agentic-plugins check  # confirm we still validate
 ```
+
+If a refreshed schema changes shape, regenerate the committed Pydantic models
+too: `uv run --project agentic-coding/transpiler --extra refresh generate-models`.
 
 You can run validation independently of drift detection:
 
