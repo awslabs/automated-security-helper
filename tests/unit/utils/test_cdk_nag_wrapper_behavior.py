@@ -1584,6 +1584,14 @@ SCOPED_RULE = "AwsSolutions-IAM5"
 # wildcard is the finding the rule exists to raise.
 WILDCARD_QUALIFIER = "Resource::*"
 
+# Two findings the same rule really emits, whose names share a prefix. AwsSolutionsChecks
+# reports one IAM5 finding per over-broad permission and spells it either `Resource::<arn>` or
+# `Action::<action>`, so a policy granting `s3:GetObject*` yields both of these as separate
+# findings. They exist to pin membership as equality rather than as any prefix rule -- see
+# test_a_scope_member_matches_the_qualifier_exactly_not_by_prefix.
+ACTION_SCOPE = "Action::s3:GetObject"
+ACTION_QUALIFIER_EXTENDING_IT = "Action::s3:GetObjectVersion"
+
 
 def _scoped_suppression_template(
     tmp_path,
@@ -1676,6 +1684,59 @@ def test_a_granular_suppression_covers_the_qualifier_it_names(
         "applies to exactly this finding"
     )
     assert NARROW_SCOPE_REASON in finding.suppressions[0].justification
+
+
+@pytest.mark.parametrize(
+    ("declared_scope", "reported_qualifier"),
+    [
+        (WILDCARD_QUALIFIER, NARROW_SCOPE),
+        (ACTION_SCOPE, ACTION_QUALIFIER_EXTENDING_IT),
+        (ACTION_QUALIFIER_EXTENDING_IT, ACTION_SCOPE),
+    ],
+    ids=[
+        "declared-wildcard-vs-a-specific-arn",
+        "declared-scope-is-a-prefix-of-the-qualifier",
+        "qualifier-is-a-prefix-of-the-declared-scope",
+    ],
+)
+def test_a_scope_member_matches_the_qualifier_exactly_not_by_prefix(
+    cdk_doubles, tmp_path, outdir, declared_scope, reported_qualifier
+):
+    """Scope membership is string equality, and nothing weaker.
+
+    Both cdk-nag majors say so: 2.38.2's ``doesApply`` compares a string element to the
+    qualifier with ``===``, and 3.0.2's ``isAcknowledged`` is ``ids.includes(ruleId)``. Neither
+    interprets the member as a pattern, which matters most for the member that looks most like
+    one. ``Resource::*`` is a finding STRING -- the text cdk-nag emits for a permission on every
+    resource -- not a glob over finding strings. An author who reviewed and accepted that one
+    wildcard finding has said nothing about the specific-ARN findings on the same resource, so a
+    prefix rule would silence them too AND stamp the wildcard's reason on them as the recorded
+    justification.
+
+    Why this needs its own test rather than resting on the section's other negatives: those
+    happen to have their two strings in the opposite prefix order. The declared scope there is a
+    long bucket ARN and the qualifier is the short ``Resource::*``, so substituting
+    ``qualifier.startswith(member.rstrip("*"))`` for the equality still answers False and every
+    one of them still passes -- measured, 119 passed with that substitution in place. Nothing
+    pinned the equality itself, which is what a later refactor toward glob-ish matching would
+    quietly relax.
+
+    The three cases cover both prefix directions plus the trailing star, so the equality is
+    pinned however a prefix rule is spelled rather than against one spelling of it.
+    """
+    path = _scoped_suppression_template(
+        tmp_path, "prefix-scope", _applies_to_block(declared_scope)
+    )
+    cdk_doubles.report_text = _one_violation_report(
+        rule_name=f"{SCOPED_RULE}[{reported_qualifier}]"
+    )
+
+    finding = _only_finding(_run(path, outdir, nag_packs=["AwsSolutionsChecks"]))
+
+    assert finding.suppressions is None, (
+        f"declared scope {declared_scope!r} is not the qualifier {reported_qualifier!r}, so "
+        "it must not cover it; sharing a prefix is not membership"
+    )
 
 
 def test_one_member_of_a_multi_member_scope_is_enough(cdk_doubles, tmp_path, outdir):

@@ -292,6 +292,9 @@ def _scope_covers_qualifier(scope, qualifier: str | None, rule_id: str) -> bool:
         return False
     for member in scope:
         if isinstance(member, str):
+            # Equality, not a prefix or glob rule. ``Resource::*`` is a finding string, not a
+            # pattern over finding strings -- see
+            # test_a_scope_member_matches_the_qualifier_exactly_not_by_prefix.
             if member == qualifier:
                 return True
             continue
