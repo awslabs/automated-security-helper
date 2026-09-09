@@ -97,7 +97,7 @@ def main() -> int:
     if failures:
         print(f"FAILED: {len(failures)} schema(s): {failures}")
         return 1
-    print("Done. Run `uv run --project agentic-coding/transpiler transpile --check` to confirm validation still passes.")
+    print("Done. Run `uv run --project agentic-coding/transpiler agentic-plugins check` to confirm validation still passes.")
     return 0
 
 

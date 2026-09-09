@@ -14,7 +14,7 @@ Direct entries require curl. Zod-converted entries require Node >=18 and git.
 Both pre-conditions are checked at startup; missing tools fail with an
 actionable error message.
 
-After refresh, run `uv run --project agentic-coding/transpiler transpile --check`
+After refresh, run `uv run --project agentic-coding/transpiler agentic-plugins check`
 to confirm the new schemas still validate the generated outputs.
 """
 from __future__ import annotations
@@ -150,7 +150,7 @@ def main() -> int:
         return 1
     print("All schemas refreshed. Review the diff and re-run --check:")
     print("  git diff agentic-coding/transpiler/schemas/")
-    print("  uv run --project agentic-coding/transpiler transpile --check")
+    print("  uv run --project agentic-coding/transpiler agentic-plugins check")
     return 0
 
 
