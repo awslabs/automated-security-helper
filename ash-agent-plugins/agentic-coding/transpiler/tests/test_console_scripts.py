@@ -11,6 +11,7 @@ outlived the shim it pointed at, and four other places told users to run it.
 Importing each target here is the cheapest check that would have caught it, and
 it covers entry points added later without anyone remembering to test them.
 """
+
 from __future__ import annotations
 
 import importlib
