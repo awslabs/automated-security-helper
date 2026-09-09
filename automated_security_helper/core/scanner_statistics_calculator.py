@@ -96,6 +96,10 @@ class ScannerStatisticsCalculator:
             - threshold_source: Source of the threshold ("global", "config", etc.)
             - excluded: Whether the scanner was explicitly excluded
             - dependencies_missing: Whether the scanner has missing dependencies
+            - error: Whether the scanner failed to run or produced no usable results
+            - evaluated_nothing: Whether a target-tracking scanner attempted zero targets.
+              Distinct from ``excluded``: the operator wanted this scanner, it ran, and there
+              was nothing for it to look at.
         """
         scanner_stats = {}
 
@@ -160,6 +164,10 @@ class ScannerStatisticsCalculator:
                 ScannerStatisticsCalculator.get_scanner_status_info(
                     asharp_model, scanner_name
                 )
+            )
+
+            evaluated_nothing = ScannerStatisticsCalculator.scanner_evaluated_nothing(
+                asharp_model, scanner_name
             )
 
             total = critical + high + medium + low + info
@@ -245,6 +253,7 @@ class ScannerStatisticsCalculator:
                 "excluded": excluded,
                 "dependencies_missing": dependencies_missing,
                 "error": error,
+                "evaluated_nothing": evaluated_nothing,
             }
 
         return scanner_stats
@@ -533,6 +542,99 @@ class ScannerStatisticsCalculator:
         return evaluation_threshold, scanner_threshold_def
 
     @staticmethod
+    def _status_info_from_report(report: Dict[str, Any]) -> Tuple[bool, bool, bool]:
+        """Read (excluded, dependencies_missing, error) off one serialized container.
+
+        ``excluded`` comes from the container's own ``excluded`` field and is never inferred
+        from the status string. Those two used to be the same thing, and the inference was sound
+        while it lasted: before per-target outcome tracking, ``determine_status`` had exactly
+        three return sites -- ERROR, FAILED, PASSED -- so the only way a container could carry
+        SKIPPED was ``for_excluded()``, where ``excluded`` genuinely held. A scanner that runs
+        and evaluates nothing now also reports SKIPPED, and re-deriving ``excluded`` from that
+        asserts the operator switched the scanner off, which is a different and false claim.
+
+        The cost of the false claim is not cosmetic. ``excluded`` and the SKIPPED it produces
+        both set ``ScannerMetrics.passed``, and a scanner runs against two targets, so a cdk-nag
+        that evaluated no source templates and found two CRITICAL issues in the converted tree
+        rendered as skipped-and-passed. No red row in the summary table, while the exit code
+        still failed the build off the very findings the row was hiding.
+
+        ``exclude_unset=True`` in the dump is what makes the field trustworthy in the other
+        direction: ``for_excluded()`` is the only caller that ever assigns ``excluded``, so the
+        key is absent from every report written by a scanner that actually ran, and ``.get``
+        falls back to the model default of False.
+
+        Shared by both report-shaped branches of ``get_scanner_status_info`` rather than
+        duplicated into each. The two blocks were identical, which is how one of them could
+        have been fixed and the other left behind.
+        """
+        excluded = bool(report.get("excluded", False))
+        dependencies_missing = False
+        error = False
+
+        match report.get("status"):
+            case "MISSING":
+                dependencies_missing = True
+            case "ERROR":
+                error = True
+            case "SKIPPED" | "FAILED" | "PASSED":
+                # All three are verdicts the scanner reached about its own run, and none of
+                # them says anything about configuration. SKIPPED is in this list rather than
+                # setting ``excluded`` because it reports a fact about the input -- there was
+                # nothing to evaluate -- and that fact travels in ``evaluated_nothing``.
+                pass
+            case _:
+                # An unrecognized status is not a verdict this code can reason about. Treated as
+                # excluded for backward compatibility, which keeps it out of the failure counts
+                # rather than inventing a severity for it.
+                excluded = True
+
+        return excluded, dependencies_missing, error
+
+    @staticmethod
+    def scanner_evaluated_nothing(
+        asharp_model: AshAggregatedResults, scanner_name: str
+    ) -> bool:
+        """True when a target-tracking scanner reported that it attempted zero targets.
+
+        The honest channel for "nothing was evaluated", replacing the old route where that fact
+        arrived disguised as ``excluded``. It lives in
+        ``ScanResultsContainer.targets_attempted``, which is tri-state: absent from a serialized
+        report means the scanner does not track per-target outcomes and is making no claim
+        (``exclude_none=True`` drops the None), while a present 0 means it tracked and attempted
+        none. Absent must never read as zero -- bandit, checkov, semgrep, grype, syft,
+        detect-secrets, opengrep, cfn-nag and npm-audit are all in the no-claim state, and
+        reading them as tracked-zero would turn every row of a clean report yellow.
+
+        Read across every target the scanner reported under, because ``ScanPhase`` gives each
+        scanner a task carrying both the source and the converted tree and only one of them may
+        have been empty. So: at least one target must have made a claim, and every claim must be
+        zero. Consulting a single target instead would report a half-empty scan as skipped and
+        discard whatever the other half found.
+
+        Mirrors the ``targets_attempted <= 0`` guard in ``determine_status`` rather than testing
+        ``== 0``, so the status a container computes for itself and the status rendered in the
+        summary table cannot disagree about the same counter. A negative count does not reach
+        this branch anyway: ``determine_status`` sends it to ERROR, and ``error`` is checked
+        first.
+        """
+        reports = asharp_model.additional_reports.get(scanner_name)
+        if not isinstance(reports, dict):
+            return False
+
+        claims = []
+        for target_report in reports.values():
+            if not isinstance(target_report, dict):
+                continue
+            attempted = target_report.get("targets_attempted")
+            # bool is an int subclass, and a True/False counter is a caller bug rather than a
+            # claim about targets, so it is not read as 1/0 here.
+            if isinstance(attempted, int) and not isinstance(attempted, bool):
+                claims.append(attempted)
+
+        return bool(claims) and all(attempted <= 0 for attempted in claims)
+
+    @staticmethod
     def get_scanner_status_info(
         asharp_model: AshAggregatedResults, scanner_name: str
     ) -> Tuple[bool, bool, bool]:
@@ -551,10 +653,15 @@ class ScannerStatisticsCalculator:
             scanner_name: Name of the scanner to get status information for
 
         Returns:
-            Tuple of (excluded, dependencies_missing), where:
+            Tuple of (excluded, dependencies_missing, error), where:
             - excluded: True if the scanner was explicitly excluded from the scan
             - dependencies_missing: True if the scanner has missing dependencies
             - error: True if the scanner failed to run or generate results
+
+        None of the three covers "the scanner ran and evaluated nothing". That is a fourth and
+        genuinely different fact, and it is answered by ``scanner_evaluated_nothing`` rather than
+        folded into ``excluded`` here -- see ``_status_info_from_report`` for what folding it in
+        used to cost.
         """
         excluded = False
         dependencies_missing = False
@@ -565,22 +672,11 @@ class ScannerStatisticsCalculator:
             and asharp_model.additional_reports[scanner_name]["None"]["scanner_name"]
             == scanner_name
         ):
-            status = asharp_model.additional_reports[scanner_name]["None"]["status"]
-            match status:
-                case "SKIPPED":
-                    excluded = True
-                case "MISSING":
-                    dependencies_missing = True
-                case "ERROR":
-                    error = True
-                case "FAILED" | "PASSED":
-                    # FAILED means scanner ran successfully and found actionable findings
-                    # PASSED means scanner ran successfully with no actionable findings
-                    # Both are valid completion statuses
-                    pass
-                case _:
-                    # For any other unknown status, treat as excluded for backward compatibility
-                    excluded = True
+            excluded, dependencies_missing, error = (
+                ScannerStatisticsCalculator._status_info_from_report(
+                    asharp_model.additional_reports[scanner_name]["None"]
+                )
+            )
         elif scanner_name in asharp_model.scanner_results:
             scanner_status_info = asharp_model.scanner_results[scanner_name]
 
@@ -599,23 +695,11 @@ class ScannerStatisticsCalculator:
             and asharp_model.additional_reports[scanner_name]["source"]["scanner_name"]
             and asharp_model.additional_reports[scanner_name]["source"]["status"]
         ):
-            # If the scanner is not found in the dictionary, check for errors
-            status = asharp_model.additional_reports[scanner_name]["source"]["status"]
-            match status:
-                case "SKIPPED":
-                    excluded = True
-                case "MISSING":
-                    dependencies_missing = True
-                case "ERROR":
-                    error = True
-                case "FAILED" | "PASSED":
-                    # FAILED means scanner ran successfully and found actionable findings
-                    # PASSED means scanner ran successfully with no actionable findings
-                    # Both are valid completion statuses
-                    pass
-                case _:
-                    # For any other unknown status, treat as excluded for backward compatibility
-                    excluded = True
+            excluded, dependencies_missing, error = (
+                ScannerStatisticsCalculator._status_info_from_report(
+                    asharp_model.additional_reports[scanner_name]["source"]
+                )
+            )
         else:
             # If the scanner is not found in the dictionary, check for errors
             error = True
@@ -631,14 +715,15 @@ class ScannerStatisticsCalculator:
         This method calculates the status of a scanner based on its findings, configuration,
         and execution status. The possible statuses are:
 
-        - "SKIPPED": The scanner was explicitly excluded from the scan
-        - "MISSING": The scanner has missing dependencies
+        - "ERROR": The scanner produced no usable results
         - "FAILED": The scanner found actionable findings (at or above the threshold)
-        - "PASSED": The scanner did not find any actionable findings
+        - "SKIPPED": The scanner was explicitly excluded, or it ran and evaluated no targets
+        - "MISSING": The scanner has missing dependencies
+        - "PASSED": The scanner evaluated targets and found nothing actionable
 
-        The method first checks if the scanner was excluded or has missing dependencies.
-        If neither of these conditions is true, it calculates the number of actionable
-        findings based on the scanner's threshold and determines the status accordingly.
+        Listed in the order the branches are checked. Findings are counted before the
+        did-not-run branches, so a scanner carrying actionable findings can never come back as a
+        status that reads as passing.
 
         Args:
             asharp_model: The AshAggregatedResults model containing scanner results
@@ -656,13 +741,11 @@ class ScannerStatisticsCalculator:
         if error:
             return "ERROR"
 
-        if excluded:
-            return "SKIPPED"
-
-        if dependencies_missing:
-            return "MISSING"
-
-        # Get actionable findings count
+        # Counted before the excluded and dependencies_missing branches, matching the precedence
+        # in ``unified_metrics.get_unified_scanner_metrics``. Two functions that answer "what is
+        # this scanner's status" must not disagree: whichever one a caller happens to reach, a
+        # scanner carrying findings has to come back FAILED rather than as a status that reads
+        # as passing.
         suppressed, critical, high, medium, low, info = (
             ScannerStatisticsCalculator.extract_sarif_counts_for_scanner(
                 asharp_model, scanner_name
@@ -677,7 +760,21 @@ class ScannerStatisticsCalculator:
             critical, high, medium, low, info, threshold
         )
 
-        return "FAILED" if actionable > 0 else "PASSED"
+        if actionable > 0:
+            return "FAILED"
+
+        if excluded:
+            return "SKIPPED"
+
+        if dependencies_missing:
+            return "MISSING"
+
+        if ScannerStatisticsCalculator.scanner_evaluated_nothing(
+            asharp_model, scanner_name
+        ):
+            return "SKIPPED"
+
+        return "PASSED"
 
     @staticmethod
     def get_summary_statistics(asharp_model: AshAggregatedResults) -> Dict[str, Any]:

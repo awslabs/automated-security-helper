@@ -200,15 +200,34 @@ def get_unified_scanner_metrics(
 
     # Convert the statistics to ScannerMetrics objects
     for scanner_name, stats in scanner_stats.items():
-        # Determine status
-        if stats["excluded"]:
-            status = "SKIPPED"
-        elif stats["dependencies_missing"]:
-            status = "MISSING"
-        elif stats["error"]:
+        # Determine status. The order of these branches is observable, not cosmetic:
+        #
+        #   error                -- no usable results came back at all, which is the loudest
+        #                           thing that can be said about a scanner.
+        #   actionable > 0       -- it produced findings. Checked ahead of the three
+        #                           "did not run" branches below, and this is the ordering that
+        #                           matters. Those three all resolve to a status for which
+        #                           ``passed`` is True, so a row reaching one of them while
+        #                           carrying findings renders green-or-yellow with no red row in
+        #                           the summary table -- while ``run_ash_scan`` sums the same
+        #                           ``actionable`` counts and fails the build. A report that
+        #                           contradicts the exit code is worse than either verdict.
+        #   excluded             -- the operator switched this scanner off.
+        #   dependencies_missing -- it could not run in this environment.
+        #   evaluated_nothing    -- it ran and had no input to evaluate. Separate from
+        #                           ``excluded`` on purpose: conflating the two is what made
+        #                           this reorder necessary in the first place.
+        #   otherwise            -- nothing above applies and there are no actionable findings.
+        if stats["error"]:
             status = "ERROR"
         elif stats["actionable"] > 0:
             status = "FAILED"
+        elif stats["excluded"]:
+            status = "SKIPPED"
+        elif stats["dependencies_missing"]:
+            status = "MISSING"
+        elif stats["evaluated_nothing"]:
+            status = "SKIPPED"
         else:
             scan_result: ScannerTargetStatusInfo | None = (
                 asharp_model.scanner_results.get(scanner_name, None)

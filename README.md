@@ -14,7 +14,8 @@
 - [Installation Options](#installation-options)
   - [Quick Install (Recommended)](#quick-install-recommended)
   - [Other Installation Methods](#other-installation-methods)
-    - [Using `uvx`](#using-uvx)
+    - [Using Homebrew (macOS/Linux)](#using-homebrew-macoslinux)
+    - [Using `pipx`](#using-pipx)
     - [Using `pip`](#using-pip)
     - [Clone the Repository](#clone-the-repository)
 - [Basic Usage](#basic-usage)
@@ -27,6 +28,10 @@
   - [Available MCP Tools](#available-mcp-tools)
   - [Usage Examples](#usage-examples)
   - [Configuration Support](#configuration-support)
+- [Installing ASH into an AI Coding Agent](#installing-ash-into-an-ai-coding-agent)
+  - [Option 1: Install the skill](#option-1-install-the-skill)
+  - [Option 2: Install a platform plugin](#option-2-install-a-platform-plugin)
+  - [Option 3: Configure the MCP server directly](#option-3-configure-the-mcp-server-directly)
 - [Configuration](#configuration)
 - [Using ASH with pre-commit](#using-ash-with-pre-commit)
 - [Output Files](#output-files)
@@ -349,6 +354,70 @@ The MCP server supports all ASH configuration methods:
 - **CLI parameters**: Severity thresholds, custom output directories
 
 For detailed information about streaming capabilities and advanced usage, see the [MCP Streaming Guide](docs/content/tutorials/mcp-streaming-guide.md).
+
+
+## Installing ASH into an AI Coding Agent
+
+You do not have to wire the MCP server by hand. This repository also ships prebuilt
+integrations under [`ash-agent-plugins/`](ash-agent-plugins/README.md), generated from
+one source of truth so every agent gets the same content.
+
+There are three ways in, ordered here by how much work they ask of you. They are
+alternatives, not steps — pick one. All three end up calling the same ASH MCP server,
+so scan behavior does not change between them.
+
+Install ASH first and make sure `ash` runs from your shell; see
+[Installation Options](#installation-options). These integrations tell an agent how to
+call ASH. They do not install ASH.
+
+### Option 1: Install the skill
+
+```bash
+npx skills add awslabs/automated-security-helper
+```
+
+That installs the `ash-mcp` skill, which teaches an agent the start-scan, poll-progress,
+fetch-results workflow and when to reach for it. `skills` is
+[Vercel's open agent-skills CLI](https://github.com/vercel-labs/skills). It detects which
+supported agent you have and writes the skill into that agent's own directory, so you do
+not need to know which one you are running or where it keeps its skills. Pass `--list` to
+see what it finds without installing anything, or `--agent` to target a specific agent.
+
+A skill carries instructions, not MCP configuration. If your agent is not already pointed
+at the ASH MCP server, use one of the two options below as well.
+
+### Option 2: Install a platform plugin
+
+A plugin is the fuller integration: MCP server wiring, slash commands, an agent
+definition, and rules files in the platform's native format. Two of the more common
+agents install with a single command, run from the repository root:
+
+```bash
+# Claude Code — load the plugin directly
+claude --plugin-dir ./ash-agent-plugins/agentic-coding/plugins/claude
+
+# Codex CLI — register the plugin marketplace, then install from it
+codex plugin marketplace add ./ash-agent-plugins/agentic-coding/plugins/codex
+```
+
+Cursor and GitHub Copilot are copy-in rather than CLI installs. Working from
+`ash-agent-plugins/agentic-coding/plugins/`, copy `cursor/.cursor/` into the root of your
+own repository; for Copilot copy both `copilot/.github/` and `copilot/.vscode/`, which
+needs VS Code 1.104 or newer. Merge into a directory of the same name if you already have
+one rather than replacing it.
+
+Fifteen platforms have a plugin tree and each has its own install step.
+[`ash-agent-plugins/README.md`](ash-agent-plugins/README.md) holds the full table, one
+generated tree per platform with the exact command or copy step for each. Treat that table
+as the authoritative list. It is deliberately not duplicated here, because it changes
+whenever a platform is added and a second copy would go stale.
+
+### Option 3: Configure the MCP server directly
+
+If your agent has no plugin tree but does speak MCP, point it at the server yourself.
+[Client Configuration](#client-configuration) above has JSON you can paste for Amazon Q
+Developer CLI, Claude Desktop, and Cline; the same shape works for any MCP client that
+takes a command and arguments.
 
 
 ## Configuration

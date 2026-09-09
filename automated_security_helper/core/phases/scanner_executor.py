@@ -19,24 +19,68 @@ from automated_security_helper.utils.sarif_utils import (
 _ResultsFn = Callable[[ScanResultsContainer, AshAggregatedResults], AshAggregatedResults]
 
 
-def _non_negative_int_attr(obj: Any, name: str) -> int:
-    """Read an integer counter off a scanner plugin, defaulting to 0 for anything else.
+def _target_count_attr(obj: Any, name: str) -> int | None:
+    """Read a target counter off a scanner plugin, or None when it makes no usable claim.
 
-    A plain ``getattr(obj, name, 0)`` is not safe here. Scanner plugins are arbitrary objects,
-    and a ``MagicMock`` auto-creates any attribute asked of it -- so the default never applies
-    and a mock lands in an int field, which is not validated on assignment. The first
-    ``> 0`` comparison downstream then raises
-    ``TypeError: '>' not supported between instances of 'MagicMock' and 'int'``.
+    None is the answer for an absent attribute and for a present-but-unusable one alike, and
+    that conflation is deliberate: both mean "this scanner has told us nothing about targets",
+    which is the state ``ScanResultsContainer.targets_attempted`` uses None for. Returning 0
+    instead would assert "it tracked targets and attempted none", which for a non-tracking
+    scanner is a false statement that resolves to SKIPPED.
+
+    A plain ``getattr(obj, name, None)`` is not safe here. Scanner plugins are arbitrary
+    objects, and a ``MagicMock`` auto-creates any attribute asked of it -- so the default never
+    applies and a mock lands in an int field, which is not validated on assignment. The first
+    comparison downstream then raises
+    ``TypeError: '>=' not supported between instances of 'MagicMock' and 'int'``.
 
     Coercing at this boundary keeps the trust boundary where the untrusted value enters,
     rather than teaching every consumer to be defensive about a field typed ``int``.
+
+    A negative is the one unusable value that gets a warning, because it is the only one that is
+    evidence of a defect rather than of a scanner that simply does not count targets. An absent
+    attribute, a MagicMock, a string or a float all mean "no counter here", which is the normal
+    state for nine of the builtin scanners; warning about those would fire on every clean run.
+
+    The warning matters because the silence used to be total, and the silence is what made two
+    individually-correct halves compose into a wrong answer. ``determine_status`` sends a negative
+    ``targets_attempted`` to ERROR, so the model looks defended -- but the negative never reaches
+    it, because this function turns it into None first. The scanner then reads as making no claim,
+    falls past both per-target guards into the severity gate, and reports PASSED off a broken
+    counter with nothing anywhere to say so.
+
+    The value is still dropped rather than passed through. Letting it reach the model would report
+    ERROR, which asserts "it tried and everything broke" -- a claim nobody has evidence for. All
+    that is known is that the plugin's accounting is wrong; its findings come from SARIF rather
+    than from the counter and remain usable, so failing the scan over an accounting bug would be
+    a worse answer than naming it. Raising is rejected for the same reason.
     """
-    value = getattr(obj, name, 0)
+    value = getattr(obj, name, None)
     # bool is an int subclass; excluded because a True/False counter is a caller bug and
     # silently reading it as 1/0 would hide that.
-    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
-        return value
-    return 0
+    if isinstance(value, int) and not isinstance(value, bool):
+        if value >= 0:
+            return value
+        ASH_LOGGER.warning(
+            f"Scanner plugin {type(obj).__name__} reported {name}={value}. A target count "
+            "cannot be negative, so it is being ignored and the scanner treated as making no "
+            "claim about targets. Its status will come from findings alone, which means a scan "
+            "that evaluated nothing cannot be reported as SKIPPED. This is a defect in the "
+            "scanner plugin's own accounting."
+        )
+    return None
+
+
+def _non_negative_int_attr(obj: Any, name: str) -> int:
+    """``_target_count_attr`` for a counter whose absence is indistinguishable from zero.
+
+    ``targets_failed`` is such a counter: it is only ever read against ``targets_attempted``,
+    so "no claim" and "zero failures" lead to the same decision and there is nothing to gain
+    from keeping them apart. One coercion rule serves both callers, so the two cannot drift
+    apart on what counts as a usable value -- including on warning about a negative, which is
+    just as much an accounting defect in a failure count as in an attempt count.
+    """
+    return _target_count_attr(obj, name) or 0
 
 
 class ScannerExecutor:
@@ -258,12 +302,18 @@ class ScannerExecutor:
 
                     # Carry per-target outcome counts across, following the exit_code pattern
                     # above. This is what lets determine_status distinguish "scanned and found
-                    # nothing" from "failed on everything it tried" -- without it, status can
-                    # only be derived from findings and a total failure reports PASSED.
+                    # nothing" from "failed on everything it tried" and from "evaluated
+                    # nothing" -- without it, status can only be derived from findings and both
+                    # of the latter two report PASSED.
                     #
-                    # Scanners that do not track per-target outcomes report 0/0 and are
-                    # unaffected, so this is additive for every existing scanner.
-                    container.targets_attempted = _non_negative_int_attr(
+                    # This is the line where the tri-state has to be preserved rather than
+                    # flattened. A scanner that does not track targets has no
+                    # ``targets_attempted`` attribute at all, and _target_count_attr answers
+                    # None for it, which determine_status reads as "no claim" and leaves alone.
+                    # Reading an absent attribute as 0 here would assert that every
+                    # non-tracking scanner attempted zero targets, and every one of them would
+                    # report SKIPPED instead of PASSED.
+                    container.targets_attempted = _target_count_attr(
                         scanner_plugin, "targets_attempted"
                     )
                     container.targets_failed = _non_negative_int_attr(
