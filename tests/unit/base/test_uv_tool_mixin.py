@@ -725,3 +725,69 @@ class TestIsOfflineMode:
             "automated_security_helper.core.constants.is_offline_mode", return_value=False
         ):
             assert plugin._is_offline_mode() is False
+
+
+class SpecPlugin(FakePlugin):
+    """A plugin whose scan runs under extras and a version constraint."""
+
+    def _get_tool_package_extras(self):
+        return ["sarif", "toml"]
+
+    def _get_tool_version_constraint(self):
+        return ">=1.7.0,<2.0.0"
+
+
+class TestProbeSharesTheScansEnvironment:
+    """The probe must run under the same ``--from`` spec as the scan.
+
+    ``uv tool run bandit`` and
+    ``uv tool run --from 'bandit[sarif,toml]>=1.7.0,<2.0.0' bandit`` resolve to
+    different environments. stevedore's entry-point cache is keyed on
+    ``sys.executable`` and ``sys.prefix``, so those warm two different cache
+    files -- and a probe that warms the wrong one leaves the scan's file cold for
+    N concurrent scanners to race. Serializing the probe then removes nothing.
+    Measured directly: one workspace scan produced five distinct bandit
+    environments.
+    """
+
+    def test_the_spec_matches_what_run_tool_builds(self):
+        """Same string the scan path passes as --from, or the guarantee is void."""
+        plugin = SpecPlugin(command="bandit")
+        assert plugin._uv_from_spec() == "bandit[sarif,toml]>=1.7.0,<2.0.0"
+
+    def test_no_extras_and_no_constraint_means_no_from(self):
+        """The scan passes no --from either, so the probe must not invent one."""
+        assert FakePlugin(command="bandit")._uv_from_spec() is None
+
+    def test_the_probe_is_given_the_scans_spec_by_default(self):
+        plugin = SpecPlugin(command="bandit")
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner"
+        ) as mock_get_runner:
+            mock_runner = MagicMock()
+            mock_runner.is_uv_available.return_value = True
+            mock_runner.get_tool_version.return_value = "bandit 1.9.4"
+            mock_get_runner.return_value = mock_runner
+
+            plugin._get_uv_tool_version("bandit")
+
+            mock_runner.get_tool_version.assert_called_once_with(
+                "bandit", "bandit[sarif,toml]>=1.7.0,<2.0.0"
+            )
+
+    def test_an_explicit_package_name_still_wins(self):
+        """JupyterConverter passes 'nbconvert' on purpose; do not override it."""
+        plugin = SpecPlugin(command="jupyter-nbconvert")
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner"
+        ) as mock_get_runner:
+            mock_runner = MagicMock()
+            mock_runner.is_uv_available.return_value = True
+            mock_runner.get_tool_version.return_value = "7.16.0"
+            mock_get_runner.return_value = mock_runner
+
+            plugin._get_uv_tool_version("jupyter-nbconvert", "nbconvert")
+
+            mock_runner.get_tool_version.assert_called_once_with(
+                "jupyter-nbconvert", "nbconvert"
+            )

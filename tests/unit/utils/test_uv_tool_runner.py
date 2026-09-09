@@ -664,6 +664,98 @@ class TestGetToolVersionRunsOneProcessPerTool:
             runner.get_tool_version("checkov")
             assert mock_run.call_count == 2
 
+    def test_invalidation_matches_a_tool_whose_command_is_not_its_package(
+        self, runner
+    ):
+        """The key-shape the previous invalidator missed entirely.
+
+        A memo key is "<command>::<from-spec>", but the name reaching
+        install_tool_with_version is ``uv_tool_package_name or command``. For
+        JupyterConverter those differ -- command 'jupyter-nbconvert', package
+        'nbconvert' -- so a prefix match on the package name cleared nothing:
+        "jupyter-nbconvert::nbconvert".startswith("nbconvert::") is False. The
+        pre-install None then survived the install meant to invalidate it, and
+        tool_version stayed None forever after a *successful* install.
+
+        The earlier test could not catch this: it invalidated by the same name it
+        probed with and passed no package_name, which is the one shape where
+        command and package coincide -- the shape that already worked.
+        """
+        runner._uv_available_cache = True
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+        ) as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stdout="")
+            assert (
+                runner.get_tool_version("jupyter-nbconvert", "nbconvert") is None
+            )
+            assert mock_run.call_count == 1
+
+            # The installer knows this tool as 'nbconvert'.
+            invalidate_tool_version_cache("nbconvert")
+
+            mock_run.return_value = MagicMock(returncode=0, stdout="7.16.6\n")
+            assert (
+                runner.get_tool_version("jupyter-nbconvert", "nbconvert") == "7.16.6"
+            )
+            assert mock_run.call_count == 2
+
+    def test_invalidation_matches_a_from_spec_carrying_extras(self, runner):
+        """Keys hold the whole --from spec, so equality on the bare name is not enough."""
+        runner._uv_available_cache = True
+        spec = "bandit[sarif,toml]>=1.7.0,<2.0.0"
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+        ) as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stdout="")
+            assert runner.get_tool_version("bandit", spec) is None
+
+            invalidate_tool_version_cache("bandit")
+
+            mock_run.return_value = MagicMock(returncode=0, stdout="bandit 1.9.4\n")
+            assert runner.get_tool_version("bandit", spec) == "bandit 1.9.4"
+            assert mock_run.call_count == 2
+
+    def test_a_real_install_invalidates_through_install_tool_with_version(
+        self, runner
+    ):
+        """End to end through the wiring, not just the invalidator in isolation.
+
+        install_tool_with_version is the single function every install path
+        funnels through, so the invalidation belongs there -- but being in the
+        right place does not help if the installer and the memo derive their keys
+        from different variables, which is exactly what went wrong.
+        """
+        runner._uv_available_cache = True
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+        ) as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stdout="")
+            assert (
+                runner.get_tool_version("jupyter-nbconvert", "nbconvert") is None
+            )
+
+        with patch.object(runner, "is_tool_installed", return_value=False), patch(
+            "automated_security_helper.core.constants.is_offline_mode",
+            return_value=False,
+        ), patch(
+            "automated_security_helper.utils.subprocess_utils.find_executable",
+            return_value=None,
+        ), patch(
+            "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+        ) as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="")
+            # The installer's own name for this tool is the package name.
+            assert runner.install_tool_with_version("nbconvert") is True
+
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+        ) as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="7.16.6\n")
+            assert (
+                runner.get_tool_version("jupyter-nbconvert", "nbconvert") == "7.16.6"
+            ), "the install did not clear the pre-install None"
+
     def test_installing_a_tool_forgets_its_remembered_version(self, runner):
         """An install is what makes a memoized version wrong, so it invalidates.
 
@@ -685,3 +777,118 @@ class TestGetToolVersionRunsOneProcessPerTool:
             mock_run.return_value = MagicMock(returncode=0, stdout="bandit 1.9.4\n")
             assert runner.get_tool_version("bandit") == "bandit 1.9.4"
             assert mock_run.call_count == 2
+
+
+class TestAMemoizedFailureIsRecoverable:
+    """A failed probe is cached, so it must be forcibly refreshable.
+
+    Caching failures is deliberate -- caching only successes would reopen the
+    concurrent-probe window on exactly the path where a slow cold start makes it
+    most likely. The cost is that one transient failure is then served
+    process-wide: a cold probe that exceeds the subprocess ceiling caches None,
+    and every consumer afterwards reports uv_version None and
+    is_functional False for a tool that works.
+
+    That compounds -- a non-functional result sends the mixin into
+    "Proceeding with reinstallation", install_tool_with_version returns True
+    early because the tool IS installed, so no install and therefore no
+    invalidation runs and the poison is never cleared. For a security scanner a
+    report that omits the version of the tool that produced the findings is a
+    provenance defect. So validate_cached_tool forces a re-probe.
+    """
+
+    def test_a_timeout_is_memoized_and_served_to_later_callers(self, runner):
+        """Documents the caching that makes the refresh below necessary."""
+        runner._uv_available_cache = True
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="uv", timeout=15),
+        ) as mock_run:
+            assert runner.get_tool_version("bandit") is None
+            assert runner.get_tool_version("bandit") is None
+            assert mock_run.call_count == 1
+
+    def test_validate_cached_tool_re_probes_past_a_memoized_failure(self, runner):
+        runner._uv_available_cache = True
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="uv", timeout=15),
+        ):
+            assert runner.get_tool_version("bandit") is None
+
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+        ) as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="bandit 1.9.4\n")
+            result = runner.validate_cached_tool("bandit")
+
+        assert result["is_functional"] is True, (
+            "a tool that works must not be reported broken because an earlier "
+            "probe timed out"
+        )
+        assert result["version"] == "bandit 1.9.4"
+
+    def test_the_refresh_overwrites_the_memo_for_everyone(self, runner):
+        """Recovery must be shared, not private to the refreshing caller."""
+        runner._uv_available_cache = True
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="uv", timeout=15),
+        ):
+            assert runner.get_tool_version("bandit") is None
+
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+        ) as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="bandit 1.9.4\n")
+            runner.validate_cached_tool("bandit")
+            # No further subprocess: the good answer replaced the poisoned one.
+            assert runner.get_tool_version("bandit") == "bandit 1.9.4"
+            assert mock_run.call_count == 1
+
+
+class TestProbeLocksAreNamespaced:
+    """The two probes must not share a lock object.
+
+    get_tool_version keys on "<tool>::<package>" and get_uv_tool_command on
+    "<tool>::<fallback_binary>", so get_tool_version("bandit", "bandit") and
+    get_uv_tool_command("bandit") both produced "bandit::bandit". These are
+    non-reentrant threading.Lock, so sharing one is a deadlock waiting for a
+    refactor that makes either call into the other.
+    """
+
+    def test_the_two_probes_use_different_lock_keys(self, runner):
+        """Observed at call time, not by inspecting the registry afterwards.
+
+        ``_uv_tool_probe_locks`` is a WeakValueDictionary, so every lock is
+        collected as soon as the call that held it returns -- reading the keys
+        after the fact finds an empty mapping regardless of what happened.
+        """
+        import automated_security_helper.utils.uv_tool_runner as mod
+
+        real = mod._get_or_create_probe_lock
+        seen: list = []
+
+        def recording(cache_key):
+            seen.append(cache_key)
+            return real(cache_key)
+
+        runner._uv_available_cache = True
+        with patch.object(mod, "_get_or_create_probe_lock", recording), patch(
+            "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+        ) as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0, stdout="bandit 1.9.4\n", stderr=""
+            )
+            runner.get_tool_version("bandit", "bandit")
+            with patch(
+                "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
+                return_value="/opt/uv/bin/uv",
+            ):
+                get_uv_tool_command("bandit")
+
+        assert "version::bandit::bandit" in seen
+        assert "command::bandit::bandit" in seen
+        # The collision the namespacing exists to prevent.
+        assert "bandit::bandit" not in seen
+        assert len(set(seen)) == 2

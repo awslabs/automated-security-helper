@@ -1722,6 +1722,31 @@ def _print_block(title: str, body: Any) -> None:
     print(sanitize_for_console(text))
 
 
+#: Cap on a single scanner stderr log printed as evidence. Generous enough that
+#: no real traceback is touched, small enough that a pathological log cannot push
+#: the scan stdout/stderr blocks after it past a truncated job log. "Not tailed"
+#: and "unbounded" are separable, and only the first is wanted.
+SCANNER_LOG_PRINT_BUDGET_BYTES = 200_000
+
+
+def _clamp_keeping_both_ends(text: str, budget: int) -> str:
+    """Trim the middle, never the ends.
+
+    A tail cut loses the head; a head cut loses the deepest frame and the
+    exception line. When a log has to be trimmed at all, the ends are the part
+    worth keeping, so the middle goes and says how much it took.
+    """
+    if len(text) <= budget:
+        return text
+    half = budget // 2
+    omitted = len(text) - (half * 2)
+    return (
+        text[:half]
+        + f"\n\n... {omitted} byte(s) omitted from the middle of this log ...\n\n"
+        + text[-half:]
+    )
+
+
 def find_scanner_error_logs(output_dir: Path, scanner: str) -> List[Path]:
     """Every stderr log a scanner wrote, across projects and target types.
 
@@ -1744,8 +1769,11 @@ def print_scanner_error_evidence(output_dir: Path, scanners: Sequence[str]) -> N
     Deliberately not tail-truncated: the useful frames of an import-time
     traceback are the *last* ones, but the deepest frame is what names the
     failing library, and a tail cut mid-frame is what makes these reports
-    unactionable. Identical logs are collapsed, since a workspace scan runs the
-    same tool once per project and typically fails the same way in each.
+    unactionable. Bounded rather than unbounded, though -- a log over
+    ``SCANNER_LOG_PRINT_BUDGET_BYTES`` loses its middle, not either end, so the
+    blocks printed after it still reach a truncated job log. Identical logs are
+    collapsed, since a workspace scan runs the same tool once per project and
+    typically fails the same way in each.
     """
     for scanner in scanners:
         logs = find_scanner_error_logs(output_dir, scanner)
@@ -1765,7 +1793,10 @@ def print_scanner_error_evidence(output_dir: Path, scanners: Sequence[str]) -> N
         for body, paths in by_content.items():
             shown = ", ".join(str(p.relative_to(output_dir)) for p in paths)
             suffix = f" (identical in {len(paths)} projects)" if len(paths) > 1 else ""
-            _print_block(f"scanner '{scanner}' stderr{suffix}: {shown}", body)
+            _print_block(
+                f"scanner '{scanner}' stderr{suffix}: {shown}",
+                _clamp_keeping_both_ends(body, SCANNER_LOG_PRINT_BUDGET_BYTES),
+            )
 
 
 def _configure_stdout_for_utf8() -> None:

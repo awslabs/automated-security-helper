@@ -93,7 +93,11 @@ class UVToolRunner:
         return tool_name in installed_tools
 
     def get_tool_version(
-        self, tool_name: str, package_name: Optional[str] = None
+        self,
+        tool_name: str,
+        package_name: Optional[str] = None,
+        *,
+        refresh: bool = False,
     ) -> Optional[str]:
         """Get version of a UV tool.
 
@@ -109,6 +113,22 @@ class UVToolRunner:
         first-imports can leave behind a cache that parses but holds a
         wrong-arity entry, which breaks the tool for every later process on the
         machine. One probe means one writer.
+
+        ``package_name`` is the ``--from`` specification. Passing the SAME spec
+        the scan will use matters: ``uv tool run bandit`` and
+        ``uv tool run --from 'bandit[sarif,toml]>=1.7.0,<2.0.0' bandit`` resolve
+        to different environments, and stevedore's digest is over
+        ``sys.executable`` and ``sys.prefix``, so they warm different cache
+        files. A probe that warms the wrong file leaves the scan's file cold for
+        N concurrent scanners. Callers should pass the scan's spec;
+        ``UVToolMixin._get_uv_tool_version`` does this by default.
+
+        Failures are memoized too, deliberately -- caching only successes would
+        reopen the concurrent-probe window on exactly the path where a slow cold
+        start makes it most likely. Because that means one transient failure is
+        then served process-wide, ``refresh=True`` forces a re-probe and
+        overwrites the memo; ``validate_cached_tool`` uses it so a probe that
+        merely timed out cannot permanently declare a working tool broken.
         """
         if not self.is_uv_available():
             return None
@@ -116,11 +136,11 @@ class UVToolRunner:
         cache_key = f"{tool_name}::{package_name or ''}"
 
         with _uv_tool_runner_cache_lock:
-            if cache_key in _uv_tool_version_cache:
+            if not refresh and cache_key in _uv_tool_version_cache:
                 return _uv_tool_version_cache[cache_key]
             # Bind to a local and keep it alive until after the acquire below;
             # the registry holds locks weakly. See _get_or_create_probe_lock.
-            probe_lock = _get_or_create_probe_lock(cache_key)
+            probe_lock = _get_or_create_probe_lock(f"version::{cache_key}")
 
         # Held across the subprocess so a second thread on this key waits for
         # the first probe rather than starting its own. The coarse cache lock is
@@ -128,7 +148,7 @@ class UVToolRunner:
         # in parallel.
         with probe_lock:
             with _uv_tool_runner_cache_lock:
-                if cache_key in _uv_tool_version_cache:
+                if not refresh and cache_key in _uv_tool_version_cache:
                     return _uv_tool_version_cache[cache_key]
 
             version: Optional[str] = None
@@ -150,7 +170,7 @@ class UVToolRunner:
                     command,
                     capture_output=True,
                     text=True,
-                    timeout=15,
+                    timeout=_UV_TOOL_VERSION_PROBE_TIMEOUT,
                     check=False,
                     encoding="utf-8",
                     errors="replace",
@@ -595,7 +615,11 @@ class UVToolRunner:
 
         try:
             # Try to get version to validate functionality
-            version = self.get_tool_version(tool_name, package_name)
+            # refresh=True: this is the caller that decides whether a tool is
+            # broken, so it must not inherit a memoized failure. A probe that
+            # merely timed out would otherwise make every later caller report
+            # is_functional=False for a tool that works.
+            version = self.get_tool_version(tool_name, package_name, refresh=True)
             if version:
                 validation_result["is_functional"] = True
                 validation_result["version"] = version
@@ -659,7 +683,7 @@ _executable_cache: Dict[str, Optional[str]] = {}
 # populates that cache and every other reads it. See #542.
 _uv_tool_version_cache: Dict[str, Optional[str]] = {}
 
-# Coarse lock guarding the three module-level cache dicts above. This lock
+# Coarse lock guarding the four module-level cache dicts above. This lock
 # is only held across in-memory reads/writes; it is NOT held across the
 # subprocess probe. See `_get_or_create_probe_lock` below for the per-key
 # lock used to dedupe concurrent probes for the same `(tool, fallback)`
@@ -687,18 +711,37 @@ _uv_tool_probe_locks: "_weakref.WeakValueDictionary[str, threading.Lock]" = (
 # scanners with no progress reporting (DA r4 #5).
 _UV_VERSION_PROBE_TIMEOUT = 5
 
+# Timeout for ``UVToolRunner.get_tool_version``. Higher than the constant above
+# on purpose, and the two are not merged. That probe resolves a bare tool name;
+# this one resolves a full ``--from`` spec with extras and a version constraint,
+# which on a cold uv cache means materializing an environment.
+#
+# Kept at its historical 15s rather than lowered now that the probe is
+# serialized. It is true that this is now the whole workspace's stall budget
+# instead of one project's -- but it is one 15s worst case for the workspace
+# where it used to be N of them, so serializing already improved the bound.
+# Lowering it would trade that for a higher rate of memoized failures, and a
+# memoized failure is now served process-wide (see ``refresh``), which costs the
+# tool version in every project's report.
+_UV_TOOL_VERSION_PROBE_TIMEOUT = 15
+
 
 def _get_or_create_probe_lock(cache_key: str) -> threading.Lock:
     """Return the per-key probe lock for ``cache_key``, creating it if needed.
 
+    ``cache_key`` must be namespaced by caller (``version::``, ``command::``).
+    Two callers building the same string share a lock, and these are plain
+    non-reentrant ``threading.Lock``, so an accidental collision between two
+    probes that can call into each other is a deadlock rather than a slowdown.
+
     STRONG-REF CONTRACT: ``_uv_tool_probe_locks`` holds its values weakly, so
-    the caller MUST bind the returned lock to a local and keep that local alive
-    until after it has acquired the lock. Acquiring on a temporary (for example
-    ``with _get_or_create_probe_lock(k):`` is fine, but re-calling this helper
-    to acquire a second time is not) risks the lock being collected between the
-    dict write here and a later acquire, at which point a concurrent thread on
-    the same key would create a *different* lock and the per-key serialization
-    would silently stop working.
+    the caller must keep a reference to the returned lock alive until it has
+    acquired it -- binding it to a local, as both callers here do, is enough. If
+    the only reference were dropped before the acquire, a concurrent thread on
+    the same key could create a *different* lock object and the per-key
+    serialization would silently stop working. This contract is asserted by
+    inspection, not by a test: a test written in the obvious way holds a strong
+    reference itself and so cannot fail.
 
     Must be called with ``_uv_tool_runner_cache_lock`` held, so that two
     threads racing on the same key agree on one lock object.
@@ -710,15 +753,48 @@ def _get_or_create_probe_lock(cache_key: str) -> threading.Lock:
     return probe_lock
 
 
-def invalidate_tool_version_cache(tool_name: str) -> None:
-    """Forget memoized ``--version`` answers for ``tool_name``.
+def _requirement_base_name(spec: str) -> str:
+    """The bare package name at the front of a requirement spec.
 
-    Call after installing or upgrading a tool. Keys are ``tool::package``, so
-    every package spelling for this tool is dropped.
+    ``bandit[sarif,toml]>=1.7.0,<2.0.0`` -> ``bandit``. Used so an invalidation
+    naming a package still matches memo keys whose ``--from`` segment carries
+    extras and a version constraint.
     """
-    prefix = f"{tool_name}::"
+    for index, char in enumerate(spec):
+        if char in "[]<>=!~;, ":
+            return spec[:index].strip()
+    return spec.strip()
+
+
+def invalidate_tool_version_cache(name: str) -> None:
+    """Forget memoized ``--version`` answers for a tool, by either of its names.
+
+    Matching on a single spelling is not enough. A memo key is
+    ``"<command>::<from-spec>"``, but the name reaching
+    ``install_tool_with_version`` is ``uv_tool_package_name or command``
+    (``UVToolMixin._install_uv_tool``), so the installer often knows the tool by
+    its *package* name while the probe keyed on its *command* name. For
+    JupyterConverter those differ -- command ``jupyter-nbconvert``, package
+    ``nbconvert`` -- so a prefix match on the package name cleared nothing and
+    the pre-install ``None`` survived the install it was supposed to be
+    invalidated by.
+
+    So compare against both segments of the key, and against the bare package
+    name of each, since the ``--from`` segment carries extras and constraints.
+    """
     with _uv_tool_runner_cache_lock:
-        for key in [k for k in _uv_tool_version_cache if k.startswith(prefix)]:
+        doomed = []
+        for key in _uv_tool_version_cache:
+            command_segment, _, from_segment = key.partition("::")
+            candidates = {
+                command_segment,
+                from_segment,
+                _requirement_base_name(command_segment),
+                _requirement_base_name(from_segment),
+            }
+            if name in candidates or _requirement_base_name(name) in candidates:
+                doomed.append(key)
+        for key in doomed:
             del _uv_tool_version_cache[key]
 
 
@@ -790,21 +866,13 @@ def get_uv_tool_command(
         if cache_key in _uv_command_cache:
             return _uv_command_cache[cache_key]
         # Get-or-create the per-key probe lock under the coarse lock so two
-        # threads racing here see the same lock object.
-        #
-        # STRONG-REF CONTRACT (DA r6 #6): the local `probe_lock` variable
-        # MUST stay in scope until after the `with probe_lock:` acquire
-        # below. The WeakValueDictionary holds the lock by weak reference;
-        # without a stack-frame strong reference, GC could collect the
-        # lock between the dict-write here and the acquire below, and a
-        # concurrent thread on the same cache key would create a NEW
-        # lock — defeating the per-key serialization. Do NOT refactor
-        # this block to return the lock from a helper without giving the
-        # caller a strong ref before the acquire.
-        probe_lock = _uv_tool_probe_locks.get(cache_key)
-        if probe_lock is None:
-            probe_lock = threading.Lock()
-            _uv_tool_probe_locks[cache_key] = probe_lock
+        # threads racing here see the same lock object. STRONG-REF CONTRACT
+        # (DA r6 #6): `probe_lock` must stay in scope until after the acquire
+        # below -- see _get_or_create_probe_lock. The `command::` prefix keeps
+        # these keys disjoint from get_tool_version's; without it,
+        # get_tool_version("bandit", "bandit") and get_uv_tool_command("bandit")
+        # both produce "bandit::bandit" and share a non-reentrant lock.
+        probe_lock = _get_or_create_probe_lock(f"command::{cache_key}")
 
     # Per-key lock: serialize probes for THIS cache key without blocking
     # probes for other cache keys. The coarse cache lock is NOT held here,

@@ -1203,3 +1203,43 @@ class TestScannerErrorEvidenceIsSurfaced:
         gate.print_scanner_error_evidence(output_dir, ["bandit"])
         out = capsys.readouterr().out
         assert "reported ERROR but wrote no stderr log" in out
+
+    def test_a_pathological_log_is_bounded_but_keeps_both_ends(
+        self, output_dir, capsys
+    ):
+        """Not tailed and unbounded are separable; only the first is wanted.
+
+        Two blocks are printed after this one, and they are what a runaway log
+        would push past a truncated job log.
+        """
+        log = (
+            output_dir
+            / "projects"
+            / gate.FIXTURE_PROJECTS[0].key
+            / "scanners"
+            / "bandit"
+            / "source"
+            / "BanditScanner.stderr.log"
+        )
+        log.parent.mkdir(parents=True, exist_ok=True)
+        log.write_text(
+            "FIRST-LINE-MARKER\n"
+            + ("x" * gate.SCANNER_LOG_PRINT_BUDGET_BYTES)
+            + "\nLAST-LINE-MARKER\n",
+            encoding="utf-8",
+        )
+        gate.print_scanner_error_evidence(output_dir, ["bandit"])
+        out = capsys.readouterr().out
+        assert "FIRST-LINE-MARKER" in out
+        assert "LAST-LINE-MARKER" in out
+        assert "omitted from the middle" in out
+        assert len(out) < gate.SCANNER_LOG_PRINT_BUDGET_BYTES + 5000
+
+    def test_a_log_within_budget_is_untouched(self):
+        body = self.TRACEBACK
+        assert (
+            gate._clamp_keeping_both_ends(
+                body, gate.SCANNER_LOG_PRINT_BUDGET_BYTES
+            )
+            == body
+        )
