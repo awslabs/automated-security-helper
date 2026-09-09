@@ -14,7 +14,21 @@ from automated_security_helper.utils.uv_tool_runner import (
     find_uv_or_none,
     get_uv_tool_command,
     get_uv_tool_runner,
+    invalidate_tool_version_cache,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_module_caches():
+    """Clear the module-level memo caches around every test in this file.
+
+    ``get_tool_version`` memoizes per ``tool::package``, so without this a
+    version cached by one test would be served to the next and the second test
+    would assert against a value its own mock never produced.
+    """
+    _reset_uv_tool_runner_caches()
+    yield
+    _reset_uv_tool_runner_caches()
 
 
 @pytest.fixture
@@ -577,3 +591,97 @@ class TestGetUvToolCommandThreadSafety:
             assert kwargs.get("timeout") == 5, (
                 f"expected 5 s probe timeout, got {kwargs.get('timeout')}"
             )
+
+
+class TestGetToolVersionRunsOneProcessPerTool:
+    """``get_tool_version`` must spawn ONE process per tool, however many ask.
+
+    Why this is a correctness test and not a performance test: the probe *runs
+    the tool*, and a stevedore-based tool builds a shared per-user entry-point
+    cache at ``$XDG_CACHE_HOME/python-entrypoints/<digest>`` on first import.
+    stevedore writes it with a truncating ``open(path, 'w')`` and no lock, and
+    orders the JSON by iterating a set -- so two processes emit equal-length,
+    different-content streams that interleave at the 8 KiB flush boundary. The
+    spliced file can still parse while holding an entry whose arity is not 3,
+    and then EVERY later reader dies in ``stevedore/_cache.py`` with
+    ``TypeError: EntryPoint.__init__()``.
+
+    ASH builds one scanner per project and each construction probed the
+    version, so an N-project workspace scan fired N concurrent cold-start
+    imports of the same tool -- N writers racing on one file. One probe per
+    tool means one writer, so no splice is possible. Regression test for #542.
+    """
+
+    def test_concurrent_callers_spawn_exactly_one_subprocess(self, runner):
+        import threading
+        import time
+
+        runner._uv_available_cache = True
+        calls = {"n": 0}
+        calls_lock = threading.Lock()
+
+        def slow_probe(*_args, **_kwargs):
+            with calls_lock:
+                calls["n"] += 1
+            time.sleep(0.05)  # Let the other threads pile up on the cache.
+            return MagicMock(returncode=0, stdout="bandit 1.9.4\n")
+
+        seen: list = []
+        seen_lock = threading.Lock()
+        barrier = threading.Barrier(12)
+
+        def worker():
+            barrier.wait()  # Maximize the race window.
+            version = runner.get_tool_version("bandit")
+            with seen_lock:
+                seen.append(version)
+
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.subprocess.run",
+            side_effect=slow_probe,
+        ):
+            threads = [threading.Thread(target=worker) for _ in range(12)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=10)
+
+        assert calls["n"] == 1, (
+            "the tool must be imported once, not once per caller: "
+            f"{calls['n']} concurrent cold-start processes would race "
+            "stevedore's entry-point cache write"
+        )
+        assert seen == ["bandit 1.9.4"] * 12
+
+    def test_distinct_tools_are_not_serialized_into_one_probe(self, runner):
+        """Per-key, not global: two different tools still get their own probe."""
+        runner._uv_available_cache = True
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+        ) as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="1.0\n")
+            runner.get_tool_version("bandit")
+            runner.get_tool_version("checkov")
+            assert mock_run.call_count == 2
+
+    def test_installing_a_tool_forgets_its_remembered_version(self, runner):
+        """An install is what makes a memoized version wrong, so it invalidates.
+
+        Without this, a caller that probes, installs, then re-reads the version
+        (the converters do exactly that) would keep the pre-install answer.
+        """
+        runner._uv_available_cache = True
+        with patch(
+            "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+        ) as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="bandit 1.7.0\n")
+            assert runner.get_tool_version("bandit") == "bandit 1.7.0"
+            # Cached: no second process.
+            assert runner.get_tool_version("bandit") == "bandit 1.7.0"
+            assert mock_run.call_count == 1
+
+            invalidate_tool_version_cache("bandit")
+
+            mock_run.return_value = MagicMock(returncode=0, stdout="bandit 1.9.4\n")
+            assert runner.get_tool_version("bandit") == "bandit 1.9.4"
+            assert mock_run.call_count == 2
