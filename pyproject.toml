@@ -17,7 +17,15 @@ dependencies = [
  "GitPython>=3.1.61,<4.0.0",  # floor is advisory-driven: GHSA-wvpp-8hx9-p66j and others affect <= 3.1.57
  "gitdb>=4.0,<5.0.0",
  "pyrsistent>=0.20,<1.0.0",
- "pydantic[email]>=2.13,<2.14",
+ # Was "pydantic[email]". Split into two bare requirements because Dependabot could not compute
+ # a semver level for a name carrying extras, so every bump of it escaped its group and arrived
+ # as its own pull request. `pydantic[email]` is exactly pydantic plus email-validator: pydantic
+ # 2.13.5 declares 'email-validator>=2.0.0; extra == "email"' and nothing else under that extra.
+ # Unbundled rather than pinned: this list is published to PyPI, so an exact pin here would
+ # force a resolution conflict on any consumer that also depends on pydantic. Two bare names
+ # cost consumers nothing and keep the automatic patch adoption that the floors here exist for.
+ "pydantic>=2.13,<2.14",
+ "email-validator>=2.0,<3.0.0",
  "typer>=0.27,<0.28",
  "rich>=15.0,<16",
  "igittigitt>=2.2,<3.0.0",
@@ -83,10 +91,45 @@ dev = [
  "mkdocs>=1.6,<2.0.0",
  "mkdocs-material>=9.7.7,<10.0.0",  # floor is advisory-driven: GHSA-xvg9-69gf-fjrf affects >= 7.2.0, < 9.7.7
  "pymdown-extensions>=11.0.2,<12.0.0",  # floor is advisory-driven: GHSA-gm37-52c6-37mw affects <= 11.0.0
- "mkdocstrings[python]>=1.0,<2.0.0",
+ # Was "mkdocstrings[python]". Unbundled for the same reason as pydantic above. mkdocstrings
+ # 1.0.6 declares 'mkdocstrings-python>=1.16.2; extra == "python"' and nothing else under that
+ # extra. Unbundled rather than pinned even though this group is not published: an exact pin
+ # would reverse the deliberate move to major.minor floors, turning every upstream patch back
+ # into its own pull request. The <3.0.0 cap is this file's convention, not the extra's, which
+ # is unbounded -- a future major then arrives as a major instead of silently.
+ "mkdocstrings>=1.0,<2.0.0",
+ "mkdocstrings-python>=2.0,<3.0.0",
  "mkdocs-autorefs>=1.4,<2.0.0",
  "pytest-asyncio>=1.4,<2.0.0",
- "types-boto3[essential, logs, s3, securityhub, securitylake, sts]>=1.43,<2.0.0",
+ # Was "types-boto3[essential, logs, s3, securityhub, securitylake, sts]". Unbundled for the same
+ # reason as the two above, and the expansion is verified rather than guessed: in types-boto3
+ # 1.43.86 the `essential` extra declares dynamodb, cloudformation, ec2, lambda, rds, s3 and sqs;
+ # `logs`, `s3`, `securityhub`, `securitylake` and `sts` declare one each. The union of the six
+ # extras is the eleven names below -- s3 appears in both `essential` and `s3`. botocore-stubs
+ # and types-s3transfer are unconditional requirements of types-boto3 itself, so they still
+ # arrive without being named here.
+ #
+ # Pinning was rejected here specifically. types-boto3 published seven releases in the fortnight
+ # before this change, so an exact pin would propose a pull request most days. These eleven
+ # instead batch into one grouped pull request, so naming them does not multiply PR volume.
+ #
+ # One deliberate difference from the extra: it constrained each satellite to the parent's minor
+ # (>=1.43.0,<1.44.0), and these carry the parent's own >=1.43,<2.0.0 instead. That allows a
+ # satellite to move a minor ahead of the parent. For type stubs that is a staleness question
+ # rather than a runtime one, and it avoids having to widen twelve lines in lockstep every time
+ # the ecosystem's minor rolls over.
+ "types-boto3>=1.43,<2.0.0",
+ "types-boto3-cloudformation>=1.43,<2.0.0",
+ "types-boto3-dynamodb>=1.43,<2.0.0",
+ "types-boto3-ec2>=1.43,<2.0.0",
+ "types-boto3-lambda>=1.43,<2.0.0",
+ "types-boto3-logs>=1.43,<2.0.0",
+ "types-boto3-rds>=1.43,<2.0.0",
+ "types-boto3-s3>=1.43,<2.0.0",
+ "types-boto3-securityhub>=1.43,<2.0.0",
+ "types-boto3-securitylake>=1.43,<2.0.0",
+ "types-boto3-sqs>=1.43,<2.0.0",
+ "types-boto3-sts>=1.43,<2.0.0",
  "mkdocs-awesome-nav>=3.3,<4.0.0",
  "mkdocs-mermaid2-plugin>=1.2,<2.0.0",
  "pytest-xdist>=3.8,<4.0.0",
