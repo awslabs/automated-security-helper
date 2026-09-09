@@ -1,0 +1,31 @@
+# GENERATED FILE - DO NOT EDIT.
+#
+# Rendered from deploy/cdk-constructs/src/private/buildspec.ts, which is also
+# what the ASHScanStep CDK construct renders its CodeBuild projects from.
+# Editing this file by hand makes the construct and the committed buildspec
+# disagree, and CI byte-compares the two.
+#
+# Regenerate with:
+#   cd deploy/cdk-constructs && npm ci && npm run generate:buildspec
+#
+# Runs a full, unsharded ASH scan and fails the build on findings.
+# This document owns its own pass/fail verdict.
+version: 0.2
+env:
+  variables:
+    ASH_SOURCE_DIR: '.'
+    ASH_OUTPUT_DIR: '.ash/ash_output'
+    ASH_VERSION: v3.7.0
+phases:
+  install:
+    runtime-versions:
+      python: '3.12'
+    commands:
+      - 'python3 -m pip install --no-cache-dir --disable-pip-version-check "git+https://github.com/awslabs/automated-security-helper.git@$ASH_VERSION"'
+  build:
+    commands:
+      - 'ash scan --source-dir "$ASH_SOURCE_DIR" --output-dir "$ASH_OUTPUT_DIR" --min-severity low --fail-on-findings'
+artifacts:
+  base-directory: '$ASH_OUTPUT_DIR'
+  files:
+    - '**/*'

@@ -1,0 +1,1469 @@
+{
+ "Description": "ASH MCP server on Amazon Bedrock AgentCore Runtime. Builds the ASH ARM64 image into this account's ECR repository, because ASH publishes no public image.",
+ "Parameters": {
+  "AshVersion": {
+   "Type": "String",
+   "Default": "v3.7.0",
+   "Description": "ASH git ref (tag, branch, or commit) to build the image from, for example v3.7.0. Pinning a tag makes the build reproducible; the scheduled rebuild still repulls base-image and OS patches for that same ASH revision.",
+   "MinLength": 1
+  },
+  "AshOfflineMode": {
+   "Type": "String",
+   "Default": "NO",
+   "AllowedValues": [
+    "YES",
+    "NO"
+   ],
+   "Description": "Build the ASH image in offline mode, vendoring scanner rulesets and tools into the image so scans need no network egress. Forwarded to the ASH Dockerfile's OFFLINE build argument. Offline images are larger and slower to build."
+  },
+  "RebuildSchedule": {
+   "Type": "String",
+   "Default": "cron(0 6 * * ? *)",
+   "Description": "EventBridge schedule expression for the image rebuild, for example \"cron(0 6 * * ? *)\" or \"rate(1 day)\". The rebuild repulls the base image and scanner tools so a long-lived deployment keeps getting OS and scanner patches without a stack update. Note that a rate() expression starts when the rule is created, so it also rebuilds once at deployment; a cron() expression only fires at the times it names.",
+   "MinLength": 1
+  },
+  "KmsKeyArn": {
+   "Type": "String",
+   "Default": "",
+   "AllowedPattern": "^$|^arn:aws[a-zA-Z-]*:kms:[a-z0-9-]+:\\d{12}:key/[0-9a-z-]{36}$",
+   "Description": "ARN of an existing symmetric customer-managed KMS key for this stack data at rest. Empty uses AWS-managed encryption. Needs a key policy admitting logs.<region>.amazonaws.com, plus kms:CreateGrant for whoever deploys."
+  },
+  "AshBaseConfigYaml": {
+   "Type": "String",
+   "Default": "",
+   "Description": "Optional ASH configuration document (YAML). Stored in an SSM parameter and written to .ash/.ash.yaml inside the container at start. Leave empty to use ASH's built-in defaults. CloudFormation caps this at 4096 bytes; for a larger config, deploy empty and edit the SSM parameter afterwards (Advanced tier, 8 KB).",
+   "MaxLength": 4096
+  },
+  "McpStatelessHttp": {
+   "Type": "String",
+   "Default": "true",
+   "AllowedValues": [
+    "true",
+    "false"
+   ],
+   "Description": "Handle each streamable-HTTP request independently instead of binding it to a server-held session. Keep true on AgentCore: AWS documents stateless as the default there and requires the server not to reject the platform-generated Mcp-Session-Id, and ASH in stateful mode answers 404 to a session id it did not issue. AgentCore does support stateful servers, but only when clients omit the session id on initialize, which this stack cannot enforce. Also keep true behind a load balancer that may route requests to different replicas."
+  },
+  "McpMountPath": {
+   "Type": "String",
+   "Default": "/mcp",
+   "AllowedPattern": "^/.*",
+   "Description": "HTTP path the MCP streamable-HTTP transport listens on. AgentCore requires /mcp and will not route anything else, so only change this for the Fargate target."
+  },
+  "McpAllowedHost": {
+   "Type": "String",
+   "Default": "",
+   "Description": "Comma-separated Host header values to accept, passed to ASH as repeated --allowed-host flags. Keeps DNS-rebinding protection enabled while admitting a known proxy or load balancer hostname. Leave empty to accept any Host."
+  },
+  "McpAuthHeaderName": {
+   "Type": "String",
+   "Default": "",
+   "AllowedPattern": "^$|^[A-Za-z][A-Za-z0-9_-]{0,255}$",
+   "Description": "HTTP header name ASH requires on every MCP request, for example X-ASH-Auth. Leave both this and McpAuthHeaderValue empty to disable ASH-level auth and rely solely on the surrounding network controls."
+  },
+  "McpAuthHeaderValue": {
+   "Type": "String",
+   "Default": "",
+   "Description": "Expected value of McpAuthHeaderName. Stored in Secrets Manager; the container is given the secret's ARN and resolves it at start, so the value is never written into a task definition or a runtime environment variable.",
+   "NoEcho": true
+  },
+  "AshImageTag": {
+   "Type": "String",
+   "Default": "",
+   "Description": "ECR tag the workload pulls. Empty tracks the moving tag, which every rebuild republishes, so a replaced task adopts the newest image at no defined moment. Pin the build's version-qualified tag instead; its digest is only known after a build, so deploy empty, read the tag, then set this on a stack update."
+  }
+ },
+ "Conditions": {
+  "HasKmsKey": {
+   "Fn::Not": [
+    {
+     "Fn::Equals": [
+      {
+       "Ref": "KmsKeyArn"
+      },
+      ""
+     ]
+    }
+   ]
+  },
+  "ConfigHasBaseConfigA7D225A9": {
+   "Fn::Not": [
+    {
+     "Fn::Equals": [
+      {
+       "Ref": "AshBaseConfigYaml"
+      },
+      ""
+     ]
+    }
+   ]
+  },
+  "ConfigHasHeaderAuthA42E2E27": {
+   "Fn::And": [
+    {
+     "Fn::Not": [
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "McpAuthHeaderName"
+        },
+        ""
+       ]
+      }
+     ]
+    },
+    {
+     "Fn::Not": [
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "McpAuthHeaderValue"
+        },
+        ""
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  "ImageImageTagPinned430B439C": {
+   "Fn::Not": [
+    {
+     "Fn::Equals": [
+      {
+       "Ref": "AshImageTag"
+      },
+      ""
+     ]
+    }
+   ]
+  }
+ },
+ "Resources": {
+  "ConfigBaseConfig623C762C": {
+   "Type": "AWS::SSM::Parameter",
+   "Properties": {
+    "Description": "ASH base configuration document, written to the container at start and applied through ASH_CONFIG. Edit here to change the deployment-wide config without a stack update; the next container start picks it up.",
+    "Tier": "Advanced",
+    "Type": "String",
+    "Value": {
+     "Fn::If": [
+      "ConfigHasBaseConfigA7D225A9",
+      {
+       "Ref": "AshBaseConfigYaml"
+      },
+      "# No ASH base configuration was supplied at deployment time."
+     ]
+    }
+   }
+  },
+  "ConfigMcpAuthHeaderSecret99D04B65": {
+   "Type": "AWS::SecretsManager::Secret",
+   "Properties": {
+    "Description": "Expected value of McpAuthHeaderName. The container is handed this ARN and resolves the value at start, so the secret never enters a task definition or a runtime environment-variable map.",
+    "KmsKeyId": {
+     "Fn::If": [
+      "HasKmsKey",
+      {
+       "Ref": "KmsKeyArn"
+      },
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    },
+    "SecretString": {
+     "Fn::If": [
+      "ConfigHasHeaderAuthA42E2E27",
+      {
+       "Ref": "McpAuthHeaderValue"
+      },
+      "ash-mcp-auth-disabled"
+     ]
+    }
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete",
+   "Metadata": {
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Automatic rotation would break authentication rather than improve it. ASH resolves this value once at container start and compares every request against it, so a rotated secret leaves running tasks validating the old value while callers send the new one, with no signal. The value is a shared secret the adopter also configures on the calling side, so any change has to be coordinated with callers regardless. Rotate by updating the secret and restarting the tasks.",
+       "id": "AwsSolutions-SMG4"
+      }
+     ]
+    }
+   }
+  },
+  "ConfigKeyAccessB463082D": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "kms:Decrypt",
+       "Effect": "Allow",
+       "Resource": {
+        "Ref": "KmsKeyArn"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "ConfigKeyAccessB463082D",
+    "Roles": [
+     {
+      "Ref": "RuntimeRoleFD8790A4"
+     }
+    ]
+   },
+   "Condition": "HasKmsKey"
+  },
+  "EncryptionKey1B843E66": {
+   "Type": "AWS::KMS::Key",
+   "Properties": {
+    "Description": "Encrypts ASH CodeBuild project output for this stack.",
+    "EnableKeyRotation": true,
+    "KeyPolicy": {
+     "Statement": [
+      {
+       "Action": "kms:*",
+       "Effect": "Allow",
+       "Principal": {
+        "AWS": {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":iam::",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":root"
+          ]
+         ]
+        }
+       },
+       "Resource": "*"
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain"
+  },
+  "ImageRepositoryD8036990": {
+   "Type": "AWS::ECR::Repository",
+   "Properties": {
+    "EncryptionConfiguration": {
+     "EncryptionType": "KMS",
+     "KmsKey": {
+      "Fn::If": [
+       "HasKmsKey",
+       {
+        "Ref": "KmsKeyArn"
+       },
+       {
+        "Ref": "AWS::NoValue"
+       }
+      ]
+     }
+    },
+    "ImageScanningConfiguration": {
+     "ScanOnPush": true
+    },
+    "ImageTagMutability": "MUTABLE",
+    "LifecyclePolicy": {
+     "LifecyclePolicyText": "{\"rules\":[{\"rulePriority\":1,\"description\":\"Keep the ten most recent images; older rebuilds are unreachable.\",\"selection\":{\"tagStatus\":\"any\",\"countType\":\"imageCountMoreThan\",\"countNumber\":10},\"action\":{\"type\":\"expire\"}}]}"
+    }
+   },
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain"
+  },
+  "ImageBuildLogsBC6BBB2A": {
+   "Type": "AWS::Logs::LogGroup",
+   "Properties": {
+    "KmsKeyId": {
+     "Fn::If": [
+      "HasKmsKey",
+      {
+       "Ref": "KmsKeyArn"
+      },
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    },
+    "RetentionInDays": 30
+   },
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain"
+  },
+  "ImageBuildRole1BB51BF0": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "codebuild.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "ImageBuildRoleDefaultPolicy3DC330B3": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "ImageBuildLogsBC6BBB2A",
+         "Arn"
+        ]
+       }
+      },
+      {
+       "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":logs:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":log-group:/aws/codebuild/",
+           {
+            "Ref": "ImageBuild31565E2D"
+           },
+           ":*"
+          ]
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":logs:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":log-group:/aws/codebuild/",
+           {
+            "Ref": "ImageBuild31565E2D"
+           }
+          ]
+         ]
+        }
+       ]
+      },
+      {
+       "Action": [
+        "codebuild:BatchPutCodeCoverages",
+        "codebuild:BatchPutTestCases",
+        "codebuild:CreateReport",
+        "codebuild:CreateReportGroup",
+        "codebuild:UpdateReport"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":codebuild:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":report-group/",
+          {
+           "Ref": "ImageBuild31565E2D"
+          },
+          "-*"
+         ]
+        ]
+       }
+      },
+      {
+       "Action": [
+        "kms:Decrypt",
+        "kms:Encrypt",
+        "kms:GenerateDataKey*",
+        "kms:ReEncrypt*"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "EncryptionKey1B843E66",
+         "Arn"
+        ]
+       }
+      },
+      {
+       "Action": [
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:BatchGetImage",
+        "ecr:CompleteLayerUpload",
+        "ecr:GetDownloadUrlForLayer",
+        "ecr:InitiateLayerUpload",
+        "ecr:PutImage",
+        "ecr:UploadLayerPart"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "ImageRepositoryD8036990",
+         "Arn"
+        ]
+       }
+      },
+      {
+       "Action": "ecr:GetAuthorizationToken",
+       "Effect": "Allow",
+       "Resource": "*"
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "ImageBuildRoleDefaultPolicy3DC330B3",
+    "Roles": [
+     {
+      "Ref": "ImageBuildRole1BB51BF0"
+     }
+    ]
+   },
+   "Metadata": {
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "ImageBuild31565E2D": {
+   "Type": "AWS::CodeBuild::Project",
+   "Properties": {
+    "Artifacts": {
+     "Type": "NO_ARTIFACTS"
+    },
+    "Cache": {
+     "Type": "NO_CACHE"
+    },
+    "ConcurrentBuildLimit": 1,
+    "Description": "Builds the ASH arm64 image (mcp) into this account's ECR repository. ASH publishes no public image, so this build is what makes the deployment possible.",
+    "EncryptionKey": {
+     "Fn::GetAtt": [
+      "EncryptionKey1B843E66",
+      "Arn"
+     ]
+    },
+    "Environment": {
+     "ComputeType": "BUILD_GENERAL1_LARGE",
+     "EnvironmentVariables": [
+      {
+       "Name": "ASH_ECR_REPOSITORY_URI",
+       "Type": "PLAINTEXT",
+       "Value": {
+        "Fn::Join": [
+         "",
+         [
+          {
+           "Fn::Select": [
+            4,
+            {
+             "Fn::Split": [
+              ":",
+              {
+               "Fn::GetAtt": [
+                "ImageRepositoryD8036990",
+                "Arn"
+               ]
+              }
+             ]
+            }
+           ]
+          },
+          ".dkr.ecr.",
+          {
+           "Fn::Select": [
+            3,
+            {
+             "Fn::Split": [
+              ":",
+              {
+               "Fn::GetAtt": [
+                "ImageRepositoryD8036990",
+                "Arn"
+               ]
+              }
+             ]
+            }
+           ]
+          },
+          ".",
+          {
+           "Ref": "AWS::URLSuffix"
+          },
+          "/",
+          {
+           "Ref": "ImageRepositoryD8036990"
+          }
+         ]
+        ]
+       }
+      },
+      {
+       "Name": "ASH_VERSION",
+       "Type": "PLAINTEXT",
+       "Value": {
+        "Ref": "AshVersion"
+       }
+      },
+      {
+       "Name": "ASH_OFFLINE",
+       "Type": "PLAINTEXT",
+       "Value": {
+        "Ref": "AshOfflineMode"
+       }
+      },
+      {
+       "Name": "ASH_REPOSITORY_URL",
+       "Type": "PLAINTEXT",
+       "Value": "https://github.com/awslabs/automated-security-helper.git"
+      },
+      {
+       "Name": "ASH_BUILD_PLATFORM",
+       "Type": "PLAINTEXT",
+       "Value": "arm64"
+      },
+      {
+       "Name": "ASH_BUILD_FLAVORS",
+       "Type": "PLAINTEXT",
+       "Value": "mcp"
+      }
+     ],
+     "Image": "aws/codebuild/amazonlinux-aarch64-standard:3.0",
+     "ImagePullCredentialsType": "CODEBUILD",
+     "PrivilegedMode": true,
+     "Type": "ARM_CONTAINER"
+    },
+    "LogsConfig": {
+     "CloudWatchLogs": {
+      "GroupName": {
+       "Ref": "ImageBuildLogsBC6BBB2A"
+      },
+      "Status": "ENABLED"
+     }
+    },
+    "ServiceRole": {
+     "Fn::GetAtt": [
+      "ImageBuildRole1BB51BF0",
+      "Arn"
+     ]
+    },
+    "Source": {
+     "BuildSpec": {
+      "Fn::Join": [
+       "",
+       [
+        "{\n  \"version\": \"0.2\",\n  \"phases\": {\n    \"pre_build\": {\n      \"commands\": [\n        \"echo \\\"Building ASH ${ASH_VERSION} for ${ASH_BUILD_PLATFORM}: ${ASH_BUILD_FLAVORS}\\\"\",\n        \"aws ecr get-login-password --region ",
+        {
+         "Ref": "AWS::Region"
+        },
+        " | docker login --username AWS --password-stdin ",
+        {
+         "Ref": "AWS::AccountId"
+        },
+        ".dkr.ecr.",
+        {
+         "Ref": "AWS::Region"
+        },
+        ".",
+        {
+         "Ref": "AWS::URLSuffix"
+        },
+        "\",\n        \"git clone --depth 1 --branch \\\"${ASH_VERSION}\\\" \\\"${ASH_REPOSITORY_URL}\\\" ash-src\"\n      ]\n    },\n    \"build\": {\n      \"commands\": [\n        \"ASH_SAFE_REF=\\\"$(printf '%s' \\\"${ASH_VERSION}\\\" | tr -c 'A-Za-z0-9._-' '-' | cut -c1-109)\\\"\\nASH_REF_DIGEST=\\\"$(printf '%s' \\\"${ASH_VERSION}\\\" | sha256sum | cut -c1-8)\\\"\\n# The digest is what keeps two refs that fold to the same string on separate\\n# tags. A pipeline reports only its last command's status, so a missing\\n# sha256sum would leave it empty and let one build overwrite another's audit\\n# tag. Fail here instead.\\n[ ${#ASH_REF_DIGEST} -eq 8 ] || { echo \\\"cannot digest ASH_VERSION\\\" >&2; exit 1; }\\nASH_VERSION_TAG_SUFFIX=\\\"${ASH_SAFE_REF}-${ASH_REF_DIGEST}\\\"\\necho \\\"version-qualified audit tag suffix: ${ASH_VERSION_TAG_SUFFIX}\\\"\",\n        \"docker build --platform \\\"linux/${ASH_BUILD_PLATFORM}\\\" --target non-root --build-arg \\\"OFFLINE=${ASH_OFFLINE}\\\" --build-arg \\\"INSTALL_ASH_REVISION=${ASH_VERSION}\\\" -t \\\"ash-base-non-root:local\\\" ash-src\",\n        \"cat > ash-src/ash-mcp-entrypoint.sh <<'ASH_CDK_EOF'\\n#!/bin/sh\\n# Entrypoint for the ASH MCP server. Generated by the ASH CDK deployment\\n# targets; see deploy/cdk/lib/ash-container-scripts.ts.\\nset -eu\\n\\n# Materialize the deployment-wide ASH config, when one was supplied. Written to\\n# a fixed path and exported through ASH_CONFIG so it applies to every scan this\\n# process runs, not just scans of one directory.\\nif [ -n \\\"${ASH_BASE_CONFIG_SSM_PARAMETER:-}\\\" ]; then\\n  mkdir -p \\\"$(dirname \\\"${ASH_CONFIG:-/tmp/ash-config/.ash.yaml}\\\")\\\"\\n  python3 -c \\\"import os, sys, boto3; sys.stdout.write(boto3.client('ssm').get_parameter(Name=os.environ['ASH_BASE_CONFIG_SSM_PARAMETER'], WithDecryption=True)['Parameter']['Value'])\\\" \\\\\\n    > \\\"${ASH_CONFIG:-/tmp/ash-config/.ash.yaml}\\\"\\nelse\\n  # No config supplied. Unset ASH_CONFIG so ASH does not log a missing-file\\n  # notice on every scan and falls through to its built-in defaults.\\n  unset ASH_CONFIG || true\\nfi\\n\\n# Resolve the shared secret from its ARN. The ARN travels in the environment;\\n# the value never does, so it stays out of the template, the task definition and\\n# the runtime's environment-variable map.\\nASH_AUTH_VALUE=\\\"\\\"\\nif [ -n \\\"${ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN:-}\\\" ]; then\\n  ASH_AUTH_VALUE=$(python3 -c \\\"import os, sys, boto3; sys.stdout.write(boto3.client('secretsmanager').get_secret_value(SecretId=os.environ['ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN'])['SecretString'])\\\")\\nfi\\n\\n# Ask this image's ASH which MCP options it accepts, once. AshVersion decides\\n# which ASH is in here at deploy time, and older releases have neither\\n# --stateless-http nor --allowed-host; passing an unknown option would leave the\\n# server unable to bind. COLUMNS is wide so rich cannot wrap a flag name across\\n# lines and make a supported option measure as missing.\\nif ! ASH_MCP_HELP=\\\"$(COLUMNS=200 ash mcp --help 2>&1)\\\"; then\\n  echo \\\"ash-mcp-entrypoint: 'ash mcp --help' exited non-zero, so this image cannot serve MCP at all. This is not a missing option; it is a broken ASH install. Its output was:\\\" >&2\\n  printf '%s\\\\n' \\\"${ASH_MCP_HELP}\\\" >&2\\n  exit 69\\nfi\\n\\n# Fixed-string match, so a flag name is never interpreted as a regex.\\nash_mcp_supports() {\\n  printf '%s' \\\"${ASH_MCP_HELP}\\\" | grep -qF -- \\\"$1\\\"\\n}\\n\\nset -- ash mcp --transport streamable-http \\\\\\n  --host \\\"${ASH_MCP_HOST:-0.0.0.0}\\\" \\\\\\n  --port \\\"${ASH_MCP_PORT:-8000}\\\" \\\\\\n  --mount-path \\\"${ASH_MCP_MOUNT_PATH:-/mcp}\\\"\\n\\n# --stateless-http is a paired flag, so state the intent rather than inheriting\\n# ASH's default. Refuses to start if stateless was asked for and this ASH has no\\n# such option: running stateful instead would answer 404 to every session id the\\n# platform injects while still passing the health check.\\nif [ \\\"${ASH_MCP_STATELESS:-true}\\\" = \\\"true\\\" ]; then\\n  if ash_mcp_supports '--stateless-http'; then\\n    set -- \\\"$@\\\" --stateless-http\\n  else\\n    echo \\\"ash-mcp-entrypoint: this deployment asks for a stateless MCP server, but the ASH in this image has no --stateless-http option, so the server would run stateful and reject every session id the platform injects. Deploy an AshVersion whose 'ash mcp' accepts --stateless-http, or set McpStatelessHttp=false to run stateful deliberately.\\\" >&2\\n    exit 65\\n  fi\\nelif ash_mcp_supports '--no-stateless-http'; then\\n  set -- \\\"$@\\\" --no-stateless-http\\nfi\\n# The remaining case needs no flag and is not a degradation: stateful was asked\\n# for, and an ASH without the option is already stateful.\\n\\n# --allowed-host is repeatable, so split the comma-separated value and pass one\\n# flag per hostname; a comma-joined single value would match nothing. Warns\\n# rather than refusing when the option is absent: the Fargate stack always\\n# substitutes its load balancer DNS name here, so there is no parameter value an\\n# operator could set to satisfy a refusal.\\nif [ -n \\\"${ASH_MCP_ALLOWED_HOST:-}\\\" ]; then\\n  if ash_mcp_supports '--allowed-host'; then\\n    ASH_SAVED_IFS=$IFS\\n    IFS=,\\n    for ash_host in ${ASH_MCP_ALLOWED_HOST}; do\\n      if [ -n \\\"$ash_host\\\" ]; then\\n        # Lower-cased because a load balancer lowercases Host while the MCP SDK\\n        # matches case-sensitively; mixed case yields 421 on every request.\\n        ash_host=$(printf '%s' \\\"$ash_host\\\" | tr 'A-Z' 'a-z')\\n        set -- \\\"$@\\\" --allowed-host \\\"$ash_host\\\"\\n      fi\\n    done\\n    IFS=$ASH_SAVED_IFS\\n  else\\n    echo \\\"ash-mcp-entrypoint: WARNING: a Host allowlist of '${ASH_MCP_ALLOWED_HOST}' was requested, but the ASH in this image has no --allowed-host option, so EVERY Host header will be accepted. Deploy an AshVersion whose 'ash mcp' accepts --allowed-host to enforce the allowlist.\\\" >&2\\n  fi\\nfi\\n\\n# Both halves are required: a header name with no value would make ASH compare\\n# against an empty secret.\\nif [ -n \\\"${ASH_MCP_AUTH_HEADER_NAME:-}\\\" ] && [ -n \\\"$ASH_AUTH_VALUE\\\" ]; then\\n  set -- \\\"$@\\\" --auth-header-name \\\"${ASH_MCP_AUTH_HEADER_NAME}\\\" --auth-header-value \\\"$ASH_AUTH_VALUE\\\"\\nelif [ -n \\\"${ASH_MCP_AUTH_HEADER_NAME:-}\\\" ]; then\\n  echo \\\"ash-mcp-entrypoint: McpAuthHeaderName was set but no secret value resolved; refusing to start an unauthenticated server that the deployment expected to authenticate.\\\" >&2\\n  exit 64\\nfi\\n\\nexec \\\"$@\\\"\\n\\nASH_CDK_EOF\",\n        \"cat > ash-src/Dockerfile.mcp <<'ASH_CDK_EOF'\\nFROM ash-base-non-root:local\\n# The ASH stage already dropped to UID 500; step back up to install.\\nUSER root\\nCOPY ash-mcp-entrypoint.sh /usr/local/bin/ash-mcp-entrypoint.sh\\nRUN chmod 0755 /usr/local/bin/ash-mcp-entrypoint.sh\\nENV ASH_CONFIG=/tmp/ash-config/.ash.yaml\\n# 500:100 are the ASH Dockerfile UID/GID defaults, and this build\\n# overrides neither.\\nUSER 500:100\\n# Documentation only; AgentCore fixes the port at 8000 regardless.\\nEXPOSE 8000\\nENTRYPOINT [\\\"/usr/local/bin/ash-mcp-entrypoint.sh\\\"]\\nASH_CDK_EOF\",\n        \"docker build --platform \\\"linux/${ASH_BUILD_PLATFORM}\\\" -f ash-src/Dockerfile.mcp -t \\\"ash-mcp:local\\\" ash-src\",\n        \"docker tag \\\"ash-mcp:local\\\" \\\"${ASH_ECR_REPOSITORY_URI}:mcp-arm64\\\"\",\n        \"docker tag \\\"ash-mcp:local\\\" \\\"${ASH_ECR_REPOSITORY_URI}:mcp-arm64-${ASH_VERSION_TAG_SUFFIX}\\\"\",\n        \"docker push \\\"${ASH_ECR_REPOSITORY_URI}:mcp-arm64\\\"\",\n        \"docker push \\\"${ASH_ECR_REPOSITORY_URI}:mcp-arm64-${ASH_VERSION_TAG_SUFFIX}\\\"\"\n      ]\n    },\n    \"post_build\": {\n      \"commands\": [\n        \"if [ -n \\\"${CFN_RESPONSE_URL:-}\\\" ]; then\\n  if [ \\\"${CODEBUILD_BUILD_SUCCEEDING:-0}\\\" = \\\"1\\\" ]; then\\n    ASH_STATUS=SUCCESS\\n    ASH_REASON=\\\"ASH image build succeeded\\\"\\n  else\\n    ASH_STATUS=FAILED\\n    ASH_REASON=\\\"ASH image build failed; see CodeBuild build ${CODEBUILD_BUILD_ID:-unknown}\\\"\\n  fi\\n  python3 -c \\\"import json, os, sys, urllib.request; body = json.dumps({'Status': sys.argv[1], 'Reason': sys.argv[2], 'PhysicalResourceId': os.environ['CFN_LOGICAL_ID'], 'StackId': os.environ['CFN_STACK_ID'], 'RequestId': os.environ['CFN_REQUEST_ID'], 'LogicalResourceId': os.environ['CFN_LOGICAL_ID'], 'Data': {}}).encode(); req = urllib.request.Request(os.environ['CFN_RESPONSE_URL'], data=body, method='PUT', headers={'content-type': '', 'content-length': str(len(body))}); urllib.request.urlopen(req)\\\" \\\"$ASH_STATUS\\\" \\\"$ASH_REASON\\\"\\nfi\"\n      ]\n    }\n  }\n}"
+       ]
+      ]
+     },
+     "Type": "NO_SOURCE"
+    },
+    "TimeoutInMinutes": 120
+   },
+   "Metadata": {
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "ImageBuildEventsRoleDF4F46F6": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "events.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   },
+   "Metadata": {
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "ImageBuildEventsRoleDefaultPolicyB7206C02": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "codebuild:StartBuild",
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "ImageBuild31565E2D",
+         "Arn"
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "ImageBuildEventsRoleDefaultPolicyB7206C02",
+    "Roles": [
+     {
+      "Ref": "ImageBuildEventsRoleDF4F46F6"
+     }
+    ]
+   },
+   "Metadata": {
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "ImageBootstrapStarterLogsFCF41B92": {
+   "Type": "AWS::Logs::LogGroup",
+   "Properties": {
+    "KmsKeyId": {
+     "Fn::If": [
+      "HasKmsKey",
+      {
+       "Ref": "KmsKeyArn"
+      },
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    },
+    "RetentionInDays": 30
+   },
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain"
+  },
+  "ImageBootstrapStarterRole4262AC52": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "lambda.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "Description": "Execution role for the image-build bootstrap. Deliberately not using AWSLambdaBasicExecutionRole: the only logging grant it needs is on one log group."
+   },
+   "Metadata": {
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "The only wildcard is the log-stream suffix on the function's own log group. Lambda creates a stream per execution environment, so the stream name is not knowable at deploy time and \":*\" on that one group is the narrowest grant that permits logging at all.",
+       "id": "AwsSolutions-IAM5"
+      }
+     ]
+    }
+   }
+  },
+  "ImageBootstrapStarterRoleDefaultPolicy10189EBF": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "ImageBootstrapStarterLogsFCF41B92",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "ImageBootstrapStarterLogsFCF41B92",
+             "Arn"
+            ]
+           },
+           ":*"
+          ]
+         ]
+        }
+       ]
+      },
+      {
+       "Action": "codebuild:StartBuild",
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "ImageBuild31565E2D",
+         "Arn"
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "ImageBootstrapStarterRoleDefaultPolicy10189EBF",
+    "Roles": [
+     {
+      "Ref": "ImageBootstrapStarterRole4262AC52"
+     }
+    ]
+   },
+   "Metadata": {
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "The only wildcard is the log-stream suffix on the function's own log group. Lambda creates a stream per execution environment, so the stream name is not knowable at deploy time and \":*\" on that one group is the narrowest grant that permits logging at all.",
+       "id": "AwsSolutions-IAM5"
+      }
+     ]
+    }
+   }
+  },
+  "ImageBootstrapStarter2B9D5AC0": {
+   "Type": "AWS::Lambda::Function",
+   "Properties": {
+    "Code": {
+     "ZipFile": "import json\nimport os\nimport urllib.request\n\nimport boto3\n\n\ndef send(event, status, reason):\n    body = json.dumps({\n        \"Status\": status,\n        \"Reason\": reason,\n        \"PhysicalResourceId\": event[\"LogicalResourceId\"],\n        \"StackId\": event[\"StackId\"],\n        \"RequestId\": event[\"RequestId\"],\n        \"LogicalResourceId\": event[\"LogicalResourceId\"],\n        \"Data\": {},\n    }).encode()\n    urllib.request.urlopen(urllib.request.Request(\n        event[\"ResponseURL\"], data=body, method=\"PUT\",\n        headers={\"content-type\": \"\", \"content-length\": str(len(body))}))\n\n\ndef handler(event, context):\n    # Never block a teardown on an image build.\n    if event[\"RequestType\"] == \"Delete\":\n        send(event, \"SUCCESS\", \"Nothing to undo\")\n        return\n    try:\n        boto3.client(\"codebuild\").start_build(\n            projectName=os.environ[\"PROJECT_NAME\"],\n            environmentVariablesOverride=[\n                {\"name\": \"CFN_RESPONSE_URL\", \"value\": event[\"ResponseURL\"], \"type\": \"PLAINTEXT\"},\n                {\"name\": \"CFN_STACK_ID\", \"value\": event[\"StackId\"], \"type\": \"PLAINTEXT\"},\n                {\"name\": \"CFN_REQUEST_ID\", \"value\": event[\"RequestId\"], \"type\": \"PLAINTEXT\"},\n                {\"name\": \"CFN_LOGICAL_ID\", \"value\": event[\"LogicalResourceId\"], \"type\": \"PLAINTEXT\"},\n            ],\n        )\n    except Exception as exc:\n        # The build never started, so nothing else will ever answer. The most\n        # likely cause is a scheduled rebuild holding the project's only\n        # concurrent build slot, which is why the reason says so: retrying the\n        # stack operation once the rebuild finishes is safe.\n        send(event, \"FAILED\", \"Could not start the ASH image build. A scheduled \"\n             \"rebuild may hold the project's only build slot; retrying is safe. \"\n             \"Cause: %s\" % exc)\n    # Success path is silent by design: the build itself responds when the image\n    # exists. Responding here would let the workload be created too early.\n"
+    },
+    "Description": "Starts the ASH image build during stack creation and hands CloudFormation’s response URL to the build, which answers once the image exists.",
+    "Environment": {
+     "Variables": {
+      "PROJECT_NAME": {
+       "Ref": "ImageBuild31565E2D"
+      }
+     }
+    },
+    "Handler": "index.handler",
+    "KmsKeyArn": {
+     "Fn::If": [
+      "HasKmsKey",
+      {
+       "Ref": "KmsKeyArn"
+      },
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    },
+    "LoggingConfig": {
+     "LogGroup": {
+      "Ref": "ImageBootstrapStarterLogsFCF41B92"
+     }
+    },
+    "ReservedConcurrentExecutions": 1,
+    "Role": {
+     "Fn::GetAtt": [
+      "ImageBootstrapStarterRole4262AC52",
+      "Arn"
+     ]
+    },
+    "Runtime": "python3.14",
+    "Timeout": 60
+   },
+   "DependsOn": [
+    "ImageBootstrapStarterRoleDefaultPolicy10189EBF",
+    "ImageBootstrapStarterRole4262AC52"
+   ]
+  },
+  "ImageBootstrapBuildCBE6CA7A": {
+   "Type": "Custom::AshImageBootstrap",
+   "Properties": {
+    "ServiceToken": {
+     "Fn::GetAtt": [
+      "ImageBootstrapStarter2B9D5AC0",
+      "Arn"
+     ]
+    },
+    "AshVersion": {
+     "Ref": "AshVersion"
+    },
+    "AshOfflineMode": {
+     "Ref": "AshOfflineMode"
+    },
+    "Flavors": "mcp"
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete"
+  },
+  "ImageRebuildScheduleC59CBD6A": {
+   "Type": "AWS::Events::Rule",
+   "Properties": {
+    "Description": "Rebuilds the ASH image so a long-lived deployment keeps receiving base-image, OS and scanner patches for the pinned ASH revision.",
+    "ScheduleExpression": {
+     "Ref": "RebuildSchedule"
+    },
+    "State": "ENABLED",
+    "Targets": [
+     {
+      "Arn": {
+       "Fn::GetAtt": [
+        "ImageBuild31565E2D",
+        "Arn"
+       ]
+      },
+      "Id": "Target0",
+      "RoleArn": {
+       "Fn::GetAtt": [
+        "ImageBuildEventsRoleDF4F46F6",
+        "Arn"
+       ]
+      }
+     }
+    ]
+   },
+   "DependsOn": [
+    "ImageBootstrapBuildCBE6CA7A"
+   ]
+  },
+  "RuntimeRoleFD8790A4": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Statement": [
+      {
+       "Action": "sts:AssumeRole",
+       "Condition": {
+        "StringEquals": {
+         "aws:SourceAccount": {
+          "Ref": "AWS::AccountId"
+         }
+        },
+        "ArnLike": {
+         "aws:SourceArn": {
+          "Fn::Join": [
+           "",
+           [
+            "arn:",
+            {
+             "Ref": "AWS::Partition"
+            },
+            ":bedrock-agentcore:",
+            {
+             "Ref": "AWS::Region"
+            },
+            ":",
+            {
+             "Ref": "AWS::AccountId"
+            },
+            ":*"
+           ]
+          ]
+         }
+        }
+       },
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "bedrock-agentcore.amazonaws.com"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "Description": "Execution role AgentCore Runtime assumes to run the ASH MCP server."
+   },
+   "Metadata": {
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "RuntimeRoleDefaultPolicy31263C89": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:BatchGetImage",
+        "ecr:GetDownloadUrlForLayer"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::GetAtt": [
+         "ImageRepositoryD8036990",
+         "Arn"
+        ]
+       }
+      },
+      {
+       "Action": "ecr:GetAuthorizationToken",
+       "Effect": "Allow",
+       "Resource": "*"
+      },
+      {
+       "Action": [
+        "ssm:DescribeParameters",
+        "ssm:GetParameter",
+        "ssm:GetParameterHistory",
+        "ssm:GetParameters"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":ssm:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":parameter/",
+          {
+           "Ref": "ConfigBaseConfig623C762C"
+          }
+         ]
+        ]
+       }
+      },
+      {
+       "Action": [
+        "secretsmanager:DescribeSecret",
+        "secretsmanager:GetSecretValue"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Ref": "ConfigMcpAuthHeaderSecret99D04B65"
+       }
+      },
+      {
+       "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:DescribeLogStreams",
+        "logs:PutLogEvents"
+       ],
+       "Effect": "Allow",
+       "Resource": [
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":logs:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":log-group:/aws/bedrock-agentcore/runtimes/*"
+          ]
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":logs:",
+           {
+            "Ref": "AWS::Region"
+           },
+           ":",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":log-group:/aws/bedrock-agentcore/runtimes/*:log-stream:*"
+          ]
+         ]
+        }
+       ],
+       "Sid": "RuntimeLogging"
+      },
+      {
+       "Action": "logs:DescribeLogGroups",
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":logs:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":log-group:*"
+         ]
+        ]
+       },
+       "Sid": "RuntimeLogGroupDiscovery"
+      },
+      {
+       "Action": "logs:PutResourcePolicy",
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":logs:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":log-group:/aws/bedrock-agentcore/runtimes/",
+          {
+           "Fn::Join": [
+            "",
+            {
+             "Fn::Split": [
+              "-",
+              {
+               "Ref": "AWS::StackName"
+              }
+             ]
+            }
+           ]
+          },
+          "-*"
+         ]
+        ]
+       },
+       "Sid": "RuntimeLogResourcePolicy"
+      },
+      {
+       "Action": [
+        "xray:GetSamplingRules",
+        "xray:GetSamplingTargets",
+        "xray:PutTelemetryRecords",
+        "xray:PutTraceSegments"
+       ],
+       "Effect": "Allow",
+       "Resource": "*",
+       "Sid": "RuntimeTelemetry"
+      },
+      {
+       "Action": "cloudwatch:PutMetricData",
+       "Condition": {
+        "StringEquals": {
+         "cloudwatch:namespace": "bedrock-agentcore"
+        }
+       },
+       "Effect": "Allow",
+       "Resource": "*",
+       "Sid": "RuntimeMetrics"
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "RuntimeRoleDefaultPolicy31263C89",
+    "Roles": [
+     {
+      "Ref": "RuntimeRoleFD8790A4"
+     }
+    ]
+   },
+   "Metadata": {
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Runtime": {
+   "Type": "AWS::BedrockAgentCore::Runtime",
+   "Properties": {
+    "AgentRuntimeArtifact": {
+     "ContainerConfiguration": {
+      "ContainerUri": {
+       "Fn::Join": [
+        "",
+        [
+         {
+          "Fn::Select": [
+           4,
+           {
+            "Fn::Split": [
+             ":",
+             {
+              "Fn::GetAtt": [
+               "ImageRepositoryD8036990",
+               "Arn"
+              ]
+             }
+            ]
+           }
+          ]
+         },
+         ".dkr.ecr.",
+         {
+          "Fn::Select": [
+           3,
+           {
+            "Fn::Split": [
+             ":",
+             {
+              "Fn::GetAtt": [
+               "ImageRepositoryD8036990",
+               "Arn"
+              ]
+             }
+            ]
+           }
+          ]
+         },
+         ".",
+         {
+          "Ref": "AWS::URLSuffix"
+         },
+         "/",
+         {
+          "Ref": "ImageRepositoryD8036990"
+         },
+         ":",
+         {
+          "Fn::If": [
+           "ImageImageTagPinned430B439C",
+           {
+            "Ref": "AshImageTag"
+           },
+           "mcp-arm64"
+          ]
+         }
+        ]
+       ]
+      }
+     }
+    },
+    "AgentRuntimeName": {
+     "Fn::Join": [
+      "",
+      {
+       "Fn::Split": [
+        "-",
+        {
+         "Ref": "AWS::StackName"
+        }
+       ]
+      }
+     ]
+    },
+    "Description": "ASH security scanner exposed over MCP.",
+    "EnvironmentVariables": {
+     "ASH_CONFIG": "/tmp/ash-config/.ash.yaml",
+     "ASH_BASE_CONFIG_SSM_PARAMETER": {
+      "Fn::If": [
+       "ConfigHasBaseConfigA7D225A9",
+       {
+        "Ref": "ConfigBaseConfig623C762C"
+       },
+       ""
+      ]
+     },
+     "ASH_MCP_HOST": "0.0.0.0",
+     "ASH_MCP_PORT": "8000",
+     "ASH_MCP_MOUNT_PATH": {
+      "Ref": "McpMountPath"
+     },
+     "ASH_MCP_STATELESS": {
+      "Ref": "McpStatelessHttp"
+     },
+     "ASH_MCP_ALLOWED_HOST": {
+      "Ref": "McpAllowedHost"
+     },
+     "ASH_MCP_AUTH_HEADER_NAME": {
+      "Ref": "McpAuthHeaderName"
+     },
+     "ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN": {
+      "Fn::If": [
+       "ConfigHasHeaderAuthA42E2E27",
+       {
+        "Ref": "ConfigMcpAuthHeaderSecret99D04B65"
+       },
+       ""
+      ]
+     }
+    },
+    "NetworkConfiguration": {
+     "NetworkMode": "PUBLIC"
+    },
+    "ProtocolConfiguration": "MCP",
+    "RequestHeaderConfiguration": {
+     "Fn::If": [
+      "ConfigHasHeaderAuthA42E2E27",
+      {
+       "RequestHeaderAllowlist": [
+        {
+         "Ref": "McpAuthHeaderName"
+        }
+       ]
+      },
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    },
+    "RoleArn": {
+     "Fn::GetAtt": [
+      "RuntimeRoleFD8790A4",
+      "Arn"
+     ]
+    }
+   },
+   "DependsOn": [
+    "ImageBootstrapBuildCBE6CA7A"
+   ]
+  }
+ },
+ "Outputs": {
+  "AgentRuntimeArn": {
+   "Description": "Invoke with bedrock-agentcore:InvokeAgentRuntime against this ARN.",
+   "Value": {
+    "Fn::GetAtt": [
+     "Runtime",
+     "AgentRuntimeArn"
+    ]
+   }
+  },
+  "AgentRuntimeId": {
+   "Description": "AgentCore Runtime id.",
+   "Value": {
+    "Fn::GetAtt": [
+     "Runtime",
+     "AgentRuntimeId"
+    ]
+   }
+  },
+  "EcrRepositoryUri": {
+   "Description": "Repository the ASH image is built into. Retained if the stack is deleted.",
+   "Value": {
+    "Fn::Join": [
+     "",
+     [
+      {
+       "Fn::Select": [
+        4,
+        {
+         "Fn::Split": [
+          ":",
+          {
+           "Fn::GetAtt": [
+            "ImageRepositoryD8036990",
+            "Arn"
+           ]
+          }
+         ]
+        }
+       ]
+      },
+      ".dkr.ecr.",
+      {
+       "Fn::Select": [
+        3,
+        {
+         "Fn::Split": [
+          ":",
+          {
+           "Fn::GetAtt": [
+            "ImageRepositoryD8036990",
+            "Arn"
+           ]
+          }
+         ]
+        }
+       ]
+      },
+      ".",
+      {
+       "Ref": "AWS::URLSuffix"
+      },
+      "/",
+      {
+       "Ref": "ImageRepositoryD8036990"
+      }
+     ]
+    ]
+   }
+  },
+  "ImageBuildProjectName": {
+   "Description": "CodeBuild project that builds the image. Start it manually to rebuild ahead of the schedule.",
+   "Value": {
+    "Ref": "ImageBuild31565E2D"
+   }
+  },
+  "BaseConfigParameterName": {
+   "Description": "SSM parameter holding the ASH base configuration. Edit it to change the deployment-wide config without a stack update.",
+   "Value": {
+    "Ref": "ConfigBaseConfig623C762C"
+   }
+  }
+ }
+}

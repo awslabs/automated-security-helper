@@ -1,0 +1,38 @@
+# GENERATED FILE - DO NOT EDIT.
+#
+# Rendered from deploy/cdk-constructs/src/private/buildspec.ts, which is also
+# what the ASHScanStep CDK construct renders its CodeBuild projects from.
+# Editing this file by hand makes the construct and the committed buildspec
+# disagree, and CI byte-compares the two.
+#
+# Regenerate with:
+#   cd deploy/cdk-constructs && npm ci && npm run generate:buildspec
+#
+# One shard of a fanned-out scan. Set ASH_SHARD_INDEX to 0..N-1 and
+# ASH_SHARD_COUNT to N, then run buildspec-merge.yml over the outputs.
+#
+# This document never fails on findings, by design. A shard runs a subset
+# of the scanners, so its exit code describes a subset of the repository:
+# a shard that finds nothing exits 0 even when another shard found a
+# critical issue. Gate on the merge step, never on a shard.
+version: 0.2
+env:
+  variables:
+    ASH_SOURCE_DIR: '.'
+    ASH_OUTPUT_DIR: '.ash/ash_output'
+    ASH_VERSION: v3.7.0
+    ASH_SHARD_INDEX: '0'
+    ASH_SHARD_COUNT: '1'
+phases:
+  install:
+    runtime-versions:
+      python: '3.12'
+    commands:
+      - 'python3 -m pip install --no-cache-dir --disable-pip-version-check "git+https://github.com/awslabs/automated-security-helper.git@$ASH_VERSION"'
+  build:
+    commands:
+      - 'ash scan --source-dir "$ASH_SOURCE_DIR" --output-dir "$ASH_OUTPUT_DIR" --shard-index "$ASH_SHARD_INDEX" --shard-count "$ASH_SHARD_COUNT" --no-fail-on-findings'
+artifacts:
+  base-directory: '$ASH_OUTPUT_DIR'
+  files:
+    - '**/*'

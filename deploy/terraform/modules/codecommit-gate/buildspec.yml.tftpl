@@ -1,0 +1,49 @@
+version: 0.2
+
+# Layers the Lambda runtime interface client and the pull-request handler onto
+# the shared ASH image.
+#
+# Chained off the shared image build rather than scheduled independently, so the
+# gate image is never built from a base that is about to be replaced. See the
+# EventBridge rule on CodeBuild build state change in main.tf.
+#
+# Shell variables use the $NAME form so the template renderer and the shell
+# cannot be confused for one another.
+
+phases:
+  pre_build:
+    commands:
+      - |
+        set -eu
+        echo "ASH pull-request gate image build"
+        echo "  base image  : $BASE_IMAGE_URI"
+        echo "  destination : $IMAGE_URI"
+      - |
+        set -eu
+        aws ecr get-login-password --region "$AWS_REGION" \
+          | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+
+  build:
+    commands:
+      - |
+        set -eu
+        export DOCKER_BUILDKIT=1
+        printf '%s' '${gate_dockerfile_b64}' | base64 -d > gate.Dockerfile
+        printf '%s' '${handler_b64}' | base64 -d > ash_pr_gate.py
+
+        # Pulled explicitly so a missing base image fails here with a clear
+        # message rather than partway through the build.
+        docker pull "$BASE_IMAGE_URI"
+
+        docker build \
+          -f gate.Dockerfile \
+          --build-arg ASH_BASE_IMAGE="$BASE_IMAGE_URI" \
+          -t "$IMAGE_URI" \
+          .
+
+  post_build:
+    commands:
+      - |
+        set -eu
+        docker push "$IMAGE_URI"
+        echo "pushed $IMAGE_URI"

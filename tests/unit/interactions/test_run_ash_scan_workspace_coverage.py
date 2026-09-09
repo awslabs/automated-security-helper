@@ -748,7 +748,9 @@ class TestRunAshScanContainerWorkspaceVerdict:
         monkeypatch.setattr(
             ras,
             "_run_container_mode",
-            lambda opts, logger, resolved_fail_on_findings=None: results,
+            lambda opts, logger, resolved_fail_on_findings=None, resolved_fail_on_incomplete_scanners=None: (
+                results
+            ),
         )
 
         returned = run_ash_scan(
@@ -774,7 +776,9 @@ class TestRunAshScanContainerWorkspaceVerdict:
         monkeypatch.setattr(
             ras,
             "_run_container_mode",
-            lambda opts, logger, resolved_fail_on_findings=None: results,
+            lambda opts, logger, resolved_fail_on_findings=None, resolved_fail_on_incomplete_scanners=None: (
+                results
+            ),
         )
 
         with pytest.raises(SystemExit) as excinfo:
@@ -796,7 +800,7 @@ class TestRunAshScanContainerWorkspaceVerdict:
         monkeypatch.setattr(
             ras,
             "_run_container_mode",
-            lambda opts, logger, resolved_fail_on_findings=None: (
+            lambda opts, logger, resolved_fail_on_findings=None, resolved_fail_on_incomplete_scanners=None: (
                 AshAggregatedResults()
             ),
         )
