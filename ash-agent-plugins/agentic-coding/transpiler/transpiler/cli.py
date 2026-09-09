@@ -18,7 +18,7 @@ import click
 
 from . import backends as _backends_pkg  # noqa: F401  triggers registration
 from . import orchestrator
-from .core import BuildContext
+from .core import BuildContext, resolve_output_dir
 from .registry import BackendRegistry
 
 
@@ -52,15 +52,15 @@ def setup(name: str | None) -> None:
     Most backends have no setup work; the command is a no-op unless a backend
     declares PHASES with `stage="setup"`."""
     m = orchestrator._load_manifest()
-    out_root = orchestrator.OUTPUT_ROOT
+    anchors = orchestrator.default_anchors()
     targets = _all_or_one(name)
     for backend_name in targets:
         BackendCls = BackendRegistry.get(backend_name)
         backend = BackendCls()
         ctx = BuildContext(
             manifest=m,
-            out=out_root / BackendCls.OUTPUT_DIR,
-            plugins_root=out_root,
+            out=resolve_output_dir(BackendCls, anchors),
+            plugins_root=anchors.plugins,
             base_dir=orchestrator.BASE_DIR,
             schemas_dir=orchestrator.SCHEMAS_DIR,
         )
@@ -142,8 +142,10 @@ def check(drift_only: bool, validate_only: bool) -> None:
         # Lazy import keeps jsonschema and frontmatter out of the build hot path
         from validate import validate_all
         m = orchestrator._load_manifest()
+        anchors = orchestrator.default_anchors()
         errors = validate_all(
-            plugins_root=orchestrator.OUTPUT_ROOT,
+            plugins_root=anchors.plugins,
+            repository_root=anchors.repository,
             schemas_dir=orchestrator.SCHEMAS_DIR,
             configs={
                 name: _backend_to_platform_config(BackendRegistry.get(name))
@@ -196,7 +198,7 @@ def smoke_test(name: str | None) -> None:
     Each backend that supports smoke testing implements a `smoke_test(ctx)`
     method on its class; backends without one print 'skipped'."""
     m = orchestrator._load_manifest()
-    out_root = orchestrator.OUTPUT_ROOT
+    anchors = orchestrator.default_anchors()
     targets = _all_or_one(name)
 
     failed: list[str] = []
@@ -208,8 +210,8 @@ def smoke_test(name: str | None) -> None:
         backend = BackendCls()
         ctx = BuildContext(
             manifest=m,
-            out=out_root / BackendCls.OUTPUT_DIR,
-            plugins_root=out_root,
+            out=resolve_output_dir(BackendCls, anchors),
+            plugins_root=anchors.plugins,
             base_dir=orchestrator.BASE_DIR,
             schemas_dir=orchestrator.SCHEMAS_DIR,
         )
@@ -399,6 +401,7 @@ def _backend_to_platform_config(BackendCls):
     from types import SimpleNamespace
     return SimpleNamespace(
         output_dir=BackendCls.OUTPUT_DIR,
+        output_anchor=BackendCls.OUTPUT_ANCHOR,
         plugin_manifest=BackendCls.PLUGIN_MANIFEST,
         extension_manifest=BackendCls.EXTENSION_MANIFEST,
         marketplace=BackendCls.MARKETPLACE,
