@@ -61,6 +61,11 @@
       "path": "ash-agent-plugins/agentic-coding/transpiler/tools/zod_to_json_schema.mjs",
       "kind": "no-harness",
       "reason": "A node helper shelled out to by the Python transpiler's tools/refresh_schemas.py; its tree is a Python package (pyproject.toml, uv.lock) with no package.json, tsconfig, jest or vitest config, so no JS harness exists to measure it."
+    },
+    {
+      "path": ".github/scripts/assert-actions-pinned.mjs",
+      "kind": "no-harness",
+      "reason": "A CI gate invoked as `node .github/scripts/...` from ash-actions-pinned.yml. Neither .github/scripts nor .github holds a package.json, tsconfig, jest or vitest config, so no JS harness exists to measure it. It is not untested: the gate is exercised by mutation in CI's own terms -- reverting a pinned ref to a tag makes it exit 1 -- and its failure paths are the reason the pull request that added it was reviewable."
     }
   ]
 }
