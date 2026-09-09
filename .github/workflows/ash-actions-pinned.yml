@@ -65,17 +65,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # TEMPORARY EXEMPTION -- REMOVE THE FLAG WHEN THE OTHER CHANGE MERGES
-      #
-      # ash-agent-plugins-drift.yml has its two refs pinned in a separate in-flight
-      # pull request. Pinning them here as well would put two changes in conflict
-      # over the same two lines, so this run tolerates them instead.
-      #
-      # This does not rot quietly. The script fails when an --allow-unpinned file
-      # has no unpinned refs left, so the moment that other change lands, this gate
-      # goes red and stays red until the flag below is deleted. Deleting it is the
-      # whole follow-up.
+      # No exemptions. ash-agent-plugins-drift.yml carried the only one, because its
+      # two refs were being pinned in a separate change at the same time; that change
+      # has since landed with them pinned, so the flag is gone. The gate forced this
+      # follow-up rather than waiting to be remembered: it fails on an
+      # --allow-unpinned file that has no unpinned refs left, so the carve-out went
+      # red the moment it stopped being true.
       - name: Assert no action is referenced by a mutable tag or branch
-        run: |
-          node .github/scripts/assert-actions-pinned.mjs \
-            --allow-unpinned .github/workflows/ash-agent-plugins-drift.yml
+        run: node .github/scripts/assert-actions-pinned.mjs
