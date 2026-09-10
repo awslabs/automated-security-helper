@@ -72,9 +72,13 @@ independent shapes answer yes, and each catches a real vendoring mechanism:
 
 WHAT IS DELIBERATELY ALLOWED
 ----------------------------
-automated_security_helper/assets/ ships and must keep shipping -- 64 KB across
-12 tracked files, all ASH-authored. Two parts of it look like cfn-nag at a
-glance and are not:
+automated_security_helper/assets/ ships and must keep shipping: 12 tracked files
+totalling 9,198 bytes in the built wheel, all ASH-authored, plus two the build
+hook generates (assets/Dockerfile and assets/ASH_INSTALLED_REVISION, 13,161 bytes
+together). Measured from the wheel rather than with `du`, which reports 84K for
+that directory because it counts 4K disk blocks, not content.
+
+Two parts of it look like cfn-nag at a glance and are not:
 
   assets/Gemfile declares `gem "cfn-nag", "0.8.10"` and assets/Gemfile.lock
   resolves that declaration to a dependency graph naming cfn-nag, cfn-model and
