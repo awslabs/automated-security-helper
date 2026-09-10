@@ -169,9 +169,13 @@
     `ash.ghas.sarif` has no `invocations` key at all. A pipeline that uploads
     `ash.sarif` itself rather than `ash.ghas.sarif` will surface them.
   - A cdk-nag rule that could not be evaluated is now `kind: notApplicable` at
-    `level: none`, which ASH maps to INFO. It was previously reported as a
-    finding at the rule's declared severity, so some scans will show fewer
-    critical cdk-nag findings and gain the same number of informational ones.
+    `level: none`, which ASH maps to INFO. It was previously reported as a finding
+    at the rule's declared severity. Measured on this repository, the aggregated
+    SARIF holds the same 453 results before and after, of which 15 move to
+    `notApplicable`/`none` — 10 that were `error`/`fail` and 5 that were
+    `warning`/`informational`. The actionable counts do not move here because those
+    15 were already suppressed; on a tree where they are not, the scanner's
+    high-severity count drops by however many of its rules raised.
 
 ## v3.7.0 (2026-08-27)
 
