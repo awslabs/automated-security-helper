@@ -275,12 +275,12 @@ def validate_structural_sanity(plugins_root: Path) -> list[Error]:
             try:
                 json.loads(content)
             except json.JSONDecodeError as e:
-                errors.append(err(rel, f"invalid JSON: {e}", "Edit transpiler/_base/ or the backend's class vars under transpiler/backends/; the transpiler emits malformed JSON."))
+                errors.append(err(rel, f"invalid JSON: {e}", "Edit transpiler/_base/ or the backend's class vars; the transpiler emits malformed JSON."))
         elif path.suffix in {".yaml", ".yml"}:
             try:
                 yaml.safe_load(content)
             except yaml.YAMLError as e:
-                errors.append(err(rel, f"invalid YAML: {e}", "Edit transpiler/_base/ or the backend's class vars under transpiler/backends/; the transpiler emits malformed YAML."))
+                errors.append(err(rel, f"invalid YAML: {e}", "Edit transpiler/_base/ or the backend's class vars; the transpiler emits malformed YAML."))
         elif path.suffix in {".md", ".mdc"} and content.startswith("---"):
             try:
                 fm, _ = parse_frontmatter(content)
