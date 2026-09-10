@@ -357,6 +357,39 @@ class TestTriStateSurvivesTheGate:
         )
         assert _listed([row]) == []
 
+    @pytest.mark.parametrize("bad_failed", [None, "4", 4.0, True])
+    def test_a_valid_attempt_count_with_an_unusable_failure_count(self, bad_failed):
+        """Each counter is guarded independently, and this is the second guard.
+
+        Added because it was missing: the branch that rejects an unusable
+        ``targets_failed`` was the one uncovered line in the new code after the
+        first full-suite run. Every other case in this class is rejected on the
+        ATTEMPT count and returns before the failure count is ever examined, so
+        the second guard was dead as far as the tests were concerned -- present,
+        plausible, and never executed.
+
+        The state is reachable rather than theoretical: a producer that writes an
+        attempt count and then a malformed failure count -- null, a string, a
+        float, a bool -- lands exactly here. ``4.0`` is included because a float
+        is not an ``int`` and would otherwise flow into the comparison; ``True``
+        because bool is an ``int`` subclass and must be rejected on this counter
+        for the same reason it is on the other one.
+
+        A shortfall needs both numbers to be trustworthy, so an unusable failure
+        count yields no claim rather than a guess.
+        """
+        row = SimpleNamespace(
+            scanner_name="cdk-nag",
+            status=ScannerStatus.PASSED.value,
+            targets_attempted=10,
+            targets_failed=bad_failed,
+        )
+
+        assert _listed([row]) == [], (
+            f"targets_failed={bad_failed!r} is not a usable count, so there is no "
+            f"honest shortfall to report"
+        )
+
 
 class TestTotalLossKeepsItsOldReport:
     """ERROR and MISSING have to read exactly as they did, message included."""
