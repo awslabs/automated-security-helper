@@ -60,6 +60,106 @@ _CDK_EXTRA_FALLBACK_REQUIREMENTS: List[str] = [
     "constructs>=10.8,<11.0.0",
 ]
 
+# Where cdk-nag documents its own rules, and where the CDK documents everything else that can
+# write into the same validation report.
+_CDK_NAG_RULES_URL = "https://github.com/cdklabs/cdk-nag/blob/main/RULES.md"
+_CDK_POLICY_VALIDATION_URL = (
+    "https://docs.aws.amazon.com/cdk/v2/guide/policy-validation-synthesis.html"
+)
+
+
+def _rule_is_from_pack(rule_id: str, pack: str) -> bool:
+    """Whether ``rule_id`` was minted by cdk-nag's ``applyRule`` for ``pack``.
+
+    A derived test rather than a hardcoded list of pack names. cdk-nag builds every rule id as
+    ``f"{packName}-{ruleSuffix}"`` -- 3.0.2's ``applyRule`` does so literally, and
+    :func:`~automated_security_helper.utils.cdk_nag_wrapper._rule_id_parts` already relies on
+    the same construction from the other end. So ``AwsSolutions`` owns ``AwsSolutions-S1``,
+    while ``CloudFormation Validate`` demonstrably does not own ``F3017``.
+
+    An allowlist of cdk-nag pack names was the alternative and was rejected: it goes stale the
+    moment cdk-nag adds a pack, and the failure is silent -- a new pack's rules would start
+    being treated as foreign and lose their documentation link, which is a quieter version of
+    the defect this function exists to fix. A denylist naming only the CDK's built-in plugin is
+    worse still, because it is wrong for every third-party plugin a user registers.
+    """
+    return bool(pack) and rule_id.startswith(f"{pack}-")
+
+
+def _rule_help_uri(rule_id: str, pack: str, rule_level: str) -> str:
+    """The document that actually describes ``rule_id``.
+
+    Every rule used to be pointed at cdk-nag's RULES.md, which is right for a cdk-nag rule and
+    wrong for anything else in the report. From aws-cdk-lib 2.262.0 the CDK registers
+    ``CloudFormationValidatePlugin`` on every app unconditionally, so a scan of a template with
+    a placeholder KMS key identifier yields ``F3017`` findings whose help link opened a page
+    that does not mention ``F3017`` -- and, more to the point, does not describe how to
+    acknowledge one.
+
+    The CDK's policy-validation guide is the correct destination for those: it documents the
+    plugin, the shared validation report, and the ``Validations.of(scope).acknowledge()``
+    mechanism that governs a CloudFormation Validate finding. It is also the right destination
+    for a third-party ``IPolicyValidationPlugin``, since that guide is what defines the protocol
+    such a plugin implements.
+
+    A finding with NO pack recorded keeps the previous destination, and that is deliberately
+    narrow. Redirecting only findings positively known to be foreign means the change cannot
+    move the help link on anything it has not identified. An absent pack is not evidence of a
+    foreign producer -- inside this scanner's own report the likeliest producer is cdk-nag, the
+    level-derived anchor degrades to the generic ``#rules`` index which claims nothing about a
+    specific rule, and guessing "foreign" from missing data would send genuine cdk-nag rules
+    away from their own documentation. That is the same misattribution in the other direction.
+    """
+    if not pack or _rule_is_from_pack(rule_id, pack):
+        return f"{_CDK_NAG_RULES_URL}#{str(rule_level).lower()}s"
+    return _CDK_POLICY_VALIDATION_URL
+
+
+def _reporting_descriptor_for(
+    result: Result, tool_name: str, tool_type: str
+) -> ReportingDescriptor:
+    """Build the SARIF rule descriptor for one cdk-nag-path finding.
+
+    Extracted to module level for the same reason ``_build_nag_pack`` and ``_level_and_kind``
+    were: inline in ``scan()`` it could only be exercised by driving a full synthesis, and
+    nothing in the suite did that. Two of its three defects were invisible for exactly that
+    reason.
+
+    ``tags`` reads the result's own property bag. It used to read ``finding_props["tags"]``,
+    and ``finding_props`` is ``_NagFinding.as_dict()``, which has no ``tags`` key -- so that
+    lookup returned its ``[]`` default every single time. It looked like it forwarded the
+    finding's tags and forwarded nothing, which is why the pack name never reached the rule
+    even though the wrapper had been putting it on the result all along.
+
+    ``pack`` is also written as a labelled property. The pack is present in ``tags`` too, but
+    only as one unlabelled string among nine, so a consumer cannot tell it apart from the
+    resource id or the resource type sitting beside it; a named field can be read.
+    """
+    finding_props = (result.properties.model_extra or {}).get("cdk_nag_finding", {})
+    pack = str(finding_props.get("pack", "") or "")
+    rule_level = str(finding_props.get("rule_level", "rule"))
+
+    return ReportingDescriptor(
+        id=result.ruleId,
+        shortDescription=MultiformatMessageString(text=result.message.root.text),
+        fullDescription=MultiformatMessageString(
+            text=result.message.root.text,
+            markdown=result.message.root.markdown,
+        ),
+        helpUri=_rule_help_uri(result.ruleId or "", pack, rule_level),
+        properties=PropertyBag(
+            pack=pack,
+            rule_level=finding_props.get("rule_level", "unknown"),
+            rule_info=finding_props.get("rule_info", "unknown"),
+            tags=list(result.properties.tags or [])
+            + [
+                f"pack::{pack}" if pack else "pack::unknown",
+                f"tool_name::{tool_name}",
+                f"tool_type::{tool_type}",
+            ],
+        ),
+    )
+
 # Matches the ``extra == "cdk"`` half of a PEP 508 marker. importlib.metadata
 # renders the marker with single quotes while pyproject.toml and pip emit double
 # quotes, so neither style can be assumed.
@@ -576,29 +676,11 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                 continue
             rule_map[result.ruleId] = result
 
-            finding_props = result.properties.model_extra.get("cdk_nag_finding", {})
-
             rules.append(
-                ReportingDescriptor(
-                    id=result.ruleId,
-                    shortDescription=MultiformatMessageString(
-                        text=result.message.root.text,
-                    ),
-                    fullDescription=MultiformatMessageString(
-                        text=result.message.root.text,
-                        markdown=result.message.root.markdown,
-                    ),
-                    helpUri=f"https://github.com/cdklabs/cdk-nag/blob/main/RULES.md#{str(finding_props.get('rule_level', 'rule')).lower()}s",
-                    properties=PropertyBag(
-                        rule_level=finding_props.get("rule_level", "unknown"),
-                        rule_info=finding_props.get("rule_info", "unknown"),
-                        tags=finding_props.get("tags", [])
-                        + [
-                            f"tool_name::{self.config.name}",
-                            f"tool_type::{self.tool_type or 'UNKNOWN'}",
-                        ],
-                    ),
-                    # help,
+                _reporting_descriptor_for(
+                    result,
+                    tool_name=self.config.name,
+                    tool_type=self.tool_type or "UNKNOWN",
                 )
             )
         tool = Tool(

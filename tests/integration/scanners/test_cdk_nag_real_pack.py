@@ -59,6 +59,42 @@ def non_compliant_template(tmp_path: Path) -> Path:
     return path
 
 
+# A template that trips the CDK's OWN validation plugin as well as a nag pack. From
+# aws-cdk-lib 2.262.0 the CDK registers CloudFormationValidatePlugin unconditionally, so its
+# findings arrive in the same validation-report.json as cdk-nag's -- and a placeholder KMS key
+# identifier is the cheapest way to make it produce one (rule F3017). The bucket is also
+# non-compliant for AwsSolutions, which is load-bearing: both packs must appear in one report
+# or the test cannot show the two being told apart.
+FOREIGN_PLUGIN_TEMPLATE = {
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "Fixture that trips both a nag pack and the CDK's own validation plugin",
+    "Resources": {
+        "PlaceholderKeyBucket": {
+            "Type": "AWS::S3::Bucket",
+            "Properties": {
+                "BucketName": "ash-cdk-nag-foreign-plugin-fixture",
+                "BucketEncryption": {
+                    "ServerSideEncryptionConfiguration": [
+                        {
+                            "ServerSideEncryptionByDefault": {
+                                "SSEAlgorithm": "aws:kms",
+                                "KMSMasterKeyID": "my-kms-key",
+                            }
+                        }
+                    ]
+                },
+            },
+        }
+    },
+}
+
+@pytest.fixture()
+def foreign_plugin_template(tmp_path: Path) -> Path:
+    path = tmp_path / "foreign_plugin.template.json"
+    path.write_text(json.dumps(FOREIGN_PLUGIN_TEMPLATE, indent=2))
+    return path
+
+
 class TestRealNagPack:
     def test_pack_constructs_against_installed_cdk_nag(self):
         """The wrapper's own construction call must work on the installed major.
@@ -143,4 +179,120 @@ class TestRealNagPack:
         assert response is None, (
             "wrapper returned a populated response for a non-CloudFormation input; an "
             "empty-but-successful result is what makes a total failure look clean"
+        )
+
+
+class TestReportAttribution:
+    """Which tool produced a finding, measured against the real report rather than a fixture.
+
+    ``validation-report.json`` belongs to CDK, not to cdk-nag: it is the shared policy-validation
+    report, every registered ``IPolicyValidationPlugin`` writes into it, and from aws-cdk-lib
+    2.262.0 the CDK registers ``CloudFormationValidatePlugin`` on every app whether or not the
+    caller asked for it. So "the report came out of a cdk-nag run" stopped implying "cdk-nag
+    produced these rules", and the equivalent unit tests in
+    ``tests/unit/utils/test_cdk_nag_report_fidelity.py`` assert against a hand-written report
+    that could drift away from what the installed libraries actually emit. This class is what
+    stops that drift.
+    """
+
+    def test_a_cdk_plugin_that_is_not_a_nag_pack_is_named_as_its_own_pack(
+        self, foreign_plugin_template: Path, tmp_path: Path
+    ):
+        """The CDK's built-in plugin must be attributed to itself, not to cdk-nag.
+
+        The pack assertion is on the finding record. The per-pack mapping key is also correct
+        and is not sufficient on its own: the scanner binds that key to a loop variable, logs
+        it, and extends one flat result list, so it does not reach SARIF.
+        """
+        _require_cdk_nag()
+        from automated_security_helper.utils.cdk_nag_wrapper import (
+            run_cdk_nag_against_cfn_template,
+        )
+
+        response = run_cdk_nag_against_cfn_template(
+            template_path=foreign_plugin_template,
+            nag_packs=["AwsSolutionsChecks"],
+            outdir=tmp_path / "cdk-out-foreign",
+        )
+
+        assert response is not None and response.failure is None
+        packs = set(response.results)
+        assert "CloudFormation Validate" in packs, (
+            "the CDK's own validation plugin did not report; this fixture no longer "
+            f"exercises the defect. Packs present: {sorted(packs)}"
+        )
+        assert "AwsSolutions" in packs, (
+            f"the nag pack did not report, so nothing is being told apart. Packs: {sorted(packs)}"
+        )
+
+        for pack_name, findings in response.results.items():
+            assert findings, f"pack {pack_name!r} reported no findings"
+            for finding in findings:
+                record = (finding.properties.model_extra or {})["cdk_nag_finding"]
+                assert record["pack"] == pack_name, (
+                    f"{finding.ruleId} came from {pack_name!r} but records its pack as "
+                    f"{record['pack']!r}"
+                )
+
+        # The rule that made this defect visible in the first place, named so the fixture
+        # cannot quietly stop producing it.
+        foreign_rule_ids = {
+            f.ruleId for f in response.results["CloudFormation Validate"]
+        }
+        assert "F3017" in foreign_rule_ids, (
+            f"expected the placeholder-KMS-key rule F3017, got {sorted(foreign_rule_ids)}"
+        )
+
+    def test_the_scanner_documents_a_foreign_rule_against_the_right_guide(
+        self, test_plugin_context, foreign_plugin_template: Path
+    ):
+        """The rule descriptor a consumer reads, built by the real scanner.
+
+        ``helpUri`` was cdk-nag's RULES.md for every rule in the report, including the CDK's
+        own. Following it for ``F3017`` reaches a page that neither documents the rule nor
+        describes how to acknowledge it. The exact destination is named rather than "not the
+        cdk-nag URL", which would also be satisfied by an empty value.
+
+        This is the only test in this class that goes through ``CdkNagScanner.scan`` rather than
+        the wrapper, and it is what covers the reporting half: the rule descriptor is assembled
+        by the scanner, from a per-pack mapping it has already flattened.
+        """
+        _require_cdk_nag()
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
+            CdkNagScanner,
+            CdkNagScannerConfig,
+        )
+
+        source_dir = Path(test_plugin_context.source_dir)
+        source_dir.mkdir(parents=True, exist_ok=True)
+        (source_dir / "foreign_plugin.template.json").write_text(
+            foreign_plugin_template.read_text()
+        )
+
+        scanner = CdkNagScanner(
+            context=test_plugin_context, config=CdkNagScannerConfig()
+        )
+        report = scanner.scan(target=source_dir, target_type="source")
+        assert report is not False, "scanner refused to run"
+
+        rules = {r.id: r for r in report.runs[0].tool.driver.rules or []}
+        assert "F3017" in rules, (
+            f"F3017 produced no rule descriptor; got {sorted(rules)}"
+        )
+
+        foreign = rules["F3017"]
+        assert foreign.properties.model_extra["pack"] == "CloudFormation Validate"
+        assert "pack::CloudFormation Validate" in foreign.properties.tags
+        assert (
+            str(foreign.helpUri)
+            == "https://docs.aws.amazon.com/cdk/v2/guide/policy-validation-synthesis.html"
+        )
+
+        # The control: a genuine cdk-nag rule from the same scan keeps pointing at cdk-nag.
+        nag_rule_ids = [rid for rid in rules if rid.startswith("AwsSolutions-")]
+        assert nag_rule_ids, f"no cdk-nag rule in the same report; got {sorted(rules)}"
+        nag_rule = rules[nag_rule_ids[0]]
+        assert nag_rule.properties.model_extra["pack"] == "AwsSolutions"
+        assert str(nag_rule.helpUri).startswith(
+            "https://github.com/cdklabs/cdk-nag/blob/main/RULES.md#"
         )
