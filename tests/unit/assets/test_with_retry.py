@@ -85,11 +85,14 @@ class TestPipedFailuresAreDetected:
     def test_failing_pipe_is_actually_retried(self):
         """Detecting the failure is only useful if the retry then happens.
 
-        Three messages, not two: the script logs after every failed attempt,
-        including the final one, and only then prints "All N attempts failed".
+        Two messages for three attempts, because the message announces a retry
+        and only two of the three attempts have one after them. A zero here is
+        the original defect -- the loop exiting on its first pass -- and the
+        trailing third message is the separate defect pinned in
+        ``TestNothingFollowsTheFinalAttempt`` below.
         """
         result = run_with_retry("false | true")
-        assert result.stderr.count("failed, retrying in") == 3
+        assert result.stderr.count("failed, retrying in") == 2
 
     def test_curl_style_install_failure_is_caught(self, tmp_path):
         """The real pattern: an unreachable URL piped into a shell."""
@@ -193,10 +196,12 @@ class TestTheIntervalItActuallySleeps:
             "sleep was never invoked, so there is no backoff between attempts at "
             "all and every retry fires back-to-back"
         )
-        assert log.read_text().split() == ["5", "10", "20"], (
-            "the interval must double between attempts. ['5', '5', '5'] is a "
+        assert log.read_text().split() == ["5", "10"], (
+            "the interval must double between attempts. ['5', '5'] is a "
             "fixed delay wearing the name backoff, and an empty or partial list "
-            "means the arithmetic broke part-way through the loop"
+            "means the arithmetic broke part-way through the loop. A trailing "
+            "'20' is the sleep after the final attempt -- see "
+            "TestNothingFollowsTheFinalAttempt"
         )
 
 
@@ -314,6 +319,191 @@ class TestTheSummaryCountMatchesWhatRan:
         assert self._summary_count(result.stderr) is None, (
             "a config that was never accepted must not report attempts as failed"
         )
+
+
+def _run_recording_sleeps(
+    command: str, tmp_path, attempts: int | None = None, delay: int | None = None
+):
+    """Run the script with a recording ``sleep`` on PATH.
+
+    Returns ``(CompletedProcess, sleep_argv)`` where ``sleep_argv`` is the list of
+    arguments each ``sleep`` call received, in order. Omitting ``attempts`` or
+    ``delay`` unsets the corresponding override so the production default applies.
+    """
+    shim_dir, log = _sleep_recorder(tmp_path)
+    env = {**os.environ, "PATH": f"{shim_dir}{os.pathsep}{os.environ['PATH']}"}
+    env.pop("WITH_RETRY_MAX_ATTEMPTS", None)
+    env.pop("WITH_RETRY_DELAY", None)
+    if attempts is not None:
+        env["WITH_RETRY_MAX_ATTEMPTS"] = str(attempts)
+    if delay is not None:
+        env["WITH_RETRY_DELAY"] = str(delay)
+
+    result = subprocess.run(  # nosec B603 B607 — fixed script path, list args
+        ["bash", str(WITH_RETRY), command],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+        check=False,
+    )
+    return result, (log.read_text().split() if log.is_file() else [])
+
+
+class TestNothingFollowsTheFinalAttempt:
+    """The last attempt has no retry after it, so the wait after it is dead time.
+
+    The loop announced and took a backoff unconditionally, including after the
+    attempt that ended it. On the production schedule that reads:
+
+        Attempt 3/3 failed, retrying in 20s...
+        <20 real seconds pass>
+        All 3 attempts failed
+
+    Two adjacent lines contradicting each other, and 20 seconds of wall clock
+    burned per failing call site across every ``with-retry`` invocation in the
+    Dockerfile. Measured on this branch before the fix: three sleeps of 5, 10 and
+    20 for a command that fails every time; after: two, of 5 and 10.
+
+    Both halves are asserted separately, because either can be fixed while the
+    other stays broken: dropping only the message still burns the 20 seconds, and
+    dropping only the sleep still promises a retry that never comes. Neither
+    assertion measures wall clock -- the shim records what ``sleep`` was handed,
+    which does not flake low on a fast machine or high on a loaded one.
+    """
+
+    def test_no_sleep_follows_the_last_attempt(self, tmp_path):
+        """The Dockerfile passes no overrides, so this is the production schedule."""
+        result, slept = _run_recording_sleeps("false", tmp_path)
+
+        assert result.returncode == 1, result.stderr
+        assert slept == ["5", "10"], (
+            "three attempts have two gaps between them, so two sleeps. A "
+            "trailing '20' is the defect: the loop announced a retry, slept the "
+            "full 20 seconds, then left the loop and reported total failure"
+        )
+
+    def test_the_final_attempt_does_not_announce_a_retry(self, tmp_path):
+        result, _ = _run_recording_sleeps("false", tmp_path)
+
+        assert "Attempt 3/3 failed, retrying" not in result.stderr, (
+            "the final attempt claimed a retry was coming and then the very next "
+            "line said every attempt had failed"
+        )
+        assert result.stderr.count("failed, retrying in") == 2
+        assert "All 3 attempts failed" in result.stderr
+
+    def test_a_single_attempt_never_sleeps_at_all(self, tmp_path):
+        """max=1 is the degenerate case: no gaps, so nothing to wait for."""
+        result, slept = _run_recording_sleeps("false", tmp_path, attempts=1)
+
+        assert slept == [], (
+            "with one attempt there is no second attempt to wait for, yet the "
+            "old loop still slept the full delay before giving up"
+        )
+        assert "retrying" not in result.stderr
+        assert "All 1 attempts failed" in result.stderr
+
+    def test_the_gap_before_a_real_retry_is_still_announced_and_slept(self, tmp_path):
+        """Positive control: the guard must silence the last attempt, not the retry.
+
+        A guard that suppressed every message and every sleep would satisfy the
+        three assertions above and destroy the backoff this file exists to
+        provide.
+        """
+        result, slept = _run_recording_sleeps("false", tmp_path, attempts=2, delay=7)
+
+        assert slept == ["7"], "the gap between attempt 1 and attempt 2 must be slept"
+        assert "Attempt 1/2 failed, retrying in 7s..." in result.stderr
+        assert result.stderr.count("failed, retrying in") == 1
+
+
+def _run_argv(*argv: str, attempts: int = 3, delay: int = 0):
+    """Invoke the script with an exact argument vector, including an empty one."""
+    env = {
+        **os.environ,
+        "WITH_RETRY_MAX_ATTEMPTS": str(attempts),
+        "WITH_RETRY_DELAY": str(delay),
+    }
+    return subprocess.run(  # nosec B603 B607 — fixed script path, list args, no shell
+        ["bash", str(WITH_RETRY), *argv],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+        check=False,
+    )
+
+
+class TestAnEmptyCommandIsRejectedRatherThanReportedAsSuccess:
+    """``bash -c ""`` exits 0, so an empty invocation looked like a clean run.
+
+    This is the mirror image of the ``max=0`` guard further up the script, and
+    the guard there states the reasoning exactly: a result "indistinguishable
+    from the command having been run and failed, when it was never run at all".
+    Flip the sign and it is worse, because a false *success* is not investigated.
+    Inside a Dockerfile
+
+        RUN with-retry "$SOME_ARG"
+
+    with ``SOME_ARG`` unset or renamed produces a RUN layer that does nothing and
+    exits 0, and the build dies several steps later at a missing binary -- the
+    exact failure mode this file's header describes for the pipefail bug.
+
+    An argument *count* check alone is not enough. A quoted expansion of an unset
+    variable still passes one argument, so ``$#`` is 1 and ``$*`` is empty; that
+    is the likelier of the two shapes in practice, and the reason the guard tests
+    the joined command rather than the count.
+    """
+
+    def test_no_arguments_at_all_exits_non_zero(self):
+        result = _run_argv()
+
+        assert result.returncode != 0, (
+            "with-retry with no command exited 0, reporting success for work it "
+            "never did and never could have done"
+        )
+        assert result.returncode == 2, result.stderr
+        assert "no command given" in result.stderr
+
+    def test_an_argument_that_expanded_to_nothing_is_also_rejected(self):
+        """The Dockerfile shape: ``with-retry "$SOME_ARG"`` with SOME_ARG unset."""
+        result = _run_argv("")
+
+        assert result.returncode == 2, result.stderr
+        assert "no command given" in result.stderr
+
+    def test_a_whitespace_only_command_is_rejected(self):
+        result = _run_argv("   ")
+
+        assert result.returncode == 2, result.stderr
+        assert "no command given" in result.stderr
+
+    def test_nothing_is_reported_as_attempted_when_no_command_was_given(self):
+        """Silence beats a count, the same way a rejected config makes no claim."""
+        result = _run_argv()
+
+        assert "attempts failed" not in result.stderr
+        assert "retrying" not in result.stderr
+
+    def test_a_real_command_is_still_run(self):
+        """Positive control. A guard that rejected everything would pass the four
+        assertions above and break all 13 ``with-retry`` invocations in the
+        Dockerfile at once, which is far worse than the bug it closed."""
+        assert _run_argv("true").returncode == 0
+
+    def test_a_real_command_that_fails_still_retries(self, tmp_path):
+        marker = tmp_path / "attempts"
+        result = _run_argv(f"printf x >> {marker}; false", attempts=3)
+
+        assert marker.read_text() == "xxx", "all three attempts must still run"
+        assert result.returncode == 1
+
+    def test_a_command_split_across_several_arguments_is_still_run(self, tmp_path):
+        """Callers pass one quoted string, but ``"$*"`` joins whatever it gets."""
+        marker = tmp_path / "written"
+        assert _run_argv("printf", "ok", ">", str(marker)).returncode == 0
+        assert marker.read_text() == "ok"
 
 
 def test_script_is_present_and_executable_source():

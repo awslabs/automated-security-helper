@@ -58,9 +58,42 @@ if [ "$max" -lt 1 ]; then
   exit 2
 fi
 
+# The same hazard as max=0 above with the sign flipped, which makes it worse: a
+# *success* indistinguishable from the command having been run and succeeded,
+# when it was never run at all. `bash -c ""` exits 0, so an empty command takes
+# the `&& exit 0` on the first pass of the loop below and this script reports a
+# clean run having done nothing.
+#
+# In a Dockerfile that means `RUN with-retry "$SOME_ARG"` with SOME_ARG unset or
+# renamed produces a layer that does nothing, exits 0, and lets the build die
+# several steps later at a missing binary -- the failure mode described at the
+# top of this file, arrived at from the other direction.
+#
+# Testing the joined command rather than `$#`: a quoted expansion of an unset
+# variable still passes one argument, so `$#` is 1 while `$*` is empty, and that
+# is the likelier of the two shapes. `case` for the same reason as above -- this
+# runs in the container build stage before most of the toolchain exists.
+case "$*" in
+  *[![:space:]]*) ;;
+  *)
+    echo "with-retry: no command given" >&2
+    exit 2
+    ;;
+esac
+
 while [ $attempt -le $max ]; do
   bash -o pipefail -c "$*" && exit 0
-  echo "Attempt $attempt/$max failed, retrying in ${delay}s..." >&2
-  sleep $delay; delay=$((delay * 2)); attempt=$((attempt + 1))
+  # Announce and take the backoff only when an attempt actually follows it.
+  # Unguarded, the final pass printed "Attempt 3/3 failed, retrying in 20s...",
+  # slept the full 20 seconds, left the loop, and then printed "All 3 attempts
+  # failed" -- two adjacent lines contradicting each other, and 20 seconds of
+  # dead wall clock on every failing invocation in the Dockerfile. The message
+  # and the sleep are guarded together because either one alone is still wrong:
+  # a silent 20-second pause, or a promised retry that never comes.
+  if [ "$attempt" -lt "$max" ]; then
+    echo "Attempt $attempt/$max failed, retrying in ${delay}s..." >&2
+    sleep $delay; delay=$((delay * 2))
+  fi
+  attempt=$((attempt + 1))
 done
 echo "All $max attempts failed" >&2; exit 1
