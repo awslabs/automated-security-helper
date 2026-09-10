@@ -291,15 +291,31 @@ describe('install modes', () => {
   });
 
   test('PIP pins the given git ref', () => {
+    // A commit, not a release tag, and the choice is load bearing twice over.
+    //
+    // This test only proves anything if the ref differs from the default one
+    // above, so naming the packaged version would make it pass whether or not
+    // `version` ever reached the buildspec. And a release tag here is
+    // indistinguishable, to anything reading the file as text, from an install
+    // command a user pastes: the tree-wide pin walk in
+    // tests/unit/test_agent_plugin_ash_version.py matches
+    // `automated-security-helper.git@v<semver>` wherever it appears and cannot
+    // tell a jest assertion from a real one, so a tag here either goes stale at
+    // the next release or costs that guard an exemption covering the whole
+    // file -- including the two live `@v3.7.0` pins it should keep watching.
+    // A commit is unambiguous, and it covers the third ref kind `version`
+    // documents; the default above already covers the tag case.
+    const commit = '0123456789abcdef0123456789abcdef01234567';
+
     const { template } = synthesizeWithStep({
       installMode: ASHInstallMode.PIP,
-      version: 'v3.6.0',
+      version: commit,
     });
 
     template.hasResourceProperties('AWS::CodeBuild::Project', {
       Source: Match.objectLike({
         BuildSpec: Match.stringLikeRegexp(
-          'git\\+https://github.com/awslabs/automated-security-helper.git@v3.6.0',
+          `git\\+https://github.com/awslabs/automated-security-helper.git@${commit}`,
         ),
       }),
     });
