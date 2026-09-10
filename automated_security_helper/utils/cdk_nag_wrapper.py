@@ -100,9 +100,17 @@ class _NagFinding:
     ``resource_id``, ``compliance``, ``exception_reason``, ``rule_level``, ``rule_info``) so
     the SARIF construction below is untouched by the v3 migration. ``NagReportLine`` itself is
     not used because v3 no longer ships the file-report schema it belonged to.
+
+    ``pack`` is the one field with no 2.x counterpart, and it exists because v3's report is not
+    cdk-nag's. See :func:`_violations_from_validation_report`: the file is CDK's shared
+    policy-validation report, every registered plugin writes into it, and from aws-cdk-lib
+    2.262.0 the CDK registers one of its own. So the plugin that produced a finding is no longer
+    implied by the file it came out of, and carrying it here is what lets it stay attributable
+    after the caller flattens the per-pack mapping into a single result list.
     """
 
     __slots__ = (
+        "pack",
         "rule_id",
         "resource_id",
         "compliance",
@@ -119,6 +127,7 @@ class _NagFinding:
         exception_reason: str,
         rule_level: str,
         rule_info: str,
+        pack: str = "",
     ) -> None:
         self.rule_id = rule_id
         self.resource_id = resource_id
@@ -126,6 +135,7 @@ class _NagFinding:
         self.exception_reason = exception_reason
         self.rule_level = rule_level
         self.rule_info = rule_info
+        self.pack = pack
 
     def as_dict(self) -> Dict[str, str]:
         """The raw finding record, attached to the SARIF result's property bag.
@@ -134,6 +144,7 @@ class _NagFinding:
         ``result.properties.model_extra["cdk_nag_finding"]`` and indexes it by these keys.
         """
         return {
+            "pack": self.pack,
             "rule_id": self.rule_id,
             "resource_id": self.resource_id,
             "compliance": self.compliance,
@@ -518,6 +529,14 @@ def _violations_from_validation_report(
                         exception_reason="N/A",
                         rule_level=rule_level,
                         rule_info=rule_info,
+                        # The plugin that produced this finding, kept per-row rather than
+                        # relying on the mapping key. The caller iterates
+                        # ``results.items()``, binds the key to a loop variable and extends
+                        # one flat list with the values, so the key does not survive into
+                        # SARIF -- and after aws-cdk-lib 2.262.0 the key is the only thing
+                        # that distinguishes a cdk-nag rule from a CloudFormation Validate
+                        # one.
+                        pack=pack_name,
                     )
                 )
 

@@ -62,19 +62,28 @@ def nag_result(
     text="The S3 Bucket has server access logs disabled.",
     rule_level="Error",
     tags=None,
+    pack="AwsSolutions",
 ):
-    """A Result shaped the way cdk_nag_wrapper emits one."""
+    """A Result shaped the way cdk_nag_wrapper emits one.
+
+    ``pack`` is part of that shape. The wrapper records which plugin produced each finding,
+    because ``validation-report.json`` is CDK's shared policy-validation report and from
+    aws-cdk-lib 2.262.0 the CDK's own ``CloudFormationValidatePlugin`` writes into it alongside
+    the nag packs. Leaving it out of this helper would make every test here describe a finding
+    the wrapper cannot emit, and the help-pointer tests below turn on it.
+    """
     return Result(
         ruleId=rule_id,
         level=Level.error,
         message=Message(root=Message1(text=text)),
         properties=PropertyBag(
             cdk_nag_finding={
+                "pack": pack,
                 "rule_id": rule_id,
                 "rule_level": rule_level,
                 "rule_info": text,
             },
-            tags=["aws", "cdk", "cdk-nag", rule_id] + (tags or []),
+            tags=["aws", "cdk", "cdk-nag", pack, rule_id] + (tags or []),
         ),
     )
 
@@ -634,25 +643,28 @@ def test_rule_carries_the_finding_text_and_tool_tags(
     )
 
 
-def test_rule_tags_do_not_include_the_findings_own_tags(
+def test_rule_tags_include_the_findings_own_tags(
     scanner, cdk_available, wrapper_double, template_in_work_dir
 ):
-    """Rule tags come out as only the two tool tags.
+    """Rule tags carry the finding's tags plus the pack and the two tool tags.
 
-    The rule builder reads tags from ``cdk_nag_finding``, but cdk_nag_wrapper
-    puts the finding's tags on ``properties.tags`` and its cdk_nag_finding dict
-    holds only rule_id/resource_id/compliance/exception_reason/rule_level/
-    rule_info. So ``finding_props.get("tags", [])`` is always empty in
-    production and the resource/pack/type tags never reach the rule. The
-    fixture here mirrors the wrapper's real dict shape so the assertion
-    reflects what ships.
+    This test used to assert the opposite, and the behaviour it described was a
+    defect rather than a decision: the rule builder read
+    ``finding_props.get("tags", [])`` out of ``cdk_nag_finding``, which is
+    ``_NagFinding.as_dict()`` and has no ``tags`` key at all. The lookup
+    returned its default on every finding ever scanned, so the resource, type
+    and pack tags the wrapper puts on ``properties.tags`` never reached the
+    rule -- the one place a consumer looks up what a rule is and who owns it.
+
+    The builder now reads the result's own property bag. Every tag is named
+    below rather than counted, because a count passes for the wrong reason as
+    soon as the tag list changes shape, and it was a count that let the empty
+    read look deliberate.
     """
     finding = nag_result(rule_id="AwsSolutions-S1")
     assert "tags" not in finding.properties.model_extra["cdk_nag_finding"], (
-        "fixture must match the wrapper's cdk_nag_finding shape"
-    )
-    assert "AwsSolutions-S1" in finding.properties.tags, (
-        "the finding does carry tags -- just not where the rule builder looks"
+        "fixture must match the wrapper's cdk_nag_finding shape: the tags live "
+        "on properties.tags, not inside the finding record"
     )
     wrapper_double.return_value = CdkNagWrapperResponse(
         results={"AwsSolutions": [finding]}
@@ -661,7 +673,12 @@ def test_rule_tags_do_not_include_the_findings_own_tags(
     report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     tags = report.runs[0].tool.driver.rules[0].properties.tags
-    assert len(tags) == 2, f"expected only the two tool tags, got {tags}"
+    assert {"aws", "cdk", "cdk-nag", "AwsSolutions", "AwsSolutions-S1"}.issubset(
+        set(tags)
+    ), f"the finding's own tags did not reach the rule; got {tags}"
+    assert "pack::AwsSolutions" in tags, (
+        f"the originating pack is not labelled on the rule; got {tags}"
+    )
     assert any(t.startswith("tool_name::") for t in tags)
     assert any(t.startswith("tool_type::") for t in tags)
 
