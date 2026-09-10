@@ -218,7 +218,11 @@ runs:
         fi
         REPORT_OUTPUT=$($REPORT_CMD)
         echo "$REPORT_OUTPUT"
-        ERROR_COUNT=$(echo "$REPORT_OUTPUT" | grep -c "ERROR" | head -1)
+        # `grep -c` prints 0 but exits 1 when nothing matches, and Actions runs
+        # `shell: bash` as `bash -e -o pipefail`, so the unguarded form failed
+        # this step in the good case: no errors at all. `|| true` keeps the count
+        # and drops the status. `head -1` was a no-op on a single stdin stream.
+        ERROR_COUNT=$(echo "$REPORT_OUTPUT" | grep -c "ERROR" || true)
         if [ "$ERROR_COUNT" -gt 1 ]; then
           echo "ERROR: Found $((ERROR_COUNT - 1)) plugin execution errors"
           exit 1
@@ -283,7 +287,11 @@ runs:
         echo "Checking for plugin execution errors..."
         REPORT_OUTPUT=$(ash report --format text)
         echo "$REPORT_OUTPUT"
-        ERROR_COUNT=$(echo "$REPORT_OUTPUT" | grep -c "ERROR" | head -1)
+        # `grep -c` prints 0 but exits 1 when nothing matches, and Actions runs
+        # `shell: bash` as `bash -e -o pipefail`, so the unguarded form failed
+        # this step in the good case: no errors at all. `|| true` keeps the count
+        # and drops the status. `head -1` was a no-op on a single stdin stream.
+        ERROR_COUNT=$(echo "$REPORT_OUTPUT" | grep -c "ERROR" || true)
         if [ "$ERROR_COUNT" -gt 1 ]; then
           echo "ERROR: Found $((ERROR_COUNT - 1)) plugin execution errors"
           exit 1
@@ -354,7 +362,11 @@ runs:
         echo "Checking for plugin execution errors..."
         REPORT_OUTPUT=$(./ash report --format text)
         echo "$REPORT_OUTPUT"
-        ERROR_COUNT=$(echo "$REPORT_OUTPUT" | grep -c "ERROR" | head -1)
+        # `grep -c` prints 0 but exits 1 when nothing matches, and Actions runs
+        # `shell: bash` as `bash -e -o pipefail`, so the unguarded form failed
+        # this step in the good case: no errors at all. `|| true` keeps the count
+        # and drops the status. `head -1` was a no-op on a single stdin stream.
+        ERROR_COUNT=$(echo "$REPORT_OUTPUT" | grep -c "ERROR" || true)
         if [ "$ERROR_COUNT" -gt 1 ]; then
           echo "ERROR: Found $((ERROR_COUNT - 1)) plugin execution errors"
           exit 1
