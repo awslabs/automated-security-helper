@@ -17,9 +17,15 @@ from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Invocation,
+    Level,
+    Message,
+    Message1,
     MultiformatMessageString,
+    Notification,
     PropertyBag,
     ReportingDescriptor,
+    ReportingDescriptorReference,
+    ReportingDescriptorReference3,
     Result,
     Run,
     SarifReport,
@@ -98,8 +104,8 @@ def _rule_help_uri(rule_id: str, pack: str, rule_level: str) -> str:
 
     The CDK's policy-validation guide is the correct destination for those: it documents the
     plugin, the shared validation report, and the ``Validations.of(scope).acknowledge()``
-    mechanism that governs a CloudFormation Validate finding. It is also the right destination
-    for a third-party ``IPolicyValidationPlugin``, since that guide is what defines the protocol
+    mechanism that governs a CloudFormation Validate finding. It is also the right fallback for
+    a third-party ``IPolicyValidationPlugin``, since that guide is what defines the protocol
     such a plugin implements.
 
     A finding with NO pack recorded keeps the previous destination, and that is deliberately
@@ -113,6 +119,71 @@ def _rule_help_uri(rule_id: str, pack: str, rule_level: str) -> str:
     if not pack or _rule_is_from_pack(rule_id, pack):
         return f"{_CDK_NAG_RULES_URL}#{str(rule_level).lower()}s"
     return _CDK_POLICY_VALIDATION_URL
+
+
+def _unevaluated_rule_notifications(
+    results: list[Result],
+) -> list[Notification]:
+    """One SARIF notification per rule that could not be evaluated.
+
+    WHY THE RESULT ALONE IS NOT ENOUGH
+    ----------------------------------
+    A ``notApplicable`` result says "this one rule reached no verdict on this one resource",
+    and that is true but easy to miss: it sits in the same results array as the findings, at a
+    severity of ``none``, and most report surfaces sort or filter by severity. The fact a reader
+    needs is coarser -- "part of this scan did not run" -- and it belongs where a reader looks
+    for facts about the run.
+
+    SARIF has exactly that place, and the schema says so in its own words. ``invocation``'s
+    ``toolExecutionNotifications`` is "A list of runtime conditions detected by the tool during
+    the analysis", and ``notification.associatedRule`` is "A reference used to locate the rule
+    descriptor associated with this notification". A rule raising mid-evaluation is a runtime
+    condition, and the rule it happened to is the thing to associate it with. This is the
+    representation SARIF already defines for the case, so it is used rather than a bespoke
+    property.
+
+    ``level=error`` rather than ``warning``. For a security scanner, a rule that silently did
+    not run is the more serious of the two facts it can report -- a violation at least tells you
+    what to fix. ``warning`` is the field's default, so this is a deliberate override.
+
+    Deduplicated by rule id. One rule that cannot resolve a property will raise for every
+    construct that shares the shape, and the run-level statement is about the rule, not about
+    each occurrence -- the per-resource detail is already carried by the results themselves.
+    """
+    from automated_security_helper.utils.cdk_nag_wrapper import NOT_EVALUATED
+
+    notifications: list[Notification] = []
+    seen: set[str] = set()
+    for result in results:
+        finding_props = (result.properties.model_extra or {}).get("cdk_nag_finding", {})
+        if finding_props.get("compliance") != NOT_EVALUATED:
+            continue
+        rule_id = result.ruleId or ""
+        if rule_id in seen:
+            continue
+        seen.add(rule_id)
+        pack = str(finding_props.get("pack", "") or "unknown")
+        notifications.append(
+            Notification(
+                level=Level.error,
+                message=Message(
+                    root=Message1(
+                        text=(
+                            f"Rule {rule_id} from pack '{pack}' could not be evaluated, so "
+                            "this scan reports nothing about compliance with it. "
+                            f"{finding_props.get('rule_info', '')}".strip()
+                        )
+                    )
+                ),
+                associatedRule=ReportingDescriptorReference(
+                    # The id-bearing variant. ReportingDescriptorReference is a union whose
+                    # other two members require an index or a guid, neither of which exists
+                    # here -- the rule is identified by the id cdk-nag reported it under.
+                    root=ReportingDescriptorReference3(id=rule_id)
+                ),
+            )
+        )
+    return notifications
 
 
 def _reporting_descriptor_for(
@@ -159,6 +230,7 @@ def _reporting_descriptor_for(
             ],
         ),
     )
+
 
 # Matches the ``extra == "cdk"`` half of a PEP 508 marker. importlib.metadata
 # renders the marker with single quotes while pyproject.toml and pip emit double
@@ -717,6 +789,13 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                             executionSuccessful=scan_succeeded,
                             exitCode=0 if scan_succeeded else 1,
                             exitCodeDescription="\n".join(self.errors),
+                            # Rules cdk-nag could not evaluate, reported as conditions of the
+                            # run rather than only as individual results. A rule that did not
+                            # run is a hole in this scan's coverage, and coverage is a property
+                            # of the run -- see _unevaluated_rule_notifications.
+                            toolExecutionNotifications=_unevaluated_rule_notifications(
+                                sarif_results
+                            ),
                             workingDirectory=ArtifactLocation(
                                 uri=get_shortest_name(input=self.context.source_dir),
                             ),
