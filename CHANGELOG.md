@@ -44,6 +44,34 @@
 - [1.0.1-e-10Jan2023](#101-e-10jan2023)
 
 
+## Unreleased
+
+### Behavior changes
+
+- **`--fail-on-incomplete-scanners` now also fails a scan that lost only part of
+  its input.** The flag selected on scanner status, and a scanner that failed on
+  some of its targets keeps the status the severity gate gives it — normally
+  `PASSED` — because `determine_status` returns `ERROR` only once
+  `targets_failed >= targets_attempted`. The flag therefore reported total
+  coverage loss and stayed silent on partial loss, which is the more common case
+  and the one operators turn it on to catch.
+
+  **This can turn an existing exit 0 into an exit 1 with no change to your own
+  code.** It affects only runs that pass `--fail-on-incomplete-scanners` (or set
+  `fail_on_incomplete_scanners: true`); the default path is unchanged. On this
+  repository's own tree the flag now exits 1, because cdk-nag attempts 10 targets
+  and cannot evaluate 4 of them.
+
+  A scanner that reports no target counts at all is unaffected — absent counters
+  mean the scanner does not track targets, not that it lost them, so the nine
+  scanners in that state cannot trip the gate. Scanner statuses themselves are
+  unchanged, so no report or summary table reads differently.
+
+  To restore the previous behavior, drop the flag (or set
+  `fail_on_incomplete_scanners: false`) to accept a partial scan. To keep the
+  flag and clear the failure, fix or exclude the targets the scanner could not
+  read; the failure message names each scanner with the counts.
+
 ## v3.7.0 (2026-08-27)
 
 ### Feat

@@ -57,6 +57,7 @@ if TYPE_CHECKING:
 # ScanOptions — bundles all 40+ parameters; eliminates 7 None-rebinding stanzas
 # ---------------------------------------------------------------------------
 
+
 class ScanOptions(BaseModel):
     """All parameters for a single run_ash_scan invocation."""
 
@@ -140,9 +141,15 @@ class ScanOptions(BaseModel):
     def _coerce_absolute_path(cls, v):
         return Path(v).absolute()
 
-    @field_validator("scanners", "excluded_scanners", "output_formats",
-                     "config_overrides", "custom_build_arg", "ash_plugin_modules",
-                     mode="before")
+    @field_validator(
+        "scanners",
+        "excluded_scanners",
+        "output_formats",
+        "config_overrides",
+        "custom_build_arg",
+        "ash_plugin_modules",
+        mode="before",
+    )
     @classmethod
     def _none_to_empty_list(cls, v):
         return v if v is not None else []
@@ -185,15 +192,89 @@ _INCOMPLETE_SCANNER_STATUSES = frozenset(
 )
 
 
+def _partial_coverage(metric) -> tuple[int, int] | None:
+    """``(attempted, failed)`` when *metric* lost some of its input, else None.
+
+    The tri-state on ``targets_attempted`` is the whole content of this function.
+    ``None`` means the scanner does not track per-target outcomes and is making no
+    claim -- bandit, checkov, semgrep, grype, syft, detect-secrets, opengrep,
+    cfn-nag and npm-audit are all in that state. Reading absence as "attempted 0,
+    therefore lost everything" would fail every scan on every repository the
+    moment the flag was turned on, which is the inverse of the defect being fixed
+    here.
+
+    Both counters are type-checked rather than trusted, matching what
+    ``unified_metrics.target_counts`` already does to the serialized counters it
+    reads. Two reasons, one of them load-bearing:
+
+    * ``bool`` is an ``int`` subclass, so ``True`` would otherwise read as one
+      attempted target and invent coverage that was never claimed.
+    * This function is reached through whatever ``get_unified_scanner_metrics``
+      returns, and the sibling test module patches that with MagicMocks whose
+      every attribute is present and truthy. Without the check, a PASSED bandit
+      built as a MagicMock would start reporting as a coverage failure and
+      ``test_helper_lists_only_incomplete_scanners_with_statuses`` would break --
+      a test asserting the correct thing, broken by the gate reading a mock's
+      auto-attribute as a count.
+
+    A failure count with no attempt count is a producer bug, not a third state:
+    there is no honest denominator to print, so it is not reported rather than
+    rendered as "3 of None".
+    """
+    attempted = getattr(metric, "targets_attempted", None)
+    failed = getattr(metric, "targets_failed", None)
+    if isinstance(attempted, bool) or not isinstance(attempted, int):
+        return None
+    if isinstance(failed, bool) or not isinstance(failed, int):
+        return None
+    if failed <= 0:
+        return None
+    return attempted, failed
+
+
 def incomplete_scanners(
     results: Optional[AshAggregatedResults],
 ) -> List[tuple[str, str]]:
     """(name, status) for every scanner that was selected and did not complete.
 
+    "Did not complete" covers two distinct failures, and it did not always cover
+    the second:
+
+    1. The scanner never produced a result -- status ERROR or MISSING.
+    2. The scanner ran, reported a status, and could not evaluate some of the
+       targets it was given.
+
+    Only (1) was selected on, because that is a status test and (2) does not
+    change the status. ``ScanResultsContainer.determine_status`` returns ERROR
+    only once ``targets_failed >= targets_attempted``, so a scanner that lost some
+    of its input keeps whatever the severity gate gave it -- normally PASSED --
+    and the gate could not see it. Measured on this repository: cdk-nag attempts
+    10 targets, fails 4, reports PASSED, and the gate exited 0. Two of those four
+    are real CloudFormation templates that went unscanned.
+
+    ``_INCOMPLETE_SCANNER_STATUSES`` is deliberately NOT widened to express (2),
+    and the reason is a caller rather than taste. ``cli.merge._completed`` imports
+    that set to answer a different question -- whether a shard's scanner ran at
+    all -- and ``_verify_shard_contributions`` refuses a merge where a shard
+    completed none of the scanners it owned. A scanner that lost one target of ten
+    ran, so widening the set would start refusing healthy shards. The status a
+    scanner reports is also unchanged, so no reporter, no summary table and no
+    consumer of ``ScannerStatus`` sees anything new; the only behavior that
+    changes is this gate's own verdict, and only when the operator opted in.
+
+    Status precedence between the two arms is explicit. Total loss satisfies the
+    coverage condition too -- ``failed >= attempted`` implies ``failed > 0`` -- so
+    an ERROR scanner would otherwise gain a parenthetical it never had and break
+    every existing assertion on that message. (1) wins and reports the bare
+    status.
+
     Read through ``get_unified_scanner_metrics`` rather than off
     ``results.scanner_results`` directly, so the gate and the report cannot
     disagree: that function is what every reporter and the metrics table already
-    use, and it is where excluded-versus-missing precedence is decided.
+    use, and it is where excluded-versus-missing precedence is decided. The target
+    counters are read from the same rows for the same reason -- ``ScannerMetrics``
+    is what the summary table prints, so the gate fails on exactly the numbers the
+    operator was shown rather than on a second, independently-derived count.
 
     Known limitation, measured rather than assumed. An allowlist narrowing --
     ``--scanners bandit`` -- does not mark the unselected scanners as excluded, so
@@ -211,14 +292,29 @@ def incomplete_scanners(
 
     Returns:
         Pairs in scanner-name order, empty when every selected scanner completed.
+        The second element is the scanner's own status for a status-based
+        incompleteness, and that status followed by the unevaluated-target counts
+        for a coverage-based one. It is a display string, not a status token:
+        both callers interpolate it into a message and neither parses it.
     """
     if results is None:
         return []
-    return [
-        (metric.scanner_name, metric.status)
-        for metric in get_unified_scanner_metrics(asharp_model=results)
-        if metric.status in _INCOMPLETE_SCANNER_STATUSES
-    ]
+
+    listed: list[tuple[str, str]] = []
+    for metric in get_unified_scanner_metrics(asharp_model=results):
+        if metric.status in _INCOMPLETE_SCANNER_STATUSES:
+            listed.append((metric.scanner_name, metric.status))
+            continue
+        shortfall = _partial_coverage(metric)
+        if shortfall is not None:
+            attempted, failed = shortfall
+            listed.append(
+                (
+                    metric.scanner_name,
+                    f"{metric.status} ({failed} of {attempted} targets unevaluated)",
+                )
+            )
+    return listed
 
 
 def _resolve_fail_on_incomplete_scanners(
@@ -267,6 +363,7 @@ def _severity_filters_finding(result, min_sev_rank: int) -> bool:
 # ---------------------------------------------------------------------------
 # Helper: resolve final AshLogLevel
 # ---------------------------------------------------------------------------
+
 
 def _load_config_file(opts: ScanOptions):
     """Load the config file a scan of *opts* would use, or None.
@@ -330,9 +427,11 @@ def _resolve_log_level(opts: ScanOptions) -> AshLogLevel:
         return AshLogLevel.VERBOSE
     if opts.debug:
         return AshLogLevel.DEBUG
-    if opts.quiet or opts.simple or opts.log_level in [
-        AshLogLevel.QUIET, AshLogLevel.ERROR, AshLogLevel.SIMPLE
-    ]:
+    if (
+        opts.quiet
+        or opts.simple
+        or opts.log_level in [AshLogLevel.QUIET, AshLogLevel.ERROR, AshLogLevel.SIMPLE]
+    ):
         return AshLogLevel.ERROR
     return opts.log_level
 
@@ -340,6 +439,7 @@ def _resolve_log_level(opts: ScanOptions) -> AshLogLevel:
 # ---------------------------------------------------------------------------
 # _setup_logger
 # ---------------------------------------------------------------------------
+
 
 def _setup_logger(opts: ScanOptions):
     from automated_security_helper.utils.log import get_logger
@@ -355,7 +455,8 @@ def _setup_logger(opts: ScanOptions):
             opts.progress
             and not opts.quiet
             and not opts.simple
-            and os.environ.get("ASH_IN_CONTAINER", "NO").upper() not in ["YES", "1", "TRUE"]
+            and os.environ.get("ASH_IN_CONTAINER", "NO").upper()
+            not in ["YES", "1", "TRUE"]
         ),
         use_color=opts.color,
         simple_format=simple_logging,
@@ -420,7 +521,9 @@ def _run_container_mode(
     # the config file on the host.  Passing the resolved value avoids a race where the
     # user mutates the config file between the host read and the container's own read.
     effective_fail_on_findings = (
-        opts.fail_on_findings if opts.fail_on_findings is not None else resolved_fail_on_findings
+        opts.fail_on_findings
+        if opts.fail_on_findings is not None
+        else resolved_fail_on_findings
     )
     effective_fail_on_incomplete_scanners = (
         opts.fail_on_incomplete_scanners
@@ -484,14 +587,20 @@ def _run_container_mode(
         )
 
     if hasattr(container_result, "returncode") and container_result.returncode != 0:
-        logger.error(f"Container execution failed with code {container_result.returncode}")
+        logger.error(
+            f"Container execution failed with code {container_result.returncode}"
+        )
         if hasattr(container_result, "stderr") and container_result.stderr:
             logger.error(f"Container stderr:\n{container_result.stderr}")
-            print(f"\n[bold red]Container Error Output:[/bold red]\n{container_result.stderr}")
+            print(
+                f"\n[bold red]Container Error Output:[/bold red]\n{container_result.stderr}"
+            )
         if hasattr(container_result, "stdout") and container_result.stdout:
             logger.debug(f"Container stdout:\n{container_result.stdout}")
             if opts.debug:
-                print(f"\n[bold blue]Container Standard Output:[/bold blue]\n{container_result.stdout}")
+                print(
+                    f"\n[bold blue]Container Standard Output:[/bold blue]\n{container_result.stdout}"
+                )
 
     if not opts.run:
         if hasattr(container_result, "returncode") and container_result.returncode != 0:
@@ -515,6 +624,7 @@ def _run_container_mode(
 # ---------------------------------------------------------------------------
 # _run_nix_mode
 # ---------------------------------------------------------------------------
+
 
 def _run_nix_mode(opts: ScanOptions, logger) -> AshAggregatedResults:
     """Run the scan inside a Nix shell that supplies the pinned scanner toolchain.
@@ -559,7 +669,10 @@ def _run_nix_mode(opts: ScanOptions, logger) -> AshAggregatedResults:
 # _run_local_mode
 # ---------------------------------------------------------------------------
 
-def _run_local_mode(opts: ScanOptions, logger) -> tuple[AshAggregatedResults, Optional[bool]]:
+
+def _run_local_mode(
+    opts: ScanOptions, logger
+) -> tuple[AshAggregatedResults, Optional[bool]]:
     from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 
     _offline_was_set = False
@@ -570,6 +683,7 @@ def _run_local_mode(opts: ScanOptions, logger) -> tuple[AshAggregatedResults, Op
     _changed_file_set = None
     if opts.changed_files_only:
         from automated_security_helper.utils.get_scan_set import get_changed_files
+
         changed_paths = get_changed_files(base_ref=opts.base_ref, cwd=opts.source_dir)
         if changed_paths is not None:
             _changed_file_set = {
@@ -592,7 +706,9 @@ def _run_local_mode(opts: ScanOptions, logger) -> tuple[AshAggregatedResults, Op
                 ]
                 for def_path in def_paths:
                     if def_path.exists():
-                        logger.info(f"Using config file found at: {def_path.as_posix()}")
+                        logger.info(
+                            f"Using config file found at: {def_path.as_posix()}"
+                        )
                         config = def_path.as_posix()
                         break
                 if config is not None:
@@ -601,24 +717,34 @@ def _run_local_mode(opts: ScanOptions, logger) -> tuple[AshAggregatedResults, Op
             logger.info(f"Using config file specified at: {config}")
 
         if opts.config_overrides:
-            logger.info(f"Applying {len(opts.config_overrides or [])} configuration overrides")
+            logger.info(
+                f"Applying {len(opts.config_overrides or [])} configuration overrides"
+            )
 
         final_log_level = _resolve_log_level(opts)
         final_scanners = list(opts.scanners or [])
         if opts.mode == RunMode.precommit:
-            fast_scanners = ["bandit", "detect-secrets", "checkov", "cdk-nag", "npm-audit"]
+            fast_scanners = [
+                "bandit",
+                "detect-secrets",
+                "checkov",
+                "cdk-nag",
+                "npm-audit",
+            ]
             final_scanners = list(set(final_scanners + fast_scanners))
 
         final_show_progress = (
             opts.progress
-            and final_log_level not in [
+            and final_log_level
+            not in [
                 AshLogLevel.QUIET,
                 AshLogLevel.SIMPLE,
                 AshLogLevel.VERBOSE,
                 AshLogLevel.DEBUG,
             ]
             and os.environ.get("CI") is None
-            and os.environ.get("ASH_IN_CONTAINER", "NO").upper() not in ["YES", "1", "TRUE"]
+            and os.environ.get("ASH_IN_CONTAINER", "NO").upper()
+            not in ["YES", "1", "TRUE"]
         )
 
         orchestrator = ASHScanOrchestrator.create(
@@ -642,7 +768,11 @@ def _run_local_mode(opts: ScanOptions, logger) -> tuple[AshAggregatedResults, Op
             simple_mode=opts.simple,
             show_summary=opts.show_summary,
             color_system=(
-                "windows" if platform.system() == "Windows" else "auto" if opts.color else None
+                "windows"
+                if platform.system() == "Windows"
+                else "auto"
+                if opts.color
+                else None
             ),
             offline=(opts.offline if opts.offline is not None else is_offline_mode()),
             existing_results_path=(
@@ -675,13 +805,17 @@ def _run_local_mode(opts: ScanOptions, logger) -> tuple[AshAggregatedResults, Op
         if not opts.quiet and not opts.simple:
             logger.debug(f"Running phases: {phases_to_run}")
 
-        results = orchestrator.execute_scan(phases=cast(List[ExecutionPhaseType], phases_to_run))
+        results = orchestrator.execute_scan(
+            phases=cast(List[ExecutionPhaseType], phases_to_run)
+        )
 
         if opts.simple and not opts.quiet:
             typer.echo("\nASH scan completed.")
 
         if _changed_file_set and results is not None:
-            results = _filter_results_to_changed_files(results, _changed_file_set, opts.source_dir)
+            results = _filter_results_to_changed_files(
+                results, _changed_file_set, opts.source_dir
+            )
             sarif_path = opts.output_dir / "reports" / "ash.sarif"
             if sarif_path.exists() and results.sarif:
                 sarif_path.write_text(
@@ -705,7 +839,9 @@ def _run_local_mode(opts: ScanOptions, logger) -> tuple[AshAggregatedResults, Op
         sys.exit(3)
     except Exception as e:
         logger.exception(e)
-        print(f"[bold red]ERROR (1) Exiting due to exception during ASH scan: {e}[/bold red]")
+        print(
+            f"[bold red]ERROR (1) Exiting due to exception during ASH scan: {e}[/bold red]"
+        )
         sys.exit(1)
     finally:
         if _offline_was_set:
@@ -1000,6 +1136,7 @@ def _print_workspace_summary(
 # scan of a repository a working scan flags at HIGH.
 # ---------------------------------------------------------------------------
 
+
 def _compute_exit_code(
     results: Optional[AshAggregatedResults],
     opts: ScanOptions,
@@ -1069,7 +1206,9 @@ def _compute_exit_code(
                     and hasattr(_cfg.global_settings, "severity_threshold")
                     and _cfg.global_settings.severity_threshold
                 ):
-                    _severity_threshold = _cfg.global_settings.severity_threshold.upper()
+                    _severity_threshold = (
+                        _cfg.global_settings.severity_threshold.upper()
+                    )
 
             # SARIF levels: error -> critical/high, warning -> medium, note -> low, none -> info
             _THRESHOLD_QUALIFYING_LEVELS = {
@@ -1083,10 +1222,18 @@ def _compute_exit_code(
                 _severity_threshold, {"error", "warning"}
             )
             _SEVERITY_RANK_FOR_THRESHOLD = {
-                "CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1, "INFO": 0,
+                "CRITICAL": 4,
+                "HIGH": 3,
+                "MEDIUM": 2,
+                "LOW": 1,
+                "INFO": 0,
             }
             _THRESHOLD_MIN_RANK = {
-                "ALL": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4,
+                "ALL": 0,
+                "LOW": 1,
+                "MEDIUM": 2,
+                "HIGH": 3,
+                "CRITICAL": 4,
             }
             _min_rank = _THRESHOLD_MIN_RANK.get(_severity_threshold, 2)
 
@@ -1115,7 +1262,7 @@ def _compute_exit_code(
             sarif = getattr(results, "sarif", None)
             if sarif is None or not getattr(sarif, "runs", None):
                 has_qualifying = True
-            for run in (getattr(sarif, "runs", []) if not has_qualifying else []):
+            for run in getattr(sarif, "runs", []) if not has_qualifying else []:
                 for result in getattr(run, "results", []):
                     if _severity_filters_finding(result, min_sev_rank):
                         has_qualifying = True
@@ -1135,6 +1282,7 @@ def _compute_exit_code(
 # ---------------------------------------------------------------------------
 # _print_summary
 # ---------------------------------------------------------------------------
+
 
 def _print_summary(
     results: Optional[AshAggregatedResults],
@@ -1156,7 +1304,9 @@ def _print_summary(
     if not opts.quiet:
         if results and hasattr(results, "validation_checkpoints"):
             config_warnings = [
-                cp for cp in results.validation_checkpoints if cp.get("type") == "config_warning"
+                cp
+                for cp in results.validation_checkpoints
+                if cp.get("type") == "config_warning"
             ]
             if config_warnings:
                 print("\n[bold yellow]⚠️  CONFIGURATION WARNING ⚠️[/bold yellow]")
@@ -1164,7 +1314,9 @@ def _print_summary(
                     print(f"[yellow]  {cw['message']}[/yellow]")
                 print("")
 
-        print(f"\n[cyan]=== ASH Scan Completed in {duration_str}: Next Steps ===[/cyan]")
+        print(
+            f"\n[cyan]=== ASH Scan Completed in {duration_str}: Next Steps ===[/cyan]"
+        )
         print("View detailed findings...")
         print(f"  - SARIF: '{out_dir_alias}/reports/ash.sarif'")
         print(f"  - JUnit: '{out_dir_alias}/reports/ash.junit.xml'")
@@ -1176,7 +1328,9 @@ def _print_summary(
     if actionable_findings > 0:
         print("\n[magenta]=== Actionable findings detected! ===[/magenta]")
         print("To investigate...")
-        print("  1. Open one of the summary reports for a user-friendly table of the findings:")
+        print(
+            "  1. Open one of the summary reports for a user-friendly table of the findings:"
+        )
         print(f"    - HTML report of all findings: '{out_dir_alias}/reports/ash.html'")
         print(f"    - Markdown summary: '{out_dir_alias}/reports/ash.summary.md'")
         print(f"    - Text summary: '{out_dir_alias}/reports/ash.summary.txt'")
@@ -1194,6 +1348,7 @@ def _print_summary(
 # ---------------------------------------------------------------------------
 # _filter_results_to_changed_files (unchanged helper)
 # ---------------------------------------------------------------------------
+
 
 def _filter_results_to_changed_files(
     results: "AshAggregatedResults",
@@ -1233,6 +1388,7 @@ def _filter_results_to_changed_files(
 # ---------------------------------------------------------------------------
 # run_ash_scan — top-level entry point (~50 lines)
 # ---------------------------------------------------------------------------
+
 
 def run_ash_scan(
     source_dir: str | Path | None = None,
@@ -1294,8 +1450,14 @@ def run_ash_scan(
     scan_start_time = time.time()
 
     # Resolve cwd-based defaults at call time (not import time).
-    _source_dir: Path = Path(source_dir).absolute() if source_dir is not None else Path.cwd()
-    _output_dir: Path = Path(output_dir).absolute() if output_dir is not None else Path.cwd().joinpath(".ash", "ash_output")
+    _source_dir: Path = (
+        Path(source_dir).absolute() if source_dir is not None else Path.cwd()
+    )
+    _output_dir: Path = (
+        Path(output_dir).absolute()
+        if output_dir is not None
+        else Path.cwd().joinpath(".ash", "ash_output")
+    )
 
     opts = ScanOptions(
         source_dir=_source_dir,
@@ -1416,17 +1578,23 @@ def run_ash_scan(
     )
 
     if opts.show_summary:
-        scanner_metrics = get_unified_scanner_metrics(asharp_model=results) if results else []
+        scanner_metrics = (
+            get_unified_scanner_metrics(asharp_model=results) if results else []
+        )
         actionable_findings = sum(item.actionable for item in scanner_metrics)
         _print_summary(results, opts, scan_start_time, actionable_findings)
 
         if exit_code == 2 and not opts.quiet:
             actionable_count = sum(
                 item.actionable
-                for item in (get_unified_scanner_metrics(asharp_model=results) if results else [])
+                for item in (
+                    get_unified_scanner_metrics(asharp_model=results) if results else []
+                )
             )
             print("\n[yellow]=== ASH Exit Codes ===[/yellow]")
-            print("  0: Success - No actionable findings or not configured to fail on findings")
+            print(
+                "  0: Success - No actionable findings or not configured to fail on findings"
+            )
             print("  1: Error during execution")
             print(
                 f"  2: Actionable findings detected when configured with `fail_on_findings: true`."
@@ -1449,20 +1617,29 @@ def run_ash_scan(
             else []
         )
         if _incomplete:
+            # "did not run" would be false for the coverage case: that scanner ran,
+            # reported a status, and could not read some of its targets. Sending an
+            # operator to install a tool that is already installed is the specific
+            # wrong turn this wording avoids.
             print(
                 "\n[bold red]ERROR (1) Exiting because the scan was incomplete: "
-                f"{len(_incomplete)} selected scanner(s) did not run[/bold red]"
+                f"{len(_incomplete)} selected scanner(s) did not evaluate "
+                "everything they were given[/bold red]"
             )
             for _name, _status in _incomplete:
                 print(f"  [red]{_name}: {_status}[/red]")
             print(
                 "[yellow]ERROR means the scanner ran and failed; MISSING means its "
-                "dependencies were unavailable. Install the missing tools, exclude "
-                "the scanners with --exclude-scanners, or drop "
-                "--fail-on-incomplete-scanners to accept a partial scan.[/yellow]"
+                "dependencies were unavailable; a target count means the scanner ran "
+                "but could not read that many of its inputs. Install the missing "
+                "tools, fix or exclude the unreadable targets, exclude the scanners "
+                "with --exclude-scanners, or drop --fail-on-incomplete-scanners to "
+                "accept a partial scan.[/yellow]"
             )
         else:
-            print("[bold red]ERROR (1) Exiting due to exception during ASH scan[/bold red]")
+            print(
+                "[bold red]ERROR (1) Exiting due to exception during ASH scan[/bold red]"
+            )
 
     if exit_code != 0:
         sys.exit(exit_code)
