@@ -252,15 +252,26 @@ def incomplete_scanners(
     10 targets, fails 4, reports PASSED, and the gate exited 0. Two of those four
     are real CloudFormation templates that went unscanned.
 
-    ``_INCOMPLETE_SCANNER_STATUSES`` is deliberately NOT widened to express (2),
-    and the reason is a caller rather than taste. ``cli.merge._completed`` imports
-    that set to answer a different question -- whether a shard's scanner ran at
-    all -- and ``_verify_shard_contributions`` refuses a merge where a shard
+    Case (2) is expressed HERE and not as a status, and not by widening
+    ``_INCOMPLETE_SCANNER_STATUSES``. The reason is a caller rather than taste.
+    ``cli.merge._completed`` keys on status against that same set to answer a
+    different question -- whether a shard's scanner ran at all -- and
+    ``_verify_shard_contributions`` refuses a merge outright where a shard
     completed none of the scanners it owned. A scanner that lost one target of ten
-    ran, so widening the set would start refusing healthy shards. The status a
-    scanner reports is also unchanged, so no reporter, no summary table and no
-    consumer of ``ScannerStatus`` sees anything new; the only behavior that
-    changes is this gate's own verdict, and only when the operator opted in.
+    ran, so any status-shaped expression of partial coverage would propagate into
+    shard refusal and start rejecting healthy shards, failing the merge far from
+    the code that caused it. That is the concrete cost of adding a
+    ``ScannerStatus`` member for this, and the reason none was added.
+
+    Worth being precise about the residual risk, because an earlier version of
+    this comment overstated it: ``_completed`` inspects a
+    ``ScannerTargetStatusInfo``, which declares no target counters, so it cannot
+    read coverage today by any route -- the protection is structural, not merely
+    conventional. Since the status a scanner reports is unchanged, no reporter, no
+    summary table and no consumer of ``ScannerStatus`` sees anything new; the only
+    behavior that changes is this gate's own verdict, and only when the operator
+    opted in. ``tests/unit/cli/test_merge.py`` pins the boundary from the merge
+    side.
 
     Status precedence between the two arms is explicit. Total loss satisfies the
     coverage condition too -- ``failed >= attempted`` implies ``failed > 0`` -- so

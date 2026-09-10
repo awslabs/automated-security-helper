@@ -56,11 +56,26 @@
   coverage loss and stayed silent on partial loss, which is the more common case
   and the one operators turn it on to catch.
 
-  **This can turn an existing exit 0 into an exit 1 with no change to your own
-  code.** It affects only runs that pass `--fail-on-incomplete-scanners` (or set
-  `fail_on_incomplete_scanners: true`); the default path is unchanged. On this
-  repository's own tree the flag now exits 1, because cdk-nag attempts 10 targets
-  and cannot evaluate 4 of them.
+  **If you already pass `--fail-on-incomplete-scanners`, a build that was green
+  will now exit 1 with no diff of your own.** Nothing about your code changed and
+  nothing newly broke: the flag was blind to partial loss, and the coverage it was
+  silently accepting is now reported. Expect to hit this in CI without warning the
+  first time you upgrade. It affects only runs that pass the flag (or set
+  `fail_on_incomplete_scanners: true`); the default path is unchanged.
+
+  Measured on this repository's own tree, so the scale is concrete rather than
+  hypothetical: cdk-nag **attempts 10 targets and cannot evaluate 4** of them, a
+  40% loss that previously reported as a clean scan. ASH's own scan therefore now
+  exits 1 under the flag.
+
+  That 40% is not entirely spurious, and it is worth knowing the split before
+  dismissing it. Two of the four are real CloudFormation templates that genuinely
+  went unscanned (`test-yaml.template.json` and
+  `cfn-and-python-test-yaml.template.json`). The other two — a `tsconfig.json` and
+  a `mkdocs.yml` — were never templates at all and reach cdk-nag through a
+  separate target-selection bug, not fixed here. So half the number is real lost
+  coverage and half is noise, which is precisely why the counts are reported
+  rather than folded into a single percentage.
 
   A scanner that reports no target counts at all is unaffected — absent counters
   mean the scanner does not track targets, not that it lost them, so the nine
