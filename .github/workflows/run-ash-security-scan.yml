@@ -250,7 +250,8 @@ jobs:
           message-path: ${{ inputs.output-dir }}/reports/ash.summary.md
 
       # Say so rather than leaving a contributor wondering why the bot went
-      # quiet. Mirrors the ::warning:: the checks-permission probe below emits.
+      # quiet. The junit publish step below is skipped on the same condition and
+      # carries the same notice, for the same reason.
       - name: Note that the PR comment was skipped for a fork
         if: >-
           inputs.post-pr-comment
@@ -270,25 +271,36 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
-      - name: Verify checks write permission
-        if: inputs.collect-junit-xml-report && (success() || failure())
-        id: check-perms
-        run: |
-          # Attempt a minimal GitHub API call that requires checks:write
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-            -H "Authorization: Bearer ${{ github.token }}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${{ github.repository }}/check-runs?per_page=1")
-          if [ "$HTTP_CODE" = "403" ] || [ "$HTTP_CODE" = "404" ]; then
-            echo "::warning::JUnit report publishing requires 'checks: write' permission. Add 'permissions: checks: write' to your workflow."
-            echo "has_permission=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_permission=true" >> "$GITHUB_OUTPUT"
-          fi
-
+      # THE CHECKS-PERMISSION PROBE THAT USED TO GATE THIS STEP IS GONE
+      #
+      # It called GET /repos/{owner}/{repo}/check-runs and read 403 or 404 as "no
+      # permission". That route does not exist: the REST API lists check runs per
+      # ref or per check suite, never per repository. So it returned 404 on every
+      # run for everyone, `has_permission` was always false, and the gate below was
+      # never once true -- this call site has never published a junit report at all.
+      # Measured with one fully authorized token: the bare route 404s, while
+      # /repos/{owner}/{repo}/commits/{sha}/check-runs returns 200.
+      #
+      # Repointing it at the per-ref route was rejected. A GET cannot establish
+      # WRITE access, so the probe could never do the job its name claimed. It would
+      # return 200 for a fork's read-only token and let the step run on to a 403
+      # regardless, which is the noise the probe existed to avoid.
+      #
+      # The condition it was reaching for is "is this a fork pull request", and this
+      # file already carries the exact test for that on the PR-comment step above.
+      # Reusing it removes an API call, a step and a status-code inference.
+      #
+      # Residual case, deliberately left to the action: a same-repo caller that
+      # never granted `checks: write`. The action fails soft and names the real
+      # cause, "Resource not accessible by integration", which is better diagnostics
+      # than a warning guessed from an HTTP status.
       - name: Publish JUnit Test Report
         uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6.5.0
-        if: inputs.collect-junit-xml-report && (success() || failure()) && steps.check-perms.outputs.has_permission == 'true'
+        if: >-
+          inputs.collect-junit-xml-report
+          && (github.event_name != 'pull_request'
+              || github.event.pull_request.head.repo.full_name == github.repository)
+          && (success() || failure())
         # No `update_check: true`, for the reason spelled out in
         # .github/actions/run-unit-tests/action.yml: it took the action's update path,
         # which resolves an existing check run by `job_name` (default `github.job`, a
@@ -300,6 +312,19 @@ jobs:
           include_passed: true
           check_name: ASH Scan JUnit Test Report
           summary: Skipped means passing, suppressed, or ignored findings that are considered non-actionable.
+
+      # Same reason as the PR-comment notice above: an absent junit check should say
+      # why rather than just not appear. This is the case the deleted probe was
+      # trying to serve, expressed as the condition that actually holds.
+      - name: Note that the JUnit report was skipped for a fork
+        if: >-
+          inputs.collect-junit-xml-report
+          && github.event_name == 'pull_request'
+          && github.event.pull_request.head.repo.full_name != github.repository
+          && (success() || failure())
+        shell: bash
+        run: |
+          echo "::notice::The JUnit test report was not published as a check: GITHUB_TOKEN is read-only for fork pull requests, so check runs cannot be created. The results are in this job's summary and in the ash_output artifact."
 
       - name: Upload ASH SARIF file
         uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
