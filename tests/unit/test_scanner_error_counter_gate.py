@@ -327,6 +327,77 @@ class TestRefusesToReportZeroFromNothing:
         assert exit_code != 0
         assert "semgrep" in err
 
+    def test_an_object_entry_with_no_status_exits_nonzero(self, tmp_path, capsys):
+        """The nastier leaf case: every entry is an object, none declares a status.
+
+        Nothing looks wrong on the way through. Each entry passes the object check,
+        then `normalize_status(None)` is "", which compares unequal to "ERROR", so
+        every entry reads as "not an error" and is cleared. Count 0, exit 0, and not
+        one scanner's status was read.
+
+        The asymmetry against the case above is what makes this a defect rather than
+        a judgement call: an entry of `[]` failed loudly while an entry of `{}` passed
+        silently, and both had measured exactly nothing.
+        """
+        payload = {
+            "scanner_results": {
+                "bandit": {"finding_count": 0},
+                "semgrep": {"finding_count": 0},
+            }
+        }
+        exit_code, out, err = _run(tmp_path, capsys, payload)
+        assert exit_code != 0, (
+            "entries that are objects but declare no status were never inspected, so "
+            "they must not be reported as clean"
+        )
+        assert out != "0"
+        for name in ("bandit", "semgrep"):
+            assert name in err, (
+                f"the failure must name '{name}' so a maintainer can see which "
+                f"records carry no status. Got: {err!r}"
+            )
+
+    def test_a_renamed_status_field_is_caught_without_being_special_cased(
+        self, tmp_path, capsys
+    ):
+        """A leaf rename lands with a sweep of the tests that read the old name.
+
+        This file used to argue that a rename needed no guard here because the wider
+        ASH suite would redden first. That argument lives in other files and fails in
+        the one case that matters, which is a rename landing together with the sweep.
+        The readability check covers it without naming the field.
+        """
+        payload = {
+            "scanner_results": {
+                "bandit": {"scan_status": "ERROR"},
+                "semgrep": {"scan_status": "PASSED"},
+            }
+        }
+        exit_code, out, _ = _run(tmp_path, capsys, payload)
+        assert exit_code != 0, (
+            "a record whose status moved to a different key reads as non-ERROR at "
+            "every field this counter knows, so it must be refused, not cleared"
+        )
+        assert out != "0"
+
+    def test_a_null_status_is_not_a_passing_status(self, tmp_path, capsys):
+        """An explicit null is as unread as a missing key."""
+        payload = {"scanner_results": {"bandit": {"status": None}}}
+        exit_code, _, err = _run(tmp_path, capsys, payload)
+        assert exit_code != 0
+        assert "bandit" in err
+
+    def test_a_nested_record_with_no_status_is_refused(self, tmp_path, capsys):
+        """source/converted present but carrying no status is still nothing read."""
+        payload = {
+            "scanner_results": {
+                "bandit": {"source": {"finding_count": 0}, "converted": {}}
+            }
+        }
+        exit_code, _, err = _run(tmp_path, capsys, payload)
+        assert exit_code != 0
+        assert "bandit" in err
+
     def test_count_only_still_refuses_an_unreadable_entry(self, tmp_path, capsys):
         """--count-only relaxes the count, never the readability requirement."""
         payload = {"scanner_results": {"bandit": [_scanner("ERROR")]}}
@@ -336,3 +407,38 @@ class TestRefusesToReportZeroFromNothing:
             "count to report"
         )
         assert "bandit" in err
+
+
+# ------------------------------------------------------------------ #
+# The tuple contract, for callers that read it instead of the exit code
+# ------------------------------------------------------------------ #
+class TestProblemsAlwaysMeanAZeroCount:
+    """A partial count would look authoritative while totalling only what was read.
+
+    main() never prints the count when problems are present, so no CI step can be
+    misled today. This pins the contract for the next caller, which may read the
+    tuple directly.
+    """
+
+    def test_a_mixed_payload_reports_no_count_and_names_both_findings(self):
+        """One readable entry at ERROR, one unreadable entry, in the same payload."""
+        count, offenders, problems = counter.count_scanner_errors(
+            {
+                "scanner_results": {
+                    "bandit": _scanner("ERROR"),
+                    "semgrep": {"finding_count": 0},
+                }
+            }
+        )
+        assert problems, "the unreadable entry must be reported"
+        assert (count, offenders) == (0, {}), (
+            "whenever problems is non-empty the count must be 0 and offenders empty, "
+            "uniformly with the whole-payload and empty-container checks; a caller "
+            f"must not receive a partial total. Got {count} and {offenders}"
+        )
+        joined = " ".join(problems)
+        assert "semgrep" in joined, "the unreadable entry must be named"
+        assert "bandit" in joined, (
+            "the ERROR found among the readable entries must still be reported, not "
+            f"dropped along with the count. Got: {problems}"
+        )

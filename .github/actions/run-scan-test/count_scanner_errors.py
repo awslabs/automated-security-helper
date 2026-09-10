@@ -65,15 +65,29 @@ one all exit non-zero rather than reporting zero errors. A scan that recorded no
 scanners at all has not demonstrated that no scanner failed, and "0 errors" from an
 empty input is the silent pass this whole script exists to prevent.
 
-The same doctrine applies one level in, per entry. A ``scanner_results`` value that
-is not a JSON object cannot be read for a status, so it is reported as a problem
-rather than skipped. Skipping it was the residual hole in the first version of this
-file: the container checks above catch a missing or empty ``scanner_results``, but if
-the serialization changed from a mapping-of-records to, say, a list per scanner, then
-``scanner_results`` is still a non-empty mapping and every entry inside it fails the
-object check. Every entry gets skipped, no offender is recorded, no problem is
-recorded, and the script prints 0 and exits 0 -- the identical silent pass, reached
-through the leaf instead of through the container.
+The same doctrine applies one level in, per entry, and it takes two checks rather
+than one. An entry is unreadable if it is not a JSON object, and equally if it is an
+object that declares no status anywhere this file knows to look. Either way its
+status was never read, so it is reported as a problem instead of being skipped.
+
+Both were holes in the first version. The container checks above catch a missing or
+empty ``scanner_results``, so they do not fire when ``scanner_results`` is a perfectly
+good non-empty mapping whose contents changed shape underneath it:
+
+* Serialization changes from a mapping-of-records to, say, a list per scanner. Every
+  entry fails the object check, every entry is skipped.
+* A leaf field is renamed, or a scanner simply never set one, so every entry is still
+  an object but ``record.get("status")`` is ``None`` everywhere. This one is nastier
+  because nothing looks wrong: ``normalize_status(None)`` is ``""``, which compares
+  unequal to ``"ERROR"``, so every entry reads as "not an error" and is cleared.
+
+In both cases no offender is recorded, no problem is recorded, and the script prints 0
+and exits 0 -- the identical silent pass, reached through the leaf instead of through
+the container. The asymmetry between them is what gave the second one away: a record
+of ``[]`` failed loudly while a record of ``{}`` passed silently, and both had
+measured exactly nothing. Hence ``status_fields_in`` below, which asks whether a
+status was found at all. ``error_statuses_in`` cannot answer that, because a record
+with no status and a record with a status of PASSED both yield no ERROR fields.
 
 Any unreadable entry is a problem, not just the all-unreadable case, and that is
 deliberate. A threshold would reintroduce the defect this script replaced: the old
@@ -82,10 +96,25 @@ them are unreadable" is another offset, one that lets a partial serialization ch
 under-count silently. A scanner whose record could not be read has not demonstrated
 that it did not error, which is the same sentence as the empty case above.
 
-Not guarded, on purpose: renaming the leaf ``status`` field itself. Hundreds of ASH
-unit tests read that field, so the rename reddens the suite long before it reaches
-this counter. A guard here would be redundant, and a redundant guard is one neither
-side tests.
+Why the readability check cannot fail a healthy scan, which is the thing to get right
+given that five CI steps read this exit code. Both model shapes always carry a status
+somewhere, including in the one case that looks risky. ``ScannerTargetStatusInfo``
+declares ``status: ScannerStatus = ScannerStatus.PASSED``, so its top-level status is
+never null. ``ScannerStatusInfo`` declares ``status: ScannerStatus | None = None``, so
+its top-level status genuinely can be null -- but it also always carries ``source`` and
+``converted`` sub-records, each a ``ScannerTargetStatusInfo`` whose own status defaults
+to PASSED. Measured rather than inferred from the defaults: serializing a default
+instance of each and running it through this function yields ``["status"]`` for the
+first and ``["source.status", "converted.status"]`` for the second, and both produce no
+problems. A real aggregated results file with ten scanners in it also comes back clean.
+
+A note on an argument this file used to make and no longer relies on. It claimed a
+rename of the leaf ``status`` field needed no guard here, because hundreds of ASH unit
+tests read that field and would redden the suite first. That is an alibi located in
+other files, and it fails in exactly the case that matters: a rename landed together
+with a sweep updating those tests, which is how renames actually get done. The
+readability check above covers the rename without special-casing it, so the argument
+is no longer load bearing.
 
 Exit codes
 ----------
@@ -126,6 +155,26 @@ def normalize_status(raw: Any) -> str:
     return text.upper()
 
 
+def status_fields_in(record: Mapping[str, Any]) -> list[str]:
+    """Every place inside one scanner record that carries a status at all.
+
+    Returns labels such as ``"status"`` or ``"source.status"``, whatever the value
+    says. An empty result is the point of this function: it means the record declared
+    no status anywhere this counter knows to look, so the record was never actually
+    inspected and must not be read as a clean one. ``error_statuses_in`` below cannot
+    answer that question, because a record with no status and a record with a status
+    of PASSED both produce no ERROR fields.
+    """
+    found: list[str] = []
+    if normalize_status(record.get("status")):
+        found.append("status")
+    for key in NESTED_TARGET_KEYS:
+        nested = record.get(key)
+        if isinstance(nested, Mapping) and normalize_status(nested.get("status")):
+            found.append(f"{key}.status")
+    return found
+
+
 def error_statuses_in(record: Mapping[str, Any]) -> list[str]:
     """Every place inside one scanner record that says ERROR.
 
@@ -148,11 +197,17 @@ def error_statuses_in(record: Mapping[str, Any]) -> list[str]:
 def count_scanner_errors(results: Any) -> tuple[int, dict[str, list[str]], list[str]]:
     """Count scanners at ERROR.
 
-    Returns ``(count, {scanner: [fields]}, problems)``. ``problems`` is non-empty
-    when any part of the input could not be inspected, which the caller must treat as
-    a failure rather than as zero errors. That covers the whole payload, a missing or
-    empty ``scanner_results``, and any individual entry inside it that is not an
-    object -- an entry that was never read cannot be evidence that it did not error.
+    Returns ``(count, {scanner: [fields]}, problems)``. ``problems`` is non-empty when
+    any part of the input could not be inspected, which the caller must treat as a
+    failure rather than as zero errors. That covers the whole payload, a missing or
+    empty ``scanner_results``, and any individual entry inside it that is either not an
+    object or declares no status -- an entry that was never read cannot be evidence
+    that it did not error.
+
+    Contract: whenever ``problems`` is non-empty, ``count`` is 0 and the offenders
+    mapping is empty, uniformly across all four checks. A partial count would look
+    authoritative to a caller while totalling only the entries that happened to be
+    readable, so anything found is named in the ``problems`` strings instead.
     """
     if not isinstance(results, Mapping):
         return (
@@ -190,23 +245,32 @@ def count_scanner_errors(results: Any) -> tuple[int, dict[str, list[str]], list[
     unreadable: list[str] = []
     for name, entry in scanner_results.items():
         if not isinstance(entry, Mapping):
-            unreadable.append(f"{name} ({type(entry).__name__})")
+            unreadable.append(f"{name} (not an object: {type(entry).__name__})")
+            continue
+        if not status_fields_in(entry):
+            unreadable.append(f"{name} (an object, but it declares no status)")
             continue
         fields = error_statuses_in(entry)
         if fields:
             offenders[str(name)] = fields
     if unreadable:
-        return (
-            len(offenders),
-            offenders,
-            [
-                (
-                    "these 'scanner_results' entries are not JSON objects, so their "
-                    "status was never inspected and they cannot have demonstrated "
-                    f"that they did not error: {sorted(unreadable)}"
-                )
-            ],
-        )
+        problems = [
+            (
+                "the status of these 'scanner_results' entries was never inspected, so "
+                "they cannot have demonstrated that they did not error: "
+                f"{sorted(unreadable)}"
+            )
+        ]
+        if offenders:
+            problems.append(
+                "among the entries that could be read, these reported ERROR: "
+                f"{sorted(offenders)}"
+            )
+        # Count 0 and no offenders, matching the three checks above: whenever
+        # problems is non-empty the count is not a total of anything, and a caller
+        # reading the tuple must not be handed a partial number that looks like one.
+        # Everything found is named in the messages instead.
+        return 0, {}, problems
     return len(offenders), offenders, []
 
 
