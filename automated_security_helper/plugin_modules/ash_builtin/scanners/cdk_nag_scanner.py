@@ -196,15 +196,44 @@ def _reporting_descriptor_for(
     nothing in the suite did that. Two of its three defects were invisible for exactly that
     reason.
 
-    ``tags`` reads the result's own property bag. It used to read ``finding_props["tags"]``,
-    and ``finding_props`` is ``_NagFinding.as_dict()``, which has no ``tags`` key -- so that
-    lookup returned its ``[]`` default every single time. It looked like it forwarded the
-    finding's tags and forwarded nothing, which is why the pack name never reached the rule
-    even though the wrapper had been putting it on the result all along.
+    ``tags`` USED TO FORWARD THE RESULT'S OWN TAGS, AND MUST NOT
+    -----------------------------------------------------------
+    A first attempt read ``finding_props["tags"]``, and ``finding_props`` is
+    ``_NagFinding.as_dict()``, which has no ``tags`` key -- so that lookup returned its ``[]``
+    default every single time, and the pack the wrapper had been writing onto each result never
+    reached the rule. The obvious repair, ``list(result.properties.tags or []) + [...]``, fixed
+    the pack and introduced a worse defect, so neither shape is used now.
 
-    ``pack`` is also written as a labelled property. The pack is present in ``tags`` too, but
-    only as one unlabelled string among nine, so a consumer cannot tell it apart from the
-    resource id or the resource type sitting beside it; a named field can be read.
+    The result's tag list is built per occurrence, in ``utils.cdk_nag_wrapper``, and two of its
+    nine entries are per-occurrence values: the resource's logical id and its
+    ``AWS::*::*`` type. A descriptor is built once per unique ``ruleId`` -- ``scan()`` keys a
+    ``rule_map`` and ``continue``s on a repeat -- so forwarding those two stamps ONE resource's
+    identity into the definition of a rule that fired on many. Measured on this repository:
+    ``HIPAA.Security-IAMNoInlinePolicy`` fires on 35 results, and the forwarding put
+    ``ConfigKeyAccessB463082D`` and ``AWS::IAM::Policy`` on its rule descriptor -- whichever
+    result the aggregation happened to yield first. That is wrong for any consumer reading
+    ``rules[].properties``, and because "first" is an ordering rather than a fact, two runs over
+    identical input could disagree. ``tests/unit/plugin_modules/ash_builtin/
+    test_cdk_nag_sarif_attribution.py`` pins byte-identical descriptors across two runs.
+
+    So the tags are CONSTRUCTED from the rule-scoped facts this function already holds rather
+    than inherited and filtered. Filtering was the alternative and was rejected: this function is
+    not given the resource id or the resource type, so it could only drop them positionally, and
+    a positional rule silently stops working the next time the wrapper's list changes shape.
+    Constructing cannot leak a per-occurrence value because it never sees one.
+
+    Dropping the forwarding costs nothing the descriptor needed. The pack is the fact that was
+    supposed to arrive, and it arrives twice over -- as the labelled ``pack`` property and as
+    ``pack::<name>`` -- so a consumer can read it without guessing which unlabelled string it is.
+    The two entries that are genuinely per-occurrence remain on the results, where they belong
+    and where they were never lost.
+
+    ``tool_type`` takes ``.value``. ``ScannerToolType`` subclasses ``str``, but ``Enum.__str__``
+    still wins for a mixin enum, so an interpolated member renders
+    ``tool_type::ScannerToolType.IAC`` while the wrapper writes the literal ``tool_type::IAC``
+    onto every result. Forwarding made both appear in one list, disagreeing; taking the value
+    makes the descriptor agree with the results. A plain ``str`` caller is unaffected --
+    ``getattr`` falls back to the object itself.
     """
     finding_props = (result.properties.model_extra or {}).get("cdk_nag_finding", {})
     pack = str(finding_props.get("pack", "") or "")
@@ -222,11 +251,18 @@ def _reporting_descriptor_for(
             pack=pack,
             rule_level=finding_props.get("rule_level", "unknown"),
             rule_info=finding_props.get("rule_info", "unknown"),
-            tags=list(result.properties.tags or [])
-            + [
+            # Every entry is a fact about the RULE. Listed literally, in a fixed order, so the
+            # descriptor is a pure function of the rule id, the pack and the tool -- which is
+            # what makes two runs over identical input produce identical bytes.
+            tags=[
+                "aws",
+                "cdk",
+                "cdk-nag",
+                pack or "unknown",
+                result.ruleId or "unknown",
                 f"pack::{pack}" if pack else "pack::unknown",
                 f"tool_name::{tool_name}",
-                f"tool_type::{tool_type}",
+                f"tool_type::{getattr(tool_type, 'value', tool_type)}",
             ],
         ),
     )
