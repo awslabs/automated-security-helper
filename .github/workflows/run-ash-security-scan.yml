@@ -53,8 +53,40 @@ on:
         required: false
         default: true
         type: boolean
+      # BEHAVIOR CHANGE -- read this before upgrading if you call this workflow.
+      #
+      # This input has always defaulted to true, but until now it had no visible
+      # effect: the publish step was gated on a permission probe that called a REST
+      # route which does not exist, so the probe was false on every run and no
+      # `ASH Scan JUnit Test Report` check run was ever created for anyone. That
+      # gate is gone and the step now runs.
+      #
+      # What that means for a downstream caller: the action derives the check run's
+      # conclusion from the JUnit failure count, and ASH's JUnit report encodes
+      # every ACTIONABLE FINDING as a test failure. So a repository with even one
+      # actionable finding goes from "no check at all" to a RED
+      # `ASH Scan JUnit Test Report` check, without any change of its own.
+      #
+      # The step and the job both stay green -- `fail_on_failure` is left at its
+      # default of false -- so this does not by itself fail a build. But the check
+      # run is red, it appears in the pull request's checks list, and it counts
+      # toward the commit's combined status. If a branch protection rule requires
+      # this check by name, it will now block; it could not have been required
+      # before, because it never existed.
+      #
+      # Two ways to respond, both supported:
+      #   * Leave it on and treat the red check as the finding report it is. The
+      #     annotations land inline on the offending lines, which is the whole
+      #     point of publishing the report.
+      #   * Set `collect-junit-xml-report: false` to opt out entirely. The results
+      #     are still in the job summary and in the `ash_output` artifact.
       collect-junit-xml-report:
-        description: "Whether to collect the ash.junit.xml report using the mikepenz/action-junit-report@v6 GitHub Action"
+        description: >-
+          Whether to publish the ash.junit.xml report as a check run using
+          mikepenz/action-junit-report. Note that ASH encodes actionable findings
+          as JUnit test failures, so a scan with actionable findings publishes a
+          RED "ASH Scan JUnit Test Report" check (the job itself stays green).
+          Set to false to opt out.
         required: false
         default: true
         type: boolean
@@ -294,6 +326,13 @@ jobs:
       # never granted `checks: write`. The action fails soft and names the real
       # cause, "Resource not accessible by integration", which is better diagnostics
       # than a warning guessed from an HTTP status.
+      #
+      # Because the probe was always false, removing it means this step publishes a
+      # check run where previously none existed -- and the action's conclusion comes
+      # from the JUnit failure count, which for ASH is the actionable finding count.
+      # A caller with findings therefore sees a red `ASH Scan JUnit Test Report`
+      # check for the first time. That is intended, and the trade-off plus the
+      # opt-out are written out at the `collect-junit-xml-report` input above.
       - name: Publish JUnit Test Report
         uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6.5.0
         if: >-
