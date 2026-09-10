@@ -50,11 +50,13 @@
 
 - **`--fail-on-incomplete-scanners` now also fails a scan that lost only part of
   its input.** The flag selected on scanner status, and a scanner that failed on
-  some of its targets keeps the status the severity gate gives it — normally
-  `PASSED` — because `determine_status` returns `ERROR` only once
-  `targets_failed >= targets_attempted`. The flag therefore reported total
-  coverage loss and stayed silent on partial loss, which is the more common case
-  and the one operators turn it on to catch.
+  some of its targets keeps whatever status the severity gate gives it — `PASSED`
+  or `FAILED`, decided only by what the targets it *did* read contained — because
+  `determine_status` returns `ERROR` only once
+  `targets_failed >= targets_attempted`. Neither value says anything about the
+  targets that went unread, so the flag reported total coverage loss and stayed
+  silent on partial loss, which is the more common case and the one operators turn
+  it on to catch.
 
   **If you already pass `--fail-on-incomplete-scanners`, a build that was green
   will now exit 1 with no diff of your own.** Nothing about your code changed and
@@ -68,12 +70,12 @@
   40% loss that nothing in the rendered output mentioned. ASH's own scan therefore
   now exits 1 under the flag.
 
-  Not "reported as a clean scan", which an earlier draft of this entry said. On
-  this repository cdk-nag rolls up to `FAILED`, on 16 actionable findings at the
-  `MEDIUM` threshold — identical before and after this change. What it reported was
-  a **complete** scan, not a clean one, and that is the claim being corrected: the
-  40% shortfall was absent from the summary table, from every report and from the
-  exit code, regardless of what the status column said.
+  Note that cdk-nag's status here is `FAILED`, on 16 actionable findings at the
+  `MEDIUM` threshold, both before and after this change. The point is not that a
+  passing row hid a problem; it is that the shortfall was absent from the summary
+  table, from every report and from the exit code no matter which status the row
+  carried. A scanner reports a **complete** scan of its input whether it passed or
+  failed on the part it read.
 
   That 40% is not entirely spurious, and it is worth knowing the split before
   dismissing it. Two of the four are real CloudFormation templates that genuinely
@@ -105,9 +107,9 @@
   scan, with nothing to opt into.** This is wider than the flag change above and
   wants reading first.
 
-  `ScanPhase` gives each scanner one task carrying two targets — the source tree
-  and the converted tree — and `ScanResultProcessor` writes one serialized
-  container per target. `determine_status` already returned `ERROR` for a tree
+  `ScanPhase` gives each scanner one task carrying the source tree and, where the
+  convert phase produced one, the converted tree, and `ScanResultProcessor` writes
+  one serialized container per target. `determine_status` already returned `ERROR` for a tree
   whose every attempted target failed, but `get_scanner_status_info` never
   consulted it: it read the scanner-level `"None"` report, else the
   `scanner_results` entry, else the `"source"` report. In a real run the
