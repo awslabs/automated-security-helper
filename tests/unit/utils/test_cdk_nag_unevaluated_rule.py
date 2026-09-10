@@ -306,3 +306,74 @@ class TestARuleThatCouldNotBeEvaluatedIsNotAViolation:
         )
 
         assert per_pack["AwsSolutions"][0].compliance == "Non-Compliant"
+
+
+class TestTheMarkerStillMatchesTheInstalledCdkNag:
+    """One sentence in cdk-nag's source is load-bearing for three behaviours.
+
+    ``_compliance_for_violation`` decides ``NOT_EVALUATED`` from
+    ``description.startswith(_UNEVALUATED_DESCRIPTION_PREFIX)`` and from nothing else, because
+    ``addViolation`` records a rule that threw through the same call a real violation goes
+    through and leaves no structural marker to key on. Three things then hang off that decision:
+
+    * ``_level_and_kind`` renders the result ``none``/``notApplicable`` instead of a finding at
+      the rule's declared severity
+    * ``cdk_nag_scanner._rule_scoped_description`` discards the description, which is what keeps
+      cdk-nag's exception text -- resolved parameter values, and a resource logical id from the
+      Lex rule -- out of the SARIF rule descriptor
+    * the run-level ``toolExecutionNotifications`` entry exists at all
+
+    So if upstream rewords that sentence, a rule that never ran silently becomes a real finding
+    again AND per-occurrence text starts reaching the rule descriptor again. Neither failure
+    announces itself: the report stays well-formed and every other test here builds its own
+    fixture using our constant, so they would all keep passing against the new wording.
+
+    This test is the only thing standing between that and a silent regression. It reads the
+    cdk-nag distribution ASH actually installs rather than a fixture, so it fails on the version
+    bump that introduces the drift instead of on the scan that is misreported because of it.
+    """
+
+    def test_the_prefix_appears_verbatim_in_the_installed_distribution(self):
+        import tarfile
+
+        import cdk_nag
+
+        from automated_security_helper.utils.cdk_nag_wrapper import (
+            _UNEVALUATED_DESCRIPTION_PREFIX,
+        )
+
+        root = Path(cdk_nag.__file__).parent
+        tarballs = sorted(root.rglob("*.tgz"))
+        assert tarballs, (
+            f"no cdk-nag tarball under {root}; this test cannot fail as written, so the "
+            "marker is unpinned rather than confirmed"
+        )
+
+        sources = {}
+        for tarball in tarballs:
+            with tarfile.open(tarball) as archive:
+                for member in archive.getmembers():
+                    if member.name.endswith("lib/nag-pack.js"):
+                        handle = archive.extractfile(member)
+                        assert handle is not None
+                        sources[f"{tarball.name}:{member.name}"] = handle.read().decode(
+                            "utf-8", "replace"
+                        )
+
+        assert sources, (
+            f"no lib/nag-pack.js inside {[t.name for t in tarballs]}; the marker is unpinned"
+        )
+        # Positive control: the file we found must be the one that builds the description, or a
+        # missing prefix would be indistinguishable from having read the wrong file.
+        for name, text in sources.items():
+            assert "addViolation(ruleName" in text, (
+                f"{name} does not define addViolation, so it is not the file that builds the "
+                "description and this assertion would prove nothing"
+            )
+            assert _UNEVALUATED_DESCRIPTION_PREFIX in text, (
+                f"{name} no longer contains {_UNEVALUATED_DESCRIPTION_PREFIX!r}. cdk-nag has "
+                "reworded the one string ASH uses to recognise a rule that threw. Until "
+                "_UNEVALUATED_DESCRIPTION_PREFIX is updated, such a rule is reported as a real "
+                "finding at its declared severity, and its exception text -- which carries "
+                "template values -- reaches the SARIF rule descriptor."
+            )

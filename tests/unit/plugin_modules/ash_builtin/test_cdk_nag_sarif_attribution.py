@@ -320,10 +320,17 @@ class TestRuleTagsAreRuleScoped:
         from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
             _reporting_descriptor_for,
         )
+        from automated_security_helper.utils.cdk_nag_wrapper import NOT_EVALUATED
 
         # Both results are the same rule, not evaluated against two different templates. Only
         # the template path differs -- the rule-scoped tail is identical, exactly as the
         # wrapper builds it.
+        #
+        # ``compliance`` is set to match the message rather than left at the fixture's
+        # "Non-Compliant" default. Production cannot pair a "was NOT evaluated" message with
+        # that default, because ``_compliance_for_violation`` derives NOT_EVALUATED from the
+        # same description the message is built from -- so leaving it would have driven the
+        # rule_info branch while this docstring described the not-evaluated one.
         unevaluated = (
             "so this result says nothing about whether the template complies with it."
             "\n\nRule threw an error during validation."
@@ -337,6 +344,7 @@ class TestRuleTagsAreRuleScoped:
             ),
             message_markdown="`infra/alpha.template.json` was NOT evaluated.",
         )
+        first.properties.model_extra["cdk_nag_finding"]["compliance"] = NOT_EVALUATED
         first.properties.tags = [
             "aws",
             "cdk",
@@ -357,6 +365,7 @@ class TestRuleTagsAreRuleScoped:
             ),
             message_markdown="`infra/beta.template.json` was NOT evaluated.",
         )
+        second.properties.model_extra["cdk_nag_finding"]["compliance"] = NOT_EVALUATED
         second.properties.tags = [
             "aws",
             "cdk",

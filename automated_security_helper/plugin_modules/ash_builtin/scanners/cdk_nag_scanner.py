@@ -240,10 +240,27 @@ def _rule_scoped_description(finding_props: dict, rule_id: str) -> str:
     So a not-evaluated row's description is discarded here and a rule-scoped sentence is
     constructed instead. Nothing is lost: the error text stays on the result's own message,
     where it is per-occurrence data sitting in a per-occurrence place, and it is what a reader
-    diagnosing the failure needs. Stripping cdk-nag's ``Rule threw an error during validation.``
-    prefix off the front and keeping that was the alternative, and it was rejected -- it
-    re-derives a rule-scoped string by parsing a string whose shape ``addViolation`` controls,
-    so a wording change upstream would silently start leaking the exception text again.
+    diagnosing the failure needs.
+
+    Stripping cdk-nag's ``Rule threw an error during validation.`` prefix off the front and
+    keeping the remainder was the alternative. It is rejected because a prefix strip keeps the
+    exception text in the buffer it is trying to remove it from -- one wrong slice index and the
+    tail is back -- while branching discards it wholesale. It is NOT rejected for being
+    sensitive to upstream's wording, because THIS FUNCTION IS EQUALLY SENSITIVE TO IT and an
+    earlier draft of this note wrongly claimed otherwise. The branch below reads
+    ``compliance``, and ``compliance`` is itself derived from that same sentence:
+    ``_compliance_for_violation`` returns ``NOT_EVALUATED`` from
+    ``description.startswith(_UNEVALUATED_DESCRIPTION_PREFIX)`` and nothing else. If cdk-nag
+    reworded it, ``compliance`` would come back ``"Non-Compliant"``, this function would take
+    the ``rule_info`` branch, and the exception text would flow into both descriptions and into
+    ``properties.rule_info`` exactly as before.
+
+    That shared dependency is worth stating plainly because the same drift is already the more
+    serious failure elsewhere: ``_level_and_kind`` dispatches on ``compliance`` too, so a
+    reworded prefix would also render a rule that never ran as a real finding at its declared
+    severity. One string in cdk-nag's source is load-bearing for all three behaviours, which is
+    why ``tests/unit/utils/test_cdk_nag_unevaluated_rule.py`` pins that string against the
+    cdk-nag distribution ASH actually installs rather than trusting it to hold.
 
     Returns ``""`` when the report supplied no description at all, so a caller can tell "the
     report said nothing" apart from "we constructed this".
@@ -736,8 +753,15 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             return False
 
         # Find all files to scan from the scan set
+        #
+        # sorted(), because this list decides the order findings are flattened in and therefore
+        # the order of rules[] in the emitted SARIF. Path.glob walks os.scandir, whose order is
+        # filesystem-determined rather than sorted, so two runs over an identical tree could
+        # emit the same rule descriptors in a different order and give ash-cdk-nag.sarif a
+        # non-empty diff. The non-converted branch below already ends in
+        # ``sorted(set(included))`` inside get_scan_set, so only this branch was unordered.
         orig_scannable = (
-            [item for item in self.context.work_dir.glob("**/*.*")]
+            sorted(self.context.work_dir.glob("**/*.*"))
             if target_type == "converted"
             else scan_set(
                 source=self.context.source_dir,
