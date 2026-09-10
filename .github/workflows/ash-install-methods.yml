@@ -33,7 +33,13 @@ jobs:
   validate:
     name: ${{ matrix.method }} (${{ matrix.os }}, py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    # The container runtimes get the same 45 minutes ash-unified-ci.yml gives them.
+    # Both workflows route to .github/actions/validate-container, so one flat budget
+    # of 20 here meant the same work ran under two different caps -- and that action
+    # now scans with the image it builds as well as building it. Measured build-only
+    # durations on ubuntu-latest were about 5 minutes for podman and finch, so 20 was
+    # not tight yet; it would have become tight silently.
+    timeout-minutes: ${{ (matrix.method == 'podman' || matrix.method == 'finch') && 45 || 20 }}
     strategy:
       fail-fast: false
       matrix:

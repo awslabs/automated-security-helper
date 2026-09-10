@@ -1,5 +1,5 @@
 name: "Validate Container Runtime"
-description: "Validate that ASH container image can be built with podman or finch"
+description: "Validate that ASH can build its container image with podman or finch, and then actually scan with it"
 
 inputs:
   runtime:
@@ -12,6 +12,60 @@ runs:
     - name: Install ASH
       shell: bash
       run: pip install .
+
+    # Same fixture, same path, as .github/actions/validate-install/action.yml creates
+    # for the pip/pipx/uvx legs. Created here because this action is routed to on its
+    # own -- the matrix picks exactly one of validate-install, validate-mcp,
+    # validate-nix or this file per cell, so nothing else has run to make it.
+    - name: Create test fixture
+      shell: bash
+      run: |
+        mkdir -p /tmp/ash-selftest
+        echo 'print("hello")' > /tmp/ash-selftest/test_sample.py
+
+    # WHY A SCAN LEG EXISTS AT ALL
+    #
+    # This action used to end at `ash build-image --force`. `build-image` proves the
+    # Dockerfile still builds under a given runtime; it says nothing about whether ASH
+    # can scan with the result, which is the only reason the image is built. So podman
+    # and finch were the two runtimes in the matrix whose image nobody ever ran, while
+    # the five methods that do scan (pip, pipx, uvx, mcp, nix) all exercise
+    # `ash scan --source-dir /tmp/ash-selftest ... --phases scan --phases report`.
+    #
+    # A runtime with a build leg and no scan leg is precisely that defect, so the
+    # runtimes carrying one are named here rather than assumed. Adding a runtime to the
+    # matrix without adding it below fails loudly instead of quietly reverting this
+    # action to build-only for that runtime.
+    - name: "Assert this runtime has a scan leg"
+      shell: bash
+      env:
+        RUNTIME: ${{ inputs.runtime }}
+      run: |
+        case "${RUNTIME}" in
+          podman | finch) ;;
+          *)
+            echo "::error::validate-container has no scan leg for runtime '${RUNTIME}'. Add one rather than leaving this action build-only for it."
+            exit 1
+            ;;
+        esac
+        echo "${RUNTIME}: scan leg present"
+
+    # One place decides the wrapper, so the build and the scan cannot disagree about
+    # it -- and they must agree. An image built rootless is invisible to
+    # `sudo <runtime>`, which reads root's image store instead, so a mismatch surfaces
+    # at the scan as a missing-image error a long way from its cause.
+    #
+    # podman is rootless on the hosted runners and must NOT be wrapped. finch drives a
+    # root-owned containerd socket and must be.
+    - name: "Resolve the OCI runner wrapper"
+      shell: bash
+      env:
+        RUNTIME: ${{ inputs.runtime }}
+      run: |
+        case "${RUNTIME}" in
+          finch) echo "OCI_RUNNER_WRAPPER=sudo" >> "$GITHUB_ENV" ;;
+          *) echo "${RUNTIME}: no wrapper" ;;
+        esac
 
     # === podman ===
     - name: "podman: install (macOS)"
@@ -45,9 +99,53 @@ runs:
       run: |
         finch vm init
         finch vm start
+    # OCI_RUNNER_WRAPPER comes from the resolve step above rather than an inline `env:`
+    # here, so this build and the scan below read one value.
     - name: "finch: build image"
       if: inputs.runtime == 'finch'
       shell: bash
-      env:
-        OCI_RUNNER_WRAPPER: sudo
       run: ash build-image --oci-runner finch --force
+
+    # === the built image has to run ===
+    #
+    # Shared rather than per-runtime: the whole point is that every runtime with a
+    # build leg gets scanned, and a shared step cannot be the one somebody forgets.
+    - name: "Scan with the built image"
+      shell: bash
+      env:
+        RUNTIME: ${{ inputs.runtime }}
+      # ASH's documented exit codes: 0 success, 1 error during execution, 2 actionable
+      # findings. Distinguishing 2 from 1 rather than `|| true`, for the reason
+      # validate-nix records: swallowing every status turned a scan that had died into
+      # a later, more confusing assertion failure and cost a full CI round trip.
+      run: |
+        set +e
+        ash scan \
+          --mode container \
+          --oci-runner "${RUNTIME}" \
+          --source-dir /tmp/ash-selftest \
+          --output-dir /tmp/ash-selftest/output \
+          --simple \
+          --phases scan \
+          --phases report
+        rc=$?
+        set -e
+        if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then
+          echo "::error::ash scan --mode container --oci-runner ${RUNTIME} exited $rc (expected 0, or 2 for findings)"
+          exit "$rc"
+        fi
+        echo "scan exited $rc"
+
+    # A scan step that runs and produces nothing is the same shape of failure as a
+    # build with no scan: it reports success for work that did not happen. So the
+    # report is required to exist and to parse, not assumed from the exit code.
+    - name: "Assert the scan produced a report"
+      shell: bash
+      run: |
+        results=/tmp/ash-selftest/output/ash_aggregated_results.json
+        if [ ! -s "$results" ]; then
+          echo "::error::${results} is missing or empty, so the container scan did not complete even though it exited cleanly."
+          ls -la /tmp/ash-selftest/output 2>/dev/null || echo "(no output directory)"
+          exit 1
+        fi
+        python3 -c "import json, sys; json.load(open(sys.argv[1])); print('report parsed OK')" "$results"
