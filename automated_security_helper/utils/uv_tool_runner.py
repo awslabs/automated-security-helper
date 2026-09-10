@@ -276,7 +276,13 @@ class UVToolRunner:
                 handlers below for why.
             package_extras: Optional list of package extras (e.g., ["sarif", "toml"])
             with_dependencies: Optional list of additional dependencies to install with --with flag
-            progress_callback: Optional callback function for progress updates
+            progress_callback: Optional callback for progress updates, invoked
+                only when ``timeout`` exceeds 60 seconds. Called from a monitor
+                thread started and stopped around each individual attempt, so the
+                elapsed figure it reports is measured from the start of the
+                attempt in flight rather than from the start of the call, and no
+                callback arrives once this function has returned. With a
+                ``retry_config`` in play the message also names the attempt.
 
         Returns:
             True if installation succeeded, False otherwise
