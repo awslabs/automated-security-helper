@@ -19,9 +19,11 @@ the one string that was wrong, because the second defect passed the original
 version of this file: the tests asserted the buggy behavior.
 """
 
+import json
 import re
 import sys
 from importlib.metadata import PackageNotFoundError, packages_distributions
+from pathlib import Path, PureWindowsPath
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -453,6 +455,156 @@ class TestCdkExtraResolution:
             "install-location strategy could have answered it"
         )
         assert any("aws-cdk-lib" in req for req in derived), derived
+
+    def test_the_url_a_directory_spells_maps_back_to_that_directory(self) -> None:
+        """The assertion that was red on all four Windows cells of the matrix.
+
+        ``as_uri()`` is the spelling pip and uv write into direct_url.json, so
+        reading one back has to be its inverse. Slicing ``file://`` off
+        ``file:///D:/proj`` leaves ``/D:/proj`` -- rooted, but carrying no drive
+        -- which resolves against whichever drive happens to be current and so
+        equals nothing. On POSIX the leftover text happens to be the right path,
+        which is why every Linux and macOS cell stayed green through the defect
+        and this test passes there both before and after the fix.
+
+        Two ancestors, because the discovery loop accepts the project directory
+        or any ancestor of this module; a conversion correct at only one depth
+        would still be wrong.
+        """
+        here = Path(cdk_nag_scanner_module.__file__).resolve()
+
+        for directory in (here.parent, here.parents[3]):
+            recovered = cdk_nag_scanner_module._local_path_from_file_url(
+                directory.as_uri()
+            )
+            assert recovered == directory, (
+                f"{directory.as_uri()} did not read back as {directory}, so a "
+                f"distribution installed from there cannot be recognized as the "
+                f"one containing this module: {recovered}"
+            )
+
+    def test_a_windows_drive_letter_url_reads_back_as_a_drive_path(self) -> None:
+        """The Windows half of the defect, asserted from any runner.
+
+        On Windows ``urllib.request.url2pathname`` *is* ``nturl2path.url2pathname``
+        -- urllib.request imports it under ``os.name == "nt"`` -- and nturl2path
+        imports on every platform, so substituting it here runs the conversion the
+        Windows cells run. Without this the drive-letter shape is observable only
+        on a Windows runner, and the round-trip test above, which passes on POSIX
+        before and after the fix, would be the only thing standing behind it.
+        """
+        import nturl2path
+
+        with patch.object(
+            cdk_nag_scanner_module, "url2pathname", nturl2path.url2pathname
+        ):
+            recovered = cdk_nag_scanner_module._local_path_from_file_url(
+                "file:///D:/a/project"
+            )
+
+        assert recovered is not None
+        assert PureWindowsPath(str(recovered)) == PureWindowsPath("D:/a/project"), (
+            f"the drive-letter URL did not read back as a path on drive D:, so a "
+            f"distribution installed from D:\\a\\project cannot be matched against "
+            f"this module's own path: {recovered}"
+        )
+        assert PureWindowsPath(str(recovered)).drive == "D:", (
+            f"the recovered path is rooted but carries no drive, which is the "
+            f"shape that resolved against whatever drive was current: {recovered}"
+        )
+
+    def test_a_percent_encoded_directory_still_matches(self) -> None:
+        """The other half of the same defect: nothing unquoted the URL.
+
+        Unlike the drive-letter shape above, this misses on every platform. CI
+        just never checks out into a directory whose name needs escaping, so no
+        cell ever caught it. The fixture forces the escaping rather than waiting
+        for a checkout path to supply it, which is what lets this fail on the
+        runner that is actually available.
+        """
+        ancestor = Path(cdk_nag_scanner_module.__file__).resolve().parent
+        head, _, tail = ancestor.as_uri().rpartition("/")
+        # Escape every byte of the last segment. quote() leaves ordinary
+        # characters alone, which would make this fixture identical to the plain
+        # URL and the test vacuous.
+        encoded = head + "/" + "".join(f"%{byte:02X}" for byte in tail.encode())
+        assert encoded != ancestor.as_uri(), (
+            "the fixture URL is not actually percent-encoded, so it cannot "
+            "distinguish a read that unquotes from one that does not"
+        )
+
+        dist = MagicMock()
+        dist.read_text.return_value = json.dumps({"url": encoded})
+        dist.metadata = {"Name": "installed-from-an-escaped-path"}
+
+        with (
+            patch.object(
+                cdk_nag_scanner_module, "packages_distributions", return_value={}
+            ),
+            patch.object(cdk_nag_scanner_module, "distributions", return_value=[dist]),
+        ):
+            located = cdk_nag_scanner_module._distributions_declaring_this_module(
+                "automated_security_helper"
+            )
+
+        assert located == ["installed-from-an-escaped-path"], (
+            f"the percent-encoded project directory did not match this module's "
+            f"own path, so discovery reported nothing and the requirements fall "
+            f"back to the pinned copy: {located}"
+        )
+
+    def test_the_authority_is_kept_for_a_share_and_dropped_for_localhost(self) -> None:
+        """RFC 8089 puts a host in the authority; it belongs to the path.
+
+        On Windows a host authority addresses ``\\\\server\\share``. Dropping it
+        would turn that share into a local directory spelling the same tail, so a
+        distribution installed from a network share could match a local path it
+        has nothing to do with. Asserted as "the host survives" rather than as
+        one platform's rendering of it, because only Windows renders a UNC path.
+
+        ``localhost`` is the one authority that means *this* host and names no
+        path of its own, so it has to reduce to the empty-authority form.
+        """
+        share = cdk_nag_scanner_module._local_path_from_file_url(
+            "file://build-share/proj"
+        )
+        assert share is not None
+        assert "build-share" in str(share), (
+            f"the host authority was dropped, so a share reads as the local "
+            f"directory /proj: {share}"
+        )
+
+        assert cdk_nag_scanner_module._local_path_from_file_url(
+            "file://localhost/proj"
+        ) == cdk_nag_scanner_module._local_path_from_file_url("file:///proj")
+
+    def test_an_unreadable_url_is_skipped_rather_than_raising(self) -> None:
+        """The walk covers every installed distribution, so nothing may escape.
+
+        Each case is something a sibling distribution can genuinely carry: a
+        non-string from hand-edited JSON, an ordinary install from an index, and
+        an unterminated IPv6 authority that makes urlsplit itself raise. The last
+        one is injected because only nturl2path raises for a drive specifier it
+        cannot parse, and that code does not run on this runner.
+        """
+        assert cdk_nag_scanner_module._local_path_from_file_url(None) is None
+        assert cdk_nag_scanner_module._local_path_from_file_url({"url": 1}) is None
+        assert (
+            cdk_nag_scanner_module._local_path_from_file_url(
+                "https://example.invalid/x.whl"
+            )
+            is None
+        )
+        assert (
+            cdk_nag_scanner_module._local_path_from_file_url("file://[::1/proj") is None
+        )
+
+        with patch.object(
+            cdk_nag_scanner_module, "url2pathname", side_effect=OSError("Bad URL")
+        ):
+            assert (
+                cdk_nag_scanner_module._local_path_from_file_url("file:///proj") is None
+            )
 
     def test_falls_back_when_no_distribution_declares_the_extra(self) -> None:
         """Readable metadata with no cdk extra falls back; it does not return [].

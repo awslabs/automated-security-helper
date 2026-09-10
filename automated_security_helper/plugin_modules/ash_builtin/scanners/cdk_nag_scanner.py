@@ -11,6 +11,8 @@ from importlib.metadata import (
 )
 from typing import Annotated, ClassVar, List, Literal, Optional
 from pathlib import Path
+from urllib.parse import urlsplit
+from urllib.request import url2pathname
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -78,6 +80,61 @@ _CDK_EXTRA_FALLBACK_REQUIREMENTS: List[str] = [
 _CDK_EXTRA_MARKER = re.compile(r"""\bextra\s*==\s*['"]cdk['"]""")
 
 
+def _local_path_from_file_url(url: object) -> Optional[Path]:
+    """The path on this host that a PEP 610 ``file://`` URL names, or None.
+
+    Slicing the scheme off the front and handing the remainder to ``Path`` is
+    what this used to do inline, and it is wrong twice over. Both mistakes are
+    invisible on Linux, where the leftover text happens to be exactly the path:
+
+    * ``file:///D:/proj`` leaves ``/D:/proj``, which on Windows is *rooted with
+      no drive* -- ``PureWindowsPath("/D:/proj").drive`` is ``""`` -- so it
+      resolves against whichever drive is current and can never equal the real
+      ``D:\\proj``. Every comparison against it missed, which is what took out
+      all four Windows cells: on 3.12 and 3.13 only the two tests that force the
+      declared mapping empty, and on 3.10 and 3.11 the drift guards too, because
+      there this route is the only one that resolves at all.
+    * A directory whose name needs percent-encoding stays encoded, because
+      nothing unquoted it. That one misses on every platform; CI simply never
+      checks out into such a directory.
+
+    ``url2pathname`` is the standard library's inverse of the conversion pip and
+    uv perform when they write the file, and it is platform specific on purpose:
+    on Windows it turns ``/D:/proj`` into ``D:\\proj``, and on POSIX it unquotes
+    and does nothing else. A Windows-shaped URL read on POSIX therefore yields a
+    path that matches nothing, which is the right answer -- ``direct_url.json``
+    is written by the installer that ran on this host, so its URL always names a
+    path here.
+
+    Deliberately not ``workspace.aggregation._strip_file_scheme``, which is
+    textual for a reason of its own: it normalizes scanner-emitted SARIF URIs
+    that are frequently not valid URIs at all, and has to reduce ``file:///C:/x``
+    the same way on every host. This URL is machine-written and well formed, and
+    what is wanted from it is a path on *this* host, so the two cannot share an
+    implementation.
+    """
+    if not isinstance(url, str):
+        return None
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        # An unterminated IPv6 authority, e.g. "file://[::1/proj". One malformed
+        # sibling distribution must not take out the walk over all of them.
+        return None
+    if parts.scheme != "file":
+        return None
+    # Keep a host authority in the string handed to url2pathname: on Windows that
+    # is what turns "file://server/share/x" into the UNC path \\server\share\x,
+    # and dropping it would silently reinterpret a share as a local directory.
+    # "localhost" is RFC 8089's spelling of "this host" and names no path itself.
+    host = "" if parts.netloc.lower() == "localhost" else parts.netloc
+    try:
+        return Path(url2pathname(f"//{host}{parts.path}" if host else parts.path))
+    except (OSError, ValueError):
+        # nturl2path raises OSError for a drive specifier it cannot parse.
+        return None
+
+
 def _distributions_declaring_this_module(root_package: str) -> List[str]:
     """Names of installed distributions that ship ``root_package``.
 
@@ -107,8 +164,10 @@ def _distributions_declaring_this_module(root_package: str) -> List[str]:
     The second strategy does not ask what a distribution declares it contains. It
     asks which distribution was installed FROM the directory this module lives
     in, via the PEP 610 ``direct_url.json`` that pip and uv write for any install
-    from a local path. That file records the project directory verbatim and does
-    not depend on RECORD or ``top_level.txt``, so it resolves on every version.
+    from a local path. That file records the project directory as a ``file://``
+    URL -- see ``_local_path_from_file_url`` for why reading one back is not a
+    string slice -- and depends on neither RECORD nor ``top_level.txt``, so it
+    resolves on every version.
 
     Still never names a distribution literally. A literal name is one someone
     else can own on a package index, and installing by such a name is the defect
@@ -156,12 +215,13 @@ def _distributions_declaring_this_module(root_package: str) -> List[str]:
             url = json.loads(raw).get("url", "")
         except (ValueError, AttributeError):
             continue
-        if not isinstance(url, str) or not url.startswith("file://"):
+        project_dir = _local_path_from_file_url(url)
+        if project_dir is None:
             continue
         # Compare resolved paths rather than strings: the URL is absolute but may
         # differ from this module's path by a symlink or a trailing separator.
         try:
-            project_dir = Path(url[len("file://") :]).resolve()
+            project_dir = project_dir.resolve()
         except (OSError, ValueError):
             continue
         if project_dir == here or project_dir in here.parents:
