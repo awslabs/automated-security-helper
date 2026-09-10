@@ -150,7 +150,10 @@ def _sleep_recorder(tmp_path):
     Returns ``(shim_dir, log_path)``.
     """
     shim_dir = tmp_path / "shim"
-    shim_dir.mkdir()
+    # parents=True so callers can hand this a fresh subdirectory of tmp_path and
+    # get an independent recording, which is how the two halves of a
+    # same-invocation comparison stay from writing into one log.
+    shim_dir.mkdir(parents=True)
     log = tmp_path / "sleep-argv"
     shim = shim_dir / "sleep"
     shim.write_text('#!/bin/bash\nprintf "%s\\n" "$*" >> "' + str(log) + '"\nexit 0\n')
@@ -322,13 +325,20 @@ class TestTheSummaryCountMatchesWhatRan:
 
 
 def _run_recording_sleeps(
-    command: str, tmp_path, attempts: int | None = None, delay: int | None = None
+    command: str,
+    tmp_path,
+    attempts: int | str | None = None,
+    delay: int | str | None = None,
 ):
     """Run the script with a recording ``sleep`` on PATH.
 
     Returns ``(CompletedProcess, sleep_argv)`` where ``sleep_argv`` is the list of
     arguments each ``sleep`` call received, in order. Omitting ``attempts`` or
     ``delay`` unsets the corresponding override so the production default applies.
+
+    Both knobs accept a ``str`` as well as an ``int``, because the environment
+    carries strings and the distinction between ``10`` and ``010`` is exactly what
+    some callers need to set -- an ``int`` literal cannot express the second.
     """
     shim_dir, log = _sleep_recorder(tmp_path)
     env = {**os.environ, "PATH": f"{shim_dir}{os.pathsep}{os.environ['PATH']}"}
@@ -416,6 +426,165 @@ class TestNothingFollowsTheFinalAttempt:
         assert slept == ["7"], "the gap between attempt 1 and attempt 2 must be slept"
         assert "Attempt 1/2 failed, retrying in 7s..." in result.stderr
         assert result.stderr.count("failed, retrying in") == 1
+
+
+class TestALeadingZeroDelayIsReadAsBaseTen:
+    """The guard above closed the non-integer route and left an all-digits one open.
+
+    ``case $delay in '' | *[!0-9]*)`` accepts any string of digits, but
+    ``$((delay * 2))`` reads a leading zero as *octal*, and bash rejects ``08``
+    and ``09`` outright::
+
+        with-retry.sh: line 95: 08: value too great for base (error token is "08")
+
+    That is verbatim the failure the delay guard's own comment describes for
+    ``0.1``: the arithmetic error aborts the enclosing ``while`` without aborting
+    the script, so exactly one of three attempts ran and "All 3 attempts failed"
+    printed anyway. Measured on this branch before the fix, with
+    ``WITH_RETRY_DELAY=08``: one attempt, sleep handed ``08``, exit 1.
+
+    ``010`` is the worse case, because nothing crashes. ``sleep`` parses its
+    argument in base 10 while ``$(( ))`` parses it in base 8, so the two disagree
+    about the same string: measured before the fix, the recorded argv was
+    ``['010', '16']`` -- ten seconds, then sixteen. Not a doubling of ten, and not
+    a doubling of eight. A reader who set ``010`` meaning ten got a schedule that
+    matches neither reading and no diagnostic of any kind.
+
+    Normalizing with ``$((10#$delay))`` after validation makes both consumers
+    agree, so ``010`` and ``10`` become indistinguishable -- which is what the two
+    assertions below compare, rather than hard-coding one expected list.
+    """
+
+    def test_a_delay_of_08_no_longer_aborts_the_loop(self, tmp_path):
+        """08 is not valid octal, so the doubling was a fatal arithmetic error."""
+        result, slept = _run_recording_sleeps("false", tmp_path, delay="08")
+
+        assert "value too great for base" not in result.stderr, (
+            "bash could not parse the delay as octal and the arithmetic error "
+            "aborted the retry loop mid-run"
+        )
+        assert slept == ["8", "16"], (
+            "08 must mean eight seconds doubling to sixteen. A single-element "
+            "list is the truncated loop, and a leading '08' means the raw string "
+            "reached sleep and the doubling then died on it"
+        )
+        assert result.stderr.count("failed, retrying in") == 2
+        assert "All 3 attempts failed" in result.stderr
+
+    def test_09_is_the_other_invalid_octal_digit(self, tmp_path):
+        result, slept = _run_recording_sleeps("false", tmp_path, delay="09")
+
+        assert "value too great for base" not in result.stderr
+        assert slept == ["9", "18"]
+
+    def test_every_attempt_still_runs_when_the_delay_has_a_leading_zero(
+        self, tmp_path
+    ):
+        """The observable the crash actually destroyed: how many attempts ran.
+
+        Exit code and the summary line were both useless here -- the exit was
+        already 1 and the summary already said 3 -- which is the same reason the
+        malformed-knob tests above count runs instead.
+        """
+        marker = tmp_path / "attempts"
+        result, _ = _run_recording_sleeps(
+            f"printf x >> {marker}; false", tmp_path, delay="08"
+        )
+
+        assert marker.read_text() == "xxx", (
+            "one 'x' is the aborted loop: the arithmetic error ended the while "
+            "without ending the script, so two attempts were skipped while the "
+            "summary still claimed three"
+        )
+        assert result.returncode == 1
+
+    def test_010_is_interpreted_as_ten_and_not_as_eight(self, tmp_path):
+        """The silent case, and the more valuable assertion of the two.
+
+        Nothing errors on ``010``, so this is compared against the plain ``10``
+        that a caller writing ``010`` meant. Before the fix the two diverged:
+        ``['010', '16']`` against ``['10', '20']``.
+        """
+        octal_shaped, slept_octal_shaped = _run_recording_sleeps(
+            "false", tmp_path / "octal", delay="010"
+        )
+        plain, slept_plain = _run_recording_sleeps(
+            "false", tmp_path / "plain", delay="10"
+        )
+
+        assert slept_plain == ["10", "20"], (
+            "control: a plain decimal delay must still double, or the comparison "
+            "below proves nothing"
+        )
+        assert slept_octal_shaped == slept_plain, (
+            f"010 slept {slept_octal_shaped} where 10 slept {slept_plain}. A "
+            f"leading zero must not change the interval: sleep reads it in base "
+            f"10 and $(( )) read it in base 8, so the announced wait and the "
+            f"doubling disagreed about the same string"
+        )
+        assert "Attempt 1/3 failed, retrying in 10s..." in octal_shaped.stderr, (
+            "the announced interval must match the one slept; '010s' here means "
+            "the raw string is still being reported"
+        )
+
+    def test_a_delay_without_a_leading_zero_is_unchanged(self, tmp_path):
+        """Positive control: normalization must not perturb the common case."""
+        result, slept = _run_recording_sleeps("false", tmp_path, delay=5)
+
+        assert slept == ["5", "10"]
+        assert "Attempt 1/3 failed, retrying in 5s..." in result.stderr
+        assert result.returncode == 1
+
+    def test_a_zero_delay_is_still_zero(self, tmp_path):
+        """Every other test in this file collapses the backoff with 0, so this
+        path has to survive the normalization or the whole file goes red."""
+        _, slept = _run_recording_sleeps("false", tmp_path, delay=0)
+
+        assert slept == ["0", "0"]
+
+
+class TestTheAttemptCountIsNotAffected:
+    """Positive control for the half of the pair that was already correct.
+
+    ``max`` never reaches ``$(( ))``. Its three consumers are
+    ``[ "$max" -lt 1 ]``, ``[ $attempt -le $max ]`` and
+    ``[ "$attempt" -lt "$max" ]``, all of them ``test``, which parses its integer
+    operands in base 10 -- so ``[ 9 -le 010 ]`` is true and ``010`` already meant
+    ten attempts consistently. Only ``delay`` is doubled.
+
+    Normalizing ``max`` too would therefore be a change to a path that was
+    already right, so these pin that it was left alone. Measured before and after
+    the delay fix: ``010`` and ``10`` each ran ten attempts with nine gaps.
+    """
+
+    def test_a_leading_zero_attempt_count_already_meant_base_ten(self, tmp_path):
+        marker = tmp_path / "attempts"
+        result, slept = _run_recording_sleeps(
+            f"printf x >> {marker}; false", tmp_path, attempts="010", delay=0
+        )
+
+        assert len(marker.read_text()) == 10, (
+            "test(1) parses base 10, so 010 is ten attempts; eight would mean "
+            "the attempt count had been routed through octal arithmetic"
+        )
+        assert len(slept) == 9, "ten attempts have nine gaps between them"
+        assert result.returncode == 1
+
+    def test_it_matches_the_plain_decimal_attempt_count_exactly(self, tmp_path):
+        octal_shaped = tmp_path / "octal"
+        plain = tmp_path / "plain"
+        _, slept_octal_shaped = _run_recording_sleeps(
+            f"printf x >> {octal_shaped / 'm'}; false",
+            octal_shaped,
+            attempts="010",
+            delay=0,
+        )
+        _, slept_plain = _run_recording_sleeps(
+            f"printf x >> {plain / 'm'}; false", plain, attempts="10", delay=0
+        )
+
+        assert (octal_shaped / "m").read_text() == (plain / "m").read_text()
+        assert slept_octal_shaped == slept_plain
 
 
 def _run_argv(*argv: str, attempts: int = 3, delay: int = 0):
