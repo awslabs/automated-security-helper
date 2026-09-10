@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
@@ -80,8 +79,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Tuple
+from typing import Any
 
 DEFAULT_RESULTS_PATH = Path(".ash") / "ash_output" / "ash_aggregated_results.json"
 
@@ -104,24 +104,26 @@ def normalize_status(raw: Any) -> str:
     return text.upper()
 
 
-def error_statuses_in(record: Mapping[str, Any]) -> List[str]:
+def error_statuses_in(record: Mapping[str, Any]) -> list[str]:
     """Every place inside one scanner record that says ERROR.
 
     Returns labels such as ``"status"`` or ``"source.status"`` so the caller can
     report which field produced the verdict rather than just a count.
     """
-    found: List[str] = []
+    found: list[str] = []
     if normalize_status(record.get("status")) == STATUS_ERROR:
         found.append("status")
     for key in NESTED_TARGET_KEYS:
         nested = record.get(key)
-        if isinstance(nested, Mapping):
-            if normalize_status(nested.get("status")) == STATUS_ERROR:
-                found.append(f"{key}.status")
+        if (
+            isinstance(nested, Mapping)
+            and normalize_status(nested.get("status")) == STATUS_ERROR
+        ):
+            found.append(f"{key}.status")
     return found
 
 
-def count_scanner_errors(results: Any) -> Tuple[int, Dict[str, List[str]], List[str]]:
+def count_scanner_errors(results: Any) -> tuple[int, dict[str, list[str]], list[str]]:
     """Count scanners at ERROR.
 
     Returns ``(count, {scanner: [fields]}, problems)``. ``problems`` is non-empty
@@ -133,8 +135,10 @@ def count_scanner_errors(results: Any) -> Tuple[int, Dict[str, List[str]], List[
             0,
             {},
             [
-                f"results is not a JSON object (got {type(results).__name__}); "
-                "expected the parsed aggregated results"
+                (
+                    f"results is not a JSON object (got {type(results).__name__}); "
+                    "expected the parsed aggregated results"
+                )
             ],
         )
 
@@ -144,9 +148,11 @@ def count_scanner_errors(results: Any) -> Tuple[int, Dict[str, List[str]], List[
             0,
             {},
             [
-                "results has no 'scanner_results' object, so this check would "
-                "inspect nothing. Available top-level keys: "
-                f"{sorted(str(key) for key in results)}"
+                (
+                    "results has no 'scanner_results' object, so this check would "
+                    "inspect nothing. Available top-level keys: "
+                    f"{sorted(str(key) for key in results)}"
+                )
             ],
         )
     if not scanner_results:
@@ -156,7 +162,7 @@ def count_scanner_errors(results: Any) -> Tuple[int, Dict[str, List[str]], List[
             ["'scanner_results' is empty -- the scan recorded no scanners at all"],
         )
 
-    offenders: Dict[str, List[str]] = {}
+    offenders: dict[str, list[str]] = {}
     for name, entry in scanner_results.items():
         if not isinstance(entry, Mapping):
             continue
@@ -166,7 +172,7 @@ def count_scanner_errors(results: Any) -> Tuple[int, Dict[str, List[str]], List[
     return len(offenders), offenders, []
 
 
-def _parse_args(argv: List[str] | None) -> argparse.Namespace:
+def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Count scanners reporting status ERROR in an ASH aggregated results "
@@ -191,7 +197,7 @@ def _parse_args(argv: List[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: List[str] | None = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     path = Path(args.results)
 
