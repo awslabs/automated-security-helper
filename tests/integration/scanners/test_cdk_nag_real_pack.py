@@ -88,10 +88,51 @@ FOREIGN_PLUGIN_TEMPLATE = {
     },
 }
 
+# A template on which a nag rule RAISES rather than returning a verdict.
+#
+# cdk-nag rules read primitive properties through NagRules.resolveIfPrimitive, which throws
+# "the rule could not be validated" when the value resolves to a non-primitive -- which is what
+# a Ref to a CloudFormation Parameter resolves to. applyRule catches that and records it through
+# the same addViolation a real violation uses, so the report cannot be told apart structurally.
+#
+# Two resources rather than one because two different rules have to be exercised: EC2Volume's
+# Encrypted trips AwsSolutions-EC26 and the security group description trips AwsSolutions-EC27.
+# Measured against cdk-nag 3.0.2, both come back at severity "error".
+UNEVALUATABLE_TEMPLATE = {
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "Fixture whose primitive properties resolve to intrinsic functions",
+    "Parameters": {
+        "SgDescription": {"Type": "String", "Default": "fixture security group"},
+        "VolumeEncrypted": {"Type": "String", "Default": "true"},
+    },
+    "Resources": {
+        "IntrinsicSecurityGroup": {
+            "Type": "AWS::EC2::SecurityGroup",
+            "Properties": {"GroupDescription": {"Ref": "SgDescription"}},
+        },
+        "IntrinsicVolume": {
+            "Type": "AWS::EC2::Volume",
+            "Properties": {
+                "AvailabilityZone": "us-east-1a",
+                "Size": 8,
+                "Encrypted": {"Ref": "VolumeEncrypted"},
+            },
+        },
+    },
+}
+
+
 @pytest.fixture()
 def foreign_plugin_template(tmp_path: Path) -> Path:
     path = tmp_path / "foreign_plugin.template.json"
     path.write_text(json.dumps(FOREIGN_PLUGIN_TEMPLATE, indent=2))
+    return path
+
+
+@pytest.fixture()
+def unevaluatable_template(tmp_path: Path) -> Path:
+    path = tmp_path / "unevaluatable.template.json"
+    path.write_text(json.dumps(UNEVALUATABLE_TEMPLATE, indent=2))
     return path
 
 
@@ -295,4 +336,116 @@ class TestReportAttribution:
         assert nag_rule.properties.model_extra["pack"] == "AwsSolutions"
         assert str(nag_rule.helpUri).startswith(
             "https://github.com/cdklabs/cdk-nag/blob/main/RULES.md#"
+        )
+
+
+class TestRuleThatCouldNotBeEvaluated:
+    def test_an_unevaluated_rule_is_not_reported_as_a_violation(
+        self, unevaluatable_template: Path, tmp_path: Path
+    ):
+        """A rule that raised must render as notApplicable with no severity.
+
+        cdk-nag reports a rule that threw through the same ``addViolation`` as a real finding,
+        at whatever severity the rule declared -- ``"error"`` for these two, which ASH's ladder
+        reads as CRITICAL. So before this change a template referencing a parameter produced
+        critical security findings for rules that never ran.
+
+        Both directions are asserted from one report: the unevaluated rules must be
+        ``notApplicable``/``none``, and a genuine violation from the same run must still be
+        ``fail``/``error``.
+        """
+        _require_cdk_nag()
+        from automated_security_helper.schemas.sarif_schema_model import Kind, Level
+        from automated_security_helper.utils.cdk_nag_wrapper import (
+            NOT_EVALUATED,
+            run_cdk_nag_against_cfn_template,
+        )
+
+        response = run_cdk_nag_against_cfn_template(
+            template_path=unevaluatable_template,
+            nag_packs=["AwsSolutionsChecks"],
+            outdir=tmp_path / "cdk-out-unevaluatable",
+        )
+
+        assert response is not None and response.failure is None
+
+        unevaluated = [
+            finding
+            for findings in response.results.values()
+            for finding in findings
+            if (finding.properties.model_extra or {})["cdk_nag_finding"]["compliance"]
+            == NOT_EVALUATED
+        ]
+        assert unevaluated, (
+            "no rule reported as un-evaluated, so this fixture no longer reproduces the "
+            "defect. cdk-nag raises out of NagRules.resolveIfPrimitive when a primitive "
+            "property resolves to an intrinsic; check that the parameter Refs survived."
+        )
+
+        for finding in unevaluated:
+            assert finding.kind == Kind.notApplicable, (
+                f"{finding.ruleId} could not be evaluated but rendered kind={finding.kind}"
+            )
+            assert finding.level == Level.none, (
+                f"{finding.ruleId} could not be evaluated but carries level={finding.level}"
+            )
+            # The message is what most report surfaces show, so the fact has to be legible
+            # there too rather than only in the machine-readable kind.
+            assert "NOT evaluated" in finding.message.root.text
+
+    def test_the_scanner_reports_an_unevaluated_rule_as_a_run_level_condition(
+        self, test_plugin_context, unevaluatable_template: Path
+    ):
+        """End to end through the real scanner, asserting the SARIF invocation.
+
+        This is the only test here that exercises ``CdkNagScanner.scan`` rather than the
+        wrapper, and it is what covers the reporting half of the fix: the rule descriptor's
+        pack and help pointer, and the ``toolExecutionNotifications`` entry.
+
+        SARIF's own definitions are why the notification exists at all --
+        ``toolExecutionNotifications`` is "A list of runtime conditions detected by the tool
+        during the analysis" and ``notification.associatedRule`` is "A reference used to locate
+        the rule descriptor associated with this notification". A rule that raised mid-scan is
+        a runtime condition, and a coverage hole is a property of the run rather than of one
+        result.
+        """
+        _require_cdk_nag()
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
+            CdkNagScanner,
+            CdkNagScannerConfig,
+        )
+
+        source_dir = Path(test_plugin_context.source_dir)
+        source_dir.mkdir(parents=True, exist_ok=True)
+        (source_dir / "unevaluatable.template.json").write_text(
+            unevaluatable_template.read_text()
+        )
+
+        scanner = CdkNagScanner(
+            context=test_plugin_context, config=CdkNagScannerConfig()
+        )
+        report = scanner.scan(target=source_dir, target_type="source")
+
+        assert report is not False, "scanner refused to run"
+        run = report.runs[0]
+
+        notifications = run.invocations[0].toolExecutionNotifications or []
+        notified_rules = {
+            n.associatedRule.root.id for n in notifications if n.associatedRule
+        }
+        assert notified_rules, (
+            "the scan produced no toolExecutionNotifications, so a rule that did not run "
+            "leaves no trace at the run level"
+        )
+
+        # Every notified rule must correspond to a notApplicable result, and vice versa: the
+        # two channels are two views of one fact and must not disagree.
+        from automated_security_helper.schemas.sarif_schema_model import Kind
+
+        unevaluated_rules = {
+            r.ruleId for r in (run.results or []) if r.kind == Kind.notApplicable
+        }
+        assert notified_rules == unevaluated_rules, (
+            f"notifications name {sorted(notified_rules)} but the notApplicable results are "
+            f"{sorted(unevaluated_rules)}"
         )
