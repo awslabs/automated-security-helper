@@ -308,7 +308,17 @@ jobs:
         # nothing and the action reads `check_runs[0].id` unguarded, so the step threw
         # a TypeError, swallowed it, reported success, and published no annotations.
         with:
-          report_paths: "**/ash.junit.xml"
+          # An explicit path, not `**/ash.junit.xml`. The report lands in
+          # `.ash/ash_output/reports/` by default, and `**` does not descend into
+          # hidden directories unless the globber is told to, so the pattern never
+          # matched the file it was written for: the step reported "No test results
+          # found!" and created an empty check. This was invisible while the broken
+          # permission probe above skipped the step entirely.
+          #
+          # The explicit form also honors a caller that overrides output-dir, which
+          # the glob only ever did by accident, and it matches how the PR comment and
+          # SARIF upload in this same job already address their own report files.
+          report_paths: ${{ inputs.output-dir }}/reports/ash.junit.xml
           include_passed: true
           check_name: ASH Scan JUnit Test Report
           summary: Skipped means passing, suppressed, or ignored findings that are considered non-actionable.
