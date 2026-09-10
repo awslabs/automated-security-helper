@@ -1,0 +1,202 @@
+# Installation Guide
+
+ASH v3 offers multiple installation methods to fit your workflow. Choose the option that works best for your environment.
+
+## Prerequisites
+
+### For Local Mode
+- Python 3.10 or later
+- UV package manager (automatically installed with ASH)
+
+ASH v3 uses UV's tool isolation system to automatically manage most scanner dependencies (Bandit, Checkov, Semgrep). For full scanner coverage in local mode, the following additional non-Python tools are recommended:
+- Ruby with cfn-nag (`gem install cfn-nag`)
+- Node.js/npm (for npm audit support)
+- Grype and Syft (for SBOM and vulnerability scanning)
+
+**Note**: Tools like Bandit, Checkov, and Semgrep are automatically installed via UV tool management when needed, so you don't need to install them manually. ASH uses sensible default version constraints with the flexibility to override through configuration.
+
+### For Container Mode
+- Any OCI-compatible container runtime (Docker, Podman, Finch, etc.)
+- On Windows: WSL2 is typically required for running Linux containers
+
+### For Nix Mode
+- [Nix](https://nixos.org/download/) on Linux or macOS
+- On Windows: use WSL2, then follow the Linux instructions
+
+Nix mode supplies every scanner from a pinned flake, so nothing else needs installing. See [Nix mode](#nix-mode) below.
+
+## Installation Options
+
+### Standard Installation
+
+#### 1. Using `uvx` (Recommended)
+
+[`uvx`](https://github.com/astral-sh/uv) is a fast Python package installer and resolver that allows you to run packages directly without installing them permanently.
+
+#### Linux/macOS
+```bash
+# Install uv if you don't have it
+curl -sSf https://astral.sh/uv/install.sh | sh
+
+# Create an alias for ASH
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}"
+
+# Use as normal
+ash --help
+```
+
+#### Windows
+```powershell
+# Install uv if you don't have it
+irm https://astral.sh/uv/install.ps1 | iex
+
+# Create a function for ASH
+function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}} $args }
+
+# Use as normal
+ash --help
+```
+
+!!! tip "Floating tag `v3`"
+    We also maintain a `v3` floating tag that always points to the latest stable v3.x release. You can use `@v3` instead of a specific version to stay up to date automatically. Pin a specific version (e.g., `@v{{VERSION}}`) when you need reproducible builds, such as in CI/CD pipelines.
+
+#### 2. Using `pipx`
+
+[`pipx`](https://pypa.github.io/pipx/) installs packages in isolated environments and makes their entry points available globally.
+
+```bash
+# Works on Windows, macOS, and Linux
+pipx install git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}
+
+# Use as normal
+ash --help
+```
+
+#### 3. Using `pip`
+
+Standard Python package installation:
+
+```bash
+# Works on Windows, macOS, and Linux
+pip install git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}
+
+# Use as normal
+ash --help
+```
+
+#### 4. Clone the Repository
+
+For development or if you want to modify ASH:
+
+```bash
+# Works on Windows, macOS, and Linux
+git clone https://github.com/awslabs/automated-security-helper.git --branch v{{VERSION}}
+cd automated-security-helper
+pip install .
+
+# Use as normal
+ash --help
+```
+
+### MCP Support
+
+ASH v3 includes built-in Model Context Protocol (MCP) support for AI integration. No additional installation steps are required - MCP dependencies are included as core dependencies.
+
+After installing ASH with any of the methods above, you can immediately use MCP features:
+
+```bash
+# Start the MCP server
+ash mcp
+
+# Verify MCP support
+ash mcp --help
+```
+
+## Nix mode
+
+Nix mode runs your scan inside a development shell that supplies every scanner, each pinned by hash:
+
+```bash
+ash scan --mode nix --source-dir . --output-dir .ash/ash_output
+```
+
+Use it when you want the reproducibility of container mode without building an image. ASH publishes no container image, so `--mode container` requires every adopter to build one first. Nix mode needs no image and no registry.
+
+It also avoids a quieter problem. In local mode, a scanner whose binary is missing reports `MISSING`, contributes zero findings, and the run still writes a complete-looking report, so a scan can under-report without saying so. Nix mode supplies all ten scanners, and if Nix itself is absent it fails with an explanation rather than falling back to local mode.
+
+### How it works
+
+Like container mode, this is an outer wrapper: ASH re-executes itself inside `nix develop` and the inner run is an ordinary local scan. A development shell changes `PATH` but not the filesystem, so no path translation is involved.
+
+The shell sets `ASH_OFFLINE=YES` for the inner run. Several scanners prefer to install their own tools with `uv tool install`, and without this they would fetch copies that shadow the pinned ones, leaving a report that describes versions the flake never supplied.
+
+### Choosing the flake
+
+By default ASH uses the flake in your checkout when you are running from source, and otherwise the published repository at the version of ASH you are running. Override it with:
+
+```bash
+export ASH_NIX_FLAKE_REF="github:awslabs/automated-security-helper/v3.5.9"
+```
+
+### Platform support
+
+Linux and macOS, on both x86-64 and ARM. Windows users should run ASH under WSL2, which uses the Linux path.
+
+Native Windows Nix is not supported, and this is an upstream limitation rather than a gap in ASH. Windows Nix has no fixed-output derivations, which is the mechanism by which any of these tools would be downloaded, and no build sandbox. Nix's own installation documentation lists Windows as WSL2 only.
+
+## Windows-Specific Installation Notes
+
+ASH v3 provides the same experience on Windows as on other platforms:
+
+- For local mode, ASH runs natively on Windows with Python 3.10+
+- For container mode, you'll need:
+  1. Windows Subsystem for Linux (WSL2) installed
+  2. A container runtime like Docker Desktop, Rancher Desktop, or Podman Desktop with WSL2 integration enabled
+- For Nix mode, you'll need WSL2; native Windows Nix cannot supply the toolchain
+
+## Verifying Your Installation
+
+After installation, verify that ASH is working correctly:
+
+```bash
+# Check the version
+ash --version
+
+# Run a simple scan in local mode
+ash --mode local
+```
+
+## Upgrading ASH
+
+To upgrade ASH to the latest version:
+
+### If installed with `uvx`
+```bash
+# Your alias will use the latest version when specified
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}"
+```
+
+### If installed with `pipx`
+```bash
+pipx upgrade automated-security-helper
+```
+
+### If installed with `pip`
+```bash
+pip install --upgrade git+https://github.com/awslabs/automated-security-helper.git@v{{VERSION}}
+```
+
+### If installed from repository
+```bash
+cd automated-security-helper
+git pull
+pip install .
+```
+
+## Next Steps
+
+After installation, you can:
+
+1. [Configure ASH](configuration-guide.md) for your project
+2. [Run your first scan](quick-start-guide.md)
+3. Learn about [ASH's CLI options](cli-reference.md)
