@@ -37,6 +37,15 @@ max=${WITH_RETRY_MAX_ATTEMPTS:-3}; delay=${WITH_RETRY_DELAY:-5}; attempt=1
 #
 # `case` rather than a regex or `expr` so this stays dependency-free: it runs in
 # the container build stage before most of the toolchain exists.
+#
+# The `''` arm of both cases is unreachable today, and worth keeping anyway. It is
+# unreachable because the assignments above use `${VAR:-default}`, and `:-`
+# substitutes for null as well as for unset -- so WITH_RETRY_DELAY="" yields 5,
+# not an error, and neither variable can be empty by the time it reaches here.
+# Kept because an empty $delay is the one input that would make `$((10#$delay))`
+# below a syntax error rather than a wrong number, so the day someone changes
+# `:-` to `-` the guard is already in place. The messages describe the value they
+# rejected rather than claiming the arm fires.
 case $max in
   '' | *[!0-9]*)
     echo "with-retry: WITH_RETRY_MAX_ATTEMPTS must be a non-negative integer, got '$max'" >&2
@@ -64,11 +73,43 @@ esac
 # Measured, the recorded sleeps were 010 then 16 -- ten seconds, then sixteen,
 # which is a doubling of neither.
 #
-# `10#` forces base 10 for both consumers, so a leading zero stops mattering.
-# Safe unconditionally here: $delay is already known to be all digits, and
-# `10#5` is 5. Only $delay needs this. $max reaches `test` alone, which parses
-# base 10 -- `[ 9 -le 010 ]` is true -- so 010 already meant ten attempts
-# consistently, and normalizing it would change a path that was already correct.
+# Strip the padding textually first, before any arithmetic touches it. That makes
+# the length test below exact -- it measures the value's digits rather than the
+# padding's -- so the rejection message can name the real magnitude.
+while [ "${#delay}" -gt 1 ] && [ "${delay#0}" != "$delay" ]; do delay=${delay#0}; done
+# All digits is also not the same as in range, and past 2^63-1 `$(( ))` wraps
+# SILENTLY: measured in bash, $((10#9223372036854775808)) is
+# -9223372036854775808 with exit 0 and no diagnostic. That is a worse failure than
+# the octal one because it is not an error anywhere. With
+# WITH_RETRY_DELAY=9223372036854775808, all digits and so accepted by the guard
+# above, the recorded sleeps were -9223372036854775808 then 0: GNU sleep rejects a
+# negative interval and exits 1, that status is unchecked, the doubling wraps the
+# rest to zero, and all three attempts run back-to-back with NO backoff at all --
+# precisely the protection this script exists to provide, silently removed.
+#
+# So bound the magnitude, not just the character set. 86400 is one day, well past
+# any plausible install backoff and far below the wrap. This also closes a hole
+# that predates the base-10 fix and needs no overflow to reach it: 99999999 is
+# eight digits, wraps nothing, and asked `sleep` for 3.2 years.
+#
+# Length first, and the short-circuit matters: at most five digits means at most
+# 99999, so `$(( ))` cannot wrap and the comparison that follows is meaningful.
+# Reversing the two would evaluate the arithmetic on the very input that overflows.
+if [ "${#delay}" -gt 5 ] || [ "$((10#$delay))" -gt 86400 ]; then
+  echo "with-retry: WITH_RETRY_DELAY must be at most 86400 seconds (24h), got '$delay'" >&2
+  exit 2
+fi
+# `10#` forces base 10, so a leading zero stops mattering. Redundant with the
+# padding strip above and kept regardless: it is a local, one-token guarantee that
+# does not depend on that loop being right, and it cannot overflow now that the
+# length is bounded. Only $delay needs any of this.
+#
+# $max reaches `test` alone, which parses its integer operands in base 10 --
+# `[ 9 -le 010 ]` is true -- so 010 already meant ten attempts consistently, and
+# normalizing it would change a path that was already correct. That safety depends
+# on this script using `[` exclusively: `[[ ]]` evaluates its operands
+# arithmetically, so converting these tests to `[[ ]]` would silently reintroduce
+# octal on the attempt count.
 delay=$((10#$delay))
 # Guarded separately, and only once $max is known to be numeric so `-lt` is
 # safe. max=0 would skip the loop entirely and then report "All 0 attempts
