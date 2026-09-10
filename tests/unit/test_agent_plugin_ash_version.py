@@ -86,6 +86,37 @@ _INSTALL_REF = re.compile(
     r"automated-security-helper(?:\.git)?@v(?P<version>\d+\.\d+\.\d+)"
 )
 
+# The same reference, but reading whatever follows `@v` instead of only a
+# well-formed version. `_INSTALL_REF` above requires `\d+\.\d+\.\d+`, so a pin that
+# is not a parseable version does not match it -- and a pattern that does not match
+# reports nothing. That is not a hypothetical: README.md documented
+# `pipx install git+...@v3.0,1` for six releases, a comma where a dot belongs, and
+# it was invisible to every mechanism at once. `[tool.commitizen] version_files`
+# does not list README.md, `scripts/version_template_manager.py` only rewrites text
+# matching that same three-part pattern, and the walk above could not see it. The
+# command was simply broken, and nothing said so.
+#
+# So staleness and well-formedness are two different questions and need two
+# different patterns. This one stops at the characters that end a pin in prose or
+# markup, which is why `@v3.0,1` is read as the pin `3.0` -- two components, and
+# therefore not a version. The failure message prints the whole line so the comma
+# is visible to whoever has to fix it.
+_INSTALL_REF_PIN = re.compile(
+    r"""automated-security-helper(?:\.git)?@v(?P<pin>[^\s`'"),;\]]*)"""
+)
+
+# A release pin: exactly three numeric components.
+_SEMVER_PIN = re.compile(r"^\d+\.\d+\.\d+$")
+
+# The documented floating major tag. README.md offers `@v3` as the deliberate
+# alternative to a pinned release ("always points to the latest stable v3.x"), so it
+# is a correct pin rather than a truncated one.
+_FLOATING_MAJOR_PIN = re.compile(r"^\d+$")
+
+# Floor for the positive control on the well-formedness walk. The tree carries over
+# a hundred `@v<version>` pins today; this sits far below that and far above zero.
+_MINIMUM_VERSION_PINS = 20
+
 # Directories with no hand-maintained sources: virtualenvs, caches, build output
 # and scan artifacts. Anything installed under these can carry install refs for
 # other versions and is not ours to keep current.
@@ -108,6 +139,13 @@ _SKIP_DIRS = frozenset(
         ".tox",
         "cdk.out",
         ".eggs",
+        # pytest's own junit XML and coverage HTML land here, and a failure message
+        # quoting a bad install reference becomes a file in the tree that the next
+        # run reads back as a real defect. On a fresh CI checkout the directory does
+        # not exist yet when this walk runs, so the loop only closes locally on a
+        # second run -- which makes it a latent flake rather than a visible one.
+        # Gitignored generated output, like the entries above it.
+        "test-results",
     }
 )
 
@@ -183,6 +221,52 @@ def _install_refs():
                 yield relative, number, match.group("version")
 
 
+def _version_pins():
+    """Every (relative path, line number, pin, line) `@v<pin>` reference in the tree.
+
+    Same walk and same decode guard as `_install_refs`, reading the pin loosely so a
+    malformed one is returned rather than skipped.
+    """
+    for path in _candidate_files():
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        if "automated-security-helper" not in text:
+            continue
+        relative = path.relative_to(REPO_ROOT).as_posix()
+        for number, line in enumerate(text.splitlines(), 1):
+            for match in _INSTALL_REF_PIN.finditer(line):
+                yield relative, number, match.group("pin"), line.strip()
+
+
+def _pin_is_a_version_attempt(pin: str) -> bool:
+    """Whether a pin is claiming to be a version at all.
+
+    A pin that does not start with a digit is not a malformed version, it is not a
+    version: `@v{{VERSION}}` is a template placeholder the generator fills in,
+    `@v<semver>` is documentation of the shape, and `@v${commit}` is a shell
+    expansion in a buildspec. Holding those to semver would fail on correct files,
+    which is the quickest way to get a check deleted.
+    """
+    return pin[:1].isdigit()
+
+
+def _malformed_pins():
+    """Pins that claim to be a version and are not one."""
+    malformed = []
+    for path, number, pin, line in _version_pins():
+        if not _pin_is_a_version_attempt(pin):
+            continue
+        # A pin ending a sentence keeps the period; strip one so `@v3.7.0.` in prose
+        # is not reported as malformed. `3.0` is still `3.0` after this.
+        candidate = pin.rstrip(".")
+        if _SEMVER_PIN.match(candidate) or _FLOATING_MAJOR_PIN.match(candidate):
+            continue
+        malformed.append((path, number, pin, line))
+    return malformed
+
+
 def _split_entry(entry: str) -> tuple[str, str]:
     """Split a `version_files` entry into its path and its regex.
 
@@ -247,6 +331,94 @@ class TestInstallRefsTrackPackagedVersion:
             f"_ALLOWED_STALE names files that do not exist: {missing}. Remove the "
             "entries, or repoint them at the paths the content moved to."
         )
+
+
+class TestInstallRefsParseAsVersions:
+    """Every documented install pin must be a version a user could actually install.
+
+    The class above asks "is this pin current?". This one asks the prior question:
+    "is this pin a version?". A pin that does not parse is worse than a stale one,
+    because a stale tag resolves and installs an old ASH while a malformed tag
+    resolves to nothing and the documented command just fails.
+
+    These are separate walks on purpose. The staleness walk keys on
+    `\\d+\\.\\d+\\.\\d+`, so anything that is not three numeric components is not
+    merely unchecked by it -- it is unreachable by it. One pattern cannot answer both
+    questions.
+    """
+
+    def test_every_documented_install_pin_parses_as_a_version(self):
+        malformed = _malformed_pins()
+
+        assert not malformed, (
+            "These install references name something that is not a version, so the "
+            "documented command fails for anyone who runs it:\n"
+            + "\n".join(
+                f"  {path}:{number} pins {pin!r}\n      {line}"
+                for path, number, pin, line in malformed
+            )
+            + "\n\nA pin must be three numeric components (3.7.0) or the documented "
+            "floating major tag (3). Fix the source file -- for README.md that is "
+            "README.md.template, then regenerate with "
+            "`python scripts/version_template_manager.py generate`; editing the "
+            "generated file is overwritten by the next run. Prefer the "
+            "{{VERSION}} placeholder over a literal so the value is maintained."
+        )
+
+    def test_the_well_formedness_walk_reaches_the_tree(self):
+        """Positive control. The assertion above is satisfied by an empty result set.
+
+        If the loose pattern, the skip list or the decode guard stopped matching,
+        this file would report success over nothing at all.
+        """
+        pins = [
+            (path, number)
+            for path, number, pin, _ in _version_pins()
+            if _pin_is_a_version_attempt(pin)
+        ]
+
+        assert len(pins) >= _MINIMUM_VERSION_PINS, (
+            f"The walk found only {len(pins)} `@v<version>` pin(s), below the floor "
+            f"of {_MINIMUM_VERSION_PINS}. The generated plugin trees alone account "
+            "for more than that, so the walk is probably not reaching the tree: "
+            "check _SKIP_DIRS, the UTF-8 guard, and _INSTALL_REF_PIN."
+        )
+
+    def test_the_check_rejects_a_comma_for_a_dot(self):
+        """The specific typo this class was added for, as a unit on the classifier.
+
+        The walk above only fails while a malformed pin is in the tree. Once fixed,
+        it passes forever and stops demonstrating that it *can* fail -- so the
+        classifier is exercised directly on the shape that escaped, and on the
+        neighbouring shapes that must keep passing.
+        """
+        # Split immediately after `@v` so this file does not contain the broken
+        # reference contiguously. The walk above reads every file in the tree,
+        # including this one, so a fixture written as one literal would be reported as
+        # a real defect -- the test describing the hazard would BE the hazard, and
+        # fixing README.md would not turn the suite green. Concatenating leaves the
+        # walk an empty pin here, which is not a version attempt, while the value
+        # under test is the full broken string at run time.
+        typo = (
+            "pipx install git+https://github.com/awslabs/"
+            "automated-security-helper.git@v" + "3.0,1"
+        )
+
+        # The pin reads as `3.0` because the comma ends it.
+        assert _INSTALL_REF_PIN.search(typo).group("pin") == "3.0"
+
+        # Two components is the typo's signature; a bare major and a full release are
+        # the two forms that must stay acceptable.
+        assert not _SEMVER_PIN.match("3.0") and not _FLOATING_MAJOR_PIN.match("3.0"), (
+            "A two-component pin must not classify as a version; that is the shape "
+            "`@v3.0,1` collapses to."
+        )
+        assert _FLOATING_MAJOR_PIN.match("3"), "the documented @v3 floating tag"
+        assert _SEMVER_PIN.match("3.0.1"), "a normal release pin"
+
+        # Placeholders and shell expansions are not version attempts at all.
+        for pin in ("{{VERSION}}", "<semver>", "${commit}", ""):
+            assert not _pin_is_a_version_attempt(pin), pin
 
 
 class TestCommitizenMaintainsTheReferences:
