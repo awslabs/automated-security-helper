@@ -445,21 +445,35 @@ jobs:
     # finch has been observed succeeding at 23 min and hanging past 280; podman is
     # similarly slow. The other six methods peak under 3 min, so they keep a tight
     # bound while the container runtimes get enough room to pass legitimately.
-    timeout-minutes: ${{ (matrix.method == 'podman' || matrix.method == 'finch') && 45 || 20 }}
+    timeout-minutes: ${{ (matrix.method == 'podman' || matrix.method == 'finch' || matrix.method == 'nerdctl') && 45 || 20 }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-14, windows-latest]
         python-version: ["3.10", "3.11", "3.12", "3.13"]
-        method: [pip, pipx, uvx, homebrew, pre-commit, podman, finch, mcp]
+        method: [pip, pipx, uvx, homebrew, pre-commit, podman, finch, nerdctl, mcp]
         exclude:
           # Homebrew not on Windows
           - { os: windows-latest, method: homebrew }
-          # Podman/Finch not on Windows
+          # Podman/Finch/nerdctl not on Windows
           - { os: windows-latest, method: podman }
           - { os: windows-latest, method: finch }
+          - { os: windows-latest, method: nerdctl }
           # Finch Linux is x86_64 only
           - { os: ubuntu-24.04-arm, method: finch }
+          # nerdctl: x86_64 only for now. An arm64 bundle exists upstream, but
+          # scripts/setup-nerdctl-linux.sh verifies a pinned checksum and only the amd64
+          # one has been confirmed against the artifact; the script fails rather than
+          # downloading unverified bytes for another architecture.
+          - { os: ubuntu-24.04-arm, method: nerdctl }
+          # nerdctl on macOS needs a Linux VM, and hosted macOS has no nested
+          # virtualization -- same reason as podman and finch below.
+          - { os: macos-latest, method: nerdctl }
+          - { os: macos-14, method: nerdctl }
+          # nerdctl only needs Python 3.12
+          - { os: ubuntu-latest, python-version: "3.10", method: nerdctl }
+          - { os: ubuntu-latest, python-version: "3.11", method: nerdctl }
+          - { os: ubuntu-latest, python-version: "3.13", method: nerdctl }
 
           # Container runtimes only need Python 3.12
           - { os: ubuntu-latest, python-version: "3.10", method: podman }
@@ -523,7 +537,7 @@ jobs:
           method: ${{ matrix.method }}
 
       - uses: ./.github/actions/validate-container
-        if: matrix.method == 'podman' || matrix.method == 'finch'
+        if: matrix.method == 'podman' || matrix.method == 'finch' || matrix.method == 'nerdctl'
         with:
           runtime: ${{ matrix.method }}
 

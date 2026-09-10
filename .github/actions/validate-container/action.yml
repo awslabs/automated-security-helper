@@ -1,9 +1,9 @@
 name: "Validate Container Runtime"
-description: "Validate that ASH can build its container image with podman or finch, and then actually scan with it"
+description: "Validate that ASH can build its container image with podman, finch or nerdctl, and then actually scan with it"
 
 inputs:
   runtime:
-    description: "Container runtime: podman or finch"
+    description: "Container runtime: podman, finch or nerdctl"
     required: true
 
 runs:
@@ -42,7 +42,7 @@ runs:
         RUNTIME: ${{ inputs.runtime }}
       run: |
         case "${RUNTIME}" in
-          podman | finch) ;;
+          podman | finch | nerdctl) ;;
           *)
             echo "::error::validate-container has no scan leg for runtime '${RUNTIME}'. Add one rather than leaving this action build-only for it."
             exit 1
@@ -55,15 +55,15 @@ runs:
     # `sudo <runtime>`, which reads root's image store instead, so a mismatch surfaces
     # at the scan as a missing-image error a long way from its cause.
     #
-    # podman is rootless on the hosted runners and must NOT be wrapped. finch drives a
-    # root-owned containerd socket and must be.
+    # podman is rootless on the hosted runners and must NOT be wrapped. finch and
+    # nerdctl both drive a root-owned containerd socket and must be.
     - name: "Resolve the OCI runner wrapper"
       shell: bash
       env:
         RUNTIME: ${{ inputs.runtime }}
       run: |
         case "${RUNTIME}" in
-          finch) echo "OCI_RUNNER_WRAPPER=sudo" >> "$GITHUB_ENV" ;;
+          finch | nerdctl) echo "OCI_RUNNER_WRAPPER=sudo" >> "$GITHUB_ENV" ;;
           *) echo "${RUNTIME}: no wrapper" ;;
         esac
 
@@ -105,6 +105,26 @@ runs:
       if: inputs.runtime == 'finch'
       shell: bash
       run: ash build-image --oci-runner finch --force
+
+    # === nerdctl ===
+    #
+    # Linux only. nerdctl drives containerd directly, and on hosted macOS there is no
+    # nested virtualization to run a Linux VM in -- the same reason podman and finch are
+    # excluded there. The support matrix's nerdctl entries are Rancher Desktop on macOS,
+    # which supplies that VM itself and is not reproducible on a hosted runner; this
+    # leg covers the same `--oci-runner nerdctl` code path natively instead.
+    - name: "nerdctl: install (Linux)"
+      if: inputs.runtime == 'nerdctl' && runner.os == 'Linux'
+      shell: bash
+      run: sudo bash scripts/setup-nerdctl-linux.sh
+    - name: "nerdctl: verify"
+      if: inputs.runtime == 'nerdctl'
+      shell: bash
+      run: sudo nerdctl --version
+    - name: "nerdctl: build image"
+      if: inputs.runtime == 'nerdctl'
+      shell: bash
+      run: ash build-image --oci-runner nerdctl --force
 
     # === the built image has to run ===
     #
