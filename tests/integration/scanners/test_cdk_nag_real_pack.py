@@ -129,6 +129,25 @@ def foreign_plugin_template(tmp_path: Path) -> Path:
     return path
 
 
+# The two shapes ASH's own repository feeds cdk-nag today. Both are read by the YAML/JSON
+# loader, and neither can survive it: an unknown tag has no constructor, and JSON with comments
+# is not a flow mapping.
+UNPARSEABLE_TARGETS = {
+    "mkdocs.yml": (
+        "site_name: Fixture\n"
+        "markdown_extensions:\n"
+        "  - pymdownx.emoji:\n"
+        "      emoji_index: !!python/name:material.extensions.emoji.twemoji\n"
+    ),
+    "tsconfig.json": (
+        "{\n"
+        "  // a comment makes this not plain JSON\n"
+        '  "compilerOptions": {"strict": true}\n'
+        "}\n"
+    ),
+}
+
+
 @pytest.fixture()
 def unevaluatable_template(tmp_path: Path) -> Path:
     path = tmp_path / "unevaluatable.template.json"
@@ -449,3 +468,96 @@ class TestRuleThatCouldNotBeEvaluated:
             f"notifications name {sorted(notified_rules)} but the notApplicable results are "
             f"{sorted(unevaluated_rules)}"
         )
+
+
+class TestTargetThatCouldNotBeParsed:
+    """A file cdk-nag cannot parse must stay OUT of the findings channel.
+
+    WHY THIS EXISTS WITHOUT A FIX BESIDE IT
+    ---------------------------------------
+    ASH's own CI feeds cdk-nag files that are not CloudFormation at all -- ``mkdocs.yml`` and
+    ``deploy/cdk/tsconfig.json`` -- and the scan logs two parse failures next to a non-zero exit
+    citing "1 actionable findings". The obvious reading is that the two failures became the
+    finding. They did not: that run's summary table attributes the single actionable finding to
+    detect-secrets, at CRITICAL, with cdk-nag itself on ``Action 0 / PASSED``. Two unrelated
+    facts, printed near each other.
+
+    So there is nothing to fix here, and that is exactly why the property is worth pinning. It
+    is currently correct and nothing asserted it, which is the state a regression arrives in.
+    A future change that turned a target-level parse failure into a synthetic finding would
+    inflate the count and fail builds on repositories whose only problem is that a YAML file is
+    not a template.
+
+    WHAT THIS ASSERTS, AND WHAT IT REFUSES TO ASSERT
+    -----------------------------------------------
+    The count and the channel, never the wording. A test that watched the log message would pass
+    while the miscount survived, because the message is emitted before the finding would be
+    constructed. So: the number of results, the absence of any result attributed to the
+    unparseable files, and the presence of both failures in ``exitCodeDescription`` -- the error
+    channel the scanner actually reports them through.
+
+    WHAT IS DELIBERATELY NOT ASSERTED AS CORRECT
+    --------------------------------------------
+    ``executionSuccessful`` is True and ``exitCode`` is 0 on this run even though a third of the
+    targets were never evaluated, because ``determine_status`` only reports ERROR once
+    ``targets_failed >= targets_attempted``. Partial coverage loss being invisible in the
+    rolled-up status is a real and separate defect from the three this module covers; it is not
+    fixed here and this test does not pretend the value is right, it only records what it is.
+    """
+
+    def test_an_unparseable_target_is_an_error_not_a_finding(
+        self, test_plugin_context, non_compliant_template: Path
+    ):
+        _require_cdk_nag()
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
+            CdkNagScanner,
+            CdkNagScannerConfig,
+        )
+
+        source_dir = Path(test_plugin_context.source_dir)
+        source_dir.mkdir(parents=True, exist_ok=True)
+        # A real template alongside them, so the scan has something it CAN evaluate. Without it
+        # every target fails, the scanner reports ERROR, and the test would be measuring the
+        # total-failure path instead of the partial one.
+        (source_dir / "template.json").write_text(non_compliant_template.read_text())
+        for name, body in UNPARSEABLE_TARGETS.items():
+            (source_dir / name).write_text(body)
+
+        scanner = CdkNagScanner(
+            context=test_plugin_context, config=CdkNagScannerConfig()
+        )
+        report = scanner.scan(target=source_dir, target_type="source")
+        assert report is not False, "scanner refused to run"
+
+        assert scanner.targets_attempted == 3, (
+            f"expected all three files in the scan set, got {scanner.targets_attempted}"
+        )
+        assert scanner.targets_failed == len(UNPARSEABLE_TARGETS), (
+            f"expected {len(UNPARSEABLE_TARGETS)} parse failures, got {scanner.targets_failed}"
+        )
+
+        run = report.runs[0]
+        results = run.results or []
+        assert results, (
+            "the real template produced no findings, so this fixture is not exercising the "
+            "partial-failure path"
+        )
+        # The channel assertion. Named per file so a failure says which one leaked.
+        for name in UNPARSEABLE_TARGETS:
+            leaked = [
+                r.ruleId
+                for r in results
+                if name in str(getattr(r.analysisTarget, "uri", "") or "")
+            ]
+            assert not leaked, (
+                f"{name} could not be parsed yet produced findings {leaked}"
+            )
+
+        # And the error channel does carry them, which is the positive artifact: "not a finding"
+        # on its own would also be satisfied by the failure vanishing entirely.
+        description = run.invocations[0].exitCodeDescription or ""
+        for name in UNPARSEABLE_TARGETS:
+            assert name in description, (
+                f"{name} failed to parse but is absent from exitCodeDescription, so the "
+                f"failure is recorded nowhere a consumer can see it"
+            )
