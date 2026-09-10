@@ -44,9 +44,19 @@
 name: ASH - IaC Drift
 
 on:
+  # Same defect, and the same fix, as ash-unified-ci.yml: a branch filter built only
+  # from negative patterns matches nothing, so "!main" did not exempt main -- it
+  # disabled the push trigger for every branch, and a generated artifact could go
+  # stale on main with no drift check reporting on it.
+  #
+  # Cheap enough to run in full here. All six jobs below are single-runner and
+  # offline -- cdk synth, terraform validate and cdk-nag read local files only -- so
+  # there is no matrix to fan out and nothing to pay for but the runner minutes.
+  # `main` rather than `**` for the reason given in ash-unified-ci.yml: pull_request
+  # already covers every branch with an open pull request.
   push:
     branches:
-      - "!main"
+      - main
   pull_request:
     # "**" not "*": GitHub branch filters treat "*" as matching any character
     # except "/", so a PR whose BASE is a nested branch (a stacked PR targeting

@@ -1,9 +1,25 @@
 name: ASH - Unified CI
 
 on:
+  # A branch filter built only from negative patterns matches nothing, so "!main"
+  # did not exempt main -- it disabled the push trigger for every branch. Measured
+  # before this change: 1 push run against 793 pull_request runs, and that single
+  # push predates the filter. A commit landing on main therefore ran no lint, no
+  # unit tests, no scan validation and no install validation, which is how a broken
+  # constant reached main unwatched and reddened every open pull request.
+  #
+  # `main` rather than `**`: pull_request already reports on every branch that has a
+  # pull request open, so `**` would duplicate all 793 of those runs while adding no
+  # coverage. main is the one ref no other trigger here speaks for.
+  #
+  # The full matrix runs on a main push rather than a reduced one, deliberately.
+  # required-checks below counts `skipped` as a failure -- see the comment on that
+  # job -- so gating the expensive jobs behind `if: github.event_name != 'push'`
+  # would turn that gate red on every main push instead of shrinking it. Main pushes
+  # are merges, and rare next to PR pushes, so the honest gate is the affordable one.
   push:
     branches:
-      - "!main"
+      - main
   pull_request:
     # "**" not "*": GitHub branch filters treat "*" as matching any character
     # except "/", so a PR whose BASE is a nested branch (a stacked PR targeting
