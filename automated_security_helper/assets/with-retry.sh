@@ -49,6 +49,27 @@ case $delay in
     exit 2
     ;;
 esac
+# All digits is not the same as decimal. `$(( ))` reads a leading zero as octal,
+# so the guard above accepts values the arithmetic below cannot evaluate: 08 and
+# 09 are not valid octal, and `delay=$((delay * 2))` died on them with
+#
+#     with-retry.sh: line NN: 08: value too great for base (error token is "08")
+#
+# reproducing the exact failure this guard was added to stop. One of three
+# attempts ran and "All 3 attempts failed" printed anyway, because the arithmetic
+# error aborts the `while` without aborting the script.
+#
+# 010 was worse for being silent: `sleep` parses its argument in base 10 while
+# `$(( ))` parses it in base 8, so one string produced two different numbers.
+# Measured, the recorded sleeps were 010 then 16 -- ten seconds, then sixteen,
+# which is a doubling of neither.
+#
+# `10#` forces base 10 for both consumers, so a leading zero stops mattering.
+# Safe unconditionally here: $delay is already known to be all digits, and
+# `10#5` is 5. Only $delay needs this. $max reaches `test` alone, which parses
+# base 10 -- `[ 9 -le 010 ]` is true -- so 010 already meant ten attempts
+# consistently, and normalizing it would change a path that was already correct.
+delay=$((10#$delay))
 # Guarded separately, and only once $max is known to be numeric so `-lt` is
 # safe. max=0 would skip the loop entirely and then report "All 0 attempts
 # failed" with exit 1 -- a failure indistinguishable from the command having
