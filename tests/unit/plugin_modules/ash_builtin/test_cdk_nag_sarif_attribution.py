@@ -43,7 +43,13 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 
 
-def _result(rule_id: str, pack: str, rule_level: str = "Error") -> Result:
+def _result(
+    rule_id: str,
+    pack: str,
+    rule_level: str = "Error",
+    message_text: str | None = None,
+    message_markdown: str | None = None,
+) -> Result:
     """A Result shaped the way the wrapper emits one.
 
     ``cdk_nag_finding`` lands in ``model_extra`` because ``PropertyBag`` allows extras and does
@@ -54,10 +60,27 @@ def _result(rule_id: str, pack: str, rule_level: str = "Error") -> Result:
     included. Those two matter: the wrapper already writes them onto every result, so a
     descriptor that forwards the result's tags AND appends its own emits each twice. A fixture
     that omitted them would leave the duplication tests unable to fail.
+
+    ``message_text`` and ``message_markdown`` are overridable because the message is a
+    per-occurrence value and the default is not. The default derives from ``rule_id`` alone,
+    which is what every caller below wants -- but it makes two results for one rule share a
+    message by construction, so a test that varies nothing else cannot observe the message
+    reaching the descriptor. ``TestRuleTagsAreRuleScoped`` passes both explicitly for that
+    reason. ``markdown`` is separate from ``text`` because they are two fields, and a fix that
+    stops forwarding one can leave the other forwarding.
     """
     return Result(
         ruleId=rule_id,
-        message=Message(root=Message1(text=f"{rule_id} description text")),
+        message=Message(
+            root=Message1(
+                text=(
+                    message_text
+                    if message_text is not None
+                    else f"{rule_id} description text"
+                ),
+                markdown=message_markdown,
+            )
+        ),
         properties=PropertyBag(
             cdk_nag_finding={
                 "pack": pack,
@@ -264,20 +287,56 @@ class TestRuleTagsAreRuleScoped:
         assert "AWS::IAM::Policy" not in descriptor.properties.tags
 
     def test_two_results_for_one_rule_yield_byte_identical_descriptors(self):
-        """Identical input, identical bytes -- whichever occurrence the aggregation yields first.
+        """No per-occurrence CHANNEL reaches the descriptor -- message, markdown or tags.
 
-        This is the stability half, and it is the one that could not be expressed at all while
-        the tags were inherited: the two results below differ ONLY in their per-occurrence tags,
-        so under forwarding the two descriptors differed and the emitted SARIF depended on
-        result order. Compared as serialized JSON rather than field by field, so a
-        per-occurrence value reaching any part of the descriptor fails here, not just one the
-        assertion happened to name.
+        What this pins, precisely: two results that agree on every rule-scoped fact (id, pack,
+        rule level, rule description) and disagree on all three per-occurrence channels must
+        produce the same descriptor bytes. ``scan()`` keys a ``rule_map`` by ``ruleId`` and
+        ``continue``s on a repeat, so exactly one of them becomes the descriptor and which one
+        is an aggregation order rather than a fact.
+
+        The scenario is real, not hypothetical. One cdk-nag rule that raises during validation
+        of two templates produces two results under one ``ruleId``, and
+        ``utils.cdk_nag_wrapper._result_message_text`` opens that message with the template's
+        own path -- so the message differs between them while the rule does not. Forwarding it
+        put one template's name in the definition of a rule that failed on both.
+
+        AN EARLIER VERSION OF THIS TEST COULD NOT FAIL, which is why the channels are now
+        passed explicitly. It varied ``properties.tags`` and nothing else, and took its message
+        from ``_result``'s default of ``f"{rule_id} description text"`` -- a function of
+        ``rule_id`` alone. Both results therefore shared a message BY CONSTRUCTION, and
+        ``model_dump_json()`` compared equal whether or not the message reached the descriptor.
+        Its docstring claimed "a per-occurrence value reaching any part of the descriptor fails
+        here"; only the tag half of that was ever true.
+
+        The three guard assertions below are the reason it cannot regress to that state. Each
+        one fails loudly if the fixture stops differing in that channel, so a future edit that
+        re-derives a channel from ``rule_id`` breaks the guard instead of quietly making the
+        comparison vacuous.
+
+        Compared as serialized JSON rather than field by field, so a channel reaching a field no
+        assertion happens to name still fails here.
         """
         from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
             _reporting_descriptor_for,
         )
 
-        first = _result("AwsSolutions-IAM5", "AwsSolutions")
+        # Both results are the same rule, not evaluated against two different templates. Only
+        # the template path differs -- the rule-scoped tail is identical, exactly as the
+        # wrapper builds it.
+        unevaluated = (
+            "so this result says nothing about whether the template complies with it."
+            "\n\nRule threw an error during validation."
+        )
+        first = _result(
+            "AwsSolutions-IAM5",
+            "AwsSolutions",
+            message_text=(
+                "'infra/alpha.template.json' was NOT evaluated for rule "
+                f"AwsSolutions-IAM5, {unevaluated}"
+            ),
+            message_markdown="`infra/alpha.template.json` was NOT evaluated.",
+        )
         first.properties.tags = [
             "aws",
             "cdk",
@@ -289,7 +348,15 @@ class TestRuleTagsAreRuleScoped:
             "tool_name::cdk-nag",
             "tool_type::IAC",
         ]
-        second = _result("AwsSolutions-IAM5", "AwsSolutions")
+        second = _result(
+            "AwsSolutions-IAM5",
+            "AwsSolutions",
+            message_text=(
+                "'infra/beta.template.json' was NOT evaluated for rule "
+                f"AwsSolutions-IAM5, {unevaluated}"
+            ),
+            message_markdown="`infra/beta.template.json` was NOT evaluated.",
+        )
         second.properties.tags = [
             "aws",
             "cdk",
@@ -302,9 +369,23 @@ class TestRuleTagsAreRuleScoped:
             "tool_type::IAC",
         ]
 
+        assert first.message.root.text != second.message.root.text, (
+            "the two occurrences must carry different message text or this test cannot "
+            "detect the message reaching the descriptor"
+        )
+        assert first.message.root.markdown != second.message.root.markdown, (
+            "the two occurrences must carry different message markdown or this test cannot "
+            "detect the markdown reaching the descriptor"
+        )
         assert first.properties.tags != second.properties.tags, (
             "the two occurrences must differ or this test cannot detect order dependence"
         )
+        # The rule-scoped facts must AGREE, or a descriptor difference would be legitimate and
+        # the comparison below would be asserting the wrong thing.
+        assert (
+            first.properties.model_extra["cdk_nag_finding"]
+            == second.properties.model_extra["cdk_nag_finding"]
+        ), "the two occurrences must agree on the rule-scoped facts"
 
         one = _reporting_descriptor_for(first, tool_name="cdk-nag", tool_type="IAC")
         two = _reporting_descriptor_for(second, tool_name="cdk-nag", tool_type="IAC")
@@ -313,6 +394,84 @@ class TestRuleTagsAreRuleScoped:
             "the rule descriptor depends on which occurrence was seen first, so two runs over "
             "identical input can emit different SARIF"
         )
+
+    def test_two_unevaluated_results_for_one_rule_yield_identical_descriptors(self):
+        """The case a ``rule_info``-based fix passes while still being order-dependent.
+
+        The test above varies the message, which is necessary and not sufficient. Deriving the
+        descriptions from ``finding_props["rule_info"]`` instead of from the message fixes that
+        one and leaves this one broken, so the two tests together discriminate between the
+        candidate fixes rather than only between broken and fixed.
+
+        WHY ``rule_info`` IS NOT RULE-SCOPED HERE. It is ``violation.description`` from
+        ``validation-report.json`` verbatim, and cdk-nag 3.0.2's ``addViolation`` builds that
+        field two ways. For an evaluated rule it is ``f"{params.info} {params.explanation}"``,
+        and those are static literals -- 463 of each in the bundled ``package/lib``, none
+        interpolated. For a rule that RAISED it is
+        ``f"Rule threw an error during validation. {errorMessage}"``, where ``errorMessage`` is
+        the rule's own exception text, included rather than elided because
+        ``_build_nag_pack`` passes ``verbose=True``. Every interpolating throw site reachable
+        from ``applyRule``'s catch embeds template-derived data: ``nag-rules.js:50`` the
+        resolved parameter value, ``LambdaLatestVersion.js:24``/``:48`` the resource runtime,
+        ``LexBotAliasEncryptedConversationLogs.js:57`` a resource logical id.
+
+        The two fixtures below are that shape: one rule, two templates, two different resolved
+        parameter values in the exception text. The descriptions come from
+        ``nag-rules.js``'s wording, doubled "to to" included, because that is what the real
+        report contains -- ``tests/unit/utils/test_cdk_nag_unevaluated_rule.py`` carries the
+        same string.
+
+        The descriptor must therefore use NEITHER the message nor ``rule_info`` on this path.
+        """
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
+            _reporting_descriptor_for,
+        )
+        from automated_security_helper.utils.cdk_nag_wrapper import NOT_EVALUATED
+
+        def _unevaluated(template: str, resolved: str) -> Result:
+            result = _result(
+                "AwsSolutions-EC26",
+                "AwsSolutions",
+                message_text=(
+                    f"'{template}' was NOT evaluated for rule AwsSolutions-EC26, so this "
+                    "result says nothing about whether the template complies with it."
+                ),
+            )
+            finding = result.properties.model_extra["cdk_nag_finding"]
+            finding["compliance"] = NOT_EVALUATED
+            finding["rule_info"] = (
+                "Rule threw an error during validation. The parameter resolved to to a "
+                f'non-primitive value "{resolved}", therefore the rule could not be validated.'
+            )
+            return result
+
+        first = _unevaluated("infra/alpha.template.json", '{"Ref":"VolumeEncrypted"}')
+        second = _unevaluated("infra/beta.template.json", '{"Ref":"KmsKeyArn"}')
+
+        assert (
+            first.properties.model_extra["cdk_nag_finding"]["rule_info"]
+            != second.properties.model_extra["cdk_nag_finding"]["rule_info"]
+        ), (
+            "the two occurrences must carry different rule_info or this test cannot tell a "
+            "rule_info-based fix apart from a rule-scoped one"
+        )
+
+        one = _reporting_descriptor_for(first, tool_name="cdk-nag", tool_type="IAC")
+        two = _reporting_descriptor_for(second, tool_name="cdk-nag", tool_type="IAC")
+
+        assert one.model_dump_json() == two.model_dump_json(), (
+            "the descriptor of a rule that threw depends on which template it threw on first, "
+            "so cdk-nag's exception text -- which carries resolved template values and, for "
+            "the Lex rule, a resource logical id -- reached the rule's definition"
+        )
+
+        # Named explicitly as well as compared, because the comparison above passes if BOTH
+        # descriptors carry the same wrong thing, and a future edit could make it so.
+        emitted = one.model_dump_json()
+        for leaked in ("VolumeEncrypted", "KmsKeyArn", "alpha.template.json"):
+            assert leaked not in emitted, (
+                f"{leaked!r} is a per-occurrence value and must not appear in a rule descriptor"
+            )
 
     def test_the_tool_type_tag_uses_the_enum_value_not_its_repr(self):
         """``ScannerToolType`` is a str mixin, and ``Enum.__str__`` still wins.

@@ -3,7 +3,7 @@
 import logging
 import re
 from importlib.metadata import PackageNotFoundError, packages_distributions, requires
-from typing import Annotated, ClassVar, List, Literal
+from typing import Annotated, Any, ClassVar, List, Literal
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -186,6 +186,78 @@ def _unevaluated_rule_notifications(
     return notifications
 
 
+def _is_unevaluated_result(result: Result) -> bool:
+    """Whether this result records a rule that threw instead of reaching a verdict.
+
+    Reads the structured ``compliance`` field rather than matching on the description's text.
+    The wrapper sets ``compliance`` for exactly this kind of dispatch -- it is what
+    ``_level_and_kind`` branches on -- and a text match would be a second, independent copy of
+    cdk-nag's wording that can drift away from the first.
+    """
+    from automated_security_helper.utils.cdk_nag_wrapper import NOT_EVALUATED
+
+    finding_props = (result.properties.model_extra or {}).get("cdk_nag_finding", {})
+    return finding_props.get("compliance") == NOT_EVALUATED
+
+
+def _rule_scoped_description(finding_props: dict, rule_id: str) -> str:
+    """The rule's description with nothing in it that varies between occurrences.
+
+    ``rule_info`` IS THE REPORT'S DESCRIPTION VERBATIM, AND THAT IS ONLY SOMETIMES RULE-SCOPED
+    ---------------------------------------------------------------------------------------
+    ``rule_info`` is ``violation.description`` from ``validation-report.json``, and cdk-nag
+    3.0.2 builds that field two different ways in ``package/lib/nag-pack.js``'s
+    ``addViolation``::
+
+        const description = errorMessage
+            ? `Rule threw an error during validation. ${this.verbose ? errorMessage : '...'}`
+            : this.verbose ? `${params.info} ${params.explanation}` : params.info;
+
+    The ordinary branch is rule-scoped and safe to reuse: ``info`` and ``explanation`` are
+    static string literals declared once per rule. Measured against the bundled cdk-nag 3.0.2
+    tarball, ``package/lib`` holds 463 ``info:`` and 463 ``explanation:`` occurrences and NONE
+    of them interpolates -- so for a rule that was evaluated, the description cannot carry
+    anything about the template it was evaluated against.
+
+    The error branch is NOT rule-scoped. ``applyRule``'s ``catch`` calls
+    ``addViolation(ruleId, params, error.message)``, and :func:`_build_nag_pack` constructs
+    every pack with ``verbose=True``, so the rule's own exception text is interpolated in rather
+    than the fixed intrinsic-function hint. Every interpolating throw site reachable from that
+    ``catch`` embeds template-derived data:
+
+    * ``nag-rules.js:50`` -- ``JSON.stringify(resolvedValue)``, the parameter value as resolved
+      out of the template being scanned
+    * ``rules/lambda/LambdaLatestVersion.js:24`` and ``:48`` -- the resource's ``runtime``
+    * ``rules/lex/LexBotAliasEncryptedConversationLogs.js:57`` -- a resource LOGICAL ID, which
+      is the same class of value the tags note in :func:`_reporting_descriptor_for` says must
+      never reach a descriptor
+
+    plus any unforeseen exception and anything a third-party pack throws. ASH's own fixture
+    already carries the contamination: ``tests/unit/utils/test_cdk_nag_unevaluated_rule.py``
+    holds a description reading ``non-primitive value "{"Ref":"VolumeEncrypted"}"``, where
+    ``VolumeEncrypted`` is a parameter of the scanned template.
+
+    So a not-evaluated row's description is discarded here and a rule-scoped sentence is
+    constructed instead. Nothing is lost: the error text stays on the result's own message,
+    where it is per-occurrence data sitting in a per-occurrence place, and it is what a reader
+    diagnosing the failure needs. Stripping cdk-nag's ``Rule threw an error during validation.``
+    prefix off the front and keeping that was the alternative, and it was rejected -- it
+    re-derives a rule-scoped string by parsing a string whose shape ``addViolation`` controls,
+    so a wording change upstream would silently start leaking the exception text again.
+
+    Returns ``""`` when the report supplied no description at all, so a caller can tell "the
+    report said nothing" apart from "we constructed this".
+    """
+    from automated_security_helper.utils.cdk_nag_wrapper import NOT_EVALUATED
+
+    if finding_props.get("compliance") == NOT_EVALUATED:
+        return (
+            f"cdk-nag threw while evaluating {rule_id}, so this scan reached no verdict on it. "
+            "The error text differs per template and is carried on each result's message."
+        )
+    return str(finding_props.get("rule_info") or "").strip()
+
+
 def _reporting_descriptor_for(
     result: Result, tool_name: str, tool_type: str
 ) -> ReportingDescriptor:
@@ -234,26 +306,74 @@ def _reporting_descriptor_for(
     onto every result. Forwarding made both appear in one list, disagreeing; taking the value
     makes the descriptor agree with the results. A plain ``str`` caller is unaffected --
     ``getattr`` falls back to the object itself.
+
+    THE DESCRIPTIONS USED TO FORWARD THE RESULT'S MESSAGE, AND MUST NOT
+    ------------------------------------------------------------------
+    Fixing ``tags`` left the same defect in place two fields below it. ``shortDescription`` and
+    ``fullDescription`` both read ``result.message.root.text``, and ``fullDescription`` also
+    read ``result.message.root.markdown``.
+
+    Before the not-evaluated work that was harmless, which is why it survived the tags review.
+    The message was ``rule_info + "\\n\\nException Reason: " + exception_reason``, and on the
+    validation-report path ``exception_reason`` is the literal ``"N/A"`` for every row, so both
+    halves were rule-scoped and two results for one rule carried the same message.
+
+    ``utils.cdk_nag_wrapper._result_message_text`` broke that. A not-evaluated result now opens
+    its message with the template's own path -- ``f"'{target}' was NOT evaluated for rule ..."``
+    where ``target`` is ``cfn_file_rel_path``, bound per template. One rule that raises while
+    validating two templates therefore produces two results under one ``ruleId`` whose messages
+    differ, exactly one descriptor is built from whichever the aggregation yielded first, and
+    ``rules[].shortDescription.text`` then named one arbitrary template as the DEFINITION of a
+    rule that failed on both.
+
+    The constructing-not-forwarding argument above covered ``tags`` only, and the claim that the
+    descriptor is "a pure function of the rule id, the pack and the tool" was false for this
+    path while these three fields forwarded. It is now a pure function of the rule id, the pack,
+    the rule level, the rule's own description and the tool -- the description being rule-scoped
+    is what :func:`_rule_scoped_description` establishes, and it is NOT simply ``rule_info``,
+    because ``rule_info`` is contaminated on the not-evaluated path as well.
+
+    WHY THE CALLER PICKS THE REPRESENTATIVE RESULT
+    ---------------------------------------------
+    One rule can produce BOTH kinds of row in a single scan -- raising on one template while
+    reaching a verdict on another, or on two constructs of one template. The two rows then carry
+    genuinely different rule-scoped descriptions (the rule's real text versus the constructed
+    not-evaluated sentence), so which one becomes the descriptor would still be an ordering even
+    though neither value is per-occurrence. ``scan()`` removes that last ordering by preferring
+    an evaluated row as the rule's representative, which is also the better answer: the rule's
+    real description is used whenever any template managed to evaluate it.
     """
     finding_props = (result.properties.model_extra or {}).get("cdk_nag_finding", {})
     pack = str(finding_props.get("pack", "") or "")
     rule_level = str(finding_props.get("rule_level", "rule"))
+    rule_description = _rule_scoped_description(
+        finding_props, result.ruleId or "unknown"
+    )
 
     return ReportingDescriptor(
         id=result.ruleId,
-        shortDescription=MultiformatMessageString(text=result.message.root.text),
-        fullDescription=MultiformatMessageString(
-            text=result.message.root.text,
-            markdown=result.message.root.markdown,
-        ),
+        # NOT ``result.message.root.text``. See the description note in the docstring: the
+        # message is built per occurrence and names the template, so forwarding it put one
+        # template's path in the definition of a rule that failed on several.
+        shortDescription=MultiformatMessageString(text=rule_description or "unknown"),
+        # ``markdown`` is deliberately not set. It used to forward
+        # ``result.message.root.markdown``, a second per-occurrence channel into the same
+        # object. The wrapper builds its ``Message1`` with ``text`` only, so that read returned
+        # None on every finding ever scanned and the forwarding carried nothing -- but it would
+        # have started carrying the template's path the moment the wrapper set the field.
+        fullDescription=MultiformatMessageString(text=rule_description or "unknown"),
         helpUri=_rule_help_uri(result.ruleId or "", pack, rule_level),
         properties=PropertyBag(
             pack=pack,
             rule_level=finding_props.get("rule_level", "unknown"),
-            rule_info=finding_props.get("rule_info", "unknown"),
+            # The rule-scoped description, not the raw ``rule_info``. On a not-evaluated row
+            # the raw value carries cdk-nag's exception text, which is template-derived, so
+            # this field had the same leak the two descriptions did.
+            rule_info=rule_description or "unknown",
             # Every entry is a fact about the RULE. Listed literally, in a fixed order, so the
-            # descriptor is a pure function of the rule id, the pack and the tool -- which is
-            # what makes two runs over identical input produce identical bytes.
+            # descriptor is a pure function of the rule id, the pack, the rule level, the
+            # rule's own description and the tool -- which is what makes two runs over
+            # identical input produce identical bytes.
             tags=[
                 "aws",
                 "cdk",
@@ -777,20 +897,34 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             target_type=target_type,
         )
         # Create SARIF report
-        rules: List[ReportingDescriptor] = []
-        rule_map = {}
+        # One descriptor per rule id, built from a chosen representative rather than from
+        # whichever result the flatten above happened to yield first.
+        #
+        # A rule can appear as both an evaluated row and a not-evaluated one in a single scan --
+        # raising on one template while reaching a verdict on another, or on two constructs of
+        # one template. Those two rows carry different descriptions, so under first-wins the
+        # descriptor's text depended on template iteration order. Preferring the evaluated row
+        # makes it depend on a fact instead: the rule's real description is used whenever any
+        # template managed to evaluate it, and the constructed not-evaluated sentence only when
+        # none did.
+        #
+        # Assigning into an existing key leaves its insertion position alone, so the rules list
+        # keeps the first-encounter order it had before.
+        rule_reps: dict[Any, Result] = {}
         for result in sarif_results:
-            if result.ruleId in rule_map:
-                continue
-            rule_map[result.ruleId] = result
-
-            rules.append(
-                _reporting_descriptor_for(
-                    result,
-                    tool_name=self.config.name,
-                    tool_type=self.tool_type or "UNKNOWN",
-                )
+            current = rule_reps.get(result.ruleId)
+            if current is None or (
+                _is_unevaluated_result(current) and not _is_unevaluated_result(result)
+            ):
+                rule_reps[result.ruleId] = result
+        rules: List[ReportingDescriptor] = [
+            _reporting_descriptor_for(
+                representative,
+                tool_name=self.config.name,
+                tool_type=self.tool_type or "UNKNOWN",
             )
+            for representative in rule_reps.values()
+        ]
         tool = Tool(
             driver=ToolComponent(
                 name="ash-cdk-nag-wrapper",
