@@ -3,7 +3,7 @@
 import logging
 import re
 from importlib.metadata import PackageNotFoundError, packages_distributions, requires
-from typing import Annotated, ClassVar, List, Literal
+from typing import Annotated, Any, ClassVar, List, Literal
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -17,9 +17,15 @@ from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Invocation,
+    Level,
+    Message,
+    Message1,
     MultiformatMessageString,
+    Notification,
     PropertyBag,
     ReportingDescriptor,
+    ReportingDescriptorReference,
+    ReportingDescriptorReference3,
     Result,
     Run,
     SarifReport,
@@ -55,10 +61,349 @@ except (ImportError, Exception):
 # and can therefore go stale, which is exactly why it is only reached when the
 # metadata read below fails outright.
 _CDK_EXTRA_FALLBACK_REQUIREMENTS: List[str] = [
-    "aws-cdk-lib>=2.267,<3.0.0",
+    "aws-cdk-lib>=2.268.0,<3.0.0",
     "cdk-nag>=3.0,<4.0.0",
     "constructs>=10.8,<11.0.0",
 ]
+
+# Where cdk-nag documents its own rules, and where the CDK documents everything else that can
+# write into the same validation report.
+_CDK_NAG_RULES_URL = "https://github.com/cdklabs/cdk-nag/blob/main/RULES.md"
+_CDK_POLICY_VALIDATION_URL = (
+    "https://docs.aws.amazon.com/cdk/v2/guide/policy-validation-synthesis.html"
+)
+
+
+def _rule_is_from_pack(rule_id: str, pack: str) -> bool:
+    """Whether ``rule_id`` was minted by cdk-nag's ``applyRule`` for ``pack``.
+
+    A derived test rather than a hardcoded list of pack names. cdk-nag builds every rule id as
+    ``f"{packName}-{ruleSuffix}"`` -- 3.0.2's ``applyRule`` does so literally, and
+    :func:`~automated_security_helper.utils.cdk_nag_wrapper._rule_id_parts` already relies on
+    the same construction from the other end. So ``AwsSolutions`` owns ``AwsSolutions-S1``,
+    while ``CloudFormation Validate`` demonstrably does not own ``F3017``.
+
+    An allowlist of cdk-nag pack names was the alternative and was rejected: it goes stale the
+    moment cdk-nag adds a pack, and the failure is silent -- a new pack's rules would start
+    being treated as foreign and lose their documentation link, which is a quieter version of
+    the defect this function exists to fix. A denylist naming only the CDK's built-in plugin is
+    worse still, because it is wrong for every third-party plugin a user registers.
+    """
+    return bool(pack) and rule_id.startswith(f"{pack}-")
+
+
+def _rule_help_uri(rule_id: str, pack: str, rule_level: str) -> str:
+    """The document that actually describes ``rule_id``.
+
+    Every rule used to be pointed at cdk-nag's RULES.md, which is right for a cdk-nag rule and
+    wrong for anything else in the report. From aws-cdk-lib 2.262.0 the CDK registers
+    ``CloudFormationValidatePlugin`` on every app unconditionally, so a scan of a template with
+    a placeholder KMS key identifier yields ``F3017`` findings whose help link opened a page
+    that does not mention ``F3017`` -- and, more to the point, does not describe how to
+    acknowledge one.
+
+    The CDK's policy-validation guide is the correct destination for those: it documents the
+    plugin, the shared validation report, and the ``Validations.of(scope).acknowledge()``
+    mechanism that governs a CloudFormation Validate finding. It is also the right fallback for
+    a third-party ``IPolicyValidationPlugin``, since that guide is what defines the protocol
+    such a plugin implements.
+
+    A finding with NO pack recorded keeps the previous destination, and that is deliberately
+    narrow. Redirecting only findings positively known to be foreign means the change cannot
+    move the help link on anything it has not identified. An absent pack is not evidence of a
+    foreign producer -- inside this scanner's own report the likeliest producer is cdk-nag, the
+    level-derived anchor degrades to the generic ``#rules`` index which claims nothing about a
+    specific rule, and guessing "foreign" from missing data would send genuine cdk-nag rules
+    away from their own documentation. That is the same misattribution in the other direction.
+    """
+    if not pack or _rule_is_from_pack(rule_id, pack):
+        return f"{_CDK_NAG_RULES_URL}#{str(rule_level).lower()}s"
+    return _CDK_POLICY_VALIDATION_URL
+
+
+def _unevaluated_rule_notifications(
+    results: list[Result],
+) -> list[Notification]:
+    """One SARIF notification per rule that could not be evaluated.
+
+    WHY THE RESULT ALONE IS NOT ENOUGH
+    ----------------------------------
+    A ``notApplicable`` result says "this one rule reached no verdict on this one resource",
+    and that is true but easy to miss: it sits in the same results array as the findings, at a
+    severity of ``none``, and most report surfaces sort or filter by severity. The fact a reader
+    needs is coarser -- "part of this scan did not run" -- and it belongs where a reader looks
+    for facts about the run.
+
+    SARIF has exactly that place, and the schema says so in its own words. ``invocation``'s
+    ``toolExecutionNotifications`` is "A list of runtime conditions detected by the tool during
+    the analysis", and ``notification.associatedRule`` is "A reference used to locate the rule
+    descriptor associated with this notification". A rule raising mid-evaluation is a runtime
+    condition, and the rule it happened to is the thing to associate it with. This is the
+    representation SARIF already defines for the case, so it is used rather than a bespoke
+    property.
+
+    ``level=error`` rather than ``warning``. For a security scanner, a rule that silently did
+    not run is the more serious of the two facts it can report -- a violation at least tells you
+    what to fix. ``warning`` is the field's default, so this is a deliberate override.
+
+    Deduplicated by rule id. One rule that cannot resolve a property will raise for every
+    construct that shares the shape, and the run-level statement is about the rule, not about
+    each occurrence -- the per-resource detail is already carried by the results themselves.
+    """
+    from automated_security_helper.utils.cdk_nag_wrapper import NOT_EVALUATED
+
+    notifications: list[Notification] = []
+    seen: set[str] = set()
+    for result in results:
+        finding_props = (result.properties.model_extra or {}).get("cdk_nag_finding", {})
+        if finding_props.get("compliance") != NOT_EVALUATED:
+            continue
+        rule_id = result.ruleId or ""
+        if rule_id in seen:
+            continue
+        seen.add(rule_id)
+        pack = str(finding_props.get("pack", "") or "unknown")
+        notifications.append(
+            Notification(
+                level=Level.error,
+                message=Message(
+                    root=Message1(
+                        text=(
+                            f"Rule {rule_id} from pack '{pack}' could not be evaluated, so "
+                            "this scan reports nothing about compliance with it. "
+                            f"{finding_props.get('rule_info', '')}".strip()
+                        )
+                    )
+                ),
+                associatedRule=ReportingDescriptorReference(
+                    # The id-bearing variant. ReportingDescriptorReference is a union whose
+                    # other two members require an index or a guid, neither of which exists
+                    # here -- the rule is identified by the id cdk-nag reported it under.
+                    root=ReportingDescriptorReference3(id=rule_id)
+                ),
+            )
+        )
+    return notifications
+
+
+def _is_unevaluated_result(result: Result) -> bool:
+    """Whether this result records a rule that threw instead of reaching a verdict.
+
+    Reads the structured ``compliance`` field rather than matching on the description's text.
+    The wrapper sets ``compliance`` for exactly this kind of dispatch -- it is what
+    ``_level_and_kind`` branches on -- and a text match would be a second, independent copy of
+    cdk-nag's wording that can drift away from the first.
+    """
+    from automated_security_helper.utils.cdk_nag_wrapper import NOT_EVALUATED
+
+    finding_props = (result.properties.model_extra or {}).get("cdk_nag_finding", {})
+    return finding_props.get("compliance") == NOT_EVALUATED
+
+
+def _rule_scoped_description(finding_props: dict, rule_id: str) -> str:
+    """The rule's description with nothing in it that varies between occurrences.
+
+    ``rule_info`` IS THE REPORT'S DESCRIPTION VERBATIM, AND THAT IS ONLY SOMETIMES RULE-SCOPED
+    ---------------------------------------------------------------------------------------
+    ``rule_info`` is ``violation.description`` from ``validation-report.json``, and cdk-nag
+    3.0.2 builds that field two different ways in ``package/lib/nag-pack.js``'s
+    ``addViolation``::
+
+        const description = errorMessage
+            ? `Rule threw an error during validation. ${this.verbose ? errorMessage : '...'}`
+            : this.verbose ? `${params.info} ${params.explanation}` : params.info;
+
+    The ordinary branch is rule-scoped and safe to reuse: ``info`` and ``explanation`` are
+    static string literals declared once per rule. Measured against the bundled cdk-nag 3.0.2
+    tarball, ``package/lib`` holds 463 ``info:`` and 463 ``explanation:`` occurrences and NONE
+    of them interpolates -- so for a rule that was evaluated, the description cannot carry
+    anything about the template it was evaluated against.
+
+    The error branch is NOT rule-scoped. ``applyRule``'s ``catch`` calls
+    ``addViolation(ruleId, params, error.message)``, and :func:`_build_nag_pack` constructs
+    every pack with ``verbose=True``, so the rule's own exception text is interpolated in rather
+    than the fixed intrinsic-function hint. Every interpolating throw site reachable from that
+    ``catch`` embeds template-derived data:
+
+    * ``nag-rules.js:50`` -- ``JSON.stringify(resolvedValue)``, the parameter value as resolved
+      out of the template being scanned
+    * ``rules/lambda/LambdaLatestVersion.js:24`` and ``:48`` -- the resource's ``runtime``
+    * ``rules/lex/LexBotAliasEncryptedConversationLogs.js:57`` -- a resource LOGICAL ID, which
+      is the same class of value the tags note in :func:`_reporting_descriptor_for` says must
+      never reach a descriptor
+
+    plus any unforeseen exception and anything a third-party pack throws. ASH's own fixture
+    already carries the contamination: ``tests/unit/utils/test_cdk_nag_unevaluated_rule.py``
+    holds a description reading ``non-primitive value "{"Ref":"VolumeEncrypted"}"``, where
+    ``VolumeEncrypted`` is a parameter of the scanned template.
+
+    So a not-evaluated row's description is discarded here and a rule-scoped sentence is
+    constructed instead. Nothing is lost: the error text stays on the result's own message,
+    where it is per-occurrence data sitting in a per-occurrence place, and it is what a reader
+    diagnosing the failure needs.
+
+    Stripping cdk-nag's ``Rule threw an error during validation.`` prefix off the front and
+    keeping the remainder was the alternative. It is rejected because a prefix strip keeps the
+    exception text in the buffer it is trying to remove it from -- one wrong slice index and the
+    tail is back -- while branching discards it wholesale. It is NOT rejected for being
+    sensitive to upstream's wording, because THIS FUNCTION IS EQUALLY SENSITIVE TO IT and an
+    earlier draft of this note wrongly claimed otherwise. The branch below reads
+    ``compliance``, and ``compliance`` is itself derived from that same sentence:
+    ``_compliance_for_violation`` returns ``NOT_EVALUATED`` from
+    ``description.startswith(_UNEVALUATED_DESCRIPTION_PREFIX)`` and nothing else. If cdk-nag
+    reworded it, ``compliance`` would come back ``"Non-Compliant"``, this function would take
+    the ``rule_info`` branch, and the exception text would flow into both descriptions and into
+    ``properties.rule_info`` exactly as before.
+
+    That shared dependency is worth stating plainly because the same drift is already the more
+    serious failure elsewhere: ``_level_and_kind`` dispatches on ``compliance`` too, so a
+    reworded prefix would also render a rule that never ran as a real finding at its declared
+    severity. One string in cdk-nag's source is load-bearing for all three behaviours, which is
+    why ``tests/unit/utils/test_cdk_nag_unevaluated_rule.py`` pins that string against the
+    cdk-nag distribution ASH actually installs rather than trusting it to hold.
+
+    Returns ``""`` when the report supplied no description at all, so a caller can tell "the
+    report said nothing" apart from "we constructed this".
+    """
+    from automated_security_helper.utils.cdk_nag_wrapper import NOT_EVALUATED
+
+    if finding_props.get("compliance") == NOT_EVALUATED:
+        return (
+            f"cdk-nag threw while evaluating {rule_id}, so this scan reached no verdict on it. "
+            "The error text differs per template and is carried on each result's message."
+        )
+    return str(finding_props.get("rule_info") or "").strip()
+
+
+def _reporting_descriptor_for(
+    result: Result, tool_name: str, tool_type: str
+) -> ReportingDescriptor:
+    """Build the SARIF rule descriptor for one cdk-nag-path finding.
+
+    Extracted to module level for the same reason ``_build_nag_pack`` and ``_level_and_kind``
+    were: inline in ``scan()`` it could only be exercised by driving a full synthesis, and
+    nothing in the suite did that. Two of its three defects were invisible for exactly that
+    reason.
+
+    ``tags`` USED TO FORWARD THE RESULT'S OWN TAGS, AND MUST NOT
+    -----------------------------------------------------------
+    A first attempt read ``finding_props["tags"]``, and ``finding_props`` is
+    ``_NagFinding.as_dict()``, which has no ``tags`` key -- so that lookup returned its ``[]``
+    default every single time, and the pack the wrapper had been writing onto each result never
+    reached the rule. The obvious repair, ``list(result.properties.tags or []) + [...]``, fixed
+    the pack and introduced a worse defect, so neither shape is used now.
+
+    The result's tag list is built per occurrence, in ``utils.cdk_nag_wrapper``, and two of its
+    nine entries are per-occurrence values: the resource's logical id and its
+    ``AWS::*::*`` type. A descriptor is built once per unique ``ruleId`` -- ``scan()`` keys a
+    ``rule_map`` and ``continue``s on a repeat -- so forwarding those two stamps ONE resource's
+    identity into the definition of a rule that fired on many. Measured on this repository:
+    ``HIPAA.Security-IAMNoInlinePolicy`` fires on 35 results, and the forwarding put
+    ``ConfigKeyAccessB463082D`` and ``AWS::IAM::Policy`` on its rule descriptor -- whichever
+    result the aggregation happened to yield first. That is wrong for any consumer reading
+    ``rules[].properties``, and because "first" is an ordering rather than a fact, two runs over
+    identical input could disagree. ``tests/unit/plugin_modules/ash_builtin/
+    test_cdk_nag_sarif_attribution.py`` pins byte-identical descriptors across two runs.
+
+    So the tags are CONSTRUCTED from the rule-scoped facts this function already holds rather
+    than inherited and filtered. Filtering was the alternative and was rejected: this function is
+    not given the resource id or the resource type, so it could only drop them positionally, and
+    a positional rule silently stops working the next time the wrapper's list changes shape.
+    Constructing cannot leak a per-occurrence value because it never sees one.
+
+    Dropping the forwarding costs nothing the descriptor needed. The pack is the fact that was
+    supposed to arrive, and it arrives twice over -- as the labelled ``pack`` property and as
+    ``pack::<name>`` -- so a consumer can read it without guessing which unlabelled string it is.
+    The two entries that are genuinely per-occurrence remain on the results, where they belong
+    and where they were never lost.
+
+    ``tool_type`` takes ``.value``. ``ScannerToolType`` subclasses ``str``, but ``Enum.__str__``
+    still wins for a mixin enum, so an interpolated member renders
+    ``tool_type::ScannerToolType.IAC`` while the wrapper writes the literal ``tool_type::IAC``
+    onto every result. Forwarding made both appear in one list, disagreeing; taking the value
+    makes the descriptor agree with the results. A plain ``str`` caller is unaffected --
+    ``getattr`` falls back to the object itself.
+
+    THE DESCRIPTIONS USED TO FORWARD THE RESULT'S MESSAGE, AND MUST NOT
+    ------------------------------------------------------------------
+    Fixing ``tags`` left the same defect in place two fields below it. ``shortDescription`` and
+    ``fullDescription`` both read ``result.message.root.text``, and ``fullDescription`` also
+    read ``result.message.root.markdown``.
+
+    Before the not-evaluated work that was harmless, which is why it survived the tags review.
+    The message was ``rule_info + "\\n\\nException Reason: " + exception_reason``, and on the
+    validation-report path ``exception_reason`` is the literal ``"N/A"`` for every row, so both
+    halves were rule-scoped and two results for one rule carried the same message.
+
+    ``utils.cdk_nag_wrapper._result_message_text`` broke that. A not-evaluated result now opens
+    its message with the template's own path -- ``f"'{target}' was NOT evaluated for rule ..."``
+    where ``target`` is ``cfn_file_rel_path``, bound per template. One rule that raises while
+    validating two templates therefore produces two results under one ``ruleId`` whose messages
+    differ, exactly one descriptor is built from whichever the aggregation yielded first, and
+    ``rules[].shortDescription.text`` then named one arbitrary template as the DEFINITION of a
+    rule that failed on both.
+
+    The constructing-not-forwarding argument above covered ``tags`` only, and the claim that the
+    descriptor is "a pure function of the rule id, the pack and the tool" was false for this
+    path while these three fields forwarded. It is now a pure function of the rule id, the pack,
+    the rule level, the rule's own description and the tool -- the description being rule-scoped
+    is what :func:`_rule_scoped_description` establishes, and it is NOT simply ``rule_info``,
+    because ``rule_info`` is contaminated on the not-evaluated path as well.
+
+    WHY THE CALLER PICKS THE REPRESENTATIVE RESULT
+    ---------------------------------------------
+    One rule can produce BOTH kinds of row in a single scan -- raising on one template while
+    reaching a verdict on another, or on two constructs of one template. The two rows then carry
+    genuinely different rule-scoped descriptions (the rule's real text versus the constructed
+    not-evaluated sentence), so which one becomes the descriptor would still be an ordering even
+    though neither value is per-occurrence. ``scan()`` removes that last ordering by preferring
+    an evaluated row as the rule's representative, which is also the better answer: the rule's
+    real description is used whenever any template managed to evaluate it.
+    """
+    finding_props = (result.properties.model_extra or {}).get("cdk_nag_finding", {})
+    pack = str(finding_props.get("pack", "") or "")
+    rule_level = str(finding_props.get("rule_level", "rule"))
+    rule_description = _rule_scoped_description(
+        finding_props, result.ruleId or "unknown"
+    )
+
+    return ReportingDescriptor(
+        id=result.ruleId,
+        # NOT ``result.message.root.text``. See the description note in the docstring: the
+        # message is built per occurrence and names the template, so forwarding it put one
+        # template's path in the definition of a rule that failed on several.
+        shortDescription=MultiformatMessageString(text=rule_description or "unknown"),
+        # ``markdown`` is deliberately not set. It used to forward
+        # ``result.message.root.markdown``, a second per-occurrence channel into the same
+        # object. The wrapper builds its ``Message1`` with ``text`` only, so that read returned
+        # None on every finding ever scanned and the forwarding carried nothing -- but it would
+        # have started carrying the template's path the moment the wrapper set the field.
+        fullDescription=MultiformatMessageString(text=rule_description or "unknown"),
+        helpUri=_rule_help_uri(result.ruleId or "", pack, rule_level),
+        properties=PropertyBag(
+            pack=pack,
+            rule_level=finding_props.get("rule_level", "unknown"),
+            # The rule-scoped description, not the raw ``rule_info``. On a not-evaluated row
+            # the raw value carries cdk-nag's exception text, which is template-derived, so
+            # this field had the same leak the two descriptions did.
+            rule_info=rule_description or "unknown",
+            # Every entry is a fact about the RULE. Listed literally, in a fixed order, so the
+            # descriptor is a pure function of the rule id, the pack, the rule level, the
+            # rule's own description and the tool -- which is what makes two runs over
+            # identical input produce identical bytes.
+            tags=[
+                "aws",
+                "cdk",
+                "cdk-nag",
+                pack or "unknown",
+                result.ruleId or "unknown",
+                f"pack::{pack}" if pack else "pack::unknown",
+                f"tool_name::{tool_name}",
+                f"tool_type::{getattr(tool_type, 'value', tool_type)}",
+            ],
+        ),
+    )
+
 
 # Matches the ``extra == "cdk"`` half of a PEP 508 marker. importlib.metadata
 # renders the marker with single quotes while pyproject.toml and pip emit double
@@ -408,8 +753,15 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             return False
 
         # Find all files to scan from the scan set
+        #
+        # sorted(), because this list decides the order findings are flattened in and therefore
+        # the order of rules[] in the emitted SARIF. Path.glob walks os.scandir, whose order is
+        # filesystem-determined rather than sorted, so two runs over an identical tree could
+        # emit the same rule descriptors in a different order and give ash-cdk-nag.sarif a
+        # non-empty diff. The non-converted branch below already ends in
+        # ``sorted(set(included))`` inside get_scan_set, so only this branch was unordered.
         orig_scannable = (
-            [item for item in self.context.work_dir.glob("**/*.*")]
+            sorted(self.context.work_dir.glob("**/*.*"))
             if target_type == "converted"
             else scan_set(
                 source=self.context.source_dir,
@@ -569,38 +921,34 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             target_type=target_type,
         )
         # Create SARIF report
-        rules: List[ReportingDescriptor] = []
-        rule_map = {}
+        # One descriptor per rule id, built from a chosen representative rather than from
+        # whichever result the flatten above happened to yield first.
+        #
+        # A rule can appear as both an evaluated row and a not-evaluated one in a single scan --
+        # raising on one template while reaching a verdict on another, or on two constructs of
+        # one template. Those two rows carry different descriptions, so under first-wins the
+        # descriptor's text depended on template iteration order. Preferring the evaluated row
+        # makes it depend on a fact instead: the rule's real description is used whenever any
+        # template managed to evaluate it, and the constructed not-evaluated sentence only when
+        # none did.
+        #
+        # Assigning into an existing key leaves its insertion position alone, so the rules list
+        # keeps the first-encounter order it had before.
+        rule_reps: dict[Any, Result] = {}
         for result in sarif_results:
-            if result.ruleId in rule_map:
-                continue
-            rule_map[result.ruleId] = result
-
-            finding_props = result.properties.model_extra.get("cdk_nag_finding", {})
-
-            rules.append(
-                ReportingDescriptor(
-                    id=result.ruleId,
-                    shortDescription=MultiformatMessageString(
-                        text=result.message.root.text,
-                    ),
-                    fullDescription=MultiformatMessageString(
-                        text=result.message.root.text,
-                        markdown=result.message.root.markdown,
-                    ),
-                    helpUri=f"https://github.com/cdklabs/cdk-nag/blob/main/RULES.md#{str(finding_props.get('rule_level', 'rule')).lower()}s",
-                    properties=PropertyBag(
-                        rule_level=finding_props.get("rule_level", "unknown"),
-                        rule_info=finding_props.get("rule_info", "unknown"),
-                        tags=finding_props.get("tags", [])
-                        + [
-                            f"tool_name::{self.config.name}",
-                            f"tool_type::{self.tool_type or 'UNKNOWN'}",
-                        ],
-                    ),
-                    # help,
-                )
+            current = rule_reps.get(result.ruleId)
+            if current is None or (
+                _is_unevaluated_result(current) and not _is_unevaluated_result(result)
+            ):
+                rule_reps[result.ruleId] = result
+        rules: List[ReportingDescriptor] = [
+            _reporting_descriptor_for(
+                representative,
+                tool_name=self.config.name,
+                tool_type=self.tool_type or "UNKNOWN",
             )
+            for representative in rule_reps.values()
+        ]
         tool = Tool(
             driver=ToolComponent(
                 name="ash-cdk-nag-wrapper",
@@ -635,6 +983,13 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                             executionSuccessful=scan_succeeded,
                             exitCode=0 if scan_succeeded else 1,
                             exitCodeDescription="\n".join(self.errors),
+                            # Rules cdk-nag could not evaluate, reported as conditions of the
+                            # run rather than only as individual results. A rule that did not
+                            # run is a hole in this scan's coverage, and coverage is a property
+                            # of the run -- see _unevaluated_rule_notifications.
+                            toolExecutionNotifications=_unevaluated_rule_notifications(
+                                sarif_results
+                            ),
                             workingDirectory=ArtifactLocation(
                                 uri=get_shortest_name(input=self.context.source_dir),
                             ),

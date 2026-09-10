@@ -8,6 +8,7 @@ from rich.panel import Panel
 
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.core.unified_metrics import (
+    coverage_shortfalls,
     get_unified_scanner_metrics,
     format_duration,
 )
@@ -156,6 +157,49 @@ def generate_metrics_table_from_unified_data(
     return table
 
 
+def print_coverage_shortfalls(
+    asharp_model: AshAggregatedResults, console: Console
+) -> None:
+    """Name every scanner that could not evaluate part of its input, with the counts.
+
+    Printed BESIDE the table rather than added to it. A twelfth column would change the table's
+    geometry for every scan including the ones with nothing to report, and the responsive
+    narrow-terminal layout already carries eleven; the shortfall is also exceptional rather than
+    per-row data. Emitting nothing when there is nothing to say is what keeps this from becoming
+    noise -- see the negative control in
+    ``tests/unit/core/test_partial_target_coverage_visibility.py``.
+
+    Why it exists at all: ``determine_status`` only returns ERROR once every attempted target
+    failed, so a scanner that lost some of its input reports whatever the severity gate gives it.
+    Measured on this repository, cdk-nag attempts 10 targets and cannot evaluate 4, and its status
+    column reads FAILED -- on findings, which say nothing about the four it never read. Two of
+    those four were real CloudFormation templates rather than files that were never templates.
+    Nothing in the rendered output said so, whatever the status happened to be, which is the
+    point: no status value carries this fact, so the status column cannot be where a reader looks
+    for it.
+
+    This rendering does not touch the status or the exit code, and neither claim generalizes past
+    this function. A sibling change ORs ``any_target_errored`` into the ``error`` flag, so a tree
+    that lost ALL its targets does now move the rolled-up status to ERROR -- see the CHANGELOG's
+    breaking-change entry. What is genuinely untouched by the whole change is the DEFAULT exit
+    code: ``_compute_exit_code`` reaches the coverage list only once
+    ``--fail-on-incomplete-scanners`` resolves true. Whether a partial scan should fail is a
+    policy question about pipelines, it is answered by that flag, and it is not one this rendering
+    decides.
+    """
+    shortfalls = coverage_shortfalls(asharp_model)
+    if not shortfalls:
+        return
+    for scanner_name, attempted, failed in shortfalls:
+        evaluated = attempted - failed
+        console.print(
+            f"[bold yellow]Incomplete coverage:[/bold yellow] {scanner_name} evaluated "
+            f"{evaluated} of {attempted} target(s); {failed} could not be evaluated and "
+            f"contributed no findings. See the scanner's exitCodeDescription in its SARIF "
+            f"report for the reason per target."
+        )
+
+
 def display_metrics_table(
     asharp_model: AshAggregatedResults,
     source_dir: str | Path | None = None,
@@ -248,6 +292,10 @@ def display_metrics_table(
             console.print()
             console.print(table)
             console.print()
+            # After the table, so the counts sit next to the status they qualify. Inside the same
+            # guarded block because it writes to the same console: a closed stdout has to be
+            # handled identically for both, and a shortfall notice is not worth failing a scan.
+            print_coverage_shortfalls(asharp_model, console)
         except (ValueError, OSError, BrokenPipeError) as io_error:
             # stdout/stderr may be closed (e.g., in MCP server context)
             # Log the error but don't fail the scan

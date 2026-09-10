@@ -12,6 +12,7 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginConfigBase,
     ReporterWorkspaceBehaviour,
 )
+from automated_security_helper.core.unified_metrics import coverage_shortfalls
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
     ReportContentEmitter,
 )
@@ -36,7 +37,9 @@ class MarkdownReporterConfigOptions(ReporterOptionsBase):
     use_collapsible_details: bool = (
         True  # Use HTML details/summary tags for detailed findings
     )
-    compact: bool = False  # When True, produce a shorter report suitable for PR comments
+    compact: bool = (
+        False  # When True, produce a shorter report suitable for PR comments
+    )
 
 
 class MarkdownReporterConfig(ReporterPluginConfigBase):
@@ -216,7 +219,7 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
 
                 threshold_text = f"{result['threshold']} ({result['threshold_source']})"
 
-                safe_scanner = result['scanner_name'].replace("|", "\\|")
+                safe_scanner = result["scanner_name"].replace("|", "\\|")
                 safe_threshold = threshold_text.replace("|", "\\|")
                 md_parts.append(
                     f"| {safe_scanner} | {result['suppressed']} | {result['critical']} | {result['high']} | "
@@ -225,6 +228,40 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                 )
 
             md_parts.append("")
+
+            # Scanners that could not evaluate part of their input, listed after the table rather
+            # than as an extra column. The table has a fixed ten-column shape that several tests
+            # and any downstream consumer parse positionally, and a shortfall is exceptional
+            # rather than per-row data.
+            #
+            # This is the artifact a human is most likely to read -- it gets pasted into pull
+            # requests -- and the status column cannot carry the fact. ``determine_status`` only
+            # reports ERROR once every attempted target failed, so partial loss leaves the status
+            # to the severity gate, and the value it lands on says nothing either way. Measured on
+            # this repository, cdk-nag attempts 10 targets and cannot evaluate 4, and its row reads
+            # FAILED -- on 16 actionable findings from the six it did read. A row reading PASSED
+            # would have been just as silent about the four. That is why this is a separate
+            # section: no status value is the right place to put it.
+            #
+            # Emitted only when there is something to report, and NOT suppressed in compact mode.
+            # Compact mode exists to drop noise -- clean rows and skipped scanners -- and an
+            # incomplete-coverage notice is the opposite of noise. Hiding it there would remove it
+            # from precisely the rendering that gets pasted into a pull request.
+            shortfalls = coverage_shortfalls(model)
+            if shortfalls:
+                md_parts.append("### Incomplete coverage")
+                md_parts.append("")
+                md_parts.append(
+                    "These scanners could not evaluate part of their input. The findings they "
+                    "did report are real, but the set is known to be partial:"
+                )
+                md_parts.append("")
+                for scanner_name, attempted, failed in shortfalls:
+                    md_parts.append(
+                        f"- **{scanner_name}**: evaluated {attempted - failed} of {attempted} "
+                        f"target(s); {failed} could not be evaluated"
+                    )
+                md_parts.append("")
 
             # Add top hotspots (files with most findings)
             top_hotspots = emitter.get_top_hotspots(

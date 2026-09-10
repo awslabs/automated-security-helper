@@ -119,6 +119,19 @@ class ReportContentEmitter:
                     "status": metrics.status,
                     "excluded": metrics.excluded,
                     "dependencies_missing": metrics.dependencies_missing,
+                    # How much of its input the scanner actually evaluated. Every other key here
+                    # describes what was found; these two describe how much was looked at, and
+                    # without them a report cannot distinguish a clean scan from one that
+                    # examined a fraction of its targets. ``determine_status`` only reports ERROR
+                    # once every attempted target failed, so a partial loss leaves ``status`` to
+                    # the severity gate -- PASSED or FAILED depending only on what the targets it
+                    # DID read contained -- and reached these rows as nothing at all.
+                    #
+                    # ``targets_attempted`` is None for a scanner that does not track per-target
+                    # outcomes, and is serialized as null rather than 0 so a consumer can tell
+                    # "made no claim" from "attempted none".
+                    "targets_attempted": metrics.targets_attempted,
+                    "targets_failed": metrics.targets_failed,
                 }
             )
 
