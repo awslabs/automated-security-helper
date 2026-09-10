@@ -11,7 +11,7 @@ dependencies = [
  "requests>=2.34,<3.0.0",
  "attrs>=26.1,<27.0.0",
  "jsonschema>=4.26,<5.0.0",
- "importlib-metadata>=9.0,<10.0.0",
+ "importlib-metadata>=9.0.1,<10.0.0",
  "cattrs>=26.1,<27.0.0",
  "docker>=7.2,<8.0.0",
  "GitPython>=3.1.61,<4.0.0",  # floor is advisory-driven: GHSA-wvpp-8hx9-p66j and others affect <= 3.1.57
@@ -24,9 +24,9 @@ dependencies = [
  # Unbundled rather than pinned: this list is published to PyPI, so an exact pin here would
  # force a resolution conflict on any consumer that also depends on pydantic. Two bare names
  # cost consumers nothing and keep the automatic patch adoption that the floors here exist for.
- "pydantic>=2.13,<2.14",
+ "pydantic>=2.13.5,<2.14",
  "email-validator>=2.0,<3.0.0",
- "typer>=0.27,<0.28",
+ "typer>=0.27.2,<0.28",
  "rich>=15.0,<16",
  "igittigitt>=2.2,<3.0.0",
  "defusedxml>=0.7,<0.8",
@@ -81,7 +81,7 @@ email = "ntheule@amazon.com"
 
 [dependency-groups]
 dev = [
- "ruff>=0.16,<1.0.0",
+ "ruff>=0.16.6,<1.0.0",
  "pytest>=9.1,<10.0.0",
  "pytest-cov>=7.1,<8.0.0",
  "pytest-mock>=3.15,<4.0.0",
@@ -98,7 +98,7 @@ dev = [
  # into its own pull request. The <3.0.0 cap is this file's convention, not the extra's, which
  # is unbounded -- a future major then arrives as a major instead of silently.
  "mkdocstrings>=1.0,<2.0.0",
- "mkdocstrings-python>=2.0,<3.0.0",
+ "mkdocstrings-python>=2.0.8,<3.0.0",
  "mkdocs-autorefs>=1.4,<2.0.0",
  "pytest-asyncio>=1.4,<2.0.0",
  # Was "types-boto3[essential, logs, s3, securityhub, securitylake, sts]". Unbundled for the same
@@ -118,15 +118,15 @@ dev = [
  # satellite to move a minor ahead of the parent. For type stubs that is a staleness question
  # rather than a runtime one, and it avoids having to widen twelve lines in lockstep every time
  # the ecosystem's minor rolls over.
- "types-boto3>=1.43,<2.0.0",
- "types-boto3-cloudformation>=1.43,<2.0.0",
- "types-boto3-dynamodb>=1.43,<2.0.0",
- "types-boto3-ec2>=1.43,<2.0.0",
- "types-boto3-lambda>=1.43,<2.0.0",
- "types-boto3-logs>=1.43,<2.0.0",
- "types-boto3-rds>=1.43,<2.0.0",
- "types-boto3-s3>=1.43,<2.0.0",
- "types-boto3-securityhub>=1.43,<2.0.0",
+ "types-boto3>=1.43.87,<2.0.0",
+ "types-boto3-cloudformation>=1.43.62,<2.0.0",
+ "types-boto3-dynamodb>=1.43.64,<2.0.0",
+ "types-boto3-ec2>=1.43.87,<2.0.0",
+ "types-boto3-lambda>=1.43.86,<2.0.0",
+ "types-boto3-logs>=1.43.82,<2.0.0",
+ "types-boto3-rds>=1.43.82,<2.0.0",
+ "types-boto3-s3>=1.43.66,<2.0.0",
+ "types-boto3-securityhub>=1.43.66,<2.0.0",
  "types-boto3-securitylake>=1.43,<2.0.0",
  "types-boto3-sqs>=1.43,<2.0.0",
  "types-boto3-sts>=1.43,<2.0.0",
