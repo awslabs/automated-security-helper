@@ -171,13 +171,21 @@ def print_coverage_shortfalls(
 
     Why it exists at all: ``determine_status`` only returns ERROR once every attempted target
     failed, so a scanner that lost some of its input reports whatever the severity gate gives it.
-    Measured on this repository, cdk-nag attempts 10 targets, fails 4, and reports PASSED -- and
-    two of those four were real CloudFormation templates rather than files that were never
-    templates. Nothing in the rendered output said so.
+    Measured on this repository, cdk-nag attempts 10 targets and cannot evaluate 4, and its status
+    column reads FAILED -- on findings, which say nothing about the four it never read. Two of
+    those four were real CloudFormation templates rather than files that were never templates.
+    Nothing in the rendered output said so, whatever the status happened to be, which is the
+    point: no status value carries this fact, so the status column cannot be where a reader looks
+    for it.
 
-    The status and the exit code are deliberately not touched. At the measured rate, failing on
-    any unevaluated target would turn a routine condition into a permanent red; whether it should
-    fail is a policy question about pipelines and not one this rendering decides.
+    This rendering does not touch the status or the exit code, and neither claim generalizes past
+    this function. A sibling change ORs ``any_target_errored`` into the ``error`` flag, so a tree
+    that lost ALL its targets does now move the rolled-up status to ERROR -- see the CHANGELOG's
+    breaking-change entry. What is genuinely untouched by the whole change is the DEFAULT exit
+    code: ``_compute_exit_code`` reaches the coverage list only once
+    ``--fail-on-incomplete-scanners`` resolves true. Whether a partial scan should fail is a
+    policy question about pipelines, it is answered by that flag, and it is not one this rendering
+    decides.
     """
     shortfalls = coverage_shortfalls(asharp_model)
     if not shortfalls:

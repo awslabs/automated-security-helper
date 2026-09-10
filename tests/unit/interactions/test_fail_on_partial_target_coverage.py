@@ -696,12 +696,9 @@ class TestTheGateReadsTheRealRollup:
         along the way fails here, which the injected-row version of this control cannot
         detect -- it never runs ``target_counts`` at all.
         """
-        assert (
-            incomplete_scanners(
-                _rollup_model({"bandit": {"source": _target_report("PASSED", name="bandit")}})
-            )
-            == []
-        )
+        reports = {"bandit": {"source": _target_report("PASSED", name="bandit")}}
+
+        assert incomplete_scanners(_rollup_model(reports)) == []
 
     def test_the_default_exit_code_is_unchanged_through_the_real_rollup(self, tmp_path):
         """The blast-radius guard, measured end to end rather than on injected rows.

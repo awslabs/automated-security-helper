@@ -82,9 +82,11 @@ class ScannerMetrics(ScannerSeverityCount):
     # That mattered because ``determine_status`` only returns ERROR once
     # ``targets_failed >= targets_attempted``. A scanner that failed on some of its targets keeps
     # whatever status the severity gate gives it, so partial coverage loss renders exactly like a
-    # clean scan. Measured against cdk-nag on this repository: 10 targets attempted, 4 failed,
-    # reported PASSED -- and two of those four were CloudFormation templates that genuinely went
-    # unscanned rather than files that were never templates.
+    # scan that read everything. Measured against cdk-nag on this repository: 10 targets
+    # attempted, 4 failed, rolled up to FAILED on its findings -- and two of those four were
+    # CloudFormation templates that genuinely went unscanned rather than files that were never
+    # templates. FAILED is as silent about the four as PASSED would have been, which is the
+    # reason these are fields rather than a status.
     #
     # ``targets_attempted`` keeps the container's tri-state meaning rather than defaulting to 0.
     # None means the scanner does not track per-target outcomes and is making no claim; bandit,

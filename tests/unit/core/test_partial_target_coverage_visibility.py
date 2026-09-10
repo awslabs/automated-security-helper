@@ -35,9 +35,16 @@ even in principle. That is the half of the defect that is purely additive to fix
 
 Whether a partially-covered scan should FAIL is a separate question with a real blast radius --
 at a 40% rate on this repository, "ERROR on any failed target" would turn a routine condition
-into a permanent red -- so the status and the exit code are deliberately unchanged here. The
-tests below assert that they are unchanged, so that a later change to them is a visible decision
-rather than a side effect.
+into a permanent red -- so PARTIAL loss moves neither the status nor the exit code, and the tests
+below assert that, so a later change to it is a visible decision rather than a side effect.
+
+Read that as scoped to partial loss, not as a claim about the change this file belongs to. A
+sibling commit ORs ``any_target_errored`` into the ``error`` flag, so a tree that lost ALL of its
+targets -- which ``determine_status`` does report as ERROR -- now reaches the rolled-up status
+where it previously could not. That is a status change, it has no opt-in, and
+``tests/unit/core/test_scanner_status_across_targets.py`` owns it. The two are consistent because
+they concern different conditions: 4 of 10 lost is not a status, 10 of 10 lost on some tree always
+was one and simply could not be seen.
 
 ASSERTIONS ARE ON COUNTS AND CHANNELS, NEVER ON WORDING
 -------------------------------------------------------

@@ -356,14 +356,10 @@ class TestRuleTagsAreRuleScoped:
             tool_type="IAC",
         )
 
-        assert (
-            sum(
-                1
-                for tag in descriptor.properties.tags
-                if tag.startswith("tool_name::")
-            )
-            == 1
-        )
+        name_tags = [
+            tag for tag in descriptor.properties.tags if tag.startswith("tool_name::")
+        ]
+        assert name_tags == ["tool_name::cdk-nag"]
 
 
 class TestPackOwnershipIsDerivedNotListed:

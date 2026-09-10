@@ -235,10 +235,13 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
             # rather than per-row data.
             #
             # This is the artifact a human is most likely to read -- it gets pasted into pull
-            # requests -- and the status column cannot carry the fact: ``determine_status`` only
-            # reports ERROR once every attempted target failed, so a scanner that lost some of its
-            # targets appears here as PASSED. Measured on this repository, cdk-nag attempts 10
-            # targets, fails 4, and reports PASSED.
+            # requests -- and the status column cannot carry the fact. ``determine_status`` only
+            # reports ERROR once every attempted target failed, so partial loss leaves the status
+            # to the severity gate, and the value it lands on says nothing either way. Measured on
+            # this repository, cdk-nag attempts 10 targets and cannot evaluate 4, and its row reads
+            # FAILED -- on 16 actionable findings from the six it did read. A row reading PASSED
+            # would have been just as silent about the four. That is why this is a separate
+            # section: no status value is the right place to put it.
             #
             # Emitted only when there is something to report, and NOT suppressed in compact mode.
             # Compact mode exists to drop noise -- clean rows and skipped scanners -- and an

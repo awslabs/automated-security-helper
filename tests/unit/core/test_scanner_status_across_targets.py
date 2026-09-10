@@ -11,11 +11,25 @@ converted tree -- and ``ScanResultProcessor`` writes one serialized container pe
 ``get_unified_scanner_metrics``, whose loudest branch is ``stats["error"]``, and that flag is
 produced by ``get_scanner_status_info``.
 
-``get_scanner_status_info`` read the ``"source"`` report and only the ``"source"`` report. So a
-scanner that passed on the source tree and errored on the converted tree rolled up to PASSED:
-the ERROR container was written, serialized, and never consulted. An ERROR means no rule was
-evaluated on that target, so this is the silent-pass shape the surrounding code was written
-against, arriving through the target dimension instead of through the severity counts.
+``get_scanner_status_info`` never consulted a per-target ERROR at all. Its branches are, in
+order: the scanner-level ``"None"`` report, else the ``scanner_results`` entry, else the
+``"source"`` report. In a real run ``scanner_results`` carries the scanner, so that middle branch
+wins and reads only ``excluded`` and ``dependencies_satisfied`` -- ``error`` stays False and even
+the ``"source"`` fallback is unreachable. So a scanner that passed on the source tree and errored
+on the converted tree rolled up to PASSED: the ERROR container was written, serialized, and read
+by nothing. An ERROR means no rule was evaluated on that target, so this is the silent-pass shape
+the surrounding code was written against, arriving through the target dimension instead of through
+the severity counts.
+
+THIS IS A STATUS CHANGE, AND IT IS NOT OPTED IN
+-----------------------------------------------
+Worth stating plainly here because sibling files say partial coverage does NOT move a status, and
+both are true of different conditions. ``error`` is the FIRST branch in both
+``get_scanner_status`` and ``get_unified_scanner_metrics``, so for an affected scanner the summary
+table, every report format and ``ash.flat.json``'s ``passed`` all change, on every scan, with no
+flag. The CHANGELOG carries it as a breaking change. Measured on this repository nothing changes,
+because cdk-nag's only target report is the source tree and it carries PASSED -- a repository is
+affected only where some tree lost every target it attempted.
 
 WHAT WAS ALREADY HANDLED, AND WHY THAT WAS NOT ENOUGH
 -----------------------------------------------------

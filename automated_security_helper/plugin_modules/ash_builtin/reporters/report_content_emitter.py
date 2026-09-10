@@ -123,8 +123,9 @@ class ReportContentEmitter:
                     # describes what was found; these two describe how much was looked at, and
                     # without them a report cannot distinguish a clean scan from one that
                     # examined a fraction of its targets. ``determine_status`` only reports ERROR
-                    # once every attempted target failed, so a partial loss reaches ``status`` as
-                    # PASSED and reached these rows as nothing at all.
+                    # once every attempted target failed, so a partial loss leaves ``status`` to
+                    # the severity gate -- PASSED or FAILED depending only on what the targets it
+                    # DID read contained -- and reached these rows as nothing at all.
                     #
                     # ``targets_attempted`` is None for a scanner that does not track per-target
                     # outcomes, and is serialized as null rather than 0 so a consumer can tell
