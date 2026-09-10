@@ -1,7 +1,7 @@
 [project]
 name = "agentic-plugin-transpiler"
 version = "0.1.0"
-description = "Transpile a single _base/ source-of-truth into plugin packages for 14 AI coding agent platforms (Claude Code, Codex CLI, Kiro, GitHub Copilot, OpenCode, Cursor, Windsurf, Cline, Roo Code, Continue.dev, Gemini CLI, Goose, Amazon Q, Aider)."
+description = "Transpile a single _base/ source-of-truth into plugin packages for AI coding agent platforms, plus standalone agentskills.io skill releases. `agentic-plugins formats` lists the registered backends and the formats they emit."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
@@ -24,13 +24,12 @@ dependencies = [
 
 [project.scripts]
 agentic-plugins = "transpiler.cli:main"
-transpile = "transpiler.cli:transpile_compat"
 refresh-schemas = "tools.refresh_schemas:main"
 generate-models = "tools.generate_models:main"
 
 [project.optional-dependencies]
 # Refresh-time tooling — only needed when running refresh-schemas or generate-models.
-# CI normally just runs `transpile --check` against vendored schemas + models.
+# CI normally just runs `agentic-plugins check` against vendored schemas + models.
 refresh = [
     # Was "datamodel-code-generator[http]". Unbundled for the same reason as pydantic above --
     # an extras-bearing name is one Dependabot cannot compute a semver level for, so it escapes

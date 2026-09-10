@@ -1380,7 +1380,7 @@ jobs:
       - uses: actions/checkout@v3
       
       - name: Install ASH
-        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.1.2
+        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
       
       - name: Run Trivy Security Scan
         run: |
@@ -1400,7 +1400,7 @@ security-scan:
   stage: test
   image: python:3.10
   script:
-    - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.1.2
+    - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
     - ash --scanners trivy-repo --reporters sarif,markdown
   artifacts:
     reports:

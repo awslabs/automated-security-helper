@@ -63,12 +63,18 @@ class ScanExecutionEngine:
         simple_mode: bool = False,
         ash_plugin_modules: List[str] | None = None,
         output_formats: List[str] | None = None,
+        shard_index: Optional[int] = None,
+        shard_count: Optional[int] = None,
     ):
         """Initialize the execution engine.
 
         Args:
             enabled_scanners: List of scanner names to enable. If None, all scanners are enabled.
                 If empty list, no scanners are enabled.
+            shard_index: Zero-based index of this shard, when one scan is split
+                across several executors. Requires shard_count. Carried verbatim to
+                ScanPhase, which validates the pair and computes the partition.
+            shard_count: Total number of shards. Requires shard_index.
             strategy: Execution strategy to use for scanner execution (default: PARALLEL)
             asharp_model: Optional AshAggregatedResults to use for results
             show_progress: Whether to show progress bars
@@ -143,6 +149,12 @@ class ScanExecutionEngine:
         )
         self._simple_mode = simple_mode  # Store the simple_mode flag
         self._output_formats = output_formats  # CLI --output-formats
+        # Stored unvalidated. ScanPhase._execute_phase is the single owner of both
+        # the validation and the partition, because the names a shard is expressed
+        # in are only knowable after scanner instantiation; a rule duplicated here
+        # could start disagreeing with the one that decides what actually runs.
+        self._shard_index = shard_index
+        self._shard_count = shard_count
 
         # Get debug and verbose flags from environment or config
         debug_flag = debug or os.environ.get("ASH_DEBUG", "").lower() in [
@@ -459,9 +471,34 @@ class ScanExecutionEngine:
                             max_workers=self._max_workers,
                             global_ignore_paths=self._global_ignore_paths,
                             python_based_plugins_only=self._python_only,  # Pass the python_based_plugins_only flag to the scan phase
+                            shard_index=self._shard_index,
+                            shard_count=self._shard_count,
                         )
                         # Store the completed scanners for metrics display
                         self._completed_scanners = scan_phase._completed_scanners
+                        # Stamp shard provenance, so `ash merge` can verify
+                        # coverage from the result files alone rather than being
+                        # told out of band how many shards to expect. Taken from
+                        # the phase rather than from self._shard_index/_count
+                        # because the phase is what resolved the actual scanner
+                        # names: copying the two integers here would record that a
+                        # shard existed without recording what it covered, and
+                        # verify_shard_coverage's overlap check needs the names.
+                        #
+                        # Assigned only when the phase produced one, so a
+                        # non-sharded scan leaves metadata.shard as None. Assigning
+                        # unconditionally would be a no-op today and would stay
+                        # correct only as long as _shard_assignment is never given
+                        # a non-None default.
+                        #
+                        # Read as a plain attribute, not via getattr with a
+                        # fallback: ScanPhase.__init__ always sets it, so a
+                        # fallback would only ever hide the case where a refactor
+                        # stopped setting it -- and that case must not degrade to
+                        # "silently stamp nothing", which is a partial scan
+                        # reporting itself as whole.
+                        if scan_phase._shard_assignment is not None:
+                            self._results.metadata.shard = scan_phase._shard_assignment
 
                     case "report":
                         # Final suppression pass on the merged SARIF before reporters read it.

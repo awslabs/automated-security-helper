@@ -100,6 +100,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterWorkspaceBehaviour,
+    reporter_matches_requested_formats,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.workspace.plan import WorkspacePlan
@@ -219,11 +220,15 @@ def _matches_requested_formats(
 
     An empty request means every reporter, matching ``ReportPhase``: an operator
     who passed no ``--output-format`` asked for the default set, not for nothing.
+
+    Delegates so that this and ``ReportPhase`` cannot answer differently. They
+    used to hold two copies of the comparison and both had the same bug -- they
+    matched the requested format names against each reporter's ``extension``,
+    which only coincides with the name for four of the fifteen reporters. A
+    workspace scan asked for ``markdown`` produced no markdown report and said
+    nothing about it, exactly as a single-directory scan did.
     """
-    if not output_formats:
-        return True
-    extension = getattr(getattr(instance, "config", None), "extension", None)
-    return extension in output_formats
+    return reporter_matches_requested_formats(instance, output_formats)
 
 
 def _load_workspace_model(results_path: Path):
@@ -470,7 +475,9 @@ def emit_workspace_reports(
         results_path: The unified ``ash_aggregated_results.json`` the aggregator
             wrote. Read back rather than passed as a model; see the module
             docstring.
-        output_formats: Extensions the operator asked for. Empty means all.
+        output_formats: Format names the operator asked for, as ``ExportFormat``
+            values. Empty means all. Not extensions -- see
+            :func:`_matches_requested_formats`.
         python_based_plugins_only: Excludes reporters with non-Python
             dependencies, matching ``--python-based-plugins-only``.
         ignore_suppressions: Threaded onto the plugin context so a reporter that

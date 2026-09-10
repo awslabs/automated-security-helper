@@ -245,5 +245,7 @@ def test_mcp_wrapper_exposes_streamable_http_flags() -> None:
         "--mount-path",
         "--auth-header-name",
         "--auth-header-value",
+        "--stateless-http",
+        "--allowed-host",
     ):
         assert flag in flat, f"Missing {flag} in `ash mcp --help`:\n{result.output}"

@@ -82,6 +82,20 @@ def get_session_source_dir(session_id: str) -> Optional[Path]:
     return _SESSION_SOURCE_DIRS.get(session_id)
 
 
+def delivered_session_count() -> int:
+    """Return how many sessions currently have a recorded ``source_dir``.
+
+    Deliberately a count and not the ids. The one caller is a diagnostic that
+    needs to distinguish "nobody has delivered anything" from "somebody
+    delivered, but not the session asking" -- the second being the signature of
+    a caller whose session id is not stable between calls. Returning the ids
+    would tell one tenant that another exists and what it is called, which the
+    diagnostic does not need.
+    """
+
+    return len(_SESSION_SOURCE_DIRS)
+
+
 def _set_session_source_dir(session_id: str, source_dir: Path) -> None:
     _SESSION_SOURCE_DIRS[session_id] = source_dir
 

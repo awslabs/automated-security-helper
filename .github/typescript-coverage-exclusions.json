@@ -61,6 +61,16 @@
       "path": "ash-agent-plugins/agentic-coding/transpiler/tools/zod_to_json_schema.mjs",
       "kind": "no-harness",
       "reason": "A node helper shelled out to by the Python transpiler's tools/refresh_schemas.py; its tree is a Python package (pyproject.toml, uv.lock) with no package.json, tsconfig, jest or vitest config, so no JS harness exists to measure it."
+    },
+    {
+      "path": ".github/scripts/assert-coverage-completeness.mjs",
+      "kind": "no-harness",
+      "reason": "This census script itself. Invoked as `node .github/scripts/...` from a workflow step, and neither .github/scripts/, .github/ nor the repository root carries a package.json, tsconfig, jest or vitest config -- verified against `git ls-files` -- so no JS harness exists anywhere in its tree to measure it. Named here rather than left unlisted because the gate is deliberately self-inclusive: it censuses every tracked JS/TS file, including its own, and an unexplained absence is what it exists to reject."
+    },
+    {
+      "path": ".github/scripts/assert-coverage-scope.mjs",
+      "kind": "no-harness",
+      "reason": "The denominator-pinning script, same disposition as assert-coverage-completeness.mjs above: run by `node` from a workflow step, in a tree with no JS harness in any ancestor directory. These two are the only tracked JS/TS files under .github/, so this pair completes that subtree rather than starting a list that will grow with each workflow helper."
     }
   ]
 }

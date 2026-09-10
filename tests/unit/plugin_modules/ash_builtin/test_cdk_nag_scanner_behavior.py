@@ -812,3 +812,83 @@ def test_source_target_type_scans_the_source_tree(
     assert "should-not-be-scanned.yaml" not in scanned, (
         f"a work_dir template leaked into a source scan: {scanned}"
     )
+
+
+# ---------------------------------------------------------------------------
+# The --ignore-suppressions gate on in-template suppressions
+# ---------------------------------------------------------------------------
+#
+# The wrapper will honor a scanned template's own `Metadata.cdk_nag.rules_to_suppress`, and
+# whether it does is this scanner's decision: it passes `honor_template_suppressions` derived
+# from the run's `ignore_suppressions`. The wrapper's own tests drive that parameter directly,
+# which leaves the derivation itself uncovered -- and it is the derivation that decides
+# whether `--ignore-suppressions` means anything against a repository of CDK output.
+#
+# Measured before these existed: deleting the `not` from that expression inverts the flag and
+# the entire unit suite still passes, 6435 tests, no failures anywhere. An inverted gate makes
+# an ordinary scan hide every in-band suppression and an audit run honor them all, which is
+# precisely backwards, and nothing said so.
+
+
+def test_template_suppressions_are_honored_by_default(
+    scanner, cdk_available, wrapper_double, template_in_work_dir
+):
+    """An ordinary scan honors what the template says it accepted.
+
+    Half of the polarity check. On its own it is satisfiable by hard-coding True, which is why
+    it is paired with the ignore_suppressions case below rather than standing alone.
+    """
+    assert scanner.context.ignore_suppressions is False, "fixture precondition"
+
+    scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert wrapper_double.call_args.kwargs["honor_template_suppressions"] is True
+
+
+def test_ignore_suppressions_stops_the_scanner_honoring_template_suppressions(
+    scanner, cdk_available, wrapper_double, template_in_work_dir
+):
+    """The other half: ``--ignore-suppressions`` has to reach the wrapper.
+
+    Someone auditing a repository with that flag is asking to see everything the repository
+    accepted, and a template's in-band cdk_nag metadata is one of the things it accepted. If
+    this derivation is wrong the flag silently stops meaning "show me everything" as soon as
+    the scanned tree is CDK output -- which is the tree this scanner exists for.
+    """
+    scanner.context.ignore_suppressions = True
+
+    scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert wrapper_double.call_args.kwargs["honor_template_suppressions"] is False
+
+
+def test_a_context_missing_the_flag_fails_the_target_rather_than_honoring_suppressions(
+    scanner, cdk_available, wrapper_double, template_in_work_dir
+):
+    """The read fails closed if the field is ever renamed away.
+
+    ``ignore_suppressions`` is a declared field on ``PluginContext``, so reading it through
+    ``getattr(..., False)`` cannot fail today -- but it also cannot fail if the field is
+    renamed. It would quietly yield the default, which is the lenient direction: honor every
+    in-template suppression, on every run, including one that asked to ignore them. That is a
+    silent policy inversion with no signal, and it is the failure mode this scanner's design
+    already rejects everywhere else, because a target that was not evaluated as requested must
+    not read as clean.
+
+    Direct attribute access turns that into an error the per-template handler records, so the
+    template is reported as a failed target and the wrapper is never asked to scan it. The
+    field is deleted here rather than renamed because deleting reproduces exactly what a
+    rename leaves behind: an attribute that is no longer there.
+    """
+    del scanner.context.ignore_suppressions
+
+    scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert scanner.targets_failed == 1, (
+        "an unreadable ignore_suppressions must fail the target, not fall back to the "
+        "permissive default"
+    )
+    assert any("ignore_suppressions" in error for error in scanner.errors), (
+        f"the error has to name the attribute; got {scanner.errors}"
+    )
+    wrapper_double.assert_not_called()

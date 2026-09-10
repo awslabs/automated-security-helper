@@ -1326,6 +1326,12 @@
           "title": "Fail On Findings",
           "type": "boolean"
         },
+        "fail_on_incomplete_scanners": {
+          "default": false,
+          "description": "Whether to exit with a non-zero code when a selected scanner did not complete -- status ERROR (ran and failed) or MISSING (dependencies unavailable, never ran). SKIPPED scanners are not selected and never trip this. Independent of fail_on_findings: one answers 'was anything found', this one answers 'did what I asked for actually run'. Defaults to False so that environments legitimately lacking a scanner's tool keep their current exit codes.",
+          "title": "Fail On Incomplete Scanners",
+          "type": "boolean"
+        },
         "global_settings": {
           "$ref": "#/$defs/AshConfigGlobalSettingsSection",
           "default": {
@@ -1335,6 +1341,7 @@
                 "allowed_paths": [],
                 "denied_paths": [
                   "/fail_on_findings",
+                  "/fail_on_incomplete_scanners",
                   "/global_settings/ignore_paths",
                   "/global_settings/suppressions",
                   "/reporters/bedrock-summary-reporter/options/aws_*",
@@ -1679,6 +1686,7 @@
               "allowed_paths": [],
               "denied_paths": [
                 "/fail_on_findings",
+                "/fail_on_incomplete_scanners",
                 "/global_settings/ignore_paths",
                 "/global_settings/suppressions",
                 "/reporters/bedrock-summary-reporter/options/aws_*",
@@ -1726,6 +1734,7 @@
             "allowed_paths": [],
             "denied_paths": [
               "/fail_on_findings",
+              "/fail_on_incomplete_scanners",
               "/global_settings/ignore_paths",
               "/global_settings/suppressions",
               "/reporters/bedrock-summary-reporter/options/aws_*",
@@ -13516,6 +13525,18 @@
           "description": "Unique identifier for the report",
           "title": "Report Id"
         },
+        "shard": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ShardAssignment"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Which shard of a split scan produced these results, and which scanners it was responsible for. Absent when the scan was not sharded, which is how a whole-repository scan is told apart from one shard of several."
+        },
         "summary_stats": {
           "$ref": "#/$defs/SummaryStats",
           "default": {
@@ -15688,6 +15709,7 @@
         "denied_paths": {
           "default": [
             "/fail_on_findings",
+            "/fail_on_incomplete_scanners",
             "/global_settings/ignore_paths",
             "/global_settings/suppressions",
             "/reporters/bedrock-summary-reporter/options/aws_*",
@@ -17094,6 +17116,54 @@
       ],
       "title": "Severity",
       "type": "string"
+    },
+    "ShardAssignment": {
+      "additionalProperties": false,
+      "description": "What one shard was actually asked to run.\n\nRecorded on each shard's results so ``ash merge`` can verify coverage from the\nresult files alone, without being told out of band how many shards to expect.\nTaking the expected count as a merge argument would mean an operator who\nchanged their matrix in one place and not the other gets a silently short\nmerge.\n\n``assigned_scanners`` is the assignment, not the outcome. A scanner listed\nhere that failed or was disabled by config still appears; the scanner's own\nstatus in the results says what became of it. Conflating the two would make a\nlegitimately-disabled scanner look like a coverage gap.\n\n``candidate_scanners`` is what makes coverage verifiable at all. Recording\nonly the assignment lets every shard be internally consistent while the union\nhas a hole: at ``shard_count=2``, executor 0 resolving ``{a,b,c,d}`` and\ntaking ``[a,c]`` alongside executor 1 resolving ``{a,b,c}`` and taking ``[b]``\nagrees on the count, has complete indices, no duplicates and no overlap. Every\ncheck in :func:`verify_shard_coverage` passed and ``d`` was never scanned,\nbecause nothing recorded what the partition was taken *from*.",
+      "properties": {
+        "assigned_scanners": {
+          "description": "Scanner names this shard was responsible for running.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Assigned Scanners",
+          "type": "array"
+        },
+        "candidate_scanners": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Every scanner this executor resolved before partitioning -- the set assigned_scanners was taken from. None on results written before this field existed, in which case the union check is skipped.",
+          "title": "Candidate Scanners"
+        },
+        "shard_count": {
+          "description": "Total number of shards the scan was split across.",
+          "minimum": 1,
+          "title": "Shard Count",
+          "type": "integer"
+        },
+        "shard_index": {
+          "description": "Zero-based index of this shard within the run.",
+          "minimum": 0,
+          "title": "Shard Index",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "shard_index",
+        "shard_count"
+      ],
+      "title": "ShardAssignment",
+      "type": "object"
     },
     "Signatories": {
       "additionalProperties": false,

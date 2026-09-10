@@ -252,8 +252,24 @@ class EnginePhase(ABC):
                 if not instance.validate_plugin_dependencies():
                     continue
                 result.append(instance)
-            except Exception:
-                pass
+            except Exception as e:
+                # Swallowed deliberately: one plugin whose enabled/dependency
+                # check raises must not take down the whole phase, and every
+                # caller already treats an absent instance as "not enabled".
+                # Narrowing the type was rejected -- validate_plugin_dependencies
+                # and is_python_only are plugin-supplied, so the exception set is
+                # open by design.
+                #
+                # Logged rather than silent because the plugin otherwise vanishes
+                # from the run with no trace anywhere:
+                # report_phase._excluded_reporter_reason attributes every leftover
+                # exclusion to unsatisfied dependencies, so a plugin that blew up
+                # here is reported to the operator as merely unsatisfied.
+                ASH_LOGGER.debug(
+                    f"Excluding {type(instance).__name__} from the "
+                    f"{self.phase_name} phase: its enabled/dependency check "
+                    f"raised {e!r}"
+                )
         return result
 
     def add_summary(self, status: str, details: str) -> None:
