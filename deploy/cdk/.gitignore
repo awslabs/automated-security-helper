@@ -22,3 +22,10 @@ cdk.out
 dist
 .cdk.staging
 *.tsbuildinfo
+
+# Test/coverage output. ash-typescript-ci.yml runs jest with --coverage here and
+# uploads this directory as an artifact, so running the documented command
+# locally produces it too. The sibling deploy/cdk-constructs/.gitignore already
+# covers this; without the rule here the run leaves an untracked coverage/
+# behind, which is easy to sweep into an unrelated commit.
+coverage/
