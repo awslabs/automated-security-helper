@@ -13,7 +13,7 @@ Three validation tiers:
       All generated *.md files declared to have frontmatter actually do
         (parsed via the python-frontmatter library — handles BOM, CRLF,
          trailing-newline variants, escaped delimiters)
-      Every path declared in configs.yaml exists in the output
+      Every path declared by a backend's class vars exists in the output
 
   Tier 3 — Known platform constraints (documented hard rules from each
             platform's docs that we encoded during research)
@@ -275,18 +275,18 @@ def validate_structural_sanity(plugins_root: Path) -> list[Error]:
             try:
                 json.loads(content)
             except json.JSONDecodeError as e:
-                errors.append(err(rel, f"invalid JSON: {e}", "Edit transpiler/_base/ or configs.yaml; the transpiler emits malformed JSON."))
+                errors.append(err(rel, f"invalid JSON: {e}", "Edit transpiler/_base/ or the backend's class vars; the transpiler emits malformed JSON."))
         elif path.suffix in {".yaml", ".yml"}:
             try:
                 yaml.safe_load(content)
             except yaml.YAMLError as e:
-                errors.append(err(rel, f"invalid YAML: {e}", "Edit transpiler/_base/ or configs.yaml; the transpiler emits malformed YAML."))
+                errors.append(err(rel, f"invalid YAML: {e}", "Edit transpiler/_base/ or the backend's class vars; the transpiler emits malformed YAML."))
         elif path.suffix in {".md", ".mdc"} and content.startswith("---"):
             try:
                 fm, _ = parse_frontmatter(content)
             except yaml.YAMLError as e:
                 errors.append(err(rel, f"invalid YAML frontmatter: {e}",
-                                  "Edit transpiler/templates/ or configs.yaml frontmatter_fields."))
+                                  "Edit transpiler/templates/ or the backend's SKILL/COMMANDS/AGENTS frontmatter_fields."))
                 continue
             if fm is None and _has_frontmatter_block(content):
                 errors.append(err(rel, "frontmatter delimiters present but block could not be parsed",
@@ -456,7 +456,7 @@ def validate_copilot_instructions_size(plugins_root: Path) -> list[Error]:
     if chars > COPILOT_INSTRUCTIONS_MAX_CHARS:
         return [err(p,
                     f"copilot-instructions.md is {chars} chars > {COPILOT_INSTRUCTIONS_MAX_CHARS} (Code Review limit)",
-                    "Trim transpiler/_base/skill.md or lower truncate_chars in configs.yaml.")]
+                    "Trim transpiler/_base/skill.md or lower truncate_chars in the `copilot` backend's INSTRUCTION_FILE class var.")]
     return []
 
 
@@ -469,7 +469,7 @@ def validate_windsurf_rule_size(plugins_root: Path) -> list[Error]:
         size = len(rule_path.read_bytes())
         if size > WINDSURF_RULE_MAX_BYTES:
             errors.append(err(rule_path, f"windsurf rule is {size} bytes > {WINDSURF_RULE_MAX_BYTES}",
-                              "Trim transpiler/_base/skill.md or lower truncate_bytes in configs.yaml."))
+                              "Trim transpiler/_base/skill.md or lower truncate_bytes in the `windsurf` backend's SKILL class var."))
     return errors
 
 
@@ -590,7 +590,7 @@ def validate_mcpb_archive(plugins_root: Path) -> list[Error]:
             ptr = "/".join(str(p) for p in verr.absolute_path)
             errors.append(err(f"{archive}#manifest.json/{ptr}",
                               f"MCPB archive manifest schema violation: {verr.message}",
-                              "Edit transpiler/_base/manifest.json or configs.yaml `mcpb_bundle`."))
+                              "Edit transpiler/_base/manifest.json or the `mcpb` backend's MCPB_BUNDLE class var."))
 
     # Verify the archive's manifest matches the on-disk source manifest.
     # Normalize both via json round-trip to ignore insignificant whitespace
