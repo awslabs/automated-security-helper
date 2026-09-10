@@ -65,6 +65,28 @@ one all exit non-zero rather than reporting zero errors. A scan that recorded no
 scanners at all has not demonstrated that no scanner failed, and "0 errors" from an
 empty input is the silent pass this whole script exists to prevent.
 
+The same doctrine applies one level in, per entry. A ``scanner_results`` value that
+is not a JSON object cannot be read for a status, so it is reported as a problem
+rather than skipped. Skipping it was the residual hole in the first version of this
+file: the container checks above catch a missing or empty ``scanner_results``, but if
+the serialization changed from a mapping-of-records to, say, a list per scanner, then
+``scanner_results`` is still a non-empty mapping and every entry inside it fails the
+object check. Every entry gets skipped, no offender is recorded, no problem is
+recorded, and the script prints 0 and exits 0 -- the identical silent pass, reached
+through the leaf instead of through the container.
+
+Any unreadable entry is a problem, not just the all-unreadable case, and that is
+deliberate. A threshold would reintroduce the defect this script replaced: the old
+grep was wrong precisely because it carried an offset, and "fail only when all of
+them are unreadable" is another offset, one that lets a partial serialization change
+under-count silently. A scanner whose record could not be read has not demonstrated
+that it did not error, which is the same sentence as the empty case above.
+
+Not guarded, on purpose: renaming the leaf ``status`` field itself. Hundreds of ASH
+unit tests read that field, so the rename reddens the suite long before it reaches
+this counter. A guard here would be redundant, and a redundant guard is one neither
+side tests.
+
 Exit codes
 ----------
 0   the results were readable and no scanner reported ERROR
@@ -127,8 +149,10 @@ def count_scanner_errors(results: Any) -> tuple[int, dict[str, list[str]], list[
     """Count scanners at ERROR.
 
     Returns ``(count, {scanner: [fields]}, problems)``. ``problems`` is non-empty
-    when the input could not be inspected at all, which the caller must treat as a
-    failure rather than as zero errors.
+    when any part of the input could not be inspected, which the caller must treat as
+    a failure rather than as zero errors. That covers the whole payload, a missing or
+    empty ``scanner_results``, and any individual entry inside it that is not an
+    object -- an entry that was never read cannot be evidence that it did not error.
     """
     if not isinstance(results, Mapping):
         return (
@@ -163,12 +187,26 @@ def count_scanner_errors(results: Any) -> tuple[int, dict[str, list[str]], list[
         )
 
     offenders: dict[str, list[str]] = {}
+    unreadable: list[str] = []
     for name, entry in scanner_results.items():
         if not isinstance(entry, Mapping):
+            unreadable.append(f"{name} ({type(entry).__name__})")
             continue
         fields = error_statuses_in(entry)
         if fields:
             offenders[str(name)] = fields
+    if unreadable:
+        return (
+            len(offenders),
+            offenders,
+            [
+                (
+                    "these 'scanner_results' entries are not JSON objects, so their "
+                    "status was never inspected and they cannot have demonstrated "
+                    f"that they did not error: {sorted(unreadable)}"
+                )
+            ],
+        )
     return len(offenders), offenders, []
 
 
