@@ -104,6 +104,86 @@ class TestRetryWithBackoff:
         assert "ValidationError" in str(excinfo.value)
 
 
+class TestRetryIntervals:
+    """The interval is the one thing the tests above never observe.
+
+    They pass ``base_delay=0.01`` to stay fast and then assert only the call
+    count, so replacing the exponential with a constant -- or with zero -- would
+    leave every one of them green while the decorator hammered a throttled API
+    back-to-back. So these assert what ``time.sleep`` is handed.
+
+    No wall-clock bound is used: an elapsed-time assertion flakes low on a fast
+    machine and high on a loaded one, and would not distinguish a broken
+    schedule from a busy host.
+    """
+
+    @staticmethod
+    def _throttling_error():
+        return botocore.exceptions.ClientError(
+            {"Error": {"Code": "ThrottlingException", "Message": "Rate exceeded"}},
+            "operation",
+        )
+
+    def _sleeps_while_always_failing(self, **retry_kwargs):
+        mock_func = MagicMock(side_effect=self._throttling_error())
+        decorated_func = retry_with_backoff(**retry_kwargs)(mock_func)
+
+        sleeps = []
+        with (
+            patch(
+                "automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils.time.sleep",
+                side_effect=sleeps.append,
+            ),
+            pytest.raises(botocore.exceptions.ClientError),
+        ):
+            decorated_func()
+        return sleeps, mock_func
+
+    def test_the_interval_grows_between_retries(self):
+        sleeps, mock_func = self._sleeps_while_always_failing(
+            max_retries=3, base_delay=10.0, max_delay=600.0
+        )
+
+        assert mock_func.call_count == 4
+        assert len(sleeps) == 3, "one wait between each pair of attempts, no more"
+        assert sleeps == sorted(sleeps), sleeps
+        # Jitter adds at most 1.0s and each step doubles a >=10s base, so the
+        # per-attempt envelopes cannot overlap and exact bounds are safe here.
+        assert 10.0 <= sleeps[0] < 11.0, sleeps
+        assert 20.0 <= sleeps[1] < 21.0, sleeps
+        assert 40.0 <= sleeps[2] < 41.0, sleeps
+
+    def test_the_interval_is_capped_at_max_delay(self):
+        sleeps, _ = self._sleeps_while_always_failing(
+            max_retries=4, base_delay=10.0, max_delay=25.0
+        )
+        assert all(interval <= 25.0 for interval in sleeps), sleeps
+        assert sleeps[-1] == 25.0, sleeps
+
+    def test_a_negative_max_delay_never_reaches_sleep(self):
+        """Reachable from reporter config, and it used to raise inside the retry.
+
+        CloudWatchLogsReporter and S3Reporter both declare ``base_delay`` and
+        ``max_delay`` as bare ``float`` fields with no lower bound and hand them
+        straight to this decorator. ``time.sleep`` raises ValueError on a negative
+        argument, and the broad ``except Exception`` in
+        ``_create_log_stream_with_retry`` swallows it -- so the retry silently
+        became zero retries and the warning blamed the log stream.
+        """
+        sleeps, mock_func = self._sleeps_while_always_failing(
+            max_retries=2, base_delay=1.0, max_delay=-30.0
+        )
+
+        assert all(interval >= 0.0 for interval in sleeps), sleeps
+        assert mock_func.call_count == 3, "the retries themselves must still happen"
+
+    def test_a_negative_base_delay_never_reaches_sleep(self):
+        sleeps, _ = self._sleeps_while_always_failing(
+            max_retries=2, base_delay=-5.0, max_delay=60.0
+        )
+        assert all(interval >= 0.0 for interval in sleeps), sleeps
+
+
 class TestGetAvailableModels:
     """Tests for the get_available_models function."""
 

@@ -89,9 +89,30 @@ def retry_with_backoff(
                         # If we shouldn't retry, re-raise the exception
                         raise
 
-                    # Calculate delay with exponential backoff and jitter
-                    delay = min(
-                        base_delay * (2**retries) + random.uniform(0, 1), max_delay  # nosec B311 — jitter for retry backoff, not security
+                    # Calculate delay with exponential backoff and jitter.
+                    #
+                    # Clamped non-negative deliberately. ``base_delay`` and
+                    # ``max_delay`` reach here from reporter config --
+                    # CloudWatchLogsReporter and S3Reporter both declare them as
+                    # bare ``float`` fields with no lower bound and hand them
+                    # straight to this decorator -- so a negative ``max_delay``
+                    # made this expression negative, and ``time.sleep`` raises
+                    # ValueError on a negative argument. That ValueError is then
+                    # swallowed by the broad ``except Exception`` in
+                    # ``_create_log_stream_with_retry``, so the retry silently
+                    # became zero retries and the log blamed the log stream.
+                    #
+                    # The floor is 0.0 rather than some small positive number
+                    # because ``base_delay=0`` is a legitimate way to ask for
+                    # immediate retries; what must not happen is a *negative*
+                    # interval reaching sleep, or an exception escaping from the
+                    # arithmetic that is supposed to protect a throttled API.
+                    delay = max(
+                        0.0,
+                        min(
+                            base_delay * (2**retries) + random.uniform(0, 1),  # nosec B311 — jitter for retry backoff, not security
+                            max_delay,
+                        ),
                     )
 
                     # Log the retry
