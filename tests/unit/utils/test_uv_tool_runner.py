@@ -906,12 +906,41 @@ class TestTheProgressMonitorCoversTheWholeRetriedRun:
         thread reference only on the *success* path, so after a failed attempt the
         monitor kept reporting elapsed time against an attempt that had already
         ended, right through the backoff and into the next one.
+
+        Counted by *arrival order* rather than by timestamp, and this matters. The
+        first form of this test bracketed the backoff with two ``time.time()``
+        reads and asked which callback timestamps fell between them. That compares
+        clock readings taken on two different threads and needs the wall clock to
+        order them, which no clock promises: ``time.time()`` is not monotonic, and
+        where its resolution is coarse two reads microseconds apart return the
+        same value, which the inclusive bounds then counted as inside the gap.
+
+        It failed on exactly one CI cell, windows-latest/py3.11, reporting one
+        callback in a 0.41s gap. One is the tell. The monitor's cadence here is
+        0.02s, measured at 5 callbacks per 0.1s attempt, so a monitor genuinely
+        still running through that gap would have delivered about twenty, not one
+        -- and quantizing this test's own timestamps to 15.625ms, Windows' timer
+        granularity, puts a callback in the gap on 30 runs out of 30 with the code
+        unchanged and behaving correctly. So the count was measuring the clock.
+
+        A monotonically increasing arrival index has no such problem: the gap's
+        endpoints are the callback count before and after the backoff, taken under
+        the same lock the callback appends under, so "did anything arrive during
+        the gap" is answered by a happens-before relation instead of by two
+        clocks. The second assertion then reads the *content*, which is what the
+        property is actually about -- a message naming attempt 1 must not arrive
+        once attempt 1 is over -- and holds at any runner speed.
         """
         records: list = []
-        gap: list = []
+        gap_marks: list = []
+        lock = threading.Lock()
         config = UVToolRetryConfig(
             max_retries=1, base_delay=0.4, max_delay=0.4, jitter=False
         )
+
+        def _record(message):
+            with lock:
+                records.append(message)
 
         def _outcomes(attempt_number):
             threading.Event().wait(0.1)
@@ -922,23 +951,25 @@ class TestTheProgressMonitorCoversTheWholeRetriedRun:
             return MagicMock(returncode=0)
 
         def _sleep_really(seconds):
-            """Take the backoff for real, and record exactly when it ran.
+            """Take the backoff for real, and mark the arrival index around it.
 
             The window between the two attempts is bounded by this sleep, not by
             anything inside the fake install: the monitor is stopped and joined in
             the loop's ``finally``, which runs before the backoff starts, and the
-            next attempt's monitor starts after it ends. So any callback timed
-            inside this window came from a monitor outliving its own attempt, and
-            no grace period is needed to say so.
+            next attempt's monitor starts after it ends. So any callback that
+            arrives between these two marks came from a monitor outliving its own
+            attempt, and no grace period is needed to say so.
 
             The 0.4s backoff and the 0.02s monitor cadence are far enough apart to
             tell apart by size, which matters because the pre-fix monitor polls
             with this same ``time.sleep``.
             """
             if seconds > 0.1:
-                gap.append(time.time())
+                with lock:
+                    gap_marks.append(len(records))
                 threading.Event().wait(seconds)
-                gap.append(time.time())
+                with lock:
+                    gap_marks.append(len(records))
             else:
                 threading.Event().wait(seconds)
 
@@ -957,19 +988,34 @@ class TestTheProgressMonitorCoversTheWholeRetriedRun:
                 "bandit",
                 timeout=120,
                 retry_config=config,
-                progress_callback=lambda m: records.append((time.time(), m)),
+                progress_callback=_record,
             )
 
         assert len(installs) == 2
-        assert len(gap) == 2, f"expected exactly one backoff between attempts: {gap}"
-        assert records, "attempt 1 itself must still have been reported on"
+        assert len(gap_marks) == 2, (
+            f"expected exactly one backoff between attempts: {gap_marks}"
+        )
+        assert any("attempt 1/2" in m for m in records), (
+            "attempt 1 itself must still have been reported on, or the two "
+            "assertions below are satisfied by a monitor that never ran"
+        )
 
-        during_backoff = [at for at, _ in records if gap[0] <= at <= gap[1]]
-        assert during_backoff == [], (
-            f"{len(during_backoff)} callbacks landed in the "
-            f"{gap[1] - gap[0]:.2f}s gap between the two attempts, so attempt 1's "
-            f"monitor was still running through the backoff and reporting elapsed "
-            f"time against an attempt that had already failed"
+        arrived_during_backoff = gap_marks[1] - gap_marks[0]
+        assert arrived_during_backoff == 0, (
+            f"{arrived_during_backoff} callbacks arrived during the backoff "
+            f"between the two attempts, so attempt 1's monitor was still running "
+            f"through it and reporting elapsed time against an attempt that had "
+            f"already failed. At the 0.02s cadence a monitor that ran the whole "
+            f"0.4s gap delivers about twenty"
+        )
+        reported_after_attempt_one = [
+            m for m in records[gap_marks[0] :] if "attempt 1/2" in m
+        ]
+        assert reported_after_attempt_one == [], (
+            f"attempt 1 had already failed, and {len(reported_after_attempt_one)} "
+            f"callbacks still named it: {reported_after_attempt_one}. This is the "
+            f"property the count above approximates, asserted on the message "
+            f"instead of on a wall-clock window"
         )
 
     def test_a_short_timeout_still_starts_no_monitor(self, runner):
