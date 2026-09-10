@@ -74,6 +74,26 @@ class ScannerMetrics(ScannerSeverityCount):
     excluded: bool = False  # Whether the scanner was explicitly excluded
     dependencies_missing: bool = False  # Whether the scanner has missing dependencies
 
+    # How much of its input the scanner actually evaluated, summed over every target it reported
+    # under. Present here because this class is the only model the summary table and every
+    # reporter read: the counters existed on ``ScanResultsContainer`` and in the serialized
+    # per-target reports, and had no route to any human-facing output at all.
+    #
+    # That mattered because ``determine_status`` only returns ERROR once
+    # ``targets_failed >= targets_attempted``. A scanner that failed on some of its targets keeps
+    # whatever status the severity gate gives it, so partial coverage loss renders exactly like a
+    # clean scan. Measured against cdk-nag on this repository: 10 targets attempted, 4 failed,
+    # reported PASSED -- and two of those four were CloudFormation templates that genuinely went
+    # unscanned rather than files that were never templates.
+    #
+    # ``targets_attempted`` keeps the container's tri-state meaning rather than defaulting to 0.
+    # None means the scanner does not track per-target outcomes and is making no claim; bandit,
+    # checkov, semgrep, grype, syft, detect-secrets, opengrep, cfn-nag and npm-audit are all in
+    # that state. Reading them as "attempted zero" would report every one of them as having
+    # evaluated nothing.
+    targets_attempted: int | None = None
+    targets_failed: int = 0
+
     @computed_field
     @property
     def passed(self) -> bool:
@@ -107,6 +127,69 @@ class ScannerMetrics(ScannerSeverityCount):
         field mean the stricter thing is a report-schema change, not a bug fix.
         """
         return self.status in ("PASSED", "SKIPPED", "MISSING")
+
+
+def target_counts(
+    asharp_model: AshAggregatedResults, scanner_name: str
+) -> tuple[int | None, int]:
+    """``(targets_attempted, targets_failed)`` summed over every target the scanner reported.
+
+    Summed rather than read off ``"source"``, because ``ScanPhase`` gives each scanner one task
+    carrying both the source tree and the converted tree and either of them can lose coverage.
+    Reading one report would under-report by whatever the other did, which is the same
+    single-target mistake that made a converted-target failure invisible in the first place.
+
+    Returns None for the attempt count when NO target report carries one. That is the
+    scanner-does-not-track state, and it must not collapse to 0: ``0`` is a claim -- "I tracked
+    targets and attempted none" -- while absence is the absence of a claim. ``targets_failed``
+    stays a plain int because it has no independent meaning; a failure count with no attempt count
+    is a producer bug rather than a third state.
+
+    ``bool`` is rejected explicitly even though it is an ``int`` subclass. A True/False counter is
+    a producer bug, and reading it as 1/0 would silently invent a target.
+    """
+    reports = asharp_model.additional_reports.get(scanner_name)
+    if not isinstance(reports, dict):
+        return None, 0
+
+    attempted: int | None = None
+    failed = 0
+    for target_report in reports.values():
+        if not isinstance(target_report, dict):
+            continue
+        raw_attempted = target_report.get("targets_attempted")
+        if isinstance(raw_attempted, int) and not isinstance(raw_attempted, bool):
+            attempted = (attempted or 0) + raw_attempted
+        raw_failed = target_report.get("targets_failed")
+        if isinstance(raw_failed, int) and not isinstance(raw_failed, bool):
+            failed += raw_failed
+    return attempted, failed
+
+
+def coverage_shortfalls(
+    asharp_model: AshAggregatedResults,
+) -> list[tuple[str, int, int]]:
+    """``(scanner, attempted, failed)`` for every scanner that could not evaluate some input.
+
+    The structured form on purpose. The renderer formats these, and a test that asserted the
+    rendered sentence would keep passing through a change that got the numbers wrong -- so the
+    numbers are pinned here, where they are data, and the renderer is only checked for whether it
+    emits at all.
+
+    Includes the total-loss case as well as the partial one. Total loss already reaches the status
+    column as ERROR, but the count of what went unevaluated is exactly as absent from the table
+    there as it is when only some targets failed.
+
+    A scanner making no claim is never a shortfall: absent counters mean the scanner does not
+    track targets, not that it lost all of them.
+    """
+    shortfalls: list[tuple[str, int, int]] = []
+    for scanner_name in sorted(asharp_model.additional_reports or {}):
+        attempted, failed = target_counts(asharp_model, scanner_name)
+        if attempted is None or failed <= 0:
+            continue
+        shortfalls.append((scanner_name, attempted, failed))
+    return shortfalls
 
 
 def format_duration(duration_seconds: Optional[float]) -> str:
@@ -236,6 +319,14 @@ def get_unified_scanner_metrics(
                 scan_result.status if scan_result and scan_result.status else "PASSED"
             )
 
+        # Read straight off the serialized per-target reports rather than through
+        # ``extract_scanner_statistics``. These two are the only values here that describe how
+        # much input was consumed rather than what was found in it, and they are the reason the
+        # summary table could not previously say a scan was partial -- see ScannerMetrics.
+        scanner_targets_attempted, scanner_targets_failed = target_counts(
+            asharp_model, scanner_name
+        )
+
         # Create metrics entry. total and passed are computed, so we do not pass
         # them in explicitly — they're derived from severity fields and status.
         metrics = ScannerMetrics(
@@ -253,6 +344,8 @@ def get_unified_scanner_metrics(
             threshold_source=stats["threshold_source"],
             excluded=stats["excluded"],
             dependencies_missing=stats["dependencies_missing"],
+            targets_attempted=scanner_targets_attempted,
+            targets_failed=scanner_targets_failed,
         )
 
         metrics_list.append(metrics)

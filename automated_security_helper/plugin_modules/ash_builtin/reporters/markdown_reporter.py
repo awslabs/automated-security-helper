@@ -18,6 +18,7 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.report_conte
 from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_section import (
     markdown_workspace_section,
 )
+from automated_security_helper.core.unified_metrics import coverage_shortfalls
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
 
@@ -225,6 +226,37 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                 )
 
             md_parts.append("")
+
+            # Scanners that could not evaluate part of their input, listed after the table rather
+            # than as an extra column. The table has a fixed ten-column shape that several tests
+            # and any downstream consumer parse positionally, and a shortfall is exceptional
+            # rather than per-row data.
+            #
+            # This is the artifact a human is most likely to read -- it gets pasted into pull
+            # requests -- and the status column cannot carry the fact: ``determine_status`` only
+            # reports ERROR once every attempted target failed, so a scanner that lost some of its
+            # targets appears here as PASSED. Measured on this repository, cdk-nag attempts 10
+            # targets, fails 4, and reports PASSED.
+            #
+            # Emitted only when there is something to report, and NOT suppressed in compact mode.
+            # Compact mode exists to drop noise -- clean rows and skipped scanners -- and an
+            # incomplete-coverage notice is the opposite of noise. Hiding it there would remove it
+            # from precisely the rendering that gets pasted into a pull request.
+            shortfalls = coverage_shortfalls(model)
+            if shortfalls:
+                md_parts.append("### Incomplete coverage")
+                md_parts.append("")
+                md_parts.append(
+                    "These scanners could not evaluate part of their input. The findings they "
+                    "did report are real, but the set is known to be partial:"
+                )
+                md_parts.append("")
+                for scanner_name, attempted, failed in shortfalls:
+                    md_parts.append(
+                        f"- **{scanner_name}**: evaluated {attempted - failed} of {attempted} "
+                        f"target(s); {failed} could not be evaluated"
+                    )
+                md_parts.append("")
 
             # Add top hotspots (files with most findings)
             top_hotspots = emitter.get_top_hotspots(
