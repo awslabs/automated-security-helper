@@ -1,0 +1,176 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: ASH - Package Build
+# Builds the wheel and sdist, asserts neither ships third-party scanner code, and
+# uploads both as workflow artifacts.
+#
+# WHY THIS WORKFLOW EXISTS
+#
+# ASH is not on PyPI: the name is held by an unrelated third party, so every
+# documented install resolves a git ref instead. The native installers being added
+# (deb, rpm, MSIX, Flatpak, Chocolatey, winget) each install ASH from a wheel built
+# here, which makes that wheel the artifact the whole distribution story rests on.
+#
+# Until this workflow, CI never built one. There is no `uv build`, `python -m build`
+# or `hatch build` anywhere else under .github/; the only `uv build` in the
+# repository is Dockerfile:43, inside the image build, where the wheel is installed
+# and then discarded with the build layer. So the artifact every installer will
+# depend on was never produced outside a developer's laptop and never inspected.
+#
+# Two things therefore happen here that could not happen before: the build is
+# exercised on every change, and the thing it produces is opened and checked.
+#
+# WHY THESE TRIGGERS AND NOT THE ONES NEXT DOOR
+#
+# The trigger is copied from ash-unified-ci.yml's `pull_request`/`merge_group`
+# block, deliberately, and NOT from ash-install-methods.yml, which is the closer
+# neighbour by subject matter. That workflow declares:
+#
+#     pull_request:
+#       branches: [main]
+#       paths: [pyproject.toml, hatch_build.py, automated_security_helper/**, ...]
+#
+# Both halves of that are wrong for a gate. `branches: [main]` means a pull request
+# stacked onto any non-main base -- the normal shape of work in this repository --
+# never runs it at all. And there is no `merge_group` trigger, so a queued entry
+# gets no verdict: a required check that cannot report for a merge-queue entry
+# blocks the queue on an answer that will never arrive.
+#
+# `branches: ["**"]` and not `["*"]`: GitHub branch filters treat `*` as matching
+# any character except `/`, so a PR based on a nested branch like `pr/foo-bar`
+# silently matches nothing.
+#
+# There is no `paths` filter. `merge_group` accepts none, so a gate filtered on
+# pull_request but unfiltered on merge_group runs in one place and not the other --
+# and packaging depends on more than a path list can capture: pyproject.toml, the
+# hatch_build.py hook, every file under automated_security_helper/, and the
+# presence or absence of stray files that a build would sweep in. A filter here
+# would be an assertion about what cannot affect the wheel, and that assertion
+# would be wrong.
+#
+# Note for anyone comparing against ash-unified-ci.yml: that file also carries
+# `push: branches: ["!main"]`, which does not do what it appears to. It is a known
+# bug being fixed on another branch and is deliberately NOT reproduced here.
+
+on:
+  pull_request:
+    branches:
+      - "**"
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  # One in-flight run per pull request; pushing again supersedes the previous run.
+  #
+  # github.ref is refs/pull/<n>/merge on pull_request, and on merge_group it is the
+  # per-entry gh-readonly-queue/main/pr-<n>-<sha> branch, so every queue entry lands
+  # in its own group and entries never serialize behind one another.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Only pull_request runs may be cancelled. A merge_group run must finish or the
+  # queue loses its verdict.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Build wheel and sdist, and assert their contents
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      # Default fetch-depth (1) on purpose. hatch_build.py stamps
+      # automated_security_helper/assets/ASH_INSTALLED_REVISION during the build,
+      # and despite the name of the function that produces it (_get_commit_sha)
+      # what it actually runs is `git rev-parse --abbrev-ref HEAD` -- a branch
+      # name, deliberately, per the NOTE at hatch_build.py:78 saying the Dockerfile
+      # needs the branch rather than a commit. That needs no history, so a full
+      # clone would buy nothing here.
+      #
+      # Worth knowing when reading a built artifact: on a pull_request event the
+      # checkout leaves HEAD detached, and `--abbrev-ref HEAD` on a detached HEAD
+      # prints the literal string "HEAD". So the wheel this job builds records
+      # "HEAD" as its revision. That is pre-existing behavior of the build hook,
+      # not something this workflow introduces, and it does not fail the build --
+      # "HEAD" is not one of the values the hook's fallback rejects. It is noted
+      # here so nobody reads that string as corruption.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+
+      # Run before the build, not after. The check's own positive control has to
+      # pass before its verdict on a real artifact means anything: a matcher that
+      # silently stopped matching would otherwise clear every wheel forever, and
+      # that is the failure mode this whole step exists to rule out. It plants
+      # known third-party payload in fixture archives and requires rejection, and
+      # pairs that with a fixture of the legitimate lookalikes -- Gemfile.lock,
+      # the ASH-authored cfn-nag rules, the trivy/snyk/bandit adapters -- and
+      # requires acceptance.
+      #
+      # It runs first so an ordering accident cannot leave the control unrun after
+      # a build failure short-circuits the job.
+      - name: Prove the artifact-contents check can fail
+        run: python3 .github/scripts/assert-artifact-contents.py --self-test
+
+      - name: Build wheel and sdist
+        run: uv build --out-dir dist
+
+      # `uv build` exiting 0 is not evidence that it wrote anything, and every
+      # step below would read an empty dist/ as success.
+      - name: Assert the build produced exactly one wheel and one sdist
+        run: |
+          set -euo pipefail
+          wheels=$(find dist -maxdepth 1 -name '*.whl' | wc -l)
+          sdists=$(find dist -maxdepth 1 -name '*.tar.gz' | wc -l)
+          echo "dist/ contains ${wheels} wheel(s) and ${sdists} sdist(s):"
+          ls -la dist
+          if [ "${wheels}" -ne 1 ] || [ "${sdists}" -ne 1 ]; then
+            echo "::error::expected exactly 1 wheel and 1 sdist, got ${wheels} and ${sdists}" >&2
+            exit 1
+          fi
+
+      # The operator invariant for the whole installer program: no artifact
+      # published from this repository may carry third-party scanner source or
+      # assets. ASH invokes bandit, checkov, semgrep, grype, syft, trivy,
+      # opengrep, detect-secrets, cdk-nag and cfn-nag; it redistributes none of
+      # them. Two vendored .jsii.tgz bundles (aws-cdk-lib, cdk-nag) lived in the
+      # tree until commit 760f3647, so this is a regression guard rather than a
+      # hypothetical.
+      - name: Assert no artifact ships third-party scanner code
+        run: python3 .github/scripts/assert-artifact-contents.py dist/*.whl dist/*.tar.gz
+
+      # Proves the artifact the installers will consume actually installs and runs.
+      # Building a wheel nobody installs would leave the one property every
+      # downstream installer depends on untested.
+      - name: Install the built wheel into a clean environment and run it
+        run: |
+          set -euo pipefail
+          wheel=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
+          echo "installing ${wheel}"
+          # A fresh venv, and --no-cache so a previously built wheel of the same
+          # version cannot be substituted for the one just produced.
+          uv venv /tmp/ash-wheel-check
+          VIRTUAL_ENV=/tmp/ash-wheel-check uv pip install --no-cache "${wheel}"
+          # The console script, not `python -m`: the entry point is what the deb,
+          # rpm, MSIX, Flatpak, Chocolatey and winget packages put on PATH, and it
+          # is declared in wheel metadata that a plain import would not exercise.
+          /tmp/ash-wheel-check/bin/ash --version
+
+      - name: Upload wheel and sdist
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ash-package-${{ github.sha }}
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+          # An upload that matches nothing must fail rather than produce an empty
+          # artifact that a later phase would download and treat as a build.
+          if-no-files-found: error
+          retention-days: 14
