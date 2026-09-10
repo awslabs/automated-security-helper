@@ -12,13 +12,13 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginConfigBase,
     ReporterWorkspaceBehaviour,
 )
+from automated_security_helper.core.unified_metrics import coverage_shortfalls
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
     ReportContentEmitter,
 )
 from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_section import (
     markdown_workspace_section,
 )
-from automated_security_helper.core.unified_metrics import coverage_shortfalls
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
 
@@ -37,7 +37,9 @@ class MarkdownReporterConfigOptions(ReporterOptionsBase):
     use_collapsible_details: bool = (
         True  # Use HTML details/summary tags for detailed findings
     )
-    compact: bool = False  # When True, produce a shorter report suitable for PR comments
+    compact: bool = (
+        False  # When True, produce a shorter report suitable for PR comments
+    )
 
 
 class MarkdownReporterConfig(ReporterPluginConfigBase):
@@ -217,7 +219,7 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
 
                 threshold_text = f"{result['threshold']} ({result['threshold_source']})"
 
-                safe_scanner = result['scanner_name'].replace("|", "\\|")
+                safe_scanner = result["scanner_name"].replace("|", "\\|")
                 safe_threshold = threshold_text.replace("|", "\\|")
                 md_parts.append(
                     f"| {safe_scanner} | {result['suppressed']} | {result['critical']} | {result['high']} | "
