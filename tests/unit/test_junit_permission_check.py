@@ -166,13 +166,19 @@ class TestUpdateCheckIsNeverSet:
             # `update_check: false` is fine, and so is omitting it entirely.
             if value not in (None, False, "false"):
                 offenders.append(f"{path.relative_to(REPO_ROOT)}: {value!r}")
+        # The wording here avoids putting "update" and "set" on either side of an
+        # interpolated value: bandit's B608 heuristic reads that shape as
+        # "UPDATE ... SET <variable>" and reports a MEDIUM SQL-injection finding,
+        # which is actionable at this repository's threshold and fails its own
+        # self-scan. Rewording is free; a nosec comment would have suppressed a
+        # real rule to make prose fit.
         assert not offenders, (
-            "update_check selects the action's update path, which resolves a "
-            "check run by job_name while GitHub names check runs by display "
-            "name. The lookup matches nothing, annotator.ts reads "
-            "check_runs[0].id unguarded, and the step throws, swallows the "
-            "error, reports success and publishes no annotations -- issue "
-            f"#189. Set by: {offenders}"
+            "A junit-report step enables update_check, which takes the action's "
+            "update path. That path resolves a check run by job_name while "
+            "GitHub names check runs by display name, so the lookup matches "
+            "nothing, annotator.ts reads check_runs[0].id unguarded, and the "
+            "step throws, swallows the error, reports success and publishes no "
+            f"annotations -- issue #189. Offending call site(s): {offenders}"
         )
 
 
