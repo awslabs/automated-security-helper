@@ -9,6 +9,14 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any, Callable
 
 
+# How often the install progress monitor calls back while an attempt is running.
+# Named rather than inline because it is the monitor's only cadence knob, and the
+# tests that assert the monitor covers a retried run have to shorten it -- the
+# smallest ``timeout`` that starts a monitor at all is 61 seconds, so at the
+# production cadence a test could observe exactly one callback per attempt.
+_PROGRESS_UPDATE_INTERVAL_SECONDS = 10
+
+
 class UVToolRunnerError(Exception):
     """Exception raised for UV tool runner errors."""
 
@@ -330,25 +338,6 @@ class UVToolRunner:
 
         cmd.append(tool_spec)
 
-        # Set up progress monitoring for long installations
-        progress_thread = None
-        if callable(progress_callback) and timeout > 60:
-
-            def progress_monitor():
-                start_time = time.time()
-                while True:
-                    elapsed = time.time() - start_time
-                    if elapsed > timeout:
-                        break
-                    if callable(progress_callback):
-                        progress_callback(
-                            f"Installation in progress... ({elapsed:.0f}s elapsed)"
-                        )
-                    time.sleep(10)  # Update every 10 seconds
-
-            progress_thread = threading.Thread(target=progress_monitor, daemon=True)
-            progress_thread.start()
-
         # ``retry_config`` was accepted here and then silently dropped: there was
         # no retry loop in this function at all, so a caller asking for
         # ``max_retries=3`` got exactly one attempt. BanditScanner asks for
@@ -364,10 +353,81 @@ class UVToolRunner:
         #
         # ``retry_config=None`` still means a single attempt, so every caller
         # that never asked for retries keeps its behaviour exactly.
-        attempts = (1 + retry_config.max_retries) if retry_config else 1
+        #
+        # ``max(1, ...)`` doubles up on the ``max(0, ...)`` in
+        # ``UVToolRetryConfig.__post_init__``, and for the same reason
+        # ``_install_retry_delay`` doubles up on its clamp of ``max_delay``: this
+        # is a plain *mutable* dataclass, so ``config.max_retries = -1`` after
+        # construction walks straight past normalization. The consequence is worse
+        # here than it is for a delay. ``attempts <= 0`` makes ``range`` empty, so
+        # the loop body never runs, ``last_error`` is never assigned, and this
+        # function ends at ``raise UVToolRunnerError(None)`` -- an install that
+        # never happened, reported as a failure whose message is the literal
+        # "None". ``with-retry.sh`` guards the identical case with
+        # ``if [ "$max" -lt 1 ]`` and gives the identical reason.
+        attempts = max(1, 1 + retry_config.max_retries) if retry_config else 1
         last_error: str | None = None
 
+        # Progress monitoring for long installations: one monitor per attempt, not
+        # one for the whole call.
+        #
+        # ``timeout`` is a *per-attempt* budget -- it is what ``subprocess.run``
+        # below enforces -- so an elapsed figure anchored anywhere else reports
+        # progress against a limit nothing applies. A single monitor started
+        # before the loop broke that twice over. It self-terminated at
+        # ``elapsed > timeout`` measured from before the first attempt, so once
+        # ``retry_config`` let the install run for ``attempts * timeout`` plus
+        # backoff -- roughly fifteen minutes for BanditScanner's max_retries=3 at
+        # the default 300s -- callbacks stopped after the first 300 seconds and
+        # the caller heard nothing for the remaining ten. And the figures it did
+        # emit before that described the first attempt rather than the running
+        # one.
+        #
+        # The stop Event is what actually stops it. The previous code set
+        # ``progress_thread = None`` under a comment reading "Stop progress
+        # monitoring", which drops a reference and stops nothing: the thread is a
+        # daemon polling a fixed sleep, so it went on calling back for up to
+        # ``timeout`` after the install had returned, into a callback whose owner
+        # has every reason to have torn down what it writes to. It also ran only
+        # on the success path, so a failed attempt left its monitor reporting
+        # elapsed time against an attempt that had already ended.
+        #
+        # The alternative shape -- keep one monitor and give it the whole budget --
+        # would have to invent that budget: ``attempts * timeout`` plus a sum of
+        # jittered backoffs is not a limit anything enforces and differs run to
+        # run.
+        monitor_attempts = callable(progress_callback) and timeout > 60
+
+        def start_progress_monitor(attempt_index: int):
+            """Report on one attempt. Returns ``(stop_event, thread)``."""
+            if not monitor_attempts:
+                return None, None
+
+            stop = threading.Event()
+            # Numbered only when there is more than one attempt, so callers that
+            # never asked for retries see the message they saw before, unchanged.
+            prefix = f"attempt {attempt_index + 1}/{attempts}, " if attempts > 1 else ""
+
+            def progress_monitor():
+                start_time = time.time()
+                while True:
+                    elapsed = time.time() - start_time
+                    if elapsed > timeout:
+                        break
+                    if callable(progress_callback):
+                        progress_callback(
+                            f"Installation in progress... "
+                            f"({prefix}{elapsed:.0f}s elapsed)"
+                        )
+                    if stop.wait(_PROGRESS_UPDATE_INTERVAL_SECONDS):
+                        break
+
+            thread = threading.Thread(target=progress_monitor, daemon=True)
+            thread.start()
+            return stop, thread
+
         for attempt in range(attempts):
+            progress_stop, progress_thread = start_progress_monitor(attempt)
             try:
                 subprocess.run(  # nosec B603 — list args, validated uv executable path
                     cmd,
@@ -378,18 +438,6 @@ class UVToolRunner:
                     encoding="utf-8",
                     errors="replace",
                 )
-
-                # Stop progress monitoring
-                if progress_thread:
-                    progress_thread = None
-
-                # Installing is exactly the event that makes a remembered version
-                # wrong, so drop this tool's memoized probe result. Without this, a
-                # caller that probed before installing (converters re-read
-                # tool_version afterwards) would keep seeing the pre-install answer.
-                invalidate_tool_version_cache(tool_name)
-
-                return True
             except subprocess.TimeoutExpired as e:
                 # Deliberately terminal, not retried. This attempt already spent
                 # the whole ``timeout`` budget, so retrying would multiply wall
@@ -416,6 +464,27 @@ class UVToolRunner:
                 raise UVToolRunnerError(
                     f"Unexpected error during tool installation for {tool_name}: {e}"
                 )
+            else:
+                # Installing is exactly the event that makes a remembered version
+                # wrong, so drop this tool's memoized probe result. Without this, a
+                # caller that probed before installing (converters re-read
+                # tool_version afterwards) would keep seeing the pre-install answer.
+                invalidate_tool_version_cache(tool_name)
+
+                return True
+            finally:
+                # Every exit from an attempt comes through here: the success
+                # ``return``, both terminal ``raise``es, and falling through to the
+                # backoff. Joining rather than only signalling means no callback
+                # can arrive after this function has returned. Bounded because the
+                # callback is caller-supplied code.
+                # Both halves named, though ``start_progress_monitor`` returns the
+                # two together or neither: a type checker cannot see that
+                # correlation, and the same reasoning is already written out for
+                # ``retry_config is not None`` below.
+                if progress_stop is not None and progress_thread is not None:
+                    progress_stop.set()
+                    progress_thread.join(timeout=5)
 
             # ``retry_config is not None`` is redundant with ``attempt + 1 <
             # attempts`` today: ``attempts`` is 1 whenever ``retry_config`` is
