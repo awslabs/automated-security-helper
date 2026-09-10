@@ -17,19 +17,37 @@ turned the gate on to be told when coverage was lost was told only about total
 loss, which is the rarer case.
 
 Measured on this repository before the change: cdk-nag attempts 10 targets and
-fails 4, reports PASSED, and ``--fail-on-incomplete-scanners`` exited 0. Two of
-those four are real CloudFormation templates that went unscanned.
+fails 4, its per-target container reports PASSED, and
+``--fail-on-incomplete-scanners`` exited 0. Two of those four are real
+CloudFormation templates that went unscanned.
 
 What is deliberately NOT changed
 --------------------------------
-* No new ``ScannerStatus`` member. The status a scanner reports is unchanged, and
-  ``test_partial_coverage_does_not_change_the_status`` pins that.
+* No new ``ScannerStatus`` member. Partial coverage is expressed in this gate's
+  own output and not by promoting a status, so ``cli.merge._completed`` keeps
+  answering the narrower did-it-run-at-all question that shard refusal depends on.
+  ``test_partial_coverage_still_counts_as_having_run`` pins that, and pins it
+  falsifiably: it measures that the counters DO reach the entry -- the model sets
+  ``extra="allow"`` -- so ``_completed`` ignoring them is a behavior a mutation can
+  break rather than a structural impossibility.
 * No new config key. This is the existing opt-in flag learning about a case it
   was always meant to cover.
 * The default path. ``TestDefaultPathIsUntouched`` asserts that a partial-coverage
   run without the flag exits exactly as it did before -- because this change does
   move existing opt-in users from 0 to 1, and the blast radius has to stay
   confined to people who asked for the gate.
+
+What IS changed elsewhere, so this file is not read as a claim about the whole PR
+--------------------------------------------------------------------------------
+A sibling commit ORs ``any_target_errored`` into the ``error`` flag, so a target
+tree that lost ALL its targets -- which ``determine_status`` does report as ERROR
+-- now reaches the ROLLED-UP status. That is a status change with no opt-in, and
+it is not what this file is about; ``tests/unit/core/
+test_scanner_status_across_targets.py`` owns it. The distinction that makes both
+true at once: partial loss on a tree never became a status, total loss on a tree
+always was one and simply could not be seen. ``TestTheGateReadsTheRealRollup``
+below is where the two meet, and it is the only class here that does not patch
+``get_unified_scanner_metrics``.
 
 The tri-state is the subtle part
 --------------------------------
@@ -249,24 +267,80 @@ class TestDefaultPathIsUntouched:
 
         assert code == 0
 
-    def test_partial_coverage_does_not_change_the_status(self):
-        """The gate reads the status; it does not rewrite it.
+    def test_partial_coverage_still_counts_as_having_run(self):
+        """``cli.merge._completed`` asks a narrower question and must keep asking it.
 
-        Were the fix implemented by promoting a partial-coverage scanner to
-        ERROR, every reporter and the summary table would start calling a scan
-        that ran an error, and ``_completed`` in ``cli.merge`` would begin
-        refusing shards that had merely lost a target. The status stays PASSED
-        and only the gate's own verdict changes.
+        This replaces a test that could not fail. Its predecessor built a
+        ``ScannerMetrics`` with ``status=PASSED`` handed in and then asserted the
+        status was PASSED, which pins only that ``incomplete_scanners`` does not
+        mutate its argument -- something nobody proposed and no production code
+        does. It exercised none of the two behaviors it claimed to protect.
+
+        The behavior worth protecting is the one below. Two checks both mean
+        "incomplete" and answer different questions:
+
+        * ``_completed`` asks whether a scanner ran **at all**, and
+          ``_verify_shard_contributions`` refuses a merge outright where a shard
+          completed none of the scanners it owned. A scanner that read 6 of 10
+          targets ran.
+        * ``incomplete_scanners`` asks whether everything the scanner was given was
+          evaluated. It answers no, and that is what the opt-in exit-code gate acts
+          on.
+
+        Why this is falsifiable, which an earlier note in ``tests/unit/cli/
+        test_merge.py`` denied. That note said ``ScannerTargetStatusInfo``
+        "declares no target counters at all, so it cannot see coverage even if
+        someone wired it to try", making the boundary structural. The model sets
+        ``extra="allow"``: counters written into ``scanner_results`` land in
+        ``model_extra``, and the assertion below measures that ``getattr`` finds
+        them. So ``_completed`` CAN read coverage, it simply does not, and
+        reimplementing it to consult these counters fails this test.
+
+        The counters are asserted present before the verdict is. Without that, a
+        model that silently dropped the extras would make the ``_completed``
+        assertion pass for the wrong reason -- there would be no coverage to
+        ignore.
         """
-        metric = _metric(
-            "cdk-nag",
-            ScannerStatus.PASSED.value,
+        from automated_security_helper.cli.merge import _completed
+        from automated_security_helper.models.asharp_model import (
+            ScannerTargetStatusInfo,
+        )
+
+        entry = ScannerTargetStatusInfo(
+            status=ScannerStatus.PASSED,
             targets_attempted=10,
             targets_failed=4,
         )
 
-        assert metric.status == ScannerStatus.PASSED.value
-        assert metric.passed is True
+        assert getattr(entry, "targets_failed", None) == 4, (
+            "the counters must reach the entry, or _completed has nothing to "
+            "ignore and this test cannot fail"
+        )
+        assert _completed(entry) is True, (
+            "a scanner that evaluated 6 of its 10 targets ran; reading its "
+            "coverage here would make _verify_shard_contributions refuse healthy "
+            "shards, failing the merge far from the code that caused it"
+        )
+
+    def test_a_scanner_that_evaluated_nothing_still_does_not_count_as_having_run(self):
+        """The negative control for the assertion above.
+
+        Without it, ``_completed`` could be ``return True`` and the test above
+        would pass. ERROR is the status a target reaches when it lost everything,
+        and that one really does mean the scanner did not run.
+        """
+        from automated_security_helper.cli.merge import _completed
+        from automated_security_helper.models.asharp_model import (
+            ScannerTargetStatusInfo,
+        )
+
+        entry = ScannerTargetStatusInfo(
+            status=ScannerStatus.ERROR,
+            targets_attempted=10,
+            targets_failed=10,
+        )
+
+        assert _completed(entry) is False
 
 
 class TestTriStateSurvivesTheGate:
@@ -489,3 +563,165 @@ def _listed(metrics):
     """``incomplete_scanners`` over *metrics*."""
     with patch(f"{_MODULE}.get_unified_scanner_metrics", return_value=metrics):
         return incomplete_scanners(MagicMock())
+
+
+def _rollup_model(reports: dict):
+    """A results stand-in carrying serialized per-target reports and nothing derived.
+
+    Everything above this line injects ``ScannerMetrics`` rows by patching
+    ``get_unified_scanner_metrics``, which is the right shape for pinning the gate's
+    own logic and the wrong shape for pinning that the gate and the rollup agree. The
+    class below uses this instead: only ``additional_reports`` is populated, and the
+    counters and the status are both DERIVED by the production code under test.
+
+    ``scanner_results`` is left empty and ``sarif.runs`` is empty so no severity count
+    can decide the status -- otherwise a fixture that accidentally carried findings
+    would return FAILED and an assertion about ERROR would be measuring the findings
+    gate.
+    """
+    model = MagicMock()
+    model.sarif = MagicMock()
+    model.sarif.runs = []
+    model.scanner_results = {}
+    model.ash_config = MagicMock()
+    model.ash_config.global_settings.severity_threshold = "MEDIUM"
+    model.ash_config.get_plugin_config.return_value = None
+    model.additional_reports = reports
+    return model
+
+
+def _target_report(status: str, attempted=None, failed=None, name="cdk-nag") -> dict:
+    """One serialized ``ScanResultsContainer``, as ``ScanResultProcessor`` writes it.
+
+    Dumped with ``exclude_unset=True`` in production, so a scanner that does not track
+    targets has no counter keys at all rather than zeroes. Omitting them here rather
+    than passing None is what makes the non-tracking control a real control.
+    """
+    report = {"scanner_name": name, "status": status, "duration": 1.0}
+    if attempted is not None:
+        report["targets_attempted"] = attempted
+    if failed is not None:
+        report["targets_failed"] = failed
+    return report
+
+
+class TestTheGateReadsTheRealRollup:
+    """End to end from serialized per-target reports to the gate's verdict, unpatched.
+
+    Every other test in this module patches ``get_unified_scanner_metrics`` and hands
+    the gate rows it built itself. That leaves the seam where this change's two halves
+    meet completely uncovered: one half writes ``targets_attempted``/``targets_failed``
+    into ``ScannerMetrics`` from ``additional_reports``, the other reads them here, and
+    nothing drove the first into the second. A rename of either serialized key, or a
+    rollup that stopped summing across targets, would leave every injected-row test
+    green.
+
+    So these assert on ``incomplete_scanners`` with NO patch of the metrics getter.
+    ``target_counts``, ``get_scanner_status_info``, ``any_target_errored`` and
+    ``get_unified_scanner_metrics`` all run for real.
+    """
+
+    def test_partial_coverage_travels_from_the_serialized_reports_to_the_gate(self):
+        """The measured shape, derived rather than injected.
+
+        10 attempted and 4 failed on the source tree, which is what a real cdk-nag run
+        on this repository writes. The status stays PASSED because
+        ``determine_status`` only reports ERROR on total loss, so the counts are the
+        only thing that can carry the fact -- and they now arrive through the rollup.
+        """
+        listed = dict(
+            incomplete_scanners(
+                _rollup_model(
+                    {"cdk-nag": {"source": _target_report("PASSED", 10, 4)}}
+                )
+            )
+        )
+
+        assert "cdk-nag" in listed, (
+            "the counters did not survive the trip from additional_reports through "
+            "get_unified_scanner_metrics to the gate"
+        )
+        assert listed["cdk-nag"] == "PASSED (4 of 10 targets unevaluated)"
+
+    def test_a_total_loss_on_one_tree_arrives_as_error_carrying_its_counts(self):
+        """Both halves of this change, in one assertion, through the real rollup.
+
+        Source 2 attempted 0 failed, converted 1 attempted 1 failed. Two things have
+        to happen and neither is injected:
+
+        * ``any_target_errored`` has to see the converted tree's ERROR and roll the
+          scanner up to ERROR. Reading only ``"source"`` gives PASSED.
+        * the routing has to report the SUMMED counts -- 1 of 3 -- rather than the bare
+          status, because 1 of 3 is a partial shortfall. Selecting the bare-status arm
+          on status alone printed ``cdk-nag: ERROR`` and dropped them, which is exactly
+          the case the counts exist for: ERROR alone reads as "the tool is missing".
+        """
+        listed = dict(
+            incomplete_scanners(
+                _rollup_model(
+                    {
+                        "cdk-nag": {
+                            "source": _target_report("PASSED", 2, 0),
+                            "converted": _target_report("ERROR", 1, 1),
+                        }
+                    }
+                )
+            )
+        )
+
+        assert listed["cdk-nag"] == "ERROR (1 of 3 targets unevaluated)", (
+            f"expected the rolled-up ERROR to carry the summed counts; got "
+            f"{listed.get('cdk-nag')!r}"
+        )
+
+    def test_total_loss_on_every_tree_still_reports_the_bare_status(self):
+        """The precedence control, so the arm above cannot be "always append counts".
+
+        Everything attempted was lost, so the status already says nothing was
+        evaluated and a parenthetical would only repeat it.
+        """
+        listed = dict(
+            incomplete_scanners(
+                _rollup_model({"cdk-nag": {"source": _target_report("ERROR", 4, 4)}})
+            )
+        )
+
+        assert listed["cdk-nag"] == "ERROR"
+
+    def test_a_non_tracking_scanner_is_absent_from_the_real_rollup(self):
+        """The tri-state control at the seam, not just at the gate.
+
+        The nine scanners that report no counters must derive ``targets_attempted`` as
+        None through ``target_counts`` and be absent. Collapsing absence to 0 anywhere
+        along the way fails here, which the injected-row version of this control cannot
+        detect -- it never runs ``target_counts`` at all.
+        """
+        assert (
+            incomplete_scanners(
+                _rollup_model({"bandit": {"source": _target_report("PASSED", name="bandit")}})
+            )
+            == []
+        )
+
+    def test_the_default_exit_code_is_unchanged_through_the_real_rollup(self, tmp_path):
+        """The blast-radius guard, measured end to end rather than on injected rows.
+
+        ``_compute_exit_code`` reaches ``incomplete_scanners`` only once
+        ``_resolve_fail_on_incomplete_scanners`` returns true, so a partial-coverage run
+        that did not ask for the gate exits exactly as it did before. Asserted with the
+        real rollup so that a future change routing coverage into the default path is
+        caught here and not in somebody's pipeline.
+        """
+        model = _rollup_model({"cdk-nag": {"source": _target_report("PASSED", 10, 4)}})
+
+        assert dict(incomplete_scanners(model)), (
+            "the fixture must be genuinely partial or this asserts nothing"
+        )
+
+        opts = _opts(tmp_path, fail_on_findings=False)
+        assert _compute_exit_code(model, opts) == 0
+
+        opted_in = _opts(
+            tmp_path, fail_on_findings=False, fail_on_incomplete_scanners=True
+        )
+        assert _compute_exit_code(model, opted_in) == 1

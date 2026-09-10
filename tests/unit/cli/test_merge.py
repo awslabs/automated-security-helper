@@ -1421,18 +1421,17 @@ class TestShardContributionIsRefused:
 
         What each assertion is worth, stated honestly because the two differ:
 
-        The merge-proceeds half is a regression guard whose protection is
-        currently *structural* rather than behavioural. ``_completed`` inspects a
-        ``ScannerTargetStatusInfo`` from ``scanner_results``, and that model
-        declares no target counters at all, so it cannot see coverage even if
-        someone wired it to try. Verified by mutation: reimplementing
-        ``_completed`` to consult ``_partial_coverage`` does not change this
-        test's result, because the value it would consult is never there. So this
-        assertion documents a boundary and would catch a future change that put
-        the counters onto that model, but no one-line mistake today can violate
-        it. It is not the reason to trust the boundary; the reason is that
-        partial coverage does not change the status, which
-        ``test_partial_coverage_loss_still_reports_passed`` pins directly.
+        The merge-proceeds half is a regression guard, and an earlier version of
+        this docstring undersold it on a false premise. It said the protection was
+        *structural* because ``ScannerTargetStatusInfo`` declares no target
+        counters. The model sets ``extra="allow"``, so counters written into
+        ``scanner_results`` land in ``model_extra`` and ``getattr(entry,
+        "targets_failed", 0)`` returns 4 rather than the default -- measured, not
+        reasoned. Nothing structural stops ``_completed`` from reading coverage.
+        What stops it is that it reads the status and only the status, which is a
+        behavior, and ``test_partial_coverage_still_counts_as_having_run`` in
+        ``tests/unit/interactions/test_fail_on_partial_target_coverage.py`` holds
+        that behavior against a mutation that consults the counters.
 
         The gate-still-sees-it half is falsifiable and is what earns this test its
         place. It is the only coverage this repository has that the target counters

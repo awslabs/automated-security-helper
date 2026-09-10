@@ -244,13 +244,24 @@ def incomplete_scanners(
     2. The scanner ran, reported a status, and could not evaluate some of the
        targets it was given.
 
-    Only (1) was selected on, because that is a status test and (2) does not
-    change the status. ``ScanResultsContainer.determine_status`` returns ERROR
-    only once ``targets_failed >= targets_attempted``, so a scanner that lost some
-    of its input keeps whatever the severity gate gave it -- normally PASSED --
-    and the gate could not see it. Measured on this repository: cdk-nag attempts
-    10 targets, fails 4, reports PASSED, and the gate exited 0. Two of those four
-    are real CloudFormation templates that went unscanned.
+    Only (1) was selected on, because that is a status test and (2) does not move
+    a target's status. ``ScanResultsContainer.determine_status`` returns ERROR only
+    once ``targets_failed >= targets_attempted``, so a scanner that lost some of
+    its input keeps whatever the severity gate gave it and the gate could not see
+    it. Measured on this repository under its own config: cdk-nag attempts 10
+    targets and fails 4, its per-target container still reports PASSED, and the
+    gate exited 0. Two of those four are real CloudFormation templates that went
+    unscanned.
+
+    Do not read "(2) does not change the status" as "nothing in this change
+    touches a status". A sibling commit ORs ``any_target_errored`` into the
+    ``error`` flag, so a target tree that lost ALL of its targets -- which
+    ``determine_status`` does report as ERROR -- now reaches the rolled-up status
+    where previously only the ``"source"`` report was consulted, and even that only
+    when the scanner was absent from ``scanner_results``. That is a status change,
+    it is not opted in, and it is the thing the CHANGELOG's "Behavior changes"
+    entry describes. The two arms are separable: partial loss stays out of the
+    status and is expressed here; total loss on any tree is a status.
 
     Case (2) is expressed HERE and not as a status, and not by widening
     ``_INCOMPLETE_SCANNER_STATUSES``. The reason is a caller rather than taste.
@@ -263,21 +274,43 @@ def incomplete_scanners(
     the code that caused it. That is the concrete cost of adding a
     ``ScannerStatus`` member for this, and the reason none was added.
 
-    Worth being precise about the residual risk, because an earlier version of
-    this comment overstated it: ``_completed`` inspects a
-    ``ScannerTargetStatusInfo``, which declares no target counters, so it cannot
-    read coverage today by any route -- the protection is structural, not merely
-    conventional. Since the status a scanner reports is unchanged, no reporter, no
-    summary table and no consumer of ``ScannerStatus`` sees anything new; the only
-    behavior that changes is this gate's own verdict, and only when the operator
-    opted in. ``tests/unit/cli/test_merge.py`` pins the boundary from the merge
-    side.
+    Worth being precise about the residual risk, because two earlier versions of
+    this comment got it wrong in opposite directions. One said ``_completed``
+    inspects a ``ScannerTargetStatusInfo``, which declares no target counters, so
+    the protection is structural rather than conventional. That is false, and
+    measurably so: the model sets ``extra="allow"``, so counters written into
+    ``scanner_results`` land in ``model_extra`` and a ``getattr`` for them
+    succeeds. Nothing structural stops ``_completed`` reading coverage; what stops
+    it is that it does not, which is a behavior and therefore something a test can
+    hold. ``tests/unit/interactions/test_fail_on_partial_target_coverage.py``
+    holds it, and mutating ``_completed`` to consult the counters reddens it.
 
-    Status precedence between the two arms is explicit. Total loss satisfies the
-    coverage condition too -- ``failed >= attempted`` implies ``failed > 0`` -- so
-    an ERROR scanner would otherwise gain a parenthetical it never had and break
-    every existing assertion on that message. (1) wins and reports the bare
-    status.
+    The other claimed no reporter and no summary table sees anything new, and this
+    change is the reason both do. ``ScannerMetrics`` gained ``targets_attempted``
+    and ``targets_failed``; the console table, the markdown report and
+    ``ash.flat.json`` all carry them, and the first two grew an "Incomplete
+    coverage" section. Measured on this repository, ``ash.summary.md`` gained
+    ``### Incomplete coverage`` and ``ash.flat.json`` gained the two keys. What is
+    genuinely untouched is narrower and worth naming exactly: ``_completed``, and
+    the DEFAULT exit code, which reaches this function only once
+    ``_resolve_fail_on_incomplete_scanners`` returns true.
+    ``tests/unit/cli/test_merge.py`` pins the boundary from the merge side.
+
+    Precedence between the two arms is on TOTALITY, not on status. Total loss
+    satisfies the coverage condition too -- ``failed >= attempted`` implies
+    ``failed > 0`` -- and appending counts there would give an ERROR row a
+    parenthetical it never had while saying nothing the status does not already
+    say, so total loss reports the bare status.
+
+    A PARTIAL shortfall reports its counts whatever the status is, and that is a
+    correction rather than a preference. Selecting the bare-status arm on status
+    alone made this function unable to deliver what it exists for in the case it
+    was written for: an ERROR scanner that is only partly incomplete took the bare
+    arm and printed ``cdk-nag: ERROR``, never ``cdk-nag: ERROR (4 of 10 targets
+    unevaluated)``, so the counts the operator needs to tell "the tool is absent"
+    from "the tool ran and skipped four templates" were dropped by the routing.
+    An ERROR with no counters available still falls to the bare form, because there
+    is no honest denominator to print.
 
     Read through ``get_unified_scanner_metrics`` rather than off
     ``results.scanner_results`` directly, so the gate and the report cannot
@@ -313,18 +346,32 @@ def incomplete_scanners(
 
     listed: list[tuple[str, str]] = []
     for metric in get_unified_scanner_metrics(asharp_model=results):
-        if metric.status in _INCOMPLETE_SCANNER_STATUSES:
+        status_is_incomplete = metric.status in _INCOMPLETE_SCANNER_STATUSES
+        shortfall = _partial_coverage(metric)
+
+        # No usable counters. The status is the only thing there is to report, so
+        # this is the arm an ERROR or MISSING with no denominator falls to.
+        if shortfall is None:
+            if status_is_incomplete:
+                listed.append((metric.scanner_name, metric.status))
+            continue
+
+        attempted, failed = shortfall
+        # Total loss, and a status that already says so. The counts would add a
+        # parenthetical that repeats the status.
+        if status_is_incomplete and failed >= attempted:
             listed.append((metric.scanner_name, metric.status))
             continue
-        shortfall = _partial_coverage(metric)
-        if shortfall is not None:
-            attempted, failed = shortfall
-            listed.append(
-                (
-                    metric.scanner_name,
-                    f"{metric.status} ({failed} of {attempted} targets unevaluated)",
-                )
+
+        # A partial shortfall against a known denominator, whatever the status.
+        # Selecting on status ahead of this is what dropped the counts from the
+        # measured case.
+        listed.append(
+            (
+                metric.scanner_name,
+                f"{metric.status} ({failed} of {attempted} targets unevaluated)",
             )
+        )
     return listed
 
 
