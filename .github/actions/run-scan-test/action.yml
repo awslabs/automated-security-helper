@@ -216,17 +216,12 @@ runs:
         else
           REPORT_CMD="python -m automated_security_helper report --format text"
         fi
-        REPORT_OUTPUT=$($REPORT_CMD)
-        echo "$REPORT_OUTPUT"
-        # `grep -c` prints 0 but exits 1 when nothing matches, and Actions runs
-        # `shell: bash` as `bash -e -o pipefail`, so the unguarded form failed
-        # this step in the good case: no errors at all. `|| true` keeps the count
-        # and drops the status. `head -1` was a no-op on a single stdin stream.
-        ERROR_COUNT=$(echo "$REPORT_OUTPUT" | grep -c "ERROR" || true)
-        if [ "$ERROR_COUNT" -gt 1 ]; then
-          echo "ERROR: Found $((ERROR_COUNT - 1)) plugin execution errors"
-          exit 1
-        fi
+        # Still printed, because it is what a human reads when this step fails.
+        # It is no longer what the check is computed from; see the script's module
+        # docstring for why counting "ERROR" in rendered prose was off by one.
+        $REPORT_CMD
+        python3 "${{ github.action_path }}/count_scanner_errors.py" \
+          .ash/ash_output/ash_aggregated_results.json
 
     # Python Local scan (Windows)
     - name: Validate ASH using Python Local (Windows)
@@ -251,16 +246,18 @@ runs:
       shell: pwsh
       run: |
         Write-Host "Checking for plugin execution errors..."
-        $ReportText = & ash report --format text 2>&1; $null = $LASTEXITCODE
-        $ErrorOutput = $ReportText | Select-String "ERROR"
-        if ($ErrorOutput -and $ErrorOutput.Count -gt 1) {
-          Write-Host "ERROR: Found plugin execution errors in the scan results (excluding legend)"
-          $ErrorOutput | Select-Object -Skip 1
-          exit 1
-        } else {
-          Write-Host "SUCCESS: No plugin execution errors found"
-          exit 0
-        }
+        # Printed for a human reading a failure, not parsed. Select-String "ERROR"
+        # used to be the check, and it is case-insensitive by default, so any
+        # report line containing lower-case "error" inflated the count on top of
+        # the legend-line offset the other legs carried.
+        & ash report --format text 2>&1 | Write-Host
+        $null = $LASTEXITCODE
+        # setup-python puts `python` on PATH everywhere and `python3` only on
+        # Unix, so resolve rather than assuming either.
+        $Python = if (Get-Command python3 -ErrorAction SilentlyContinue) { "python3" } else { "python" }
+        & $Python "${{ github.action_path }}/count_scanner_errors.py" `
+          .ash/ash_output/ash_aggregated_results.json
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     # Python Local scan (Unix)
     - name: Validate ASH using Python Local (Unix)
@@ -285,17 +282,12 @@ runs:
       shell: bash
       run: |
         echo "Checking for plugin execution errors..."
-        REPORT_OUTPUT=$(ash report --format text)
-        echo "$REPORT_OUTPUT"
-        # `grep -c` prints 0 but exits 1 when nothing matches, and Actions runs
-        # `shell: bash` as `bash -e -o pipefail`, so the unguarded form failed
-        # this step in the good case: no errors at all. `|| true` keeps the count
-        # and drops the status. `head -1` was a no-op on a single stdin stream.
-        ERROR_COUNT=$(echo "$REPORT_OUTPUT" | grep -c "ERROR" || true)
-        if [ "$ERROR_COUNT" -gt 1 ]; then
-          echo "ERROR: Found $((ERROR_COUNT - 1)) plugin execution errors"
-          exit 1
-        fi
+        # Still printed, because it is what a human reads when this step fails.
+        # It is no longer what the check is computed from; see the script's module
+        # docstring for why counting "ERROR" in rendered prose was off by one.
+        ash report --format text
+        python3 "${{ github.action_path }}/count_scanner_errors.py" \
+          .ash/ash_output/ash_aggregated_results.json
 
     # PowerShell scan
     - name: Validate ASH using PowerShell
@@ -314,31 +306,28 @@ runs:
           Invoke-ASH -BuildTarget ci -SourceDir "$($PWD.Path)" -OutputDir "$($PWD.Path)/.ash/ash_output" -Verbose -Debug -OCIRunner $runner
         }
 
+    # This step used to read `$Results.scanners.<name>.result`. Neither the key nor
+    # the field exists: AshAggregatedResults declares `scanner_results`, keyed by
+    # scanner name, and each entry carries `status`, not `result`. So the foreach
+    # iterated an empty property set, $ErrorCount stayed 0, and this step reported
+    # "SUCCESS: No plugin execution errors found" on every run without ever having
+    # looked at a scanner. It was the same silent always-pass as the grep legs, one
+    # layer deeper -- and it was the implementation the others were about to be
+    # modelled on. Replaced with the same shared counter, which fails when
+    # `scanner_results` is missing or empty rather than reporting zero.
     - name: Validate No Plugin Errors (PowerShell)
       if: inputs.method == 'powershell'
       shell: pwsh
       run: |
         Write-Host "Checking for plugin execution errors..."
-        $ResultsFile = ".ash/ash_output/ash_aggregated_results.json"
-        if (Test-Path $ResultsFile) {
-          $Results = Get-Content $ResultsFile | ConvertFrom-Json
-          $ErrorCount = 0
-          foreach ($Scanner in $Results.scanners.PSObject.Properties) {
-            if ($Scanner.Value.result -eq "ERROR") {
-              $ErrorCount++
-              Write-Host "ERROR: Scanner $($Scanner.Name) failed with error"
-            }
-          }
-          if ($ErrorCount -gt 0) {
-            Write-Host "ERROR: Found $ErrorCount plugin execution errors"
-            exit 1
-          } else {
-            Write-Host "SUCCESS: No plugin execution errors found"
-          }
-        } else {
-          Write-Host "ERROR: Results file not found at $ResultsFile"
-          exit 1
-        }
+        # setup-python puts `python` on PATH everywhere and `python3` only on
+        # Unix, so resolve rather than assuming either. This method runs only on
+        # Linux cells today, but the resolution costs nothing and removes a trap
+        # if a Windows cell is ever added.
+        $Python = if (Get-Command python3 -ErrorAction SilentlyContinue) { "python3" } else { "python" }
+        & $Python "${{ github.action_path }}/count_scanner_errors.py" `
+          .ash/ash_output/ash_aggregated_results.json
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     # Bash scan
     - name: Validate ASH using Bash
@@ -360,17 +349,12 @@ runs:
       shell: bash
       run: |
         echo "Checking for plugin execution errors..."
-        REPORT_OUTPUT=$(./ash report --format text)
-        echo "$REPORT_OUTPUT"
-        # `grep -c` prints 0 but exits 1 when nothing matches, and Actions runs
-        # `shell: bash` as `bash -e -o pipefail`, so the unguarded form failed
-        # this step in the good case: no errors at all. `|| true` keeps the count
-        # and drops the status. `head -1` was a no-op on a single stdin stream.
-        ERROR_COUNT=$(echo "$REPORT_OUTPUT" | grep -c "ERROR" || true)
-        if [ "$ERROR_COUNT" -gt 1 ]; then
-          echo "ERROR: Found $((ERROR_COUNT - 1)) plugin execution errors"
-          exit 1
-        fi
+        # Still printed, because it is what a human reads when this step fails.
+        # It is no longer what the check is computed from; see the script's module
+        # docstring for why counting "ERROR" in rendered prose was off by one.
+        ./ash report --format text
+        python3 "${{ github.action_path }}/count_scanner_errors.py" \
+          .ash/ash_output/ash_aggregated_results.json
 
     # Companion to "Expose the Actions cache credentials to ASH's build". The build
     # is done by now, so clear the credentials back out rather than leaving them in
