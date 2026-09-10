@@ -2085,6 +2085,29 @@ global_settings:
         of the literals they describe. Deliberately not citing a line number: this
         file argues against that a few entries above, and the number had already
         gone stale by the next commit.
+    - rule_id: SECRET-HEX-HIGH-ENTROPY-STRING
+      path: deploy/cdk-constructs/test/ash-scan-step.test.ts
+      reason: >-
+        The same 40-character git-ref placeholder as the entry above, reached by a
+        second file. Here it is the `commit` const in the jest test "PIP pins the
+        given git ref", which passes it to ASHScanStep as `version` and asserts
+        the synthesized buildspec carries it into the pip install URL. It stands
+        in for a commit rather than naming one -- the digits 0-9 followed by a-f,
+        repeated to length -- so it identifies nothing, grants nothing, and there
+        is nothing to revoke.
+        HexHighEntropyString fires on entropy alone here, with no keyword or
+        pattern component to corroborate it: the string spends all sixteen hex
+        digits across 40 characters, putting its Shannon entropy at 3.97 against
+        the plugin's limit of 3.0. Measured, not inferred -- any 40-character hex
+        string clears that limit, which is why a git SHA and a key are
+        indistinguishable to this detector.
+        A second entry rather than a widened first one because the two files sit
+        in different packages, deploy/cdk and deploy/cdk-constructs, and neither
+        path pattern reaches the other. One path per file and no
+        `deploy/cdk-constructs/**` glob, so a hex string added elsewhere in that
+        package still fails loudly instead of inheriting this argument.
+        Value DESCRIBED rather than quoted, and no line number cited, for the two
+        reasons the entry above records from having got both of those wrong.
     # === semgrep/opengrep Python compatibility (ASH requires 3.10+) ===
     - rule_id: "python.lang.compatibility.*"
       path: "automated_security_helper/**/*.py"
