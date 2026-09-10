@@ -477,9 +477,7 @@ class TestALeadingZeroDelayIsReadAsBaseTen:
         assert "value too great for base" not in result.stderr
         assert slept == ["9", "18"]
 
-    def test_every_attempt_still_runs_when_the_delay_has_a_leading_zero(
-        self, tmp_path
-    ):
+    def test_every_attempt_still_runs_when_the_delay_has_a_leading_zero(self, tmp_path):
         """The observable the crash actually destroyed: how many attempts ran.
 
         Exit code and the summary line were both useless here -- the exit was
@@ -508,9 +506,7 @@ class TestALeadingZeroDelayIsReadAsBaseTen:
         octal_shaped, slept_octal_shaped = _run_recording_sleeps(
             "false", tmp_path / "octal", delay="010"
         )
-        plain, slept_plain = _run_recording_sleeps(
-            "false", tmp_path / "plain", delay="10"
-        )
+        _, slept_plain = _run_recording_sleeps("false", tmp_path / "plain", delay="10")
 
         assert slept_plain == ["10", "20"], (
             "control: a plain decimal delay must still double, or the comparison "
