@@ -266,7 +266,31 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
             )
             return error_msg
 
-    @retry_with_backoff()
     def _put_object_with_retry(self, s3_client, **kwargs):
-        """Put object to S3 with retry logic."""
-        return s3_client.put_object(**kwargs)
+        """Put object to S3, retrying on the schedule this reporter was configured with.
+
+        The decorator used to be applied to this method directly, with no
+        arguments. That is valid -- every parameter of ``retry_with_backoff`` has
+        a default -- but it is applied when the class body executes, where there
+        is no ``self``, so it could only ever use the module defaults of
+        max_retries=3, base_delay=1.0, max_delay=60.0. This reporter's
+        ``max_retries``, ``base_delay`` and ``max_delay`` options were the only
+        three in the file that nothing read: declared, documented to users, and
+        inert. Setting max_retries=10 changed nothing.
+
+        Applying the decorator to a closure instead, the way
+        ``CloudWatchLogsReporter._create_log_stream_with_retry`` already does,
+        defers it to call time when ``self.config`` exists. The method name and
+        signature are unchanged, so the existing ``patch.object`` in
+        test_project_attribution keeps working.
+        """
+
+        @retry_with_backoff(
+            max_retries=self.config.options.max_retries,
+            base_delay=self.config.options.base_delay,
+            max_delay=self.config.options.max_delay,
+        )
+        def put_object():
+            return s3_client.put_object(**kwargs)
+
+        return put_object()
