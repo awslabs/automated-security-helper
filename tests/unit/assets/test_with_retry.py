@@ -261,6 +261,61 @@ class TestMalformedKnobsAreRejectedNotSilentlyHonoured:
         assert result.returncode == 1
 
 
+class TestTheSummaryCountMatchesWhatRan:
+    """The defect was a disagreement between two observables, so compare them.
+
+    Every other test here reads one side or the other: the attempt marker, or the
+    "All N attempts failed" line. The bug lived in the gap -- one attempt ran and
+    the summary said three -- so a test that reads only one side cannot see it no
+    matter how precise it is. These read both in the same run and assert they
+    agree.
+
+    This is the assertion that would have caught the original defect with no
+    knowledge of bash arithmetic at all.
+    """
+
+    @staticmethod
+    def _summary_count(stderr: str) -> int | None:
+        """The N out of "All N attempts failed", or None if no claim was made."""
+        for line in stderr.splitlines():
+            if line.startswith("All ") and "attempts failed" in line:
+                return int(line.split()[1])
+        return None
+
+    @pytest.mark.parametrize("attempts", [1, 2, 3, 5])
+    def test_the_claim_equals_the_number_of_runs(self, tmp_path, attempts):
+        marker = tmp_path / "attempts"
+        result = run_with_retry(f"printf x >> {marker}; false", attempts=attempts)
+
+        actually_ran = len(marker.read_text()) if marker.exists() else 0
+        claimed = self._summary_count(result.stderr)
+
+        assert claimed == attempts, result.stderr
+        assert actually_ran == claimed, (
+            f"the script ran the command {actually_ran} time(s) but reported "
+            f"{claimed}. That disagreement is the defect: a truncated loop still "
+            f"prints the summary, so the message alone always looked right"
+        )
+
+    def test_a_rejected_config_makes_no_claim_at_all(self, tmp_path):
+        """Silence beats a false count.
+
+        The old behaviour on WITH_RETRY_DELAY=0.1 was to run once and then assert
+        three attempts had failed. Exiting 2 with no summary is the honest
+        alternative -- there is nothing to summarize, because nothing ran.
+        """
+        marker = tmp_path / "attempts"
+        result = run_with_retry(
+            f"printf x >> {marker}; false",
+            extra_env={"WITH_RETRY_DELAY": "0.1"},
+        )
+        assert result.returncode == 2, result.stderr
+        assert not marker.exists()
+        assert self._summary_count(result.stderr) is None, (
+            "a config that was never accepted must not report attempts as failed"
+        )
+
+
 def test_script_is_present_and_executable_source():
     """A missing script would make every test above skip-shaped rather than fail."""
     assert WITH_RETRY.is_file(), f"expected with-retry.sh at {WITH_RETRY}"
