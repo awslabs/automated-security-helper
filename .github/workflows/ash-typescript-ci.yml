@@ -101,12 +101,17 @@ on:
     paths:
       - "deploy/cdk/**"
       - "deploy/cdk-constructs/**"
+      # .nvmrc is load-bearing for both jobs below: it is where setup-node reads the
+      # Node version from, so editing it changes the toolchain this gate runs on. A
+      # file that decides what a gate tests belongs in the gate's own filter.
+      - ".nvmrc"
   pull_request:
     branches:
       - "*"
     paths:
       - "deploy/cdk/**"
       - "deploy/cdk-constructs/**"
+      - ".nvmrc"
   workflow_dispatch: {}
 
 permissions:
@@ -166,6 +171,23 @@ jobs:
             exit 1
           fi
 
+      # Before this step there was no setup-node anywhere in this file, so both jobs
+      # took whatever Node the ubuntu-latest image happened to ship that week. That
+      # is a moving toolchain under a gate whose whole purpose is to hold coverage
+      # steady, and it disagreed with the rest of the repository: ash-iac-drift.yml
+      # pins Node 22 for these same two packages and Dockerfile sets NODE_MAJOR=22.
+      # Two workflows built the same TypeScript on two different Node versions, and
+      # a runner-image bump could change the result of either without a diff here.
+      #
+      # The version comes from .nvmrc so there is one source of truth rather than a
+      # fifth copy of the literal "22". nvm, `node --version` checks and setup-node
+      # all read that file, and ash-iac-drift.yml now reads it too.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: deploy/${{ matrix.package }}/package-lock.json
+
       - name: Install dependencies
         run: npm ci --prefix "deploy/${{ matrix.package }}"
 
@@ -223,6 +245,14 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v7
+
+      # This job runs no npm install, but it does run `node`, so it needs the same
+      # pinned toolchain as the matrix above -- otherwise the two jobs in one
+      # workflow execute the coverage scripts on two different Node versions. No
+      # `cache:` here for that same reason: there is no single lockfile to key it on.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
 
       # --package must name the same packages as the matrix above. The check
       # itself fails when a deploy/<pkg>/package.json exists that this list does
