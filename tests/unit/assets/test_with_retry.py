@@ -539,6 +539,109 @@ class TestALeadingZeroDelayIsReadAsBaseTen:
         assert slept == ["0", "0"]
 
 
+class TestADelayTooLargeToSleepIsRejected:
+    """All digits is not the same as in range, and the overflow is silent.
+
+    Past 2^63-1 ``$(( ))`` wraps with no diagnostic and exit 0: measured in bash,
+    ``$((10#9223372036854775808))`` is ``-9223372036854775808``. The character-set
+    guard accepts that value because it is all digits, and the consequence is the
+    dangerous direction. Measured with a recording ``sleep`` that rejects a
+    negative interval the way GNU ``sleep`` does, the argv was
+    ``['-9223372036854775808', '0']``: the first backoff errored out, its status is
+    unchecked, the doubling wrapped the rest to zero, and all three attempts ran
+    back-to-back with no backoff at all -- the protection this script exists to
+    provide, silently removed.
+
+    Before the base-10 fix the same input slept ``9223372036854775808`` seconds
+    instead, which is 292 billion years. Both are broken; neither reports anything.
+
+    Reaching it needs no overflow either. ``99999999`` is eight digits, wraps
+    nothing, and asks ``sleep`` for 3.2 years, which predates all of this.
+
+    So the ceiling is a magnitude bound rather than an overflow workaround, which
+    is why the smallest case asserted here is 86401 rather than 2^63.
+    """
+
+    def test_a_delay_past_the_arithmetic_limit_is_rejected(self, tmp_path):
+        """The value whose wrap removes the backoff entirely."""
+        marker = tmp_path / "attempts"
+        result = run_with_retry(
+            f"printf x >> {marker}; false",
+            extra_env={"WITH_RETRY_DELAY": "9223372036854775808"},
+        )
+
+        assert not marker.exists(), (
+            "a rejected configuration must run the command zero times; 'xxx' here "
+            "is the wrap: sleep refused a negative interval, nothing checked its "
+            "status, and every attempt ran with no gap between them"
+        )
+        assert result.returncode == 2, result.stderr
+        assert "86400" in result.stderr
+
+    def test_a_delay_far_past_the_limit_is_rejected(self, tmp_path):
+        """23 digits, which wraps to a positive number and so errors nowhere."""
+        marker = tmp_path / "attempts"
+        result = run_with_retry(
+            f"printf x >> {marker}; false",
+            extra_env={"WITH_RETRY_DELAY": "99999999999999999999999"},
+        )
+
+        assert not marker.exists()
+        assert result.returncode == 2, result.stderr
+
+    def test_a_delay_that_would_sleep_for_years_is_rejected(self, tmp_path):
+        """No overflow needed. This one predates the base-10 fix entirely."""
+        marker = tmp_path / "attempts"
+        result = run_with_retry(
+            f"printf x >> {marker}; false",
+            extra_env={"WITH_RETRY_DELAY": "99999999"},
+        )
+
+        assert not marker.exists()
+        assert result.returncode == 2, result.stderr
+
+    def test_one_second_over_the_ceiling_is_rejected(self, tmp_path):
+        """The bound is on magnitude, so it has to bite just above the limit."""
+        marker = tmp_path / "attempts"
+        result = run_with_retry(
+            f"printf x >> {marker}; false",
+            extra_env={"WITH_RETRY_DELAY": "86401"},
+        )
+
+        assert not marker.exists()
+        assert result.returncode == 2, result.stderr
+
+    def test_the_ceiling_itself_is_accepted(self, tmp_path):
+        """Positive control on the boundary: 86400 is in range, not out of it."""
+        _, slept = _run_recording_sleeps("false", tmp_path, attempts=2, delay=86400)
+
+        assert slept == ["86400"], (
+            "the ceiling is inclusive; an empty list means the bound is off by one "
+            "and rejects the largest value it is supposed to allow"
+        )
+
+    def test_a_padded_value_is_measured_by_its_digits_not_its_padding(self, tmp_path):
+        """The length test runs after the leading zeros are stripped.
+
+        Nineteen characters, value five. Testing the raw length would reject this
+        and report a magnitude it does not have.
+        """
+        _, slept = _run_recording_sleeps(
+            "false", tmp_path, attempts=2, delay="0000000000000000005"
+        )
+
+        assert slept == ["5"], (
+            "padding is not magnitude; an empty list means the guard measured the "
+            "string rather than the number it denotes"
+        )
+
+    def test_an_ordinary_delay_is_still_accepted(self, tmp_path):
+        """Positive control: the ceiling must not disturb the values callers use."""
+        _, slept = _run_recording_sleeps("false", tmp_path, delay=5)
+
+        assert slept == ["5", "10"]
+
+
 class TestTheAttemptCountIsNotAffected:
     """Positive control for the half of the pair that was already correct.
 
