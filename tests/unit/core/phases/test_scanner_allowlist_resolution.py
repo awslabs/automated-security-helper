@@ -261,6 +261,64 @@ class TestUnresolvableAllowlistIsRefused:
         assert _scanned(result) == {"bandit"}
 
 
+class TestTheRefusalReachesTheOperator:
+    """The handler that turns the exception into an exit code and one readable line.
+
+    Pinned because it is easy for a handler to be wrong and never noticed: it sits
+    between the generic ``except Exception`` and the config-error handler, and if it
+    were ordered after the generic one it would never run, while every test about the
+    scan phase itself would still pass.
+    """
+
+    def test_local_mode_exits_one_and_prints_the_message(self, tmp_path, capsys):
+        from automated_security_helper.interactions import run_ash_scan as mod
+
+        source = tmp_path / "src"
+        source.mkdir()
+        (source / "app.py").write_text("print('hello')", encoding="utf-8")
+        opts = mod.ScanOptions(source_dir=source, output_dir=tmp_path / "out")
+
+        # Patched where it is defined, not on the run_ash_scan module: the import is
+        # inside _run_local_mode, so the name never exists as a module attribute.
+        with patch(
+            "automated_security_helper.core.orchestrator.ASHScanOrchestrator.create",
+            side_effect=ScannerSelectionError(
+                "None of the requested scanners exist: detect_secrets."
+            ),
+        ):
+            with pytest.raises(SystemExit) as excinfo:
+                mod._run_local_mode(opts, MagicMock())
+
+        assert excinfo.value.code == 1, (
+            "1 rather than 3: exit 3 means the config file is invalid, and an operator "
+            "who mistyped a flag has a perfectly good config"
+        )
+        out = capsys.readouterr().out
+        assert "detect_secrets" in out, (
+            f"the unresolved name has to survive into the operator's output: {out!r}"
+        )
+
+    def test_the_handler_precedes_the_generic_one(self):
+        """Ordered before ``except Exception``, or it would never be reached.
+
+        Checked on the source rather than by behaviour: both handlers exit 1, so a
+        run cannot tell which one it went through, and the only observable difference
+        -- whether a traceback was logged -- is the thing this ordering exists to
+        avoid.
+        """
+        import inspect
+
+        from automated_security_helper.interactions import run_ash_scan as mod
+
+        body = inspect.getsource(mod._run_local_mode)
+        specific = body.index("except ScannerSelectionError")
+        generic = body.index("except Exception as e:")
+        assert specific < generic, (
+            "ScannerSelectionError must be caught before the bare Exception handler; "
+            "after it, the targeted message and the traceback suppression are dead code"
+        )
+
+
 class TestResolvableAllowlistsAreUntouched:
     """Controls. Without these, a check that refused everything would pass above."""
 
