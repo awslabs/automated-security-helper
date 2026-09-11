@@ -1556,7 +1556,12 @@ def stale_allowlist_entries(members: list[Member], artifact: str) -> list[Violat
     violations: list[Violation] = []
     present = {strip_distribution_root(m.name) for m in members}
 
-    def report(missing: set[str], namespace: str, constant: str) -> None:
+    # `frozenset[str]` and not `set[str]`: every caller passes an allowlist constant
+    # minus the paths present, and `frozenset - set` is a frozenset. The narrower
+    # annotation was simply wrong rather than hiding a crash -- this reads `missing`
+    # once, via sorted(), and never mutates it -- but a type that does not describe
+    # its arguments is a type nobody can rely on.
+    def report(missing: frozenset[str], namespace: str, constant: str) -> None:
         for path in sorted(missing):
             violations.append(
                 Violation(
