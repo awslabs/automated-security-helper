@@ -1381,13 +1381,51 @@ NEUTERED = [
     ("MAX_MEMBER_BYTES", gate.OVERSIZE_FIXTURE_BYTES),
 ]
 
+# Which planted fixture each neutering experiment is ABOUT. Shared by the two
+# experiments below so they cannot disagree about what is being measured, and so
+# the weaker of them can assert the specific failure line rather than a bare
+# return code -- see test_self_test_fails_when_a_rule_is_neutered for why a bare
+# return code made all of these vacuous on one platform.
+NEUTERED_LABEL = {
+    "malformed_path_reason": "malformed-member-path",
+    "VENDOR_DIR_COMPONENTS": "vendor-directory",
+    "ARCHIVE_SUFFIXES": "nested-archive-by-suffix",
+    "ARCHIVE_MAGICS": "nested-archive-by-header",
+    "NATIVE_SUFFIXES": "native-binary-by-suffix",
+    "NATIVE_MAGICS": "native-binary-by-header",
+    "SCANNER_DIST_NAMES": "vendored-scanner",
+    "ASSETS_ALLOWLIST": "unpinned-asset",
+    "PACKAGE_SUBDIRECTORIES": "unpinned-package-subdirectory",
+    # Three detectors share this rule set -- the plain unenumerated root, the
+    # `.data` scheme tree and the wrapper-lookalike directory. The neutered value
+    # widens the set with `third_party_tools`, so the experiment is about the first
+    # of them; the other two are covered by their own committed test cases rather
+    # than by a second widening, which would have to name a different directory and
+    # would then be measuring the same table twice.
+    "DISTRIBUTION_ROOT_DIRECTORIES": "unpinned-distribution-directory",
+    "DIST_INFO_ALLOWLIST": "unpinned-dist-info-member",
+    "is_plain_filename": "loose-wheel-root-file",
+    "MAX_MEMBER_BYTES": "oversize-member",
+}
+
 
 class TestSelfTestIsTheControl:
     """The gate's own --self-test must pass here, and fail when neutered."""
 
     def test_self_test_passes(self):
+        """The stream is the assertion message, and that is not decoration.
+
+        `run_self_test` writes the sentence naming the broken detector into the
+        stream it is handed. This used to pass a throwaway StringIO and assert only
+        the return code, so a CI failure read `assert 1 == 0` and nothing else --
+        the diagnosis was generated on the runner and garbage-collected before
+        anyone could see it. That cost three agents and two hours on a
+        Windows-only fixture break whose cause was named, in full, in the discarded
+        string. Every assertion in this file that checks a return code now carries
+        the stream with it.
+        """
         stream = io.StringIO()
-        assert gate.run_self_test(stream) == 0
+        assert gate.run_self_test(stream) == 0, stream.getvalue()
         output = stream.getvalue()
         for label in gate.PLANTED_MEMBERS:
             assert label in output, f"{label} was not exercised by the self-test"
@@ -1433,6 +1471,11 @@ class TestSelfTestIsTheControl:
             "is_plain_filename",
             "MAX_MEMBER_BYTES",
         }
+        # And every experiment names the fixture it is about, so the two neutering
+        # tests cannot drift apart about what is being measured.
+        assert {c for c, _ in NEUTERED} == set(NEUTERED_LABEL)
+        for constant, label in NEUTERED_LABEL.items():
+            assert label in gate.PLANTED_MEMBERS, (constant, label)
 
     @pytest.mark.parametrize(
         ("constant", "neutered"), NEUTERED, ids=[c for c, _ in NEUTERED]
@@ -1444,8 +1487,15 @@ class TestSelfTestIsTheControl:
 
         A control that still passes once the rule it checks is gone is measuring
         nothing. This runs that experiment for every rule set the classifier
-        consults -- nine of them, where the earlier version covered four and
-        left NATIVE_SUFFIXES unmeasured.
+        consults.
+
+        THE RETURN CODE ALONE IS NOT ENOUGH, and asserting only on it made all of
+        these vacuous on one platform. `run_self_test` returned 1 unconditionally on
+        Windows -- a fixture bug, fixed separately -- so `== 1` was already satisfied
+        before monkeypatch did anything, and every parametrization passed whether or
+        not the neutered rule was still firing. A test that cannot fail passes. So
+        the assertion names the SPECIFIC member that must go unrejected, which is
+        only true when the intended rule is the one that stopped.
 
         Each experiment is single-variable by construction: the planted member
         for the disabled rule is chosen so that no other rule catches it, so the
@@ -1456,9 +1506,19 @@ class TestSelfTestIsTheControl:
         """
         monkeypatch.setattr(gate, constant, neutered)
         stream = io.StringIO()
-        assert gate.run_self_test(stream) == 1, (
+        result = gate.run_self_test(stream)
+        output = stream.getvalue()
+        assert result == 1, (
             f"disabling {constant} left the self-test green, so that rule set is "
-            "not what the control measures."
+            f"not what the control measures.\n{output}"
+        )
+        member = gate.PLANTED_MEMBERS[NEUTERED_LABEL[constant]][0]
+        # repr() and not the bare name: the self-test formats the member with !r,
+        # which doubles the backslashes in the malformed-member-path fixture.
+        assert f"{member!r} was NOT rejected" in output, (
+            f"disabling {constant} turned the self-test red, but not by leaving "
+            f"{member!r} unrejected -- so the red is coming from somewhere else "
+            f"and this experiment does not measure {constant}.\n{output}"
         )
 
     @pytest.mark.parametrize(
@@ -1477,29 +1537,7 @@ class TestSelfTestIsTheControl:
         asserts the stronger property: with the rule disabled, its own planted
         member is classified by NOTHING.
         """
-        label_for = {
-            "malformed_path_reason": "malformed-member-path",
-            "VENDOR_DIR_COMPONENTS": "vendor-directory",
-            "ARCHIVE_SUFFIXES": "nested-archive-by-suffix",
-            "ARCHIVE_MAGICS": "nested-archive-by-header",
-            "NATIVE_SUFFIXES": "native-binary-by-suffix",
-            "NATIVE_MAGICS": "native-binary-by-header",
-            "SCANNER_DIST_NAMES": "vendored-scanner",
-            "ASSETS_ALLOWLIST": "unpinned-asset",
-            "PACKAGE_SUBDIRECTORIES": "unpinned-package-subdirectory",
-            # Three detectors share this rule set -- the plain unenumerated root,
-            # the `.data` scheme tree and the wrapper-lookalike directory. The
-            # neutered value widens the set with `third_party_tools`, so the
-            # experiment is about the first of them; the other two are covered by
-            # their own committed test cases rather than by a second widening,
-            # which would have to name a different directory and would then be
-            # measuring the same table twice.
-            "DISTRIBUTION_ROOT_DIRECTORIES": "unpinned-distribution-directory",
-            "DIST_INFO_ALLOWLIST": "unpinned-dist-info-member",
-            "is_plain_filename": "loose-wheel-root-file",
-            "MAX_MEMBER_BYTES": "oversize-member",
-        }
-        label = label_for[constant]
+        label = NEUTERED_LABEL[constant]
         name, data, _ = gate.PLANTED_MEMBERS[label]
         payload = gate._planted_data(label, data)
 
@@ -1537,9 +1575,10 @@ class TestSelfTestIsTheControl:
                 stream = io.StringIO()
                 assert gate.run_self_test(stream) == 1, (
                     f"dropping {dropped} from ASSETS_ALLOWLIST left the "
-                    "self-test green, so that entry is not what admits the file"
+                    "self-test green, so that entry is not what admits the "
+                    f"file\n{stream.getvalue()}"
                 )
-                assert "fixture was rejected" in stream.getvalue()
+                assert "fixture was rejected" in stream.getvalue(), stream.getvalue()
             finally:
                 gate.ASSETS_ALLOWLIST = original
 
@@ -1549,8 +1588,8 @@ class TestSelfTestIsTheControl:
         try:
             gate.PACKAGE_SUBDIRECTORIES = frozenset(original) - {"utils"}
             stream = io.StringIO()
-            assert gate.run_self_test(stream) == 1
-            assert "fixture was rejected" in stream.getvalue()
+            assert gate.run_self_test(stream) == 1, stream.getvalue()
+            assert "fixture was rejected" in stream.getvalue(), stream.getvalue()
         finally:
             gate.PACKAGE_SUBDIRECTORIES = original
 
@@ -1560,8 +1599,8 @@ class TestSelfTestIsTheControl:
         try:
             gate.DISTRIBUTION_ROOT_DIRECTORIES = frozenset()
             stream = io.StringIO()
-            assert gate.run_self_test(stream) == 1
-            assert "fixture was rejected" in stream.getvalue()
+            assert gate.run_self_test(stream) == 1, stream.getvalue()
+            assert "fixture was rejected" in stream.getvalue(), stream.getvalue()
         finally:
             gate.DISTRIBUTION_ROOT_DIRECTORIES = original
 
@@ -1591,9 +1630,10 @@ class TestSelfTestIsTheControl:
                 stream = io.StringIO()
                 assert gate.run_self_test(stream) == 1, (
                     f"dropping {dropped} from DIST_INFO_ALLOWLIST left the "
-                    "self-test green, so that entry is not what admits the file"
+                    "self-test green, so that entry is not what admits the "
+                    f"file\n{stream.getvalue()}"
                 )
-                assert "fixture was rejected" in stream.getvalue()
+                assert "fixture was rejected" in stream.getvalue(), stream.getvalue()
         finally:
             gate.DIST_INFO_ALLOWLIST = original
 
@@ -1626,9 +1666,9 @@ class TestMutationSensitivity:
         """
         monkeypatch.setattr(gate, "classify_member", lambda member, artifact: None)
         stream = io.StringIO()
-        assert gate.run_self_test(stream) == 1
+        assert gate.run_self_test(stream) == 1, stream.getvalue()
         output = stream.getvalue()
-        assert "was NOT rejected" in output
+        assert "was NOT rejected" in output, output
         for label in gate.PLANTED_MEMBERS:
             member = gate.PLANTED_MEMBERS[label][0]
             # repr() and not the bare name: the self-test's failure line formats
