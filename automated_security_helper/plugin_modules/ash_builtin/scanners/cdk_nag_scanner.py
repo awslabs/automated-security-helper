@@ -401,6 +401,25 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
 
         # Per-call state, reset before anything else in the method can return.
         #
+        # ``errors`` is reset here for the same reason and by the same argument as the two
+        # counters, and it was the field the counters' fix missed. It is declared on
+        # PluginBase and nothing else resets it -- not ``_pre_scan``, not the executor, not
+        # ``scan()`` -- so it accumulated across every target a plugin instance was handed.
+        # The observable consequence is a failure message attached to a run that did not
+        # fail: the source pass appends "a.yaml: RuntimeError: ..." at the append sites
+        # below, the converted pass succeeds, and the converted pass's SARIF then carries
+        # executionSuccessful=True and exitCode=0 alongside
+        # exitCodeDescription="a.yaml: RuntimeError: ...". ``ScannerExecutor`` splices the
+        # same list into a second target's error list on its exception path, re-reporting the
+        # first target's errors against the second.
+        #
+        # Note that ``_plugin_log`` also appends here for anything logged at ERROR or with
+        # ``append_to_stream="stderr"``, so the leak is not confined to the two explicit
+        # ``self.errors.append`` calls below -- the "target directory is empty" notice lands
+        # in it too. Resetting at the top of the call covers every writer at once, and it has
+        # to be above the first ``_plugin_log`` call in this method rather than merely above
+        # the loop, or that notice would be cleared after being recorded.
+        #
         # These are instance attributes on a plugin object that ScanPhase reuses:
         # ``_scanner_tasks`` carries one task per scanner holding ``[source, converted]``, and
         # ``ScannerExecutor._execute_scanner`` loops that list against the same instance, reading
@@ -430,6 +449,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         # wearing a different name.
         self.targets_attempted = 0
         self.targets_failed = 0
+        self.errors = []
 
         tool_component = ToolComponent(
             name="ash-cdk-nag-wrapper",
