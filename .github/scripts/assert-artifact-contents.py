@@ -1026,9 +1026,18 @@ def read_members(path: str) -> list[Member]:
     )
 
 
-@dataclass(frozen=True)
+@dataclass
 class Report:
-    """What one artifact was found to contain."""
+    """What one artifact was found to contain.
+
+    Not `frozen=True`, unlike Violation and Member above. Both of those hold only
+    immutable fields, so frozen there means what it says. This holds two lists,
+    and `frozen=True` would only stop the attributes being rebound while leaving
+    the lists themselves mutable -- an immutability claim the type does not
+    honour, and the kind of guarantee a reader trusts to their cost. It would
+    also synthesize a `__hash__` over unhashable fields, so hashing a Report
+    would raise rather than be prevented.
+    """
 
     violations: list[Violation] = field(default_factory=list)
     members: list[Member] = field(default_factory=list)
