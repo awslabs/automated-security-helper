@@ -37,6 +37,7 @@ from automated_security_helper.cli.merge import (
     MERGED_SHARD_INDICES_KEY,
     RESULTS_FILE_NAME,
     SHARD_PROVENANCE_KEY,
+    _completed,
     _merged_exit_code,
     load_shard_results,
     merge_shard_results,
@@ -1134,6 +1135,46 @@ def _make_shard_contribute_nothing(
     for scanner in owned:
         _incomplete_entries(model, scanner, status)
     return owned
+
+
+class TestCompletedClassifiesUnknownStatusesAsIncomplete:
+    """``ash merge`` is the reader most exposed to a status it does not know.
+
+    It consumes results files written by whatever ASH produced each shard, so a
+    fan-out whose runners are mid-upgrade can hand it a status string that is not in
+    this version's ``ScannerStatus``. A denylist -- "not ERROR and not MISSING means
+    it ran" -- reports that shard as complete, and the merged report then covers
+    scanners whose outcome nobody knows.
+
+    Exercised through ``_completed`` directly rather than through a shard fixture,
+    because ``ScannerStatusInfo.status`` is typed to the enum and cannot hold the
+    cross-version string this is about.
+    """
+
+    class _Entry:
+        def __init__(self, status):
+            self.status = status
+
+    @pytest.mark.parametrize(
+        "status", [ScannerStatus.PASSED, ScannerStatus.FAILED, ScannerStatus.SKIPPED]
+    )
+    def test_the_three_known_complete_statuses_are_complete(self, status):
+        assert _completed(self._Entry(status)) is True
+        assert _completed(self._Entry(status.value)) is True
+
+    @pytest.mark.parametrize("status", [ScannerStatus.ERROR, ScannerStatus.MISSING])
+    def test_the_two_known_incomplete_statuses_are_incomplete(self, status):
+        assert _completed(self._Entry(status)) is False
+
+    @pytest.mark.parametrize("status", ["PARTIALLY_COMPLETED", "TIMED_OUT", "", None])
+    def test_a_status_this_version_does_not_know_is_incomplete(self, status):
+        assert _completed(self._Entry(status)) is False, (
+            f"{status!r} is not evidence that a scanner ran; treating it as complete "
+            "is how a shard from another ASH version merges into a clean report"
+        )
+
+    def test_an_entry_with_no_status_attribute_at_all_is_incomplete(self):
+        assert _completed(object()) is False
 
 
 class TestShardContributionIsRefused:

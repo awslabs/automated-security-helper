@@ -454,28 +454,35 @@ def _verify_scanner_union(
 
 
 def _completed(entry: Any) -> bool:
-    """Whether one ``scanner_results`` entry represents a scanner that ran.
+    """Whether one ``scanner_results`` entry represents a scanner whose outcome is known.
 
-    ERROR and MISSING are the two statuses that mean it did not. Everything else
-    -- including SKIPPED, which is how a run-wide exclusion is recorded -- counts
-    as completed, because the scanner either produced a result or was never
-    supposed to.
+    PASSED, FAILED and SKIPPED are the three that qualify -- SKIPPED because it is how
+    a run-wide exclusion or another shard's ownership is recorded, so the scanner was
+    never supposed to run here. Everything else does not, including a status this
+    version has never heard of.
 
-    The status set is imported from ``run_ash_scan`` rather than re-listed, so
-    this and ``ash scan``'s gate cannot drift apart. Imported inside the function
-    for the same reason :func:`_merged_exit_code` imports from there lazily:
-    ``run_ash_scan`` pulls in ``run_ash_container`` at module scope, and there is
-    no reason for a command that does not scan to carry that import graph. There
-    is no cycle between the two modules -- ``run_ash_scan`` does not import this
-    one -- so the laziness is about cost, not about breaking a loop.
+    Membership of the *complete* set, not absence from the incomplete one, and that
+    matters most here of all the readers. ``ash merge`` consumes results files written
+    by whatever ASH produced each shard, so a fan-out whose runners are mid-upgrade can
+    hand this an unfamiliar status string. Asking "is it one of the two bad ones"
+    answers no for such a status and merges the shard as complete, putting scanners
+    whose outcome nobody knows inside a report that reads as a whole scan.
+
+    The status set is imported from ``run_ash_scan`` rather than re-listed, so this and
+    ``ash scan``'s gate cannot drift apart. Imported inside the function for the same
+    reason :func:`_merged_exit_code` imports from there lazily: ``run_ash_scan`` pulls
+    in ``run_ash_container`` at module scope, and there is no reason for a command that
+    does not scan to carry that import graph. There is no cycle between the two modules
+    -- ``run_ash_scan`` does not import this one -- so the laziness is about cost, not
+    about breaking a loop.
     """
     from automated_security_helper.interactions.run_ash_scan import (
-        _INCOMPLETE_SCANNER_STATUSES,
+        _COMPLETE_SCANNER_STATUSES,
     )
 
     status = getattr(entry, "status", None)
     status_value = getattr(status, "value", status)
-    return status_value not in _INCOMPLETE_SCANNER_STATUSES
+    return status_value in _COMPLETE_SCANNER_STATUSES
 
 
 def _verify_shard_contributions(

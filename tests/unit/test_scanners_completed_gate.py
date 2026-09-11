@@ -102,6 +102,30 @@ class TestNothingRanIsAFailure:
         )
 
 
+class TestUnknownStatusesFailClosed:
+    """The verdict is an allowlist of known-good statuses, not a denylist of bad ones.
+
+    A results file written by a different ASH version can carry a status this script
+    has never heard of. Classifying it as complete because it is not one of the two
+    known-bad names means a future rename of ERROR silently disarms the gate -- and
+    the whole reason this script exists is that its five predecessors were each
+    disarmed in some equally quiet way.
+    """
+
+    @pytest.mark.parametrize("status", ["PARTIALLY_COMPLETED", "TIMED_OUT", "Passed"])
+    def test_a_status_this_version_does_not_know_fails(
+        self, tmp_path, status, capsys
+    ):
+        path = _write(
+            tmp_path, {"bandit": _entry("PASSED"), "semgrep": _entry(status)}
+        )
+        assert _run(path) == 1
+        assert "semgrep" in capsys.readouterr().out
+
+    def test_the_complete_statuses_are_exactly_the_three_that_are_tolerated(self):
+        assert set(gate.COMPLETE_STATUSES) == {"PASSED", "FAILED", "SKIPPED"}
+
+
 class TestRunsThatDidMeasureSomethingPass:
     """Controls. A gate rewritten to fail unconditionally passes the test above."""
 

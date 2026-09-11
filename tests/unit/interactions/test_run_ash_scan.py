@@ -170,7 +170,13 @@ def test_run_ash_scan_with_actionable_findings(
     mock_orchestrator.execute_scan.return_value = mock_results
 
     # Mock get_unified_scanner_metrics to return metrics with actionable findings
-    mock_scanner_metrics = [MagicMock(scanner_name="test-scanner", actionable=5)]
+    # status stated, not left to MagicMock: completeness is classified by membership
+    # of the complete statuses, so a fabricated attribute reads as a scanner whose
+    # outcome is unknown and the exit code becomes 1 for incompleteness rather than 2
+    # for findings. FAILED is what a scanner with actionable findings reports.
+    mock_scanner_metrics = [
+        MagicMock(scanner_name="test-scanner", actionable=5, status="FAILED")
+    ]
 
     # Mock the open function
     with patch("builtins.open", mock_open()):

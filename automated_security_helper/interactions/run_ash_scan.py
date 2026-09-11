@@ -162,24 +162,53 @@ _SARIF_LEVEL_TO_SEVERITY = {"error": "high", "warning": "medium", "note": "low"}
 # ---------------------------------------------------------------------------
 # Scanner completeness
 #
-# The two statuses that mean "this scanner was selected and did not complete".
-# Derived from ScannerStatus rather than spelled as literals so a member added to
-# the enum surfaces here as a decision to make instead of silently defaulting to
-# "complete".
+# The statuses whose outcome is known. This is the allowlist, and the incomplete set
+# below is its complement, so the default for anything not named here is "incomplete"
+# rather than "complete".
 #
-# SKIPPED is deliberately absent, and the distinction is load-bearing rather than
-# a nicety. SKIPPED means the scanner was not selected, and that is the mechanism
+# That direction is the point. The classification used to be a two-member denylist,
+# which meant every status it did not name -- including one this version has never
+# heard of -- counted as complete. Reachable rather than hypothetical: `ash merge`
+# reads results files written by whatever ASH produced each shard, so a fan-out whose
+# runners are mid-upgrade can hand this code a status string that is not in this
+# enum, and a denylist reports that shard as a scanner that ran. An allowlist fails
+# loudly on it instead.
+#
+# It also makes the derivation real. The comment here used to claim that a member
+# added to ScannerStatus "surfaces here as a decision to make", which was not true of
+# a hand-listed pair -- adding a member changed nothing and the new status defaulted
+# to complete. As a complement it is true by construction: a new member is incomplete
+# until someone deliberately adds it below.
+#
+# PASSED and FAILED both mean the scanner ran; FAILED already carries its verdict
+# through the finding count.
+#
+# SKIPPED is the one entry here that is a decision rather than a definition, and it is
+# load-bearing. SKIPPED means the scanner was not selected, and that is the mechanism
 # sharding uses to divide work: core.sharding.exclusions_for_shard excludes every
-# scanner the other shards own, so each shard of an n-way split records n-1
-# scanner sets as SKIPPED. Treating SKIPPED as incomplete would fail every shard
-# of a perfectly healthy sharded scan. Operator-level --exclude-scanners lands in
-# the same place, and an excluded scanner is one the operator said not to run.
+# scanner the other shards own, so each shard of an n-way split records n-1 scanner
+# sets as SKIPPED. Treating SKIPPED as incomplete would fail every shard of a
+# perfectly healthy sharded scan. Operator-level --exclude-scanners lands in the same
+# place, and an excluded scanner is one the operator said not to run.
 #
-# PASSED and FAILED both mean the scanner ran to completion; FAILED already
-# carries its verdict through the finding count.
-_INCOMPLETE_SCANNER_STATUSES = frozenset(
-    {ScannerStatus.ERROR.value, ScannerStatus.MISSING.value}
+# What SKIPPED cannot do is speak for a whole run. Every scanner being SKIPPED means
+# the run selected nothing, which is caught where the selection is made -- see
+# ScanPhase's allowlist resolution and .github/scripts/assert_scanners_completed.py --
+# because a shard legitimately owns nothing when it is handed a count above the
+# scanner count, and that merge still has to succeed.
+_COMPLETE_SCANNER_STATUSES = frozenset(
+    {
+        ScannerStatus.PASSED.value,
+        ScannerStatus.FAILED.value,
+        ScannerStatus.SKIPPED.value,
+    }
 )
+
+#: Every remaining ScannerStatus member: today ERROR (ran and failed) and MISSING
+#: (selected, dependencies unavailable, never ran).
+_INCOMPLETE_SCANNER_STATUSES = frozenset(
+    {member.value for member in ScannerStatus}
+) - _COMPLETE_SCANNER_STATUSES
 
 
 def incomplete_scanners(
@@ -206,6 +235,12 @@ def incomplete_scanners(
     same scanner, and it has no counterpart in ``ash merge``, which has no scanner
     selection to consult. Fixing the recorded status instead makes both agree.
 
+    Tested against ``_COMPLETE_SCANNER_STATUSES`` and not against
+    ``_INCOMPLETE_SCANNER_STATUSES``, though the two are complements over the enum.
+    ``metric.status`` is a plain string that may have come from a results file this
+    version did not write, and only the allowlist form treats a status outside the
+    enum entirely as incomplete rather than as a scanner that ran.
+
     Args:
         results: The aggregated results, or None when the scan produced none.
 
@@ -217,7 +252,7 @@ def incomplete_scanners(
     return [
         (metric.scanner_name, metric.status)
         for metric in get_unified_scanner_metrics(asharp_model=results)
-        if metric.status in _INCOMPLETE_SCANNER_STATUSES
+        if metric.status not in _COMPLETE_SCANNER_STATUSES
     ]
 
 

@@ -3,11 +3,17 @@
 
 """Fail a CI job when a scanner it was supposed to run did not complete.
 
-Reads ``scanner_results[*].status`` out of ``ash_aggregated_results.json`` and
-exits 1 when any scanner is ERROR (ran and failed) or MISSING (its dependencies
-were unavailable, so it never ran). SKIPPED scanners are ones the run did not
-select -- ``--exclude-scanners``, a config that disables them, or one shard of a
+Reads ``scanner_results[*].status`` out of ``ash_aggregated_results.json`` and exits
+1 unless every scanner is PASSED, FAILED or SKIPPED. Today that means it fails on
+ERROR (ran and failed) and MISSING (its dependencies were unavailable, so it never
+ran), and on any status it does not recognise. SKIPPED scanners are ones the run did
+not select -- ``--exclude-scanners``, a config that disables them, or one shard of a
 sharded run -- and are reported but do not fail the job.
+
+Stated as what is accepted rather than what is rejected, deliberately: a results file
+from a different ASH version can carry a status this script has never heard of, and a
+rejected-list would let it through a gate whose whole job is to notice that a scanner
+did not run.
 
 It also exits 1 when *no* scanner executed, which is a separate assertion and not
 implied by the first. Because SKIPPED has to be tolerated one entry at a time, a
@@ -51,12 +57,26 @@ import json
 import sys
 from pathlib import Path
 
-# The two statuses that mean "this scanner was selected and did not complete".
+# The statuses whose outcome is known, and the only ones that do not fail the job.
+#
+# An allowlist, not a denylist of the bad ones. This used to be
+# ``INCOMPLETE_STATUSES = ("ERROR", "MISSING")`` tested with ``in``, so every status
+# it did not name counted as complete -- including one this script has never heard
+# of. A results file written by a different ASH version, or a future rename of
+# ERROR, would then pass a gate whose entire purpose is to notice that a scanner did
+# not run. The five predecessors this script replaced were each disarmed in some
+# equally quiet way, so the default has to be "fail" rather than "pass".
+#
+# SKIPPED is tolerated because it means the scanner was not selected: one shard of a
+# sharded run records the scanners the other shards own that way, and
+# --exclude-scanners records an operator's choice that way. Whether the *whole set*
+# being SKIPPED is acceptable is a separate question, answered below.
+#
 # Kept in step with automated_security_helper.interactions.run_ash_scan's
-# _INCOMPLETE_SCANNER_STATUSES. Spelled as literals here rather than imported
-# because this script runs before -- and independently of -- an importable ASH:
-# the bash and PowerShell scan methods leave no ASH on the runner's PATH at all.
-INCOMPLETE_STATUSES = ("ERROR", "MISSING")
+# _COMPLETE_SCANNER_STATUSES. Spelled as literals here rather than imported because
+# this script runs before -- and independently of -- an importable ASH: the bash and
+# PowerShell scan methods leave no ASH on the runner's PATH at all.
+COMPLETE_STATUSES = ("PASSED", "FAILED", "SKIPPED")
 
 # The statuses that mean "this scanner executed". Mirrors ScannerState.ran in
 # scripts/verify_external_target_scan.py, which the sibling gate uses for the same
@@ -108,9 +128,10 @@ def main() -> int:
         status = str(status) if status is not None else "UNKNOWN"
         print(f"  {name:<24} {status}")
         observed.append((name, status))
-        # UNKNOWN counts as incomplete. An entry whose status could not be read is
-        # not evidence that the scanner ran.
-        if status in INCOMPLETE_STATUSES or status == "UNKNOWN":
+        # Anything not on the allowlist counts as incomplete, which covers the
+        # "UNKNOWN" this loop substitutes for an entry whose status could not be read
+        # at all. An unreadable status is not evidence that the scanner ran.
+        if status not in COMPLETE_STATUSES:
             incomplete.append((name, status))
 
     # Consistency check on the counters, cheap and worth having: every scanner
@@ -145,7 +166,9 @@ def main() -> int:
             "complete. ERROR means the scanner ran and failed; MISSING means its "
             "dependencies were unavailable so it never ran. Either install the "
             "tool on this platform or exclude the scanner explicitly, which "
-            "records it as SKIPPED and says so in the report."
+            "records it as SKIPPED and says so in the report. Any other status is "
+            "one this gate does not recognise -- most likely a results file from a "
+            f"different ASH version; the ones it accepts are {', '.join(COMPLETE_STATUSES)}."
         )
         failed = True
 

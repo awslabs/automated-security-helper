@@ -565,6 +565,76 @@ class TestIncompleteScannerReport:
         assert incomplete_scanners(None) == []
 
 
+class TestStatusClassificationFailsClosed:
+    """A status this version does not recognise is not evidence a scanner ran.
+
+    The classification used to be a denylist -- ``status in {ERROR, MISSING}`` --
+    which makes every status the list does not name count as complete. That is the
+    wrong default for a completeness check, and it is reachable rather than
+    hypothetical: ``ash merge`` reads shard results written by whatever ASH produced
+    them, so a mixed-version fan-out can hand this code a status string that is not
+    in this version's enum. A denylist reports that shard as complete.
+
+    Inverted to an allowlist of the three statuses that mean the scanner's outcome is
+    known. Anything else is incomplete, so an unrecognised status fails loudly
+    instead of passing quietly.
+    """
+
+    def test_an_unrecognised_status_is_reported_incomplete(self):
+        from automated_security_helper.interactions.run_ash_scan import (
+            incomplete_scanners,
+        )
+
+        results = MagicMock()
+        with patch(
+            f"{_MODULE}.get_unified_scanner_metrics",
+            return_value=[
+                _metric("bandit", ScannerStatus.PASSED.value),
+                _metric("semgrep", "PARTIALLY_COMPLETED"),
+            ],
+        ):
+            listed = incomplete_scanners(results)
+
+        assert listed == [("semgrep", "PARTIALLY_COMPLETED")], (
+            "a status from another ASH version has to be treated as incomplete; "
+            "counting it as complete is how a partial scan reads as a whole one"
+        )
+
+    def test_the_two_status_sets_partition_the_enum(self):
+        """Neither set may drift from the enum, in either direction.
+
+        The complete set is spelled out and the incomplete set is derived as its
+        complement, so a member added to ``ScannerStatus`` becomes incomplete by
+        construction -- fail-closed -- rather than defaulting to complete. This
+        asserts the two facts that makes rest on: they are disjoint, and together
+        they cover every member.
+        """
+        from automated_security_helper.interactions.run_ash_scan import (
+            _COMPLETE_SCANNER_STATUSES,
+            _INCOMPLETE_SCANNER_STATUSES,
+        )
+
+        every = {member.value for member in ScannerStatus}
+        assert _COMPLETE_SCANNER_STATUSES | _INCOMPLETE_SCANNER_STATUSES == every
+        assert not (_COMPLETE_SCANNER_STATUSES & _INCOMPLETE_SCANNER_STATUSES)
+
+    def test_skipped_is_on_the_complete_side(self):
+        """The one classification that is a decision rather than a definition.
+
+        SKIPPED means the scanner was not selected, and that is how sharding divides
+        work: each shard of an n-way split records the other shards' scanners as
+        SKIPPED. Treating it as incomplete would fail every shard of a healthy
+        sharded scan. Pinned separately from the partition above, which would still
+        hold with SKIPPED on either side.
+        """
+        from automated_security_helper.interactions.run_ash_scan import (
+            _COMPLETE_SCANNER_STATUSES,
+        )
+
+        assert ScannerStatus.SKIPPED.value in _COMPLETE_SCANNER_STATUSES
+        assert _COMPLETE_SCANNER_STATUSES == {"PASSED", "FAILED", "SKIPPED"}
+
+
 class TestConfigFileResolution:
     """The YAML field has to be readable without building the orchestrator."""
 
