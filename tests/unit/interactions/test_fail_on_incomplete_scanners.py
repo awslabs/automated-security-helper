@@ -505,17 +505,69 @@ class TestReadsTheAuthoritativeSignals:
         per-scanner status is what supplies the name. A count would also reintroduce
         the coupling this whole file exists to break: two readers of the same state,
         one of which can be right while the other is wrong.
-        """
-        from automated_security_helper.models.asharp_model import SummaryStats
 
-        assert "error" in SummaryStats.model_fields, (
-            "ERROR needs a counter of its own; without one the other four sum to "
-            "fewer than the scanners in the run and every total reads clean"
+        How the partition is asserted, and how it used to be
+        ---------------------------------------------------
+        This checked ``sum(...) == 10`` over five integers the test itself had just
+        passed to the constructor, which verifies that pydantic stores integers.
+        Deleting ``error=error_count`` from ``core/unified_metrics.py`` left it
+        passing, so the one claim it appeared to make -- that the five counters
+        account for every scanner -- was not being made at all.
+
+        Replaced by two assertions that read something the test did not choose: that
+        every ``ScannerStatus`` member has a counter named after it, and that a real
+        pass through ``populate_metrics_from_unified_source`` over one scanner in each
+        of the five statuses produces counters that sum to the scanner count.
+        """
+        # AshConfig is imported for its side effect as well: importing it is what
+        # calls AshAggregatedResults.model_rebuild(), without which constructing one
+        # raises PydanticUserError.
+        from automated_security_helper.config.ash_config import AshConfig  # noqa: F401
+        from automated_security_helper.core.unified_metrics import (
+            ScannerMetrics,
+            populate_metrics_from_unified_source,
+        )
+        from automated_security_helper.models.asharp_model import (
+            AshAggregatedResults,
+            SummaryStats,
         )
 
-        buckets = ("passed", "failed", "missing", "skipped", "error")
-        stats = SummaryStats(passed=3, failed=1, missing=2, skipped=3, error=1)
-        assert sum(getattr(stats, b) for b in buckets) == 10
+        # Derived from the enum rather than listed, so a member added to
+        # ScannerStatus without a counter to match fails here.
+        assert {member.value.lower() for member in ScannerStatus} <= set(
+            SummaryStats.model_fields
+        ), (
+            "every ScannerStatus member needs a counter of its own; ERROR had none, "
+            "so the other four summed to fewer than the scanners in the run on "
+            "exactly the runs where the difference mattered, and every total read clean"
+        )
+
+        # One scanner in each of the five statuses, counted by the real function.
+        metrics = [
+            ScannerMetrics(scanner_name=member.value.lower(), status=member.value)
+            for member in ScannerStatus
+        ]
+        model = AshAggregatedResults()
+        with patch(
+            "automated_security_helper.core.unified_metrics.get_unified_scanner_metrics",
+            return_value=metrics,
+        ):
+            populated = populate_metrics_from_unified_source(aggregated_results=model)
+
+        stats = populated.metadata.summary_stats
+        buckets = [member.value.lower() for member in ScannerStatus]
+        assert sum(getattr(stats, bucket) for bucket in buckets) == len(
+            populated.scanner_results
+        ), (
+            "the five counters must account for every scanner in the run; when one "
+            f"status has no counter the total silently excludes it: {stats!r}"
+        )
+        # Each status contributed exactly one scanner, so each counter must read 1.
+        # Without this the sum could be reached by one counter absorbing another's
+        # scanners.
+        assert {bucket: getattr(stats, bucket) for bucket in buckets} == {
+            bucket: 1 for bucket in buckets
+        }
 
         model = self._model_with("grype", ScannerStatus.ERROR, "PASSED")
 
