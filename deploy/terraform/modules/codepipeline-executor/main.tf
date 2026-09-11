@@ -78,6 +78,39 @@ locals {
 #
 
 resource "aws_s3_bucket" "artifacts" {
+  # CKV2_AWS_62 asks for event notifications. This is CodePipeline's artifact
+  # store: CodePipeline advances its own stages and does not consume S3 events,
+  # and no other subscriber exists, so a notification configuration here would
+  # publish to nothing.
+  #checkov:skip=CKV2_AWS_62:CodePipeline drives its own stage transitions and consumes no S3 events; there is no subscriber for a notification to reach.
+  #
+  # CKV_AWS_18 asks for server access logging, which requires a second bucket to
+  # receive the logs and cannot be satisfied by this bucket alone. The principals
+  # able to reach these objects are the shard and merge roles and CodePipeline,
+  # all declared in this module, and object-level access is auditable
+  # account-wide through CloudTrail data events rather than per-bucket logs.
+  #checkov:skip=CKV_AWS_18:Server access logging needs a second log bucket per deployment; access here is limited to roles declared in this module and is auditable account-wide via CloudTrail data events.
+  #
+  # CKV_AWS_144 asks for cross-region replication, which is a decision for the
+  # team adopting this module rather than a default it should impose. Three
+  # reasons, in the order they usually matter:
+  #
+  #   1. It bills a second full copy of every artifact this pipeline produces,
+  #      plus cross-region transfer per GB moved. Neither charge stops when the
+  #      pipeline is idle, because the copies persist.
+  #   2. Neither piece it needs exists here. Replication requires a destination
+  #      bucket in another region and a replication IAM role, and this module
+  #      creates only the one bucket above. Satisfying the rule means adding both
+  #      and deciding which region, which the module cannot choose for a caller.
+  #   3. It changes where scan results come to rest. These artifacts carry finding
+  #      detail and repository file paths, so replicating them puts that content
+  #      in a second region -- a data-residency question the adopter answers
+  #      against their own obligations, not one a scanner default settles.
+  #
+  # An opt-in variable was considered and rejected: Checkov reads static HCL, so a
+  # conditional replication block defaulting to off still trips this rule, leaving
+  # the same skip line plus a feature most adopters would not enable.
+  #checkov:skip=CKV_AWS_144:Replication bills a second full copy of every artifact plus per-GB cross-region transfer; the destination bucket and replication IAM role do not exist in this module and the region cannot be chosen on a caller's behalf; and it moves finding detail and file paths to rest in a second region, making it the adopter's data-residency decision rather than a module default. See the comment above this line.
   bucket_prefix = "${var.name_prefix}-"
   force_destroy = var.artifact_bucket_force_destroy
 
@@ -169,6 +202,8 @@ data "aws_iam_policy_document" "build_assume_role" {
 }
 
 resource "aws_cloudwatch_log_group" "shard" {
+  #checkov:skip=CKV_AWS_158:CloudWatch Logs already encrypts at rest with an AWS managed key, and a customer managed key carries a recurring per-key cost this module should not impose. These are scanner console logs; the findings themselves are the pipeline artifact, encrypted with kms_key_arn when one is supplied.
+  #checkov:skip=CKV_AWS_338:A one-year floor is a per-deployment compliance posture. These records diagnose a shard that failed or timed out, a question asked within days. Callers with a retention requirement set log_retention_days.
   name              = "/aws/codebuild/${var.name_prefix}-shard"
   retention_in_days = var.log_retention_days
 
@@ -176,6 +211,8 @@ resource "aws_cloudwatch_log_group" "shard" {
 }
 
 resource "aws_cloudwatch_log_group" "merge" {
+  #checkov:skip=CKV_AWS_158:Same as the shard log group above -- already encrypted at rest with an AWS managed key, and a CMK is a per-deployment choice with a recurring cost.
+  #checkov:skip=CKV_AWS_338:Same as the shard log group above -- retention is a per-deployment compliance posture, set through log_retention_days.
   name              = "/aws/codebuild/${var.name_prefix}-merge"
   retention_in_days = var.log_retention_days
 
@@ -363,6 +400,13 @@ resource "aws_codebuild_project" "shard" {
   service_role  = aws_iam_role.shard.arn
   build_timeout = var.shard_build_timeout_minutes
 
+  # The same key the artifact bucket uses. Without this the module would honour
+  # kms_key_arn for the bucket but leave CodeBuild's own build output on the
+  # default AWS managed key, so a caller who supplied a CMK would get only half
+  # of what they asked for. Null keeps the default key, which is the behaviour
+  # when no CMK is supplied.
+  encryption_key = var.kms_key_arn
+
   source {
     type      = "CODEPIPELINE"
     buildspec = local.shard_buildspec
@@ -406,6 +450,9 @@ resource "aws_codebuild_project" "merge" {
   description   = "Merges every shard's ASH results and forms the pipeline verdict."
   service_role  = aws_iam_role.merge.arn
   build_timeout = var.merge_build_timeout_minutes
+
+  # Same reasoning as the shard project above.
+  encryption_key = var.kms_key_arn
 
   source {
     type      = "CODEPIPELINE"

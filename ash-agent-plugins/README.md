@@ -1,6 +1,6 @@
 # Agentic Coding Plugins for ASH
 
-A unified source-of-truth (`agentic-coding/transpiler/_base/`) plus a config-driven Python transpiler that emits plugin packages for **15 AI coding agent platforms** plus the **agentskills.io generic-skill release** from one canonical content set. Wraps the [ASH (Automated Security Helper)](https://github.com/awslabs/automated-security-helper) MCP server so any agent can run security scans through the same backing service.
+A unified source-of-truth (`agentic-coding/transpiler/_base/`) plus a config-driven Python transpiler that emits plugin packages for **15 AI coding agent platforms** plus **two agentskills.io skill releases** from one canonical content set — 17 outputs in total, which is the number `agentic-plugins check` reports. Wraps the [ASH (Automated Security Helper)](https://github.com/awslabs/automated-security-helper) MCP server so any agent can run security scans through the same backing service.
 
 ## What this gets you
 
@@ -22,6 +22,9 @@ A unified source-of-truth (`agentic-coding/transpiler/_base/`) plus a config-dri
 | 14 | **Aider** | `agentic-coding/plugins/aider/` | Copy `.aider.conf.yml` and `CONVENTIONS.md` (no MCP support in Aider) |
 | 15 | **MCPB / Claude Desktop** | `agentic-coding/plugins/mcpb/` | Double-click `ash.mcpb` for one-click install in Claude Desktop |
 | 16 | **Generic Skill ([agentskills.io](https://agentskills.io/specification))** | `agentic-coding/plugins/generic-skill/` | Drop `skills/<name>/` into any agentskills-compatible agent's skills directory. Natively consumed by Claude Code, Codex, OpenCode, Cline, Kiro. |
+| 17 | **Repository-root skill tree** | `skills/` (repository root, not under `plugins/`) | `npx skills add awslabs/automated-security-helper` |
+
+Rows 16 and 17 hold the same skill content and differ only in where it lands. Row 17 is emitted at the repository root because [Vercel's `skills` CLI](https://github.com/vercel-labs/skills) looks for `skills/<name>/` there and does not search the rest of the tree, which is what makes the `owner/repo` shorthand above resolve. Row 16's copy stays inside the plugin tree for people assembling a custom integration who want the bare artifact and no repository layout imposed on them. Both are generated from `_base/`, so they cannot disagree.
 
 Plus a **universal `AGENTS.md`** at `agentic-coding/plugins/AGENTS.md`, read natively by Codex, Cursor, Windsurf, OpenCode, Copilot (1.104+), Cline, Roo, Kiro, Goose, Aider, and Factory CLI.
 
@@ -33,20 +36,39 @@ This complements (does NOT replace) the per-platform plugin trees. The per-platf
 
 ## Architecture
 
-**Single source of truth, class-per-backend, deterministic transpiler.** Humans edit `agentic-coding/transpiler/_base/` and (when adding a new platform) write a backend module under `agentic-coding/transpiler/transpiler/backends/<name>/`. The transpiler regenerates all platform outputs. A pre-commit hook + CI verifies that committed plugin files match what the transpiler would produce.
+**Single source of truth, class-per-backend, deterministic transpiler.** Humans edit `agentic-coding/transpiler/_base/` and (when adding a new platform) write a backend module under `agentic-coding/transpiler/transpiler/backends/<name>/`. The transpiler regenerates all platform outputs.
+
+CI verifies that committed plugin files match what the transpiler would produce. Which workflow does that depends on how this directory is being used, and the distinction is worth stating plainly because getting it wrong once let a drift failure sit unnoticed on the ASH default branch:
+
+- **Inside the ASH monorepo**, `.github/workflows/ash-agent-plugins-drift.yml` at the repository root runs `agentic-plugins check` and the transpiler's pytest suite, path-filtered to the transpiler, both generated output trees, `.gitignore`, and the workflow file itself.
+- **When `ash-agent-plugins/` is used as its own repository**, `.github/workflows/validate.yml` in this directory applies instead, and adds the per-CLI smoke-test matrix.
+
+Only one of the two ever runs, because GitHub reads workflows solely from the repository root. The nested `validate.yml` therefore does nothing inside the monorepo, which is why the root workflow exists. There is no pre-commit hook for the transpiler at the ASH repository root; `pre-commit install` in the Development workflow below applies when this directory is its own repository.
 
 Each backend is a class that subclasses `BaseBackend` and declares its layout via class-level constants (`PLUGIN_MANIFEST`, `MCP`, `SKILL`, `COMMANDS`, `AGENTS`, `INSTRUCTION_FILE`, `RULES_DIR`, `CUSTOM_MODES`, `CONFIG_FILE`, `MARKETPLACE`, `EXTENSION_MANIFEST`, `MCPB_BUNDLE`). Build behavior comes from `BaseBackend.build()`'s section-emitter dispatch; backends with multi-step builds opt into the `PHASES` machinery (setup/build/release stages with topo-sorted `depends_on`). Backends can also expose backend-specific Click subcommands via a `CLI_GROUP` class var, and override `smoke_test()` to confirm the generated package loads under the platform's CLI.
 
 ```
 agentic-coding/
 ├── transpiler/                         # The build tool
-│   ├── pyproject.toml                  # Declares jinja2, pydantic, pyyaml deps
-│   ├── transpile.py                    # ~700 lines — orchestrator + section emitters
-│   ├── schema.py                       # Pydantic models that validate configs.yaml
-│   ├── configs.yaml                    # Per-platform layout descriptions (15 entries)
+│   ├── pyproject.toml                  # Deps + the agentic-plugins, refresh-schemas, generate-models entry points
+│   ├── validate.py                     # Output validation, invoked by `check`
+│   ├── transpiler/                     # The package
+│   │   ├── cli.py                      # Click CLI — the commands listed under Development workflow
+│   │   ├── core.py                     # BaseBackend, Manifest, output-anchor resolution
+│   │   ├── orchestrator.py             # build / release / drift across backends
+│   │   ├── emitters.py                 # Section emitters + the run_section_emitters dispatch
+│   │   ├── registry.py                 # BackendRegistry + @register_backend
+│   │   ├── formats.py                  # Format descriptors (see `agentic-plugins formats`)
+│   │   ├── backends/<name>/            # One sub-package per backend — the class and its class vars
+│   │   └── ...                         # jinja_renderer, manifest_builders, mcp_builders, install_scripts, packagers, cli_tools
+│   ├── tools/                          # refresh-schemas + generate-models
+│   ├── schemas/                        # Vendored external JSON Schemas + the schemas.json index
+│   ├── generated_models/               # Pydantic models generated from those schemas (committed)
+│   ├── tests/
 │   ├── _base/                          # SOURCE OF TRUTH — humans only edit here
 │   │   ├── manifest.json               # Plugin metadata: name, description, etc.
 │   │   ├── skill.md                    # Main skill body (no frontmatter)
+│   │   ├── cli_versions.json           # Platform CLI version pins, used by smoke-test
 │   │   ├── references/
 │   │   │   ├── tool-reference.md
 │   │   │   └── troubleshooting.md
@@ -60,21 +82,25 @@ agentic-coding/
 │
 └── plugins/                            # GENERATED — committed for browse-by-platform
     ├── AGENTS.md                       # Universal repo-root instruction file
-    ├── claude/, codex/, kiro/,         # 14 directory-style plugins
+    ├── claude/, codex/, kiro/,         # 14 directory-style platform plugins
     ├── copilot/, opencode/, cursor/,
     ├── windsurf/, cline/, roo/,
     ├── continue/, gemini/, goose/,
     ├── amazonq/, aider/
-    └── mcpb/                           # MCPB archive (manifest.json + ash.mcpb ZIP)
+    ├── mcpb/                           # MCPB archive (manifest.json + ash.mcpb ZIP)
+    └── generic-skill/                  # Standalone agentskills.io release (row 16 above)
 ```
+
+The seventeenth backend, `skills-root`, writes outside this tree — to `skills/`
+at the repository root, per row 17 above.
 
 ## How transpilation works
 
-The transpiler reads `_base/` content and `configs.yaml` layout descriptions, then dispatches each platform through a generic `render_platform()` function. Each section in a platform's config (`plugin_manifest`, `mcp`, `skill`, `commands`, `agents`, `instruction_file`, `rules_dir`, `custom_modes`, `config_file`, `marketplace`, `extension_manifest`, `mcpb_bundle`) is handled by a corresponding emitter.
+The transpiler reads `_base/` content and each backend's class vars, then dispatches through `emitters.run_section_emitters`. Every section a backend declares (`PLUGIN_MANIFEST`, `MCP`, `SKILL`, `COMMANDS`, `AGENTS`, `INSTRUCTION_FILE`, `RULES_DIR`, `CUSTOM_MODES`, `CONFIG_FILE`, `MARKETPLACE`, `EXTENSION_MANIFEST`, `MCPB_BUNDLE`) is handled by a corresponding `emit_*` function; sections it leaves unset are skipped.
 
-**Adding a new platform** is typically just a `configs.yaml` entry plus possibly one Jinja template if the layout has a genuinely new shape. No new Python render function is needed unless the platform requires output formats outside the existing dispatcher (JSON manifests, YAML configs, MCPB archives, install scripts).
+**Adding a new platform** is typically just a backend class declaring those class vars, plus possibly one Jinja template if the layout has a genuinely new shape. No new emitter is needed unless the platform requires an output shape outside the existing dispatch (JSON manifests, YAML configs, MCPB archives, install scripts).
 
-**Each Jinja template stays under 20 lines.** The single `skill.md.j2` template handles all frontmatter+body files (skills, commands, agents) by parameterizing over `frontmatter_fields`. Per-platform templates exist only where a platform's shape is genuinely different (Roo `.roomodes`, Continue YAML mcpServers, Goose YAML extensions, instruction files like POWER.md / GEMINI.md / .goosehints / CONVENTIONS.md / copilot-instructions.md, Aider config).
+**Jinja templates stay small** — 24 of the 26 are under 20 lines. The single `skill.md.j2` template handles all frontmatter+body files (skills, commands, agents) by parameterizing over `frontmatter_fields`, which is why it is the longest at 34. Per-platform templates exist only where a platform's shape is genuinely different (Roo `.roomodes`, Continue YAML mcpServers, Goose YAML extensions, instruction files like POWER.md / GEMINI.md / .goosehints / CONVENTIONS.md / copilot-instructions.md, Aider config).
 
 ## Development workflow
 
@@ -87,17 +113,18 @@ pre-commit install
 $EDITOR agentic-coding/transpiler/_base/skill.md
 $EDITOR agentic-coding/transpiler/transpiler/backends/claude/__init__.py
 
-# 3. Re-build all 15 platforms
+# 3. Re-build all 17 outputs
 uv run --project agentic-coding/transpiler agentic-plugins build
 
 # 4. Verify drift + validation
 uv run --project agentic-coding/transpiler agentic-plugins check
 
-# 5. Commit — pre-commit re-runs build + check
+# 5. Commit. In a standalone checkout of this directory, pre-commit re-runs
+#    build + check; in the ASH monorepo, CI is what checks it.
 git commit -am "feat: improve scan workflow"
 ```
 
-The Click CLI surfaces four lifecycle phases. Each subcommand takes an optional backend NAME; without one, the command runs across all 15 backends:
+The Click CLI surfaces five lifecycle commands. Each takes an optional backend NAME; without one, the command runs across all 17 backends:
 
 ```bash
 agentic-plugins build [NAME]       # build platform plugin packages
@@ -107,30 +134,33 @@ agentic-plugins release [NAME]     # phase stage="release" (e.g. MCPB → dist/)
 agentic-plugins smoke-test [NAME]  # confirm each plugin loads under its platform CLI
 ```
 
-CI runs `agentic-plugins check` and `agentic-plugins smoke-test` on every push and PR. `check` runs both passes unconditionally so a single CI run surfaces every problem; the exit code is non-zero if either fails. Drift is architecturally impossible to merge; spec violations are caught before they reach users.
+CI runs `agentic-plugins check` on every push and pull request that touches the paths listed under Architecture above; the standalone workflow also runs `agentic-plugins smoke-test` as a per-CLI matrix. `check` runs both of its passes unconditionally so a single run surfaces every problem, and its exit code is non-zero if either fails, which is what keeps a drifted plugin tree from merging.
 
 ## Output validation
 
 The transpiler validates every generated file against its platform's spec via three tiers:
 
-1. **External JSON Schemas** — `mcpb/manifest.json` validates against the official [MCPB Draft 07 schema](https://github.com/modelcontextprotocol/mcpb), and `opencode/opencode.json` validates against the [OpenCode Draft 2020-12 schema](https://opencode.ai/config.json). Both schemas are vendored at `agentic-coding/transpiler/schemas/`.
-2. **Structural sanity** — every generated `.json` parses as JSON, every `.yaml`/`.yml` parses as YAML, every markdown file with `---` frontmatter has parseable YAML, and every path declared in `configs.yaml` exists in the output tree.
+1. **External JSON Schemas** — `mcpb/manifest.json` validates against the official [MCPB Draft 07 schema](https://github.com/modelcontextprotocol/mcpb), `opencode/opencode.json` against the [OpenCode Draft 2020-12 schema](https://opencode.ai/config.json), and `amazonq/agent.json` against the [Amazon Q agent-v1 Draft 07 schema](https://github.com/aws/amazon-q-developer-cli/blob/main/docs/agent-format.md). All are vendored at `agentic-coding/transpiler/schemas/`; `validate.EXTERNAL_SCHEMAS` is the list.
+2. **Structural sanity** — every generated `.json` parses as JSON, every `.yaml`/`.yml` parses as YAML, every markdown file with `---` frontmatter has parseable YAML, and every path a backend declares exists in the output tree.
 3. **Known platform constraints** — Claude plugin name kebab-case, Roo customMode slug regex, Windsurf `trigger` enum, Copilot 4000-char `copilot-instructions.md` cap, Windsurf 12000-byte rule cap, MCPB archive integrity (must contain `manifest.json` at root, manifest must validate against the MCPB schema).
 
 To refresh the cached external schemas after upstream changes:
 
 ```bash
-bash agentic-coding/transpiler/schemas/refresh.sh
+uv run --project agentic-coding/transpiler refresh-schemas
 git diff agentic-coding/transpiler/schemas/   # review what changed
-uv run --project agentic-coding/transpiler transpile --check  # confirm we still validate
+uv run --project agentic-coding/transpiler agentic-plugins check  # confirm we still validate
 ```
+
+If a refreshed schema changes shape, regenerate the committed Pydantic models
+too: `uv run --project agentic-coding/transpiler --extra refresh generate-models`.
 
 You can run validation independently of drift detection:
 
 ```bash
-uv run --project agentic-coding/transpiler transpile --check          # drift + validation (CI gate)
-uv run --project agentic-coding/transpiler transpile --validate-only  # validation alone
-uv run --project agentic-coding/transpiler transpile --drift-only     # drift alone
+uv run --project agentic-coding/transpiler agentic-plugins check                  # drift + validation (CI gate)
+uv run --project agentic-coding/transpiler agentic-plugins check --validate-only  # validation alone
+uv run --project agentic-coding/transpiler agentic-plugins check --drift-only     # drift alone
 ```
 
 ## MCPB / Claude Desktop one-click install

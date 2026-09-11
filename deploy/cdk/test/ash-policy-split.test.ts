@@ -140,6 +140,24 @@ describe('no role logical id moved', () => {
   }
 });
 
+/**
+ * Policies this stack authors by hand, which the split neither created nor names.
+ *
+ * `AshRuntimeConfig` builds `new iam.Policy(this, 'KeyAccess', ...)` for the
+ * conditional `kms:Decrypt` on an adopter-supplied `KmsKeyArn` -- it exists as its
+ * own policy resource precisely so the grant can be made conditional, which
+ * `Secret.grantRead` cannot do. It holds one service and so would satisfy the
+ * one-service rule below, but its logical id is `ConfigKeyAccess<hash>` rather than
+ * the split's `<Role><Service>Access`, so the naming rule has to skip it.
+ *
+ * Listed by name rather than matched by a pattern: a pattern loose enough to
+ * excuse this id would also excuse a split policy that had been misnamed, which is
+ * the thing the naming rule exists to catch. The test below asserts every entry
+ * here is actually present, so a rename or removal fails rather than silently
+ * widening the exemption.
+ */
+const POLICIES_AUTHORED_OUTSIDE_THE_SPLIT = ['ConfigKeyAccess'];
+
 describe('every generated policy document holds exactly one service', () => {
   /** `[stack/logicalId, services]` for every AWS::IAM::Policy in every stack. */
   function policyServices(): [string, string[]][] {
@@ -181,12 +199,25 @@ describe('every generated policy document holds exactly one service', () => {
 
   it('each split policy is named after the service it holds', () => {
     for (const [id, services] of POLICIES) {
-      if (id.includes('DefaultPolicy') || services.length === 0) {
+      if (
+        id.includes('DefaultPolicy') ||
+        services.length === 0 ||
+        POLICIES_AUTHORED_OUTSIDE_THE_SPLIT.some((name) => id.includes(name))
+      ) {
         continue;
       }
       const service = services[0].replace(/-/g, '').toLowerCase();
       // e.g. AshDistributedPipeline/Shard0ProjectRoleS3Access1A2B3C4D holds s3.
       expect(id.toLowerCase()).toContain(`${service}access`);
+    }
+  });
+
+  it('every hand-authored exemption is still present', () => {
+    // Non-vacuity for the skip above. A stale entry here would silently excuse a
+    // split policy whose id happened to contain the same substring, and the naming
+    // rule would stop being able to fail.
+    for (const name of POLICIES_AUTHORED_OUTSIDE_THE_SPLIT) {
+      expect(POLICIES.filter(([id]) => id.includes(name)).length).toBeGreaterThan(0);
     }
   });
 });

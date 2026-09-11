@@ -15,9 +15,11 @@ from __future__ import annotations
 
 import json
 import subprocess  # nosec B404 -- builds throwaway git repositories for the changed-files gate
+import sys
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Dict, List
 
 import pytest
@@ -781,6 +783,28 @@ class TestScannerCompleteness:
 # Failures and timeouts
 # ---------------------------------------------------------------------------
 
+#: Budget for the tests that need a project to exceed its deadline.
+#
+# It was 0.2s, and that produced an intermittent CI failure in
+# test_a_project_timeout_fails_that_project_only: the assertion is that a timeout fails only the
+# offending project, and on one run BOTH the slow project AND the one configured to sleep not at
+# all exceeded the budget. A project with no work to do cannot overrun a deadline that covers the
+# cost of starting it, so 0.2s did not cover that cost on a loaded runner.
+#
+# The leading explanation is cold Pydantic validation under CPU contention -- FakeOrchestrator
+# validates a SarifReport, and first-use model validation is easily over 200ms on a contended
+# runner with several xdist workers competing. That would also explain why the sibling tests
+# below survived the same run: by the time they execute, the models are warm in that worker.
+# Stated as the best available reading rather than a measurement, because reproducing a hosted
+# runner's load was not attempted.
+#
+# The value does not depend on which explanation is right, which is the point. What was wrong was
+# a budget of the same order as the fixed overhead of running a project at all, so the fix is
+# headroom -- 15x the old value -- rather than a smaller number or a retry. The cost is that each
+# test here waits for this to elapse before the workspace gives up; under xdist that is
+# concurrent, and a deterministic three seconds beats an 0.2s race that lands on unrelated PRs.
+PROJECT_TIMEOUT = 3.0
+
 
 class TestFailureHandling:
     def test_a_failing_project_does_not_stop_the_others(self, tmp_path):
@@ -836,26 +860,57 @@ class TestFailureHandling:
     def test_a_project_timeout_fails_that_project_only(self, tmp_path):
         """The other projects still complete, and the workspace still reports.
 
-        The slow project sleeps only slightly longer than its budget, so the
-        abandoned worker finishes during the test rather than outliving it. That
-        is a property of the test, not of the timeout: see the module docstring in
-        workspace/execution.py for why a thread cannot be preempted.
+        The stalled project blocks on an event rather than sleeping past its budget, matching
+        the tests further down this class. A sleep makes the overrun depend on two durations
+        being ordered correctly -- sleep longer than budget, budget longer than startup -- and
+        the second of those is not under the test's control. Blocking removes one side of it:
+        a project waiting on an event that is never set overruns any budget, so only the
+        sibling's completion depends on timing, and PROJECT_TIMEOUT gives that room.
+
+        The event is released in a finally so the abandoned worker exits with the test rather
+        than outliving it. It cannot be interrupted -- see the module docstring in
+        workspace/execution.py for why a thread cannot be preempted -- so releasing it is the
+        only way to reclaim it.
         """
-        _, plan = _make_workspace(tmp_path, ("slow", "MEDIUM"), ("quick", "MEDIUM"))
-        FakeOrchestrator.behaviour["slow"] = {"sleep": 1.5}
-        outcome = _run(tmp_path, plan, project_timeout=0.2, max_parallel_projects=2)
+        _, plan = _make_workspace(tmp_path, ("stalled", "MEDIUM"), ("quick", "MEDIUM"))
+        release = threading.Event()
+        FakeOrchestrator.behaviour["stalled"] = {"block": release}
+        try:
+            outcome = _run(
+                tmp_path,
+                plan,
+                project_timeout=PROJECT_TIMEOUT,
+                max_parallel_projects=2,
+            )
+        finally:
+            release.set()
+
         statuses = {p.project: p.status for p in outcome.payload.projects}
-        assert statuses["slow"] is ProjectRunStatus.FAILED
-        assert statuses["quick"] is ProjectRunStatus.COMPLETED
+        assert statuses["stalled"] is ProjectRunStatus.FAILED
+        assert statuses["quick"] is ProjectRunStatus.COMPLETED, (
+            "a project configured to do nothing must finish inside the budget; if it did not, "
+            "the budget is smaller than the fixed cost of starting a project"
+        )
         assert outcome.exit_code == WorkspaceExitCode.INTERNAL_ERROR
 
     def test_a_timeout_says_so_in_the_error(self, tmp_path):
-        _, plan = _make_workspace(tmp_path, ("slow", "MEDIUM"))
-        FakeOrchestrator.behaviour["slow"] = {"sleep": 1.5}
-        outcome = _run(tmp_path, plan, project_timeout=0.2)
+        """The error names the budget, so the number is read from the constant.
+
+        Asserting a hardcoded "0.2" here was what tied this test to the old value: changing the
+        budget anywhere else would have failed this assertion for a reason unrelated to what it
+        checks, which is that the message reports the deadline it enforced.
+        """
+        _, plan = _make_workspace(tmp_path, ("stalled", "MEDIUM"))
+        release = threading.Event()
+        FakeOrchestrator.behaviour["stalled"] = {"block": release}
+        try:
+            outcome = _run(tmp_path, plan, project_timeout=PROJECT_TIMEOUT)
+        finally:
+            release.set()
+
         error = outcome.payload.projects[0].error or ""
         assert "timed out" in error.lower()
-        assert "0.2" in error
+        assert str(PROJECT_TIMEOUT) in error
 
     def test_the_timeout_bounds_wall_clock_when_the_bound_is_smaller(self, tmp_path):
         """The defect: a queued project was never given a deadline.
@@ -881,7 +936,9 @@ class TestFailureHandling:
         FakeOrchestrator.behaviour["wedged"] = {"block": release}
         try:
             started = time.monotonic()
-            outcome = _run(tmp_path, plan, project_timeout=0.2, max_parallel_projects=1)
+            outcome = _run(
+                tmp_path, plan, project_timeout=PROJECT_TIMEOUT, max_parallel_projects=1
+            )
             elapsed = time.monotonic() - started
         finally:
             release.set()
@@ -900,7 +957,9 @@ class TestFailureHandling:
         release = threading.Event()
         FakeOrchestrator.behaviour["wedged"] = {"block": release}
         try:
-            outcome = _run(tmp_path, plan, project_timeout=0.2, max_parallel_projects=1)
+            outcome = _run(
+                tmp_path, plan, project_timeout=PROJECT_TIMEOUT, max_parallel_projects=1
+            )
         finally:
             release.set()
 
@@ -922,7 +981,9 @@ class TestFailureHandling:
         release = threading.Event()
         FakeOrchestrator.behaviour["wedged"] = {"block": release}
         try:
-            outcome = _run(tmp_path, plan, project_timeout=0.2, max_parallel_projects=2)
+            outcome = _run(
+                tmp_path, plan, project_timeout=PROJECT_TIMEOUT, max_parallel_projects=2
+            )
         finally:
             release.set()
 
@@ -945,7 +1006,7 @@ class TestFailureHandling:
             "sarif": _sarif(level="error", count=3),
         }
         try:
-            outcome = _run(tmp_path, plan, project_timeout=0.2)
+            outcome = _run(tmp_path, plan, project_timeout=PROJECT_TIMEOUT)
             # Let the abandoned worker finish and attempt its write.
             release.set()
             time.sleep(0.4)
@@ -1283,28 +1344,97 @@ class TestWorkspaceOutput:
     ):
         """Pin the arithmetic by driving the clock instead of racing it.
 
-        The first ``monotonic()`` call in ``execute_workspace`` is the start
-        stamp; every later call here returns a fixed later instant, so the
-        recorded wall clock must be exactly the difference. ``calls`` is the
-        control: if the start stamp were ever *not* the first call, or the clock
-        were consulted only once, the subtraction below would be meaningless, so
-        the count is asserted rather than assumed.
+        WHY THIS IS NOT "first call is the start stamp"
+
+        It was, and that form failed on one CI row with ``Obtained: 0.0,
+        Expected: 42.5`` while passing on the other seventeen. The reason is that
+        ``monkeypatch.setattr`` on ``time.monotonic`` replaces the attribute on
+        the ``time`` MODULE, so the fake is process-global: thread-pool warmup,
+        logging and executor internals consult it too, and how many calls they
+        take before ``execute_workspace`` reaches its own ``started`` varies by
+        platform. When one of them consumed the single 100.0, the workspace's
+        start stamp became the same value as its end stamp and the difference
+        was exactly zero.
+
+        Note the old assertion ``calls[0] == 100.0`` still passed in that state,
+        because it only proved SOMETHING read 100.0 first -- not that the
+        workspace's own start stamp was that read. A control that cannot fail on
+        the thing it is guarding is not a control.
+
+        The fix is to stop patching the global clock at all. This module reads
+        ``time.monotonic`` and nothing else from ``time`` -- nine call sites, no
+        ``sleep``, no ``time()`` -- so replacing the module's own ``time``
+        reference with a stand-in confines the fake to the code under test.
+        Thread pools, logging and executors keep the real clock and cannot
+        consume a read.
+
+        That restores the premise the exact assertion needs: among this module's
+        own calls, ``execute_workspace``'s ``started`` really is the first,
+        because the per-project stamps are taken by workers it launches later.
+        So the recorded wall clock must be exactly the difference, and a
+        constant fails.
+
+        A weaker form was tried first -- a strictly increasing clock, asserting
+        only that the result was *some* difference of two observed reads. It was
+        rejected on review: with reads one apart, every integer up to the call
+        count is a valid difference, so a hardcoded constant passes as soon as
+        enough reads happen. It survived a mutation check only by luck of how
+        many calls that run made.
+
+        The control records the CALLER, not the value. `calls[0] == 100.0` would be
+        a tautology: the fake returns 100.0 exactly when `calls` is empty, so the
+        first recorded value is 100.0 in every possible execution. Asserting it
+        proves nothing, and giving it a message about the start stamp moving is
+        worse than omitting it, because that message can never fire. Recording
+        which function took each read is what makes "execute_workspace's stamp is
+        the first one" falsifiable.
+
+        WHAT THIS STILL DOES NOT CATCH, stated so nobody assumes otherwise
+
+        Moving ``started`` LATER inside ``execute_workspace`` -- after the plugin
+        prewarm, say, or after the changed-file gate loop -- leaves it the first
+        read by this module and by this function, so the caller check passes and
+        the difference is still exactly 42.5. Production would then under-report
+        the wall clock by however long that skipped work took, which under
+        ``--precommit`` is real seconds. This test pins "the field is a
+        subtraction of the first module read from a later one"; it does not pin
+        "the first read happens before all the work". A hardcoded 42.5 also
+        passes, for the same reason any exact-value assertion does.
+        WHY THE PATCH TARGETS THE NAME AND NOT THE ATTRIBUTE
+
+        The stand-in replaces the ``time`` *name* in ``execution``'s namespace
+        rather than the ``monotonic`` attribute on the module that name refers
+        to. ``execution.time`` IS the stdlib ``time`` module, so patching
+        ``execution.time.monotonic`` would mutate it process-wide and every
+        unrelated caller of ``time.monotonic()`` would land in ``calls``. That
+        defeats the control instead of tripping it: a foreign call consumes the
+        ``100.0``, so ``execute_workspace`` reads ``142.5`` for both of its own
+        stamps and records a difference of ``0.0``. The failure surfaces only
+        once enough other tests have run to warm the plugin caches, which reads
+        as flake rather than as an order-dependent patch. Keep the patch narrow:
+        ``execution`` only ever uses ``time.monotonic``, so a stand-in exposing
+        that one name is sufficient, and ``calls`` then records solely the reads
+        made by the code under test.
         """
-        calls: List[float] = []
+        calls: List[tuple[str, float]] = []
 
         def fake_monotonic() -> float:
+            caller = sys._getframe(1).f_code.co_name
             value = 100.0 if not calls else 142.5
-            calls.append(value)
+            calls.append((caller, value))
             return value
 
         monkeypatch.setattr(
-            "automated_security_helper.workspace.execution.time.monotonic",
-            fake_monotonic,
+            "automated_security_helper.workspace.execution.time",
+            SimpleNamespace(monotonic=fake_monotonic),
         )
         _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
         outcome = _run(tmp_path, plan)
         assert len(calls) >= 2, "the clock was consulted too few times to subtract"
-        assert calls[0] == 100.0
+        assert calls[0] == ("execute_workspace", 100.0), (
+            "the module's first clock read was not execute_workspace's start stamp, "
+            f"so the subtraction below is not the one under test: {calls!r}"
+        )
         assert outcome.payload.wall_clock_seconds == pytest.approx(42.5)
 
     def test_the_payload_status_is_completed(self, tmp_path):

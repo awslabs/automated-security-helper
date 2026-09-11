@@ -8,8 +8,10 @@ Unit tests for the scan registry module.
 This module tests the scan registry and management components for ASH MCP server.
 """
 
+import os
 import signal
 from datetime import datetime
+from pathlib import Path
 from unittest import mock
 
 import pytest
@@ -849,3 +851,152 @@ def test_get_scan_registry():
 
     assert registry1 is registry2
     assert isinstance(registry1, ScanRegistry)
+
+
+class TestDirectoryComparisonIsCanonical:
+    """One directory answers to one entry, however the caller spelled the path.
+
+    Why this exists
+    ---------------
+    Every directory-keyed decision in the registry compared the raw string it was
+    handed. ``/proj`` and ``/proj/`` were therefore two directories, as were
+    ``/proj/../proj`` and ``/proj``, so ``register_scan`` admitted a second active
+    scan on a tree that already had one. Both scans then wrote into
+    ``<proj>/.ash/ash_output``: one source examined twice, its findings attributed
+    twice, and two writers racing on one output tree.
+
+    ``str(Path)`` never ends in a separator, so the trailing-separator spelling can
+    only arrive from a caller -- which is the untrusted case. The single-project
+    MCP flow reaches this code with one hand-typed path, which made it survivable;
+    a workspace scan derives N of them from a file an operator wrote.
+
+    Real directories, not mocked validators
+    ---------------------------------------
+    These use ``tmp_path`` rather than the ``mock_validate_directory_path``
+    fixture the tests above share. The comparison under test resolves the path,
+    and ``Path.resolve()`` on a directory that does not exist collapses ``..``
+    lexically without consulting the filesystem -- so a mocked-away existence
+    check would leave the traversal case measuring something weaker than the
+    production path does.
+    """
+
+    @staticmethod
+    def _register(registry: ScanRegistry, directory: Path, output: Path) -> str:
+        return registry.register_scan(
+            directory_path=str(directory), output_directory=str(output)
+        )
+
+    @staticmethod
+    def _project_and_output(tmp_path: Path) -> tuple[Path, Path]:
+        project = tmp_path / "proj"
+        project.mkdir()
+        output = tmp_path / "out"
+        output.mkdir()
+        return project, output
+
+    def test_a_trailing_separator_does_not_admit_a_second_active_scan(self, tmp_path):
+        project, output = self._project_and_output(tmp_path)
+        registry = ScanRegistry()
+        first = self._register(registry, project, output)
+
+        with pytest.raises(MCPResourceError) as excinfo:
+            registry.register_scan(
+                directory_path=str(project) + os.sep, output_directory=str(output)
+            )
+
+        assert "already has an active scan" in str(excinfo.value)
+        assert excinfo.value.context["scan_id"] == first
+        assert registry.get_scan_count() == 1
+
+    def test_a_traversal_does_not_admit_a_second_active_scan(self, tmp_path):
+        """``proj/../proj`` is ``proj`` and is not the same string.
+
+        Joined as strings rather than with ``/`` on a ``Path``: pathlib collapses
+        nothing at construction for ``..``, but it does drop a single ``.``, so
+        string joining is the only way to be sure the un-canonical form survives
+        to the call.
+        """
+        project, output = self._project_and_output(tmp_path)
+        registry = ScanRegistry()
+        first = self._register(registry, project, output)
+        traversal = os.path.join(str(project), os.pardir, "proj")
+        assert traversal != str(project)
+
+        with pytest.raises(MCPResourceError) as excinfo:
+            registry.register_scan(
+                directory_path=traversal, output_directory=str(output)
+            )
+
+        assert excinfo.value.context["scan_id"] == first
+        assert registry.get_scan_count() == 1
+
+    def test_a_sibling_sharing_a_prefix_still_registers(self, tmp_path):
+        """Positive control: canonicalising must not collapse distinct paths.
+
+        The cheapest wrong way to do this is a ``startswith`` or a prefix strip,
+        and ``proj`` against ``proj-backup`` is where that shows.
+        """
+        project, output = self._project_and_output(tmp_path)
+        sibling = tmp_path / "proj-backup"
+        sibling.mkdir()
+        registry = ScanRegistry()
+
+        first = self._register(registry, project, output)
+        second = self._register(registry, sibling, output)
+
+        assert first != second
+        assert registry.get_scan_count() == 2
+
+    def test_a_completed_scan_does_not_block_a_rescan(self, tmp_path):
+        """The rule is about *active* scans, and canonicalising must not widen it.
+
+        Applied without keeping the ``is_active()`` half of the condition, the
+        first scan of a directory would permanently block every later one --
+        which nothing else here would notice, because nothing else registers one
+        directory twice.
+        """
+        project, output = self._project_and_output(tmp_path)
+        registry = ScanRegistry()
+        first = self._register(registry, project, output)
+        registry.update_scan_status(first, MCScanStatus.COMPLETED)
+
+        second = registry.register_scan(
+            directory_path=str(project) + os.sep, output_directory=str(output)
+        )
+
+        assert second != first
+        assert registry.get_scan_count() == 2
+
+    def test_get_scan_by_directory_finds_the_entry_the_refusal_named(self, tmp_path):
+        """The refusal and the lookup have to agree on what one directory is.
+
+        ``register_scan`` reports the id of the scan already holding the
+        directory. A caller handed that id, asking the registry for the same
+        directory by the same string, must reach the same entry -- otherwise the
+        refusal names a scan the caller cannot then inspect.
+        """
+        project, output = self._project_and_output(tmp_path)
+        registry = ScanRegistry()
+        first = self._register(registry, project, output)
+
+        entry = registry.get_scan_by_directory(str(project) + os.sep)
+
+        assert entry is not None
+        assert entry.scan_id == first
+
+    def test_list_scans_filters_by_the_same_directory_however_spelled(self, tmp_path):
+        """The ``directory_path`` filter keys off the same notion of sameness.
+
+        Left comparing raw strings, ``list_scans`` would report zero scans for a
+        directory ``register_scan`` had just refused as occupied.
+        """
+        project, output = self._project_and_output(tmp_path)
+        sibling = tmp_path / "other"
+        sibling.mkdir()
+        registry = ScanRegistry()
+        first = self._register(registry, project, output)
+        self._register(registry, sibling, output)
+
+        matched = registry.list_scans(directory_path=str(project) + os.sep)
+
+        assert [entry["scan_id"] for entry in matched] == [first]

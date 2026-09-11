@@ -348,6 +348,79 @@ jobs:
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
+  # Deploy-tree AWS helpers: run them against a real moto endpoint.
+  #
+  # The boto3 rewrite replaced `aws s3 cp --recursive` and `aws ssm get-parameter`
+  # in the CDK buildspecs, because the ASH image those builds run in ships boto3
+  # and no AWS CLI. A deployed pipeline had failed all four shards at `aws: not
+  # found` AFTER a successful scan, so the scan stage went red and the merge never
+  # ran. The CDK tests assert the rendered template contains the right strings,
+  # which is what caught that -- but a string can be present and still wrong. A
+  # recursive download that reads only the first ListObjectsV2 page, flattens the
+  # key hierarchy, or writes outside its destination renders identically.
+  #
+  # So this job EXECUTES the command strings extracted from the committed
+  # deploy/cdk/templates/*.template.json against a moto server, plus the Terraform
+  # sibling helper, with every behavior test parametrized across both copies.
+  #
+  # WHY IT IS ITS OWN JOB WHEN unit-test ALREADY RUNS THESE: moto is a declared dev
+  # dependency, so `uv sync && uv run pytest` in the unit-test matrix does run this
+  # suite on all five OSes. That is good, and it is not sufficient -- the matrix's
+  # check is pytest's exit status, which stays 0 while the suite shrinks. Measured
+  # on this suite: marking one class skip, dropping one parametrization, or
+  # renaming one module out of the discovery pattern each deletes about a third of
+  # the coverage and leaves pytest exiting 0. scripts/verify_moto_server_suite.py
+  # asserts on the run instead -- a floor on tests executed, zero skips, both
+  # helper copies exercised, both modules present.
+  #
+  # Linux only, and deliberately: the buildspec commands under test are POSIX shell
+  # destined for a Linux CodeBuild container, and the suite skips those on Windows.
+  # The gate refuses ANY skip, so running it here is what makes "zero skips"
+  # meaningful. Python 3.12 only for the same reason the other gates pin it -- the
+  # unit-test matrix already covers this suite across every version.
+  # ---------------------------------------------------------------------------
+  deploy-aws-helpers:
+    name: deploy-tree AWS helpers (moto server)
+    runs-on: ubuntu-latest
+    # The suite's own slowest test uploads 1050 objects to force a second
+    # ListObjectsV2 page; the whole run measures ~30s at 4 workers. 15 leaves room
+    # for a slow runner without letting a hang sit for half an hour.
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-ash
+        with:
+          python-version: "3.12"
+          install-ash: "false"
+      # The suite needs the dev group, which is where moto[server] lives. The
+      # [server] extra is the part that provides ThreadedMotoServer; bare moto
+      # only patches botocore in-process and cannot reach the subprocesses these
+      # tests run.
+      - name: Install dependencies
+        run: uv sync
+      # No AWS credentials are configured for this job, and the fixture sets fake
+      # ones plus AWS_CONFIG_FILE/AWS_SHARED_CREDENTIALS_FILE pointing at paths
+      # that do not exist. Both matter: without AWS_ENDPOINT_URL a bare
+      # boto3.client("s3") resolves s3.amazonaws.com and really does send the
+      # request, so the fake credentials are the backstop and the suite has a test
+      # asserting the endpoint variable is what routes it to moto.
+      - name: Verify the deploy-tree AWS helpers against a moto server
+        run: uv run python scripts/verify_moto_server_suite.py --workers 4
+      # The gate writes its own report so a red run leaves per-test evidence
+      # rather than only the summary line that failed the step.
+      - name: Collect the suite report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: moto-server-suite-report
+          path: test-results/moto-server-suite.junit.xml
+          retention-days: 7
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
   # Install methods: method x OS x Python (matches ash-install-methods.yml)
   # ---------------------------------------------------------------------------
   install-validation:
@@ -440,3 +513,89 @@ jobs:
 
       - uses: ./.github/actions/validate-mcp
         if: matrix.method == 'mcp'
+
+  # ---------------------------------------------------------------------------
+  # One check name that can actually be required
+  # ---------------------------------------------------------------------------
+  #
+  # Every job above names itself from its matrix, so this workflow contributes 84 distinct
+  # check-run names to a pull request and not one of them is stable. A ruleset's
+  # required_status_checks list holds literal context strings with no wildcard, so requiring
+  # `unit-test` means enumerating all 18 of its names -- and then any matrix edit either orphans
+  # a required context that no longer runs, which leaves a pull request pending forever, or
+  # quietly adds a leg that nothing requires. That maintenance cost is why the ruleset requires
+  # two contexts today while 150 of the 152 checks on a pull request are advisory.
+  #
+  # This job's name does not depend on the matrix, so it can be required once and stay correct
+  # across matrix changes. It reports the verdict the individual legs already computed.
+  #
+  # THE TWO WAYS A GATE LIKE THIS FAILS OPEN
+  #
+  # `if: always()` is load-bearing, not defensive. Without it a failed dependency makes this job
+  # *skipped*, and GitHub counts a skipped required check as a pass -- so the gate would
+  # disappear at exactly the moment it is supposed to speak. That is the whole failure mode this
+  # job exists to remove, so it must not reproduce it.
+  #
+  # The second way is drift: a job added to this workflow and not added to `needs` escapes the
+  # gate silently, and the gate keeps reporting success over a shrinking share of the suite. So
+  # the count is asserted rather than assumed. A census beats a list that nobody re-checks --
+  # the same reason .github/scripts/assert-coverage-completeness.mjs takes its file list from
+  # `git ls-files` rather than from the coverage report.
+  required-checks:
+    name: required-checks
+    if: always()
+    needs:
+      - lint
+      - unit-test
+      - scan-validation
+      - external-target-scan
+      - multi-project-attribution
+      - deploy-aws-helpers
+      - install-validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Assert every upstream job succeeded
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          # Bump deliberately when adding a job above, which is the point: the assertion below
+          # fails until this matches, so a new job cannot slip past the gate unnoticed.
+          EXPECTED_UPSTREAM_JOBS: "7"
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          needs = json.loads(os.environ["NEEDS_JSON"])
+          expected = int(os.environ["EXPECTED_UPSTREAM_JOBS"])
+
+          for name, data in sorted(needs.items()):
+              print(f"{data.get('result', '?'):<10} {name}")
+
+          problems = []
+
+          if len(needs) != expected:
+              problems.append(
+                  f"this gate depends on {len(needs)} job(s) but expects {expected}. A job was "
+                  "added to the workflow without being added to this job's `needs`, so it is "
+                  "not covered by the required check. Add it and bump "
+                  "EXPECTED_UPSTREAM_JOBS."
+              )
+
+          # Every job in this workflow is unconditional -- none carries a job-level `if` -- so a
+          # result of anything other than success means something went wrong, including
+          # 'skipped'. Tolerating 'skipped' here would let a job that never ran read as a pass.
+          for name, data in sorted(needs.items()):
+              result = data.get("result")
+              if result != "success":
+                  problems.append(f"{name}: {result}")
+
+          if problems:
+              for problem in problems:
+                  print(f"::error::{problem}")
+              sys.exit(1)
+
+          print(f"all {len(needs)} upstream job(s) succeeded")
+          PY

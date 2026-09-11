@@ -1,7 +1,9 @@
 """Backend registration + discovery.
 
 @register_backend on a class adds it to BackendRegistry. Importing
-transpiler.backends triggers all 15 platform modules, populating the registry.
+transpiler.backends triggers every backend module, populating the registry.
+`BackendRegistry.names()` is the authoritative list; nothing should restate its
+length, since a stated count goes stale the next time a backend is added.
 """
 from __future__ import annotations
 
@@ -25,6 +27,13 @@ class BackendRegistry:
                 f"backend '{backend_cls.NAME}' already registered "
                 f"({cls._backends[backend_cls.NAME].__name__} vs {backend_cls.__name__})"
             )
+        # Fail at import rather than mid-build. Registration is the point where
+        # a backend commits to being built, and a build rmtree's its output
+        # directory before writing, so an OUTPUT_DIR that escapes its anchor is
+        # destructive rather than merely wrong. Imported locally to keep
+        # registry.py free of a module-level dependency on core.
+        from .core import validated_output_dir
+        validated_output_dir(backend_cls.NAME, backend_cls.OUTPUT_DIR)
         cls._backends[backend_cls.NAME] = backend_cls
         return backend_cls
 

@@ -31,8 +31,19 @@ inputs:
 runs:
   using: "composite"
   steps:
+    # Only the docker cells have anything to do with a buildx builder. The two
+    # steps below that consume what this bootstraps are both gated
+    # `oci-runner == 'docker'`, and ASH's own container build shells out to
+    # `<runner> build` -- `podman build`, never `docker buildx` -- on every
+    # entrypoint (utils/ash_helpers.ps1, ./ash, run_ash_container.py). So on the
+    # podman cells this used to boot a `docker-container` buildkit builder and
+    # pull moby/buildkit:buildx-stable-1 from Docker Hub that nothing then used:
+    # six matrix cells paying a network round trip purely as failure surface. One
+    # such pull returned a 500 and took the whole job with it. Matching the gate
+    # the credential steps already use keeps docker unchanged and drops the
+    # dependency everywhere it was never earned.
     - name: Set up Docker Buildx on Linux
-      if: contains(inputs.os, 'ubuntu') && inputs.method != 'python-local' && inputs.oci-runner != 'finch'
+      if: contains(inputs.os, 'ubuntu') && inputs.method != 'python-local' && inputs.oci-runner == 'docker'
       uses: docker/setup-buildx-action@v4
 
     # ASH's container build exports and restores its layers through the GitHub

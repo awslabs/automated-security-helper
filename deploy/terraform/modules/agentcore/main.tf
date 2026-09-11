@@ -81,6 +81,19 @@ locals {
 #
 
 resource "aws_secretsmanager_secret" "auth_header" {
+  # CKV2_AWS_57: rotation needs a function that can change the credential at both
+  # ends, and the far end here is whatever MCP client the operator configured with
+  # the same header value -- not something AWS can reach. Scheduled rotation would
+  # only start rejecting callers. Rotating means changing mcp_auth_header_value and
+  # re-applying, in step with the clients.
+  #checkov:skip=CKV2_AWS_57:No rotation function can update the far end -- an operator-configured MCP client -- so scheduled rotation would only start rejecting callers. Rotation is done by changing mcp_auth_header_value alongside the clients.
+  #
+  # CKV_AWS_149: already encrypted with the aws/secretsmanager managed key.
+  # Satisfying the rule would mean this module creating a customer managed key and
+  # every caller carrying its monthly charge, and there is no input to accept an
+  # existing one. The exposure this design does address is the comment above:
+  # keeping the value out of the runtime's environment_variables.
+  #checkov:skip=CKV_AWS_149:Already encrypted with the aws/secretsmanager managed key. Satisfying this would require the module to create a CMK and bill every caller for it; there is no input to supply an existing key, and adding one should follow a deployment that needs it.
   count = local.manage_auth_secret ? 1 : 0
 
   name        = "${var.name_prefix}-agentcore-mcp-auth-header"

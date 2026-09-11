@@ -124,10 +124,72 @@ describe('sharded scan contract', () => {
     // into a JSON string and then stringified again for this assertion, so each
     // real newline arrives double-escaped; pinning the escaping would make this
     // test fail on a rendering change rather than on a behaviour change.
+    //
+    // Matched with the `python3 /tmp/` prefix, not on the bare script name: the
+    // helper's own docstring carries a usage line reading `ash-s3-sync.py upload
+    // <local-dir> ...`, and that text is written into pre_build by the heredoc. A
+    // bare-name search finds the documentation and reports the upload as
+    // happening before the scan.
     const restoreAt = spec.indexOf('set -e');
-    const uploadAt = spec.indexOf('aws s3 cp --recursive');
+    const uploadAt = spec.indexOf('python3 /tmp/ash-s3-sync.py upload');
     expect(restoreAt).toBeGreaterThan(-1);
     expect(uploadAt).toBeGreaterThan(restoreAt);
+  });
+
+  test('S3 transfers use boto3, because the ASH image has no AWS CLI', () => {
+    // The shard and merge projects run IN the ASH image, which ships no `aws`.
+    // This shipped once as `aws s3 cp` and failed every shard at post_build with
+    // exit 127, after the scan had already succeeded. The class-level gate lives
+    // in ash-no-aws-cli.test.ts; this pins the specific commands.
+    const specs = buildSpecsByName(template);
+    const shardSpecs = Object.values(specs).filter((s) => s.includes('ASH_SHARD_INDEX'));
+    expect(shardSpecs).toHaveLength(4);
+    for (const spec of shardSpecs) {
+      expect(spec).toContain('python3 /tmp/ash-s3-sync.py upload ./ash-shard-output');
+    }
+
+    const [, mergeSpec] = Object.entries(specs).find(([, s]) => s.includes('ash merge'))!;
+    expect(mergeSpec).toContain('python3 /tmp/ash-s3-sync.py download');
+    expect(mergeSpec).toContain('python3 /tmp/ash-s3-sync.py upload ./ash-merged-output');
+  });
+
+  test('the helper is written in pre_build, before any phase that uses it', () => {
+    // post_build runs even when the build phase failed, so a helper materialized
+    // on the success path only would replace a scan failure with a confusing
+    // "no such file" failure.
+    const users = Object.values(buildSpecsByName(template)).filter((s) =>
+      s.includes('python3 /tmp/ash-s3-sync.py'),
+    );
+    // Four shards plus the merge. A zero here would make the ordering assertion
+    // below vacuous.
+    expect(users).toHaveLength(5);
+    for (const spec of users) {
+      const writtenAt = spec.indexOf("cat > /tmp/ash-s3-sync.py <<'PY'");
+      const firstUseAt = spec.indexOf('python3 /tmp/ash-s3-sync.py');
+      expect(writtenAt).toBeGreaterThan(-1);
+      expect(firstUseAt).toBeGreaterThan(writtenAt);
+    }
+  });
+
+  test('the base config is read with boto3, not the AWS CLI', () => {
+    // Latent rather than correct before: AshBaseConfigYaml defaults empty, so the
+    // else branch ran and nobody hit `aws ssm get-parameter`. An adopter who
+    // supplied a base config would have.
+    //
+    // Scoped by MATERIALIZE_CONFIG_COMMAND's own message rather than by the
+    // parameter name. The image-build project in this same stack bakes the MCP
+    // entrypoint into the image with a heredoc, and that script reads the same
+    // ASH_BASE_CONFIG_SSM_PARAMETER — so filtering on the variable name picks up
+    // six buildspecs, one of which is a managed-image build that materializes no
+    // config of its own.
+    const configConsumers = Object.values(buildSpecsByName(template)).filter((s) =>
+      s.includes('No ASH base configuration supplied'),
+    );
+    expect(configConsumers).toHaveLength(5);
+    for (const spec of configConsumers) {
+      expect(spec).toContain("boto3.client('ssm')");
+      expect(spec).not.toContain('aws ssm get-parameter');
+    }
   });
 
   test('the merge action passes one repeatable --results per shard', () => {

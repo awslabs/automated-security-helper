@@ -11,6 +11,10 @@ locals {
 # aws-ia module genuinely fits: it is verified, actively maintained, and its
 # output surface covers what the service needs.
 module "vpc" {
+  # CKV_TF_1 asks for a commit hash, which only a git source can carry. This is a
+  # Terraform Registry source, where the pin is the version constraint below, and
+  # the registry protocol offers no revision to name instead.
+  #checkov:skip=CKV_TF_1:Registry sources are pinned by version constraint, not commit hash; there is no revision to name for a registry module.
   source  = "aws-ia/vpc/aws"
   version = "~> 4.9"
 

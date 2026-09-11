@@ -33,6 +33,30 @@ class UVToolMixin:
     # Version detection
     # ------------------------------------------------------------------
 
+    def _uv_from_spec(self) -> Optional[str]:
+        """The ``--from`` spec this plugin's scan will run under.
+
+        Mirrors the construction in ``UVToolRunner.run_tool``, which builds the
+        spec from ``self.command`` plus this plugin's extras and version
+        constraint. Returns ``None`` when the scan passes no ``--from`` at all,
+        so the probe matches that too.
+
+        Why the probe needs this: ``uv tool run bandit`` and
+        ``uv tool run --from 'bandit[sarif,toml]>=1.7.0,<2.0.0' bandit`` resolve
+        to different environments. stevedore's entry-point cache is keyed on
+        ``sys.executable`` and ``sys.prefix``, so those two invocations warm two
+        different cache files -- and a probe that warms the wrong one leaves the
+        scan's file cold for N concurrent scanners to race, which is the whole
+        problem serializing the probe was meant to remove. Measured directly:
+        one workspace scan produced five distinct bandit environments.
+        """
+        extras = self._get_tool_package_extras()
+        constraint = self._get_tool_version_constraint()
+        if not extras and not constraint:
+            return None
+        base = f"{self.command}[{','.join(extras)}]" if extras else self.command
+        return f"{base}{constraint}" if constraint else base
+
     def _get_uv_tool_version(
         self, tool_name: str, package_name: Optional[str] = None
     ) -> Optional[str]:
@@ -40,10 +64,15 @@ class UVToolMixin:
 
         Args:
             tool_name: Name of the tool to get version for
+            package_name: ``--from`` spec to probe under. When omitted, defaults
+                to :meth:`_uv_from_spec` so the probe shares an environment --
+                and therefore an entry-point cache file -- with the scan.
 
         Returns:
             Version string if detected, None if version cannot be determined or UV is not available
         """
+        if package_name is None:
+            package_name = self._uv_from_spec()
         if not self.use_uv_tool:
             self._plugin_log(
                 f"UV tool execution is disabled for {tool_name}",
@@ -595,8 +624,14 @@ class UVToolMixin:
 
                 clear_find_executable_cache()
 
+                # Second argument is the ``--from`` spec, a string. This passed
+                # ``package_extras`` (a list) until now, which raised TypeError
+                # inside the probe and was swallowed by the broad except below,
+                # so the version silently read as unknown. After memoization it
+                # was worse: the failure was cached under the key
+                # "bandit::['sarif', 'toml']" and served to later callers.
                 post_install_version = runner.get_installed_tool_version(
-                    self.command, package_extras
+                    self.command, self._uv_from_spec()
                 )
 
                 self._plugin_log(

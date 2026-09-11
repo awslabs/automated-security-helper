@@ -1,5 +1,6 @@
 {
   "app": "npx ts-node --prefer-ts-exts bin/ash.ts",
+  "pathMetadata": false,
   "watch": {
     "include": ["**"],
     "exclude": [

@@ -89,8 +89,16 @@ def _excluded_reporter_reason(instance: object, python_only: bool) -> str:
         try:
             if not instance.is_python_only():
                 return FORMAT_REPORTER_NOT_PYTHON
-        except Exception:  # noqa: BLE001 -- a broken check must not break reporting
-            pass
+        except Exception as e:  # noqa: BLE001 -- a broken check must not break reporting
+            # Falling through to FORMAT_REPORTER_DEPENDENCIES is the documented
+            # attribution-by-elimination described above, so no control flow
+            # changes here. The exception is logged because otherwise a reporter
+            # with a broken is_python_only() is silently reattributed to a
+            # dependency problem it does not have.
+            ASH_LOGGER.debug(
+                f"{type(instance).__name__}.is_python_only() raised {e!r}; "
+                "attributing the exclusion to unsatisfied dependencies"
+            )
     return FORMAT_REPORTER_DEPENDENCIES
 
 

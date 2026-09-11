@@ -33,6 +33,7 @@ import { Construct } from 'constructs';
 
 import {
   ashSynthesizer,
+  AshCustomerKey,
   ashOfflineMode, ashVersion, rebuildSchedule,
 } from './ash-config';
 import { AshImageBuild } from './ash-image-build';
@@ -52,6 +53,9 @@ export class AshImagePipelineStack extends Stack {
     const version = ashVersion(this);
     const offline = ashOfflineMode(this);
     const schedule = rebuildSchedule(this);
+    // Shared by both architectures, so the two repositories and all four log
+    // groups answer to one key rather than asking the adopter for two.
+    const customerKey = new AshCustomerKey(this);
 
     // One customer-managed key per stack, shared by every CodeBuild project here.
     // Rotation is on: the key only protects build output, so a rotated key needs
@@ -73,6 +77,7 @@ export class AshImagePipelineStack extends Stack {
       rebuildSchedule: schedule,
       bootstrapOnDeploy: false,
       encryptionKey,
+      customerKey,
     });
 
     const amd = new AshImageBuild(this, 'Amd64', {
@@ -83,6 +88,7 @@ export class AshImagePipelineStack extends Stack {
       rebuildSchedule: schedule,
       bootstrapOnDeploy: false,
       encryptionKey,
+      customerKey,
     });
 
     new CfnOutput(this, 'Arm64RepositoryUri', {

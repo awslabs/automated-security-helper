@@ -23,7 +23,7 @@
     "semgrep",
     "grype"
   ],
-  "ash_version": "v3.4.0",
+  "ash_version": "v3.7.0",
   "commands": [
     {
       "name": "scan",

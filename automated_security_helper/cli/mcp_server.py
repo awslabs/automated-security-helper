@@ -12,7 +12,7 @@ the MCP protocol for ASH security scanning.
 import asyncio
 import json
 import os
-from typing import Dict, Any, Optional
+from typing import Dict, Any, NamedTuple, Optional
 from pathlib import Path
 
 from mcp.server.mcpserver import MCPServer, Context
@@ -30,8 +30,14 @@ from automated_security_helper.cli.mcp_tools import (
     mcp_validate_config,
     mcp_explain_finding,
     mcp_suggest_suppression,
+    mcp_set_source_git,
+    mcp_set_source_zip_chunk,
+    mcp_set_source_zip_finalize,
+    mcp_clear_source,
+    mcp_list_profiles,
 )
 from automated_security_helper.core.constants import ASH_EXIT_CODES
+from automated_security_helper.models.workspace import WorkspaceExitCode
 
 from automated_security_helper.core.resource_management.scan_registry import (
     get_scan_registry,
@@ -48,6 +54,15 @@ from automated_security_helper.core.resource_management.result_filters import (
 )
 from automated_security_helper.cli.mcp.progress_monitor import monitor_scan_progress
 from automated_security_helper.cli.mcp.scan_target import validate_scan_target
+from automated_security_helper.cli.mcp.session_identity import resolve_session_id
+from automated_security_helper.cli.mcp.source_delivery import (
+    delivered_session_count,
+    get_session_source_dir,
+)
+from automated_security_helper.cli.mcp.workspace import (
+    mcp_resolve_workspace,
+    mcp_scan_workspace,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 
 logger = ASH_LOGGER
@@ -61,6 +76,113 @@ _add_findings_list = add_findings_list
 _monitor_scan_progress = monitor_scan_progress
 
 mcp = MCPServer(name="ASH Security Scanner")
+
+
+class _OmittedSourceResolution(NamedTuple):
+    """Outcome of resolving ``run_ash_scan`` with no ``source_dir``.
+
+    Exactly one field is set: ``source_dir`` when a target was resolved, or
+    ``error`` when the call must be refused.
+    """
+
+    source_dir: Optional[str] = None
+    error: Optional[Dict[str, Any]] = None
+
+
+def _resolve_omitted_source_dir(session_id: str) -> _OmittedSourceResolution:
+    """Decide what ``run_ash_scan()`` with no arguments should scan.
+
+    WHY THIS REFUSES RATHER THAN GUESSING
+    -------------------------------------
+    The obvious implementation falls back to the process working directory when
+    the session has no delivered tree, and that fallback is the dangerous kind:
+    on a network transport the working directory is the *server's*, holds none of
+    the caller's code, and scanning it completes normally and reports no
+    findings. A caller cannot tell that from a clean repository. A security
+    scanner that examined nothing and reads as clean is worse than one that
+    fails, so the ambiguous cases are refused with a message naming the cause.
+
+    The fallback survives only where it is unambiguous. A transport that carries
+    no session header is a single local client -- stdio, where ``ash mcp`` runs
+    in the tree the developer means and the working directory has always been the
+    documented default. That case keeps working.
+
+    THE CASE THIS EXISTS FOR
+    ------------------------
+    On Bedrock AgentCore the platform mints session ids, and whether the id the
+    server receives is stable across requests in one session is not established
+    (see cli/mcp/session_identity.py). If it rotates, an upload lands under one
+    session directory and the scan looks under another. That shows up here as
+    "this session has nothing, but some other session does", which is reported as
+    exactly that rather than papered over -- the count of other delivering
+    sessions is the tell, and it names the likely cause in the error.
+
+    Args:
+        session_id: The session this call resolved to.
+
+    Returns:
+        An :class:`_OmittedSourceResolution` carrying either a target path or a
+        structured refusal.
+    """
+
+    from automated_security_helper.cli.mcp.profile_registry import (
+        DEFAULT_SESSION_ID,
+    )
+
+    delivered = get_session_source_dir(session_id)
+    if delivered is not None:
+        return _OmittedSourceResolution(source_dir=str(delivered))
+
+    if session_id == DEFAULT_SESSION_ID:
+        # No session header at all: a single local client, where the working
+        # directory is the documented default and is the tree the caller means.
+        #
+        # Checked BEFORE the cross-session diagnostic below, and the order is
+        # load-bearing. The other-sessions signal is only meaningful for a caller
+        # that HAS a session id; a caller with none cannot be the victim of an id
+        # that rotated, so letting another session's delivery refuse this call
+        # would break the documented stdio default for an unrelated reason.
+        return _OmittedSourceResolution(source_dir=str(Path.cwd().absolute()))
+
+    other_sessions = delivered_session_count()
+    if other_sessions:
+        # Somebody delivered source; this session is not who. Do not scan
+        # anything -- naming another session's tree would be a cross-tenant read,
+        # and the working directory is not what the caller meant either.
+        return _OmittedSourceResolution(
+            error={
+                "success": False,
+                "error": (
+                    "No source has been delivered under this session id, but "
+                    f"{other_sessions} other session(s) currently hold delivered "
+                    "source. This session id is most likely not stable across "
+                    "calls, so the upload and this scan resolved to different "
+                    "workspaces. Pass the source_dir that set_source_git or "
+                    "set_source_zip_finalize returned, rather than omitting it. "
+                    "Refusing to scan: falling back to the server's working "
+                    "directory would report a clean result for a tree that is "
+                    "not yours."
+                ),
+                "error_type": "session_source_mismatch",
+                "session_id": session_id,
+            }
+        )
+
+    return _OmittedSourceResolution(
+        error={
+            "success": False,
+            "error": (
+                "No source has been delivered under this session id, so there is "
+                "nothing to scan. Deliver a tree first with set_source_git or "
+                "set_source_zip_chunk/set_source_zip_finalize, or pass source_dir "
+                "explicitly. Refusing to scan: falling back to the server's "
+                "working directory holds none of your code, and would complete "
+                "with no findings and no error."
+            ),
+            "error_type": "no_source_delivered",
+            "session_id": session_id,
+        }
+    )
 
 
 @mcp.tool()
@@ -103,6 +225,8 @@ async def run_ash_scan(
 
     Args:
         source_dir: Path to the directory to scan. This should be the absolute path!
+            Omit it to scan a source tree this session delivered with
+            set_source_git or set_source_zip_finalize.
         severity_threshold: Minimum severity threshold (LOW, MEDIUM, HIGH, CRITICAL)
         config_path: Optional path to ASH configuration file
         clean_output: Whether to clean up existing output files before starting the scan
@@ -111,8 +235,22 @@ async def run_ash_scan(
         Dict with scan_id, status, and connection management guidance
     """
     try:
+        try:
+            session_id = resolve_session_id(ctx.headers)
+        except ValueError as e:
+            await ctx.error(str(e))
+            return {
+                "success": False,
+                "error": str(e),
+                "error_type": "invalid_session_id",
+            }
+
         if source_dir is None:
-            source_dir = str(Path.cwd().absolute())
+            resolved = _resolve_omitted_source_dir(session_id)
+            if resolved.error is not None:
+                await ctx.error(resolved.error["error"])
+                return resolved.error
+            source_dir = resolved.source_dir
         await ctx.info(f"run_ash_scan tool called in cwd: {Path.cwd()}")
         if not Path(source_dir).is_absolute():
             source_dir = str(Path.cwd() / source_dir)
@@ -122,7 +260,12 @@ async def run_ash_scan(
         # directory, so it must not run for a target the policy refuses.
         # mcp_scan_directory checks this again for callers that reach it
         # directly.
-        target_error = validate_scan_target(source_dir)
+        #
+        # The session id is passed so that this session's own workspace counts as
+        # a permitted root. Without it a delivered tree is refused by the very
+        # allowlist the operator set to bound the scan surface, since no operator
+        # lists a directory the server invented per connection.
+        target_error = validate_scan_target(source_dir, session_id=session_id)
         if target_error:
             await ctx.error(str(target_error))
             return {
@@ -151,10 +294,16 @@ async def run_ash_scan(
             except Exception as e:
                 await ctx.warning(f"Failed to clean up results file: {str(e)}")
 
+        # session_id is what engages the per-session scan lock in
+        # mcp_scan_directory. Two scans in one session write the same
+        # <workspace>/<session>/source tree and the same .ash output inside it, so
+        # they have to serialize; scans in different sessions still run in
+        # parallel because they contend on different locks.
         result = await mcp_scan_directory(
             directory_path=source_dir,
             severity_threshold=severity_threshold,
             config_path=config_path,
+            session_id=session_id,
         )
 
         if not result.get("success", False) or "scan_id" not in result:
@@ -192,6 +341,7 @@ async def run_ash_scan(
             "progress": 0.0,
             "message": "Scan started, initializing scanners. Use get_scan_progress to track progress.",
             "directory_path": str(directory_path_obj),
+            "session_id": session_id,
             "important": {
                 "connection_management": (
                     "CRITICAL: ASH scans take 30-120+ seconds. To prevent MCP connection timeout, "
@@ -214,6 +364,161 @@ async def run_ash_scan(
             "success": False,
             "error": f"Error running scan: {str(e)}",
             "error_type": type(e).__name__,
+        }
+
+
+@mcp.tool()
+async def resolve_ash_workspace(
+    ctx: Context,
+    workspace_file: str,
+    workspace_config: Optional[str] = None,
+    allow_missing_projects: bool = False,
+    config_overrides: Optional[list] = None,
+) -> Dict[str, Any]:
+    """Resolve a VS Code workspace file into a scan plan without scanning anything.
+
+    The MCP equivalent of `ash --workspace <file> --dry-run`. Reads the workspace
+    definition and every project's own ASH config, then reports which directories
+    became projects, what key each was given, which scanners its config enables,
+    which severity threshold it will be judged against, and which projects were
+    dropped and why. Nothing is scanned and no output tree is written, so this is
+    the cheap way to check a workspace before committing to N repository scans.
+
+    Call this first when a workspace is unfamiliar, then run_ash_workspace_scan on
+    the same arguments: the scan resolves the same plan from the same inputs.
+
+    Args:
+        workspace_file: Absolute path to the .code-workspace file.
+        workspace_config: Optional path to a workspace policy file. Must exist if
+            given; ASH will not fall back to searching for one.
+        allow_missing_projects: Mark project directories that are absent or
+            unreadable as skipped instead of refusing the workspace.
+        config_overrides: Optional list of `key=value` config overrides, applied to
+            each project's config so the reported threshold is the enforced one.
+
+    Returns:
+        Dict with `plan` (the rendered plan, for a human to read), `projects` (the
+        same decisions structured), and `exit_code` -- 0 on success, 4 for a
+        workspace definition or policy problem, 3 for a project whose own config is
+        invalid.
+    """
+    try:
+        await ctx.info(f"Resolving ASH workspace: {workspace_file}")
+        response = await mcp_resolve_workspace(
+            workspace_file=workspace_file,
+            workspace_config=workspace_config,
+            allow_missing_projects=allow_missing_projects,
+            config_overrides=list(config_overrides) if config_overrides else None,
+        )
+        if not response.get("success", False):
+            await ctx.error(str(response.get("error", "Unknown error")))
+        return response
+    except Exception as e:
+        logger.exception(f"Error in resolve_ash_workspace: {str(e)}")
+        await ctx.error(f"Error resolving workspace: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Error resolving workspace: {str(e)}",
+            "error_type": type(e).__name__,
+            "exit_code": int(WorkspaceExitCode.INTERNAL_ERROR),
+        }
+
+
+@mcp.tool()
+async def run_ash_workspace_scan(
+    ctx: Context,
+    workspace_file: str,
+    workspace_config: Optional[str] = None,
+    allow_missing_projects: bool = False,
+    config_overrides: Optional[list] = None,
+    output_dir: Optional[str] = None,
+    scanners: Optional[list] = None,
+    excluded_scanners: Optional[list] = None,
+    offline: bool = False,
+    clean_output: bool = True,
+) -> Dict[str, Any]:
+    """Scan every project in a VS Code workspace and return the per-project verdict.
+
+    The MCP equivalent of `ash --workspace <file>`. Each project is scanned with
+    its own ASH config and its own severity threshold, a workspace policy file can
+    impose a ceiling over all of them, and the results are aggregated into one
+    workspace payload.
+
+    Unlike run_ash_scan this call does not return early: it waits for the whole
+    workspace and returns the verdict. Progress is reported as completed projects
+    over total projects, with the project key in the message, so a client watching
+    progress notifications can see which project is finishing.
+
+    Every project gets its own entry in the scan registry, so the `scan_ids` map in
+    the response can be used with get_scan_progress and get_scan_results per
+    project. A project skipped at resolution gets no entry and no id.
+
+    Confinement: `ASH_MCP_ALLOWED_ROOTS` governs the project directories, and one
+    project outside the permitted roots refuses the whole workspace rather than
+    scanning the rest -- a green result covering fewer projects than you asked for
+    is the outcome that refusal exists to prevent. The .code-workspace file itself
+    and the workspace policy file are config inputs and are not confined.
+
+    Not available in container mode; workspace mode runs locally.
+
+    Args:
+        workspace_file: Absolute path to the .code-workspace file.
+        workspace_config: Optional path to a workspace policy file.
+        allow_missing_projects: Skip absent or unreadable project directories
+            rather than refusing the workspace.
+        config_overrides: Optional list of `key=value` config overrides.
+        output_dir: Where to write the workspace output tree. Defaults to
+            `<workspace root>/.ash/ash_output`.
+        scanners: Restrict every project to these scanner names.
+        excluded_scanners: Exclude these scanners from every project. Takes
+            precedence over `scanners`.
+        offline: Run without network access.
+        clean_output: Remove each project's previous aggregated-results file first.
+
+    Returns:
+        Dict with `scan_ids` (project key to registry scan id), `projects` (each
+        project's status, finding counts and threshold verdict), `results_path`, and
+        `exit_code` -- 0 clean, 2 actionable findings above a threshold, 3 an
+        invalid project config, 4 a workspace definition, policy or confinement
+        refusal, 1 an internal error. `success` reports whether the scan ran; the
+        verdict is `exit_code`.
+    """
+    try:
+        await ctx.info(f"Starting ASH workspace scan: {workspace_file}")
+        # No filesystem work happens here. The confinement check needs the
+        # resolved project directories, so it lives inside mcp_scan_workspace,
+        # which runs it immediately after resolution and before its first mkdir or
+        # clean_output deletion -- the same ordering run_ash_scan enforces above by
+        # checking the policy before touching the target.
+        response = await mcp_scan_workspace(
+            workspace_file=workspace_file,
+            workspace_config=workspace_config,
+            allow_missing_projects=allow_missing_projects,
+            config_overrides=list(config_overrides) if config_overrides else None,
+            output_dir=output_dir,
+            scanners=list(scanners) if scanners else None,
+            excluded_scanners=list(excluded_scanners) if excluded_scanners else None,
+            offline=offline,
+            clean_output=clean_output,
+            progress_reporter=ctx.report_progress,
+        )
+        if not response.get("success", False):
+            await ctx.error(str(response.get("error", "Unknown error")))
+            return response
+
+        await ctx.info(
+            f"Workspace scan finished with exit code {response.get('exit_code')} "
+            f"across {len(response.get('scan_ids', {}))} project(s)"
+        )
+        return response
+    except Exception as e:
+        logger.exception(f"Error in run_ash_workspace_scan: {str(e)}")
+        await ctx.error(f"Error running workspace scan: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Error running workspace scan: {str(e)}",
+            "error_type": type(e).__name__,
+            "exit_code": int(WorkspaceExitCode.INTERNAL_ERROR),
         }
 
 
@@ -711,10 +1016,20 @@ def list_scanners() -> list:
 
     Returns one entry per scanner with:
       name: scanner config name (e.g. "bandit", "checkov")
-      version: detected version string, or null if unavailable
-      dependencies_satisfied: whether the scanner's runtime dependencies are met
+      version: detected version string, or null when the scanner reports none.
+        The format is whatever each scanner reports and is not consistent between
+        them -- bandit reports "bandit 1.9.4" where checkov reports "3.3.11".
+      dependencies_satisfied: true, false, or null when it could not be
+        determined, which happens when a scanner cannot be constructed or its own
+        dependency check raises. Treat null as "unknown", not as "not met": a
+        scanner reporting null may well run.
       offline_strategy: one of "bundled", "cache_flags", "skip_offline", "unknown"
       enabled: whether the scanner is enabled in the default ASH config
+
+    dependencies_satisfied describes this deployment's environment at the moment of
+    the call. It is not a prediction about a scan: a scanner reporting true can
+    still fail on a given target, and a scan may skip a scanner for reasons of
+    configuration rather than dependencies.
     """
     try:
         return mcp_list_scanners()
@@ -840,6 +1155,251 @@ async def suggest_suppression(
         return {
             "success": False,
             "error": f"Error suggesting suppression: {str(e)}",
+            "error_type": type(e).__name__,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Source delivery.
+#
+# A client on a network transport shares no filesystem with the server, so the
+# tree to scan has to arrive over the protocol. These four tools are the
+# delivery surface; the implementation and its limits live in
+# cli/mcp/source_delivery.py, and the wrappers below it in cli/mcp_tools.py.
+#
+# Each one takes its session from the transport rather than from an argument.
+# Letting a client name its own session id would let it name another client's
+# workspace, and on AgentCore the platform supplies the id anyway -- see
+# cli/mcp/session_identity.py.
+#
+# The delivered tree becomes the default target of run_ash_scan for that
+# session, so the usual sequence is deliver -> run_ash_scan() with no arguments
+# -> get_scan_progress.
+# ---------------------------------------------------------------------------
+
+
+def _session_error(e: ValueError) -> Dict[str, Any]:
+    """Shape a rejected session header like the tools' other failures."""
+    return {"success": False, "error": str(e), "error_type": "invalid_session_id"}
+
+
+def _with_session(result: Dict[str, Any], session_id: str) -> Dict[str, Any]:
+    """Echo the resolved session id back to the caller.
+
+    Two reasons. It tells a client which workspace a call actually landed in,
+    which is otherwise invisible when the id comes from a header the client did
+    not set. And it makes an open question answerable from outside the container:
+    on Bedrock AgentCore the platform mints session ids and it is not established
+    whether the id the server *receives* is stable across requests in one session
+    (see cli/mcp/session_identity.py). Calling any of these tools twice and
+    comparing this field settles it without a code change or a log dive.
+
+    Echoing costs nothing in disclosure: the value is the caller's own id, which
+    it or the platform acting for it supplied. mcp_select_profile already returns
+    session_id for the same reason.
+    """
+    return {**result, "session_id": session_id}
+
+
+@mcp.tool()
+async def set_source_git(
+    ctx: Context,
+    url: str,
+    ref: Optional[str] = None,
+    ssh_key_id: Optional[str] = None,
+    depth: int = 1,
+) -> Dict[str, Any]:
+    """Clone a repository into this session's workspace and make it the scan target.
+
+    After this returns, call run_ash_scan() with no source_dir to scan the clone.
+
+    Args:
+        url: Remote URL to clone (https or ssh). Rejected if it begins with '-'
+             or uses the ext:: transport, both of which make git run a command.
+        ref: Optional branch, tag, or commit. Defaults to the remote's default branch.
+        ssh_key_id: Opaque identifier for a key the operator registered on the
+                    server. Raw private keys are never accepted over the wire.
+        depth: Shallow-clone depth. Defaults to 1.
+
+    Returns:
+        Dict with success and source_dir, or success=False and error.
+    """
+    try:
+        session_id = resolve_session_id(ctx.headers)
+    except ValueError as e:
+        await ctx.error(str(e))
+        return _session_error(e)
+
+    try:
+        result = mcp_set_source_git(
+            url=url,
+            ref=ref,
+            ssh_key_id=ssh_key_id,
+            depth=depth,
+            session_id=session_id,
+        )
+    except Exception as e:
+        logger.exception(f"Error in set_source_git: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Error cloning source: {str(e)}",
+            "error_type": type(e).__name__,
+        }
+
+    if result.get("success"):
+        await ctx.info(f"Source cloned for session {session_id}")
+    else:
+        await ctx.error(str(result.get("error", "clone failed")))
+    return _with_session(result, session_id)
+
+
+@mcp.tool()
+async def set_source_zip_chunk(
+    ctx: Context,
+    upload_id: str,
+    sequence: int,
+    data_b64: str,
+    last: bool,
+) -> Dict[str, Any]:
+    """Upload one base64 chunk of a zipped source tree.
+
+    Chunks must arrive in order, each at most 1 MiB once decoded. Send the final
+    chunk with last=True, then call set_source_zip_finalize to verify and extract.
+
+    Args:
+        upload_id: Identifier you choose, scoping this one upload.
+        sequence: Zero-based ordinal of this chunk.
+        data_b64: Base64-encoded chunk payload.
+        last: True on the final chunk.
+
+    Returns:
+        Dict with success, received, next_sequence and last; or success=False
+        and error on an out-of-order, oversize, or malformed chunk.
+    """
+    try:
+        session_id = resolve_session_id(ctx.headers)
+    except ValueError as e:
+        await ctx.error(str(e))
+        return _session_error(e)
+
+    try:
+        return _with_session(
+            mcp_set_source_zip_chunk(
+                upload_id=upload_id,
+                sequence=sequence,
+                data_b64=data_b64,
+                last=last,
+                session_id=session_id,
+            ),
+            session_id,
+        )
+    except Exception as e:
+        logger.exception(f"Error in set_source_zip_chunk: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Error accepting source chunk: {str(e)}",
+            "error_type": type(e).__name__,
+        }
+
+
+@mcp.tool()
+async def set_source_zip_finalize(
+    ctx: Context,
+    upload_id: str,
+    expected_sha256: str,
+) -> Dict[str, Any]:
+    """Verify an uploaded zip and extract it as this session's scan target.
+
+    The assembled zip must hash to expected_sha256. Entries with absolute paths,
+    '..' components, or symlinks are refused before anything is extracted, and
+    the archive is capped at 100 MiB on the wire, 500 MiB extracted, and 50000
+    entries. After this returns, call run_ash_scan() with no source_dir.
+
+    Args:
+        upload_id: The identifier used for the preceding chunk calls.
+        expected_sha256: Hex sha256 of the complete zip.
+
+    Returns:
+        Dict with success and source_dir, or success=False and error.
+    """
+    try:
+        session_id = resolve_session_id(ctx.headers)
+    except ValueError as e:
+        await ctx.error(str(e))
+        return _session_error(e)
+
+    try:
+        result = mcp_set_source_zip_finalize(
+            upload_id=upload_id,
+            expected_sha256=expected_sha256,
+            session_id=session_id,
+        )
+    except Exception as e:
+        logger.exception(f"Error in set_source_zip_finalize: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Error finalizing source upload: {str(e)}",
+            "error_type": type(e).__name__,
+        }
+
+    if result.get("success"):
+        await ctx.info(f"Source extracted for session {session_id}")
+    else:
+        await ctx.error(str(result.get("error", "finalize failed")))
+    return _with_session(result, session_id)
+
+
+@mcp.tool()
+async def clear_source(ctx: Context) -> Dict[str, Any]:
+    """Delete this session's delivered source tree and workspace.
+
+    Idempotent: a session that delivered nothing still succeeds. Call this to
+    reclaim space or before delivering a different tree.
+
+    Returns:
+        Dict with success.
+    """
+    try:
+        session_id = resolve_session_id(ctx.headers)
+    except ValueError as e:
+        await ctx.error(str(e))
+        return _session_error(e)
+
+    try:
+        result = mcp_clear_source(session_id=session_id)
+    except Exception as e:
+        logger.exception(f"Error in clear_source: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Error clearing source: {str(e)}",
+            "error_type": type(e).__name__,
+        }
+
+    await ctx.info(f"Source cleared for session {session_id}")
+    return _with_session(result, session_id)
+
+
+@mcp.tool()
+async def list_profiles() -> Dict[str, Any]:
+    """List the config profiles the operator registered at server startup.
+
+    A profile is a named, pre-validated ASH config, registered with
+    `ash mcp --profile NAME=path/to/ash.yaml`. Only the name and a hash of the
+    path are returned; the path itself is an operator deployment detail, and the
+    hash is enough for a client to notice that a registration changed underneath
+    it.
+
+    Returns:
+        Dict with profiles (a list of name/path_sha256 pairs) and count. An empty
+        list means the operator registered none, not that the call failed.
+    """
+    try:
+        return mcp_list_profiles()
+    except Exception as e:
+        logger.exception(f"Error in list_profiles: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Error listing profiles: {str(e)}",
             "error_type": type(e).__name__,
         }
 

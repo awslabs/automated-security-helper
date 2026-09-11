@@ -299,13 +299,23 @@ def validate_paths_exist(
     configs: dict[str, Any],
     plugin_name: str,
     skill_name: str,
+    repository_root: Path | None = None,
 ) -> list[Error]:
-    """For each platform, confirm that configs.yaml's declared output paths
-    actually exist in the generated tree. Catches transpiler omissions.
+    """For each platform, confirm that its declared output paths actually exist
+    in the generated tree. Catches transpiler omissions.
 
     Path templating uses **values consistent with the renderer's interpolate_path
     so future placeholders ({command_name}, {ref_name}, etc.) added to a config
-    don't crash the validator with KeyError."""
+    don't crash the validator with KeyError.
+
+    A backend's paths are relative to its own anchor, not always to
+    `plugins_root`: a backend declaring `output_anchor = "repository"` writes
+    into the repository root instead. Resolving every config against
+    `plugins_root` would report that backend's output directory as missing while
+    it sat correctly on disk somewhere else. `repository_root` is optional so
+    callers that only build plugin trees need not supply it; a config that asks
+    for an anchor the caller did not provide is an error rather than a silent
+    fallback to `plugins_root`, which would resolve to the wrong tree."""
     errors: list[Error] = []
     template_values = {
         "plugin_name": plugin_name,
@@ -323,8 +333,27 @@ def validate_paths_exist(
                               "This is a transpiler bug, not a content issue."))
             return None
 
+    anchor_roots: dict[str, Path | None] = {
+        "plugins": plugins_root,
+        "repository": repository_root,
+    }
+
     for name, cfg in configs.items():
-        out = plugins_root / cfg.output_dir
+        anchor = getattr(cfg, "output_anchor", "plugins")
+        if anchor not in anchor_roots:
+            errors.append(err(cfg.output_dir,
+                              f"platform {name} declares unknown output_anchor {anchor!r}",
+                              "Valid anchors are 'plugins' and 'repository'."))
+            continue
+        anchor_root = anchor_roots[anchor]
+        if anchor_root is None:
+            errors.append(err(cfg.output_dir,
+                              f"platform {name} is anchored at {anchor!r} but the "
+                              f"validator was not given that root",
+                              f"Pass {anchor}_root= to validate_all."))
+            continue
+
+        out = anchor_root / cfg.output_dir
         if not out.exists():
             errors.append(err(out, f"platform {name} output directory missing", "Run the transpiler."))
             continue
@@ -590,14 +619,20 @@ def validate_all(
     configs: dict[str, Any],
     plugin_name: str,
     skill_name: str,
+    repository_root: Path | None = None,
 ) -> list[Error]:
     """Run all three validation tiers and return collected errors.
 
-    Empty list means everything passed. Caller decides exit behavior."""
+    Empty list means everything passed. Caller decides exit behavior.
+
+    `repository_root` is only needed when some backend declares
+    `output_anchor = "repository"`; every other check is scoped to
+    `plugins_root`."""
     return [
         *validate_external_schemas(plugins_root, schemas_dir),
         *validate_structural_sanity(plugins_root),
-        *validate_paths_exist(plugins_root, configs, plugin_name, skill_name),
+        *validate_paths_exist(plugins_root, configs, plugin_name, skill_name,
+                              repository_root=repository_root),
         *validate_claude_plugin_name(plugins_root),
         *validate_roo_slug(plugins_root),
         *validate_windsurf_trigger(plugins_root),

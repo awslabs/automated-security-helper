@@ -90,6 +90,11 @@ class RunMode(str, Enum):
     precommit = "precommit"
     container = "container"
     local = "local"
+    # Runs the scan inside `nix develop`, which supplies every scanner binary pinned by
+    # hash. Like container mode this is an outer wrapper: the inner run is a local scan.
+    # Linux and macOS only -- native Windows Nix can fetch nothing, so Windows goes
+    # through WSL2.
+    nix = "nix"
 
 
 class ExportFormat(str, Enum):

@@ -379,6 +379,14 @@ class ScanPhase(EnginePhase):
                     shard_index=shard_index,
                     shard_count=shard_count,
                     assigned_scanners=assigned,
+                    # The set the partition was taken from, not just this shard's
+                    # slice. Without it every shard can be internally consistent
+                    # while the union has a hole -- an executor missing a plugin
+                    # module resolves a smaller set, partitions it validly, and
+                    # nothing at merge time can tell. Recorded here because this
+                    # is the only layer that knows the resolved names; see the
+                    # comment above on why no earlier layer can.
+                    candidate_scanners=sorted(set(all_scanner_names)),
                 )
                 ASH_LOGGER.info(
                     f"Shard {shard_index} of {shard_count} runs "
@@ -938,8 +946,21 @@ class ScanPhase(EnginePhase):
                         scan_targets=scan_targets,
                         message=f"Starting scanner: {scanner_name}",
                     )
-                except Exception:
-                    pass
+                except Exception as notify_error:
+                    # Event delivery must never abort a scan, and this is the only
+                    # guard that makes that true: notify_event calls
+                    # ash_plugin_manager.notify, which invokes every subscribed
+                    # callback directly with no handler of its own. A subscriber
+                    # raising here would otherwise be indistinguishable from the
+                    # scanner itself failing.
+                    #
+                    # The type stays broad on purpose -- subscribers are plugin
+                    # code -- but the swallow is no longer silent. Debug level
+                    # because the scan result is unaffected; the operator has
+                    # nothing to act on beyond a misbehaving subscriber.
+                    ASH_LOGGER.debug(
+                        f"SCAN_START notification for {scanner_name} failed: {notify_error!r}"
+                    )
 
                 results_list = self._safe_execute_scanner(scanner_name, scanner_plugin, scan_targets)
 
@@ -991,8 +1012,13 @@ class ScanPhase(EnginePhase):
                             remaining_scanners=remaining_scanners,
                             message=f"Scanner {scanner_name} completed. {remaining_count} remaining: {remaining_list}",
                         )
-                    except Exception:
-                        pass
+                    except Exception as notify_error:
+                        # Same reasoning as the SCAN_START guard above: notify_event
+                        # has no handler of its own, so a raising subscriber would
+                        # be reported as a scanner failure.
+                        ASH_LOGGER.debug(
+                            f"SCAN_COMPLETE notification for {scanner_name} failed: {notify_error!r}"
+                        )
 
             except Exception as e:
                 stack_trace = _traceback.format_exc()
@@ -1133,8 +1159,15 @@ class ScanPhase(EnginePhase):
                                     remaining_scanners=remaining_scanners.copy(),
                                     message=f"Scanner {scanner_name} completed. {remaining_count} remaining: {remaining_list}",
                                 )
-                            except Exception:
-                                pass
+                            except Exception as notify_error:
+                                # Same reasoning as the sequential SCAN_COMPLETE
+                                # guard: notify_event has no handler of its own.
+                                # Note this runs while remaining_scanners_lock is
+                                # held, so raising here would also leave the lock
+                                # to unwind through the enclosing handler.
+                                ASH_LOGGER.debug(
+                                    f"SCAN_COMPLETE notification for {scanner_name} failed: {notify_error!r}"
+                                )
 
                 except Exception as e:
                     stack_trace = _traceback.format_exc()
@@ -1215,8 +1248,15 @@ class ScanPhase(EnginePhase):
                 from automated_security_helper.plugins.events import AshEventType
 
                 self.notify_event(AshEventType.ERROR, message=error_msg, scanner=scanner_name, exception=e)
-            except Exception:
-                pass
+            except Exception as notify_error:
+                # Same reasoning as the SCAN_START guard: notify_event has no
+                # handler of its own. Doubly important on this path -- the
+                # failure_container below is how the scanner's error reaches the
+                # report, so a raising ERROR subscriber must not replace a
+                # recorded scanner failure with an unhandled exception.
+                ASH_LOGGER.debug(
+                    f"ERROR notification for {scanner_name} failed: {notify_error!r}"
+                )
             return [failure_container]
 
 

@@ -1,14 +1,21 @@
 [project]
 name = "agentic-plugin-transpiler"
 version = "0.1.0"
-description = "Transpile a single _base/ source-of-truth into plugin packages for 14 AI coding agent platforms (Claude Code, Codex CLI, Kiro, GitHub Copilot, OpenCode, Cursor, Windsurf, Cline, Roo Code, Continue.dev, Gemini CLI, Goose, Amazon Q, Aider)."
+description = "Transpile a single _base/ source-of-truth into plugin packages for AI coding agent platforms, plus standalone agentskills.io skill releases. `agentic-plugins formats` lists the registered backends and the formats they emit."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
 authors = [{ name = "AWS Labs", url = "https://github.com/awslabs/automated-security-helper" }]
 dependencies = [
     "jinja2>=3.1",
-    "pydantic[email]>=2.0",
+    # Was "pydantic[email]". Split into two bare requirements because Dependabot could not
+    # compute a semver level for a name carrying extras, so bumps escaped their group and
+    # arrived one per pull request. Verified against PyPI: pydantic 2.13.5 declares
+    # 'email-validator>=2.0.0; extra == "email"' and nothing else under that extra. Left
+    # unbounded to match the other requirements in this list; the transpiler entry in
+    # .github/dependabot.yml has a major-upgrade group that catches a major either way.
+    "pydantic>=2.0",
+    "email-validator>=2.0",
     "pyyaml>=6.0",
     "jsonschema>=4.0",
     "python-frontmatter>=1.1",
@@ -17,15 +24,20 @@ dependencies = [
 
 [project.scripts]
 agentic-plugins = "transpiler.cli:main"
-transpile = "transpiler.cli:transpile_compat"
 refresh-schemas = "tools.refresh_schemas:main"
 generate-models = "tools.generate_models:main"
 
 [project.optional-dependencies]
 # Refresh-time tooling — only needed when running refresh-schemas or generate-models.
-# CI normally just runs `transpile --check` against vendored schemas + models.
+# CI normally just runs `agentic-plugins check` against vendored schemas + models.
 refresh = [
-    "datamodel-code-generator[http]>=0.64",
+    # Was "datamodel-code-generator[http]". Unbundled for the same reason as pydantic above --
+    # an extras-bearing name is one Dependabot cannot compute a semver level for, so it escapes
+    # its group. Verified against the resolved 0.74.0 as well as the current release: the `http`
+    # extra declares 'httpx>=0.24.1' and nothing else. The floor here mirrors the extra exactly
+    # rather than being rounded up, so this is a faithful substitution.
+    "datamodel-code-generator>=0.64",
+    "httpx>=0.24.1",
 ]
 # Test-time tooling.
 test = [

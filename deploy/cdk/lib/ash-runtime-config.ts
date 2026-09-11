@@ -37,6 +37,7 @@ import { Construct } from 'constructs';
 
 import {
   ashBaseConfigYaml,
+  AshCustomerKey,
   mcpAllowedHost,
   mcpAuthHeaderName,
   mcpAuthHeaderValue,
@@ -61,6 +62,8 @@ export interface AshMcpRuntimeConfigProps {
    * leave this off and get only the config parameter.
    */
   readonly includeMcpParameters: boolean;
+  /** The adopter's optional customer-managed key, for the secret at rest. */
+  readonly customerKey: AshCustomerKey;
 }
 
 /**
@@ -80,6 +83,10 @@ export class AshRuntimeConfig extends Construct {
   public readonly authHeaderValue?: CfnParameter;
 
   private readonly hasConfig: CfnCondition;
+  private readonly customerKey: AshCustomerKey;
+  private readonly includeMcpParameters: boolean;
+  /** Created on the first `grantRead`; see `grantCustomerKeyDecrypt`. */
+  private customerKeyAccess?: iam.Policy;
   /**
    * True when BOTH `McpAuthHeaderName` and `McpAuthHeaderValue` were supplied.
    *
@@ -92,6 +99,8 @@ export class AshRuntimeConfig extends Construct {
   constructor(scope: Construct, id: string, props: AshMcpRuntimeConfigProps) {
     super(scope, id);
     const stack = Stack.of(this);
+    this.customerKey = props.customerKey;
+    this.includeMcpParameters = props.includeMcpParameters;
 
     this.baseConfigYaml = ashBaseConfigYaml(stack);
     this.hasConfig = new CfnCondition(this, 'HasBaseConfig', {
@@ -156,7 +165,7 @@ export class AshRuntimeConfig extends Construct {
    * embedded in a template, and no resolved secret is being embedded.
    */
   private createAuthSecret(value: SecretValue): secretsmanager.Secret {
-    return new secretsmanager.Secret(this, 'McpAuthHeaderSecret', {
+    const secret = new secretsmanager.Secret(this, 'McpAuthHeaderSecret', {
       description:
         'Expected value of McpAuthHeaderName. The container is handed this ARN and ' +
         'resolves the value at start, so the secret never enters a task definition or a ' +
@@ -164,6 +173,34 @@ export class AshRuntimeConfig extends Construct {
       secretStringValue: value,
       removalPolicy: RemovalPolicy.DESTROY,
     });
+
+    /*
+     * `KmsKeyId` IS SET THROUGH THE L1 AND NOT THROUGH THE L2 `encryptionKey` PROP.
+     *
+     * This is not a style preference, and doing it the obvious way produces an
+     * invalid template. `Secret.grantRead` calls `encryptionKey.grantDecrypt(grantee)`
+     * whenever the L2 prop is set, which puts the key ARN into an IAM statement's
+     * `Resource` LIST. The ARN here is `Fn::If(HasKmsKey, <ref>, AWS::NoValue)`, and
+     * `AWS::NoValue` inside a list removes the ELEMENT rather than the property, so
+     * an adopter who supplied no key would get `"Resource": []` on that statement -
+     * which CloudFormation rejects. `grantRead` is called on every target, so this
+     * would break all four MCP-serving and gate stacks at deploy time while
+     * synthesizing cleanly.
+     *
+     * Setting the property directly keeps the conditional value where it is safe: as
+     * an entire property value, where `AWS::NoValue` means "omit this property".
+     *
+     * The grant `grantRead` would have added is still needed - a principal reading a
+     * CMK-encrypted secret needs `kms:Decrypt` on the key ARN in its identity policy.
+     * It is added instead by `grantCustomerKeyDecrypt` below, on a policy RESOURCE
+     * gated by the same condition, which is the shape that survives an unset key.
+     */
+    (secret.node.defaultChild as secretsmanager.CfnSecret).addPropertyOverride(
+      'KmsKeyId',
+      this.customerKey.keyArnOrNoValue,
+    );
+
+    return secret;
   }
 
   /**
@@ -212,14 +249,102 @@ export class AshRuntimeConfig extends Construct {
   /**
    * Let a principal read the config parameter and the auth secret.
    *
-   * Both grants are unconditional even when the corresponding value is a
+   * The first two grants are unconditional even when the corresponding value is a
    * placeholder. That is the price of keeping the resources unconditional, and it
    * grants nothing an adopter did not deploy: the principal can read one
    * parameter and one secret that this stack owns.
+   *
+   * The third is narrower than the other two, in both dimensions: it exists only
+   * when `KmsKeyArn` was set, and only on the targets that actually READ the
+   * secret. See `grantCustomerKeyDecrypt`.
    */
   public grantRead(grantee: iam.IGrantable): void {
     this.configParameter.grantRead(grantee);
     this.authSecret.grantRead(grantee);
+
+    /*
+     * The decrypt grant follows the secret ARN, not the secret.
+     *
+     * A principal can only need `kms:Decrypt` here if something hands it the ARN and
+     * it calls `GetSecretValue`. The ARN reaches a container through exactly one
+     * path, `mcpEnvironment()`, which throws unless `includeMcpParameters` is true.
+     * So on the sharded executor and the pull-request gate the secret is the
+     * placeholder nothing reads, and a decrypt grant there would be permission on a
+     * value no code path touches. Verified against the synthesized templates:
+     * neither AshCodeCommitGate nor AshDistributedPipeline mentions
+     * `ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN` anywhere.
+     *
+     * The `GetSecretValue` grant above IS still unconditional, and that asymmetry is
+     * deliberate rather than an oversight - it is the existing cost of keeping this
+     * construct one shape, documented at the top of this file. The consequence to
+     * know: if a future change gives one of those two targets the secret ARN, it
+     * must also move to `includeMcpParameters: true`, or `GetSecretValue` will
+     * succeed and the KMS decrypt behind it will not.
+     */
+    if (this.includeMcpParameters) {
+      this.grantCustomerKeyDecrypt(grantee);
+    }
+  }
+
+  /**
+   * `kms:Decrypt` on the adopter's key, for principals that read the secret.
+   *
+   * WHY THIS IS A SEPARATE POLICY RESOURCE AND NOT A STATEMENT ON THE ROLE
+   * ---------------------------------------------------------------------
+   * Because the key ARN is conditional and a statement is not. Adding
+   * `kms:Decrypt` to a grantee's existing default policy would put the key ARN in
+   * that statement's `Resource` list unconditionally, and there is no value that
+   * means "no key": the parameter's empty default would render `"Resource": [""]`,
+   * which IAM rejects, and `AWS::NoValue` would render `"Resource": []`, which IAM
+   * also rejects. Both synthesize cleanly and fail at deploy.
+   *
+   * A separate `AWS::IAM::Policy` can carry a CloudFormation `Condition`, so when
+   * no key was supplied the whole resource is absent and no invalid statement can
+   * exist. The policy is created on the first call rather than in the constructor,
+   * so a stack that never grants read emits nothing - and CDK errors on a policy
+   * attached to no principal, which would otherwise be the failure.
+   *
+   * WHY ONLY `kms:Decrypt`, AND ONLY FOR THE SECRET
+   * ----------------------------------------------
+   * It is the only permission of the four encrypted resource classes that a
+   * principal created by this stack actually needs. Verified per service in the
+   * `kmsKeyArn` doc comment: CloudWatch Logs wants the SERVICE principal in the key
+   * POLICY, and ECR and Lambda want `kms:CreateGrant` on whoever runs the
+   * deployment. Granting those here would grant them to the wrong identity and read
+   * as though the requirement were met.
+   */
+  private grantCustomerKeyDecrypt(grantee: iam.IGrantable): void {
+    if (!this.customerKeyAccess) {
+      // `KeyAccess` rather than a more descriptive id, and no `sid`: both strings
+      // land in the template twice over (the logical id is also the PolicyName), and
+      // AshAgentCore has under 100 bytes of room beneath CloudFormation's inline
+      // template limit. The description is in this comment, where it is free.
+      this.customerKeyAccess = new iam.Policy(this, 'KeyAccess', {
+        statements: [
+          new iam.PolicyStatement({
+            actions: ['kms:Decrypt'],
+            // The bare parameter ref, NOT `keyArnOrNoValue`. This statement only
+            // exists when the condition below is true, so the ref always resolves
+            // to a real ARN and no `AWS::NoValue` can reach a list.
+            resources: [this.customerKey.parameter.valueAsString],
+          }),
+        ],
+      });
+      const cfnPolicy = this.customerKeyAccess.node.defaultChild as iam.CfnPolicy;
+      cfnPolicy.cfnOptions.condition = this.customerKey.condition;
+    }
+
+    const principal = grantee.grantPrincipal as Partial<iam.IRole>;
+    if (typeof principal.attachInlinePolicy !== 'function') {
+      // Loud rather than skipped. A grantee that is not a role would silently read
+      // the secret and fail to decrypt it, which looks like a Secrets Manager
+      // problem rather than a missing KMS grant.
+      throw new Error(
+        'AshRuntimeConfig.grantRead needs a grantee whose principal is a role, so the ' +
+          'conditional kms:Decrypt policy can be attached to it.',
+      );
+    }
+    principal.attachInlinePolicy(this.customerKeyAccess);
   }
 
   /**

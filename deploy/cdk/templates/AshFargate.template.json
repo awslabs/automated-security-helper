@@ -18,9 +18,21 @@
   },
   "RebuildSchedule": {
    "Type": "String",
-   "Default": "rate(1 day)",
-   "Description": "EventBridge schedule expression for the image rebuild, for example \"rate(1 day)\" or \"cron(0 6 * * ? *)\". The rebuild repulls the base image and scanner tools so a long-lived deployment keeps getting OS and scanner patches without a stack update.",
+   "Default": "cron(0 6 * * ? *)",
+   "Description": "EventBridge schedule expression for the image rebuild, for example \"cron(0 6 * * ? *)\" or \"rate(1 day)\". The rebuild repulls the base image and scanner tools so a long-lived deployment keeps getting OS and scanner patches without a stack update. Note that a rate() expression starts when the rule is created, so it also rebuilds once at deployment; a cron() expression only fires at the times it names.",
    "MinLength": 1
+  },
+  "McpIngressCidr": {
+   "Type": "String",
+   "Default": "",
+   "AllowedPattern": "^$|^(\\d{1,3}\\.){3}\\d{1,3}/([1-9]|[12]\\d|3[0-2])$",
+   "Description": "CIDR allowed to reach the MCP load balancer on port 80. Leave empty and NO ingress rule is created, so the endpoint is reachable from nowhere — the default, and unchanged from before this parameter existed. Set it to the range your MCP clients come from, for example 10.1.0.0/16, or x.x.x.x/32 for one host. A CIDR is required, and 0.0.0.0/0 is rejected; to grant more broadly, authorize the McpSecurityGroupId output directly."
+  },
+  "KmsKeyArn": {
+   "Type": "String",
+   "Default": "",
+   "AllowedPattern": "^$|^arn:aws[a-zA-Z-]*:kms:[a-z0-9-]+:\\d{12}:key/[0-9a-z-]{36}$",
+   "Description": "ARN of an existing symmetric customer-managed KMS key for this stack data at rest. Empty uses AWS-managed encryption. Needs a key policy admitting logs.<region>.amazonaws.com, plus kms:CreateGrant for whoever deploys."
   },
   "AshBaseConfigYaml": {
    "Type": "String",
@@ -35,7 +47,7 @@
     "true",
     "false"
    ],
-   "Description": "Handle each streamable-HTTP request independently instead of binding it to a server-held session. Must stay true on AgentCore, which injects its own Mcp-Session-Id that a stateful server rejects with 404. Also required behind a load balancer that may route consecutive requests to different replicas."
+   "Description": "Handle each streamable-HTTP request independently instead of binding it to a server-held session. Keep true on AgentCore: AWS documents stateless as the default there and requires the server not to reject the platform-generated Mcp-Session-Id, and ASH in stateful mode answers 404 to a session id it did not issue. AgentCore does support stateful servers, but only when clients omit the session id on initialize, which this stack cannot enforce. Also keep true behind a load balancer that may route requests to different replicas."
   },
   "McpMountPath": {
    "Type": "String",
@@ -59,9 +71,26 @@
    "Default": "",
    "Description": "Expected value of McpAuthHeaderName. Stored in Secrets Manager; the container is given the secret's ARN and resolves it at start, so the value is never written into a task definition or a runtime environment variable.",
    "NoEcho": true
+  },
+  "AshImageTag": {
+   "Type": "String",
+   "Default": "",
+   "Description": "ECR tag the workload pulls. Empty tracks the moving tag, which every rebuild republishes, so a replaced task adopts the newest image at no defined moment. Pin the build's version-qualified tag instead; its digest is only known after a build, so deploy empty, read the tag, then set this on a stack update."
   }
  },
  "Conditions": {
+  "HasKmsKey": {
+   "Fn::Not": [
+    {
+     "Fn::Equals": [
+      {
+       "Ref": "KmsKeyArn"
+      },
+      ""
+     ]
+    }
+   ]
+  },
   "ConfigHasBaseConfigA7D225A9": {
    "Fn::Not": [
     {
@@ -102,12 +131,36 @@
     }
    ]
   },
+  "ImageImageTagPinned430B439C": {
+   "Fn::Not": [
+    {
+     "Fn::Equals": [
+      {
+       "Ref": "AshImageTag"
+      },
+      ""
+     ]
+    }
+   ]
+  },
   "AllowedHostSupplied": {
    "Fn::Not": [
     {
      "Fn::Equals": [
       {
        "Ref": "McpAllowedHost"
+      },
+      ""
+     ]
+    }
+   ]
+  },
+  "McpIngressCidrSupplied": {
+   "Fn::Not": [
+    {
+     "Fn::Equals": [
+      {
+       "Ref": "McpIngressCidr"
       },
       ""
      ]
@@ -131,15 +184,23 @@
       "# No ASH base configuration was supplied at deployment time."
      ]
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Config/BaseConfig/Resource"
    }
   },
   "ConfigMcpAuthHeaderSecret99D04B65": {
    "Type": "AWS::SecretsManager::Secret",
    "Properties": {
     "Description": "Expected value of McpAuthHeaderName. The container is handed this ARN and resolves the value at start, so the secret never enters a task definition or a runtime environment-variable map.",
+    "KmsKeyId": {
+     "Fn::If": [
+      "HasKmsKey",
+      {
+       "Ref": "KmsKeyArn"
+      },
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    },
     "SecretString": {
      "Fn::If": [
       "ConfigHasHeaderAuthA42E2E27",
@@ -153,7 +214,6 @@
    "UpdateReplacePolicy": "Delete",
    "DeletionPolicy": "Delete",
    "Metadata": {
-    "aws:cdk:path": "AshFargate/Config/McpAuthHeaderSecret/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -163,6 +223,30 @@
      ]
     }
    }
+  },
+  "ConfigKeyAccessB463082D": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "kms:Decrypt",
+       "Effect": "Allow",
+       "Resource": {
+        "Ref": "KmsKeyArn"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "ConfigKeyAccessB463082D",
+    "Roles": [
+     {
+      "Ref": "TaskDefinitionTaskRoleFD40A61D"
+     }
+    ]
+   },
+   "Condition": "HasKmsKey"
   },
   "EncryptionKey1B843E66": {
    "Type": "AWS::KMS::Key",
@@ -199,14 +283,25 @@
     }
    },
    "UpdateReplacePolicy": "Retain",
-   "DeletionPolicy": "Retain",
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/EncryptionKey/Resource"
-   }
+   "DeletionPolicy": "Retain"
   },
   "ImageRepositoryD8036990": {
    "Type": "AWS::ECR::Repository",
    "Properties": {
+    "EncryptionConfiguration": {
+     "EncryptionType": "KMS",
+     "KmsKey": {
+      "Fn::If": [
+       "HasKmsKey",
+       {
+        "Ref": "KmsKeyArn"
+       },
+       {
+        "Ref": "AWS::NoValue"
+       }
+      ]
+     }
+    },
     "ImageScanningConfiguration": {
      "ScanOnPush": true
     },
@@ -216,21 +311,26 @@
     }
    },
    "UpdateReplacePolicy": "Retain",
-   "DeletionPolicy": "Retain",
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Image/Repository/Resource"
-   }
+   "DeletionPolicy": "Retain"
   },
   "ImageBuildLogsBC6BBB2A": {
    "Type": "AWS::Logs::LogGroup",
    "Properties": {
+    "KmsKeyId": {
+     "Fn::If": [
+      "HasKmsKey",
+      {
+       "Ref": "KmsKeyArn"
+      },
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    },
     "RetentionInDays": 30
    },
-   "UpdateReplacePolicy": "Delete",
-   "DeletionPolicy": "Delete",
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Image/BuildLogs/Resource"
-   }
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain"
   },
   "ImageBuildRole1BB51BF0": {
    "Type": "AWS::IAM::Role",
@@ -249,7 +349,6 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshFargate/Image/Build/Role/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -351,7 +450,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshFargate/Image/Build/Role/LogsAccess/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -422,7 +520,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshFargate/Image/Build/Role/CodebuildAccess/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -474,7 +571,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshFargate/Image/Build/Role/KmsAccess/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -534,7 +630,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshFargate/Image/Build/Role/EcrAccess/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -564,6 +659,7 @@
     "Cache": {
      "Type": "NO_CACHE"
     },
+    "ConcurrentBuildLimit": 1,
     "Description": "Builds the ASH amd64 image (mcp) into this account's ECR repository. ASH publishes no public image, so this build is what makes the deployment possible.",
     "EncryptionKey": {
      "Fn::GetAtt": [
@@ -696,7 +792,7 @@
         {
          "Ref": "AWS::URLSuffix"
         },
-        "\",\n        \"git clone --depth 1 --branch \\\"${ASH_VERSION}\\\" \\\"${ASH_REPOSITORY_URL}\\\" ash-src\"\n      ]\n    },\n    \"build\": {\n      \"commands\": [\n        \"ASH_SAFE_REF=\\\"$(printf '%s' \\\"${ASH_VERSION}\\\" | tr -c 'A-Za-z0-9._-' '-' | cut -c1-109)\\\"\\nASH_REF_DIGEST=\\\"$(printf '%s' \\\"${ASH_VERSION}\\\" | sha256sum | cut -c1-8)\\\"\\n# The digest is what keeps two refs that fold to the same string on separate\\n# tags. A pipeline reports only its last command's status, so a missing\\n# sha256sum would leave it empty and let one build overwrite another's audit\\n# tag. Fail here instead.\\n[ ${#ASH_REF_DIGEST} -eq 8 ] || { echo \\\"cannot digest ASH_VERSION\\\" >&2; exit 1; }\\nASH_VERSION_TAG_SUFFIX=\\\"${ASH_SAFE_REF}-${ASH_REF_DIGEST}\\\"\\necho \\\"version-qualified audit tag suffix: ${ASH_VERSION_TAG_SUFFIX}\\\"\",\n        \"cat > ash-src/ash-mcp-entrypoint.sh <<'ASH_CDK_EOF'\\n#!/bin/sh\\n# Entrypoint for the ASH MCP server. Generated by the ASH CDK deployment\\n# targets; see deploy/cdk/lib/ash-container-scripts.ts.\\nset -eu\\n\\n# Materialize the deployment-wide ASH config, when one was supplied. Written to\\n# a fixed path and exported through ASH_CONFIG so it applies to every scan this\\n# process runs, not just scans of one directory.\\nif [ -n \\\"${ASH_BASE_CONFIG_SSM_PARAMETER:-}\\\" ]; then\\n  mkdir -p \\\"$(dirname \\\"${ASH_CONFIG:-/tmp/ash-config/.ash.yaml}\\\")\\\"\\n  python3 -c \\\"import os, sys, boto3; sys.stdout.write(boto3.client('ssm').get_parameter(Name=os.environ['ASH_BASE_CONFIG_SSM_PARAMETER'], WithDecryption=True)['Parameter']['Value'])\\\" \\\\\\n    > \\\"${ASH_CONFIG:-/tmp/ash-config/.ash.yaml}\\\"\\nelse\\n  # No config supplied. Unset ASH_CONFIG so ASH does not log a missing-file\\n  # notice on every scan and falls through to its built-in defaults.\\n  unset ASH_CONFIG || true\\nfi\\n\\n# Resolve the shared secret from its ARN. The ARN travels in the environment;\\n# the value never does, so it stays out of the template, the task definition and\\n# the runtime's environment-variable map.\\nASH_AUTH_VALUE=\\\"\\\"\\nif [ -n \\\"${ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN:-}\\\" ]; then\\n  ASH_AUTH_VALUE=$(python3 -c \\\"import os, sys, boto3; sys.stdout.write(boto3.client('secretsmanager').get_secret_value(SecretId=os.environ['ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN'])['SecretString'])\\\")\\nfi\\n\\nset -- ash mcp --transport streamable-http \\\\\\n  --host \\\"${ASH_MCP_HOST:-0.0.0.0}\\\" \\\\\\n  --port \\\"${ASH_MCP_PORT:-8000}\\\" \\\\\\n  --mount-path \\\"${ASH_MCP_MOUNT_PATH:-/mcp}\\\"\\n\\n# --stateless-http is spelled as a paired flag, so state the intent explicitly\\n# rather than relying on ASH's default staying put.\\nif [ \\\"${ASH_MCP_STATELESS:-true}\\\" = \\\"true\\\" ]; then\\n  set -- \\\"$@\\\" --stateless-http\\nelse\\n  set -- \\\"$@\\\" --no-stateless-http\\nfi\\n\\n# --allowed-host is repeatable. Split the comma-separated value so DNS-rebinding\\n# protection stays ON with one flag per known proxy hostname, instead of being\\n# relaxed wholesale by binding a non-loopback host.\\nif [ -n \\\"${ASH_MCP_ALLOWED_HOST:-}\\\" ]; then\\n  ASH_SAVED_IFS=$IFS\\n  IFS=,\\n  for ash_host in ${ASH_MCP_ALLOWED_HOST}; do\\n    if [ -n \\\"$ash_host\\\" ]; then\\n      set -- \\\"$@\\\" --allowed-host \\\"$ash_host\\\"\\n    fi\\n  done\\n  IFS=$ASH_SAVED_IFS\\nfi\\n\\n# Both halves are required: a header name with no value would make ASH compare\\n# against an empty secret.\\nif [ -n \\\"${ASH_MCP_AUTH_HEADER_NAME:-}\\\" ] && [ -n \\\"$ASH_AUTH_VALUE\\\" ]; then\\n  set -- \\\"$@\\\" --auth-header-name \\\"${ASH_MCP_AUTH_HEADER_NAME}\\\" --auth-header-value \\\"$ASH_AUTH_VALUE\\\"\\nelif [ -n \\\"${ASH_MCP_AUTH_HEADER_NAME:-}\\\" ]; then\\n  echo \\\"ash-mcp-entrypoint: McpAuthHeaderName was set but no secret value resolved; refusing to start an unauthenticated server that the deployment expected to authenticate.\\\" >&2\\n  exit 64\\nfi\\n\\nexec \\\"$@\\\"\\n\\nASH_CDK_EOF\",\n        \"cat > ash-src/ash_gate_handler.py <<'ASH_CDK_EOF'\\n# ASH one-shot CodeCommit pull-request gate.\\n# Generated by the ASH CDK deployment targets; see\\n# deploy/cdk/lib/ash-container-scripts.ts.\\nimport os\\nimport pathlib\\nimport subprocess\\nimport tempfile\\nimport uuid\\n\\nimport boto3\\n\\n# ASH's documented exit codes. 2 means a scan completed and found actionable\\n# findings, which is a gate failure but NOT an operational error; 1 and 3 mean\\n# ASH could not do its job. Treating them alike would report a broken scanner as\\n# a clean repository.\\nEXIT_SUCCESS = 0\\nEXIT_SCANNER_ERROR = 1\\nEXIT_ACTIONABLE_FINDINGS = 2\\nEXIT_INVALID_CONFIG = 3\\n\\n# Defensive bound. The PostCommentForPullRequest reference documents no length\\n# constraint on \\\"content\\\", so this is a safety margin rather than the API limit.\\nMAX_COMMENT_CHARS = 10000\\n\\n\\ndef _run(argv, **kwargs):\\n    return subprocess.run(argv, capture_output=True, text=True, **kwargs)\\n\\n\\ndef _scan_summary(output_dir):\\n    \\\"\\\"\\\"Prefer ASH's own markdown report; fall back to something truthful.\\\"\\\"\\\"\\n    report = pathlib.Path(output_dir) / \\\"reports\\\" / \\\"ash.summary.md\\\"\\n    if report.is_file():\\n        text = report.read_text(encoding=\\\"utf-8\\\", errors=\\\"replace\\\")\\n        if text.strip():\\n            return text\\n    return None\\n\\n\\ndef _verdict(exit_code):\\n    if exit_code == EXIT_SUCCESS:\\n        return \\\"passed\\\", \\\"No actionable findings at or above the configured threshold.\\\"\\n    if exit_code == EXIT_ACTIONABLE_FINDINGS:\\n        return \\\"failed\\\", \\\"ASH found actionable findings at or above the configured threshold.\\\"\\n    if exit_code == EXIT_INVALID_CONFIG:\\n        return \\\"errored\\\", \\\"ASH rejected its configuration, so nothing was scanned.\\\"\\n    if exit_code == EXIT_SCANNER_ERROR:\\n        return \\\"errored\\\", \\\"One or more scanners failed, so this result is incomplete.\\\"\\n    return \\\"errored\\\", \\\"ASH exited with unexpected code %d.\\\" % exit_code\\n\\n\\ndef handler(event, context):\\n    detail = event.get(\\\"detail\\\") or {}\\n    pull_request_id = detail.get(\\\"pullRequestId\\\")\\n    repository_names = detail.get(\\\"repositoryNames\\\") or []\\n    source_commit = detail.get(\\\"sourceCommit\\\")\\n    destination_commit = detail.get(\\\"destinationCommit\\\")\\n    revision_id = detail.get(\\\"revisionId\\\")\\n\\n    # repositoryNames is a list in the CodeCommit event payload, not a string.\\n    if not (pull_request_id and repository_names and source_commit and destination_commit):\\n        return {\\\"skipped\\\": \\\"event did not carry a complete pull request\\\", \\\"detail\\\": detail}\\n\\n    repository_name = repository_names[0]\\n    region = os.environ[\\\"AWS_REGION\\\"]\\n    codecommit = boto3.client(\\\"codecommit\\\")\\n\\n    workdir = tempfile.mkdtemp(dir=\\\"/tmp\\\")\\n    source_dir = os.path.join(workdir, \\\"src\\\")\\n    output_dir = os.path.join(workdir, \\\"out\\\")\\n\\n    clone = _run([\\\"git\\\", \\\"clone\\\", \\\"--no-single-branch\\\", \\\"--quiet\\\",\\n                  \\\"codecommit::%s://%s\\\" % (region, repository_name), source_dir])\\n    if clone.returncode != 0:\\n        body = \\\"## ASH scan errored\\\\n\\\\nCould not clone the repository:\\\\n\\\\n```\\\\n%s\\\\n```\\\\n\\\" % (\\n            (clone.stderr or \\\"\\\").strip()[:2000],\\n        )\\n        _post(codecommit, pull_request_id, repository_name, destination_commit, source_commit, body)\\n        raise RuntimeError(\\\"git clone failed for %s\\\" % repository_name)\\n\\n    checkout = _run([\\\"git\\\", \\\"-C\\\", source_dir, \\\"checkout\\\", \\\"--quiet\\\", source_commit])\\n    if checkout.returncode != 0:\\n        raise RuntimeError(\\\"could not check out %s: %s\\\" % (source_commit, checkout.stderr))\\n\\n    argv = [\\\"ash\\\", \\\"scan\\\", \\\"--source-dir\\\", source_dir, \\\"--output-dir\\\", output_dir,\\n            \\\"--no-progress\\\", \\\"--simple\\\", \\\"--compact-report\\\"]\\n    if os.environ.get(\\\"ASH_CHANGED_FILES_ONLY\\\", \\\"true\\\") == \\\"true\\\":\\n        # Diff against the pull request's destination commit, which is what the\\n        # reviewer is being asked to merge into.\\n        argv += [\\\"--changed-files-only\\\", \\\"--base-ref\\\", destination_commit]\\n    min_severity = os.environ.get(\\\"ASH_MIN_SEVERITY\\\")\\n    if min_severity:\\n        argv += [\\\"--min-severity\\\", min_severity]\\n\\n    scan = _run(argv, cwd=source_dir)\\n    verdict, explanation = _verdict(scan.returncode)\\n\\n    summary = _scan_summary(output_dir)\\n    parts = [\\\"## ASH scan %s\\\\n\\\" % verdict, explanation, \\\"\\\"]\\n    if summary:\\n        parts += [summary]\\n    else:\\n        tail = ((scan.stderr or scan.stdout or \\\"\\\").strip())[-2000:]\\n        parts += [\\\"ASH produced no markdown report. Tail of its output:\\\", \\\"\\\", \\\"```\\\", tail, \\\"```\\\"]\\n    parts += [\\\"\\\", \\\"_Scanned commit `%s` against `%s`._\\\" % (source_commit[:12], destination_commit[:12])]\\n    body = \\\"\\\\n\\\".join(parts)\\n\\n    _post(codecommit, pull_request_id, repository_name, destination_commit, source_commit, body)\\n\\n    if os.environ.get(\\\"ASH_APPROVAL_GATE\\\", \\\"false\\\") == \\\"true\\\" and revision_id:\\n        state = \\\"APPROVE\\\" if verdict == \\\"passed\\\" else \\\"REVOKE\\\"\\n        try:\\n            codecommit.update_pull_request_approval_state(\\n                pullRequestId=pull_request_id, revisionId=revision_id, approvalState=state)\\n        except codecommit.exceptions.PullRequestCannotBeApprovedByAuthorException:\\n            # The comment is already posted; only the vote is unavailable.\\n            pass\\n\\n    return {\\\"verdict\\\": verdict, \\\"exitCode\\\": scan.returncode, \\\"pullRequestId\\\": pull_request_id}\\n\\n\\ndef _post(codecommit, pull_request_id, repository_name, before_commit_id, after_commit_id, content):\\n    \\\"\\\"\\\"beforeCommitId is the destination tip and afterCommitId the source tip.\\n\\n    That ordering is the API's, not ours: PostCommentForPullRequest documents\\n    beforeCommitId as the destination-branch commit and afterCommitId as the\\n    current tip of the source branch. Swapping them attaches the comment to the\\n    wrong diff.\\n    \\\"\\\"\\\"\\n    codecommit.post_comment_for_pull_request(\\n        pullRequestId=pull_request_id,\\n        repositoryName=repository_name,\\n        beforeCommitId=before_commit_id,\\n        afterCommitId=after_commit_id,\\n        content=content[:MAX_COMMENT_CHARS],\\n        clientRequestToken=str(uuid.uuid4()),\\n    )\\n\\nASH_CDK_EOF\",\n        \"docker build --platform \\\"linux/${ASH_BUILD_PLATFORM}\\\" --target non-root --build-arg \\\"OFFLINE=${ASH_OFFLINE}\\\" --build-arg \\\"INSTALL_ASH_REVISION=${ASH_VERSION}\\\" -t \\\"ash-base-non-root:local\\\" ash-src\",\n        \"cat > ash-src/Dockerfile.mcp <<'ASH_CDK_EOF'\\nFROM ash-base-non-root:local\\n# The ASH stage already dropped to UID 500; step back up to install.\\nUSER root\\nCOPY ash-mcp-entrypoint.sh /usr/local/bin/ash-mcp-entrypoint.sh\\nRUN chmod 0755 /usr/local/bin/ash-mcp-entrypoint.sh\\nENV ASH_CONFIG=/tmp/ash-config/.ash.yaml\\n# 500:100 are the ASH Dockerfile UID/GID defaults, and this build\\n# overrides neither.\\nUSER 500:100\\n# Documentation only; AgentCore fixes the port at 8000 regardless.\\nEXPOSE 8000\\nENTRYPOINT [\\\"/usr/local/bin/ash-mcp-entrypoint.sh\\\"]\\nASH_CDK_EOF\",\n        \"docker build --platform \\\"linux/${ASH_BUILD_PLATFORM}\\\" -f ash-src/Dockerfile.mcp -t \\\"ash-mcp:local\\\" ash-src\",\n        \"docker tag \\\"ash-mcp:local\\\" \\\"${ASH_ECR_REPOSITORY_URI}:mcp-amd64\\\"\",\n        \"docker tag \\\"ash-mcp:local\\\" \\\"${ASH_ECR_REPOSITORY_URI}:mcp-amd64-${ASH_VERSION_TAG_SUFFIX}\\\"\",\n        \"docker push \\\"${ASH_ECR_REPOSITORY_URI}:mcp-amd64\\\"\",\n        \"docker push \\\"${ASH_ECR_REPOSITORY_URI}:mcp-amd64-${ASH_VERSION_TAG_SUFFIX}\\\"\"\n      ]\n    },\n    \"post_build\": {\n      \"commands\": [\n        \"if [ -n \\\"${CFN_RESPONSE_URL:-}\\\" ]; then\\n  if [ \\\"${CODEBUILD_BUILD_SUCCEEDING:-0}\\\" = \\\"1\\\" ]; then\\n    ASH_STATUS=SUCCESS\\n    ASH_REASON=\\\"ASH image build succeeded\\\"\\n  else\\n    ASH_STATUS=FAILED\\n    ASH_REASON=\\\"ASH image build failed; see CodeBuild build ${CODEBUILD_BUILD_ID:-unknown}\\\"\\n  fi\\n  python3 -c \\\"import json, os, sys, urllib.request; body = json.dumps({'Status': sys.argv[1], 'Reason': sys.argv[2], 'PhysicalResourceId': os.environ['CFN_LOGICAL_ID'], 'StackId': os.environ['CFN_STACK_ID'], 'RequestId': os.environ['CFN_REQUEST_ID'], 'LogicalResourceId': os.environ['CFN_LOGICAL_ID'], 'Data': {}}).encode(); req = urllib.request.Request(os.environ['CFN_RESPONSE_URL'], data=body, method='PUT', headers={'content-type': '', 'content-length': str(len(body))}); urllib.request.urlopen(req)\\\" \\\"$ASH_STATUS\\\" \\\"$ASH_REASON\\\"\\nfi\"\n      ]\n    }\n  }\n}"
+        "\",\n        \"git clone --depth 1 --branch \\\"${ASH_VERSION}\\\" \\\"${ASH_REPOSITORY_URL}\\\" ash-src\"\n      ]\n    },\n    \"build\": {\n      \"commands\": [\n        \"ASH_SAFE_REF=\\\"$(printf '%s' \\\"${ASH_VERSION}\\\" | tr -c 'A-Za-z0-9._-' '-' | cut -c1-109)\\\"\\nASH_REF_DIGEST=\\\"$(printf '%s' \\\"${ASH_VERSION}\\\" | sha256sum | cut -c1-8)\\\"\\n# The digest is what keeps two refs that fold to the same string on separate\\n# tags. A pipeline reports only its last command's status, so a missing\\n# sha256sum would leave it empty and let one build overwrite another's audit\\n# tag. Fail here instead.\\n[ ${#ASH_REF_DIGEST} -eq 8 ] || { echo \\\"cannot digest ASH_VERSION\\\" >&2; exit 1; }\\nASH_VERSION_TAG_SUFFIX=\\\"${ASH_SAFE_REF}-${ASH_REF_DIGEST}\\\"\\necho \\\"version-qualified audit tag suffix: ${ASH_VERSION_TAG_SUFFIX}\\\"\",\n        \"docker build --platform \\\"linux/${ASH_BUILD_PLATFORM}\\\" --target non-root --build-arg \\\"OFFLINE=${ASH_OFFLINE}\\\" --build-arg \\\"INSTALL_ASH_REVISION=${ASH_VERSION}\\\" -t \\\"ash-base-non-root:local\\\" ash-src\",\n        \"cat > ash-src/ash-mcp-entrypoint.sh <<'ASH_CDK_EOF'\\n#!/bin/sh\\n# Entrypoint for the ASH MCP server. Generated by the ASH CDK deployment\\n# targets; see deploy/cdk/lib/ash-container-scripts.ts.\\nset -eu\\n\\n# Materialize the deployment-wide ASH config, when one was supplied. Written to\\n# a fixed path and exported through ASH_CONFIG so it applies to every scan this\\n# process runs, not just scans of one directory.\\nif [ -n \\\"${ASH_BASE_CONFIG_SSM_PARAMETER:-}\\\" ]; then\\n  mkdir -p \\\"$(dirname \\\"${ASH_CONFIG:-/tmp/ash-config/.ash.yaml}\\\")\\\"\\n  python3 -c \\\"import os, sys, boto3; sys.stdout.write(boto3.client('ssm').get_parameter(Name=os.environ['ASH_BASE_CONFIG_SSM_PARAMETER'], WithDecryption=True)['Parameter']['Value'])\\\" \\\\\\n    > \\\"${ASH_CONFIG:-/tmp/ash-config/.ash.yaml}\\\"\\nelse\\n  # No config supplied. Unset ASH_CONFIG so ASH does not log a missing-file\\n  # notice on every scan and falls through to its built-in defaults.\\n  unset ASH_CONFIG || true\\nfi\\n\\n# Resolve the shared secret from its ARN. The ARN travels in the environment;\\n# the value never does, so it stays out of the template, the task definition and\\n# the runtime's environment-variable map.\\nASH_AUTH_VALUE=\\\"\\\"\\nif [ -n \\\"${ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN:-}\\\" ]; then\\n  ASH_AUTH_VALUE=$(python3 -c \\\"import os, sys, boto3; sys.stdout.write(boto3.client('secretsmanager').get_secret_value(SecretId=os.environ['ASH_MCP_AUTH_HEADER_VALUE_SECRET_ARN'])['SecretString'])\\\")\\nfi\\n\\n# Ask this image's ASH which MCP options it accepts, once. AshVersion decides\\n# which ASH is in here at deploy time, and older releases have neither\\n# --stateless-http nor --allowed-host; passing an unknown option would leave the\\n# server unable to bind. COLUMNS is wide so rich cannot wrap a flag name across\\n# lines and make a supported option measure as missing.\\nif ! ASH_MCP_HELP=\\\"$(COLUMNS=200 ash mcp --help 2>&1)\\\"; then\\n  echo \\\"ash-mcp-entrypoint: 'ash mcp --help' exited non-zero, so this image cannot serve MCP at all. This is not a missing option; it is a broken ASH install. Its output was:\\\" >&2\\n  printf '%s\\\\n' \\\"${ASH_MCP_HELP}\\\" >&2\\n  exit 69\\nfi\\n\\n# Fixed-string match, so a flag name is never interpreted as a regex.\\nash_mcp_supports() {\\n  printf '%s' \\\"${ASH_MCP_HELP}\\\" | grep -qF -- \\\"$1\\\"\\n}\\n\\nset -- ash mcp --transport streamable-http \\\\\\n  --host \\\"${ASH_MCP_HOST:-0.0.0.0}\\\" \\\\\\n  --port \\\"${ASH_MCP_PORT:-8000}\\\" \\\\\\n  --mount-path \\\"${ASH_MCP_MOUNT_PATH:-/mcp}\\\"\\n\\n# --stateless-http is a paired flag, so state the intent rather than inheriting\\n# ASH's default. Refuses to start if stateless was asked for and this ASH has no\\n# such option: running stateful instead would answer 404 to every session id the\\n# platform injects while still passing the health check.\\nif [ \\\"${ASH_MCP_STATELESS:-true}\\\" = \\\"true\\\" ]; then\\n  if ash_mcp_supports '--stateless-http'; then\\n    set -- \\\"$@\\\" --stateless-http\\n  else\\n    echo \\\"ash-mcp-entrypoint: this deployment asks for a stateless MCP server, but the ASH in this image has no --stateless-http option, so the server would run stateful and reject every session id the platform injects. Deploy an AshVersion whose 'ash mcp' accepts --stateless-http, or set McpStatelessHttp=false to run stateful deliberately.\\\" >&2\\n    exit 65\\n  fi\\nelif ash_mcp_supports '--no-stateless-http'; then\\n  set -- \\\"$@\\\" --no-stateless-http\\nfi\\n# The remaining case needs no flag and is not a degradation: stateful was asked\\n# for, and an ASH without the option is already stateful.\\n\\n# --allowed-host is repeatable, so split the comma-separated value and pass one\\n# flag per hostname; a comma-joined single value would match nothing. Warns\\n# rather than refusing when the option is absent: the Fargate stack always\\n# substitutes its load balancer DNS name here, so there is no parameter value an\\n# operator could set to satisfy a refusal.\\nif [ -n \\\"${ASH_MCP_ALLOWED_HOST:-}\\\" ]; then\\n  if ash_mcp_supports '--allowed-host'; then\\n    ASH_SAVED_IFS=$IFS\\n    IFS=,\\n    for ash_host in ${ASH_MCP_ALLOWED_HOST}; do\\n      if [ -n \\\"$ash_host\\\" ]; then\\n        # Lower-cased because a load balancer lowercases Host while the MCP SDK\\n        # matches case-sensitively; mixed case yields 421 on every request.\\n        ash_host=$(printf '%s' \\\"$ash_host\\\" | tr 'A-Z' 'a-z')\\n        set -- \\\"$@\\\" --allowed-host \\\"$ash_host\\\"\\n      fi\\n    done\\n    IFS=$ASH_SAVED_IFS\\n  else\\n    echo \\\"ash-mcp-entrypoint: WARNING: a Host allowlist of '${ASH_MCP_ALLOWED_HOST}' was requested, but the ASH in this image has no --allowed-host option, so EVERY Host header will be accepted. Deploy an AshVersion whose 'ash mcp' accepts --allowed-host to enforce the allowlist.\\\" >&2\\n  fi\\nfi\\n\\n# Both halves are required: a header name with no value would make ASH compare\\n# against an empty secret.\\nif [ -n \\\"${ASH_MCP_AUTH_HEADER_NAME:-}\\\" ] && [ -n \\\"$ASH_AUTH_VALUE\\\" ]; then\\n  set -- \\\"$@\\\" --auth-header-name \\\"${ASH_MCP_AUTH_HEADER_NAME}\\\" --auth-header-value \\\"$ASH_AUTH_VALUE\\\"\\nelif [ -n \\\"${ASH_MCP_AUTH_HEADER_NAME:-}\\\" ]; then\\n  echo \\\"ash-mcp-entrypoint: McpAuthHeaderName was set but no secret value resolved; refusing to start an unauthenticated server that the deployment expected to authenticate.\\\" >&2\\n  exit 64\\nfi\\n\\nexec \\\"$@\\\"\\n\\nASH_CDK_EOF\",\n        \"cat > ash-src/Dockerfile.mcp <<'ASH_CDK_EOF'\\nFROM ash-base-non-root:local\\n# The ASH stage already dropped to UID 500; step back up to install.\\nUSER root\\nCOPY ash-mcp-entrypoint.sh /usr/local/bin/ash-mcp-entrypoint.sh\\nRUN chmod 0755 /usr/local/bin/ash-mcp-entrypoint.sh\\nENV ASH_CONFIG=/tmp/ash-config/.ash.yaml\\n# 500:100 are the ASH Dockerfile UID/GID defaults, and this build\\n# overrides neither.\\nUSER 500:100\\n# Documentation only; AgentCore fixes the port at 8000 regardless.\\nEXPOSE 8000\\nENTRYPOINT [\\\"/usr/local/bin/ash-mcp-entrypoint.sh\\\"]\\nASH_CDK_EOF\",\n        \"docker build --platform \\\"linux/${ASH_BUILD_PLATFORM}\\\" -f ash-src/Dockerfile.mcp -t \\\"ash-mcp:local\\\" ash-src\",\n        \"docker tag \\\"ash-mcp:local\\\" \\\"${ASH_ECR_REPOSITORY_URI}:mcp-amd64\\\"\",\n        \"docker tag \\\"ash-mcp:local\\\" \\\"${ASH_ECR_REPOSITORY_URI}:mcp-amd64-${ASH_VERSION_TAG_SUFFIX}\\\"\",\n        \"docker push \\\"${ASH_ECR_REPOSITORY_URI}:mcp-amd64\\\"\",\n        \"docker push \\\"${ASH_ECR_REPOSITORY_URI}:mcp-amd64-${ASH_VERSION_TAG_SUFFIX}\\\"\"\n      ]\n    },\n    \"post_build\": {\n      \"commands\": [\n        \"if [ -n \\\"${CFN_RESPONSE_URL:-}\\\" ]; then\\n  if [ \\\"${CODEBUILD_BUILD_SUCCEEDING:-0}\\\" = \\\"1\\\" ]; then\\n    ASH_STATUS=SUCCESS\\n    ASH_REASON=\\\"ASH image build succeeded\\\"\\n  else\\n    ASH_STATUS=FAILED\\n    ASH_REASON=\\\"ASH image build failed; see CodeBuild build ${CODEBUILD_BUILD_ID:-unknown}\\\"\\n  fi\\n  python3 -c \\\"import json, os, sys, urllib.request; body = json.dumps({'Status': sys.argv[1], 'Reason': sys.argv[2], 'PhysicalResourceId': os.environ['CFN_LOGICAL_ID'], 'StackId': os.environ['CFN_STACK_ID'], 'RequestId': os.environ['CFN_REQUEST_ID'], 'LogicalResourceId': os.environ['CFN_LOGICAL_ID'], 'Data': {}}).encode(); req = urllib.request.Request(os.environ['CFN_RESPONSE_URL'], data=body, method='PUT', headers={'content-type': '', 'content-length': str(len(body))}); urllib.request.urlopen(req)\\\" \\\"$ASH_STATUS\\\" \\\"$ASH_REASON\\\"\\nfi\"\n      ]\n    }\n  }\n}"
        ]
       ]
      },
@@ -705,7 +801,6 @@
     "TimeoutInMinutes": 120
    },
    "Metadata": {
-    "aws:cdk:path": "AshFargate/Image/Build/Default/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -738,7 +833,6 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshFargate/Image/Build/Default/EventsRole/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -780,7 +874,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshFargate/Image/Build/Default/EventsRole/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -796,46 +889,24 @@
     }
    }
   },
-  "ImageRebuildScheduleC59CBD6A": {
-   "Type": "AWS::Events::Rule",
-   "Properties": {
-    "Description": "Rebuilds the ASH image so a long-lived deployment keeps receiving base-image, OS and scanner patches for the pinned ASH revision.",
-    "ScheduleExpression": {
-     "Ref": "RebuildSchedule"
-    },
-    "State": "ENABLED",
-    "Targets": [
-     {
-      "Arn": {
-       "Fn::GetAtt": [
-        "ImageBuild31565E2D",
-        "Arn"
-       ]
-      },
-      "Id": "Target0",
-      "RoleArn": {
-       "Fn::GetAtt": [
-        "ImageBuildEventsRoleDF4F46F6",
-        "Arn"
-       ]
-      }
-     }
-    ]
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Image/RebuildSchedule/Resource"
-   }
-  },
   "ImageBootstrapStarterLogsFCF41B92": {
    "Type": "AWS::Logs::LogGroup",
    "Properties": {
+    "KmsKeyId": {
+     "Fn::If": [
+      "HasKmsKey",
+      {
+       "Ref": "KmsKeyArn"
+      },
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    },
     "RetentionInDays": 30
    },
-   "UpdateReplacePolicy": "Delete",
-   "DeletionPolicy": "Delete",
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Image/BootstrapStarterLogs/Resource"
-   }
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain"
   },
   "ImageBootstrapStarterRole4262AC52": {
    "Type": "AWS::IAM::Role",
@@ -855,7 +926,6 @@
     "Description": "Execution role for the image-build bootstrap. Deliberately not using AWSLambdaBasicExecutionRole: the only logging grant it needs is on one log group."
    },
    "Metadata": {
-    "aws:cdk:path": "AshFargate/Image/BootstrapStarterRole/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -921,7 +991,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshFargate/Image/BootstrapStarterRole/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -936,7 +1005,7 @@
    "Type": "AWS::Lambda::Function",
    "Properties": {
     "Code": {
-     "ZipFile": "import json\nimport os\nimport urllib.request\n\nimport boto3\n\n\ndef send(event, status, reason):\n    body = json.dumps({\n        \"Status\": status,\n        \"Reason\": reason,\n        \"PhysicalResourceId\": event[\"LogicalResourceId\"],\n        \"StackId\": event[\"StackId\"],\n        \"RequestId\": event[\"RequestId\"],\n        \"LogicalResourceId\": event[\"LogicalResourceId\"],\n        \"Data\": {},\n    }).encode()\n    urllib.request.urlopen(urllib.request.Request(\n        event[\"ResponseURL\"], data=body, method=\"PUT\",\n        headers={\"content-type\": \"\", \"content-length\": str(len(body))}))\n\n\ndef handler(event, context):\n    # Never block a teardown on an image build.\n    if event[\"RequestType\"] == \"Delete\":\n        send(event, \"SUCCESS\", \"Nothing to undo\")\n        return\n    try:\n        boto3.client(\"codebuild\").start_build(\n            projectName=os.environ[\"PROJECT_NAME\"],\n            environmentVariablesOverride=[\n                {\"name\": \"CFN_RESPONSE_URL\", \"value\": event[\"ResponseURL\"], \"type\": \"PLAINTEXT\"},\n                {\"name\": \"CFN_STACK_ID\", \"value\": event[\"StackId\"], \"type\": \"PLAINTEXT\"},\n                {\"name\": \"CFN_REQUEST_ID\", \"value\": event[\"RequestId\"], \"type\": \"PLAINTEXT\"},\n                {\"name\": \"CFN_LOGICAL_ID\", \"value\": event[\"LogicalResourceId\"], \"type\": \"PLAINTEXT\"},\n            ],\n        )\n    except Exception as exc:\n        # The build never started, so nothing else will ever answer.\n        send(event, \"FAILED\", \"Could not start the ASH image build: %s\" % exc)\n    # Success path is silent by design: the build itself responds when the image\n    # exists. Responding here would let the workload be created too early.\n"
+     "ZipFile": "import json\nimport os\nimport urllib.request\n\nimport boto3\n\n\ndef send(event, status, reason):\n    body = json.dumps({\n        \"Status\": status,\n        \"Reason\": reason,\n        \"PhysicalResourceId\": event[\"LogicalResourceId\"],\n        \"StackId\": event[\"StackId\"],\n        \"RequestId\": event[\"RequestId\"],\n        \"LogicalResourceId\": event[\"LogicalResourceId\"],\n        \"Data\": {},\n    }).encode()\n    urllib.request.urlopen(urllib.request.Request(\n        event[\"ResponseURL\"], data=body, method=\"PUT\",\n        headers={\"content-type\": \"\", \"content-length\": str(len(body))}))\n\n\ndef handler(event, context):\n    # Never block a teardown on an image build.\n    if event[\"RequestType\"] == \"Delete\":\n        send(event, \"SUCCESS\", \"Nothing to undo\")\n        return\n    try:\n        boto3.client(\"codebuild\").start_build(\n            projectName=os.environ[\"PROJECT_NAME\"],\n            environmentVariablesOverride=[\n                {\"name\": \"CFN_RESPONSE_URL\", \"value\": event[\"ResponseURL\"], \"type\": \"PLAINTEXT\"},\n                {\"name\": \"CFN_STACK_ID\", \"value\": event[\"StackId\"], \"type\": \"PLAINTEXT\"},\n                {\"name\": \"CFN_REQUEST_ID\", \"value\": event[\"RequestId\"], \"type\": \"PLAINTEXT\"},\n                {\"name\": \"CFN_LOGICAL_ID\", \"value\": event[\"LogicalResourceId\"], \"type\": \"PLAINTEXT\"},\n            ],\n        )\n    except Exception as exc:\n        # The build never started, so nothing else will ever answer. The most\n        # likely cause is a scheduled rebuild holding the project's only\n        # concurrent build slot, which is why the reason says so: retrying the\n        # stack operation once the rebuild finishes is safe.\n        send(event, \"FAILED\", \"Could not start the ASH image build. A scheduled \"\n             \"rebuild may hold the project's only build slot; retrying is safe. \"\n             \"Cause: %s\" % exc)\n    # Success path is silent by design: the build itself responds when the image\n    # exists. Responding here would let the workload be created too early.\n"
     },
     "Description": "Starts the ASH image build during stack creation and hands CloudFormation’s response URL to the build, which answers once the image exists.",
     "Environment": {
@@ -947,6 +1016,17 @@
      }
     },
     "Handler": "index.handler",
+    "KmsKeyArn": {
+     "Fn::If": [
+      "HasKmsKey",
+      {
+       "Ref": "KmsKeyArn"
+      },
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    },
     "LoggingConfig": {
      "LogGroup": {
       "Ref": "ImageBootstrapStarterLogsFCF41B92"
@@ -965,10 +1045,7 @@
    "DependsOn": [
     "ImageBootstrapStarterRoleDefaultPolicy10189EBF",
     "ImageBootstrapStarterRole4262AC52"
-   ],
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Image/BootstrapStarter/Resource"
-   }
+   ]
   },
   "ImageBootstrapBuildCBE6CA7A": {
    "Type": "Custom::AshImageBootstrap",
@@ -988,21 +1065,56 @@
     "Flavors": "mcp"
    },
    "UpdateReplacePolicy": "Delete",
-   "DeletionPolicy": "Delete",
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Image/BootstrapBuild/Default"
-   }
+   "DeletionPolicy": "Delete"
+  },
+  "ImageRebuildScheduleC59CBD6A": {
+   "Type": "AWS::Events::Rule",
+   "Properties": {
+    "Description": "Rebuilds the ASH image so a long-lived deployment keeps receiving base-image, OS and scanner patches for the pinned ASH revision.",
+    "ScheduleExpression": {
+     "Ref": "RebuildSchedule"
+    },
+    "State": "ENABLED",
+    "Targets": [
+     {
+      "Arn": {
+       "Fn::GetAtt": [
+        "ImageBuild31565E2D",
+        "Arn"
+       ]
+      },
+      "Id": "Target0",
+      "RoleArn": {
+       "Fn::GetAtt": [
+        "ImageBuildEventsRoleDF4F46F6",
+        "Arn"
+       ]
+      }
+     }
+    ]
+   },
+   "DependsOn": [
+    "ImageBootstrapBuildCBE6CA7A"
+   ]
   },
   "VpcFlowLogsE6FFDEF9": {
    "Type": "AWS::Logs::LogGroup",
    "Properties": {
+    "KmsKeyId": {
+     "Fn::If": [
+      "HasKmsKey",
+      {
+       "Ref": "KmsKeyArn"
+      },
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    },
     "RetentionInDays": 30
    },
-   "UpdateReplacePolicy": "Delete",
-   "DeletionPolicy": "Delete",
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/VpcFlowLogs/Resource"
-   }
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain"
   },
   "Vpc8378EB38": {
    "Type": "AWS::EC2::VPC",
@@ -1017,9 +1129,6 @@
       "Value": "AshFargate/Vpc"
      }
     ]
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/Resource"
    }
   },
   "VpcPublicSubnet1Subnet5C2D37C4": {
@@ -1052,9 +1161,6 @@
     "VpcId": {
      "Ref": "Vpc8378EB38"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PublicSubnet1/Subnet"
    }
   },
   "VpcPublicSubnet1RouteTable6C95E38E": {
@@ -1069,9 +1175,6 @@
     "VpcId": {
      "Ref": "Vpc8378EB38"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PublicSubnet1/RouteTable"
    }
   },
   "VpcPublicSubnet1RouteTableAssociation97140677": {
@@ -1083,9 +1186,6 @@
     "SubnetId": {
      "Ref": "VpcPublicSubnet1Subnet5C2D37C4"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PublicSubnet1/RouteTableAssociation"
    }
   },
   "VpcPublicSubnet1DefaultRoute3DA9E72A": {
@@ -1101,10 +1201,7 @@
    },
    "DependsOn": [
     "VpcVPCGWBF912B6E"
-   ],
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PublicSubnet1/DefaultRoute"
-   }
+   ]
   },
   "VpcPublicSubnet1EIPD7E02669": {
    "Type": "AWS::EC2::EIP",
@@ -1116,9 +1213,6 @@
       "Value": "AshFargate/Vpc/PublicSubnet1"
      }
     ]
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PublicSubnet1/EIP"
    }
   },
   "VpcPublicSubnet1NATGateway4D7517AA": {
@@ -1143,10 +1237,7 @@
    "DependsOn": [
     "VpcPublicSubnet1DefaultRoute3DA9E72A",
     "VpcPublicSubnet1RouteTableAssociation97140677"
-   ],
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PublicSubnet1/NATGateway"
-   }
+   ]
   },
   "VpcPublicSubnet2Subnet691E08A3": {
    "Type": "AWS::EC2::Subnet",
@@ -1178,9 +1269,6 @@
     "VpcId": {
      "Ref": "Vpc8378EB38"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PublicSubnet2/Subnet"
    }
   },
   "VpcPublicSubnet2RouteTable94F7E489": {
@@ -1195,9 +1283,6 @@
     "VpcId": {
      "Ref": "Vpc8378EB38"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PublicSubnet2/RouteTable"
    }
   },
   "VpcPublicSubnet2RouteTableAssociationDD5762D8": {
@@ -1209,9 +1294,6 @@
     "SubnetId": {
      "Ref": "VpcPublicSubnet2Subnet691E08A3"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PublicSubnet2/RouteTableAssociation"
    }
   },
   "VpcPublicSubnet2DefaultRoute97F91067": {
@@ -1227,10 +1309,7 @@
    },
    "DependsOn": [
     "VpcVPCGWBF912B6E"
-   ],
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PublicSubnet2/DefaultRoute"
-   }
+   ]
   },
   "VpcPrivateSubnet1Subnet536B997A": {
    "Type": "AWS::EC2::Subnet",
@@ -1262,9 +1341,6 @@
     "VpcId": {
      "Ref": "Vpc8378EB38"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PrivateSubnet1/Subnet"
    }
   },
   "VpcPrivateSubnet1RouteTableB2C5B500": {
@@ -1279,9 +1355,6 @@
     "VpcId": {
      "Ref": "Vpc8378EB38"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PrivateSubnet1/RouteTable"
    }
   },
   "VpcPrivateSubnet1RouteTableAssociation70C59FA6": {
@@ -1293,9 +1366,6 @@
     "SubnetId": {
      "Ref": "VpcPrivateSubnet1Subnet536B997A"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PrivateSubnet1/RouteTableAssociation"
    }
   },
   "VpcPrivateSubnet1DefaultRouteBE02A9ED": {
@@ -1308,9 +1378,6 @@
     "RouteTableId": {
      "Ref": "VpcPrivateSubnet1RouteTableB2C5B500"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PrivateSubnet1/DefaultRoute"
    }
   },
   "VpcPrivateSubnet2Subnet3788AAA1": {
@@ -1343,9 +1410,6 @@
     "VpcId": {
      "Ref": "Vpc8378EB38"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PrivateSubnet2/Subnet"
    }
   },
   "VpcPrivateSubnet2RouteTableA678073B": {
@@ -1360,9 +1424,6 @@
     "VpcId": {
      "Ref": "Vpc8378EB38"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PrivateSubnet2/RouteTable"
    }
   },
   "VpcPrivateSubnet2RouteTableAssociationA89CAD56": {
@@ -1374,9 +1435,6 @@
     "SubnetId": {
      "Ref": "VpcPrivateSubnet2Subnet3788AAA1"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PrivateSubnet2/RouteTableAssociation"
    }
   },
   "VpcPrivateSubnet2DefaultRoute060D2087": {
@@ -1389,9 +1447,6 @@
     "RouteTableId": {
      "Ref": "VpcPrivateSubnet2RouteTableA678073B"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/PrivateSubnet2/DefaultRoute"
    }
   },
   "VpcIGWD7BA715C": {
@@ -1403,9 +1458,6 @@
       "Value": "AshFargate/Vpc"
      }
     ]
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/IGW"
    }
   },
   "VpcVPCGWBF912B6E": {
@@ -1417,9 +1469,6 @@
     "VpcId": {
      "Ref": "Vpc8378EB38"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/VPCGW"
    }
   },
   "VpcIAMRoleAED9A610": {
@@ -1443,9 +1492,6 @@
       "Value": "AshFargate/Vpc/Vpc"
      }
     ]
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/Vpc/IAMRole/Resource"
    }
   },
   "VpcIAMRoleDefaultPolicyD97FC775": {
@@ -1476,9 +1522,6 @@
       "Ref": "VpcIAMRoleAED9A610"
      }
     ]
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/Vpc/IAMRole/DefaultPolicy/Resource"
    }
   },
   "VpcFlowLog64CE86D0": {
@@ -1505,9 +1548,6 @@
      }
     ],
     "TrafficType": "ALL"
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Vpc/Vpc/FlowLog"
    }
   },
   "ClusterEB0386A7": {
@@ -1519,21 +1559,26 @@
       "Value": "enabled"
      }
     ]
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Cluster/Resource"
    }
   },
   "TaskLogs5C7CDF8E": {
    "Type": "AWS::Logs::LogGroup",
    "Properties": {
+    "KmsKeyId": {
+     "Fn::If": [
+      "HasKmsKey",
+      {
+       "Ref": "KmsKeyArn"
+      },
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    },
     "RetentionInDays": 30
    },
-   "UpdateReplacePolicy": "Delete",
-   "DeletionPolicy": "Delete",
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/TaskLogs/Resource"
-   }
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain"
   },
   "TaskDefinitionTaskRoleFD40A61D": {
    "Type": "AWS::IAM::Role",
@@ -1552,7 +1597,6 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshFargate/TaskDefinition/TaskRole/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -1622,7 +1666,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshFargate/TaskDefinition/TaskRole/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -1758,7 +1801,16 @@
          {
           "Ref": "ImageRepositoryD8036990"
          },
-         ":mcp-amd64"
+         ":",
+         {
+          "Fn::If": [
+           "ImageImageTagPinned430B439C",
+           {
+            "Ref": "AshImageTag"
+           },
+           "mcp-amd64"
+          ]
+         }
         ]
        ]
       },
@@ -1808,7 +1860,6 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshFargate/TaskDefinition/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -1837,7 +1888,6 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshFargate/TaskDefinition/ExecutionRole/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -1901,7 +1951,6 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshFargate/TaskDefinition/ExecutionRole/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -1917,6 +1966,165 @@
     }
    }
   },
+  "AccessLogsArchive1A69C748": {
+   "Type": "AWS::S3::Bucket",
+   "Properties": {
+    "BucketEncryption": {
+     "ServerSideEncryptionConfiguration": [
+      {
+       "ServerSideEncryptionByDefault": {
+        "SSEAlgorithm": "AES256"
+       }
+      }
+     ]
+    },
+    "LifecycleConfiguration": {
+     "Rules": [
+      {
+       "ExpirationInDays": 30,
+       "Id": "ExpireLogDeliveryRecords",
+       "NoncurrentVersionExpiration": {
+        "NoncurrentDays": 1
+       },
+       "Status": "Enabled"
+      }
+     ]
+    },
+    "LoggingConfiguration": {
+     "LogFilePrefix": "log-delivery/"
+    },
+    "PublicAccessBlockConfiguration": {
+     "BlockPublicAcls": true,
+     "BlockPublicPolicy": true,
+     "IgnorePublicAcls": true,
+     "RestrictPublicBuckets": true
+    },
+    "VersioningConfiguration": {
+     "Status": "Enabled"
+    }
+   },
+   "UpdateReplacePolicy": "Retain",
+   "DeletionPolicy": "Retain"
+  },
+  "AccessLogsArchivePolicyBC5B3007": {
+   "Type": "AWS::S3::BucketPolicy",
+   "Properties": {
+    "Bucket": {
+     "Ref": "AccessLogsArchive1A69C748"
+    },
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": "s3:*",
+       "Condition": {
+        "Bool": {
+         "aws:SecureTransport": "false"
+        }
+       },
+       "Effect": "Deny",
+       "Principal": {
+        "AWS": "*"
+       },
+       "Resource": [
+        {
+         "Fn::GetAtt": [
+          "AccessLogsArchive1A69C748",
+          "Arn"
+         ]
+        },
+        {
+         "Fn::Join": [
+          "",
+          [
+           {
+            "Fn::GetAtt": [
+             "AccessLogsArchive1A69C748",
+             "Arn"
+            ]
+           },
+           "/*"
+          ]
+         ]
+        }
+       ]
+      },
+      {
+       "Action": "s3:PutObject",
+       "Condition": {
+        "ArnLike": {
+         "aws:SourceArn": {
+          "Fn::GetAtt": [
+           "AccessLogsArchive1A69C748",
+           "Arn"
+          ]
+         }
+        },
+        "StringEquals": {
+         "aws:SourceAccount": {
+          "Ref": "AWS::AccountId"
+         }
+        }
+       },
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "logging.s3.amazonaws.com"
+       },
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          {
+           "Fn::GetAtt": [
+            "AccessLogsArchive1A69C748",
+            "Arn"
+           ]
+          },
+          "/log-delivery/*"
+         ]
+        ]
+       }
+      },
+      {
+       "Action": "s3:PutObject",
+       "Condition": {
+        "ArnLike": {
+         "aws:SourceArn": {
+          "Fn::GetAtt": [
+           "AccessLogs8B620ECA",
+           "Arn"
+          ]
+         }
+        },
+        "StringEquals": {
+         "aws:SourceAccount": {
+          "Ref": "AWS::AccountId"
+         }
+        }
+       },
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "logging.s3.amazonaws.com"
+       },
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          {
+           "Fn::GetAtt": [
+            "AccessLogsArchive1A69C748",
+            "Arn"
+           ]
+          },
+          "/access-logs/*"
+         ]
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    }
+   }
+  },
   "AccessLogs8B620ECA": {
    "Type": "AWS::S3::Bucket",
    "Properties": {
@@ -1929,26 +2137,24 @@
       }
      ]
     },
+    "LoggingConfiguration": {
+     "DestinationBucketName": {
+      "Ref": "AccessLogsArchive1A69C748"
+     },
+     "LogFilePrefix": "access-logs/"
+    },
     "PublicAccessBlockConfiguration": {
      "BlockPublicAcls": true,
      "BlockPublicPolicy": true,
      "IgnorePublicAcls": true,
      "RestrictPublicBuckets": true
+    },
+    "VersioningConfiguration": {
+     "Status": "Enabled"
     }
    },
    "UpdateReplacePolicy": "Retain",
-   "DeletionPolicy": "Retain",
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/AccessLogs/Resource",
-    "cdk_nag": {
-     "rules_to_suppress": [
-      {
-       "reason": "This IS the access-log destination. Self-logging is an infinite loop, and chaining to a further bucket leaves that one unlogged instead, so the chain has to terminate here. Nothing writes to this bucket except the log delivery service principal, whose access is already constrained by the bucket policy.",
-       "id": "AwsSolutions-S1"
-      }
-     ]
-    }
-   }
+   "DeletionPolicy": "Retain"
   },
   "AccessLogsPolicyABDC4D2D": {
    "Type": "AWS::S3::BucketPolicy",
@@ -2045,9 +2251,6 @@
      ],
      "Version": "2012-10-17"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/AccessLogs/Policy/Resource"
    }
   },
   "LoadBalancerBE9EEC3A": {
@@ -2057,6 +2260,10 @@
      {
       "Key": "deletion_protection.enabled",
       "Value": "false"
+     },
+     {
+      "Key": "routing.http.drop_invalid_header_fields.enabled",
+      "Value": "true"
      },
      {
       "Key": "access_logs.s3.enabled",
@@ -2091,9 +2298,6 @@
      }
     ],
     "Type": "application"
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/LoadBalancer/Resource"
    }
   },
   "LoadBalancerSecurityGroupA28D6DD7": {
@@ -2103,18 +2307,15 @@
     "VpcId": {
      "Ref": "Vpc8378EB38"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/LoadBalancer/SecurityGroup/Resource"
    }
   },
-  "LoadBalancerSecurityGrouptoAshFargateServiceSecurityGroupBADB9C5780009CF0A984": {
+  "LoadBalancerSecurityGrouptoAshFargateServiceSecurityGroup2FA8F8878000BEF5DB30": {
    "Type": "AWS::EC2::SecurityGroupEgress",
    "Properties": {
     "Description": "Load balancer to target",
     "DestinationSecurityGroupId": {
      "Fn::GetAtt": [
-      "ServiceSecurityGroupC96ED6A7",
+      "ServiceSecurityGroup61DE1A49",
       "GroupId"
      ]
     },
@@ -2127,9 +2328,6 @@
     },
     "IpProtocol": "tcp",
     "ToPort": 8000
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/LoadBalancer/SecurityGroup/to AshFargateServiceSecurityGroupBADB9C57:8000"
    }
   },
   "LoadBalancerListenerE1A099B9": {
@@ -2148,9 +2346,6 @@
     },
     "Port": 80,
     "Protocol": "HTTP"
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/LoadBalancer/Listener/Resource"
    }
   },
   "LoadBalancerListenerMcpGroupABC8DC42": {
@@ -2178,9 +2373,45 @@
     "VpcId": {
      "Ref": "Vpc8378EB38"
     }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/LoadBalancer/Listener/McpGroup/Resource"
+   }
+  },
+  "ServiceSecurityGroup61DE1A49": {
+   "Type": "AWS::EC2::SecurityGroup",
+   "Properties": {
+    "GroupDescription": "ASH MCP tasks. Egress is TCP 443 only; widen it against TaskSecurityGroupId for a registry on another port. See ash-fargate-stack.ts.",
+    "SecurityGroupEgress": [
+     {
+      "CidrIp": "0.0.0.0/0",
+      "Description": "Image pull, log delivery, and SSM and Secrets Manager reads, all via NAT.",
+      "FromPort": 443,
+      "IpProtocol": "tcp",
+      "ToPort": 443
+     }
+    ],
+    "VpcId": {
+     "Ref": "Vpc8378EB38"
+    }
+   }
+  },
+  "ServiceSecurityGroupfromAshFargateLoadBalancerSecurityGroupCDCEE5AE800064FC79C8": {
+   "Type": "AWS::EC2::SecurityGroupIngress",
+   "Properties": {
+    "Description": "Load balancer to target",
+    "FromPort": 8000,
+    "GroupId": {
+     "Fn::GetAtt": [
+      "ServiceSecurityGroup61DE1A49",
+      "GroupId"
+     ]
+    },
+    "IpProtocol": "tcp",
+    "SourceSecurityGroupId": {
+     "Fn::GetAtt": [
+      "LoadBalancerSecurityGroupA28D6DD7",
+      "GroupId"
+     ]
+    },
+    "ToPort": 8000
    }
   },
   "ServiceD69D759B": {
@@ -2216,7 +2447,7 @@
       "SecurityGroups": [
        {
         "Fn::GetAtt": [
-         "ServiceSecurityGroupC96ED6A7",
+         "ServiceSecurityGroup61DE1A49",
          "GroupId"
         ]
        }
@@ -2241,68 +2472,42 @@
     "LoadBalancerListenerE1A099B9",
     "TaskDefinitionTaskRoleDefaultPolicy282E8624",
     "TaskDefinitionTaskRoleFD40A61D"
-   ],
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Service/Service"
-   }
+   ]
   },
-  "ServiceSecurityGroupC96ED6A7": {
-   "Type": "AWS::EC2::SecurityGroup",
-   "Properties": {
-    "GroupDescription": "AshFargate/Service/SecurityGroup",
-    "SecurityGroupEgress": [
-     {
-      "CidrIp": "0.0.0.0/0",
-      "Description": "Allow all outbound traffic by default",
-      "IpProtocol": "-1"
-     }
-    ],
-    "VpcId": {
-     "Ref": "Vpc8378EB38"
-    }
-   },
-   "DependsOn": [
-    "ImageBootstrapBuildCBE6CA7A",
-    "TaskDefinitionTaskRoleDefaultPolicy282E8624",
-    "TaskDefinitionTaskRoleFD40A61D"
-   ],
-   "Metadata": {
-    "aws:cdk:path": "AshFargate/Service/SecurityGroup/Resource"
-   }
-  },
-  "ServiceSecurityGroupfromAshFargateLoadBalancerSecurityGroupCDCEE5AE800049473A47": {
+  "McpIngress": {
    "Type": "AWS::EC2::SecurityGroupIngress",
    "Properties": {
-    "Description": "Load balancer to target",
-    "FromPort": 8000,
-    "GroupId": {
-     "Fn::GetAtt": [
-      "ServiceSecurityGroupC96ED6A7",
-      "GroupId"
-     ]
+    "CidrIp": {
+     "Ref": "McpIngressCidr"
     },
-    "IpProtocol": "tcp",
-    "SourceSecurityGroupId": {
+    "Description": "MCP clients allowed by McpIngressCidr.",
+    "FromPort": 80,
+    "GroupId": {
      "Fn::GetAtt": [
       "LoadBalancerSecurityGroupA28D6DD7",
       "GroupId"
      ]
     },
-    "ToPort": 8000
+    "IpProtocol": "tcp",
+    "ToPort": 80
    },
-   "DependsOn": [
-    "ImageBootstrapBuildCBE6CA7A",
-    "TaskDefinitionTaskRoleDefaultPolicy282E8624",
-    "TaskDefinitionTaskRoleFD40A61D"
-   ],
    "Metadata": {
-    "aws:cdk:path": "AshFargate/Service/SecurityGroup/from AshFargateLoadBalancerSecurityGroupCDCEE5AE:8000"
-   }
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "QXdzU29sdXRpb25zLUVDMjMgY2Fubm90IGV2YWx1YXRlIENpZHJJcCBiZWNhdXNlIGl0IGlzIGFuIEZuOjpSZWYgdG8gdGhlIE1jcEluZ3Jlc3NDaWRyIHBhcmFtZXRlciwgc28gaXQgcmVzb2x2ZXMgdG8gYSBub24tcHJpbWl0aXZlLiBUaGUgcnVsZSBkaWQgbm90IHJ1biDigJQgaXQgbmVpdGhlciBwYXNzZWQgbm9yIGZhaWxlZC4gVGhlIHByb3BlcnR5IGl0IGNoZWNrcyBpcyBlbmZvcmNlZCBpbnN0ZWFkIGJ5IHRoYXQgcGFyYW1ldGVyJ3MgQWxsb3dlZFBhdHRlcm4sIHdoaWNoIHJlamVjdHMgYSAvMCBwcmVmaXgsIHNvIGFuIG9wZW4tdG8tdGhlLXdvcmxkIENJRFIgaXMgcmVmdXNlZCBhdCBwYXJhbWV0ZXIgdmFsaWRhdGlvbiByYXRoZXIgdGhhbiByZWFjaGluZyB0aGlzIHJlc291cmNlLiBHcmFudGluZyBtb3JlIGJyb2FkbHkgaXMgZG9uZSBkZWxpYmVyYXRlbHkgYWdhaW5zdCB0aGUgTWNwU2VjdXJpdHlHcm91cElkIG91dHB1dC4=",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   },
+   "Condition": "McpIngressCidrSupplied"
   }
  },
  "Outputs": {
   "McpEndpoint": {
-   "Description": "MCP endpoint. Internal by default, so reachable from inside the VPC or over a peered/VPN path. Append the McpMountPath value.",
+   "Description": "MCP endpoint. The load balancer is internal, and reachable only from the range given in McpIngressCidr. If you left that empty there is NO ingress rule, so this address is not reachable from anywhere — set McpIngressCidr, or authorize McpSecurityGroupId directly. Append the McpMountPath value. Plain HTTP.",
    "Value": {
     "Fn::Join": [
      "",
@@ -2315,6 +2520,24 @@
        ]
       }
      ]
+    ]
+   }
+  },
+  "McpSecurityGroupId": {
+   "Description": "The load balancer's security group, which starts with no ingress rule. Authorize the range your MCP clients come from, for example: aws ec2 authorize-security-group-ingress --group-id <this> --protocol tcp --port 80 --cidr <your-client-cidr>. Prefer --source-group over --cidr where the client has its own security group.",
+   "Value": {
+    "Fn::GetAtt": [
+     "LoadBalancerSecurityGroupA28D6DD7",
+     "GroupId"
+    ]
+   }
+  },
+  "TaskSecurityGroupId": {
+   "Description": "The ASH task's security group. Egress is TCP 443 only, which covers ECR, CloudWatch Logs, Secrets Manager and Systems Manager. If a scanned repository resolves dependencies from a registry on another port, add that port, for example: aws ec2 authorize-security-group-egress --group-id <this> --protocol tcp --port 8080 --cidr <your-registry-cidr>. A missing rule shows up as a scanner timing out or failing to fetch, not as a permission error.",
+   "Value": {
+    "Fn::GetAtt": [
+     "ServiceSecurityGroup61DE1A49",
+     "GroupId"
     ]
    }
   },

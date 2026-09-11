@@ -406,7 +406,32 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                         baseline=json.load(f),
                     )
 
-                self._secrets_collection.root = Path(target).absolute()
+            # ``root`` has to be set for every scan, not only for the baseline
+            # case above. SecretsCollection.scan_files() has two branches: a
+            # single file goes through scan_file() and is keyed by the path it
+            # was handed, but two or more files go through a multiprocessing
+            # pool and are keyed by os.path.relpath(secret.filename, self.root).
+            # SecretsCollection defaults ``root`` to '', and os.path.abspath('')
+            # is the process working directory -- so reported finding paths
+            # silently depended on where ASH happened to be invoked from, and on
+            # Windows there is no relative path between two drives at all:
+            # scanning a tree on D: from a process on C: raised
+            # "ValueError: path is on mount 'C:', start on mount 'D:'"
+            # in place of the findings.
+            #
+            # Anchor it to the directory the scan set is enumerated from just
+            # below, which is an ancestor of every scanned file by construction,
+            # so the relative path is always expressible. ``absolute()`` and not
+            # ``resolve()``: the file list keeps whatever symlinked prefix it was
+            # walked with, and resolving only one side of os.path.relpath() would
+            # turn every key into a chain of '..' segments.
+            scan_root = (
+                self.context.work_dir
+                if target_type == "converted"
+                else self.context.source_dir
+            )
+            self._secrets_collection.root = Path(scan_root).absolute()
+
             # Find all files to scan from the scan set
             scannable = [
                 str(item)
@@ -513,8 +538,20 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             with transient_settings(scan_settings_dict) as settings:
                 ASH_LOGGER.debug(f"Settings: {settings}")
                 executor = ThreadPoolExecutor(max_workers=1)
+                # scan_files() reads each name as os.path.join(self.root, name),
+                # which is only a no-op for absolute names. ``source_dir`` may be
+                # relative: the CLI absolutizes it in run_ash_scan, but a library
+                # caller reaches ASHScanOrchestrator directly and
+                # model_post_init only coerces a str to Path -- it does not
+                # anchor it -- so source_dir="./sub" arrives relative and the
+                # scan set inherits that. Absolutize here: with a relative name a
+                # non-empty root would send detect-secrets looking for
+                # <root>/<root>/<file> and quietly find nothing. Kept separate
+                # from ``scannable`` so the baseline exclude patterns above still
+                # match against the paths they were written for.
+                scan_paths = [str(Path(item).absolute()) for item in scannable]
                 future = executor.submit(
-                    self._secrets_collection.scan_files, *scannable
+                    self._secrets_collection.scan_files, *scan_paths
                 )
                 try:
                     future.result(timeout=scan_timeout)

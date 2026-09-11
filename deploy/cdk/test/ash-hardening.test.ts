@@ -16,11 +16,17 @@
  *
  * NON-VACUITY IS ASSERTED, NOT ASSUMED
  * ------------------------------------
- * "every log group is encrypted" is trivially true of a stack with no log groups,
- * and a rename that stopped the iteration finding any would pass silently. Each
- * property test is therefore preceded by a count with a floor taken from the
- * cfn-nag measurement that prompted it.
+ * "every log group specifies a key" is trivially true of a stack with no log
+ * groups, and a rename that stopped the iteration finding any would pass silently.
+ * Each property test is therefore preceded by an EXACT count, not a lower bound.
+ * Exact is deliberate: `toBeGreaterThanOrEqual` would keep passing while a log
+ * group was added and left unencrypted, which is the whole failure this file
+ * exists to catch. A count that is exact fails on the day a resource lands, which
+ * is when someone can still decide whether it should carry a key.
  */
+
+import * as fs from 'fs';
+import * as path from 'path';
 
 import { App, Stack } from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
@@ -45,14 +51,45 @@ const STACKS: Record<string, StackFactory> = {
   AshDistributedPipeline: (app, id) => new AshDistributedPipelineStack(app, id),
 };
 
+/**
+ * The context `cdk.json` supplies, which a bare `new App()` in a test does not get.
+ *
+ * The CDK CLI reads `cdk.json`'s `context` block and hands it to the app; jest does
+ * not. Without it the templates a test builds are NOT the templates
+ * scripts/synth-templates.sh commits, and the difference is not cosmetic — the
+ * block turns on `@aws-cdk/aws-iam:minimizePolicies`, so an unminimized in-memory
+ * policy document has statements the shipped template has merged away. That
+ * matters most to the duplicate-statement assertion below, which exists to catch a
+ * `Sid` defeating that same minimizer: with the flag off it would be looking for
+ * the defect in the one configuration that cannot produce it.
+ *
+ * Loading it here means these tests pin the artifact an adopter launches.
+ */
+const CDK_JSON_CONTEXT: Record<string, unknown> = JSON.parse(
+  fs.readFileSync(path.join(__dirname, '..', 'cdk.json'), 'utf8'),
+).context;
+
 const TEMPLATES: Record<string, Template> = Object.fromEntries(
   Object.entries(STACKS).map(([name, factory]) => [
     name,
-    Template.fromStack(factory(new App({ analyticsReporting: false }), name)),
+    Template.fromStack(
+      factory(new App({ analyticsReporting: false, context: CDK_JSON_CONTEXT }), name),
+    ),
   ]),
 );
 
 const CASES = Object.entries(TEMPLATES);
+
+describe('the templates under test are the templates that ship', () => {
+  test('cdk.json context reached the App', () => {
+    // Non-vacuity for the block above. If the path breaks or cdk.json is
+    // restructured, `CDK_JSON_CONTEXT` becomes undefined, `new App({context:
+    // undefined})` is silently accepted, and every assertion in this file starts
+    // measuring an unminimized artifact that never ships. Nothing else would say so.
+    expect(CDK_JSON_CONTEXT).toBeDefined();
+    expect(CDK_JSON_CONTEXT['@aws-cdk/aws-iam:minimizePolicies']).toBe(true);
+  });
+});
 
 /** Every resource of one type across every stack, as `[stack/logicalId, props]`. */
 function everyResource(type: string): [string, Record<string, any>][] {
@@ -213,7 +250,7 @@ describe('no IAM policy grants the same thing twice', () => {
   );
 
   test('there are policies to check in every stack', () => {
-    // 88 across the five stacks, in the order STACKS declares them. Exact and
+    // 90 across the five stacks, in the order STACKS declares them. Exact and
     // per-stack, so one stack losing its policies to a rename cannot leave the loop
     // for that stack iterating over nothing while the others carry the assertion.
     //
@@ -221,9 +258,14 @@ describe('no IAM policy grants the same thing twice', () => {
     // ash-policy-split.ts, which files each role's statements into one
     // AWS::IAM::Policy per AWS service so that no single document trips cfn-nag's
     // W76 ceiling. The counts rose; the statements did not change, which the
-    // duplicate check below is a second witness to -- it passes over all 88.
+    // duplicate check below is a second witness to -- it passes over all 90.
+    //
+    // 88 of the 90 come from the split. The other two are AshAgentCore's and
+    // AshFargate's `ConfigKeyAccess`, which AshRuntimeConfig authors directly so
+    // the `kms:Decrypt` grant on an adopter-supplied key can be made conditional.
+    // That is why those two stacks are one higher than the split alone produces.
     expect(policiesPerStack.map(([, policies]) => policies.length)).toEqual([
-      10, 12, 9, 7, 50,
+      10, 13, 10, 7, 50,
     ]);
   });
 
@@ -234,9 +276,17 @@ describe('no IAM policy grants the same thing twice', () => {
         const { Sid, ...rest } = statement as Record<string, unknown>;
         return JSON.stringify(rest);
       });
-      expect(new Set(withoutSids).size).toBe(withoutSids.length);
-      // Named in the failure output, so a reader knows which policy to open.
-      expect(logicalId).toBeTruthy();
+      // Compared as objects carrying the logical id, so the failure output NAMES
+      // the policy. `expect(size).toBe(length)` reports "Expected: 4, Received: 3"
+      // and the test.each title carries only the stack name -- for
+      // AshDistributedPipeline that leaves a reader 50 policies to search.
+      // A separate `expect(logicalId).toBeTruthy()` cannot do this job: an
+      // Object.entries key is always a non-empty string, so it never fails and
+      // never prints anything.
+      expect({ policy: logicalId, distinct: new Set(withoutSids).size }).toEqual({
+        policy: logicalId,
+        distinct: withoutSids.length,
+      });
     }
   });
 });

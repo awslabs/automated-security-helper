@@ -72,5 +72,8 @@
     "jsii-rosetta": "^6.0.12",
     "ts-jest": "^29.4.12",
     "typescript": "~5.9.3"
+  },
+  "overrides": {
+    "stream-json": "^3.5.0"
   }
 }

@@ -205,6 +205,25 @@ def run_scan(
         # would otherwise make every pull request pass while findings were still
         # being reported in the comment.
         "--fail-on-findings" if fail_on_findings else "--no-fail-on-findings",
+        # Not optional, and not configurable, because this gate can APPROVE.
+        #
+        # Without it a run where no scanner completed exits 0 -- the same code as a
+        # clean scan, since no scanner produced a finding to fail on. That exit 0
+        # becomes outcome "pass", and "pass" is the one outcome that calls
+        # update_pull_request_approval_state with APPROVE. So an operator who arms
+        # ASH_MANAGE_APPROVAL_STATE gets auto-approval of code nothing looked at.
+        #
+        # That is not hypothetical here. Lambda runs this image on a read-only root
+        # filesystem, and ASH's scanners write caches at scan time; deployed without
+        # the cache redirection the CDK gate applies, a measured run reported bandit,
+        # checkov and semgrep MISSING, opengrep ERROR, and grype PASSED with zero
+        # findings. The gate said "passed" over a scan that evaluated almost nothing.
+        # See the _scan_env note in deploy/cdk/lib/ash-container-scripts.ts.
+        #
+        # Hardcoded rather than exposed as an environment variable: a gate whose
+        # fail-closed behaviour can be switched off by configuration is a gate whose
+        # safety depends on deployment, and the failure is silent when it is wrong.
+        "--fail-on-incomplete-scanners",
     ]
 
     extra = os.environ.get("ASH_SCAN_EXTRA_ARGS", "").strip()
@@ -363,22 +382,38 @@ def handler(event: dict, context: object) -> dict:  # noqa: ARG001 - Lambda sign
     )
     LOGGER.info("posted %s comment on pull request %s", outcome, parsed["pull_request_id"])
 
-    # Approval state is only ever set to APPROVE on a clean scan. An error
-    # outcome deliberately leaves the state untouched rather than revoking, so a
-    # transient infrastructure failure cannot look like a security judgment.
+    # APPROVE on a clean scan, REVOKE on anything else. The CDK gate does the same
+    # (deploy/cdk/lib/ash-container-scripts.ts), and the two have to agree: an operator
+    # choosing an infrastructure flavour is not choosing a security posture.
+    #
+    # This previously left the state untouched on a non-pass outcome, reasoning that a
+    # transient infrastructure failure should not look like a security judgment. The
+    # reasoning is real but it points the other way once approvals can already exist. A
+    # pull request approved on an earlier clean commit, then pushed to with code that has
+    # findings, keeps its approval: the gate declines to withdraw the very approval it
+    # granted, on code it has now judged unclean. Leaving a stale APPROVE standing is
+    # undetectable to a reviewer reading the pull request, while an over-eager REVOKE is
+    # both visible and self-correcting -- the next clean run re-approves.
+    #
+    # So REVOKE covers "findings" and "error" alike. "error" includes the incomplete-scanner
+    # exit that --fail-on-incomplete-scanners produces above, which is exactly the case
+    # where an approval must not survive: nothing was scanned, so nothing supports it.
     if manage_approval and parsed.get("revision_id"):
-        if outcome == "pass":
-            try:
-                codecommit.update_pull_request_approval_state(
-                    pullRequestId=parsed["pull_request_id"],
-                    revisionId=parsed["revision_id"],
-                    approvalState="APPROVE",
-                )
-                LOGGER.info("approved pull request %s", parsed["pull_request_id"])
-            except Exception:  # noqa: BLE001 - approval is advisory, the comment is the record
-                LOGGER.exception("could not set approval state")
-        else:
-            LOGGER.info("outcome %s: leaving approval state unchanged", outcome)
+        desired_state = "APPROVE" if outcome == "pass" else "REVOKE"
+        try:
+            codecommit.update_pull_request_approval_state(
+                pullRequestId=parsed["pull_request_id"],
+                revisionId=parsed["revision_id"],
+                approvalState=desired_state,
+            )
+            LOGGER.info(
+                "set approval state %s on pull request %s (outcome %s)",
+                desired_state,
+                parsed["pull_request_id"],
+                outcome,
+            )
+        except Exception:  # noqa: BLE001 - approval is advisory, the comment is the record
+            LOGGER.exception("could not set approval state to %s", desired_state)
 
     return {"outcome": outcome, "scanExitCode": scan_exit, "severityCounts": counts or {}}
 

@@ -39,6 +39,7 @@ from automated_security_helper.utils.subprocess_utils import find_executable
 _CDK_AVAILABLE = True
 try:
     from importlib.metadata import version as _get_version
+
     _cdk_nag_version = _get_version("cdk_nag")
     from automated_security_helper.utils.cdk_nag_wrapper import (
         run_cdk_nag_against_cfn_template,
@@ -54,9 +55,9 @@ except (ImportError, Exception):
 # and can therefore go stale, which is exactly why it is only reached when the
 # metadata read below fails outright.
 _CDK_EXTRA_FALLBACK_REQUIREMENTS: List[str] = [
-    "aws-cdk-lib>=2.257.0,<3.0.0",
-    "cdk-nag>=3.0.2,<4.0.0",
-    "constructs>=10.8.1,<11.0.0",
+    "aws-cdk-lib>=2.268.0,<3.0.0",
+    "cdk-nag>=3.0,<4.0.0",
+    "constructs>=10.8,<11.0.0",
 ]
 
 # Matches the ``extra == "cdk"`` half of a PEP 508 marker. importlib.metadata
@@ -78,34 +79,93 @@ def _cdk_extra_requirements() -> List[str]:
     name is a name someone else can own on a package index, and installing by
     such a name is the defect this function exists to remove.
 
-    Returns an empty list when the distribution is found but declares no ``cdk``
-    extra, since in that case there is genuinely nothing to install. Only an
-    unreadable or absent ``*.dist-info`` -- ASH run straight from a checkout
-    that was never installed -- falls back to the hardcoded pins. Failing closed
-    with an empty list in that case was rejected: callers only inspect the
-    process exit code, so it would look like a successful install that silently
-    installed nothing, which is how cdk-nag came to be reported MISSING before.
+    Never returns an empty list. This function is only reached when cdk-nag is
+    already missing, so an empty result means ``ash dependencies install`` runs
+    no pip command, exits 0, and leaves cdk-nag MISSING -- which is precisely
+    the defect it exists to remove. An empty accumulation therefore falls
+    through to the pinned fallback rather than being reported as "nothing to
+    install".
+
+    Why every mapped distribution is searched, not just the first
+    ------------------------------------------------------------
+    ``packages_distributions()`` maps a top-level package name to a *list* of
+    distributions providing it. An earlier version returned on the first entry
+    whose ``requires()`` was not None, whether or not any of its requirements
+    carried the ``extra == "cdk"`` marker. One shadowing or stale
+    ``*.dist-info`` that declares requirements but no ``cdk`` extra -- the
+    ordinary result of an editable install left behind next to a real one --
+    then yielded ``[]``, and the install silently did nothing. Accumulating
+    across all of them and only returning a non-empty result means a stale entry
+    can no longer mask a good one.
+
+    Why the try/except is inside the loop, and why ValueError is caught
+    ------------------------------------------------------------------
+    Both were found by probing rather than by reading. ``requires()`` returns
+    None for an unreadable or absent ``METADATA`` instead of raising, so the
+    handler does not fire for the case the previous docstring credited it with:
+    ASH run from a checkout that was never installed has no mapping at all,
+    ``.get()`` returns None, the loop body never executes, and the fallback is
+    reached by the normal path.
+
+    What the handlers do catch is narrower and real. ``packages_distributions()``
+    walks every entry on ``sys.path`` and raises ``OSError`` on an unreadable
+    one, which is why that call keeps its own handler -- moving all the handling
+    inside the loop was tried and let that OSError escape into
+    ``ash dependencies install`` as a traceback. Separately, ``requires()``
+    raises ``PackageNotFoundError`` for a name that stops resolving between the
+    two calls -- a concurrent uninstall, or an editable install being rebuilt.
+    And a ``*.dist-info`` carrying a ``top_level.txt`` but no ``METADATA`` makes
+    ``packages_distributions()`` yield ``[None]``; ``requires(None)`` raises
+    ``ValueError: A distribution name is required``, which the previous
+    two-exception clause did not catch, so one broken sibling distribution
+    crashed the command outright. The per-name handler is inside the loop so that
+    one unreadable distribution no longer discards what the others declared.
     """
     root_package = __name__.split(".", 1)[0]
+    accumulated: List[str] = []
     try:
-        for dist_name in packages_distributions().get(root_package) or []:
-            declared = requires(dist_name)
-            if declared is None:
-                continue
-            return [
-                # Keep the requirement, drop the marker. pip evaluates markers
-                # with ``extra`` undefined, so ``extra == "cdk"`` is false and
-                # pip skips the requirement while still exiting 0 -- an install
-                # that reports success and installs nothing.
-                requirement.split(";", 1)[0].strip()
-                for requirement in declared
-                if _CDK_EXTRA_MARKER.search(requirement)
-            ]
+        dist_names = packages_distributions().get(root_package) or []
     except (PackageNotFoundError, OSError) as exc:
         ASH_LOGGER.debug(
-            f"Could not read the cdk extra from ASH's own metadata ({exc}); "
-            "falling back to the pinned requirement list."
+            f"Could not enumerate the distributions providing {root_package!r} "
+            f"({exc}); falling back to the pinned requirement list."
         )
+        return list(_CDK_EXTRA_FALLBACK_REQUIREMENTS)
+
+    for dist_name in dist_names:
+        try:
+            declared = requires(dist_name)
+        except (PackageNotFoundError, OSError, ValueError) as exc:
+            ASH_LOGGER.debug(
+                f"Could not read requirements from distribution {dist_name!r} "
+                f"providing {root_package!r} ({exc}); skipping it."
+            )
+            continue
+        if declared is None:
+            continue
+        for requirement in declared:
+            if not _CDK_EXTRA_MARKER.search(requirement):
+                continue
+            # Keep the requirement, drop the marker. pip evaluates markers with
+            # ``extra`` undefined, so ``extra == "cdk"`` is false and pip skips
+            # the requirement while still exiting 0 -- an install that reports
+            # success and installs nothing.
+            bare = requirement.split(";", 1)[0].strip()
+            # Deduplicated in place rather than through a set, so the order
+            # pyproject.toml declares is what pip receives. A set would make the
+            # generated command vary run to run, which is noise in any log that
+            # records it.
+            if bare and bare not in accumulated:
+                accumulated.append(bare)
+
+    if accumulated:
+        return accumulated
+
+    ASH_LOGGER.debug(
+        f"No 'extra == \"cdk\"' requirements found in the metadata of any "
+        f"distribution providing {root_package!r}; falling back to the pinned "
+        f"requirement list."
+    )
     return list(_CDK_EXTRA_FALLBACK_REQUIREMENTS)
 
 
@@ -216,17 +276,33 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
 
         commands = super().get_installation_commands(platform, arch)
         if not _CDK_AVAILABLE:
-            requirements = _cdk_extra_requirements()
-            if requirements:
-                # One pip invocation, so the three are resolved together. Three
-                # separate installs let a later one downgrade an earlier one's
-                # shared transitive dependency.
-                commands.append([sys.executable, "-m", "pip", "install", *requirements])
+            # Appended unconditionally. _cdk_extra_requirements never returns an
+            # empty list, and the `if requirements:` that used to stand here was
+            # what turned an empty result into a silent no-op: no pip command was
+            # appended, `ash dependencies install` exited 0, and cdk-nag stayed
+            # MISSING. Should that invariant ever break, pip refuses an install
+            # with no arguments and exits non-zero, which is the loud failure this
+            # command needs rather than a green run that installed nothing.
+            #
+            # One pip invocation, so the three are resolved together. Three
+            # separate installs let a later one downgrade an earlier one's shared
+            # transitive dependency.
+            commands.append(
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    *_cdk_extra_requirements(),
+                ]
+            )
         return commands
 
     def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
         """Abstract stub — CdkNag overrides scan() directly; this is unreachable."""
-        raise NotImplementedError(f"{self.__class__.__name__} overrides scan() directly.")
+        raise NotImplementedError(
+            f"{self.__class__.__name__} overrides scan() directly."
+        )
 
     def scan(
         self,
@@ -248,6 +324,39 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         """
         if global_ignore_paths is None:
             global_ignore_paths = []
+
+        # Per-call state, reset before anything else in the method can return.
+        #
+        # These are instance attributes on a plugin object that ScanPhase reuses:
+        # ``_scanner_tasks`` carries one task per scanner holding ``[source, converted]``, and
+        # ``ScannerExecutor._execute_scanner`` loops that list against the same instance, reading
+        # the counters off it after each call. So whatever a target leaves behind is what the
+        # next target starts with.
+        #
+        # Initializing them further down, next to the loop that increments them, reads naturally
+        # and was wrong in both directions. A target returning early inherited the previous
+        # target's totals -- an empty converted tree after a clean source pass reported PASSED
+        # over two attempts it never made, and after a failed source pass reported ERROR for a
+        # target where no file was ever opened. On the first call there was nothing to inherit,
+        # so the attributes stayed unset, which is how a scanner says "I do not track targets":
+        # the executor recorded no claim and the empty report resolved to PASSED, defeating the
+        # SKIPPED status outright.
+        #
+        # Top of the method rather than merely above the empty-target check, because there are
+        # three early returns above the old initialization point and the next one added would
+        # have inherited the same bug. Nothing between here and the first return can be
+        # meaningfully counted, so there is no ordering left to get wrong.
+        #
+        # The counters stay on the instance rather than moving to the per-call
+        # ``ScanResultsContainer``, which would remove this class of leak by construction. The
+        # container is built by the executor *around* the ``scan()`` call and is not passed in,
+        # and ``scan()``'s signature is the plugin contract every scanner -- including
+        # third-party ones -- implements. Threading the container through it is a breaking API
+        # change, and stashing it on ``self`` instead would be the same shared mutable state
+        # wearing a different name.
+        self.targets_attempted = 0
+        self.targets_failed = 0
+
         tool_component = ToolComponent(
             name="ash-cdk-nag-wrapper",
             fullName="awslabs/automated-security-helper",
@@ -295,7 +404,6 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         if not validated:
             return False
 
-
         if not self.dependencies_satisfied:
             return False
 
@@ -323,6 +431,10 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             ):
                 scannable.append(pf.as_posix())
 
+        # The counters are already at 0 here, set at the top of the method. Deliberately not
+        # re-initialized at this point: the empty-scan-set return just below is one of four
+        # places this method can leave, and an initialization sitting here covers only the ones
+        # underneath it.
         if len(scannable) == 0:
             self._plugin_log(
                 f"No JSON/YAML files found in {target_type} directory to scan. Exiting.",
@@ -341,13 +453,18 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                 f"Found {len(scannable)} JSON/YAML files:\n- {joined_files}"
             )
 
-        # Process each template file
-        failed_files = []
+        # Process each template file.
+        #
+        # The counters set at the top of this method replace a local `failed_files` list that was
+        # appended to on both failure paths and never read, so a run that failed on every
+        # template still produced an empty-but-successful report. They are attributes rather than
+        # locals precisely so the executor can read them and status computation can see them.
         target_rel_path = get_shortest_name(input=target)
 
         outdir = self.results_dir.joinpath(target_type)
         sarif_results: List[Result] = []
         for cfn_file in scannable:
+            self.targets_attempted += 1
             try:
                 # Run CDK synthesis for this file
                 config_options: CdkNagScannerConfigOptions = (
@@ -366,10 +483,52 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                     ],
                     outdir=outdir,
                     include_compliant_checks=config_options.include_compliant_checks,
+                    # A template synthesized by a CDK app records that app's reviewed
+                    # cdk-nag suppressions in its own resource metadata, and cdk-nag 3.x
+                    # does not read them back when it re-scans the template. Honoring them
+                    # is therefore ASH's job; gating on ignore_suppressions keeps the flag
+                    # meaning what it says, which is that an audit sees everything the
+                    # repository accepted, including what it accepted in-band.
+                    #
+                    # Read directly rather than through getattr(..., False).
+                    # ``ignore_suppressions`` is a declared field on PluginContext, so the
+                    # default can only ever be reached by the field being renamed away -- and
+                    # then it silently resolves to the lenient direction, honoring every
+                    # in-template suppression even on a run that asked to ignore them. A
+                    # direct read raises instead, which the handler below records as a failed
+                    # target: loud, and consistent with the rest of this scanner, where a
+                    # target that was not evaluated as requested must never read as clean.
+                    # Every other consumer of this field in the codebase reads it directly
+                    # too, so this is also the house form.
+                    honor_template_suppressions=not self.context.ignore_suppressions,
                 )
                 if nag_result_dict is None:
-                    ASH_LOGGER.trace(f"Not a CloudFormation file: {cfn_file}")
-                    failed_files.append(cfn_file)
+                    # Not counted as a failure: a non-CloudFormation file in the scan set is
+                    # an expected skip, not a scanner malfunction. Counting it would make a
+                    # repository of plain JSON report ERROR.
+                    #
+                    # Decrementing back to a running total of zero is not a silent success
+                    # either. When every file in the scan set lands here the count ends at 0,
+                    # which the container reads as "tracked, attempted none" and reports
+                    # SKIPPED. The wrapper also returns None when no nag pack is enabled and
+                    # when NodeJS is unavailable, so those two reach the same place: nothing was
+                    # evaluated, and the report says so instead of rendering green.
+                    self.targets_attempted -= 1
+                    ASH_LOGGER.debug(f"Not a CloudFormation file: {cfn_file}")
+                    continue
+
+                if nag_result_dict.failure is not None:
+                    # The wrapper ran but could not read a validation report, so no rule was
+                    # evaluated against this template. Counted as a failed target because the
+                    # alternative is what this branch previously did: fall through to a
+                    # zero-iteration findings loop, raise nothing, and report the template as
+                    # clean. With one template that also defeated the "failed on all N" guard,
+                    # since no failure was ever recorded for it to count.
+                    self.targets_failed += 1
+                    ASH_LOGGER.error(
+                        f"cdk-nag did not evaluate {cfn_file}: {nag_result_dict.failure}"
+                    )
+                    self.errors.append(f"{cfn_file}: {nag_result_dict.failure}")
                     continue
 
                 for pack, findings in nag_result_dict.results.items():
@@ -378,8 +537,32 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                     )
                     sarif_results.extend(findings)
             except Exception as e:
-                ASH_LOGGER.trace(f"Error scanning {cfn_file}: {e}")
-                failed_files.append((cfn_file, str(e)))
+                # error, not trace. trace sits below debug, so this was invisible even with
+                # --debug: a scanner failing on every template produced no operator-visible
+                # signal anywhere.
+                self.targets_failed += 1
+                ASH_LOGGER.error(
+                    f"cdk-nag failed to scan {cfn_file}: {type(e).__name__}: {e}"
+                )
+                self.errors.append(f"{cfn_file}: {type(e).__name__}: {e}")
+
+        # Every template failed. Say so loudly here as well as through the returned status:
+        # this is the one line that distinguishes "your templates are compliant" from "cdk-nag
+        # never evaluated a rule", and the two produce identical reports otherwise.
+        #
+        # The zero case is success here, and it feeds SARIF executionSuccessful below. That
+        # field is about whether the tool's run completed, not about whether it had anything to
+        # look at, so a scan with an empty template set is a successful run that produced no
+        # results. The "nothing was evaluated" signal is carried by the container's SKIPPED
+        # status instead, which is what the summary table shows a human.
+        scan_succeeded = (
+            self.targets_attempted <= 0 or self.targets_failed < self.targets_attempted
+        )
+        if not scan_succeeded:
+            ASH_LOGGER.error(
+                f"cdk-nag failed on all {self.targets_attempted} template(s) in {target}. "
+                "No rules were evaluated, so this result is NOT a clean scan."
+            )
 
         self._post_scan(
             target=target,
@@ -446,8 +629,11 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                             ],
                             startTimeUtc=self.start_time,
                             endTimeUtc=self.end_time,
-                            executionSuccessful=True,
-                            exitCode=0,
+                            # Derived, not hardcoded. A SARIF run asserting success while
+                            # carrying zero results is indistinguishable to any consumer from
+                            # a clean scan, so a total failure has to say so here.
+                            executionSuccessful=scan_succeeded,
+                            exitCode=0 if scan_succeeded else 1,
                             exitCodeDescription="\n".join(self.errors),
                             workingDirectory=ArtifactLocation(
                                 uri=get_shortest_name(input=self.context.source_dir),

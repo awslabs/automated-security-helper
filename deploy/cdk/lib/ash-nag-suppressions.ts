@@ -13,6 +13,14 @@
  * - AwsSolutions-IAM4 — the AWS managed `AWSLambdaBasicExecutionRole` is
  *                       replaced by a logs policy scoped to one log group.
  * - AwsSolutions-L1   — Lambda functions run the newest available Python runtime.
+ * - AwsSolutions-S1   — every bucket delivers server access logs, including the
+ *                       access-log buckets themselves. This one used to be
+ *                       suppressed here, by `suppressLogBucketSelfLogging`. The
+ *                       argument that suppression made is still true and still
+ *                       needed, so it moved rather than vanished: it is now the
+ *                       design comment on `accessLogArchiveProps` in
+ *                       ash-config.ts, which decides which single bucket in a
+ *                       log chain points at itself.
  *
  * WHY IAM5 SUPPRESSIONS HERE DO NOT USE `appliesTo`
  * ------------------------------------------------
@@ -197,6 +205,36 @@ export function suppressUnevaluableRules(scope: IConstruct, ruleIds: string[]): 
 }
 
 /**
+ * `AwsSolutions-EC23` on the MCP ingress rule, whose CIDR is a parameter.
+ *
+ * Separate from `suppressUnevaluableRules` on purpose: that helper's reason names
+ * ECR image URIs and pseudo-parameter ARNs, and reusing it here would attach a
+ * false explanation to a real gap.
+ *
+ * EC23 exists to catch a security group opened to `0.0.0.0/0`. It cannot run on
+ * this rule, because `CidrIp` is an `Fn::Ref` to `McpIngressCidr` and the rule
+ * reports a validation failure rather than a verdict. What makes suppressing it
+ * honest is that the constraint has not been dropped — `mcpIngressCidr` rejects a
+ * `/0` prefix at parameter validation, which is where a deploy-time value is
+ * actually available. So the check moved rather than disappeared.
+ */
+export function suppressParameterizedIngressRule(scope: IConstruct): void {
+  NagSuppressions.addResourceSuppressions(scope, [
+    {
+      id: 'CdkNagValidationFailure',
+      reason:
+        'AwsSolutions-EC23 cannot evaluate CidrIp because it is an Fn::Ref to the ' +
+        'McpIngressCidr parameter, so it resolves to a non-primitive. The rule did not ' +
+        'run — it neither passed nor failed. The property it checks is enforced instead ' +
+        'by that parameter\'s AllowedPattern, which rejects a /0 prefix, so an ' +
+        'open-to-the-world CIDR is refused at parameter validation rather than reaching ' +
+        'this resource. Granting more broadly is done deliberately against the ' +
+        'McpSecurityGroupId output.',
+    },
+  ]);
+}
+
+/**
  * The Secrets Manager secret that holds the MCP shared secret.
  *
  * Rotation is not merely unconfigured; it would be actively wrong here. ASH reads
@@ -250,24 +288,3 @@ export function suppressTaskDefinitionEnvironment(scope: IConstruct): void {
   );
 }
 
-/**
- * A log bucket cannot usefully log its own access.
- *
- * AwsSolutions-S1 wants server access logging on every bucket. Pointing this
- * bucket at itself makes every write generate another write, which S3 documents
- * as an infinite loop; pointing it at a second bucket only moves the same
- * unlogged bucket one hop away. The recursion has to stop somewhere, and the
- * bucket whose only content is logs is the right place.
- */
-export function suppressLogBucketSelfLogging(scope: IConstruct): void {
-  NagSuppressions.addResourceSuppressions(scope, [
-    {
-      id: 'AwsSolutions-S1',
-      reason:
-        'This IS the access-log destination. Self-logging is an infinite loop, and chaining ' +
-        'to a further bucket leaves that one unlogged instead, so the chain has to terminate ' +
-        'here. Nothing writes to this bucket except the log delivery service principal, whose ' +
-        'access is already constrained by the bucket policy.',
-    },
-  ]);
-}

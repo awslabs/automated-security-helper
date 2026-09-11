@@ -39,6 +39,54 @@ repository. Consuming it by `Fn::ImportValue` was considered and rejected, becau
 a console launch of the AgentCore template would then fail with an unresolved
 export and no hint about which stack to deploy first.
 
+## Launching a committed template
+
+The CloudFormation console launch flow reads the template from an S3 URL, so it
+works for all five. Scripting `create-stack` does not: CloudFormation caps an
+inline `--template-body` at **51,200 bytes**, and three of these templates are
+larger than that. Upload those to a bucket and launch by URL, where the ceiling is
+1 MB.
+<https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-limits.html>
+
+| Template | Scripted launch |
+| --- | --- |
+| `AshCodeCommitGate` | `--template-body` |
+| `AshAgentCore` | `--template-body` |
+| `AshImagePipeline` | `--template-url` only |
+| `AshFargate` | `--template-url` only |
+| `AshDistributedPipeline` | `--template-url` only |
+
+Byte counts are deliberately not repeated here — they change with every template
+change and nothing would catch it if this table went stale. Run
+`wc -c templates/*.template.json` for the current numbers.
+
+The two under the cap launch directly:
+
+```sh
+aws cloudformation create-stack \
+  --stack-name ash-agentcore \
+  --template-body file://deploy/cdk/templates/AshAgentCore.template.json \
+  --capabilities CAPABILITY_IAM
+```
+
+The other three need one upload first. Any bucket in the same region works:
+
+```sh
+aws s3 cp deploy/cdk/templates/AshFargate.template.json \
+  "s3://${YOUR_BUCKET}/ash/AshFargate.template.json"
+
+aws cloudformation create-stack \
+  --stack-name ash-fargate \
+  --template-url "https://${YOUR_BUCKET}.s3.${AWS_REGION}.amazonaws.com/ash/AshFargate.template.json" \
+  --capabilities CAPABILITY_IAM
+```
+
+Sizes are pinned by `test/ash-template-size.test.ts`, which fails if a template
+crosses the cap in either direction — so this table cannot quietly go stale.
+`AshDistributedPipeline` will not come under the cap by trimming: it is large
+because it emits one CodeBuild action per shard, which is the target's whole
+purpose.
+
 ## Shared parameter surface
 
 These names are a contract. A Terraform mirror of the same targets under
@@ -48,11 +96,13 @@ change for adopters and desynchronizes the two implementations.
 | Parameter | Default | Notes |
 | --- | --- | --- |
 | `AshVersion` | `v3.7.0` | Git ref cloned and built. Not a PyPI version. |
+| `AshImageTag` | empty | ECR tag the **workload** pulls. Empty tracks the moving tag. Not offered by `AshImagePipeline`, which runs no workload. See below. |
 | `AshOfflineMode` | `NO` | `YES`/`NO`, forwarded to the ASH Dockerfile's `OFFLINE` build argument. The spelling is the Dockerfile's; a boolean would build an image that stayed online. |
 | `AshBaseConfigYaml` | empty | An ASH configuration document. See the size note below. |
-| `McpStatelessHttp` | `true` | Must stay `true` on AgentCore. See below. |
+| `McpStatelessHttp` | `true` | Keep `true` on AgentCore, and behind any load balancer with more than one replica. See below for what is measured and what is inferred. |
 | `McpMountPath` | `/mcp` | AgentCore routes only `/mcp`, so change this only for Fargate. |
-| `McpAllowedHost` | empty | Comma-separated `Host` values, passed as repeated `--allowed-host`. On Fargate, empty means the ALB DNS name. |
+| `McpAllowedHost` | empty | Comma-separated `Host` values, passed as repeated `--allowed-host`, lower-cased because load balancers lower-case the `Host` they forward. On Fargate, empty means the ALB DNS name. |
+| `McpIngressCidr` | empty | Fargate only. CIDR allowed to reach the load balancer on port 80. Empty creates **no** ingress rule, so the endpoint is reachable from nowhere. See below. |
 | `McpAuthHeaderName` | empty | Header ASH requires on every request. Must satisfy `^$|^[A-Za-z][A-Za-z0-9_-]{0,255}$`. |
 | `McpAuthHeaderValue` | empty | `NoEcho`. Stored in Secrets Manager; the container gets the ARN, never the value. |
 | `RebuildSchedule` | `rate(1 day)` | EventBridge schedule expression for the image rebuild. |
@@ -87,20 +137,95 @@ npx cdk synth -c shardCount=8
 ./scripts/synth-templates.sh
 ```
 
+## Pinning the image a workload runs
+
+**The problem:** a mutable tag consumed by a running workload has no defined moment
+at which the workload adopts a new image. Every build republishes the moving tag
+(`mcp-arm64` and friends), so a task replaced for any unrelated reason — a scaling
+event, a host failure, an ECS redeploy — silently picks up whatever the tag points
+at then. Nothing promotes the image and nothing announces the swap.
+
+`AshImageTag` is the way out. Leave it empty, the default, and the workload tracks
+the moving tag exactly as before. Set it and the workload pulls that tag instead.
+It changes only what the workload pulls: every build still pushes both the moving
+tag and the version-qualified one, so pinning never stops an image being published.
+
+**You cannot pin on the first deploy, and that is not a bug.** The tag worth
+pinning is the version-qualified one, `<flavor>-<platform>-<folded-ref>-<digest>`,
+whose digest is computed inside CodeBuild from the raw `AshVersion`. It does not
+exist and cannot be predicted before a build has run. So the workflow is three
+steps, in this order:
+
+```sh
+# 1. Deploy with AshImageTag empty. The build publishes both tags.
+
+# 2. Read the tag it produced. It is also echoed in the CodeBuild log.
+aws ecr list-images --repository-name <EcrRepositoryUri's last path segment> \
+  --query 'imageIds[?starts_with(imageTag, `mcp-arm64-`)].imageTag' --output text
+
+# 3. Pin it on a stack update.
+aws cloudformation update-stack --stack-name <your-stack> \
+  --use-previous-template --parameters \
+    ParameterKey=AshImageTag,ParameterValue=mcp-arm64-v3.7.0-1a2b3c4d \
+    ParameterKey=AshVersion,UsePreviousValue=true
+```
+
+Pinning a tag that does not exist yet fails workload creation rather than waiting
+for it. On `AshDistributedPipeline` the reference resolves per build rather than at
+deploy, so an unproduced tag fails the shard projects when they start instead.
+
+The trade is the obvious one: a pinned workload stops taking rebuilt images, so it
+no longer picks up base-image and scanner patches until you move the pin. Unpin by
+setting the parameter back to empty. `AshImagePipeline` does not take this
+parameter — it builds images and runs no workload.
+
 ## AgentCore: the contract, and why stateless is the default
 
-Verified against
-[the MCP protocol contract](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-mcp-protocol-contract.html):
-streamable-http transport, host `0.0.0.0`, port `8000`, ARM64 container,
-`POST /mcp`. The platform adds its own `Mcp-Session-Id` header, and the same page
-states that "in stateless mode, servers must support stateless operation so as to
-not reject platform generated `Mcp-Session-Id` header."
+The container's shape is confirmed by two successful deployments: streamable-http
+transport, host `0.0.0.0`, port `8000`, ARM64 container, `POST /mcp`. Change any of
+those and the runtime does not come up. The deployed template was byte-identical to
+the committed `templates/AshAgentCore.template.json`, so this applies to what ships
+here.
 
-Measured against ASH directly: given a session id the server never issued, ASH's
-MCP returns HTTP 404 "Session not found" in stateful mode and HTTP 200 in
-stateless mode. Deploying stateful on AgentCore produces a runtime that fails
-every request, and the failure reads like a client bug rather than a configuration
-one. Hence `McpStatelessHttp` defaults to `true`.
+Session handling is a different matter, and this section is labeled because we have
+been wrong about it three times — first too confident, then too cautious, then too
+trusting of the documentation.
+
+**Measured**, against two live runtimes. A stateful runtime completes `initialize`,
+`tools/list` and `tools/call` successfully. Sessions are genuinely enforced, so
+that pass is not vacuous: no session id returns 400, and two differently shaped
+fabricated ids each return 404. AgentCore returns a **fresh** `Mcp-Session-Id` on
+essentially every response, while only the id issued at `initialize` stays valid —
+so a client that follows AgentCore's own affinity guidance and adopts the returned
+id takes a 404 on its third call. Stateless is immune, because it ignores session
+ids entirely. That is why `McpStatelessHttp` defaults to `true`.
+
+**Claimed by AWS documentation, and not verified by us:** that in stateless mode
+the platform generates the `Mcp-Session-Id`, includes it in the request to your
+server, and routes on it to the same microVM. Treat that as unconfirmed. The
+affinity guidance on
+[that same page](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-mcp-protocol-contract.html)
+is precisely what we measured to break a stateful server, so the page is not a
+reliable authority on this point.
+
+**Not determined:** what the container actually sees per request. Telling "an id is
+injected and silently adopted" apart from "nothing is injected" needs the inbound
+headers logged inside the image, which nobody has done. It does not change the
+default either way.
+
+So stateful is **not impossible** here — AgentCore does support
+[stateful MCP servers](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/mcp-stateful-features.html),
+which is what enables elicitation, sampling and progress notifications. It is
+unsupportable, which is a weaker claim: it needs every client to avoid rotating the
+session id, and nothing in this stack controls the clients. There is also no
+template-level switch — `ProtocolConfiguration` is a plain string taking
+`MCP | HTTP | A2A | AGUI`, so the mode lives in the container's own invocation.
+
+Session affinity is not incidental to this target. AgentCore routing on that header
+to the same microVM is what lets on-disk per-session state survive across separate
+`InvokeAgentRuntime` calls — observed as a scan's state persisting across 18
+progress calls — which anything that delivers source in chunks and then scans it
+depends on.
 
 `AgentRuntimeArtifact.ContainerConfiguration` has exactly one property,
 `ContainerUri`. There is no `Command`, `EntryPoint` or `Args`, so the MCP
@@ -115,6 +240,105 @@ name with hyphens stripped, because the property is matched against
 `[a-zA-Z][a-zA-Z0-9_]{0,47}`. Keep the stack name at most 48 characters once
 hyphens are removed. CloudFormation intrinsics cannot truncate, so a longer name is
 rejected by AgentCore at create time.
+
+## What this target can scan, and how you give it something
+
+The runtime holds no copy of your code, and you cannot mount one into it from this
+stack. Nothing is reachable except `bedrock-agentcore:InvokeAgentRuntime`, and the
+container's filesystem starts with no source in it. **You send the tree over the
+protocol.** Three MCP tools do that:
+
+- `set_source_git(url, ref?, ssh_key_id?, depth?)` — the runtime clones a
+  repository itself. It needs egress to your git host, which `PUBLIC` network mode
+  provides for a public one; a private host needs a VPC-mode runtime this stack
+  does not configure.
+- `set_source_zip_chunk` / `set_source_zip_finalize` — you upload a zipped working
+  tree in chunks of at most 1 MiB and finalize it with its sha256. Nothing outside
+  the runtime has to be reachable, which makes this the path that works from a
+  laptop or a CI runner with no shared network.
+- `clear_source` — deletes what you delivered.
+
+Then call `run_ash_scan` with no `source_dir` and it scans what you delivered.
+Scanning writes an output tree inside the target directory, so the target has to be
+writable — a delivered tree is, because the runtime created it.
+
+Sizing follows from the upload limits rather than from AgentCore: 100 MiB zipped,
+500 MiB extracted, 50000 files. A repository past those has to arrive by
+`set_source_git` instead.
+
+Two consequences worth knowing before you deploy:
+
+- **Deliver first.** `run_ash_scan` with no `source_dir` and no delivered tree is
+  **refused** with `error_type: no_source_delivered`, naming the delivery tools to
+  call. It does not fall back to the container's working directory, which holds
+  none of your code and would have produced a clean-looking scan of the wrong
+  tree. You get an error, not a false green.
+- **On this target, pass `source_dir` explicitly.** `set_source_zip_finalize` and
+  `set_source_git` both return the path they wrote to. Capture it and hand it back
+  to `run_ash_scan(source_dir=...)` rather than relying on the no-argument form.
+
+  The no-argument form finds the delivered tree by session id, and the session id
+  comes from the `Mcp-Session-Id` request header. That is dependable on stdio and
+  on Fargate. On AgentCore it is not established, and the reason is worth stating
+  rather than glossing:
+
+  The [protocol contract](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-mcp-protocol-contract.html)
+  says the platform generates the header, includes it in the request to your
+  server, and routes requests carrying it to the same microVM — and it tells
+  clients to capture the id from the response and reuse it. Measured against two
+  live runtimes in `us-west-2`, following that guidance literally fails: the
+  platform mints a *fresh* id on nearly every response and honors only the one
+  returned by `initialize`, so `initialize` -> adopt A -> call with A -> adopt B ->
+  call with B answers `404 Session not found`. Reuse the id from `initialize`, not
+  from the latest response.
+
+  What has not been measured is what the *container* sees per request. So whether
+  the header ASH reads is stable across two calls in one AgentCore session is an
+  open question. If it is stable, the no-argument form works. If the platform
+  rotates it per request, the upload lands under one session directory and the scan
+  looks under another.
+
+  That case is **refused, not guessed at**: the scan sees that some other session
+  holds a delivered tree while yours does not, and returns
+  `error_type: session_source_mismatch` saying the id is probably not stable and
+  to pass `source_dir` instead. It reports the *count* of other delivering
+  sessions, never their ids or paths, so the diagnostic does not disclose one
+  caller's session to another. Passing `source_dir` explicitly sidesteps the
+  question entirely, which is why it remains the recommendation — but if you
+  forget, you get a specific error rather than a scan of the wrong tree.
+
+  **You can settle it in two calls.** Every tool that resolves a session echoes the
+  id it resolved back in its response, so no log dive or image change is needed:
+
+  ```
+  # same runtime-session-id on both invocations
+  clear_source()  -> {"success": true, "session_id": "..."}
+  clear_source()  -> {"success": true, "session_id": "..."}
+  ```
+
+  Equal ids mean the header is stable and the no-argument `run_ash_scan` form is
+  safe on this target. Different ids mean it rotates, and passing `source_dir`
+  explicitly is mandatory rather than merely advisable. `clear_source` is the safe
+  probe because it is idempotent and a session that delivered nothing still
+  succeeds. If you run this, please record the result here.
+
+  Passing it explicitly is permitted on this stack because
+  `ASH_MCP_ALLOWED_ROOTS` is unset (see below), so the workspace path is not
+  refused. If you do set an allowlist, include the workspace root you configure.
+
+Neither `ASH_MCP_WORKSPACE_ROOT` nor `ASH_MCP_ALLOWED_ROOTS` is set by this stack.
+The workspace therefore lands under `$HOME/.cache/ash-mcp/<session-id>/`, which is
+writable in the runtime, and scan targets fall back to ASH's default refusal list
+rather than an allowlist. If you set `ASH_MCP_ALLOWED_ROOTS` to bound the scan
+surface, note that it *replaces* that default list — but a session's own workspace
+stays permitted, so delivered trees keep working without being named in it.
+
+If you need shared, pre-populated storage rather than per-caller delivery,
+AgentCore does support it: `AWS::BedrockAgentCore::Runtime` takes up to five
+[`FilesystemConfigurations`](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-filesystem-configurations.html)
+(managed session storage, or a bring-your-own S3 Files or EFS access point). This
+stack configures none, because the BYO types require a VPC-mode runtime and the
+managed types start empty, so neither removes the need to deliver the source.
 
 ## `--host` and DNS-rebinding protection
 
@@ -175,6 +399,21 @@ through pipeline artifacts. A CodeBuild pipeline action accepts
 [1 to 5 input artifacts](https://docs.aws.amazon.com/codepipeline/latest/userguide/reference-action-artifacts.html),
 so an artifact per shard cannot express a six-way split at all.
 
+Those transfers use `boto3`, not `aws s3 cp`, and that is not a style preference.
+The shard and merge actions run with the ASH image as their CodeBuild environment
+image — which is what puts `ash` directly on `PATH` with no Docker-in-Docker — and
+**the ASH image installs no AWS CLI.** It does depend on `boto3`, so `python3` is
+the only AWS API client guaranteed to be present. An `aws` invocation in these
+buildspecs exits 127 at runtime, after the scan has already succeeded, and takes
+the results with it. The same constraint shapes the MCP entrypoint in
+`lib/ash-container-scripts.ts`, and `test/ash-no-aws-cli.test.ts` enforces it for
+every project whose environment image is the ASH image.
+
+The image build in stage one is the exception and is unaffected: it runs on a
+CodeBuild managed image, which does ship the CLI, and it needs
+`aws ecr get-login-password` to push. So do the two operator commands below —
+they run on your workstation, not in the image.
+
 Because the split is over scanners rather than files, a shard count above the
 number of enabled scanners produces empty shards and no extra parallelism. Check
 `ash plugin list` for the pinned version before raising it.
@@ -224,20 +463,27 @@ zero-based index, both shard flags always passed together, `--results` repeatabl
 and accepting a file or a directory. It will fail at pipeline run time until those
 land. Nothing else here depends on them.
 
-## What is NOT verified, because nothing was deployed
+## What is NOT verified
 
-No AWS mutation was performed. `cdk synth` and `cdk-nag` only. Everything below is
-therefore unverified, and the AgentCore items are the ones most worth checking
-first:
+Most of what follows was originally unverified because nothing had been deployed.
+Two AgentCore deployments have since closed the first two items, and they are kept
+here as settled rather than deleted, so the next reader can see what was actually
+checked instead of re-testing it.
 
-1. **That AgentCore accepts this exact property combination.** The property *shape*
-   is verified against the CloudFormation resource reference and against the L1
-   types in `aws-cdk-lib` 2.267.0. Whether the service accepts `PUBLIC` network
-   mode with `MCP` protocol and this role's permission set is not.
-2. **That the derived ARM64 image satisfies AgentCore's container probe.** The
-   image binds `0.0.0.0:8000` and serves `POST /mcp`, but whether AgentCore's own
-   readiness check passes against ASH's MCP server is untested.
-3. **That a scheduled rebuild rolls into a running workload.** It does not, on any
+**Now confirmed by deployment:**
+
+- **AgentCore accepts this property combination.** `PUBLIC` network mode with `MCP`
+  protocol and this role's permission set creates a working runtime.
+- **The derived ARM64 image satisfies AgentCore's container probe.** ASH's MCP
+  server binds `0.0.0.0:8000`, serves `POST /mcp`, and passes the readiness check.
+
+The deployed template was byte-identical to the committed
+`templates/AshAgentCore.template.json`, so that evidence applies to what ships
+here rather than to a variant.
+
+**Still unverified:**
+
+1. **That a scheduled rebuild rolls into a running workload.** It does not, on any
    target. The rebuild replaces what the moving tag points at, which patches the
    *repository*. AgentCore pins a runtime version at create time, ECS does not
    redeploy on a tag change, and Lambda resolves the image at update time. Rolling
@@ -247,6 +493,8 @@ first:
    Lambda it is straightforward, but for AgentCore it would require guessing at
    `UpdateAgentRuntime` CLI semantics, and a guessed API is worse than a documented
    gap.
+
+   Use `AshImageTag` if that bothers you. See below.
 4. **That the ASH image builds at all under these build arguments.** No Docker
    daemon was available, so no image was built. The derived Dockerfiles assume
    `awslambdaric` publishes a wheel for `linux/amd64` CPython 3.12 (no compiler is
@@ -280,6 +528,68 @@ first:
 - **The Fargate listener is HTTP, not HTTPS.** A certificate ARN would be needed,
   and the shared parameter surface has no slot for one. The load balancer is
   internal by default to match.
+- **No target sets `ASH_MCP_ALLOWED_ROOTS`, so the MCP scan boundary is the
+  permissive fallback.** Only two targets run `ash mcp` at all — AgentCore and
+  Fargate. The CodeCommit gate and the sharded pipeline invoke `ash scan` directly
+  and are unaffected. On the two that do, the variable is unset, so scan targets
+  fall back to a short denylist of system directories, which ASH's own docs call
+  "a safety net rather than a boundary." On a network-reachable MCP endpoint that is
+  not the same as naming the roots.
+
+  The stacks do not set it, and the reason is a real obstacle rather than an
+  omission. The scannable path on these targets is the per-session workspace that
+  protocol source delivery writes into, and its location is resolved *inside the
+  container* — `$ASH_MCP_WORKSPACE_ROOT`, else `$XDG_CACHE_HOME/ash-mcp`, else
+  `~/.cache/ash-mcp`. So a value is only correct if the stack also pins
+  `ASH_MCP_WORKSPACE_ROOT`. Worse, `validate_scan_target` adds the per-session
+  directory to the allowlist only when a caller passes a session id, and several
+  call sites — including output-directory validation — do not. A value that looks
+  right can therefore admit the scan and still refuse its output directory partway
+  through. Setting that wrong from here would break source delivery on a live
+  feature, which is worse than leaving the documented fallback in place.
+
+  To set it yourself, pin both, and make the allowlist include the workspace root:
+
+  ```sh
+  ASH_MCP_WORKSPACE_ROOT=/var/cache/ash-mcp
+  ASH_MCP_ALLOWED_ROOTS=/var/cache/ash-mcp
+  ```
+
+  Naming the workspace **root** rather than a per-session directory is what makes
+  every call site agree, including those that pass no session id. The cost is that
+  it no longer scopes a session to its own subdirectory, so concurrent sessions can
+  reach each other's uploaded source; add further roots for anything else you want
+  scannable. Judge that against the alternative, which is most of the container
+  filesystem.
+
+- **The Fargate endpoint is closed until you open it.** The listener is created
+  closed, so on deployment the load balancer's security group has allow-all egress
+  and **no ingress rule at all** — reachable from nowhere, not even from inside the
+  VPC. That is deliberate for an endpoint that accepts source code and returns
+  findings about it, but it does mean the stack is not usable the moment it
+  finishes. Set `McpIngressCidr` to the range your clients come from:
+
+  ```sh
+  # At deploy time, or on an update of an existing stack.
+  ParameterKey=McpIngressCidr,ParameterValue=10.1.0.0/16
+  ```
+
+  Leaving it empty creates no rule, which is the default and is unchanged from
+  before the parameter existed. A CIDR is required — a bare address is rejected at
+  parameter validation rather than silently becoming a `/32` nobody intended; use
+  `x.x.x.x/32` for a single host. For several sources, or to allow a client's
+  security group rather than a CIDR, authorize the `McpSecurityGroupId` output
+  directly:
+
+  ```sh
+  aws ec2 authorize-security-group-ingress --group-id <McpSecurityGroupId> \
+    --protocol tcp --port 80 --source-group <client-sg-id>
+  ```
+
+  Defaulting to the stack's own VPC CIDR was rejected: this stack creates its own
+  VPC and puts nothing in it but the ASH tasks, so that rule would admit a range
+  with no clients in it while still widening access. Real consumers arrive from a
+  peered VPC, a VPN or a transit gateway, none of which fall inside it.
 - **An unused Secrets Manager secret is created even with auth disabled.** The
   alternative was a CloudFormation Condition gating the resource, which makes every
   IAM grant that mentions its ARN an invalid template. Costs a few cents a month.
@@ -287,6 +597,17 @@ first:
   `emptyOnDelete` synthesize asset-backed custom resources, which need a staging
   bucket and therefore `cdk bootstrap`, and these templates are meant to launch from
   the console. Deleting a stack leaves the repository and buckets behind.
+- **Log groups are `RETAIN`, so they outlive the stack.** A Fargate deployment that
+  tripped the ECS circuit breaker rolled back and took its own `TaskLogs` group with
+  it, destroying the container stderr that explained the rollback. Every log group in
+  these stacks is now retained for that reason, which makes each one a teardown
+  residual: `TaskLogs` and `VpcFlowLogs` (Fargate), `ScanLogs` (gate), and
+  `BuildLogs` plus `BootstrapStarterLogs` per image build — twelve groups across the
+  five stacks. None pins a physical name, so a re-created stack gets a fresh group
+  rather than colliding with the old one, and repeated deploy/rollback cycles
+  accumulate one group per attempt. Retention stays at 30 days, so a residual group
+  stops holding anything after a month; sweep the empty groups with
+  `aws logs delete-log-group` when you tear an environment down.
 - **Two CloudFormation spec warnings on every synth are false positives.** `cdk
   synth` reports an empty `SecretString` and an empty `RequestHeaderAllowlist`
   entry. The validator resolves each parameter to its default and then evaluates the

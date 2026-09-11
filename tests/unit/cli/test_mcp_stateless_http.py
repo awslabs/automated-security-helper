@@ -212,6 +212,63 @@ class TestHostBinding:
         assert resp.status_code == 421, f"{resp.status_code}: {resp.text[:200]}"
 
 
+class TestCommandWiring:
+    """``mcp_command`` must hand the operator's values to the builder.
+
+    Every test in ``TestHostBinding`` calls ``build_streamable_http_app``
+    directly, so all of them stay green if the CLI never forwards ``--host`` or
+    ``--allowed-host`` at all. That gap was found by mutation: deleting
+    ``allowed_hosts=allowed_host`` from the streamable-http call site changed no
+    test result. The sibling sse tests in ``test_mcp_sse_host_binding.py`` carry
+    the same class of assertion, because a builder argument nothing forwards is
+    indistinguishable from a builder argument that does not exist.
+    """
+
+    @pytest.fixture
+    def captured(self, monkeypatch):
+        """Intercept the builder and stop before uvicorn binds a socket."""
+        seen: dict = {}
+
+        def _fake_build(**kwargs):
+            seen.update(kwargs)
+            return object()
+
+        def _fake_uvicorn(app, host, port, log_level):
+            seen["uvicorn_host"] = host
+
+        monkeypatch.setattr(
+            "automated_security_helper.cli.mcp.build_streamable_http_app", _fake_build
+        )
+        monkeypatch.setattr(
+            "automated_security_helper.cli.mcp._run_uvicorn", _fake_uvicorn
+        )
+        return seen
+
+    def test_allowed_host_reaches_the_builder(self, captured) -> None:
+        mcp_command(
+            ctx=_ResilientFalseCtx(),
+            transport="streamable-http",
+            host="0.0.0.0",
+            allowed_host=["ash-mcp.example.com"],
+            quiet=True,
+        )
+        assert captured.get("allowed_hosts") == ["ash-mcp.example.com"]
+
+    def test_the_app_is_built_with_the_host_uvicorn_binds(self, captured) -> None:
+        """One host, not two.
+
+        Handing the app a different address than uvicorn binds is the defect the
+        ``host`` argument exists to prevent, and neither call alone reveals it.
+        """
+        mcp_command(
+            ctx=_ResilientFalseCtx(),
+            transport="streamable-http",
+            host="0.0.0.0",
+            quiet=True,
+        )
+        assert captured.get("host") == captured.get("uvicorn_host") == "0.0.0.0"
+
+
 class TestOptionValidation:
     """Exit code 3, not a propagated exception.
 

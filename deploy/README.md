@@ -56,8 +56,17 @@ has consequences worth knowing before the first `create-stack` rather than after
 ## Which tool, and where the detail lives
 
 `cdk/` holds the CDK apps and the synthesized templates in `cdk/templates/`. You can
-launch a template straight from the CloudFormation console without running `cdk` at
-all. `terraform/` mirrors the same targets with the same parameter names.
+launch any of them straight from the CloudFormation console without running `cdk` at
+all — the console uploads the template for you, so template size never comes up.
+`terraform/` mirrors the same targets with the same parameter names.
+
+Scripting the launch is where size does come up. CloudFormation caps an inline
+`--template-body` at 51,200 bytes. `AshAgentCore` and `AshCodeCommitGate` fit;
+`AshImagePipeline`, `AshFargate` and `AshDistributedPipeline` do not, and have to be
+uploaded to S3 and launched with `--template-url` instead, where the cap is 1 MB.
+`cdk/README.md` has the sizes and both commands. `AshDistributedPipeline` is roughly
+2.5 times the inline cap and will not be brought under it: it emits one CodeBuild
+action per shard, which is the entire point of that target.
 
 The canonical parameter names live in `cdk/lib/ash-config.ts` and are treated as a
 contract: renaming one is a breaking change for adopters.

@@ -19,6 +19,70 @@ from automated_security_helper.utils.sarif_utils import (
 _ResultsFn = Callable[[ScanResultsContainer, AshAggregatedResults], AshAggregatedResults]
 
 
+def _target_count_attr(obj: Any, name: str) -> int | None:
+    """Read a target counter off a scanner plugin, or None when it makes no usable claim.
+
+    None is the answer for an absent attribute and for a present-but-unusable one alike, and
+    that conflation is deliberate: both mean "this scanner has told us nothing about targets",
+    which is the state ``ScanResultsContainer.targets_attempted`` uses None for. Returning 0
+    instead would assert "it tracked targets and attempted none", which for a non-tracking
+    scanner is a false statement that resolves to SKIPPED.
+
+    A plain ``getattr(obj, name, None)`` is not safe here. Scanner plugins are arbitrary
+    objects, and a ``MagicMock`` auto-creates any attribute asked of it -- so the default never
+    applies and a mock lands in an int field, which is not validated on assignment. The first
+    comparison downstream then raises
+    ``TypeError: '>=' not supported between instances of 'MagicMock' and 'int'``.
+
+    Coercing at this boundary keeps the trust boundary where the untrusted value enters,
+    rather than teaching every consumer to be defensive about a field typed ``int``.
+
+    A negative is the one unusable value that gets a warning, because it is the only one that is
+    evidence of a defect rather than of a scanner that simply does not count targets. An absent
+    attribute, a MagicMock, a string or a float all mean "no counter here", which is the normal
+    state for nine of the builtin scanners; warning about those would fire on every clean run.
+
+    The warning matters because the silence used to be total, and the silence is what made two
+    individually-correct halves compose into a wrong answer. ``determine_status`` sends a negative
+    ``targets_attempted`` to ERROR, so the model looks defended -- but the negative never reaches
+    it, because this function turns it into None first. The scanner then reads as making no claim,
+    falls past both per-target guards into the severity gate, and reports PASSED off a broken
+    counter with nothing anywhere to say so.
+
+    The value is still dropped rather than passed through. Letting it reach the model would report
+    ERROR, which asserts "it tried and everything broke" -- a claim nobody has evidence for. All
+    that is known is that the plugin's accounting is wrong; its findings come from SARIF rather
+    than from the counter and remain usable, so failing the scan over an accounting bug would be
+    a worse answer than naming it. Raising is rejected for the same reason.
+    """
+    value = getattr(obj, name, None)
+    # bool is an int subclass; excluded because a True/False counter is a caller bug and
+    # silently reading it as 1/0 would hide that.
+    if isinstance(value, int) and not isinstance(value, bool):
+        if value >= 0:
+            return value
+        ASH_LOGGER.warning(
+            f"Scanner plugin {type(obj).__name__} reported {name}={value}. A target count "
+            "cannot be negative, so it is being ignored and the scanner treated as making no "
+            "claim about targets. Its status will come from findings alone, which means a scan "
+            "that evaluated nothing cannot be reported as SKIPPED. This is a defect in the "
+            "scanner plugin's own accounting."
+        )
+    return None
+
+
+def _non_negative_int_attr(obj: Any, name: str) -> int:
+    """``_target_count_attr`` for a counter whose absence is indistinguishable from zero.
+
+    ``targets_failed`` is such a counter: it is only ever read against ``targets_attempted``,
+    so "no claim" and "zero failures" lead to the same decision and there is nothing to gain
+    from keeping them apart. One coercion rule serves both callers, so the two cannot drift
+    apart on what counts as a usable value -- including on warning about a negative, which is
+    just as much an accounting defect in a failure count as in an attempt count.
+    """
+    return _target_count_attr(obj, name) or 0
+
+
 class ScannerExecutor:
     """Runs scanner tasks in parallel or sequential mode.
 
@@ -148,8 +212,18 @@ class ScannerExecutor:
                     try:
                         from automated_security_helper.plugins.events import AshEventType
                         self._notify(AshEventType.ERROR, message=err_str, scanner=scanner_name, exception=e)
-                    except Exception:
-                        pass
+                    except Exception as notify_error:
+                        # _notify already catches and error-logs anything the
+                        # subscriber callback raises, so what reaches here is a
+                        # failure to get as far as the call: the local import above,
+                        # or building the keyword arguments. Kept broad and
+                        # swallowed so a bookkeeping failure cannot mask the
+                        # scanner error already recorded in raw_results, but logged
+                        # so it is not invisible.
+                        ASH_LOGGER.debug(
+                            f"ERROR notification for {scanner_name} could not be "
+                            f"issued: {notify_error!r}"
+                        )
                 finally:
                     ASH_LOGGER.trace(
                         f"{scanner_plugin.__class__.__name__} raw_results for {target_type}: {raw_results}"
@@ -225,6 +299,27 @@ class ScannerExecutor:
                                 container.finding_count = len(raw_results["findings"])
 
                     container.exit_code = getattr(scanner_plugin, "exit_code", 0)
+
+                    # Carry per-target outcome counts across, following the exit_code pattern
+                    # above. This is what lets determine_status distinguish "scanned and found
+                    # nothing" from "failed on everything it tried" and from "evaluated
+                    # nothing" -- without it, status can only be derived from findings and both
+                    # of the latter two report PASSED.
+                    #
+                    # This is the line where the tri-state has to be preserved rather than
+                    # flattened. A scanner that does not track targets has no
+                    # ``targets_attempted`` attribute at all, and _target_count_attr answers
+                    # None for it, which determine_status reads as "no claim" and leaves alone.
+                    # Reading an absent attribute as 0 here would assert that every
+                    # non-tracking scanner attempted zero targets, and every one of them would
+                    # report SKIPPED instead of PASSED.
+                    container.targets_attempted = _target_count_attr(
+                        scanner_plugin, "targets_attempted"
+                    )
+                    container.targets_failed = _non_negative_int_attr(
+                        scanner_plugin, "targets_failed"
+                    )
+
                     if container.status != ScannerStatus.ERROR:
                         container.status = container.determine_status(
                             scanner_config.options.severity_threshold
@@ -297,8 +392,14 @@ class ScannerExecutor:
             try:
                 from automated_security_helper.plugins.events import AshEventType
                 self._notify(AshEventType.ERROR, message=error_msg, scanner=scanner_name, exception=e)
-            except Exception:
-                pass
+            except Exception as notify_error:
+                # See the ERROR guard in _execute_scanner: _notify already handles
+                # a raising subscriber, so this only covers the local import and
+                # kwargs construction.
+                ASH_LOGGER.debug(
+                    f"ERROR notification for {scanner_name} could not be issued: "
+                    f"{notify_error!r}"
+                )
 
             return [failure_container], False
 
@@ -340,8 +441,14 @@ class ScannerExecutor:
                         scan_targets=scan_targets,
                         message=f"Starting scanner: {scanner_name}",
                     )
-                except Exception:
-                    pass
+                except Exception as notify_error:
+                    # See the ERROR guard in _execute_scanner: _notify already
+                    # handles a raising subscriber, so this only covers the local
+                    # import and kwargs construction.
+                    ASH_LOGGER.debug(
+                        f"SCAN_START notification for {scanner_name} could not be "
+                        f"issued: {notify_error!r}"
+                    )
 
                 results_list, scanner_succeeded = self._safe_execute_scanner(
                     scanner_name, scanner_plugin, scan_targets
@@ -400,8 +507,14 @@ class ScannerExecutor:
                             remaining_scanners=remaining_scanners,
                             message=f"Scanner {scanner_name} completed. {remaining_count} remaining: {remaining_list}",
                         )
-                    except Exception:
-                        pass
+                    except Exception as notify_error:
+                        # See the ERROR guard in _execute_scanner: _notify already
+                        # handles a raising subscriber, so this only covers the
+                        # local import and kwargs construction.
+                        ASH_LOGGER.debug(
+                            f"SCAN_COMPLETE notification for {scanner_name} could "
+                            f"not be issued: {notify_error!r}"
+                        )
 
             except Exception as e:
                 stack_trace = traceback.format_exc()
@@ -551,8 +664,17 @@ class ScannerExecutor:
                                     remaining_scanners=remaining_scanners.copy(),
                                     message=f"Scanner {scanner_name} completed. {remaining_count} remaining: {remaining_list}",
                                 )
-                            except Exception:
-                                pass
+                            except Exception as notify_error:
+                                # See the ERROR guard in _execute_scanner: _notify
+                                # already handles a raising subscriber, so this only
+                                # covers the local import and kwargs construction.
+                                # Note this runs while remaining_scanners_lock is
+                                # held, so raising here would unwind the lock through
+                                # the enclosing handler.
+                                ASH_LOGGER.debug(
+                                    f"SCAN_COMPLETE notification for {scanner_name} "
+                                    f"could not be issued: {notify_error!r}"
+                                )
 
                 except Exception as e:
                     stack_trace = traceback.format_exc()
@@ -608,5 +730,9 @@ class ScannerExecutor:
                     completed=completed,
                     description=description,
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            # Progress reporting is cosmetic and progress_display is a mock in much
+            # of the test suite, so a display that raises must not fail a scan. The
+            # type stays broad because the display is injected. Logged so a display
+            # that never updates is diagnosable instead of just looking frozen.
+            ASH_LOGGER.debug(f"Progress update skipped: {e!r}")

@@ -324,6 +324,21 @@ result = await mcp_check_installation()
 }
 ```
 
+### resolve_ash_workspace and run_ash_workspace_scan
+
+Every tool above scans one directory. These two take a VS Code `.code-workspace`
+file instead and cover N projects in one call, each with its own ASH config and
+its own severity threshold. `resolve_ash_workspace` returns the plan without
+scanning; `run_ash_workspace_scan` scans it and returns the per-project verdict,
+registering one scan per project so progress and results can still be fetched
+project by project.
+
+They differ from the single-directory tools in ways worth reading before you use
+them: the allowed roots are checked per project and one project outside them
+refuses the whole workspace, the workspace file and the workspace policy file are
+not subject to the roots, and there is no container mode. See
+[Workspace Mode over MCP](mcp/workspace-mode.md).
+
 ## Error Handling
 
 The ASH MCP server provides comprehensive error handling for various scenarios. Each error response includes:
@@ -464,6 +479,13 @@ restricted, restrict them at the filesystem or with a fronting proxy.
 `get_scan_progress` is not affected. It takes a scan ID, and the output
 directory comes from the scan registry rather than from the caller, so polling a
 running scan works regardless of what the roots name.
+
+For `run_ash_workspace_scan` the roots are checked once per resolved project
+directory, and one project outside them refuses the whole workspace rather than
+scanning the rest. The `.code-workspace` file and the `workspace_config` policy
+file are config inputs and are not subject to the roots, on the same reasoning as
+`config_path` above. See
+[Workspace Mode over MCP](mcp/workspace-mode.md#allowed-roots-govern-the-projects-not-the-workspace-file).
 
 ## Best Practices
 
@@ -609,6 +631,8 @@ except Exception as e:
 ## Related Documentation
 
 - [MCP Tutorial](../tutorials/using-ash-with-mcp.md)
+- [Workspace Mode over MCP](mcp/workspace-mode.md)
+- [Streamable-HTTP MCP Deployment Guide](mcp/streamable-http.md)
 - [MCP Performance and Scalability](mcp-performance-scalability.md)
 - [Configuration Guide](configuration-guide.md)
 - [ASH CLI Reference](cli-reference.md)

@@ -301,10 +301,16 @@ jobs:
 
           SYNTH_DIR=deploy/cdk/cdk.out
           GEN_DIR=deploy/cdk/templates
-          # rm -rf cdk.out is part of the command, not an aside: without it a
-          # developer with a stale cdk.out copies templates for stacks that no
-          # longer exist and the gate reds out again on the fix.
-          REGEN_CMD="cd deploy/cdk && npm ci && rm -rf cdk.out && npx cdk synth --all --output cdk.out --no-lookups --quiet && find templates -type f -name '*.template.json' -delete && cp cdk.out/*.template.json templates/"
+          # The repo's own script, not a transcription of what this job does. The
+          # previous inline command was a second implementation of the same
+          # procedure, and the two drifted: scripts/synth-templates.sh iterated a
+          # hardcoded five-stack array and synthesized without --all, so it
+          # reported "matches a fresh synth" for a tree this gate red-lined. A
+          # regeneration hint that is not the script means nobody runs the script,
+          # so nobody notices it disagrees. The script now discovers stacks by the
+          # same glob used below, synthesizes into a temp assembly, and deletes
+          # orphaned committed templates on a write run.
+          REGEN_CMD="cd deploy/cdk && npm ci && ./scripts/synth-templates.sh"
 
           # A zero here means synth ran and produced nothing, which would make
           # every check below vacuously pass. Fail on it rather than measure it.

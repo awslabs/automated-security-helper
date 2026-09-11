@@ -12,7 +12,7 @@ cat > "$TARGET" <<'EOF'
     "ash": {
       "command": "uvx",
       "args": [
-        "--from=git+https://github.com/awslabs/automated-security-helper@v3.4.0",
+        "--from=git+https://github.com/awslabs/automated-security-helper@v3.7.0",
         "ash",
         "mcp"
       ],
