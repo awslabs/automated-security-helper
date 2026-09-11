@@ -81,6 +81,7 @@ import {
   ashOfflineMode, ashVersion, rebuildSchedule, resolveShardCount,
 } from './ash-config';
 import { ASH_MATERIALIZED_CONFIG_PATH } from './ash-container-scripts';
+import { ashEncryptionKey } from './ash-encryption';
 import { AshImageBuild } from './ash-image-build';
 import {
   suppressCodeBuildRoleWildcards,
@@ -108,15 +109,15 @@ export class AshDistributedPipelineStack extends Stack {
     const version = ashVersion(this);
     const offline = ashOfflineMode(this);
     const schedule = rebuildSchedule(this);
-    const config = new AshRuntimeConfig(this, 'Config', { includeMcpParameters: false });
 
-    // One customer-managed key per stack, shared by every CodeBuild project here.
-    // Rotation is on: the key only protects build output, so a rotated key needs
-    // no coordination with anything outside the stack.
-    const encryptionKey = new kms.Key(this, 'EncryptionKey', {
-      description: 'Encrypts ASH CodeBuild project output for this stack.',
-      enableKeyRotation: true,
-      removalPolicy: RemovalPolicy.RETAIN,
+    // Created before the config so the secret can be encrypted with it. One key
+    // per stack covers every CodeBuild project here, the image build's log groups
+    // and the auth secret — see ash-encryption.ts.
+    const encryptionKey = ashEncryptionKey(this);
+
+    const config = new AshRuntimeConfig(this, 'Config', {
+      includeMcpParameters: false,
+      encryptionKey,
     });
 
     const image = new AshImageBuild(this, 'Image', {

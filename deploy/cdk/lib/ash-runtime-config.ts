@@ -31,6 +31,7 @@
 
 import { CfnCondition, CfnParameter, Fn, RemovalPolicy, SecretValue, Stack } from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as kms from 'aws-cdk-lib/aws-kms';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { Construct } from 'constructs';
@@ -61,6 +62,22 @@ export interface AshMcpRuntimeConfigProps {
    * leave this off and get only the config parameter.
    */
   readonly includeMcpParameters: boolean;
+
+  /**
+   * Customer-managed key the auth secret is encrypted with.
+   *
+   * The stack's own key rather than `aws/secretsmanager`, so that the shared
+   * secret is under a key whose policy this stack owns and whose use is
+   * auditable per-caller in CloudTrail. It is the same key the CodeBuild
+   * projects and log groups use — see ash-encryption.ts for why one key covers
+   * all three.
+   *
+   * Nothing extra is needed on the readers' side. Passing a key makes CDK's
+   * `Secret` grant Secrets Manager `kms:Encrypt`/`Decrypt`/`CreateGrant`/
+   * `DescribeKey` via a `kms:ViaService` condition, and every `grantRead` below
+   * adds `kms:Decrypt` for that grantee through the same condition.
+   */
+  readonly encryptionKey: kms.IKey;
 }
 
 /**
@@ -80,6 +97,7 @@ export class AshRuntimeConfig extends Construct {
   public readonly authHeaderValue?: CfnParameter;
 
   private readonly hasConfig: CfnCondition;
+  private readonly encryptionKey: kms.IKey;
   /**
    * True when BOTH `McpAuthHeaderName` and `McpAuthHeaderValue` were supplied.
    *
@@ -92,6 +110,7 @@ export class AshRuntimeConfig extends Construct {
   constructor(scope: Construct, id: string, props: AshMcpRuntimeConfigProps) {
     super(scope, id);
     const stack = Stack.of(this);
+    this.encryptionKey = props.encryptionKey;
 
     this.baseConfigYaml = ashBaseConfigYaml(stack);
     this.hasConfig = new CfnCondition(this, 'HasBaseConfig', {
@@ -162,6 +181,11 @@ export class AshRuntimeConfig extends Construct {
         'resolves the value at start, so the secret never enters a task definition or a ' +
         'runtime environment-variable map.',
       secretStringValue: value,
+      // Named explicitly rather than left on the AWS managed key. Two things
+      // follow from owning the key: the key policy is this stack's to narrow,
+      // and every read of the secret needs an allow on the key as well as on the
+      // secret, so revoking access to the shared secret is one edit in one place.
+      encryptionKey: this.encryptionKey,
       removalPolicy: RemovalPolicy.DESTROY,
     });
   }

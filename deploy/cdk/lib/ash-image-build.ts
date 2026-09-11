@@ -130,11 +130,14 @@ export interface AshImageBuildProps {
    */
   readonly bootstrapOnDeploy?: boolean;
   /**
-   * Customer-managed key for the build project's encryption.
+   * Customer-managed key for the build project's encryption and this
+   * construct's log groups.
    *
    * Shared across every project in a stack rather than created per project: one
    * key is enough to encrypt build output for all of them, and a key per project
-   * would multiply the standing charge for no additional isolation.
+   * would multiply the standing charge for no additional isolation. Must be a key
+   * CloudWatch Logs is allowed to use — `ashEncryptionKey` in ash-encryption.ts
+   * is the one that grants that.
    */
   readonly encryptionKey: kms.IKey;
 }
@@ -180,9 +183,14 @@ export class AshImageBuild extends Construct {
       ],
     });
 
+    // A build log holds the whole buildspec's output, which includes the ASH
+    // configuration the deployment materialized and every scanner install. The
+    // stack already owns a key for the build artifacts; using it here too means
+    // the log and the artifact it describes are protected the same way.
     const logGroup = new logs.LogGroup(this, 'BuildLogs', {
       retention: logs.RetentionDays.ONE_MONTH,
       removalPolicy: RemovalPolicy.DESTROY,
+      encryptionKey: props.encryptionKey,
     });
 
     this.project = new codebuild.Project(this, 'Build', {
@@ -279,6 +287,7 @@ export class AshImageBuild extends Construct {
     const starterLogs = new logs.LogGroup(this, 'BootstrapStarterLogs', {
       retention: logs.RetentionDays.ONE_MONTH,
       removalPolicy: RemovalPolicy.DESTROY,
+      encryptionKey: props.encryptionKey,
     });
     const starterRole = new iam.Role(this, 'BootstrapStarterRole', {
       assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),

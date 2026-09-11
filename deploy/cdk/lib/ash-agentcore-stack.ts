@@ -48,16 +48,16 @@
  * that a rebuilt image behind a moving tag does not roll into a running runtime.
  */
 
-import { Aws, CfnOutput, Fn, RemovalPolicy, Stack, StackProps } from 'aws-cdk-lib';
+import { Aws, CfnOutput, Fn, Stack, StackProps } from 'aws-cdk-lib';
 import * as bedrockagentcore from 'aws-cdk-lib/aws-bedrockagentcore';
 import * as iam from 'aws-cdk-lib/aws-iam';
-import * as kms from 'aws-cdk-lib/aws-kms';
 import { Construct } from 'constructs';
 
 import {
   ashSynthesizer,
   ashOfflineMode, ashVersion, rebuildSchedule,
 } from './ash-config';
+import { ashEncryptionKey } from './ash-encryption';
 import { AshImageBuild } from './ash-image-build';
 import { suppressSecretRotation, suppressUnevaluableRules } from './ash-nag-suppressions';
 import { AshRuntimeConfig } from './ash-runtime-config';
@@ -76,15 +76,15 @@ export class AshAgentCoreStack extends Stack {
     const version = ashVersion(this);
     const offline = ashOfflineMode(this);
     const schedule = rebuildSchedule(this);
-    const config = new AshRuntimeConfig(this, 'Config', { includeMcpParameters: true });
 
-    // One customer-managed key per stack, shared by every CodeBuild project here.
-    // Rotation is on: the key only protects build output, so a rotated key needs
-    // no coordination with anything outside the stack.
-    const encryptionKey = new kms.Key(this, 'EncryptionKey', {
-      description: 'Encrypts ASH CodeBuild project output for this stack.',
-      enableKeyRotation: true,
-      removalPolicy: RemovalPolicy.RETAIN,
+    // Created before the config so the secret can be encrypted with it. One key
+    // per stack covers the build projects, the log groups and the auth secret —
+    // see ash-encryption.ts.
+    const encryptionKey = ashEncryptionKey(this);
+
+    const config = new AshRuntimeConfig(this, 'Config', {
+      includeMcpParameters: true,
+      encryptionKey,
     });
 
     // ARM64 is required, not chosen. AgentCore rejects an x86_64 image.

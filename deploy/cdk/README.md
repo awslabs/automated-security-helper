@@ -283,6 +283,25 @@ first:
 - **An unused Secrets Manager secret is created even with auth disabled.** The
   alternative was a CloudFormation Condition gating the resource, which makes every
   IAM grant that mentions its ARN an invalid template. Costs a few cents a month.
+- **The deploying principal needs `kms:DescribeKey`.** Every log group in these
+  stacks is encrypted with the stack's own customer-managed key, and CloudWatch
+  Logs requires `kms:DescribeKey` of whoever calls `CreateLogGroup` with a
+  `kmsKeyId`
+  ([reference](https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/encrypt-log-data-kms.html)).
+  The key's default policy grants the account root `kms:*`, so a console launch by
+  an administrator satisfies this; a deployment role with KMS carved out of it does
+  not, and will fail on the first log group rather than create it unencrypted.
+- **Deleting the key destroys the logs.** The key is `RETAIN` for this reason.
+  AWS: "If you revoke CloudWatch Logs access to an associated key or delete an
+  associated KMS key, your encrypted data in CloudWatch Logs can no longer be
+  retrieved." Deleting a stack leaves the key behind along with the repository and
+  buckets.
+- **One key per stack, not one per log group.** AWS recommends a key per encrypted
+  log group so the key policy can name a single log group ARN. That is not done
+  here: naming the log groups in the key policy is a CloudFormation cycle — the
+  policy would reference the groups and the groups reference the key — so the
+  encryption-context condition is the account-scoped variant AWS documents for
+  exactly this case. The boundary it enforces is the account, not the log group.
 - **ECR repositories and buckets are `RETAIN`.** `autoDeleteObjects` and
   `emptyOnDelete` synthesize asset-backed custom resources, which need a staging
   bucket and therefore `cdk bootstrap`, and these templates are meant to launch from
@@ -305,7 +324,7 @@ first:
 | --- | --- |
 | `AwsSolutions-VPC7` | Fixed: VPC flow logs to CloudWatch. |
 | `AwsSolutions-ELB2` | Fixed: ALB access logs, wired at the L1 with the `logdelivery.elasticloadbalancing.amazonaws.com` service principal so no per-region ELB account id is needed. `logAccessLogs` throws on an environment-agnostic stack. |
-| `AwsSolutions-CB4` | Fixed: one customer-managed KMS key per stack, shared by its CodeBuild projects. |
+| `AwsSolutions-CB4` | Fixed: one customer-managed KMS key per stack, shared by its CodeBuild projects, its CloudWatch log groups and the MCP auth secret. See `lib/ash-encryption.ts`. |
 | `AwsSolutions-IAM4` | Fixed: `AWSLambdaBasicExecutionRole` replaced by a logs policy scoped to one log group. |
 | `AwsSolutions-L1` | Fixed: newest available Python runtime. |
 | `AwsSolutions-IAM5` | Suppressed. Wildcards are the CodeBuild log-stream and report-group suffixes, `ecr:GetAuthorizationToken` (which IAM defines with no resource ARN), and object-level access inside buckets these stacks create. |

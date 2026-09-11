@@ -27,14 +27,14 @@
  * output tells you how.
  */
 
-import { CfnOutput, RemovalPolicy, Stack, StackProps } from 'aws-cdk-lib';
-import * as kms from 'aws-cdk-lib/aws-kms';
+import { CfnOutput, Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 
 import {
   ashSynthesizer,
   ashOfflineMode, ashVersion, rebuildSchedule,
 } from './ash-config';
+import { ashEncryptionKey } from './ash-encryption';
 import { AshImageBuild } from './ash-image-build';
 
 export class AshImagePipelineStack extends Stack {
@@ -53,14 +53,9 @@ export class AshImagePipelineStack extends Stack {
     const offline = ashOfflineMode(this);
     const schedule = rebuildSchedule(this);
 
-    // One customer-managed key per stack, shared by every CodeBuild project here.
-    // Rotation is on: the key only protects build output, so a rotated key needs
-    // no coordination with anything outside the stack.
-    const encryptionKey = new kms.Key(this, 'EncryptionKey', {
-      description: 'Encrypts ASH CodeBuild project output for this stack.',
-      enableKeyRotation: true,
-      removalPolicy: RemovalPolicy.RETAIN,
-    });
+    // One key for both architectures' build projects and both their log groups —
+    // see ash-encryption.ts.
+    const encryptionKey = ashEncryptionKey(this);
 
     // ARM64 exists solely for AgentCore, which rejects an x86_64 image. It is a
     // separate project rather than a second buildspec because the build must run
