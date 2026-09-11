@@ -47,12 +47,18 @@ What it actually is, stated plainly:
     all four the default answer is NO: anything not on the list fails, and adding
     to the list is a diff a reviewer sees.
 
-    Loose FILES at the artifact root are deliberately unconstrained -- that set
+    Loose FILES at the SDIST root are deliberately unconstrained -- that set
     churns with ordinary work (a CHANGELOG, a CITATION.cff) and a tree cannot
-    hide in it. The corollary is that nothing may MINT a root file: an artifact
-    carrying more than one top-level distribution root is refused outright,
+    hide in it. At the WHEEL root they are refused, because the two surfaces are
+    not symmetric in the way that exemption assumed: the built wheel has zero
+    loose root files, all eight that churn are in the sdist, and only the wheel's
+    copy is delivered into site-packages -- where a `.pth` or a `sitecustomize.py`
+    is executed by site.py at interpreter startup. See rule 5d. The corollary
+    either way is that nothing may MINT a root file: an artifact carrying anything
+    other than exactly one top-level distribution root is refused outright,
     because a second version-stamped wrapper directory would otherwise strip away
-    and leave its contents looking like loose root files.
+    and leave its contents looking like loose root files -- and because zero roots
+    means there is no distribution to judge.
 
   * A PER-MEMBER SIZE CEILING, because scanner binaries and vulnerability
     databases are orders of magnitude larger than any file ASH authors.
@@ -807,6 +813,27 @@ def malformed_path_reason(name: str) -> str | None:
     return None
 
 
+def is_plain_filename(component: str) -> bool:
+    """True if `component` is a single filename rather than a path in disguise.
+
+    Used by rule 5d to decide whether a one-component member really is a file at
+    the artifact root. `automated_security_helper\\assets\\trivy-db.json` is also
+    one component to PurePosixPath, and it is emphatically NOT a root file -- it
+    is a malformed path, which is rule 0's to refuse.
+
+    Written as a positive test so that rule 5d stays inside its own domain rather
+    than re-deriving rule 0's. That separation is load-bearing for the control:
+    rule 0 is the ONLY thing standing between a backslash member and shipping, and
+    the neutering experiment proves it by disabling rule 0 and requiring that
+    nothing else catches the member. A rule 5d that picked backslash names up as
+    "root files" would quietly become a second net, making that experiment
+    multi-variable and the claim about rule 0 untestable.
+    """
+    return component not in (".", "..") and not any(
+        separator in component for separator in ("/", "\\")
+    )
+
+
 # Compound suffixes that must be read as one unit, longest first, so that
 # `foo.tar.zst` reports `.tar.zst` rather than `.zst`.
 COMPOUND_SUFFIXES = (
@@ -862,6 +889,13 @@ def classify_member(member: Member, artifact: str) -> Violation | None:
             "them at once. Refused rather than classified.",
         )
 
+    # Kept alongside the stripped path because rule 5d needs to know whether a
+    # distribution wrapper was removed. After stripping, a loose file at a WHEEL's
+    # root and a loose file at an SDIST's root are the same one-component path;
+    # before stripping they are not, and that difference is the whole discriminator
+    # between the surface that delivers to site-packages and the surface that does
+    # not.
+    raw_components = PurePosixPath(member.name).parts
     relative = strip_distribution_root(member.name)
     path = PurePosixPath(relative)
     components = path.parts
@@ -1038,6 +1072,51 @@ def classify_member(member: Member, artifact: str) -> Violation | None:
                     "same commit.",
                 )
 
+    # Rule 5d -- a loose FILE at the wheel root.
+    #
+    # Rule 5c above is gated on `len(components) > 1`, so it never ran on a member
+    # at depth 1 at all. Rules 1 and 4 iterate `components[:-1]`, empty at that
+    # depth, so they could not fire either. What was left for a wheel-root member was
+    # the suffix and magic tables and the size ceiling -- and Python source matches
+    # none of them. `evil.pth` and `sitecustomize.py` were both cleared at exit 0 and
+    # both delivered to site-packages by `uv pip install`, where site.py imports
+    # sitecustomize at interpreter startup and EXECUTES any line of a .pth beginning
+    # with `import`. Neither name is special to any other rule here.
+    #
+    # The docstring used to leave loose root files unconstrained on both surfaces,
+    # arguing that the set churns. Measured, that argument is calibrated to the
+    # wrong surface: the built WHEEL has ZERO loose root files, while the eight that
+    # churn (pyproject.toml, LICENSE, NOTICE, README.md, PKG-INFO, Dockerfile,
+    # hatch_build.py, .gitignore) are all in the SDIST -- and an sdist root file is
+    # not delivered to site-packages, whereas a wheel root file is copied straight
+    # into it. So the exemption was paying its cost on the surface that cannot
+    # deliver and granting its licence on the one that can.
+    #
+    # The two surfaces are told apart by whether a wrapper was stripped, not by
+    # filename and not by re-deriving what distribution_roots() computes: an sdist's
+    # root file arrives as `<name>-<version>/pyproject.toml` and loses a component
+    # here, a wheel's arrives as `upstream_semgrep_rules.yaml` and never had one.
+    # The real sdist carries no member outside its wrapper, so this also refuses a
+    # file planted beside the wrapper rather than inside it -- a shape no correct
+    # build produces.
+    #
+    # The sdist root stays unconstrained, deliberately: a new CHANGELOG.md or
+    # CITATION.cff must not fail this gate.
+    if len(raw_components) == 1 and is_plain_filename(raw_components[0]):
+        return Violation(
+            artifact,
+            relative,
+            "loose-wheel-root-file",
+            "is a loose file at the root of a wheel, where the only things an "
+            f"artifact may carry are {PACKAGE_ROOT}/ and its .dist-info/. pip "
+            "copies this depth directly into site-packages, so a file here is "
+            "delivered exactly like package content while belonging to no "
+            "package -- and for a .pth or sitecustomize.py, site.py executes it "
+            "at interpreter startup. The built wheel has no loose root files at "
+            "all; the ones that churn with ordinary work live at the SDIST root, "
+            "which is unconstrained for that reason.",
+        )
+
     # Rule 6 -- bigger than anything ASH authors.
     if member.size > MAX_MEMBER_BYTES:
         return Violation(
@@ -1185,7 +1264,21 @@ def check_artifact(path: str) -> Report:
             "exactly how a gate reports success having judged nothing."
         )
 
-    # More than one distribution root is a contradiction, and it was the last
+    # The count must be exactly one, and the ZERO case is as important as the many
+    # case. It was `> 1`, which let an artifact with NO distribution root at all
+    # pass: a wheel containing only the six pinned `.dist-info` members and nothing
+    # else has no package directory, so distribution_roots() returns an empty list,
+    # `> 1` is false, and every member is on the .dist-info allowlist. That wheel
+    # was reported `artifact contents OK: 6 member(s)` at exit 0 while containing no
+    # distribution -- and it composed with the wheel-root hole rule 5d closes into
+    # arbitrary code execution on install, because a seventh member named
+    # `sitecustomize.py` or anything `.pth` rode along and was executed by site.py
+    # at interpreter startup. Verified: exit 0 and delivered before, exit 2 after.
+    #
+    # `!= 1` is safe rather than merely stricter: both real shapes are asserted to
+    # have exactly one root, on the artifact this repository actually builds.
+    #
+    # More than one is a contradiction, and it was the last
     # live bypass of the wrapper-stripping rule. `automated_security_helper-9.9.9/`
     # matches the wrapper shape legitimately -- a digit where the version starts,
     # nothing malformed about it -- so its contents were stripped to bare
@@ -1201,15 +1294,15 @@ def check_artifact(path: str) -> Report:
     # exit-2 family -- an artifact whose shape this cannot reason about is one it
     # cannot clear.
     roots = distribution_roots(members)
-    if len(roots) > 1:
+    if len(roots) != 1:
         raise ValueError(
             f"{path} has {len(roots)} top-level distribution roots: "
-            + ", ".join(repr(r) for r in roots)
+            + (", ".join(repr(r) for r in roots) or "none")
             + ". A wheel carries the package directory and no version-stamped "
             "wrapper; an sdist carries exactly one wrapper and no bare package "
-            "directory. With more than one, which members are inside the "
-            "distribution is undecidable, so no verdict about them would mean "
-            "anything. Refusing to report it clean."
+            "directory. Either way the count is exactly one. With more than one, "
+            "which members are inside the distribution is undecidable; with none, "
+            "there is no distribution here at all. Refusing to report it clean."
         )
 
     label = os.path.basename(path)
@@ -1217,8 +1310,19 @@ def check_artifact(path: str) -> Report:
 
     # A member list this cannot recognize at all means the classifier reasoned
     # about nothing, which must not read as a pass.
+    #
+    # Compared as a COMPONENT and not with startswith, which is the same
+    # string-prefix mistake normalize_member_path exists to undo. As a prefix test,
+    # `automated_security_helper-3.7.0.dist-info/METADATA` counted as "recognized"
+    # -- it starts with the package name -- so a wheel carrying nothing but metadata
+    # satisfied this guard six times over while containing no package at all. The
+    # `!= 1` root check above now refuses that artifact first; this is the same
+    # defect in the other guard, fixed rather than left relying on its neighbour.
     recognized = sum(
-        1 for m in members if strip_distribution_root(m.name).startswith(PACKAGE_ROOT)
+        1
+        for m in members
+        if PurePosixPath(strip_distribution_root(m.name)).parts[:1]
+        == (PACKAGE_ROOT,)
     )
     if recognized == 0:
         raise ValueError(
@@ -1437,6 +1541,17 @@ PLANTED_MEMBERS = {
         f"{PACKAGE_ROOT}-vendor/upstream_semgrep_rules.yaml",
         b"rules:\n  - id: upstream.audit\n",
         "unpinned-distribution-directory",
+    ),
+    # A loose file at the WHEEL root, which pip copies straight into site-packages
+    # while it belongs to no package. Deliberately NOT wrapper-prefixed:
+    # clean_members_for reads the first component, so an unwrapped name selects the
+    # wheel-shaped clean members, which is the surface this rule is about. The
+    # sdist-root spelling of the same file is allowed and stays allowed -- see
+    # rule 5d for why the two surfaces differ.
+    "loose-wheel-root-file": (
+        "upstream_semgrep_rules.yaml",
+        b"rules:\n  - id: upstream.audit\n",
+        "loose-wheel-root-file",
     ),
     "oversize-member": (
         "automated_security_helper/utils/payload.dat",

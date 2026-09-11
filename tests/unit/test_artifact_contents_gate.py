@@ -681,6 +681,49 @@ class TestPlantedPayload:
         assert violation is not None, directory
         assert violation.rule == "unpinned-distribution-directory", directory
 
+    @pytest.mark.parametrize(
+        "basename",
+        [
+            "upstream_semgrep_rules.yaml",
+            "bandit_core.py",
+            "cfn_nag_engine.rb",
+            # The two code-execution vectors. site.py imports `sitecustomize` at
+            # interpreter startup, and EXECUTES any line of a `.pth` that begins
+            # with `import`. Neither name is special to any other rule here, and a
+            # wheel carrying either was cleared at exit 0 and delivered to
+            # site-packages -- verified by install, with an inert payload.
+            "sitecustomize.py",
+            "usercustomize.py",
+            "evil.pth",
+        ],
+    )
+    def test_loose_file_at_the_wheel_root_is_rejected(self, basename):
+        """A wheel root file is copied into site-packages belonging to no package.
+
+        Rule 5c could never see these: it is gated on `len(components) > 1`, and a
+        wheel-root member has exactly one component. Rules 1 and 4 iterate
+        `components[:-1]`, which is empty at this depth, so they cannot fire either.
+        What was left was the suffix and magic tables plus the size ceiling, and
+        Python source matches none of them.
+        """
+        violation = _classify(basename)
+        assert violation is not None, basename
+        assert violation.rule == "loose-wheel-root-file", basename
+
+    def test_the_sdist_root_is_still_unconstrained(self):
+        """The asymmetry is the point of rule 5d, so pin both halves together.
+
+        The same filename is REFUSED at a wheel root and ALLOWED at an sdist root,
+        because only the wheel's copy is delivered into site-packages and all the
+        churn lives in the sdist. A test that pinned one half would read as an
+        inconsistency rather than as a decision.
+        """
+        assert _classify("upstream_semgrep_rules.yaml") is not None
+        assert (
+            _classify("automated_security_helper-3.7.0/upstream_semgrep_rules.yaml")
+            is None
+        )
+
     def test_uppercase_package_directory_is_rejected(self):
         """Component checks lowercase; the pinned lists do not.
 
@@ -1208,9 +1251,53 @@ class TestNoVacuousPass:
             gate.check_artifact(str(wheel))
 
     def test_archive_with_no_recognizable_members_is_rejected(self, tmp_path):
-        """Members shaped unlike ASH's mean the classifier reasoned about nothing."""
+        """Members shaped unlike ASH's mean the classifier reasoned about nothing.
+
+        Caught by the distribution-root count rather than by the `recognized`
+        tally: `some/` is neither the package nor a version-stamped wrapper, so the
+        artifact has zero roots. Both are exit-2 refusals and the outcome is the
+        same; the message differs, so it is pinned here rather than left to whichever
+        guard happens to speak first.
+        """
         wheel = _write_wheel(tmp_path / "alien.whl", {"some/other/project.py": b"x"})
+        with pytest.raises(ValueError, match="0 top-level distribution roots"):
+            gate.check_artifact(str(wheel))
+
+    def test_a_wrapper_containing_no_package_is_rejected(self, tmp_path):
+        """The `recognized` tally is still live, and this is what reaches it.
+
+        One valid sdist wrapper, so the root count is exactly 1 and that guard is
+        satisfied -- but nothing inside is under the package, so the classifier had
+        nothing of ASH's to reason about. Without this case the tally would look
+        dead after the root check was tightened to `!= 1`, and a guard believed dead
+        is a guard someone deletes.
+        """
+        wheel = _write_wheel(
+            tmp_path / "hollow.whl",
+            {"automated_security_helper-3.7.0/pyproject.toml": b"[project]\n"},
+        )
         with pytest.raises(ValueError, match="none under"):
+            gate.check_artifact(str(wheel))
+
+    def test_a_wheel_of_only_metadata_is_rejected(self, tmp_path):
+        """No package directory at all must not read as a clean six-member wheel.
+
+        This was a live hole, and the worst one found: the root-count guard was
+        `> 1`, so an artifact with ZERO distribution roots passed it, and every
+        member of a metadata-only wheel is on DIST_INFO_ALLOWLIST. The gate printed
+        `artifact contents OK: 6 member(s)` at exit 0. Composed with a loose
+        wheel-root file it delivered `sitecustomize.py` into site-packages, which
+        site.py imports at interpreter startup -- verified by install, exit 0
+        before, exit 2 now.
+        """
+        wheel = _write_wheel(
+            tmp_path / "metadata-only.whl",
+            {
+                f"automated_security_helper-3.7.0.dist-info/{inner}": b"x\n"
+                for inner in gate.DIST_INFO_ALLOWLIST
+            },
+        )
+        with pytest.raises(ValueError, match="0 top-level distribution roots"):
             gate.check_artifact(str(wheel))
 
     def test_non_archive_is_rejected_rather_than_skipped(self, tmp_path):
@@ -1284,6 +1371,10 @@ NEUTERED = [
         "DIST_INFO_ALLOWLIST",
         frozenset(gate.DIST_INFO_ALLOWLIST) | {"licenses/upstream_rules.yaml"},
     ),
+    # Rule 5d is structural rather than a table, so like rule 0 it is neutered by
+    # stubbing the predicate it consults -- here, by denying that anything is a
+    # plain filename, which makes the rule unable to fire.
+    ("is_plain_filename", lambda component: False),
     # Exactly the fixture's own size, so `size > ceiling` is False. Raising it to
     # something enormous would be the obvious move and would make the fixture try
     # to allocate the new ceiling.
@@ -1319,14 +1410,14 @@ class TestSelfTestIsTheControl:
         # different route and used to escape it entirely.
         assert rules.count("unpinned-asset") == 2
         assert rules.count("unpinned-distribution-directory") == 3
-        assert len(gate.PLANTED_MEMBERS) == 16
+        assert len(gate.PLANTED_MEMBERS) == 17
         # One neutering experiment per RULE SET, which is fewer than the number of
         # detectors: several detectors share a table. `vendored-scanner-manifest`
         # exercises the same SCANNER_DIST_NAMES as `vendored-scanner`;
         # `unnormalized-path-defeats-the-assets-allowlist` shares ASSETS_ALLOWLIST;
         # the `.data` and wrapper-lookalike detectors share
         # DISTRIBUTION_ROOT_DIRECTORIES.
-        assert len(NEUTERED) == 12
+        assert len(NEUTERED) == 13
         assert {c for c, _ in NEUTERED} == {
             "malformed_path_reason",
             "VENDOR_DIR_COMPONENTS",
@@ -1339,6 +1430,7 @@ class TestSelfTestIsTheControl:
             "PACKAGE_SUBDIRECTORIES",
             "DISTRIBUTION_ROOT_DIRECTORIES",
             "DIST_INFO_ALLOWLIST",
+            "is_plain_filename",
             "MAX_MEMBER_BYTES",
         }
 
@@ -1404,6 +1496,7 @@ class TestSelfTestIsTheControl:
             # measuring the same table twice.
             "DISTRIBUTION_ROOT_DIRECTORIES": "unpinned-distribution-directory",
             "DIST_INFO_ALLOWLIST": "unpinned-dist-info-member",
+            "is_plain_filename": "loose-wheel-root-file",
             "MAX_MEMBER_BYTES": "oversize-member",
         }
         label = label_for[constant]
