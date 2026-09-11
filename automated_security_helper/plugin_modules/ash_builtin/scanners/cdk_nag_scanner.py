@@ -36,18 +36,83 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.utils.subprocess_utils import find_executable
 
-_CDK_AVAILABLE = True
-try:
-    from importlib.metadata import version as _get_version
+#: Every distribution ASH's ``cdk`` extra installs. All three have to be present
+#: for the wrapper to get as far as evaluating a rule: ``cdk_nag`` supplies the
+#: packs, ``aws-cdk-lib`` the App/Stack/CfnInclude the wrapper synthesizes, and
+#: ``constructs`` the base class both of those are built on.
+#:
+#: Kept as a literal tuple rather than derived from ``_cdk_extra_requirements()``
+#: below. That function reads pyproject's own metadata, which is the right source
+#: for *what to install* but the wrong one for *what to probe*: it falls back to a
+#: pinned list when the metadata is unreadable, and probing a fallback would let a
+#: checkout with no distribution metadata at all report every dependency present.
+_CDK_REQUIRED_DISTRIBUTIONS = ("cdk_nag", "aws-cdk-lib", "constructs")
 
-    _cdk_nag_version = _get_version("cdk_nag")
-    from automated_security_helper.utils.cdk_nag_wrapper import (
-        run_cdk_nag_against_cfn_template,
-    )
-except (ImportError, Exception):
-    _CDK_AVAILABLE = False
-    _cdk_nag_version = "unavailable"
-    run_cdk_nag_against_cfn_template = None  # type: ignore[assignment]
+
+def _missing_cdk_distributions(
+    distributions: "tuple[str, ...]" = _CDK_REQUIRED_DISTRIBUTIONS,
+) -> List[str]:
+    """Which of ``distributions`` have no installed metadata, in declared order.
+
+    A metadata read, not an import. The alternative -- importing ``cdk_nag`` here
+    to prove it works -- was rejected on cost: this module is imported during
+    plugin discovery on every ASH invocation, including ``ash --help`` and runs
+    that never select cdk-nag, and importing cdk_nag starts a jsii kernel, which
+    spawns a NodeJS child process. Paying that on every invocation to sharpen one
+    scanner's availability check is the wrong trade.
+
+    What the metadata read cannot see is a state where all three distributions are
+    installed but importing them still fails -- a half-finished pip run, a missing
+    jsii transitive dependency, NodeJS absent. That case is not left silent: the
+    wrapper's own import guard reports the failure per template, which the scanner
+    records against the target it was scanning.
+
+    Probing all three rather than only ``cdk_nag`` is the point of this function.
+    A one-distribution probe passes on an install where cdk-nag is present and
+    aws-cdk-lib is not -- reproducible with ``pip install --no-deps cdk-nag`` --
+    and every template then failed to import, decremented the attempt count back
+    toward zero, and the scan reported SKIPPED with exit code 0 while both
+    completeness gates passed it. ``get_installation_commands`` gates on the same
+    flag, so the documented remediation was a no-op in exactly that state too.
+    """
+    from importlib.metadata import version as _dist_version
+
+    missing: List[str] = []
+    for distribution in distributions:
+        try:
+            _dist_version(distribution)
+        except Exception:
+            # Broad on purpose. PackageNotFoundError is the expected answer, but a
+            # malformed *.dist-info on sys.path raises other things, and any
+            # failure to confirm the distribution is present has to read as "not
+            # present" -- resolving an unreadable install to "available" is the
+            # defect this probe exists to remove.
+            missing.append(distribution)
+    return missing
+
+
+#: Populated at import time so ``validate_plugin_dependencies`` can name what is
+#: absent instead of listing all three whatever the actual state is. Empty when
+#: ``_CDK_AVAILABLE`` is False because the *wrapper import* failed rather than
+#: because a distribution is missing, which is why the warning below has a
+#: fallback.
+_CDK_MISSING_DISTRIBUTIONS: List[str] = _missing_cdk_distributions()
+_CDK_AVAILABLE = not _CDK_MISSING_DISTRIBUTIONS
+_cdk_nag_version = "unavailable"
+run_cdk_nag_against_cfn_template = None  # type: ignore[assignment]
+
+if _CDK_AVAILABLE:
+    try:
+        from importlib.metadata import version as _get_version
+
+        _cdk_nag_version = _get_version("cdk_nag")
+        from automated_security_helper.utils.cdk_nag_wrapper import (
+            run_cdk_nag_against_cfn_template,
+        )
+    except Exception:
+        _CDK_AVAILABLE = False
+        _cdk_nag_version = "unavailable"
+        run_cdk_nag_against_cfn_template = None  # type: ignore[assignment]
 
 
 # Last-resort copy of the "cdk" extra's contents. The source of truth is
@@ -246,12 +311,20 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             ScannerError: If validation fails
         """
         if not _CDK_AVAILABLE:
+            # Names what is actually absent. Listing all three unconditionally
+            # described a partial install wrongly, and a wrong list is worse than
+            # none here: an operator who can see cdk-nag in `pip list` reads
+            # "cdk-nag is not installed" as a bug in ASH and stops reading.
+            #
             # Points at ASH's own command rather than at a pip install of
             # "automated-security-helper[cdk]". That name belongs to an
             # unrelated project on PyPI, so the old hint sent users to install a
             # stranger's package to fix an ASH problem.
+            absent = ", ".join(_CDK_MISSING_DISTRIBUTIONS) or ", ".join(
+                _CDK_REQUIRED_DISTRIBUTIONS
+            )
             ASH_LOGGER.warning(
-                "CDK dependencies (aws-cdk-lib, cdk-nag, constructs) are not installed. "
+                f"CDK dependencies are not usable ({absent} unavailable). "
                 "Install them with: ash dependencies install"
             )
             self.dependencies_satisfied = False

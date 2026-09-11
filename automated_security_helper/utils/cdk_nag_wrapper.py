@@ -588,11 +588,26 @@ def run_cdk_nag_against_cfn_template(
 
             try:
                 import cdk_nag
-            except (ImportError, FileNotFoundError):
+            except (ImportError, FileNotFoundError) as exc:
                 sys.stderr = original_stderr
+                # Names the module that actually could not be loaded. This used to
+                # report "NodeJS is missing" for every failure here, which is one
+                # cause among several and was measurably the wrong one: on a host
+                # with NodeJS 22 on PATH and cdk-nag installed without its
+                # dependencies, the import fails on a Python module and the log
+                # sent the operator to install NodeJS they already had.
+                #
+                # FileNotFoundError is the shape that really does mean NodeJS --
+                # jsii spawns `node` and the exec fails -- so it keeps that hint,
+                # and ImportError does not.
+                hint = (
+                    "cdk-nag runs NodeJS through jsii; check that `node` is on PATH."
+                    if isinstance(exc, FileNotFoundError)
+                    else "Reinstall the CDK dependencies with: ash dependencies install"
+                )
                 ASH_LOGGER.warning(
-                    "NodeJS is missing and CDK Nag depends on it due to transitive dependencies. "
-                    "Please install NodeJS and try running your ASH scan again for CDK NagPack coverage on CloudFormation templates. "
+                    f"cdk-nag could not be imported, so {template_path} was not "
+                    f"evaluated: {type(exc).__name__}: {exc}. {hint}"
                 )
                 return None
             from aws_cdk import (
