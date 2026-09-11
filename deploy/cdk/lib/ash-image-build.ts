@@ -312,6 +312,23 @@ export class AshImageBuild extends Construct {
       handler: 'index.handler',
       runtime: lambda.Runtime.PYTHON_3_14,
       timeout: Duration.minutes(1),
+      /**
+       * One concurrent execution, which is one more than this function ever
+       * needs.
+       *
+       * CloudFormation is the only caller: it invokes the custom resource once
+       * per Create, Update or Delete on this stack, and it waits for a response
+       * before doing anything else with the resource. There is no fan-out to
+       * absorb. Reserving 1 caps what the function can consume of the account's
+       * concurrency if it is ever invoked from somewhere else, and it does not
+       * throttle any invocation the design actually makes.
+       *
+       * The cost is real but small: a reservation is subtracted from the
+       * account's unreserved pool, and Lambda refuses a reservation that would
+       * leave less than 100 unreserved. One function at 1 does not approach that
+       * on a default 1,000 limit.
+       */
+      reservedConcurrentExecutions: 1,
       description:
         'Starts the ASH image build during stack creation and hands CloudFormation’s ' +
         'response URL to the build, which answers once the image exists.',
