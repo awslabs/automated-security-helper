@@ -262,37 +262,6 @@ runs:
           ./ash --build-target ci --verbose
         fi
 
-    # One guard for every scan method, replacing five per-method ones. Four of
-    # those grepped the prose text report for "ERROR" and compared the line count
-    # against 1 to discount the report's legend line, which could not see MISSING
-    # at all; the fifth read JSON at a path that does not exist
-    # (`scanners[*].result` rather than `scanner_results[*].status`), so it
-    # reported success unconditionally. See the script's module docstring for the
-    # measurements behind each.
-    #
-    # Deliberately not `if:`-gated on method. Every method writes the same
-    # aggregated results file to the same path -- the one "Verify scan completed"
-    # below already asserts exists -- so the guard is method-independent, and one
-    # unconditional step cannot be skipped by a method that stops matching its
-    # condition.
-    #
-    # Runs even when the scan step failed. A scan that exits non-zero is exactly
-    # when knowing which scanners did not complete is worth the most, and ASH's own
-    # exit code now covers the same condition, so this step is a second reader of
-    # the same field rather than the only one.
-    - name: Validate all selected scanners completed
-      if: ${{ !cancelled() }}
-      shell: bash
-      run: |
-        # python3 on the Linux and macOS runners, python under Git Bash on the
-        # Windows one. Probed rather than assumed because this step is the only
-        # bash step that runs on all three.
-        if command -v python3 >/dev/null 2>&1; then
-          PY=python3
-        else
-          PY=python
-        fi
-        "$PY" .github/scripts/assert_scanners_completed.py
 
     # Companion to "Expose the Actions cache credentials to ASH's build". The build
     # is done by now, so clear the credentials back out rather than leaving them in
@@ -372,3 +341,40 @@ runs:
         else
           echo "SUCCESS: All GitLab SAST reports passed schema validation"
         fi
+
+    # One guard for every scan method, replacing five per-method ones. Four of those
+    # grepped the prose text report for "ERROR" and compared the line count against
+    # 1 to discount the report's legend line, which could not see MISSING at all;
+    # the fifth read JSON at a path that does not exist (`scanners[*].result` rather
+    # than `scanner_results[*].status`), so it reported success unconditionally. See
+    # the script's module docstring for the measurement behind each.
+    #
+    # Deliberately not `if:`-gated on method. Every method writes the same
+    # aggregated results file to the same path -- the one "Verify scan completed"
+    # above already asserts exists -- so the guard is method-independent, and an
+    # unconditional step cannot be skipped by a method that stops matching a
+    # condition.
+    #
+    # Last on purpose. It is the only step here that fails on a *complete* scan
+    # artifact, so putting it after the existence, artifact-upload and schema steps
+    # means a completeness failure never skips one of their diagnostics. The
+    # artifact upload is `success() || failure()`, so the output survives this
+    # step's verdict either way.
+    #
+    # Runs even when the scan step failed. A scan that exits non-zero is exactly
+    # when knowing which scanners did not complete is worth the most, and ASH's own
+    # exit code now covers the same condition, so this is a second reader of the
+    # same field rather than the only one.
+    - name: Validate all selected scanners completed
+      if: ${{ !cancelled() }}
+      shell: bash
+      run: |
+        # python3 on the Linux and macOS runners, python under Git Bash on the
+        # Windows one. Probed rather than assumed, because this is the only bash
+        # step in this action that runs on all three.
+        if command -v python3 >/dev/null 2>&1; then
+          PY=python3
+        else
+          PY=python
+        fi
+        "$PY" .github/scripts/assert_scanners_completed.py
