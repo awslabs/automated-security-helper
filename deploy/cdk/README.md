@@ -396,6 +396,42 @@ counting only `Non-Compliant`.
 form needs strings embedding CDK logical ids, which rot on any rename and fail
 open. The reasons enumerate every wildcard instead.
 
+## cfn-nag
+
+cfn-nag runs over `templates/` rather than over the CDK app, and it is a separate
+tool from cdk-nag with a separate suppression mechanism —
+`Metadata.cfn_nag.rules_to_suppress` on the resource, not
+`Metadata.cdk_nag.rules_to_suppress`. Current state of the five committed templates:
+**0 failures, 35 warnings.**
+
+One rule is suppressed rather than fixed.
+
+`W92` (a Lambda function should specify `ReservedConcurrentExecutions`) fires on the
+three image-build bootstrap starters and on the gate's `ScanFunction`. The
+reservation was implemented and then reverted, because satisfying the rule is worse
+than the warning: Lambda rejects any reservation that would leave the account's
+unreserved concurrency below 100, so an adopter launching one of these templates
+into a sandbox account with a reduced quota — or one already carrying reservations —
+gets `InvalidParameterValueException`, a function that fails to create, and a stack
+that rolls back. These are one-click templates for accounts whose quota is unknown.
+
+The rule also bounds nothing here. Each bootstrap starter's ARN appears exactly once
+per template, as the `ServiceToken` of a `Custom::AshImageBootstrap` resource, and no
+`AWS::Lambda::Permission` grants any service principal access to it, so
+CloudFormation is the only possible invoker and it invokes a custom resource
+serially. The three starters therefore carry a `W92` suppression stating that.
+
+The gate's `ScanFunction` keeps its `W92` warning unsuppressed, and its absence of a
+reservation is load-bearing rather than incidental: it is invoked by an EventBridge
+rule with `MaximumRetryAttempts: 1`, `MaximumEventAgeInSeconds: 3600` and **no
+dead-letter queue**, so a reservation below the pull-request arrival rate would
+throttle, exhaust the single retry, and drop the event — a pull request silently
+unscanned, which is the failure this whole deployment surface exists to remove.
+
+Local measurement hazard: with a `deploy/cdk/cdk.out` present, `ash scan --scanners
+cfn-nag` double-counts, because it scans both `templates/` and the assembly under
+`cdk.out/`. Delete `cdk.out` before measuring.
+
 ## Reproducibility
 
 Templates are byte-reproducible from `cdk synth` for a pinned `aws-cdk-lib`

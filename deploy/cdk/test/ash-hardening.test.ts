@@ -145,6 +145,13 @@ const STACK_KEY_ARN: Record<string, unknown> = Object.fromEntries(
   ]),
 );
 
+/** True for the three stacks whose workload cannot be created against an empty repository. */
+function hasBootstrapStarter(template: Template): boolean {
+  return Object.keys(template.findResources('AWS::Lambda::Function')).some((logicalId) =>
+    logicalId.includes('BootstrapStarter'),
+  );
+}
+
 describe('the templates under test are the templates that ship', () => {
   test('cdk.json context reached the App', () => {
     // Non-vacuity for the block above. If the path breaks or cdk.json is
@@ -433,8 +440,14 @@ describe('the key survives the stack that created it', () => {
   });
 });
 
-describe('the image-build bootstrap starter is concurrency-bounded', () => {
-  const functions = everyResource('AWS::Lambda::Function').filter(([name]) =>
+describe('the image-build bootstrap starter reserves no concurrency', () => {
+  // cfn-nag W92 asks for a reservation. It is suppressed rather than satisfied,
+  // because a reservation makes stack CREATION depend on the account's unreserved
+  // concurrency: Lambda rejects any reservation that would leave the account below
+  // 100 unreserved, so an adopter with a reduced quota gets a failed create and a
+  // rolled-back stack -- to remediate a warning. These tests pin both halves of that
+  // decision: the property is absent, and the suppression carries the argument.
+  const starters = everyResource('AWS::Lambda::Function').filter(([name]) =>
     name.includes('BootstrapStarter'),
   );
 
@@ -442,16 +455,56 @@ describe('the image-build bootstrap starter is concurrency-bounded', () => {
     // Three: the stacks whose workload cannot be created against an empty
     // repository. The sharded pipeline and the standalone image build set
     // bootstrapOnDeploy false and have none.
-    expect(functions.length).toBe(3);
+    expect(starters.length).toBe(3);
   });
 
-  test.each(functions.map(([name, props]) => [name, props] as const))(
-    '%s reserves one execution',
-    (_name, props) => {
-      // cfn-nag W92. CloudFormation is the only caller and it invokes the custom
-      // resource serially, so 1 caps the function without throttling anything the
-      // design does.
-      expect(props.ReservedConcurrentExecutions).toBe(1);
+  test.each(starters)('%s sets no reservation', (_name, props) => {
+    expect(props.ReservedConcurrentExecutions).toBeUndefined();
+  });
+
+  test.each(CASES.filter(([, template]) => hasBootstrapStarter(template)))(
+    '%s suppresses W92 with a reason, not a bare rule id',
+    (_name, template) => {
+      // A suppression whose reason is empty or a restatement of the rule id leaves the
+      // next reader to re-derive the concurrency-quota argument. Asserted as
+      // substance: the reason has to name the invoker and the quota.
+      const starter = Object.entries<any>(template.findResources('AWS::Lambda::Function')).filter(
+        ([logicalId]) => logicalId.includes('BootstrapStarter'),
+      );
+      expect(starter).toHaveLength(1);
+      const suppressed = starter[0][1].Metadata?.cfn_nag?.rules_to_suppress;
+      expect(suppressed).toHaveLength(1);
+      expect(suppressed[0].id).toBe('W92');
+      expect(suppressed[0].reason).toMatch(/Custom::AshImageBootstrap/);
+      expect(suppressed[0].reason).toMatch(/unreserved/);
+      expect(suppressed[0].reason.length).toBeGreaterThan(120);
+    },
+  );
+
+  test.each(CASES.filter(([, template]) => hasBootstrapStarter(template)))(
+    '%s gives no service principal a way to invoke the starter',
+    (_name, template) => {
+      // This is what makes the suppression true rather than merely stated. If a
+      // Lambda::Permission ever appears for a bootstrap starter, something other than
+      // CloudFormation can invoke it, the "no fan-out" argument stops holding, and the
+      // suppression has to be revisited.
+      const permissions = Object.values<any>(template.findResources('AWS::Lambda::Permission'));
+      for (const permission of permissions) {
+        expect(JSON.stringify(permission.Properties.FunctionName)).not.toContain(
+          'BootstrapStarter',
+        );
+      }
+      // And the starter's ARN is referenced exactly once, by the custom resource.
+      const [starterId] = Object.keys(template.findResources('AWS::Lambda::Function')).filter(
+        (logicalId) => logicalId.includes('BootstrapStarter'),
+      );
+      const referrers = Object.entries<any>(template.toJSON().Resources).filter(
+        ([logicalId, resource]) =>
+          logicalId !== starterId && JSON.stringify(resource).includes(`"${starterId}"`),
+      );
+      expect(referrers.map(([, resource]) => resource.Type)).toEqual([
+        'Custom::AshImageBootstrap',
+      ]);
     },
   );
 });

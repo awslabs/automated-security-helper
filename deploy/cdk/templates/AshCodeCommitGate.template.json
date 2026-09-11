@@ -973,7 +973,6 @@
       "Ref": "ImageBootstrapStarterLogsFCF41B92"
      }
     },
-    "ReservedConcurrentExecutions": 1,
     "Role": {
      "Fn::GetAtt": [
       "ImageBootstrapStarterRole4262AC52",
@@ -988,7 +987,15 @@
     "ImageBootstrapStarterRole4262AC52"
    ],
    "Metadata": {
-    "aws:cdk:path": "AshCodeCommitGate/Image/BootstrapStarter/Resource"
+    "aws:cdk:path": "AshCodeCommitGate/Image/BootstrapStarter/Resource",
+    "cfn_nag": {
+     "rules_to_suppress": [
+      {
+       "id": "W92",
+       "reason": "CloudFormation is the only invoker: this function is referenced only as the ServiceToken of a Custom::AshImageBootstrap resource, no AWS::Lambda::Permission grants any service principal access to it, and CloudFormation invokes a custom resource serially and waits for the response. There is no fan-out for a reservation to bound. Setting one instead introduces a create-time dependency on the account's unreserved-concurrency headroom -- Lambda rejects a reservation that would leave the account below 100 unreserved -- which fails the deploy outright in a constrained account. These templates launch one-click into accounts whose quota is unknown, so that trade is not worth making."
+      }
+     ]
+    }
    }
   },
   "ImageBootstrapBuildCBE6CA7A": {
