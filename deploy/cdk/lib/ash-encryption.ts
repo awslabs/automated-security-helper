@@ -48,6 +48,54 @@
  * this case, "limits the use of the AWS KMS key to the specified account, but it can
  * be used for any log group" — and the boundary it enforces is the account rather
  * than the log group.
+ *
+ * WHY THE LOG PRODUCERS NEED NO KMS PERMISSION OF THEIR OWN
+ * --------------------------------------------------------
+ * CloudWatch Logs does the encrypting, on its own service principal. That is what
+ * the statement below grants, and it is why no CodeBuild project role, Lambda
+ * execution role or ECS task role in these stacks gained a KMS statement.
+ *
+ * The one producer that does not write under its own workload role is VPC Flow
+ * Logs: it writes through a separate delivery role, assumed by
+ * `vpc-flow-logs.amazonaws.com`, and if that role needed key access and did not
+ * have it the symptom would be silent — the flow log reports enabled, the log group
+ * exists, and no records arrive. Checked against AWS documentation rather than
+ * assumed:
+ *
+ *   - The flow-log role's required policy is five `logs:` actions and no KMS at all
+ *     ("must include at least the following permissions"):
+ *     https://docs.aws.amazon.com/vpc/latest/userguide/flow-logs-iam-role.html
+ *   - The flow-log troubleshooting page enumerates the causes of `Access error`, and
+ *     all three are the logs permissions or the trust relationship. KMS appears on
+ *     that page only for the S3 destination:
+ *     https://docs.aws.amazon.com/vpc/latest/userguide/flow-logs-troubleshooting.html
+ *   - Where a flow-log destination's CMK does need a grant — S3 with SSE-KMS — AWS
+ *     documents it as a KEY POLICY grant to a service principal, not as a role
+ *     permission. So AWS does document this requirement when it applies:
+ *     https://docs.aws.amazon.com/vpc/latest/userguide/flow-logs-s3-cmk-policy.html
+ *
+ * One qualification, because the blanket form of this claim is not what AWS says.
+ * The CloudWatch Logs encryption page has a "Permissions for reading and writing
+ * encrypted log data" section which names `PutLogEvents` and states that such a
+ * principal "needs additional AWS KMS permissions", scoped by
+ * `kms:ViaService: logs.<region>.amazonaws.com`. That describes the caller-attributed
+ * route, where a principal's own credentials are forwarded to KMS; the statement
+ * below is the service-principal route, which the same page's Step 2 introduces as
+ * giving "the CloudWatch Logs service principal ... permission to use the key". This
+ * key grants the service-principal route, so producers need nothing — but the reason
+ * is that grant, not a general rule that log producers never need KMS.
+ * https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/encrypt-log-data-kms.html
+ *
+ * WHAT THE DEPLOYING PRINCIPAL NEEDS
+ * ----------------------------------
+ * `kms:DescribeKey` on this key. CloudWatch Logs requires it of whoever calls
+ * `CreateLogGroup` with a `kmsKeyId`, and without it the log group fails to
+ * create rather than being created unencrypted. The key's default policy grants
+ * the account root `kms:*`, so any principal in the account whose own identity
+ * policy allows KMS — which a console-launch admin has — satisfies it. A
+ * deployment role with KMS carved out of it does not, and will fail on the first
+ * log group.
+ *
  */
 
 import { Aws, RemovalPolicy, Stack } from 'aws-cdk-lib';

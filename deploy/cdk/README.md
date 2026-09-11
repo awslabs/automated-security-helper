@@ -320,6 +320,21 @@ first:
   update, and replacing a log group discards the log data in it. So the
   encryption-context condition is the account-scoped variant AWS documents for
   exactly this case, and the boundary it enforces is the account, not the log group.
+- **No log producer needs a KMS grant of its own, because the key grants the
+  CloudWatch Logs service principal.** Checked rather than assumed for the one
+  producer here that writes through a separate delivery role instead of its own
+  workload role — VPC Flow Logs. AWS documents the flow-log role's required policy
+  as five `logs:` actions and no KMS
+  ([reference](https://docs.aws.amazon.com/vpc/latest/userguide/flow-logs-iam-role.html)),
+  and lists KMS among the causes of a flow-log delivery failure only for the S3
+  destination, where the fix is a key-policy grant to a service principal rather
+  than a role permission. The qualification, since the blanket claim is not what AWS
+  says: CloudWatch Logs also documents a caller-attributed route in which a
+  principal calling `PutLogEvents` on a CMK-encrypted group does need KMS
+  permissions, scoped by `kms:ViaService`. These stacks rely on the
+  service-principal route, which is the statement in `lib/ash-encryption.ts`. If
+  flow-log records ever stop arriving while the flow log reports enabled, that
+  statement is the thing to check first.
 - **ECR repositories and buckets are `RETAIN`.** `autoDeleteObjects` and
   `emptyOnDelete` synthesize asset-backed custom resources, which need a staging
   bucket and therefore `cdk bootstrap`, and these templates are meant to launch from
