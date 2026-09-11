@@ -27,7 +27,7 @@
   "EncryptionKey1B843E66": {
    "Type": "AWS::KMS::Key",
    "Properties": {
-    "Description": "Encrypts ASH CodeBuild project output for this stack.",
+    "Description": "Encrypts this stack's ASH CodeBuild project output, CloudWatch log groups and the MCP auth secret.",
     "EnableKeyRotation": true,
     "KeyPolicy": {
      "Statement": [
@@ -53,6 +53,56 @@
         }
        },
        "Resource": "*"
+      },
+      {
+       "Action": [
+        "kms:Decrypt",
+        "kms:Describe*",
+        "kms:Encrypt",
+        "kms:GenerateDataKey*",
+        "kms:ReEncrypt*"
+       ],
+       "Condition": {
+        "ArnLike": {
+         "kms:EncryptionContext:aws:logs:arn": {
+          "Fn::Join": [
+           "",
+           [
+            "arn:",
+            {
+             "Ref": "AWS::Partition"
+            },
+            ":logs:",
+            {
+             "Ref": "AWS::Region"
+            },
+            ":",
+            {
+             "Ref": "AWS::AccountId"
+            },
+            ":*"
+           ]
+          ]
+         }
+        }
+       },
+       "Effect": "Allow",
+       "Principal": {
+        "Service": {
+         "Fn::Join": [
+          "",
+          [
+           "logs.",
+           {
+            "Ref": "AWS::Region"
+           },
+           ".amazonaws.com"
+          ]
+         ]
+        }
+       },
+       "Resource": "*",
+       "Sid": "AllowCloudWatchLogsEncryption"
       }
      ],
      "Version": "2012-10-17"
@@ -84,6 +134,12 @@
   "Arm64BuildLogs3AC2EA1D": {
    "Type": "AWS::Logs::LogGroup",
    "Properties": {
+    "KmsKeyId": {
+     "Fn::GetAtt": [
+      "EncryptionKey1B843E66",
+      "Arn"
+     ]
+    },
     "RetentionInDays": 30
    },
    "UpdateReplacePolicy": "Delete",
@@ -590,6 +646,12 @@
   "Amd64BuildLogsF9EE6AF1": {
    "Type": "AWS::Logs::LogGroup",
    "Properties": {
+    "KmsKeyId": {
+     "Fn::GetAtt": [
+      "EncryptionKey1B843E66",
+      "Arn"
+     ]
+    },
     "RetentionInDays": 30
    },
    "UpdateReplacePolicy": "Delete",

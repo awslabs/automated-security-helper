@@ -61,101 +61,11 @@
    "NoEcho": true
   }
  },
- "Conditions": {
-  "ConfigHasBaseConfigA7D225A9": {
-   "Fn::Not": [
-    {
-     "Fn::Equals": [
-      {
-       "Ref": "AshBaseConfigYaml"
-      },
-      ""
-     ]
-    }
-   ]
-  },
-  "ConfigHasHeaderAuthA42E2E27": {
-   "Fn::And": [
-    {
-     "Fn::Not": [
-      {
-       "Fn::Equals": [
-        {
-         "Ref": "McpAuthHeaderName"
-        },
-        ""
-       ]
-      }
-     ]
-    },
-    {
-     "Fn::Not": [
-      {
-       "Fn::Equals": [
-        {
-         "Ref": "McpAuthHeaderValue"
-        },
-        ""
-       ]
-      }
-     ]
-    }
-   ]
-  }
- },
  "Resources": {
-  "ConfigBaseConfig623C762C": {
-   "Type": "AWS::SSM::Parameter",
-   "Properties": {
-    "Description": "ASH base configuration document, written to the container at start and applied through ASH_CONFIG. Edit here to change the deployment-wide config without a stack update; the next container start picks it up.",
-    "Tier": "Advanced",
-    "Type": "String",
-    "Value": {
-     "Fn::If": [
-      "ConfigHasBaseConfigA7D225A9",
-      {
-       "Ref": "AshBaseConfigYaml"
-      },
-      "# No ASH base configuration was supplied at deployment time."
-     ]
-    }
-   },
-   "Metadata": {
-    "aws:cdk:path": "AshAgentCore/Config/BaseConfig/Resource"
-   }
-  },
-  "ConfigMcpAuthHeaderSecret99D04B65": {
-   "Type": "AWS::SecretsManager::Secret",
-   "Properties": {
-    "Description": "Expected value of McpAuthHeaderName. The container is handed this ARN and resolves the value at start, so the secret never enters a task definition or a runtime environment-variable map.",
-    "SecretString": {
-     "Fn::If": [
-      "ConfigHasHeaderAuthA42E2E27",
-      {
-       "Ref": "McpAuthHeaderValue"
-      },
-      "ash-mcp-auth-disabled"
-     ]
-    }
-   },
-   "UpdateReplacePolicy": "Delete",
-   "DeletionPolicy": "Delete",
-   "Metadata": {
-    "aws:cdk:path": "AshAgentCore/Config/McpAuthHeaderSecret/Resource",
-    "cdk_nag": {
-     "rules_to_suppress": [
-      {
-       "reason": "Automatic rotation would break authentication rather than improve it. ASH resolves this value once at container start and compares every request against it, so a rotated secret leaves running tasks validating the old value while callers send the new one, with no signal. The value is a shared secret the adopter also configures on the calling side, so any change has to be coordinated with callers regardless. Rotate by updating the secret and restarting the tasks.",
-       "id": "AwsSolutions-SMG4"
-      }
-     ]
-    }
-   }
-  },
   "EncryptionKey1B843E66": {
    "Type": "AWS::KMS::Key",
    "Properties": {
-    "Description": "Encrypts ASH CodeBuild project output for this stack.",
+    "Description": "Encrypts this stack's ASH CodeBuild project output, CloudWatch log groups and the MCP auth secret.",
     "EnableKeyRotation": true,
     "KeyPolicy": {
      "Statement": [
@@ -181,6 +91,131 @@
         }
        },
        "Resource": "*"
+      },
+      {
+       "Action": [
+        "kms:Decrypt",
+        "kms:Describe*",
+        "kms:Encrypt",
+        "kms:GenerateDataKey*",
+        "kms:ReEncrypt*"
+       ],
+       "Condition": {
+        "ArnLike": {
+         "kms:EncryptionContext:aws:logs:arn": {
+          "Fn::Join": [
+           "",
+           [
+            "arn:",
+            {
+             "Ref": "AWS::Partition"
+            },
+            ":logs:",
+            {
+             "Ref": "AWS::Region"
+            },
+            ":",
+            {
+             "Ref": "AWS::AccountId"
+            },
+            ":*"
+           ]
+          ]
+         }
+        }
+       },
+       "Effect": "Allow",
+       "Principal": {
+        "Service": {
+         "Fn::Join": [
+          "",
+          [
+           "logs.",
+           {
+            "Ref": "AWS::Region"
+           },
+           ".amazonaws.com"
+          ]
+         ]
+        }
+       },
+       "Resource": "*",
+       "Sid": "AllowCloudWatchLogsEncryption"
+      },
+      {
+       "Action": [
+        "kms:CreateGrant",
+        "kms:Decrypt",
+        "kms:DescribeKey",
+        "kms:Encrypt",
+        "kms:GenerateDataKey*",
+        "kms:ReEncrypt*"
+       ],
+       "Condition": {
+        "StringEquals": {
+         "kms:ViaService": {
+          "Fn::Join": [
+           "",
+           [
+            "secretsmanager.",
+            {
+             "Ref": "AWS::Region"
+            },
+            ".amazonaws.com"
+           ]
+          ]
+         }
+        }
+       },
+       "Effect": "Allow",
+       "Principal": {
+        "AWS": {
+         "Fn::Join": [
+          "",
+          [
+           "arn:",
+           {
+            "Ref": "AWS::Partition"
+           },
+           ":iam::",
+           {
+            "Ref": "AWS::AccountId"
+           },
+           ":root"
+          ]
+         ]
+        }
+       },
+       "Resource": "*"
+      },
+      {
+       "Action": "kms:Decrypt",
+       "Condition": {
+        "StringEquals": {
+         "kms:ViaService": {
+          "Fn::Join": [
+           "",
+           [
+            "secretsmanager.",
+            {
+             "Ref": "AWS::Region"
+            },
+            ".amazonaws.com"
+           ]
+          ]
+         }
+        }
+       },
+       "Effect": "Allow",
+       "Principal": {
+        "AWS": {
+         "Fn::GetAtt": [
+          "RuntimeRoleFD8790A4",
+          "Arn"
+         ]
+        }
+       },
+       "Resource": "*"
       }
      ],
      "Version": "2012-10-17"
@@ -190,6 +225,60 @@
    "DeletionPolicy": "Retain",
    "Metadata": {
     "aws:cdk:path": "AshAgentCore/EncryptionKey/Resource"
+   }
+  },
+  "ConfigBaseConfig623C762C": {
+   "Type": "AWS::SSM::Parameter",
+   "Properties": {
+    "Description": "ASH base configuration document, written to the container at start and applied through ASH_CONFIG. Edit here to change the deployment-wide config without a stack update; the next container start picks it up.",
+    "Tier": "Advanced",
+    "Type": "String",
+    "Value": {
+     "Fn::If": [
+      "ConfigHasBaseConfigA7D225A9",
+      {
+       "Ref": "AshBaseConfigYaml"
+      },
+      "# No ASH base configuration was supplied at deployment time."
+     ]
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshAgentCore/Config/BaseConfig/Resource"
+   }
+  },
+  "ConfigMcpAuthHeaderSecret99D04B65": {
+   "Type": "AWS::SecretsManager::Secret",
+   "Properties": {
+    "Description": "Expected value of McpAuthHeaderName. The container is handed this ARN and resolves the value at start, so the secret never enters a task definition or a runtime environment-variable map.",
+    "KmsKeyId": {
+     "Fn::GetAtt": [
+      "EncryptionKey1B843E66",
+      "Arn"
+     ]
+    },
+    "SecretString": {
+     "Fn::If": [
+      "ConfigHasHeaderAuthA42E2E27",
+      {
+       "Ref": "McpAuthHeaderValue"
+      },
+      "ash-mcp-auth-disabled"
+     ]
+    }
+   },
+   "UpdateReplacePolicy": "Delete",
+   "DeletionPolicy": "Delete",
+   "Metadata": {
+    "aws:cdk:path": "AshAgentCore/Config/McpAuthHeaderSecret/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Automatic rotation would break authentication rather than improve it. ASH resolves this value once at container start and compares every request against it, so a rotated secret leaves running tasks validating the old value while callers send the new one, with no signal. The value is a shared secret the adopter also configures on the calling side, so any change has to be coordinated with callers regardless. Rotate by updating the secret and restarting the tasks.",
+       "id": "AwsSolutions-SMG4"
+      }
+     ]
+    }
    }
   },
   "ImageRepositoryD8036990": {
@@ -212,6 +301,12 @@
   "ImageBuildLogsBC6BBB2A": {
    "Type": "AWS::Logs::LogGroup",
    "Properties": {
+    "KmsKeyId": {
+     "Fn::GetAtt": [
+      "EncryptionKey1B843E66",
+      "Arn"
+     ]
+    },
     "RetentionInDays": 30
    },
    "UpdateReplacePolicy": "Delete",
@@ -701,6 +796,12 @@
   "ImageBootstrapStarterLogsFCF41B92": {
    "Type": "AWS::Logs::LogGroup",
    "Properties": {
+    "KmsKeyId": {
+     "Fn::GetAtt": [
+      "EncryptionKey1B843E66",
+      "Arn"
+     ]
+    },
     "RetentionInDays": 30
    },
    "UpdateReplacePolicy": "Delete",
@@ -824,6 +925,7 @@
       "Ref": "ImageBootstrapStarterLogsFCF41B92"
      }
     },
+    "ReservedConcurrentExecutions": 1,
     "Role": {
      "Fn::GetAtt": [
       "ImageBootstrapStarterRole4262AC52",
@@ -988,12 +1090,6 @@
        "Resource": {
         "Ref": "ConfigMcpAuthHeaderSecret99D04B65"
        }
-      },
-      {
-       "Action": "ecr:GetAuthorizationToken",
-       "Effect": "Allow",
-       "Resource": "*",
-       "Sid": "EcrTokenAccess"
       },
       {
        "Action": [
@@ -1293,6 +1389,48 @@
    "Metadata": {
     "aws:cdk:path": "AshAgentCore/Runtime"
    }
+  }
+ },
+ "Conditions": {
+  "ConfigHasBaseConfigA7D225A9": {
+   "Fn::Not": [
+    {
+     "Fn::Equals": [
+      {
+       "Ref": "AshBaseConfigYaml"
+      },
+      ""
+     ]
+    }
+   ]
+  },
+  "ConfigHasHeaderAuthA42E2E27": {
+   "Fn::And": [
+    {
+     "Fn::Not": [
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "McpAuthHeaderName"
+        },
+        ""
+       ]
+      }
+     ]
+    },
+    {
+     "Fn::Not": [
+      {
+       "Fn::Equals": [
+        {
+         "Ref": "McpAuthHeaderValue"
+        },
+        ""
+       ]
+      }
+     ]
+    }
+   ]
   }
  },
  "Outputs": {
