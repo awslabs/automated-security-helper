@@ -182,13 +182,37 @@ jobs:
       # named nothing like a scanner, passes. Read green as "none of the known
       # mechanisms fired", not as "audited clean".
       #
-      # Two failure modes are worth recognizing in a log rather than debugging
-      # cold. `unpinned-asset` means a file arrived in
-      # automated_security_helper/assets/ that is not in ASSETS_ALLOWLIST, and
-      # `unpinned-package-subdirectory` means a new directory appeared directly
-      # under automated_security_helper/. If the file is ASH's own, the fix is a
+      # Four failure modes are worth recognizing in a log rather than debugging
+      # cold. All four mean the same thing -- something arrived in a namespace
+      # whose contents are enumerated -- and all four are fixed the same way, by a
       # one-line addition to the corresponding list in the script, in the same
-      # commit that adds the file. That diff is the point of the rule.
+      # commit that adds the file. That diff is the point of the rule, not an
+      # obstacle to it.
+      #
+      #   unpinned-asset                    a file in automated_security_helper/
+      #                                     assets/ that is not in
+      #                                     ASSETS_ALLOWLIST (14 entries)
+      #   unpinned-package-subdirectory     a new directory directly under
+      #                                     automated_security_helper/
+      #                                     (PACKAGE_SUBDIRECTORIES, 12 entries)
+      #   unpinned-distribution-directory   a new directory at the artifact root.
+      #                                     A wheel may carry the package and its
+      #                                     .dist-info and nothing else; note that
+      #                                     a .data/ scheme directory is NOT
+      #                                     accepted, because the current build
+      #                                     does not produce one
+      #   unpinned-dist-info-member         a file in .dist-info/ that is not in
+      #                                     DIST_INFO_ALLOWLIST (6 entries). Most
+      #                                     likely cause is a hatchling upgrade
+      #                                     writing something new
+      #
+      # Two other verdicts are NOT allowlist misses and should not be answered by
+      # widening a list. `malformed-member-path` means a member name is not a
+      # plain relative `/`-separated path -- a backslash, an absolute path, a
+      # `..` -- which no correct build produces. And the gate exits 2, not 1, if
+      # an artifact carries more than one top-level distribution root; that means
+      # it cannot tell which members are inside the distribution, so it declines
+      # to judge them at all.
       - name: Assert no artifact ships third-party scanner code
         run: python3 .github/scripts/assert-artifact-contents.py dist/*.whl dist/*.tar.gz
 
