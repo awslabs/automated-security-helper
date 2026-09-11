@@ -1,9 +1,9 @@
 name: "Validate Container Runtime"
-description: "Validate that ASH container image can be built with podman or finch"
+description: "Validate that ASH can build its container image with podman, finch or nerdctl, and then actually scan with it"
 
 inputs:
   runtime:
-    description: "Container runtime: podman or finch"
+    description: "Container runtime: podman, finch or nerdctl"
     required: true
 
 runs:
@@ -12,6 +12,60 @@ runs:
     - name: Install ASH
       shell: bash
       run: pip install .
+
+    # Same fixture, same path, as .github/actions/validate-install/action.yml creates
+    # for the pip/pipx/uvx legs. Created here because this action is routed to on its
+    # own -- the matrix picks exactly one of validate-install, validate-mcp,
+    # validate-nix or this file per cell, so nothing else has run to make it.
+    - name: Create test fixture
+      shell: bash
+      run: |
+        mkdir -p /tmp/ash-selftest
+        echo 'print("hello")' > /tmp/ash-selftest/test_sample.py
+
+    # WHY A SCAN LEG EXISTS AT ALL
+    #
+    # This action used to end at `ash build-image --force`. `build-image` proves the
+    # Dockerfile still builds under a given runtime; it says nothing about whether ASH
+    # can scan with the result, which is the only reason the image is built. So podman
+    # and finch were the two runtimes in the matrix whose image nobody ever ran, while
+    # the five methods that do scan (pip, pipx, uvx, mcp, nix) all exercise
+    # `ash scan --source-dir /tmp/ash-selftest ... --phases scan --phases report`.
+    #
+    # A runtime with a build leg and no scan leg is precisely that defect, so the
+    # runtimes carrying one are named here rather than assumed. Adding a runtime to the
+    # matrix without adding it below fails loudly instead of quietly reverting this
+    # action to build-only for that runtime.
+    - name: "Assert this runtime has a scan leg"
+      shell: bash
+      env:
+        RUNTIME: ${{ inputs.runtime }}
+      run: |
+        case "${RUNTIME}" in
+          podman | finch | nerdctl) ;;
+          *)
+            echo "::error::validate-container has no scan leg for runtime '${RUNTIME}'. Add one rather than leaving this action build-only for it."
+            exit 1
+            ;;
+        esac
+        echo "${RUNTIME}: scan leg present"
+
+    # One place decides the wrapper, so the build and the scan cannot disagree about
+    # it -- and they must agree. An image built rootless is invisible to
+    # `sudo <runtime>`, which reads root's image store instead, so a mismatch surfaces
+    # at the scan as a missing-image error a long way from its cause.
+    #
+    # podman is rootless on the hosted runners and must NOT be wrapped. finch and
+    # nerdctl both drive a root-owned containerd socket and must be.
+    - name: "Resolve the OCI runner wrapper"
+      shell: bash
+      env:
+        RUNTIME: ${{ inputs.runtime }}
+      run: |
+        case "${RUNTIME}" in
+          finch | nerdctl) echo "OCI_RUNNER_WRAPPER=sudo" >> "$GITHUB_ENV" ;;
+          *) echo "${RUNTIME}: no wrapper" ;;
+        esac
 
     # === podman ===
     - name: "podman: install (macOS)"
@@ -45,9 +99,199 @@ runs:
       run: |
         finch vm init
         finch vm start
+    # OCI_RUNNER_WRAPPER comes from the resolve step above rather than an inline `env:`
+    # here, so this build and the scan below read one value.
     - name: "finch: build image"
       if: inputs.runtime == 'finch'
       shell: bash
-      env:
-        OCI_RUNNER_WRAPPER: sudo
       run: ash build-image --oci-runner finch --force
+
+    # === nerdctl ===
+    #
+    # Linux only. nerdctl drives containerd directly, and on hosted macOS there is no
+    # nested virtualization to run a Linux VM in -- the same reason podman and finch are
+    # excluded there. The support matrix's nerdctl entries are Rancher Desktop on macOS,
+    # which supplies that VM itself and is not reproducible on a hosted runner; this
+    # leg covers the same `--oci-runner nerdctl` code path natively instead.
+    - name: "nerdctl: install (Linux)"
+      if: inputs.runtime == 'nerdctl' && runner.os == 'Linux'
+      shell: bash
+      run: sudo bash scripts/setup-nerdctl-linux.sh
+    - name: "nerdctl: verify"
+      if: inputs.runtime == 'nerdctl'
+      shell: bash
+      run: sudo nerdctl --version
+    - name: "nerdctl: build image"
+      if: inputs.runtime == 'nerdctl'
+      shell: bash
+      run: ash build-image --oci-runner nerdctl --force
+
+    # === the built image has to run ===
+    #
+    # Shared rather than per-runtime: the whole point is that every runtime with a
+    # build leg gets scanned, and a shared step cannot be the one somebody forgets.
+    - name: "Scan with the built image"
+      shell: bash
+      env:
+        RUNTIME: ${{ inputs.runtime }}
+      # WHY THE ONLY ACCEPTED STATUS IS 0
+      #
+      # An earlier version of this step accepted 0 or 2, copied from
+      # validate-nix/action.yml. That tolerance is correct there and wrong here, and
+      # the difference is the fixture. validate-nix scans a deliberately flawed tree
+      # -- a shell=True call and a hardcoded credential -- so its scanners are meant
+      # to report findings and 2 is its success case. The fixture above is
+      # `print("hello")`. validate-install/action.yml scans that same file at that
+      # same path with these same `--simple --phases scan --phases report` flags, as
+      # a plain `run:` under `bash -e` with no tolerance at all, and its pip, pipx
+      # and uvx legs pass -- so 0 is what this fixture produces. Measured directly
+      # rather than inferred: that scan was run locally and exited 0.
+      #
+      # So every 2 accepted here was an anomaly recorded as a pass. Two anomalies in
+      # particular. A findings-producing 2 would mean a scanner flagged a one-line
+      # print statement, which is worth a red build. And click raises UsageError with
+      # exit_code 2, so renaming `--simple`, `--mode`, `--phases` or
+      # `--fail-on-incomplete-scanners`, or removing an `--oci-runner` value, would
+      # exit 2 with the scan never having started -- and the old tolerance called
+      # that success.
+      #
+      # 1 stays rejected, and now has something to reject: see the flag below.
+      run: |
+        set +e
+        ash scan \
+          --mode container \
+          --oci-runner "${RUNTIME}" \
+          --source-dir /tmp/ash-selftest \
+          --output-dir /tmp/ash-selftest/output \
+          --simple \
+          --fail-on-incomplete-scanners \
+          --phases scan \
+          --phases report
+        rc=$?
+        set -e
+        if [ "$rc" -ne 0 ]; then
+          echo "::error::ash scan --mode container --oci-runner ${RUNTIME} exited $rc; this fixture and these flags exit 0 when the scan works."
+          case "$rc" in
+            1) echo "::error::1 is ASH's 'error during execution', which --fail-on-incomplete-scanners also uses for a scan where a selected scanner reported ERROR or MISSING. Read the per-scanner table below." ;;
+            2) echo "::error::2 means either actionable findings on a fixture that is one print statement, or a click UsageError -- a flag above was renamed or removed and the scan never ran." ;;
+          esac
+          exit "$rc"
+        fi
+        echo "scan exited $rc"
+
+    # WHY THE FLAG ABOVE IS LOAD-BEARING, AND WHY THIS STEP IS NOT REDUNDANT WITH IT
+    #
+    # `--fail-on-incomplete-scanners` is what makes an unusable image fail. Without
+    # it the completeness check inside ASH is off: _resolve_fail_on_incomplete_scanners
+    # (automated_security_helper/interactions/run_ash_scan.py) returns False unless the
+    # flag or a config file says otherwise, and /tmp/ash-selftest has no .ash.yaml. So
+    # a container scan in which EVERY scanner reported MISSING exited 0 and wrote a
+    # well-formed ash_aggregated_results.json -- passing both the status check and a
+    # bare json.load. Measured, not argued: with a PATH holding only python3 the same
+    # scan exits 0 with 8 of 10 scanners MISSING, and exits 1 once the flag is passed.
+    #
+    # This step then reads the per-scanner statuses out of that report. It overlaps
+    # with the flag deliberately, and they fail for different reasons: the flag is
+    # ASH judging its own run, and this is CI judging whether ASH's judgement still
+    # happens. A renamed or dropped flag makes the gate above silently permissive
+    # again -- exactly the state this action shipped in -- and only a check that reads
+    # the statuses itself notices. Neither one alone is sufficient, so neither should
+    # be deleted as duplicate.
+    #
+    # Ported from validate-nix, which had this assertion while this action had only
+    # its exit-code tolerance. The verdict is the point: "the JSON parsed" says
+    # nothing about whether any scanner ran.
+    - name: "Assert every image-supplied scanner participated"
+      shell: bash
+      run: |
+        python3 <<'PY'
+        import json
+        import pathlib
+        import sys
+
+        results = pathlib.Path("/tmp/ash-selftest/output/ash_aggregated_results.json")
+        if not results.exists() or results.stat().st_size == 0:
+            listing = sorted(p.name for p in results.parent.glob("*")) if results.parent.is_dir() else "(no output directory)"
+            sys.exit(f"FAIL: no usable results at {results}; the container scan did not complete even though it exited 0. Output dir holds: {listing}")
+
+        data = json.loads(results.read_text())
+        raw = data.get("scanner_results") or {}
+        rows = raw.items() if isinstance(raw, dict) else (
+            (r.get("scanner_name"), r) for r in raw
+        )
+        statuses = {
+            name: str(res.get("status", "?"))
+            for name, res in rows
+            if isinstance(res, dict)
+        }
+
+        if not statuses:
+            sys.exit(
+                "FAIL: the report carried no per-scanner statuses. Either the scan "
+                "recorded none, or scanner_results changed shape and this check has "
+                "stopped measuring anything -- both must fail rather than pass."
+            )
+
+        # Every built-in scanner, because the container image supplies every one of
+        # them: the Dockerfile installs syft and grype as pinned binaries, cfn-nag
+        # via its Gemfile, node/npm/pnpm through corepack for npm-audit, and the
+        # wheel with its [cdk] extra, which is what cdk-nag imports.
+        #
+        # cdk-nag is INCLUDED here where validate-nix excludes it, and the asymmetry
+        # is the point rather than an oversight. Its scanner sets command = "python"
+        # and runs out of ASH's own environment; under Nix that environment is not
+        # the flake, so its status says nothing about the flake. In container mode
+        # ASH's own environment IS the image, so its status is exactly as much a
+        # statement about the image as any other scanner's.
+        image_supplied = [
+            "bandit",
+            "cdk-nag",
+            "cfn-nag",
+            "checkov",
+            "detect-secrets",
+            "grype",
+            "npm-audit",
+            "opengrep",
+            "semgrep",
+            "syft",
+        ]
+
+        for name in sorted(statuses):
+            print(f"  {name:<18} {statuses[name]}")
+        print()
+
+        # MISSING means the tool was absent, so the scanner contributed nothing and
+        # said so only in this table; ERROR means it ran and produced nothing usable.
+        # Those are the two statuses that make a clean report a lie, and they are the
+        # two the flag above gates on.
+        #
+        # SKIPPED is accepted, and has to be. This fixture is a single .py file, so a
+        # scanner with no matching input -- npm-audit with no package.json, cfn-nag
+        # with no template -- reports SKIPPED via the evaluated_nothing branch in
+        # core/unified_metrics.py. That is a scanner working correctly on a fixture
+        # with nothing for it to read, which is a different fact from a missing tool,
+        # and conflating the two would make this check fail on a healthy image.
+        broken = {
+            n: statuses[n]
+            for n in image_supplied
+            if statuses.get(n, "MISSING").upper() in ("MISSING", "ERROR")
+        }
+        absent = [n for n in image_supplied if n not in statuses]
+
+        if absent:
+            sys.exit(
+                f"FAIL: scanners absent from the report entirely: {absent}. The image "
+                "is expected to supply every built-in scanner; if one has been removed "
+                "from ASH, remove it here too."
+            )
+        if broken:
+            sys.exit(
+                "FAIL: image-supplied scanners did not complete: "
+                + ", ".join(f"{n} ({s})" for n, s in sorted(broken.items()))
+                + ". The image built, so this is a tool missing from the image or "
+                "failing inside it -- fix the Dockerfile rather than excluding the "
+                "scanner here."
+            )
+
+        print(f"PASS: all {len(image_supplied)} image-supplied scanners participated")
+        PY

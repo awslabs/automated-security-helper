@@ -44,9 +44,22 @@
 name: ASH - IaC Drift
 
 on:
-  push:
-    branches:
-      - "!main"
+  # No push trigger, for the reasons set out at length on ash-unified-ci.yml's
+  # triggers. In short: the active "Protect main" ruleset requires the merge queue for
+  # main and this workflow runs on merge_group, so the tree that becomes main is
+  # already gated -- verified on pull requests 544, 547 and 558. A push trigger would
+  # add a duplicate run of all six jobs per merge and, because github.ref is
+  # refs/heads/main for every main push while cancel-in-progress is false for push,
+  # could have its verdict evicted while pending. Run 34418283475 shows that happening
+  # to another workflow in this repository: cancelled with zero jobs started, one
+  # second after the following main push queued into the same group.
+  #
+  # Worth stating for this file specifically, because its jobs are cheap and the
+  # temptation to run them everywhere is real: cost is not the argument. All six jobs
+  # are single-runner and offline -- cdk synth, terraform validate and cdk-nag read
+  # local files only. The argument is that a second verdict on the same tree is not a
+  # second check, and an evictable one is worse than none because its absence blocks
+  # nothing.
   pull_request:
     # "**" not "*": GitHub branch filters treat "*" as matching any character
     # except "/", so a PR whose BASE is a nested branch (a stacked PR targeting
@@ -79,7 +92,11 @@ concurrency:
   # in its own group and entries never serialize behind one another.
   group: ${{ github.workflow }}-${{ github.ref }}
   # Only pull_request runs may be cancelled. A merge_group run must finish or the
-  # queue loses its verdict, and push/tag runs feed docs and releases.
+  # queue loses its verdict, and a workflow_dispatch run was asked for by a person.
+  #
+  # Safe as one group because no remaining event puts a shared branch name in
+  # github.ref -- there is no push trigger. See the note on the triggers above for
+  # what went wrong when there was.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -256,7 +273,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: deploy/cdk/package-lock.json
 
@@ -434,7 +451,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: deploy/cdk-constructs/package-lock.json
 
@@ -934,7 +951,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: deploy/cdk/package-lock.json
 

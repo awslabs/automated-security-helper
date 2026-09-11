@@ -33,13 +33,19 @@ jobs:
   validate:
     name: ${{ matrix.method }} (${{ matrix.os }}, py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    # The container runtimes get the same 45 minutes ash-unified-ci.yml gives them.
+    # Both workflows route to .github/actions/validate-container, so one flat budget
+    # of 20 here meant the same work ran under two different caps -- and that action
+    # now scans with the image it builds as well as building it. Measured build-only
+    # durations on ubuntu-latest were about 5 minutes for podman and finch, so 20 was
+    # not tight yet; it would have become tight silently.
+    timeout-minutes: ${{ (matrix.method == 'podman' || matrix.method == 'finch' || matrix.method == 'nerdctl') && 45 || 20 }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-14, windows-latest]
         python-version: ["3.10", "3.11", "3.12", "3.13"]
-        method: [pip, pipx, uvx, homebrew, pre-commit, podman, finch, mcp, nix]
+        method: [pip, pipx, uvx, homebrew, pre-commit, podman, finch, nerdctl, mcp, nix]
         exclude:
           # Native Windows Nix cannot supply the toolchain: it has no fixed-output
           # derivations, which is the mechanism by which the scanners are fetched, and no
@@ -61,11 +67,27 @@ jobs:
           - { os: macos-14, python-version: "3.13", method: nix }
           # Homebrew not available on Windows
           - { os: windows-latest, method: homebrew }
-          # Podman/Finch not available on Windows
+          # Podman/Finch/nerdctl not available on Windows
           - { os: windows-latest, method: podman }
           - { os: windows-latest, method: finch }
+          - { os: windows-latest, method: nerdctl }
           # Finch Linux release is x86_64 only
           - { os: ubuntu-24.04-arm, method: finch }
+          # nerdctl: x86_64 only for now. containerd/nerdctl does publish a linux-arm64
+          # bundle, so this is not an upstream limitation -- scripts/setup-nerdctl-linux.sh
+          # verifies a pinned checksum and only the amd64 one has been confirmed against
+          # the artifact. Adding arm means pinning that checksum too, and the script fails
+          # loudly on any other architecture rather than downloading unverified bytes.
+          - { os: ubuntu-24.04-arm, method: nerdctl }
+          # nerdctl on macOS needs a Linux VM (Rancher Desktop, Lima), and hosted macOS
+          # runners have no nested virtualization -- the same reason podman and finch are
+          # excluded below.
+          - { os: macos-latest, method: nerdctl }
+          - { os: macos-14, method: nerdctl }
+          # Container runtimes only need one Python version
+          - { os: ubuntu-latest, python-version: "3.10", method: nerdctl }
+          - { os: ubuntu-latest, python-version: "3.11", method: nerdctl }
+          - { os: ubuntu-latest, python-version: "3.13", method: nerdctl }
           # Container runtimes only need one Python version
           - { os: ubuntu-latest, python-version: "3.10", method: podman }
           - { os: ubuntu-latest, python-version: "3.11", method: podman }
@@ -131,9 +153,9 @@ jobs:
         if: matrix.method == 'mcp'
         uses: ./.github/actions/validate-mcp
 
-      # === podman / finch: container runtime validation ===
+      # === podman / finch / nerdctl: container runtime validation ===
       - name: "Validate container runtime"
-        if: matrix.method == 'podman' || matrix.method == 'finch'
+        if: matrix.method == 'podman' || matrix.method == 'finch' || matrix.method == 'nerdctl'
         uses: ./.github/actions/validate-container
         with:
           runtime: ${{ matrix.method }}
