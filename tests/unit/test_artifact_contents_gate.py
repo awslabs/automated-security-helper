@@ -1395,6 +1395,108 @@ class TestArchiveReading:
         assert "1 of them symlink/hardlink members" in out
 
 
+class TestAllowlistsAreCheckedInBothDirections:
+    """A pin that outlives the file it pins is a standing permission.
+
+    Adding a file to `assets/` failed until its path was pinned -- the reviewer
+    moment the whole design rests on. DELETING one failed nothing: the entry lived
+    on, and from then on any file appearing at that path shipped with no reviewer
+    moment at all, because the allowlist already said yes. Verified against the real
+    wheel: drop `assets/with-retry.sh` from it and the gate exited 0 with the entry
+    still in place.
+    """
+
+    def test_a_pinned_asset_missing_from_the_artifact_is_reported(self):
+        members = [
+            gate.Member(name=n, size=8, magic=b"# ash\n")
+            for n in gate.LEGITIMATE_WHEEL_MEMBERS
+            if n != "automated_security_helper/assets/with-retry.sh"
+        ]
+        violations = gate.stale_allowlist_entries(members, "fixture.whl")
+        assert [v.rule for v in violations] == ["stale-allowlist-entry"]
+        assert violations[0].member == (
+            "automated_security_helper/assets/with-retry.sh"
+        )
+
+    def test_a_pinned_package_root_file_missing_is_reported(self):
+        """Gated on the PACKAGE existing, not on the depth-2 slot being occupied.
+
+        With a single-entry allowlist those differ exactly where it matters: removing
+        `__init__.py` empties the slot, so a slot-based precondition would go quiet
+        precisely when the only entry went stale.
+        """
+        members = [
+            gate.Member(name=n, size=8, magic=b"# ash\n")
+            for n in gate.LEGITIMATE_WHEEL_MEMBERS
+            if n != "automated_security_helper/__init__.py"
+        ]
+        violations = gate.stale_allowlist_entries(members, "fixture.whl")
+        assert [v.member for v in violations] == ["__init__.py"]
+
+    def test_a_pinned_dist_info_member_missing_is_reported(self):
+        members = [
+            gate.Member(name=n, size=8, magic=b"# ash\n")
+            for n in gate.LEGITIMATE_WHEEL_MEMBERS
+            if not n.endswith(".dist-info/WHEEL")
+        ]
+        violations = gate.stale_allowlist_entries(members, "fixture.whl")
+        assert [v.member for v in violations] == ["WHEEL"]
+
+    @pytest.mark.parametrize(
+        ("label", "members"),
+        [
+            ("wheel", gate.LEGITIMATE_WHEEL_MEMBERS),
+            ("sdist", gate.LEGITIMATE_SDIST_MEMBERS),
+        ],
+    )
+    def test_a_complete_artifact_reports_nothing(self, label, members):
+        built = [gate.Member(name=n, size=8, magic=b"# ash\n") for n in members]
+        assert gate.stale_allowlist_entries(built, "fixture.whl") == [], label
+
+    def test_an_absent_namespace_asserts_nothing_about_itself(self):
+        """Present-then-complete, which is what makes this safe over fixtures.
+
+        `--self-test` plants payload into deliberately partial trees, and a
+        completeness rule applied there would redden them for a reason unrelated to
+        the rule under test -- quietly ending the single-variable property that every
+        neutering experiment depends on. So an artifact carrying nothing under
+        `assets/` has nothing asserted about `assets/`. The cost is that deleting
+        ALL 14 at once goes unreported; that is a build catastrophe with louder
+        symptoms than this gate.
+        """
+        members = [
+            gate.Member(
+                name="automated_security_helper/__init__.py", size=8, magic=b"# ash\n"
+            )
+        ]
+        assert gate.stale_allowlist_entries(members, "fixture.whl") == []
+
+    def test_the_directory_name_lists_are_not_checked_and_that_is_recorded(self):
+        """The limitation, made executable rather than left as a comment.
+
+        Staleness is worse for PACKAGE_SUBDIRECTORIES -- a removed subpackage name
+        re-permits a whole directory at any depth -- but "present" cannot be defined
+        for a directory-name list without asserting that a fixture is a complete
+        artifact, and every legitimate fixture here carries a subset. If a future
+        change closes this, the assertion below goes red, which is the good failure.
+        """
+        subset = [
+            gate.Member(name=n, size=8, magic=b"# ash\n")
+            for n in gate.LEGITIMATE_WHEEL_MEMBERS
+        ]
+        present = {
+            gate.strip_distribution_root(m.name).split("/")[1]
+            for m in subset
+            if m.name.startswith(f"{gate.PACKAGE_ROOT}/")
+            and len(m.name.split("/")) > 2
+        }
+        assert present < gate.PACKAGE_SUBDIRECTORIES, (
+            "the clean fixture now carries every pinned subdirectory, so a "
+            "completeness check for PACKAGE_SUBDIRECTORIES has become possible"
+        )
+        assert gate.stale_allowlist_entries(subset, "fixture.whl") == []
+
+
 class TestKnownGapsArePinned:
     """What the gate does NOT catch, asserted so the limit stays honest.
 
