@@ -37,15 +37,17 @@ What it actually is, stated plainly:
     header, not by grepping for tool names -- see the next section for why.
 
   * FAIL-CLOSED ALLOWLISTS over every namespace where new payload can hide
-    without looking like any of those shapes. Two are pinned MEMBER BY MEMBER:
-    `automated_security_helper/assets/` (14 entries) and the wheel's
-    `.dist-info/` (6), the two directories that exist to carry data rather than
-    code, which is what makes payload dropped into either indistinguishable from
-    what belongs there. Two are pinned BY DIRECTORY NAME: the subdirectories
-    directly under `automated_security_helper/` (12), and the top-level roots of
-    the artifact itself (one -- the package, plus the wheel's `.dist-info`). In
-    all four the default answer is NO: anything not on the list fails, and adding
-    to the list is a diff a reviewer sees.
+    without looking like any of those shapes. Three are pinned MEMBER BY MEMBER:
+    `automated_security_helper/assets/` (14 entries), the wheel's `.dist-info/`
+    (6), and the files sitting directly in `automated_security_helper/` itself
+    (1 -- `__init__.py`). The first two exist to carry data rather than code,
+    which is what makes payload dropped into either indistinguishable from what
+    belongs there; the third was a slot no rule examined at all until it was
+    measured. Two more are pinned BY DIRECTORY NAME: the subdirectories directly
+    under `automated_security_helper/` (12), and the top-level roots of the
+    artifact itself (one -- the package, plus the wheel's `.dist-info`). In all
+    five the default answer is NO: anything not on the list fails, and adding to
+    the list is a diff a reviewer sees.
 
     Loose FILES at the SDIST root are deliberately unconstrained -- that set
     churns with ordinary work (a CHANGELOG, a CITATION.cff) and a tree cannot
@@ -68,20 +70,65 @@ What it actually is, stated plainly:
     or one containing `..` is not that, and would defeat all of them at once
     rather than one at a time, so it is refused up front.
 
-What it does NOT prove, concretely. A single third-party Python source file,
-placed inside a subdirectory that is already pinned, under a filename that is
-not a scanner distribution name -- say a copy of some helper module at
-`automated_security_helper/utils/leftpad.py` -- has no distinguishing path shape
-and no distinguishing header, is well under the size ceiling, and WILL PASS. So
-will a vendored tree that keeps to a pinned subdirectory. Detecting those needs
-provenance (does every shipped file exist in this repository at this commit?) or
-license scanning, and neither is what this does.
+What it does NOT prove, concretely. FIVE residual gaps, and this list is meant to
+be exhaustive -- the only value of a section like this is that a reader can trust
+it to be. An earlier version named one of the five, and two of the four it omitted
+are strictly easier to use than the one it named. Each was measured against the
+built artifacts, not reasoned about.
+
+  1. CONTENT AT AN ALREADY-ALLOWLISTED PATH IS NEVER COMPARED TO ANYTHING. The
+     allowlists pin paths; nothing pins what is in them. Overwrite
+     `assets/ash_stargrep_rules/appsec.yaml` with an upstream LGPL-2.1 semgrep
+     ruleset and the artifact ships and installs, because the path is on the list
+     and the content is text of the same shape. Verified for that path and for
+     `assets/Gemfile`, `assets/with-retry.sh`,
+     `assets/appsec_cfn_rules/IamUserExistsRule.rb` and
+     `automated_security_helper/__init__.py`. This is the cheapest of the five --
+     it needs no new path at all, so it does not even show up in a diff of the
+     member list. Digests would close it and are deliberately not used; see
+     ASSETS_ALLOWLIST for why (two of the 14 assets are build-generated, so pinned
+     digests would fail on ordinary work and the gate would get deleted).
+
+  2. LOOSE FILES AT THE SDIST ROOT ARE UNCONSTRAINED, BY DECISION. A third-party
+     file at `automated_security_helper-3.7.0/upstream_rules.yaml` passes, and
+     that is a published artifact carrying third-party payload, which is what the
+     operator's rule forbids. It is tolerated because the churning set of root
+     files lives there and pinning it would fail the gate on a new CHANGELOG.
+     Narrower than it sounds -- an sdist root file is not delivered to
+     site-packages, unlike the wheel-root case rule 5d refuses -- but it is a real
+     hole and a one-file one.
+
+  3. A THIRD-PARTY FILE, OR A WHOLE TREE, INSIDE AN ALREADY-PINNED SUBDIRECTORY.
+     `automated_security_helper/utils/leftpad.py` has no distinguishing path
+     shape, no distinguishing header, and is far under the size ceiling. Only the
+     directory NAME is checked, so depth and breadth beneath it are unconstrained:
+     `automated_security_helper/utils/helpers/thirdparty_util.py` passes equally.
+     This is the one the earlier version of this section named.
+
+  4. THE SIZE CEILING BELIEVES THE ARCHIVE'S OWN METADATA. `member.size` is what
+     the header declares, not what was read, so a hand-crafted archive can
+     understate a 40 MB database. The header sniffing is what covers the crafted
+     case, which is why both rules exist.
+
+  5. THE TWO DIRECTORY-NAME LISTS ARE NOT CHECKED FOR STALENESS. The
+     member-by-member allowlists are checked in both directions -- a pinned path
+     the artifact no longer contains is reported, because a pin that outlives its
+     file is a standing permission for whatever appears there next. See
+     stale_allowlist_entries. PACKAGE_SUBDIRECTORIES and
+     DISTRIBUTION_ROOT_DIRECTORIES are not, and staleness is WORSE for them: a
+     removed subpackage name re-permits a whole directory at any depth, not one
+     path. It is uncovered because "the artifact contains this namespace" cannot
+     be defined for a directory-name list without asserting that the thing being
+     read is a complete build, and every legitimate fixture carries a subset.
+
+Closing 1 or 3 needs provenance (does every shipped file exist in this repository
+at this commit, byte for byte?) or license scanning. Neither is what this does.
 
 The honest summary: this makes the cheap and historically-real ways of vendoring
-a scanner fail loudly, and it makes adding anything to `assets/` or any new
-top-level package directory a conscious, reviewed act. It raises the cost of
-vendoring. It does not certify that nothing is vendored. Treat a green run as
-"none of the known mechanisms fired", not as "audited clean".
+a scanner fail loudly, and it makes adding anything to `assets/`, to `.dist-info/`,
+to the package root, or as any new directory a conscious, reviewed act. It raises
+the cost of vendoring. It does not certify that nothing is vendored. Treat a green
+run as "none of the known mechanisms fired", not as "audited clean".
 
 The rule has been broken before: two vendored `.jsii.tgz` bundles (aws-cdk-lib at
 57.9 MB and cdk-nag at 644 KB) lived in the tree until commit 760f3647 removed
@@ -140,12 +187,21 @@ fail-closed rules change the default instead of extending the list.
      14 members in the current wheel and exists precisely to carry non-Python
      data, which makes it the most comfortable hiding place in the tree -- an
      upstream ruleset or a tool database dropped there looks exactly like the
-     ASH-authored data next to it. Same for a brand-new directory anywhere in the
-     artifact's structure: under `automated_security_helper/` (5b), at the
+     ASH-authored data next to it (5a). Same for a brand-new directory anywhere in
+     the artifact's structure: under `automated_security_helper/` (5b), at the
      artifact root beside pyproject.toml (5c), or inside the wheel's
      `.dist-info/`, which pip copies verbatim into site-packages (also 5c). A
      vendored tree needs somewhere to live, and "somewhere new" is now a failure
      rather than a blind spot.
+
+     Two slots in that structure are less obvious than a new directory and were
+     open until each was measured. A file sitting DIRECTLY in
+     `automated_security_helper/` is at a depth 5a's prefix does not reach and 5b's
+     subdirectory arm never read, so it is pinned member by member (also 5b). And a
+     loose file at the WHEEL root is delivered into site-packages -- where a `.pth`
+     or a `sitecustomize.py` is executed by site.py at interpreter startup -- while
+     belonging to no package, so it is refused (5d). The sdist root, which churns
+     and delivers nothing, is not.
 
   6. Bigger than anything ASH authors. See MAX_MEMBER_BYTES.
 
@@ -154,6 +210,10 @@ fail-closed rules change the default instead of extending the list.
      backslashes is one component to PurePosixPath, so
      `automated_security_helper\\assets\\trivy-db.json` matched no rule while
      still extracting into assets/ on Windows.
+
+     Late in the same family, and numbered 5e because it is not a precondition:
+     a link whose TARGET points outside the artifact. Rule 0 vets the member name
+     and says nothing about where a link points.
 
 WHAT IS DELIBERATELY ALLOWED
 ----------------------------
@@ -211,13 +271,23 @@ path to an empty examination is closed and each one is a distinct failure:
     the member paths are shaped differently than this understands, so the
     classifier ran against nothing it could reason about.
 
-Symlink and hardlink members are classified like any other member and counted
-into the reported total. They used to be skipped, which mattered more than it
-sounds: the member count this prints is the gate's own evidence of how much it
-examined, and a skipped member is invisible in that number. A tar can carry a
-symlink named `.../bin/trivy` pointing anywhere, and the count would not have
-moved. Their targets are printed when any are present, because a link is a claim
-about something outside the artifact and the reader should see it.
+EVERY NON-DIRECTORY MEMBER IS COUNTED, and the count is why. The member total
+this prints is the gate's own evidence of how much it examined, so a member
+missing from it is a member the reader is told nothing about. Symlinks and
+hardlinks used to be skipped -- a tar could carry a symlink named `.../bin/trivy`
+pointing anywhere and move neither the count nor the verdict -- and so were FIFOs,
+device nodes and any type tarfile has no predicate for, dropped by a single
+`if not info.isfile(): continue` that contradicted the reason links were being
+counted. All of them are now classified by the path rules and counted. Link
+targets are additionally printed when any are present, because a link is a claim
+about something the artifact does not contain, and rule 5e fails the ones that
+point outside it.
+
+DIRECTORY entries are the one deliberate exclusion, in both readers. They carry no
+content and only restate structure their children already imply, and counting them
+in the tar while the zip ignores them would make the two surfaces' totals
+incomparable -- which is the number being offered as evidence. The built sdist has
+none anyway: measured, it is 213 regular files and nothing else.
 
 `--self-test` closes the last gap, which is the classifier itself silently
 matching nothing. It plants known third-party payload in fixture archives, one
@@ -250,11 +320,30 @@ from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
 # --------------------------------------------------------------------------
-# The rules. Each constant below belongs to one of the six shapes described
-# above. Every one of them has a neutering experiment in
-# tests/unit/test_artifact_contents_gate.py: emptied (or, for the allowlists,
-# made unable to fire) it must turn --self-test red. A rule set with no such
-# experiment is a rule set nobody has proved is load-bearing.
+# The rules. Each constant below belongs to one of the shapes described above.
+#
+# HOW EACH IS PROVED LOAD-BEARING, stated exactly, because the previous version of
+# this comment said "every one of them has a neutering experiment" and that was
+# false for seven of them. A rule set nobody has proved is load-bearing is a rule
+# set that can stop firing silently, and a comment claiming otherwise is worse than
+# no comment.
+#
+#   NEUTERING EXPERIMENT in tests/unit/test_artifact_contents_gate.py -- disabled,
+#   --self-test must go red AND the specific planted member must go unclassified.
+#   Fourteen of them, listed in that file's NEUTERED: malformed_path_reason,
+#   VENDOR_DIR_COMPONENTS, ARCHIVE_SUFFIXES, ARCHIVE_MAGICS, NATIVE_SUFFIXES,
+#   NATIVE_MAGICS, SCANNER_DIST_NAMES, ASSETS_ALLOWLIST, PACKAGE_SUBDIRECTORIES,
+#   PACKAGE_ROOT_FILES, DISTRIBUTION_ROOT_DIRECTORIES, DIST_INFO_ALLOWLIST,
+#   is_plain_filename and MAX_MEMBER_BYTES.
+#
+#   DIRECT UNIT TESTS instead, because they are not tables a fixture can be aimed
+#   at: PACKAGE_ROOT and ASSETS_PREFIX (derivation is asserted),
+#   DIST_INFO_PATTERN, SDIST_WRAPPER_PATTERN and WHEEL_SIBLING_SUFFIXES (pinned
+#   case by case in test_wrapper_recognition), MAGIC_READ_BYTES (asserted to still
+#   reach tar's offset-257 identifier), COMPOUND_SUFFIXES (asserted to be derived
+#   from ARCHIVE_SUFFIXES rather than a second copy of it), and
+#   link_target_escape_reason (rule 5e, pinned directly and end to end over a real
+#   tar, since the fixture format carries no link targets).
 # --------------------------------------------------------------------------
 
 # Directory names package managers and build tools use for third-party or
@@ -599,11 +688,24 @@ ASSETS_PREFIX = f"{PACKAGE_ROOT}/assets/"
 # whenever the root Dockerfile does, and assets/ASH_INSTALLED_REVISION holds the
 # current branch name, so its digest differs on literally every branch. Pinning
 # digests would make the gate fail on ordinary work, and a gate that fails on
-# correct configuration is a gate someone deletes. The content-level protection
-# comes from the shape rules instead: this allowlist is ADDITIVE, never an
-# exemption, so an allowlisted path whose content is swapped for a tarball still
-# trips nested-archive, for an ELF still trips native-binary, and for a 40 MB
-# database still trips the size ceiling.
+# correct configuration is a gate someone deletes.
+#
+# WHAT BEING ON THIS LIST DOES AND DOES NOT BUY, PRECISELY. The list is ADDITIVE
+# rather than an exemption: a member still has to clear every shape rule, so an
+# allowlisted path whose content is swapped for a TARBALL trips nested-archive, for
+# an ELF or PE trips native-binary, and for a 40 MB database trips the size
+# ceiling. Those three shapes, and no others.
+#
+# It does NOT make the path's content trusted, and an earlier version of this
+# comment implied otherwise by stating the three cases as though they were the
+# general rule. A TEXT-FOR-TEXT SWAP IS NOT DETECTED AT ALL. Overwrite
+# assets/ash_stargrep_rules/appsec.yaml with an upstream LGPL-2.1 semgrep ruleset
+# and the artifact ships, installs, and delivers the upstream bytes to
+# site-packages -- measured, along with the same swap at assets/Gemfile,
+# assets/with-retry.sh, assets/appsec_cfn_rules/IamUserExistsRule.rb and
+# automated_security_helper/__init__.py. Nothing here compares content to anything;
+# the shape rules read a suffix, 512 bytes of header, and a declared size. See
+# residual gap 1 in the module docstring, which this is the mechanism behind.
 ASSETS_ALLOWLIST = frozenset(
     {
         f"{ASSETS_PREFIX}ASH_INSTALLED_REVISION",
