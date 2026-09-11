@@ -53,12 +53,12 @@ export function suppressCodeBuildRoleWildcards(scope: IConstruct): void {
       {
         id: 'AwsSolutions-IAM5',
         reason:
-          'Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: ' +
-          '(1) the log-stream suffix on this project\'s own CloudWatch log group, which is ' +
-          'created per build; (2) the per-report suffix on this project\'s own report group; ' +
+          'Inherent to CodeBuild and ECR, not a widening of scope. The wildcards are: ' +
+          '(1) the per-build log-stream suffix on this project\'s own log group; ' +
+          '(2) the per-report suffix on its own report group; ' +
           '(3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so "*" is ' +
-          'the only valid value; (4) object-level access inside buckets created by this ' +
-          'stack. None of them reach a resource outside this stack.',
+          'the only valid value; (4) object-level access inside buckets this stack creates. ' +
+          'None of them reach a resource outside this stack.',
       },
     ],
     true,

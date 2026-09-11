@@ -79,9 +79,35 @@
  * need the bytes; they get the key anyway, and the S3-only half of this file is
  * what confirms none of them fell under the cap and quietly changed launch class.
  *
- * IT DOES NOT FIT ON ITS OWN. AshAgentCore comes out at 53,183, still 1,983 over
- * the cap. The rest has to come from the cdk-nag suppression reasons, which are
+ * IT DID NOT FIT ON ITS OWN. Unindented, AshAgentCore came out at 53,183, still
+ * 1,983 over. The rest came from the cdk-nag suppression reasons, which were
  * 20,424 of that 53,183 -- 38% of the template -- across 18 of its 28 resources.
+ * Two changes, neither of which drops a justification:
+ *
+ *   * The `CdkNagValidationFailure` reason is now pure ASCII. cdk-nag
+ *     base64-encodes any reason holding a non-ASCII character, and AshAgentCore
+ *     carries 19 copies of that one, so a single em dash cost it 3,225 bytes.
+ *     See the note on `suppressUnevaluableRules` in lib/ash-nag-suppressions.ts.
+ *   * The CodeBuild and ECR wildcard reason was tightened by 45 characters over
+ *     its 8 copies. All four enumerated wildcard classes and the closing
+ *     out-of-stack claim survive, because they are what makes the suppression
+ *     checkable rather than merely present.
+ *
+ * AshAgentCore is 49,598, so it clears the cap by 1,602 bytes.
+ *
+ * READ THAT MARGIN AS THIN, BECAUSE IT IS: 3.1% of the cap, on a stack whose
+ * suppression metadata grows with every resource added. A new resource needing an
+ * IAM5 suppression costs roughly 400 bytes of reason plus its own body, so about
+ * three of them exhaust the headroom. This test is what will say so first, and
+ * the answer at that point is more likely to be reclassifying AshAgentCore as
+ * S3-only than finding another 1,600 bytes of prose.
+ *
+ * MEASURED AND REJECTED, so nobody re-derives them: hoisting the child-policy
+ * suppressions up to the role recovers nothing, because `applyToChildren`
+ * materializes a byte-identical reason on the role and on each child either way.
+ * Reclassifying the two inline templates as S3-only would empty the inline set
+ * and make the central assertion here vacuous, which is the same objection the
+ * pathMetadata section above records.
  *
  * ONE MORE CONSEQUENCE, AND IT IS NOT IN THIS FILE: `.pre-commit-config.yaml` runs
  * `pretty-format-json --autofix --indent=2` over every JSON file except
