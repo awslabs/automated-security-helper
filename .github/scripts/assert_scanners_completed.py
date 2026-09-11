@@ -9,6 +9,11 @@ were unavailable, so it never ran). SKIPPED scanners are ones the run did not
 select -- ``--exclude-scanners``, a config that disables them, or one shard of a
 sharded run -- and are reported but do not fail the job.
 
+It also exits 1 when *no* scanner executed, which is a separate assertion and not
+implied by the first. Because SKIPPED has to be tolerated one entry at a time, a
+file in which every entry is SKIPPED passes the per-scanner check while having
+measured nothing at all.
+
 Why this exists in this shape
 -----------------------------
 It replaces five separate in-line guards, four of which grepped the *prose* text
@@ -53,6 +58,11 @@ from pathlib import Path
 # the bash and PowerShell scan methods leave no ASH on the runner's PATH at all.
 INCOMPLETE_STATUSES = ("ERROR", "MISSING")
 
+# The statuses that mean "this scanner executed". Mirrors ScannerState.ran in
+# scripts/verify_external_target_scan.py, which the sibling gate uses for the same
+# assertion.
+RAN_STATUSES = ("PASSED", "FAILED")
+
 DEFAULT_RESULTS = Path(".ash") / "ash_output" / "ash_aggregated_results.json"
 
 
@@ -91,11 +101,13 @@ def main() -> int:
 
     print(f"Scanner completion, read from {args.results}:")
     incomplete: list[tuple[str, str]] = []
+    observed: list[tuple[str, str]] = []
     for name in sorted(scanner_results):
         entry = scanner_results[name] or {}
         status = entry.get("status") if isinstance(entry, dict) else None
         status = str(status) if status is not None else "UNKNOWN"
         print(f"  {name:<24} {status}")
+        observed.append((name, status))
         # UNKNOWN counts as incomplete. An entry whose status could not be read is
         # not evidence that the scanner ran.
         if status in INCOMPLETE_STATUSES or status == "UNKNOWN":
@@ -123,6 +135,8 @@ def main() -> int:
                     "reading an incomplete tally."
                 )
 
+    failed = False
+
     if incomplete:
         for name, status in incomplete:
             print(f"::error::Scanner {name} did not complete: {status}")
@@ -133,6 +147,35 @@ def main() -> int:
             "tool on this platform or exclude the scanner explicitly, which "
             "records it as SKIPPED and says so in the report."
         )
+        failed = True
+
+    # At least one scanner has to have executed.
+    #
+    # Every status above is judged on its own, and SKIPPED has to stay tolerated
+    # there: it is how one shard of a sharded run records the scanners the other
+    # shards own, and how --exclude-scanners records an operator's choice. So a
+    # results file in which *every* scanner is SKIPPED passes the per-scanner loop
+    # while having measured nothing, and that is reachable from a typo -- measured
+    # on this tree, `ash scan --scanners detect_secrets` (the name is
+    # detect-secrets) matched no scanner, recorded ten SKIPPED, and this script
+    # returned 0.
+    #
+    # The assertion is therefore about the set rather than about any one entry,
+    # which is the shape scripts/verify_external_target_scan.py's
+    # check_some_scanner_ran already uses.
+    if not any(status in RAN_STATUSES for _, status in observed):
+        print(
+            f"::error::None of the {len(scanner_results)} scanners in "
+            f"{args.results} executed. Statuses: "
+            + ", ".join(f"{name}={status}" for name, status in observed)
+            + ". Every scanner being SKIPPED means the run selected nothing, so it "
+            "has shown the target to be neither clean nor dirty -- most often a "
+            "--scanners name that matches no scanner, or an allowlist wholly "
+            "cancelled by --exclude-scanners."
+        )
+        failed = True
+
+    if failed:
         return 1
 
     print(f"All {len(scanner_results)} scanners accounted for; none incomplete.")

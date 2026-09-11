@@ -8,6 +8,7 @@ from pathlib import Path
 
 from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.core.enums import ExecutionPhase, ScannerStatus
+from automated_security_helper.core.exceptions import ScannerSelectionError
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     ScannerSeverityCount,
@@ -154,6 +155,8 @@ class ScanPhase(EnginePhase):
 
         Raises:
             ShardSelectionError: If the shard selection cannot be used as given.
+            ScannerSelectionError: If *enabled_scanners* is non-empty and none of
+                its entries name a registered scanner.
         """
         if enabled_scanners is None:
             enabled_scanners = []
@@ -279,6 +282,68 @@ class ScanPhase(EnginePhase):
                 ASH_LOGGER.warning(
                     "No scanner instances created during plugin discovery!"
                 )
+
+            # Resolve the operator's allowlist against the names that exist.
+            #
+            # Selection is matched by string equality against a scanner's configured
+            # name, and nothing checked that a name given on the command line named
+            # a scanner at all. Measured on this tree against a one-file fixture:
+            #
+            #   ash scan --scanners detect_secrets   # the name is detect-secrets
+            #     scanner_results: ten SKIPPED
+            #     summary_stats:   passed=0 failed=0 missing=0 skipped=10 error=0
+            #     exit code:       0
+            #
+            # Zero findings from zero scanners is indistinguishable from a clean
+            # scan, and SKIPPED cannot be what gives it away: SKIPPED is how
+            # sharding and --exclude-scanners record work a run was never meant to
+            # do, so the completeness gate has to tolerate it. That leaves an
+            # unresolvable allowlist with no existing gate to fall foul of, which is
+            # why it gets one of its own here.
+            #
+            # Here rather than at CLI parse time, which was the obvious
+            # alternative. A scanner's selectable name is config.name on an
+            # *instantiated* plugin; scanner classes carry no class-level name and
+            # cannot be constructed without a plugin context, so no earlier layer
+            # can know these names without guessing -- the same reason the shard
+            # partition below is computed here. This is the first point at which the
+            # names are authoritative, and it is still before any scanner has run,
+            # so the operator gets a refusal instead of a report about nothing.
+            #
+            # Refused only when nothing resolved. A partly unresolvable allowlist
+            # warns and continues: such a run still scans and reports what did
+            # resolve, so it is not the silent-zero case, and a CI matrix whose
+            # runners load different plugin modules can produce that shape
+            # legitimately. The unresolved name is named either way.
+            if enabled_scanners and scanner_instances:
+                registered_names = {
+                    _scanner_display_name(instance).lower().strip()
+                    for instance in scanner_instances
+                }
+                requested = [
+                    (name, name.lower().strip()) for name in enabled_scanners
+                ]
+                unresolved = [
+                    name for name, key in requested if key not in registered_names
+                ]
+                if unresolved:
+                    ASH_LOGGER.warning(
+                        "No registered scanner matches "
+                        f"{', '.join(sorted(unresolved))}. Registered scanners: "
+                        f"{', '.join(sorted(registered_names))}"
+                    )
+                if not any(key in registered_names for _, key in requested):
+                    raise ScannerSelectionError(
+                        "None of the requested scanners exist: "
+                        f"{', '.join(sorted(unresolved))}. "
+                        f"Registered scanners: {', '.join(sorted(registered_names))}. "
+                        "Refused rather than scanned, because an allowlist that "
+                        "matches nothing selects nothing: every scanner would be "
+                        "recorded SKIPPED, the run would produce no findings, and a "
+                        "scan that checked nothing would report itself clean. Check "
+                        "the spelling -- names use hyphens, not underscores -- or "
+                        "drop --scanners to run them all."
+                    )
 
             # Apply the shard selection here, and not earlier.
             #

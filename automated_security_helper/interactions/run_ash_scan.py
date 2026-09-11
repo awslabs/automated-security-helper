@@ -30,6 +30,7 @@ from automated_security_helper.core.enums import (
 )
 from automated_security_helper.core.exceptions import (
     ASHConfigValidationError,
+    ScannerSelectionError,
     WorkspaceDefinitionError,
 )
 from automated_security_helper.core.progress import ExecutionPhaseType
@@ -664,6 +665,14 @@ def _run_local_mode(opts: ScanOptions, logger) -> tuple[AshAggregatedResults, Op
     except ASHConfigValidationError as e:
         print(f"[bold red]ERROR (3) Invalid configuration: {e}[/bold red]")
         sys.exit(3)
+    except ScannerSelectionError as e:
+        # Ahead of the generic handler, and without logger.exception, because this is
+        # a mistyped argument rather than a fault: a traceback would bury the one
+        # line that says which name did not resolve and what the valid names are.
+        # Exit 1 rather than 3 -- exit 3 means the config file is invalid, and this
+        # operator's config is fine.
+        print(f"[bold red]ERROR (1) {e}[/bold red]")
+        sys.exit(1)
     except Exception as e:
         logger.exception(e)
         print(f"[bold red]ERROR (1) Exiting due to exception during ASH scan: {e}[/bold red]")
