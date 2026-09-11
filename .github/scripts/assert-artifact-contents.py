@@ -1370,6 +1370,89 @@ def distribution_roots(members: list[Member]) -> list[str]:
     return roots
 
 
+def stale_allowlist_entries(members: list[Member], artifact: str) -> list[Violation]:
+    """Finds pinned paths the artifact no longer contains.
+
+    THE ALLOWLISTS WERE ONE-DIRECTIONAL. Adding a file to `assets/` fails until its
+    path is pinned, which is the reviewer moment the design is built around. But
+    DELETING one failed nothing: remove `assets/with-retry.sh` from the repository
+    and the gate stays green while the entry lives on forever -- and from then on any
+    file appearing at that path ships with no reviewer moment at all, because the
+    allowlist already says yes. Verified against the real wheel: drop that member and
+    the gate exited 0 with the entry still in place. A pin that outlives the thing it
+    pins is worse than no pin, because it reads like protection.
+
+    Checked PRESENT-THEN-COMPLETE, one namespace at a time: if an artifact carries
+    nothing under `assets/`, nothing is asserted about `assets/`. That is what makes
+    this safe to run over small fixtures, and it is why the question is asked here
+    rather than inside check_artifact -- `--self-test` fixtures deliberately carry
+    partial trees, and a completeness rule there would redden them for the wrong
+    reason and quietly stop the neutering experiments being single-variable.
+
+    PACKAGE_ROOT_FILES is gated on the PACKAGE existing rather than on the depth-2
+    slot being occupied. With a single-entry allowlist those differ in the direction
+    that matters: removing `__init__.py` empties the slot, so a slot-based test
+    would go quiet exactly when the only entry went stale.
+
+    NOT CHECKED, and this is the honest limitation: the two DIRECTORY-NAME lists,
+    PACKAGE_SUBDIRECTORIES and DISTRIBUTION_ROOT_DIRECTORIES. Staleness is worse
+    there -- a removed subpackage name re-permits a whole directory at any depth --
+    but "present" cannot be defined for them without asserting that the thing being
+    read is a complete build, and every legitimate fixture carries a subset. Closing
+    that needs a different mechanism from this one.
+    """
+    violations: list[Violation] = []
+    present = {strip_distribution_root(m.name) for m in members}
+
+    def report(missing: set[str], namespace: str, constant: str) -> None:
+        for path in sorted(missing):
+            violations.append(
+                Violation(
+                    artifact,
+                    path,
+                    "stale-allowlist-entry",
+                    f"is pinned in {constant} but is not in this artifact. The "
+                    f"artifact does carry {namespace}, so the entry is stale rather "
+                    "than the namespace being absent. A pin for a file that no "
+                    "longer ships is a standing permission for anything that later "
+                    "appears at that path: remove the entry in the same commit that "
+                    "removed the file.",
+                )
+            )
+
+    if any(path.startswith(ASSETS_PREFIX) for path in present):
+        report(ASSETS_ALLOWLIST - present, ASSETS_PREFIX, "ASSETS_ALLOWLIST")
+
+    dist_info_roots = {
+        PurePosixPath(path).parts[0]
+        for path in present
+        if PurePosixPath(path).parts
+        and DIST_INFO_PATTERN.match(PurePosixPath(path).parts[0])
+    }
+    for root in sorted(dist_info_roots):
+        inner = {
+            "/".join(PurePosixPath(path).parts[1:])
+            for path in present
+            if PurePosixPath(path).parts[:1] == (root,)
+        }
+        report(DIST_INFO_ALLOWLIST - inner, f"{root}/", "DIST_INFO_ALLOWLIST")
+
+    if any(PurePosixPath(path).parts[:1] == (PACKAGE_ROOT,) for path in present):
+        package_root_files = {
+            PurePosixPath(path).name
+            for path in present
+            if PurePosixPath(path).parts[:1] == (PACKAGE_ROOT,)
+            and len(PurePosixPath(path).parts) == 2
+        }
+        report(
+            PACKAGE_ROOT_FILES - package_root_files,
+            f"{PACKAGE_ROOT}/",
+            "PACKAGE_ROOT_FILES",
+        )
+
+    return violations
+
+
 def check_artifact(path: str) -> Report:
     """Checks one artifact.
 
@@ -1960,6 +2043,13 @@ def main(argv: list[str]) -> int:
         total_members += report.count
         total_links += len(report.links)
         all_violations.extend(report.violations)
+        # The other direction of every member-by-member allowlist: an entry the
+        # artifact no longer has. Asked here rather than in check_artifact so that
+        # --self-test's deliberately partial fixtures are not judged for
+        # completeness; see stale_allowlist_entries.
+        all_violations.extend(
+            stale_allowlist_entries(report.members, os.path.basename(path))
+        )
         sys.stdout.write(
             f"  {os.path.basename(path)}: {report.count} member(s) examined\n"
         )
