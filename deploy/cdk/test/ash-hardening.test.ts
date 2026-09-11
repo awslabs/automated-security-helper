@@ -45,7 +45,11 @@ import { Template } from 'aws-cdk-lib/assertions';
 import { AshAgentCoreStack } from '../lib/ash-agentcore-stack';
 import { AshCodeCommitGateStack } from '../lib/ash-codecommit-gate-stack';
 import { AshDistributedPipelineStack } from '../lib/ash-distributed-pipeline-stack';
-import { AshFargateStack } from '../lib/ash-fargate-stack';
+import {
+  ashFargateSubnetLayout,
+  AshFargateStack,
+  NAT_GATEWAYS,
+} from '../lib/ash-fargate-stack';
 import { AshImagePipelineStack } from '../lib/ash-image-pipeline-stack';
 
 type StackFactory = (app: App, id: string) => Stack;
@@ -442,6 +446,38 @@ describe('the Fargate VPC does not auto-assign public IPv4 addresses', () => {
     // changes. If restating CDK's default layout had also dropped the NAT, the
     // tasks would lose egress and every scan would fail on a ruleset fetch.
     template.resourceCountIs('AWS::EC2::NatGateway', 1);
+  });
+
+  test('the NAT the template deploys is the one the layout was built for', () => {
+    // Binds the constant to the artifact. Without this the guard below could be
+    // bypassed by leaving NAT_GATEWAYS at 1 and writing a different literal into
+    // the VPC's own `natGateways`, which is precisely the drift the guard exists to
+    // catch.
+    template.resourceCountIs('AWS::EC2::NatGateway', NAT_GATEWAYS);
+    expect(NAT_GATEWAYS).toBeGreaterThan(0);
+  });
+
+  test('a layout with no NAT is refused at synth rather than deployed broken', () => {
+    // The failure this replaces is silent. `natGateways: 0` is the obvious cost
+    // edit, and CDK's own default layout switches to DEFAULT_SUBNETS_NO_NAT for it —
+    // but an explicit subnetConfiguration overrides that switch, so the private
+    // subnets keep PRIVATE_WITH_EGRESS and get a default route to a NAT gateway that
+    // was never created. cdk synth reports nothing; the first scan times out
+    // fetching a ruleset and reads as a scanner bug.
+    expect(() => ashFargateSubnetLayout(0)).toThrow(/DEFAULT_SUBNETS_NO_NAT/);
+    // Negative is nonsense rather than a cost choice, but it reaches the same
+    // broken layout, so it is refused by the same guard.
+    expect(() => ashFargateSubnetLayout(-1)).toThrow(/natGateways is -1/);
+  });
+
+  test('the layout it does return is the two-tier one the stack uses', () => {
+    // Positive control for the guard: a test that only proves 0 throws would still
+    // pass if the function threw on everything.
+    const layout = ashFargateSubnetLayout(NAT_GATEWAYS);
+    expect(layout.map((tier) => [tier.name, tier.subnetType, tier.mapPublicIpOnLaunch])).toEqual([
+      ['Public', 'Public', false],
+      ['Private', 'Private', undefined],
+    ]);
   });
 });
 

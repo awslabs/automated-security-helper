@@ -68,6 +68,75 @@ import {
 } from './ash-nag-suppressions';
 import { AshRuntimeConfig } from './ash-runtime-config';
 
+/**
+ * NAT gateways for the Fargate VPC, read by both the VPC prop and the layout below.
+ *
+ * One, not one per AZ: an idle deployment then pays for one NAT rather than two.
+ * Tasks need egress to pull the image and, unless the image was built offline, to
+ * fetch scanner rulesets.
+ */
+export const NAT_GATEWAYS = 1;
+
+/**
+ * The subnet layout, plus the guard that stops it silently losing egress.
+ *
+ * WHY THIS IS A FUNCTION AND NOT AN INLINE LITERAL
+ * -----------------------------------------------
+ * Writing `subnetConfiguration` out at all costs something that is easy to miss:
+ * CDK's `Vpc` switches its DEFAULT layout to `DEFAULT_SUBNETS_NO_NAT` when
+ * `natGateways` is 0, and an explicit `subnetConfiguration` overrides that switch.
+ * So a deployment that sets `natGateways: 0` to cut cost — the obvious edit, and
+ * the reason CDK has that switch — keeps `PRIVATE_WITH_EGRESS` subnets, which are
+ * created with a route table whose default route points at a NAT gateway that does
+ * not exist. CloudFormation deploys it, `cdk synth` reports nothing, and every scan
+ * fails on the first ruleset fetch with a network timeout that looks like a
+ * scanner bug.
+ *
+ * Failing at synth is the whole point: the alternative considered was handling 0 by
+ * switching the private tier to `PRIVATE_ISOLATED`, which would deploy cleanly and
+ * quietly require an offline image plus a set of VPC endpoints this stack does not
+ * create. A loud synth error names the trade-off; a silent tier change hides it.
+ *
+ * Both this and the VPC's own `natGateways` read `NAT_GATEWAYS`, so the two cannot
+ * drift apart.
+ */
+export function ashFargateSubnetLayout(natGateways: number): ec2.SubnetConfiguration[] {
+  if (natGateways < 1) {
+    throw new Error(
+      `AshFargateStack: natGateways is ${natGateways}, but this VPC pins an explicit ` +
+        'subnetConfiguration containing PRIVATE_WITH_EGRESS. Restating the layout overrides ' +
+        "CDK's own switch to DEFAULT_SUBNETS_NO_NAT, so the private subnets would be created " +
+        'with a default route to a NAT gateway that does not exist — and nothing fails until ' +
+        'a scan times out fetching a ruleset. Either keep at least one NAT gateway, or change ' +
+        'the private tier to ec2.SubnetType.PRIVATE_ISOLATED and accept that the tasks then ' +
+        'need an offline image and VPC endpoints this stack does not create.',
+    );
+  }
+  return [
+    /**
+     * CDK's own default layout, restated only so the public subnets can stop
+     * auto-assigning public IPv4 addresses.
+     *
+     * The names and the absent `cidrMask` are exactly what `Vpc.DEFAULT_SUBNETS`
+     * uses, so the address allocation and every subnet's logical id are
+     * unchanged — the one difference is `mapPublicIpOnLaunch`.
+     *
+     * Nothing is launched into these public subnets. They exist to hold the NAT
+     * gateway and nothing else: the tasks run in PRIVATE_WITH_EGRESS and the
+     * load balancer is internal. `MapPublicIpOnLaunch` governs whether
+     * "instances launched in this subnet receive a public IPv4 address"
+     * (https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-ec2-subnet.html),
+     * and a NAT gateway is not an instance launch — it carries its own Elastic
+     * IP, allocated explicitly by CDK. So turning it off removes a default that
+     * would silently expose anything an operator later launched here, and costs
+     * the deployment nothing. CDK defaults it to true for PUBLIC subnets;
+     * CloudFormation's own default is false.
+     */
+    { name: 'Public', subnetType: ec2.SubnetType.PUBLIC, mapPublicIpOnLaunch: false },
+    { name: 'Private', subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+  ];
+}
+
 export class AshFargateStack extends Stack {
   constructor(scope: Construct, id: string, props: StackProps = {}) {
     super(scope, id, {
@@ -102,36 +171,13 @@ export class AshFargateStack extends Stack {
       encryptionKey,
     });
 
-    // Two AZs is the ALB minimum. `natGateways: 1` keeps the running cost of an
-    // idle deployment to one NAT rather than one per AZ; tasks need egress to
-    // pull the image and, unless the image was built offline, to fetch scanner
-    // rulesets.
+    // Two AZs is the ALB minimum. The NAT count and the subnet layout both come
+    // from NAT_GATEWAYS, which is what keeps the layout's assumption about egress
+    // honest — see ashFargateSubnetLayout above.
     const vpc = new ec2.Vpc(this, 'Vpc', {
       maxAzs: 2,
-      natGateways: 1,
-      /**
-       * CDK's own default layout, restated only so the public subnets can stop
-       * auto-assigning public IPv4 addresses.
-       *
-       * The names and the absent `cidrMask` are exactly what `Vpc.DEFAULT_SUBNETS`
-       * uses, so the address allocation and every subnet's logical id are
-       * unchanged — the one difference is `mapPublicIpOnLaunch`.
-       *
-       * Nothing is launched into these public subnets. They exist to hold the NAT
-       * gateway and nothing else: the tasks run in PRIVATE_WITH_EGRESS and the
-       * load balancer is internal. `MapPublicIpOnLaunch` governs whether
-       * "instances launched in this subnet receive a public IPv4 address"
-       * (https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-ec2-subnet.html),
-       * and a NAT gateway is not an instance launch — it carries its own Elastic
-       * IP, allocated explicitly below by CDK. So turning it off removes a default
-       * that would silently expose anything an operator later launched here, and
-       * costs the deployment nothing. CDK defaults it to true for PUBLIC subnets;
-       * CloudFormation's own default is false.
-       */
-      subnetConfiguration: [
-        { name: 'Public', subnetType: ec2.SubnetType.PUBLIC, mapPublicIpOnLaunch: false },
-        { name: 'Private', subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
-      ],
+      natGateways: NAT_GATEWAYS,
+      subnetConfiguration: ashFargateSubnetLayout(NAT_GATEWAYS),
       // Flow logs are on because this VPC carries source code being scanned and
       // the findings about it; without them a suspected exfiltration has nothing
       // to investigate. Encrypted with the stack key for the same reason: the
