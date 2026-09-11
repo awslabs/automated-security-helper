@@ -702,8 +702,22 @@ def check_expected_rules_present(
     histogram. A rule that matches bandit's pattern but is attributed to another
     scanner does not satisfy bandit -- that is the whole point of keying by scanner.
 
-    Skips any producer whose scanner is MISSING, SKIPPED or excluded: the tool is
-    not installed on this runner and requirement (e) says that must not fail.
+    Skips any producer whose scanner is MISSING, SKIPPED or excluded, because a rule
+    assertion about a scanner that did not run tells you about the runner rather than
+    about the product.
+
+    That is a statement about *this check* only, and the previous wording -- "requirement
+    (e) says that must not fail" -- overstated it twice. There is no requirement (e)
+    anywhere in this repository, so the citation resolved to nothing; and the gate as a
+    whole does fail when one of the scanners it selected is MISSING. It fails in
+    ``check_exit_code``: ``GATE_SCANNERS`` narrows the run to bandit and checkov, so a
+    MISSING one of those makes ``ash scan`` exit 1, and 1 is deliberately absent from
+    ``TOLERATED_EXIT_CODES`` -- see the note there, which rejects adding it because that
+    would tolerate exactly the state this gate exists to catch.
+
+    Both behaviours are intended together. This gate asserts findings from two named
+    scanners; if one of them never ran it cannot do its job, so the job failing is the
+    correct outcome and this function simply is not the place that reports it.
     """
     by_name = {state.name: state for state in states}
     violations: List[str] = []
