@@ -146,25 +146,46 @@ jobs:
       #
       # It runs first so an ordering accident cannot leave the control unrun after
       # a build failure short-circuits the job.
+      #
+      # `uv run --no-project python` rather than bare `python3`. This job runs no
+      # actions/setup-python -- its only setup steps are checkout and setup-uv -- so
+      # `python3` resolves against whatever the runner image happens to preinstall.
+      # That is fine on ubuntu-latest and unmeasured everywhere else, and the
+      # packaging work this gate exists for (MSIX, Chocolatey, winget) will add a
+      # Windows leg. uv is already installed here, so routing through it removes the
+      # assumption at no cost. `--no-project` because the gate imports only the
+      # standard library: syncing the project would install every dependency to run
+      # a script that needs none.
       - name: Prove the artifact-contents check can fail
-        run: python3 .github/scripts/assert-artifact-contents.py --self-test
+        run: uv run --no-project python .github/scripts/assert-artifact-contents.py --self-test
 
       - name: Build wheel and sdist
         run: uv build --out-dir dist
 
       # `uv build` exiting 0 is not evidence that it wrote anything, and every
       # step below would read an empty dist/ as success.
+      # Also publishes the two resolved paths, so the check below names its inputs
+      # instead of globbing for them. That makes this step the single place that
+      # decides what "the artifacts" are: it already fails unless there is exactly
+      # one of each, so the gate cannot end up checking one artifact when it meant
+      # two. `shell: bash` is explicit because this body is bash-specific
+      # (`set -euo pipefail`, `nullglob`, arrays) rather than portable.
       - name: Assert the build produced exactly one wheel and one sdist
+        id: artifacts
+        shell: bash
         run: |
           set -euo pipefail
-          wheels=$(find dist -maxdepth 1 -name '*.whl' | wc -l)
-          sdists=$(find dist -maxdepth 1 -name '*.tar.gz' | wc -l)
-          echo "dist/ contains ${wheels} wheel(s) and ${sdists} sdist(s):"
+          shopt -s nullglob
+          wheels=(dist/*.whl)
+          sdists=(dist/*.tar.gz)
+          echo "dist/ contains ${#wheels[@]} wheel(s) and ${#sdists[@]} sdist(s):"
           ls -la dist
-          if [ "${wheels}" -ne 1 ] || [ "${sdists}" -ne 1 ]; then
-            echo "::error::expected exactly 1 wheel and 1 sdist, got ${wheels} and ${sdists}" >&2
+          if [ "${#wheels[@]}" -ne 1 ] || [ "${#sdists[@]}" -ne 1 ]; then
+            echo "::error::expected exactly 1 wheel and 1 sdist, got ${#wheels[@]} and ${#sdists[@]}" >&2
             exit 1
           fi
+          echo "wheel=${wheels[0]}" >> "$GITHUB_OUTPUT"
+          echo "sdist=${sdists[0]}" >> "$GITHUB_OUTPUT"
 
       # The operator invariant for the whole installer program: no artifact
       # published from this repository may carry third-party scanner source or
@@ -213,8 +234,27 @@ jobs:
       # an artifact carries more than one top-level distribution root; that means
       # it cannot tell which members are inside the distribution, so it declines
       # to judge them at all.
+      #
+      # The paths come from the step above rather than from a glob. `dist/*.whl` is
+      # expanded by the SHELL, and the default shell on windows-latest is pwsh, which
+      # does not glob for external commands: it would pass the literal `dist/*.whl`
+      # through, and the script's own isfile() check would refuse it. That refusal is
+      # at least honest -- exit 2 with a named reason, the gate's design working --
+      # but the job would still be broken. Naming the inputs removes the dependency
+      # on any shell behaving a particular way, rather than pinning which shell.
+      #
+      # Not hardcoded either: the version in the filename tracks pyproject.toml, so a
+      # literal path would break on every release bump.
+      #
+      # Interpolated directly rather than through `env:`, deliberately. `env:` plus
+      # `"$WHEEL"` would reintroduce a shell dependency, since pwsh expands
+      # `$env:WHEEL` and not `$WHEEL`. These two values are filenames produced by
+      # `uv build` from pyproject metadata in the step above, not event payload, so
+      # they are not an injection surface -- unlike anything under github.event.
       - name: Assert no artifact ships third-party scanner code
-        run: python3 .github/scripts/assert-artifact-contents.py dist/*.whl dist/*.tar.gz
+        run: >-
+          uv run --no-project python .github/scripts/assert-artifact-contents.py
+          "${{ steps.artifacts.outputs.wheel }}" "${{ steps.artifacts.outputs.sdist }}"
 
       # Proves the artifact the installers will consume actually installs and runs.
       # Building a wheel nobody installs would leave the one property every
@@ -236,7 +276,17 @@ jobs:
       - name: Upload wheel and sdist
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ash-package-${{ github.sha }}
+          # run_attempt is in the name because artifact names are immutable within a
+          # run from upload-artifact v4 onward, and this is pinned at v7. "Re-run all
+          # jobs" on a run that already uploaded would otherwise fail the upload with
+          # a name conflict and redden a tree that was green -- a re-run that cannot
+          # succeed is worse than no re-run button. The sha is kept because it is what
+          # a human reads the artifact by; run_attempt only disambiguates retries.
+          #
+          # `overwrite: true` would also work and is the more common fix, but it
+          # depends on an input this pinned version was not verified offline to
+          # accept, whereas a different name is just a string and cannot be wrong.
+          name: ash-package-${{ github.sha }}-attempt-${{ github.run_attempt }}
           path: |
             dist/*.whl
             dist/*.tar.gz
