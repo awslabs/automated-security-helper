@@ -3,19 +3,25 @@
 
 """Tests for .github/scripts/assert_scanners_completed.py.
 
+Why this file exists
+--------------------
+The script's own docstring argues that "a gate that cannot fail is worse than no gate,
+because its green is read as evidence" -- and it shipped with no tests, which is the
+same position the five in-line guards it replaced were in. Each of those was broken in
+a way that made it pass unconditionally or nearly so, one of them by reading a JSON
+path that does not exist, and none had a test that would have said so.
+
 ``tests/unit/test_external_target_scan_gate.py`` is the precedent for testing a gate
 script that lives outside the package.
 
-What this file pins so far
---------------------------
-The set-level assertion: at least one scanner must have executed. Every status is
-judged individually elsewhere in the script, and SKIPPED has to stay tolerated
-there, so a results file in which *every* entry is SKIPPED passed the per-scanner
-loop while having measured nothing.
-
-The controls matter as much as the failing case. A script rewritten to return 1
-unconditionally would satisfy the first test here and break every real job, so a
-narrowed run and one shard of a sharded run are pinned as passing.
+Both directions, deliberately
+-----------------------------
+Half of these assert the gate fires -- absent file, malformed JSON, an ERROR entry, a
+MISSING entry, an unreadable status, a status from another version, and a results file
+where nothing ran. The other half assert it does not fire on a healthy run: a narrowed
+``--scanners`` run, one shard of a sharded run, and a scanner that found something.
+Without that second half, a script rewritten to ``return 1`` unconditionally would
+pass every test here and break every job in the repository.
 """
 
 import importlib.util
@@ -73,6 +79,106 @@ def _entry(status, **extra):
     record = {"status": status, "dependencies_satisfied": True, "excluded": False}
     record.update(extra)
     return record
+
+
+class TestUnreadableInputIsAFailure:
+    """A gate that cannot read its input must fail, not shrug.
+
+    The predecessor that read ``scanners`` keyed by ``result`` -- a path that does not
+    exist -- resolved to null under PowerShell's default non-strict mode, so its loop
+    body never ran and the step reported success unconditionally. These pin the
+    opposite: every way of failing to get usable data is exit 1.
+    """
+
+    def test_absent_results_file_fails(self, tmp_path, capsys):
+        code = _run(tmp_path / "nope.json")
+        assert code == 1
+        assert "not found" in capsys.readouterr().out
+
+    def test_malformed_json_fails(self, tmp_path, capsys):
+        path = tmp_path / "ash_aggregated_results.json"
+        path.write_text("{not json", encoding="utf-8")
+
+        code = _run(path)
+        assert code == 1
+        assert "Could not read" in capsys.readouterr().out
+
+    def test_a_results_file_with_no_scanner_results_key_fails(self, tmp_path):
+        path = tmp_path / "ash_aggregated_results.json"
+        path.write_text(json.dumps({"metadata": {}}), encoding="utf-8")
+        assert _run(path) == 1
+
+    def test_an_empty_scanner_results_map_fails(self, tmp_path):
+        """Zero scanners produce zero findings, which looks exactly like a clean scan."""
+        assert _run(_write(tmp_path, {})) == 1
+
+    def test_a_scanner_results_value_of_the_wrong_shape_fails(self, tmp_path):
+        """A list where a mapping belongs is not a scanner that ran."""
+        path = tmp_path / "ash_aggregated_results.json"
+        path.write_text(json.dumps({"scanner_results": ["bandit"]}), encoding="utf-8")
+        assert _run(path) == 1
+
+    def test_an_entry_with_no_status_fails(self, tmp_path, capsys):
+        """An entry whose status cannot be read is not evidence the scanner ran."""
+        path = _write(tmp_path, {"bandit": _entry("PASSED"), "grype": {}})
+        assert _run(path) == 1
+        assert "grype" in capsys.readouterr().out
+
+    def test_a_null_entry_fails(self, tmp_path):
+        path = tmp_path / "ash_aggregated_results.json"
+        path.write_text(
+            json.dumps({"scanner_results": {"bandit": _entry("PASSED"), "syft": None}}),
+            encoding="utf-8",
+        )
+        assert _run(path) == 1
+
+
+class TestIncompleteScannersAreAFailure:
+    def test_one_missing_scanner_fails_and_is_named(self, tmp_path, capsys):
+        """MISSING is the status the guard this script replaced could not see.
+
+        Four of the five predecessors grepped the prose report for the substring
+        "ERROR", which does not match MISSING, so a cell where four of ten scanners
+        never ran passed. On one measured pull-request run four green check runs each
+        carried three or four MISSING scanners at under a millisecond each, and in the
+        cells where those scanners did run one of them reported 82 findings.
+
+        The name has to appear in the output or an operator cannot tell which tool to
+        install.
+        """
+        path = _write(
+            tmp_path,
+            {
+                "bandit": _entry("PASSED"),
+                "cfn-nag": _entry("MISSING", dependencies_satisfied=False),
+            },
+        )
+        code = _run(path)
+        assert code == 1
+        out = capsys.readouterr().out
+        assert "cfn-nag" in out
+        assert "MISSING" in out
+
+    def test_one_error_scanner_fails_and_is_named(self, tmp_path, capsys):
+        path = _write(
+            tmp_path, {"bandit": _entry("PASSED"), "checkov": _entry("ERROR")}
+        )
+        assert _run(path) == 1
+        assert "checkov" in capsys.readouterr().out
+
+    def test_the_count_of_incomplete_scanners_is_reported(self, tmp_path, capsys):
+        """The summary line has to agree with the per-scanner lines above it."""
+        path = _write(
+            tmp_path,
+            {
+                "bandit": _entry("PASSED"),
+                "cfn-nag": _entry("MISSING"),
+                "grype": _entry("MISSING"),
+                "syft": _entry("ERROR"),
+            },
+        )
+        assert _run(path) == 1
+        assert "3 of 4 scanners did not complete" in capsys.readouterr().out
 
 
 class TestNothingRanIsAFailure:
@@ -170,6 +276,90 @@ class TestRunsThatDidMeasureSomethingPass:
         """
         path = _write(tmp_path, {"bandit": _entry("FAILED", finding_count=3)})
         assert _run(path) == 0
+
+
+class TestSummaryStatsReconciliation:
+    """The counter cross-check warns; it must never be the verdict.
+
+    ERROR had no counter at all for a while, so the four totals summed to fewer than
+    the scanners in the run on exactly the runs that mattered. The reconciliation
+    exists to say so out loud, but a gate keyed on the totals rather than on
+    per-scanner status is the defect being avoided, not the fix -- a count cannot name
+    the scanner an operator has to go and fix.
+    """
+
+    def test_a_short_tally_warns_without_failing(self, tmp_path, capsys):
+        path = _write(
+            tmp_path,
+            {"bandit": _entry("PASSED"), "semgrep": _entry("PASSED")},
+            summary_stats={
+                "passed": 1,
+                "failed": 0,
+                "missing": 0,
+                "skipped": 0,
+                "error": 0,
+            },
+        )
+        code = _run(path)
+        out = capsys.readouterr().out
+        assert code == 0, "a miscounted tally is a warning, not the verdict"
+        assert "::warning::" in out and "incomplete tally" in out
+
+    def test_clean_counters_do_not_warn(self, tmp_path, capsys):
+        path = _write(
+            tmp_path,
+            {"bandit": _entry("PASSED"), "semgrep": _entry("FAILED")},
+            summary_stats={
+                "passed": 1,
+                "failed": 1,
+                "missing": 0,
+                "skipped": 0,
+                "error": 0,
+            },
+        )
+        assert _run(path) == 0
+        assert "::warning::" not in capsys.readouterr().out
+
+    def test_a_non_integer_counter_is_ignored_rather_than_crashing(self, tmp_path):
+        """The reconciliation is a nicety and must not become a new way to fail."""
+        path = _write(
+            tmp_path,
+            {"bandit": _entry("PASSED")},
+            summary_stats={"passed": "1", "failed": 0, "missing": 0, "skipped": 0},
+        )
+        assert _run(path) == 0
+
+    def test_counters_that_read_clean_cannot_rescue_an_error_scanner(
+        self, tmp_path, capsys
+    ):
+        """The measured shape: bandit=ERROR with every counter reading zero.
+
+        A gate keyed on ``summary_stats.missing`` reads 0 and passes. The per-scanner
+        read fails. This pins which of the two this script does.
+        """
+        path = _write(
+            tmp_path,
+            {"bandit": _entry("ERROR"), "semgrep": _entry("PASSED")},
+            summary_stats={
+                "passed": 1,
+                "failed": 0,
+                "missing": 0,
+                "skipped": 0,
+                "error": 0,
+            },
+        )
+        assert _run(path) == 1
+        assert "bandit" in capsys.readouterr().out
+
+
+def test_the_gate_script_is_where_the_workflows_expect_it():
+    """A gate at the wrong path is a step that fails for the wrong reason.
+
+    Cheap, and it is the one thing these tests cannot detect indirectly: every
+    assertion here loads the script through the same constant, so a move would make
+    the whole file error at collection rather than report a missing gate.
+    """
+    assert GATE_PATH.is_file(), GATE_PATH
 
 
 @pytest.mark.parametrize("status", ["PASSED", "FAILED"])
