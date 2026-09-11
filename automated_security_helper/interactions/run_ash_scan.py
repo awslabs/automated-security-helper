@@ -191,16 +191,19 @@ def incomplete_scanners(
     disagree: that function is what every reporter and the metrics table already
     use, and it is where excluded-versus-missing precedence is decided.
 
-    Known limitation, measured rather than assumed. An allowlist narrowing --
-    ``--scanners bandit`` -- does not mark the unselected scanners as excluded, so
-    a scanner whose tool is absent still reports MISSING and will trip this gate
-    even though the operator did not ask for it. An explicit
-    ``--exclude-scanners`` does mark them, landing them at SKIPPED, which does
-    not trip it. Combining this gate with an allowlist therefore wants
-    ``--exclude-scanners`` (or the tools installed). Filtering here against
-    ``opts.scanners`` was considered and rejected: it would make the exit code
-    disagree with the status the report prints for the same scanner, and it has
-    no counterpart in ``ash merge``, which has no scanner selection to consult.
+    An allowlist narrowing -- ``--scanners bandit`` -- does not trip this, because
+    the scanners it leaves out are recorded SKIPPED. That was not always true: the
+    scan phase used to validate a scanner's dependencies before checking whether it
+    had been selected, so on a host without cfn-nag, grype and syft a
+    ``--scanners bandit`` run reported those three MISSING while the six
+    tool-present scanners it left out reported SKIPPED. Which status an unselected
+    scanner got therefore depended on whether its tool happened to be installed.
+    See ``core/phases/scan_phase.py`` for the ordering that fixed it.
+
+    Filtering here against ``opts.scanners`` was the alternative and is rejected:
+    it would make the exit code disagree with the status the report prints for the
+    same scanner, and it has no counterpart in ``ash merge``, which has no scanner
+    selection to consult. Fixing the recorded status instead makes both agree.
 
     Args:
         results: The aggregated results, or None when the scan produced none.
@@ -233,8 +236,13 @@ def _resolve_fail_on_incomplete_scanners(
     3. *config_value* -- read from the config file before the scan, which is what
        container mode has to fall back on and what ``ash merge`` passes from the
        config carried in the shard results.
-    4. Off, so an environment that has always exited 0 with a missing tool keeps
-       doing so.
+    4. On, matching ``AshConfig.fail_on_incomplete_scanners``.
+
+    Step 4 is reached only when no config model was available at all -- a results
+    object built by hand, or a scan whose config failed to load. It agrees with the
+    model default deliberately: the two are the same question answered twice, and
+    when they disagreed the answer you got depended on how far the scan had got
+    before it was asked, which is not a property anyone wants an exit code to have.
     """
     if opts.fail_on_incomplete_scanners is not None:
         return opts.fail_on_incomplete_scanners
@@ -246,7 +254,7 @@ def _resolve_fail_on_incomplete_scanners(
 
     if config_value is not None:
         return config_value
-    return False
+    return True
 
 
 def _severity_filters_finding(result, min_sev_rank: int) -> bool:
@@ -897,7 +905,7 @@ def _print_workspace_summary(
 # Two independent questions, in this order:
 #
 #   1. Did the scanners that were supposed to run actually run? Gated by
-#      fail_on_incomplete_scanners, default off, exit 1.
+#      fail_on_incomplete_scanners, default on, exit 1.
 #   2. Did they find anything actionable? Gated by fail_on_findings, default on,
 #      exit 2.
 #

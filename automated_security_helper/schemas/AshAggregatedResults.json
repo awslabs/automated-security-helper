@@ -1327,8 +1327,8 @@
           "type": "boolean"
         },
         "fail_on_incomplete_scanners": {
-          "default": false,
-          "description": "Whether to exit with a non-zero code when a selected scanner did not complete -- status ERROR (ran and failed) or MISSING (dependencies unavailable, never ran). SKIPPED scanners are not selected and never trip this. Independent of fail_on_findings: one answers 'was anything found', this one answers 'did what I asked for actually run'. Defaults to False so that environments legitimately lacking a scanner's tool keep their current exit codes.",
+          "default": true,
+          "description": "Whether to exit with a non-zero code when a selected scanner did not complete -- status ERROR (ran and failed) or MISSING (dependencies unavailable, never ran). SKIPPED scanners are not selected and never trip this. Independent of fail_on_findings: one answers 'was anything found', this one answers 'did what I asked for actually run'. Defaults to True: a scan that could not run what it was asked to run has not established that the target is clean, and reporting success for it is the wrong answer rather than a lenient one. Set it to False only for an environment that has decided, explicitly, that a partial scan is acceptable -- and note that an unavailable tool is better handled by excluding its scanner, which records SKIPPED and says so in the report.",
           "title": "Fail On Incomplete Scanners",
           "type": "boolean"
         },
@@ -13543,6 +13543,7 @@
             "actionable": 0,
             "duration": 0.0,
             "end": null,
+            "error": 0,
             "failed": 0,
             "missing": 0,
             "passed": 0,
@@ -17844,6 +17845,11 @@
           ],
           "default": null,
           "title": "End"
+        },
+        "error": {
+          "default": 0,
+          "title": "Error",
+          "type": "integer"
         },
         "failed": {
           "default": 0,

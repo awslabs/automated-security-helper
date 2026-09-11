@@ -527,13 +527,33 @@ class TestParityWithComputeExitCode:
         ``--min-severity`` gate that can zero it. Populating only one produces a
         verdict no real scan can reach, and the test would then be pinning
         nothing.
+
+        ``scanner_results`` is populated for the same reason, and it had to be
+        added once the completeness gate became the default. Measured: with
+        ``scanner_results`` left empty, ``get_unified_scanner_metrics`` still
+        derives one entry per ``properties.scanner_name`` in the SARIF, and
+        ``ScannerStatisticsCalculator`` gives a scanner it has no
+        ``scanner_results`` record for the status **ERROR** -- findings attributed
+        to a scanner the report has no evidence ran. That is fail-closed and right,
+        but it made every case here exit 1 on completeness before the threshold
+        count was ever consulted, so all 36 parity assertions were comparing
+        ``False`` against the aggregator and pinning nothing about thresholds.
+
+        A real scan always writes a ``scanner_results`` entry for every scanner --
+        measured at 10 of 10 on a local run, including the three that were MISSING
+        -- so PASSED entries here make the model one a real scan could produce
+        rather than weakening the comparison.
         """
         from automated_security_helper.config.ash_config import AshConfig
+        from automated_security_helper.core.enums import ScannerStatus
         from automated_security_helper.interactions.run_ash_scan import (
             ScanOptions,
             _compute_exit_code,
         )
-        from automated_security_helper.models.asharp_model import AshAggregatedResults
+        from automated_security_helper.models.asharp_model import (
+            AshAggregatedResults,
+            ScannerTargetStatusInfo,
+        )
         from automated_security_helper.schemas.sarif_schema_model import SarifReport
 
         document = {"version": "2.1.0", "runs": [_run(*results)]}
@@ -545,6 +565,14 @@ class TestParityWithComputeExitCode:
         config.global_settings.severity_threshold = threshold
         model = AshAggregatedResults(ash_config=config)
         model.sarif = SarifReport.model_validate(document)
+        for entry in results:
+            scanner = (entry.get("properties") or {}).get("scanner_name")
+            if scanner:
+                model.scanner_results[str(scanner)] = ScannerTargetStatusInfo(
+                    status=ScannerStatus.PASSED,
+                    excluded=False,
+                    dependencies_satisfied=True,
+                )
         opts = ScanOptions(source_dir=tmp_path, output_dir=tmp_path)
         return _compute_exit_code(model, opts, None)
 

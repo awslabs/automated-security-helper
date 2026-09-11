@@ -1026,9 +1026,15 @@ def _resolve_require_scanner_completion(
     """Whether to refuse a merge whose shards completed nothing.
 
     The CLI flag wins; otherwise the scan's own ``fail_on_incomplete_scanners``,
-    carried in the shard results; otherwise off. The same precedence
+    carried in the shard results; otherwise on, matching
+    ``AshConfig.fail_on_incomplete_scanners``. The same precedence
     ``fail_on_findings`` follows, so an operator does not have to remember which
     of the two knobs reads the config first.
+
+    The final fallback agrees with the model default rather than being independently
+    lenient. It is reached when no shard carries a config at all, which is a set of
+    results ``ash merge`` cannot vouch for in any case -- defaulting to permissive
+    there would mean the least trustworthy input got the most trusting treatment.
 
     Called before coverage has been verified, so the shards are in whatever order
     ``--results`` listed them and any of them may be unstamped. Every shard of one
@@ -1042,7 +1048,7 @@ def _resolve_require_scanner_completion(
         value = getattr(results.ash_config, "fail_on_incomplete_scanners", None)
         if isinstance(value, bool):
             return value
-    return False
+    return True
 
 
 def _merged_exit_code(

@@ -726,12 +726,16 @@ class AshConfig(BaseModel):
                 "(dependencies unavailable, never ran). SKIPPED scanners are not "
                 "selected and never trip this. Independent of fail_on_findings: "
                 "one answers 'was anything found', this one answers 'did what I "
-                "asked for actually run'. Defaults to False so that environments "
-                "legitimately lacking a scanner's tool keep their current exit "
-                "codes."
+                "asked for actually run'. Defaults to True: a scan that could not "
+                "run what it was asked to run has not established that the target "
+                "is clean, and reporting success for it is the wrong answer rather "
+                "than a lenient one. Set it to False only for an environment that "
+                "has decided, explicitly, that a partial scan is acceptable -- and "
+                "note that an unavailable tool is better handled by excluding its "
+                "scanner, which records SKIPPED and says so in the report."
             )
         ),
-    ] = False
+    ] = True
 
     ash_plugin_modules: Annotated[
         List[str],

@@ -37,7 +37,7 @@ project_name: my-project
 global_settings:
   severity_threshold: MEDIUM
   ignore_paths: []
-fail_on_incomplete_scanners: false
+fail_on_incomplete_scanners: true
 converters:
   # Converter plugins configuration
 scanners:
@@ -49,21 +49,27 @@ ash_plugin_modules: []
 
 ### Failing on an incomplete scan
 
-`fail_on_incomplete_scanners` is a top-level key, and it is off by default:
-
-```yaml
-fail_on_incomplete_scanners: true
-```
-
-With it on, ASH exits 1 when a scanner you selected did not complete — status
-`ERROR` (it ran and failed) or `MISSING` (its dependencies were unavailable, so it
-never ran) — and prints which ones. Without it, the exit code comes from finding
-counts alone, so a run where no scanner managed to start produces no findings and
-exits 0, the same code as a clean scan.
+`fail_on_incomplete_scanners` is a top-level key, and it is on by default. ASH
+exits 1 when a scanner you selected did not complete — status `ERROR` (it ran and
+failed) or `MISSING` (its dependencies were unavailable, so it never ran) — and
+prints which ones.
 
 `SKIPPED` scanners are ones you did not select and never trip it, which is what
 keeps a sharded scan working: each shard excludes the scanners its siblings own,
-and those are recorded as `SKIPPED`.
+and those are recorded as `SKIPPED`. Narrowing a run with `--scanners` or
+`--exclude-scanners` also records the scanners you left out as `SKIPPED`, so
+selecting a subset does not fail the gate.
+
+To accept a partial scan's exit code, set it to `false`:
+
+```yaml
+fail_on_incomplete_scanners: false
+```
+
+Prefer excluding the scanner whose tool you do not have. `false` makes ASH exit 0
+for a scan where nothing ran, which is the same code as a scan where everything
+ran and found nothing; excluding the scanner records it as `SKIPPED` and says so
+in the report, so the next reader can see what was and was not measured.
 
 It is independent of `fail_on_findings` in both directions. `fail_on_findings:
 false` still reports an incomplete scan, and when both would fail the exit code is

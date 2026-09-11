@@ -339,14 +339,13 @@ def run_ash_scan_cli_command(
                 "failed) or MISSING (dependencies unavailable, so it never ran). "
                 "Without this, a run where nothing ran exits 0, the same code as a "
                 "clean scan, because no scanner produced any finding. SKIPPED "
-                "scanners are ones you did not select and never trip it. "
+                "scanners are ones you did not select and never trip it, so "
+                "--scanners and --exclude-scanners both narrow what is gated. "
                 "Independent of --fail-on-findings, and takes precedence over it "
                 "when both would fail: a partial scan's findings are real but its "
                 "clean bill of health is not. Defaults to unset, which prefers the "
-                "configuration value and then off. Note that --scanners does not "
-                "mark the scanners it leaves out as excluded, so one whose tool is "
-                "absent still reports MISSING; use --exclude-scanners to narrow a "
-                "run you intend to gate this way."
+                "configuration value and then on. Pass --no-fail-on-incomplete-"
+                "scanners to accept a partial scan's exit code."
             )
         ),
     ] = None,

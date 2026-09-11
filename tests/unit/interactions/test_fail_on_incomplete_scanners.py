@@ -101,11 +101,33 @@ class TestIncompleteScannersTripTheGate:
             f"indistinguishable from a clean run"
         )
 
-    def test_default_leaves_incomplete_scanners_at_exit_zero(self, tmp_path):
-        """Default off. Flipping it would redden every CI run that lacks a tool.
+    def test_the_default_fails_a_scan_with_an_incomplete_scanner(self, tmp_path):
+        """The regression test. Nothing is passed, so this is the default's answer.
 
-        Four of this tree's ten default scanners are MISSING on a stock
-        workstation, so the default has to stay as it was.
+        This is the assertion that was inverted, and the inversion is the whole
+        defect. The gate shipped opt-in, on the argument that turning it on by
+        default would redden CI in every environment lacking a scanner's tool.
+        That is true and it is not a reason: those runs were already not measuring
+        what they claimed to measure, and a green check run is how nobody found
+        out. Measured on the pull request that prompted this, on GREEN check runs:
+        ``scan (python-local, windows-latest)`` had four of ten scanners MISSING
+        (cfn-nag, grype, semgrep, syft), each at under a millisecond, and the three
+        ubuntu/macos python-local cells had three each. In the cells where semgrep
+        did run it reported 82 findings. The green Windows cell was not clean, it
+        was unmeasured.
+
+        Nothing is passed for ``fail_on_incomplete_scanners`` here, on the command
+        line or in a config, so what this pins is precisely the value an operator
+        who never heard of the flag gets. ``results`` is a MagicMock, whose
+        ``ash_config`` attribute auto-creates to another MagicMock rather than a
+        bool, so ``_resolve_fail_on_incomplete_scanners`` falls through its config
+        steps to the final default -- which is the one this test is about.
+
+        Discrimination check, run before this was committed: against the
+        pre-change tree this test fails with ``assert 0 == 1``, because the default
+        was off and both an ERROR and a MISSING scanner produced exit 0. Every
+        other test in this file passes under either version, which is why this one
+        is the regression test and they are not.
         """
         opts = _opts(tmp_path)
         results = MagicMock()
@@ -120,7 +142,40 @@ class TestIncompleteScannersTripTheGate:
         ):
             code = _compute_exit_code(results, opts)
 
-        assert code == 0
+        assert code == 1, (
+            "with no flag and no config, a scan carrying a MISSING and an ERROR "
+            "scanner must not exit 0 -- that code is indistinguishable from a scan "
+            "where all ten ran and found nothing"
+        )
+
+    def test_the_default_comes_from_the_config_model_not_just_the_fallback(
+        self, tmp_path
+    ):
+        """The same default, reached through a real AshConfig rather than a mock.
+
+        Separate from the test above because the two exercise different steps of
+        ``_resolve_fail_on_incomplete_scanners`` and only one of them is the path a
+        real scan takes. A real run has a resolved config on ``results``, so it
+        stops at the ``isinstance(..., bool)`` step and never reaches the final
+        fallback; a hand-built results object reaches the fallback. Both had to be
+        flipped, and a test that only covered one would let the other keep the old
+        answer -- with the symptom that whether you got a correct exit code
+        depended on how far config resolution had got.
+        """
+        from automated_security_helper.config.ash_config import AshConfig
+
+        opts = _opts(tmp_path)
+        results = MagicMock()
+        results.sarif = None
+        results.ash_config = AshConfig(project_name="gate-default-test")
+
+        with patch(
+            f"{_MODULE}.get_unified_scanner_metrics",
+            return_value=[_metric("syft", ScannerStatus.MISSING.value)],
+        ):
+            code = _compute_exit_code(results, opts)
+
+        assert code == 1
 
     def test_skipped_scanners_never_trip_the_gate(self, tmp_path):
         """SKIPPED is "not selected", which is how a shard excludes its siblings.
@@ -428,26 +483,47 @@ class TestReadsTheAuthoritativeSignals:
             "counter reads clean; ERROR appears in none of them"
         )
 
-    def test_error_is_reachable_at_all_which_summary_stats_cannot_express(self):
-        """ERROR has no counter in ``SummaryStats``, so the gate cannot use one.
+    def test_summary_stats_now_counts_error_and_the_gate_still_ignores_it(self):
+        """The revisit this test's earlier form asked for, answered both ways.
 
-        ``SummaryStats`` carries passed/failed/missing/skipped and no error field.
-        A gate keyed literally on ``summary_stats.missing`` would therefore be
-        blind to a scanner that ran and failed; reading the per-scanner status
-        covers both halves of the fault set.
+        It used to assert ``"error" not in SummaryStats.model_fields`` with the
+        note "if SummaryStats grows an error counter, revisit whether the gate
+        should read it". It has grown one, so here is the answer: the counter is
+        worth having and the gate still must not read it.
+
+        Worth having, because a scanner that ran and failed appeared in none of
+        passed/failed/missing/skipped, so the counters summed to less than the
+        scanner count on exactly the runs where that mattered, and anything
+        deriving a verdict from those totals -- a dashboard, a CI gate, a reviewer
+        skimming the report -- read a tally that silently excluded the worst
+        outcomes. The five counters now partition the set, which this asserts by
+        arithmetic rather than by naming fields.
+
+        And still not read by the gate, because a count cannot name the scanner.
+        The failure message has to say *which* scanner did not complete or it sends
+        an operator to the wrong place, and ``incomplete_scanners`` reading
+        per-scanner status is what supplies the name. A count would also reintroduce
+        the coupling this whole file exists to break: two readers of the same state,
+        one of which can be right while the other is wrong.
         """
         from automated_security_helper.models.asharp_model import SummaryStats
 
-        assert "error" not in SummaryStats.model_fields, (
-            "if SummaryStats grows an error counter, revisit whether the gate "
-            "should read it"
+        assert "error" in SummaryStats.model_fields, (
+            "ERROR needs a counter of its own; without one the other four sum to "
+            "fewer than the scanners in the run and every total reads clean"
         )
+
+        buckets = ("passed", "failed", "missing", "skipped", "error")
+        stats = SummaryStats(passed=3, failed=1, missing=2, skipped=3, error=1)
+        assert sum(getattr(stats, b) for b in buckets) == 10
+
         model = self._model_with("grype", ScannerStatus.ERROR, "PASSED")
 
         from automated_security_helper.interactions.run_ash_scan import (
             incomplete_scanners,
         )
 
+        # Named, not counted. This is the property a counter cannot provide.
         assert incomplete_scanners(model) == [("grype", "ERROR")]
 
 
@@ -517,6 +593,30 @@ class TestConfigFileResolution:
         (source / ".ash.yaml").write_text("project_name: gate-test\n", encoding="utf-8")
 
         opts = ScanOptions(source_dir=source, output_dir=tmp_path / "out")
+        assert _resolve_config_fail_on_incomplete_scanners(opts) is True
+
+    def test_reads_an_explicit_false_from_the_config_file(self, tmp_path):
+        """An operator who wrote ``false`` gets ``false``, not the default.
+
+        Worth its own test now that the default is True: without it, a bug that
+        made this function ignore the file and return the model default would be
+        invisible -- ``test_absent_field_resolves_to_the_models_default`` would
+        still pass, and so would every other test here. The opt-out is the only
+        way an environment that has decided a partial scan is acceptable can say
+        so, so it has to be the one thing that cannot silently stop working.
+        """
+        from automated_security_helper.interactions.run_ash_scan import (
+            _resolve_config_fail_on_incomplete_scanners,
+        )
+
+        source = tmp_path / "src"
+        source.mkdir()
+        (source / ".ash.yaml").write_text(
+            "project_name: gate-test\nfail_on_incomplete_scanners: false\n",
+            encoding="utf-8",
+        )
+
+        opts = ScanOptions(source_dir=source, output_dir=tmp_path / "out")
         assert _resolve_config_fail_on_incomplete_scanners(opts) is False
 
     def test_no_config_file_resolves_to_none(self, tmp_path):
@@ -533,10 +633,34 @@ class TestConfigFileResolution:
 class TestConfigModelAndValidator:
     """The field has to exist on the model and be accepted by ``ash config``."""
 
-    def test_config_field_defaults_to_false(self):
+    def test_config_field_defaults_to_true(self):
         from automated_security_helper.config.ash_config import AshConfig
 
-        assert AshConfig(project_name="x").fail_on_incomplete_scanners is False
+        assert AshConfig(project_name="x").fail_on_incomplete_scanners is True
+
+    def test_the_model_default_and_the_resolver_fallback_agree(self, tmp_path):
+        """Two answers to one question must not be able to disagree.
+
+        ``_resolve_fail_on_incomplete_scanners`` ends in a literal rather than
+        reading the model, so the model default and that literal are two
+        independent copies of the same decision. When they disagreed, which one you
+        got depended on whether a config model had been built by the time the exit
+        code was computed -- so the same scan could be gated or not gated depending
+        on how it was invoked. This test is what makes changing one of them without
+        the other a failure rather than a subtle inconsistency.
+        """
+        from automated_security_helper.config.ash_config import AshConfig
+        from automated_security_helper.interactions.run_ash_scan import (
+            _resolve_fail_on_incomplete_scanners,
+        )
+
+        # No opts value, no config value, and a results object carrying nothing
+        # bool-shaped, so resolution reaches the final fallback literal.
+        bare = MagicMock()
+        bare.ash_config = None
+        fallback = _resolve_fail_on_incomplete_scanners(bare, _opts(tmp_path), None)
+
+        assert fallback is AshConfig(project_name="x").fail_on_incomplete_scanners
 
     def test_validator_accepts_the_new_top_level_field(self):
         from automated_security_helper.config.config_validator import ConfigValidator
