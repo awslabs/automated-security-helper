@@ -585,10 +585,18 @@ describe('no IAM policy grants the same thing twice', () => {
   );
 
   test('there are policies to check in every stack', () => {
-    // 33 across the five stacks, in the order STACKS declares them. Exact and
+    // 88 across the five stacks, in the order STACKS declares them. Exact and
     // per-stack, so one stack losing its policies to a rename cannot leave the loop
     // for that stack iterating over nothing while the others carry the assertion.
-    expect(policiesPerStack.map(([, policies]) => policies.length)).toEqual([4, 4, 6, 4, 15]);
+    //
+    // Was [4, 4, 6, 4, 15] = 33 before the per-service policy split in
+    // ash-policy-split.ts, which files each role's statements into one
+    // AWS::IAM::Policy per AWS service so that no single document trips cfn-nag's
+    // W76 ceiling. The counts rose; the statements did not change, which the
+    // duplicate check below is a second witness to -- it passes over all 88.
+    expect(policiesPerStack.map(([, policies]) => policies.length)).toEqual([
+      10, 12, 9, 7, 50,
+    ]);
   });
 
   test.each(policiesPerStack)('%s has no statement that duplicates another', (_stack, policies) => {
