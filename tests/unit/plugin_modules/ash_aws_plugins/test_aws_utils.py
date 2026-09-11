@@ -104,6 +104,172 @@ class TestRetryWithBackoff:
         assert "ValidationError" in str(excinfo.value)
 
 
+class TestRetryIntervals:
+    """The interval is the one thing the tests above never observe.
+
+    They pass ``base_delay=0.01`` to stay fast and then assert only the call
+    count, so replacing the exponential with a constant -- or with zero -- would
+    leave every one of them green while the decorator hammered a throttled API
+    back-to-back. So these assert what ``time.sleep`` is handed.
+
+    No wall-clock bound is used: an elapsed-time assertion flakes low on a fast
+    machine and high on a loaded one, and would not distinguish a broken
+    schedule from a busy host.
+    """
+
+    @staticmethod
+    def _throttling_error():
+        return botocore.exceptions.ClientError(
+            {"Error": {"Code": "ThrottlingException", "Message": "Rate exceeded"}},
+            "operation",
+        )
+
+    def _sleeps_while_always_failing(self, **retry_kwargs):
+        mock_func = MagicMock(side_effect=self._throttling_error())
+        decorated_func = retry_with_backoff(**retry_kwargs)(mock_func)
+
+        sleeps = []
+        with (
+            patch(
+                "automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils.time.sleep",
+                side_effect=sleeps.append,
+            ),
+            pytest.raises(botocore.exceptions.ClientError),
+        ):
+            decorated_func()
+        return sleeps, mock_func
+
+    def test_the_interval_grows_between_retries(self):
+        sleeps, mock_func = self._sleeps_while_always_failing(
+            max_retries=3, base_delay=10.0, max_delay=600.0
+        )
+
+        assert mock_func.call_count == 4
+        assert len(sleeps) == 3, "one wait between each pair of attempts, no more"
+        assert sleeps == sorted(sleeps), sleeps
+        # Jitter adds at most 1.0s and each step doubles a >=10s base, so the
+        # per-attempt envelopes cannot overlap and exact bounds are safe here.
+        assert 10.0 <= sleeps[0] < 11.0, sleeps
+        assert 20.0 <= sleeps[1] < 21.0, sleeps
+        assert 40.0 <= sleeps[2] < 41.0, sleeps
+
+    def test_the_interval_is_capped_at_max_delay(self):
+        sleeps, _ = self._sleeps_while_always_failing(
+            max_retries=4, base_delay=10.0, max_delay=25.0
+        )
+        assert all(interval <= 25.0 for interval in sleeps), sleeps
+        assert sleeps[-1] == 25.0, sleeps
+
+    def test_a_negative_max_delay_never_reaches_sleep(self):
+        """Reachable from reporter config, and it used to raise inside the retry.
+
+        CloudWatchLogsReporter and S3Reporter both declare ``base_delay`` and
+        ``max_delay`` as bare ``float`` fields with no lower bound and hand them
+        straight to this decorator. ``time.sleep`` raises ValueError on a negative
+        argument, and the broad ``except Exception`` in
+        ``_create_log_stream_with_retry`` swallows it -- so the retry silently
+        became zero retries and the warning blamed the log stream.
+        """
+        sleeps, mock_func = self._sleeps_while_always_failing(
+            max_retries=2, base_delay=1.0, max_delay=-30.0
+        )
+
+        assert all(interval >= 0.0 for interval in sleeps), sleeps
+        assert mock_func.call_count == 3, "the retries themselves must still happen"
+
+    def test_a_negative_base_delay_never_reaches_sleep(self):
+        sleeps, _ = self._sleeps_while_always_failing(
+            max_retries=2, base_delay=-5.0, max_delay=60.0
+        )
+        assert all(interval >= 0.0 for interval in sleeps), sleeps
+
+
+class TestASleepFailureIsNotAbsorbedHere:
+    """Where a ValueError out of ``time.sleep`` ends up, pinned at both levels.
+
+    Unlike the clamp tests above, neither of these fails on the unmodified
+    decorator -- they are characterization, not regression. They are here because
+    the clamp's value depends entirely on this pair of facts, and nothing else in
+    the suite states either one. The decorator raises the sleep failure; the
+    CloudWatch caller then buries it under a message naming the wrong subsystem.
+    Together they explain why a negative interval was survivable enough to ship:
+    the only symptom was a warning about a log stream.
+
+    If a later change wraps the sleep in a ``try``, the first test fails and says
+    so, rather than the retry quietly degrading to zero retries again.
+    """
+
+    @staticmethod
+    def _throttling_error():
+        return botocore.exceptions.ClientError(
+            {"Error": {"Code": "ThrottlingException", "Message": "Rate exceeded"}},
+            "operation",
+        )
+
+    def test_the_decorator_lets_a_sleep_failure_out(self):
+        """time.sleep is called from inside the ``except`` block, so it escapes.
+
+        An exception raised in a handler is not caught by that same handler, which
+        is what keeps a bad interval from being mistaken for a retryable API
+        error and looped on.
+        """
+        mock_func = MagicMock(side_effect=self._throttling_error())
+        decorated_func = retry_with_backoff(max_retries=3, base_delay=1.0)(mock_func)
+
+        with (
+            patch(
+                "automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils.time.sleep",
+                side_effect=ValueError("sleep length must be non-negative"),
+            ),
+            pytest.raises(ValueError, match="non-negative"),
+        ):
+            decorated_func()
+
+        assert mock_func.call_count == 1, (
+            "the sleep failure must stop the loop, not be retried around"
+        )
+
+    def test_the_cloudwatch_caller_is_what_hides_it(self):
+        """The broad ``except Exception`` one level up is the actual concealment.
+
+        Asserting this is what makes the clamp's necessity legible: the reporter
+        does not crash on a negative interval, it reports success-shaped failure
+        with a message about the log stream. Grepping the logs for a backoff
+        problem would never have found it.
+        """
+        from automated_security_helper.plugin_modules.ash_aws_plugins.cloudwatch_logs_reporter import (
+            CloudWatchLogsReporter,
+        )
+
+        reporter = CloudWatchLogsReporter.model_construct()
+        reporter.config = MagicMock()
+        reporter.config.options.max_retries = 3
+        reporter.config.options.base_delay = 1.0
+        reporter.config.options.max_delay = 60.0
+        reporter.config.options.log_group_name = "group"
+        reporter.config.options.log_stream_name = "stream"
+
+        logged = []
+        reporter._plugin_log = lambda message, **kwargs: logged.append(message)
+
+        client = MagicMock()
+        client.create_log_stream.side_effect = self._throttling_error()
+
+        with patch(
+            "automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils.time.sleep",
+            side_effect=ValueError("sleep length must be non-negative"),
+        ):
+            # No pytest.raises: swallowing it is precisely the behavior recorded.
+            reporter._create_log_stream_with_retry(client)
+
+        assert len(logged) == 1, logged
+        assert "Error when creating log stream" in logged[0], logged[0]
+        assert "non-negative" in logged[0], (
+            "the sleep failure is reported under a log-stream heading -- "
+            "the misattribution that let a negative interval go unnoticed"
+        )
+
+
 class TestGetAvailableModels:
     """Tests for the get_available_models function."""
 

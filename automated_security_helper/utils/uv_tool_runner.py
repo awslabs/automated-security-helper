@@ -1,11 +1,20 @@
 """UV tool runner utility for managing UV-based tool execution and installation."""
 
+import random
 import subprocess  # nosec B404 — uv_tool_runner is the subprocess orchestrator for tool execution
 import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Callable
+
+
+# How often the install progress monitor calls back while an attempt is running.
+# Named rather than inline because it is the monitor's only cadence knob, and the
+# tests that assert the monitor covers a retried run have to shorten it -- the
+# smallest ``timeout`` that starts a monitor at all is 61 seconds, so at the
+# production cadence a test could observe exactly one callback per attempt.
+_PROGRESS_UPDATE_INTERVAL_SECONDS = 10
 
 
 class UVToolRunnerError(Exception):
@@ -24,6 +33,53 @@ class UVToolRetryConfig:
     exponential_base: float = 2.0
     jitter: bool = True
     network_check_timeout: float = 5.0
+
+    def __post_init__(self) -> None:
+        """Clamp the schedule into a range that can actually be slept on.
+
+        These values arrive from scanner config by way of
+        ``UVToolMixin._install_uv_tool``, which builds this from a plain dict
+        with ``.get(key, default)`` and validates nothing. A negative
+        ``max_delay`` makes the computed interval negative, and ``time.sleep``
+        raises ``ValueError`` on a negative argument -- which, raised from inside
+        the install path, is indistinguishable to the caller from the install
+        itself having failed.
+
+        Normalizing rather than raising keeps one nonsensical knob from aborting
+        a scan, and because it mutates the fields in place, the mixin's existing
+        ``[INSTALLATION_CONFIG]`` debug line reports the values that will
+        actually be used instead of the ones that were asked for.
+
+        ``exponential_base`` floors at 1.0 rather than above it: 1.0 is a
+        deliberate fixed-interval retry, which is a legitimate choice. Below 1.0
+        the backoff would *shrink* between attempts, which never is.
+        """
+        self.max_retries = max(0, int(self.max_retries))
+        self.base_delay = max(0.0, float(self.base_delay))
+        # Ordered after base_delay so the cap can never sit below the floor.
+        self.max_delay = max(self.base_delay, float(self.max_delay))
+        self.exponential_base = max(1.0, float(self.exponential_base))
+        self.network_check_timeout = max(0.0, float(self.network_check_timeout))
+
+
+def _install_retry_delay(config: UVToolRetryConfig, attempt: int) -> float:
+    """Seconds to wait after 0-based ``attempt`` before the next install try.
+
+    Exponential growth, capped at ``max_delay``, optionally jittered, and
+    clamped non-negative.
+
+    The ``max(0.0, ...)`` overlaps with ``UVToolRetryConfig.__post_init__``,
+    which already guarantees ``max_delay >= base_delay >= 0``, and that overlap
+    is deliberate rather than sloppy: ``UVToolRetryConfig`` is a plain *mutable*
+    dataclass, so ``config.max_delay = -1`` after construction re-opens the hole
+    that normalization closed. This clamp sits closest to ``time.sleep``, which is
+    the only place the value actually has to be safe. Both guards are covered by
+    tests that distinguish them -- see ``TestRetryDelayIsAlwaysSleepable``.
+    """
+    delay = config.base_delay * (config.exponential_base**attempt)
+    if config.jitter:
+        delay += random.uniform(0, 1)  # nosec B311 — retry jitter, not security
+    return max(0.0, min(delay, config.max_delay))
 
 
 class UVToolRunner:
@@ -211,10 +267,22 @@ class UVToolRunner:
             tool_name: Name of the tool to install
             version_constraint: Optional version constraint (e.g., ">=1.7.0,<2.0.0")
             timeout: Timeout in seconds for installation
-            retry_config: Optional retry configuration
+            retry_config: Optional retry policy. ``None`` (the default) means a
+                single attempt. When supplied, a non-zero exit from
+                ``uv tool install`` is retried up to ``max_retries`` further
+                times, waiting an exponentially growing, capped, optionally
+                jittered interval between attempts. A timeout and an
+                OSError-shaped failure are both terminal either way -- see the
+                handlers below for why.
             package_extras: Optional list of package extras (e.g., ["sarif", "toml"])
             with_dependencies: Optional list of additional dependencies to install with --with flag
-            progress_callback: Optional callback function for progress updates
+            progress_callback: Optional callback for progress updates, invoked
+                only when ``timeout`` exceeds 60 seconds. Called from a monitor
+                thread started and stopped around each individual attempt, so the
+                elapsed figure it reports is measured from the start of the
+                attempt in flight rather than from the start of the call, and no
+                callback arrives once this function has returned. With a
+                ``retry_config`` in play the message also names the attempt.
 
         Returns:
             True if installation succeeded, False otherwise
@@ -276,9 +344,75 @@ class UVToolRunner:
 
         cmd.append(tool_spec)
 
-        # Set up progress monitoring for long installations
-        progress_thread = None
-        if callable(progress_callback) and timeout > 60:
+        # ``retry_config`` was accepted here and then silently dropped: there was
+        # no retry loop in this function at all, so a caller asking for
+        # ``max_retries=3`` got exactly one attempt. BanditScanner asks for
+        # exactly that (``ash_builtin/scanners/bandit_scanner.py``), and
+        # ``UVToolMixin._install_uv_tool`` logs "[INSTALLATION_CONFIG] Using
+        # custom retry configuration / max_retries=3, base_delay=1.0s" *before*
+        # calling in -- so the only observable anybody had announced a retry
+        # policy that did not exist. The tests around this asserted that log
+        # line, or that the config dict was passed through, or the bool this
+        # returns; none of the three moves when the retry is missing, which is
+        # why it survived. The regression tests added alongside this fix assert
+        # the attempt count and the sleep intervals instead.
+        #
+        # ``retry_config=None`` still means a single attempt, so every caller
+        # that never asked for retries keeps its behaviour exactly.
+        #
+        # ``max(1, ...)`` doubles up on the ``max(0, ...)`` in
+        # ``UVToolRetryConfig.__post_init__``, and for the same reason
+        # ``_install_retry_delay`` doubles up on its clamp of ``max_delay``: this
+        # is a plain *mutable* dataclass, so ``config.max_retries = -1`` after
+        # construction walks straight past normalization. The consequence is worse
+        # here than it is for a delay. ``attempts <= 0`` makes ``range`` empty, so
+        # the loop body never runs, ``last_error`` is never assigned, and this
+        # function ends at ``raise UVToolRunnerError(None)`` -- an install that
+        # never happened, reported as a failure whose message is the literal
+        # "None". ``with-retry.sh`` guards the identical case with
+        # ``if [ "$max" -lt 1 ]`` and gives the identical reason.
+        attempts = max(1, 1 + retry_config.max_retries) if retry_config else 1
+        last_error: str | None = None
+
+        # Progress monitoring for long installations: one monitor per attempt, not
+        # one for the whole call.
+        #
+        # ``timeout`` is a *per-attempt* budget -- it is what ``subprocess.run``
+        # below enforces -- so an elapsed figure anchored anywhere else reports
+        # progress against a limit nothing applies. A single monitor started
+        # before the loop broke that twice over. It self-terminated at
+        # ``elapsed > timeout`` measured from before the first attempt, so once
+        # ``retry_config`` let the install run for ``attempts * timeout`` plus
+        # backoff -- roughly fifteen minutes for BanditScanner's max_retries=3 at
+        # the default 300s -- callbacks stopped after the first 300 seconds and
+        # the caller heard nothing for the remaining ten. And the figures it did
+        # emit before that described the first attempt rather than the running
+        # one.
+        #
+        # The stop Event is what actually stops it. The previous code set
+        # ``progress_thread = None`` under a comment reading "Stop progress
+        # monitoring", which drops a reference and stops nothing: the thread is a
+        # daemon polling a fixed sleep, so it went on calling back for up to
+        # ``timeout`` after the install had returned, into a callback whose owner
+        # has every reason to have torn down what it writes to. It also ran only
+        # on the success path, so a failed attempt left its monitor reporting
+        # elapsed time against an attempt that had already ended.
+        #
+        # The alternative shape -- keep one monitor and give it the whole budget --
+        # would have to invent that budget: ``attempts * timeout`` plus a sum of
+        # jittered backoffs is not a limit anything enforces and differs run to
+        # run.
+        monitor_attempts = callable(progress_callback) and timeout > 60
+
+        def start_progress_monitor(attempt_index: int):
+            """Report on one attempt. Returns ``(stop_event, thread)``."""
+            if not monitor_attempts:
+                return None, None
+
+            stop = threading.Event()
+            # Numbered only when there is more than one attempt, so callers that
+            # never asked for retries see the message they saw before, unchanged.
+            prefix = f"attempt {attempt_index + 1}/{attempts}, " if attempts > 1 else ""
 
             def progress_monitor():
                 start_time = time.time()
@@ -288,53 +422,93 @@ class UVToolRunner:
                         break
                     if callable(progress_callback):
                         progress_callback(
-                            f"Installation in progress... ({elapsed:.0f}s elapsed)"
+                            f"Installation in progress... "
+                            f"({prefix}{elapsed:.0f}s elapsed)"
                         )
-                    time.sleep(10)  # Update every 10 seconds
+                    if stop.wait(_PROGRESS_UPDATE_INTERVAL_SECONDS):
+                        break
 
-            progress_thread = threading.Thread(target=progress_monitor, daemon=True)
-            progress_thread.start()
+            thread = threading.Thread(target=progress_monitor, daemon=True)
+            thread.start()
+            return stop, thread
 
-        try:
-            subprocess.run(  # nosec B603 — list args, validated uv executable path
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                check=True,
-                encoding="utf-8",
-                errors="replace",
-            )
+        for attempt in range(attempts):
+            progress_stop, progress_thread = start_progress_monitor(attempt)
+            try:
+                subprocess.run(  # nosec B603 — list args, validated uv executable path
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    check=True,
+                    encoding="utf-8",
+                    errors="replace",
+                )
+            except subprocess.TimeoutExpired as e:
+                # Deliberately terminal, not retried. This attempt already spent
+                # the whole ``timeout`` budget, so retrying would multiply wall
+                # clock by the attempt count -- three 300s timeouts is fifteen
+                # minutes of a scan phase spent waiting on a tool that is not
+                # coming. A timeout is also the one failure the caller can
+                # already see in its own elapsed time.
+                raise UVToolRunnerError(
+                    f"Tool installation timed out after {timeout} seconds for {tool_name}. "
+                    f"Command: {' '.join(cmd)}"
+                    f"Error: {e}"
+                )
+            except subprocess.CalledProcessError as e:
+                # A non-zero exit from ``uv tool install`` is the transient shape
+                # worth retrying: a reset connection, a 5xx from the index, a DNS
+                # blip. Remember the message and fall through to the backoff.
+                last_error = f"Tool installation failed for {tool_name} with exit code {e.returncode}"
+                if e.stderr:
+                    last_error += f". Error: {e.stderr.strip()}"
+            except Exception as e:
+                # Not retried: this is the OSError shape -- ``uv`` itself missing,
+                # not executable, or a bad cwd -- and no amount of waiting fixes
+                # any of them.
+                raise UVToolRunnerError(
+                    f"Unexpected error during tool installation for {tool_name}: {e}"
+                )
+            else:
+                # Installing is exactly the event that makes a remembered version
+                # wrong, so drop this tool's memoized probe result. Without this, a
+                # caller that probed before installing (converters re-read
+                # tool_version afterwards) would keep seeing the pre-install answer.
+                invalidate_tool_version_cache(tool_name)
 
-            # Stop progress monitoring
-            if progress_thread:
-                progress_thread = None
+                return True
+            finally:
+                # Every exit from an attempt comes through here: the success
+                # ``return``, both terminal ``raise``es, and falling through to the
+                # backoff. Joining rather than only signalling means no callback
+                # can arrive after this function has returned. Bounded because the
+                # callback is caller-supplied code.
+                # Both halves named, though ``start_progress_monitor`` returns the
+                # two together or neither: a type checker cannot see that
+                # correlation, and the same reasoning is already written out for
+                # ``retry_config is not None`` below.
+                if progress_stop is not None and progress_thread is not None:
+                    progress_stop.set()
+                    progress_thread.join(timeout=5)
 
-            # Installing is exactly the event that makes a remembered version
-            # wrong, so drop this tool's memoized probe result. Without this, a
-            # caller that probed before installing (converters re-read
-            # tool_version afterwards) would keep seeing the pre-install answer.
-            invalidate_tool_version_cache(tool_name)
+            # ``retry_config is not None`` is redundant with ``attempt + 1 <
+            # attempts`` today: ``attempts`` is 1 whenever ``retry_config`` is
+            # falsy, so this line is reachable only when a real config exists.
+            # It is written out anyway for two reasons. A type checker cannot see
+            # that correlation and reports ``UVToolRetryConfig | None`` against
+            # ``_install_retry_delay``'s non-optional parameter. More to the
+            # point, if a later change to how ``attempts`` is derived ever broke
+            # the correlation, the failure would be an AttributeError raised
+            # *from inside the retry path* -- code that runs only once something
+            # has already gone wrong, and that no test exercising a successful
+            # install would ever reach. That is the same invisible-on-the-error-
+            # path shape as the missing retry this function was fixed for, so the
+            # invariant is stated in the condition rather than left implicit.
+            if retry_config is not None and attempt + 1 < attempts:
+                time.sleep(_install_retry_delay(retry_config, attempt))
 
-            return True
-        except subprocess.TimeoutExpired as e:
-            # Handle timeout specifically
-            raise UVToolRunnerError(
-                f"Tool installation timed out after {timeout} seconds for {tool_name}. "
-                f"Command: {' '.join(cmd)}"
-                f"Error: {e}"
-            )
-        except subprocess.CalledProcessError as e:
-            # Handle non-zero exit codes
-            error_msg = f"Tool installation failed for {tool_name} with exit code {e.returncode}"
-            if e.stderr:
-                error_msg += f". Error: {e.stderr.strip()}"
-            raise UVToolRunnerError(error_msg)
-        except Exception as e:
-            # Handle other exceptions
-            raise UVToolRunnerError(
-                f"Unexpected error during tool installation for {tool_name}: {e}"
-            )
+        raise UVToolRunnerError(last_error)
 
     def run_tool(
         self,

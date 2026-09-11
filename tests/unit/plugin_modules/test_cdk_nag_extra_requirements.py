@@ -100,12 +100,28 @@ def fake_metadata(monkeypatch):
     Returns a callable taking the distribution-name list the mapping should
     report and a dict from distribution name to what ``requires`` should do --
     either a list, None, or an exception instance to raise.
+
+    ``distributions`` is emptied as well, and that is what keeps every test in
+    this file testing what its name says. Resolution has a second strategy now:
+    when the declared mapping yields nothing, it finds the distribution installed
+    from this module's own directory via PEP 610 ``direct_url.json``. That
+    strategy exists because an empty declared mapping is the ORDINARY state of an
+    editable install on py3.10 and py3.11, where treating it as "not installed"
+    made the drift guard compare a constant against itself.
+
+    Left live, it would answer from the real environment in the middle of a test
+    that has declared the metadata universe to be something else -- so a case
+    asserting the fallback would quietly receive genuine metadata, and a case
+    supplying a name-keyed ``requires`` stub would be handed a name the stub has
+    no entry for. Emptying it makes this fixture mean what it always meant: these
+    names, and nothing else installed.
     """
 
     def _install(dist_names, requires_by_name):
         monkeypatch.setattr(
             cdk_nag_scanner, "packages_distributions", lambda: {ROOT: dist_names}
         )
+        monkeypatch.setattr(cdk_nag_scanner, "distributions", lambda: [])
 
         def _fake_requires(name):
             outcome = requires_by_name[name]
@@ -217,11 +233,18 @@ class TestUnreadableMetadata:
     def test_no_mapping_at_all_falls_back(self, monkeypatch) -> None:
         """ASH run from a checkout that was never installed.
 
-        This reaches the fallback by the normal path -- the mapping has no entry,
-        so the loop body never runs -- and not through the exception handler,
-        which is what the resolver's docstring used to claim.
+        This reaches the fallback by the normal path -- neither strategy finds a
+        distribution, so the loop body never runs -- and not through the exception
+        handler, which is what the resolver's docstring used to claim.
+
+        ``distributions`` is emptied alongside the mapping because "never
+        installed" now has to mean both: an empty declared mapping alone is the
+        ordinary editable-install shape, and the install-location strategy answers
+        it from ``direct_url.json``. Without this the test would receive real
+        metadata while asserting the fallback.
         """
         monkeypatch.setattr(cdk_nag_scanner, "packages_distributions", lambda: {})
+        monkeypatch.setattr(cdk_nag_scanner, "distributions", lambda: [])
         assert _cdk_extra_requirements() == list(_CDK_EXTRA_FALLBACK_REQUIREMENTS)
 
     def test_requires_returning_none_falls_back(self, fake_metadata) -> None:

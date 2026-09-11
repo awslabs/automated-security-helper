@@ -535,13 +535,27 @@ class TestBuildImage:
         monkeypatch.setenv("ACTIONS_RUNTIME_TOKEN", "token")
         monkeypatch.setenv("ACTIONS_CACHE_URL", "https://example.invalid/cache")
         monkeypatch.delenv("ASH_DISABLE_GHA_BUILD_CACHE", raising=False)
+        # The gate probes the runner for buildx, which would otherwise shell out
+        # and make this test depend on the machine running it.
+        monkeypatch.setattr(rac, "_runner_supports_buildx", lambda runner: True)
+        # Pin the architecture, which is part of the cache scope, so the expected
+        # string does not change on arm runners.
+        monkeypatch.setattr(rac.platform, "machine", lambda: "x86_64")
 
-        _build_image(**_build_image_kwargs(dockerfile, debug=True))
+        # build_target is "ci" rather than this module's "non-root" default because
+        # that is the only value reachable here: run_ash_container forces "ci"
+        # whenever CI is set, and the cache requires ACTIONS_RUNTIME_TOKEN, which
+        # only exists inside Actions.
+        _build_image(**_build_image_kwargs(dockerfile, build_target="ci", debug=True))
 
         cmd = recorded_commands[0]
         assert cmd[:4] == ["docker", "buildx", "build", "--load"]
         assert "--cache-from" in cmd
-        assert "type=gha,scope=ash-non-root" in cmd
+        assert "type=gha,scope=ash-ci-x86_64-online" in cmd
+        # The export direction must stay fail-soft and bounded: a transient cache
+        # 400 must not fail the build, and mode=max would push a multi-GB image
+        # into a 10 GB per-repository quota that other workflows share.
+        assert "type=gha,mode=min,ignore-error=true,scope=ash-ci-x86_64-online" in cmd
         assert "Running build command:" in capfd.readouterr().out
 
     def test_without_the_gha_cache_a_plain_build_is_used(

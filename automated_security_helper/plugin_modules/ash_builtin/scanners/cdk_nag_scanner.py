@@ -1,10 +1,18 @@
 """Module containing the CDK Nag security scanner implementation."""
 
+import json
 import logging
 import re
-from importlib.metadata import PackageNotFoundError, packages_distributions, requires
-from typing import Annotated, ClassVar, List, Literal
+from importlib.metadata import (
+    PackageNotFoundError,
+    distributions,
+    packages_distributions,
+    requires,
+)
+from typing import Annotated, ClassVar, List, Literal, Optional
 from pathlib import Path
+from urllib.parse import urlsplit
+from urllib.request import url2pathname
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -54,8 +62,14 @@ except (ImportError, Exception):
 # [project.optional-dependencies] cdk in pyproject.toml; this list duplicates it
 # and can therefore go stale, which is exactly why it is only reached when the
 # metadata read below fails outright.
+#
+# It went stale exactly as predicted. 200a6565 (#547) bumped aws-cdk-lib to
+# >=2.268.0 in pyproject.toml and touched only pyproject.toml and uv.lock, so this
+# copy stayed at >=2.267 and test_fallback_matches_installed_metadata -- the guard
+# written for this -- started failing. Anything edited here must be edited in
+# pyproject.toml too, and vice versa; that test is what enforces the pairing.
 _CDK_EXTRA_FALLBACK_REQUIREMENTS: List[str] = [
-    "aws-cdk-lib>=2.267,<3.0.0",
+    "aws-cdk-lib>=2.268.0,<3.0.0",
     "cdk-nag>=3.0,<4.0.0",
     "constructs>=10.8,<11.0.0",
 ]
@@ -64,6 +78,211 @@ _CDK_EXTRA_FALLBACK_REQUIREMENTS: List[str] = [
 # renders the marker with single quotes while pyproject.toml and pip emit double
 # quotes, so neither style can be assumed.
 _CDK_EXTRA_MARKER = re.compile(r"""\bextra\s*==\s*['"]cdk['"]""")
+
+
+def _local_path_from_file_url(url: object) -> Optional[Path]:
+    """The path on this host that a PEP 610 ``file://`` URL names, or None.
+
+    Slicing the scheme off the front and handing the remainder to ``Path`` is
+    what this used to do inline, and it is wrong twice over. Both mistakes are
+    invisible on Linux, where the leftover text happens to be exactly the path:
+
+    * ``file:///D:/proj`` leaves ``/D:/proj``, which on Windows is *rooted with
+      no drive* -- ``PureWindowsPath("/D:/proj").drive`` is ``""`` -- so it
+      resolves against whichever drive is current and can never equal the real
+      ``D:\\proj``. Every comparison against it missed, which is what took out
+      all four Windows cells: on 3.12 and 3.13 only the two tests that force the
+      declared mapping empty, and on 3.10 and 3.11 the drift guards too, because
+      there this route is the only one that resolves at all.
+    * A directory whose name needs percent-encoding stays encoded, because
+      nothing unquoted it. That one misses on every platform; CI simply never
+      checks out into such a directory.
+
+    ``url2pathname`` is the standard library's inverse of the conversion pip and
+    uv perform when they write the file, and it is platform specific on purpose:
+    on Windows it turns ``/D:/proj`` into ``D:\\proj``, and on POSIX it unquotes
+    and does nothing else. A Windows-shaped URL read on POSIX therefore yields a
+    path that matches nothing, which is the right answer -- ``direct_url.json``
+    is written by the installer that ran on this host, so its URL always names a
+    path here.
+
+    Deliberately not ``workspace.aggregation._strip_file_scheme``, which is
+    textual for a reason of its own: it normalizes scanner-emitted SARIF URIs
+    that are frequently not valid URIs at all, and has to reduce ``file:///C:/x``
+    the same way on every host. This URL is machine-written and well formed, and
+    what is wanted from it is a path on *this* host, so the two cannot share an
+    implementation.
+    """
+    if not isinstance(url, str):
+        return None
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        # An unterminated IPv6 authority, e.g. "file://[::1/proj". One malformed
+        # sibling distribution must not take out the walk over all of them.
+        return None
+    if parts.scheme != "file":
+        return None
+    # Keep a host authority in the string handed to url2pathname: on Windows that
+    # is what turns "file://server/share/x" into the UNC path \\server\share\x,
+    # and dropping it would silently reinterpret a share as a local directory.
+    # "localhost" is RFC 8089's spelling of "this host" and names no path itself.
+    host = "" if parts.netloc.lower() == "localhost" else parts.netloc
+    try:
+        return Path(url2pathname(f"//{host}{parts.path}" if host else parts.path))
+    except (OSError, ValueError):
+        # nturl2path raises OSError for a drive specifier it cannot parse.
+        return None
+
+
+def _distributions_declaring_this_module(root_package: str) -> List[str]:
+    """Names of installed distributions that ship ``root_package``.
+
+    Two strategies, in order, because the first one silently fails for the
+    install mode this project's own CI uses.
+
+    ``packages_distributions()`` maps a top-level import name to distributions
+    using only what the ``*.dist-info`` declares about its contents, and for an
+    editable install there is nothing usable there. Hatchling writes no
+    ``top_level.txt``, and an editable RECORD lists the import shim rather than
+    the project's own files -- no ``.py`` under the package at all. So:
+
+    * 3.10 reads ``top_level.txt`` and nothing else. Absent, so no mapping, in
+      either install mode.
+    * 3.11 also infers from RECORD but filters on ``suffix == ".py"``, and an
+      editable RECORD has none, so the inferred set is empty. A non-editable
+      install works.
+    * 3.12 dropped that suffix filter, so non-Python files that happen to sit
+      under the package directory yield the name.
+
+    Measured at 804036ba on one editable install: 3.10.20 and 3.11.15 got
+    ``None``, 3.12.13 and 3.13.12 got ``['automated-security-helper']``. That is
+    why ``_cdk_extra_requirements`` had been returning the pinned fallback as its
+    NORMAL path on half the support matrix, and why the guard comparing the two
+    was comparing the fallback against itself and could not fail.
+
+    The second strategy does not ask what a distribution declares it contains. It
+    asks which distribution was installed FROM the directory this module lives
+    in, via the PEP 610 ``direct_url.json`` that pip and uv write for any install
+    from a local path. That file records the project directory as a ``file://``
+    URL -- see ``_local_path_from_file_url`` for why reading one back is not a
+    string slice -- and depends on neither RECORD nor ``top_level.txt``, so it
+    resolves on every version.
+
+    Still never names a distribution literally. A literal name is one someone
+    else can own on a package index, and installing by such a name is the defect
+    this whole path exists to remove -- so the fallback strategy is keyed on a
+    filesystem path this module can see from the inside, not on a string.
+    """
+    try:
+        mapped = packages_distributions().get(root_package) or []
+    except (PackageNotFoundError, OSError) as exc:
+        ASH_LOGGER.debug(
+            f"Could not enumerate the distributions providing {root_package!r} "
+            f"({exc}); trying the install-location strategy instead."
+        )
+        mapped = []
+    if mapped:
+        return list(mapped)
+
+    try:
+        here = Path(__file__).resolve()
+    except OSError:  # pragma: no cover - resolve() on an unreadable cwd
+        return []
+
+    located: List[str] = []
+    try:
+        candidates = list(distributions())
+    except OSError as exc:
+        ASH_LOGGER.debug(
+            f"Could not enumerate installed distributions ({exc}); falling back "
+            f"to the pinned requirement list."
+        )
+        return []
+
+    for dist in candidates:
+        # Every read here is defensive on purpose: this loop walks EVERY
+        # installed distribution, so one malformed sibling must not take out the
+        # command. read_text returns None for an absent file rather than raising.
+        try:
+            raw = dist.read_text("direct_url.json")
+            name = dist.metadata["Name"]
+        except (OSError, KeyError, ValueError):
+            continue
+        if not raw or not name:
+            continue
+        try:
+            url = json.loads(raw).get("url", "")
+        except (ValueError, AttributeError):
+            continue
+        project_dir = _local_path_from_file_url(url)
+        if project_dir is None:
+            continue
+        # Compare resolved paths rather than strings: the URL is absolute but may
+        # differ from this module's path by a symlink or a trailing separator.
+        try:
+            project_dir = project_dir.resolve()
+        except (OSError, ValueError):
+            continue
+        if project_dir == here or project_dir in here.parents:
+            if name not in located:
+                located.append(name)
+
+    if not located:
+        ASH_LOGGER.debug(
+            f"No installed distribution declares or contains {root_package!r}; "
+            f"falling back to the pinned requirement list."
+        )
+    return located
+
+
+def _cdk_extra_requirements_from_metadata() -> Optional[List[str]]:
+    """The ``cdk`` extra exactly as the installed metadata declares it, or None.
+
+    ``None`` means the metadata could not be read at all. It does NOT mean the
+    extra is empty, and the distinction is the whole reason this is a separate
+    function from ``_cdk_extra_requirements`` below.
+
+    Collapsing the two is what hid a real defect. ``_cdk_extra_requirements``
+    returns the pinned fallback when the read fails, so a caller cannot tell
+    "metadata declares this" from "metadata was unreadable, here is the copy".
+    ``test_fallback_matches_installed_metadata`` compared the copy against that
+    return value, so on any interpreter taking the fallback it compared the copy
+    against itself -- a guard that passed for every possible value of the
+    constant, on py3.10 and py3.11, with no skip and no warning. Tests assert
+    against this function so that an unreadable read is visible as ``None``
+    instead of impersonating a successful one.
+    """
+    root_package = __name__.split(".", 1)[0]
+    accumulated: List[str] = []
+
+    for dist_name in _distributions_declaring_this_module(root_package):
+        try:
+            declared = requires(dist_name)
+        except (PackageNotFoundError, OSError, ValueError) as exc:
+            ASH_LOGGER.debug(
+                f"Could not read requirements from distribution {dist_name!r} "
+                f"providing {root_package!r} ({exc}); skipping it."
+            )
+            continue
+        if declared is None:
+            continue
+        for requirement in declared:
+            if not _CDK_EXTRA_MARKER.search(requirement):
+                continue
+            # Keep the requirement, drop the marker. pip evaluates markers with
+            # ``extra`` undefined, so ``extra == "cdk"`` is false and pip skips
+            # the requirement while still exiting 0 -- an install that reports
+            # success and installs nothing.
+            bare = requirement.split(";", 1)[0].strip()
+            # Deduplicated in place rather than through a set, so the order
+            # pyproject.toml declares is what pip receives. A set would make the
+            # generated command vary run to run, which is noise in any log that
+            # records it.
+            if bare and bare not in accumulated:
+                accumulated.append(bare)
+
+    return accumulated or None
 
 
 def _cdk_extra_requirements() -> List[str]:
@@ -121,50 +340,14 @@ def _cdk_extra_requirements() -> List[str]:
     crashed the command outright. The per-name handler is inside the loop so that
     one unreadable distribution no longer discards what the others declared.
     """
-    root_package = __name__.split(".", 1)[0]
-    accumulated: List[str] = []
-    try:
-        dist_names = packages_distributions().get(root_package) or []
-    except (PackageNotFoundError, OSError) as exc:
-        ASH_LOGGER.debug(
-            f"Could not enumerate the distributions providing {root_package!r} "
-            f"({exc}); falling back to the pinned requirement list."
-        )
-        return list(_CDK_EXTRA_FALLBACK_REQUIREMENTS)
-
-    for dist_name in dist_names:
-        try:
-            declared = requires(dist_name)
-        except (PackageNotFoundError, OSError, ValueError) as exc:
-            ASH_LOGGER.debug(
-                f"Could not read requirements from distribution {dist_name!r} "
-                f"providing {root_package!r} ({exc}); skipping it."
-            )
-            continue
-        if declared is None:
-            continue
-        for requirement in declared:
-            if not _CDK_EXTRA_MARKER.search(requirement):
-                continue
-            # Keep the requirement, drop the marker. pip evaluates markers with
-            # ``extra`` undefined, so ``extra == "cdk"`` is false and pip skips
-            # the requirement while still exiting 0 -- an install that reports
-            # success and installs nothing.
-            bare = requirement.split(";", 1)[0].strip()
-            # Deduplicated in place rather than through a set, so the order
-            # pyproject.toml declares is what pip receives. A set would make the
-            # generated command vary run to run, which is noise in any log that
-            # records it.
-            if bare and bare not in accumulated:
-                accumulated.append(bare)
-
-    if accumulated:
-        return accumulated
+    derived = _cdk_extra_requirements_from_metadata()
+    if derived:
+        return derived
 
     ASH_LOGGER.debug(
-        f"No 'extra == \"cdk\"' requirements found in the metadata of any "
-        f"distribution providing {root_package!r}; falling back to the pinned "
-        f"requirement list."
+        "Could not read 'extra == \"cdk\"' requirements from the metadata of any "
+        "distribution containing this module; falling back to the pinned "
+        "requirement list."
     )
     return list(_CDK_EXTRA_FALLBACK_REQUIREMENTS)
 

@@ -1,10 +1,11 @@
 # pre-commit hooks for the agentic-coding-plugins repo.
 #
 # Two hooks driven by `uv run`:
-#   1. transpile-base — regenerates AGENTS.md + claude/, codex/, kiro/, ...
-#                       whenever transpiler/_base/ or transpiler/ changes.
-#   2. verify-no-drift — fails the commit if any platform output differs from
-#                        what the transpiler would produce. Catches hand-edits.
+#   1. agentic-plugins-build — regenerates AGENTS.md + claude/, codex/, kiro/, ...
+#                              whenever transpiler/_base/ or transpiler/ changes.
+#   2. agentic-plugins-check — fails the commit if any platform output differs
+#                              from what the transpiler would produce, and runs
+#                              output validation. Catches hand-edits.
 #
 # uv handles its own .venv inside transpiler/ — pre-commit doesn't manage it.
 # First run is slow (creates .venv, installs jinja2); subsequent runs are ~50ms.
