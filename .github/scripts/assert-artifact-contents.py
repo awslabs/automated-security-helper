@@ -36,15 +36,23 @@ What it actually is, stated plainly:
     checked in under its own name. Each is detected by path shape or by content
     header, not by grepping for tool names -- see the next section for why.
 
-  * A FAIL-CLOSED ALLOWLIST over every DIRECTORY namespace in the artifact --
-    the places new payload can hide without looking like any of those shapes.
-    `automated_security_helper/assets/` is pinned member by member; the
-    subdirectories directly under `automated_security_helper/` are pinned by
-    name; so are the directories at the artifact root and the ones inside a
-    wheel's metadata directory. In all of those the default answer is NO:
-    anything not on the list fails, and adding to the list is a diff a reviewer
-    sees. Loose FILES at the artifact root are deliberately unconstrained -- that
-    set churns with ordinary work and a tree cannot hide in it.
+  * FAIL-CLOSED ALLOWLISTS over every namespace where new payload can hide
+    without looking like any of those shapes. Two are pinned MEMBER BY MEMBER:
+    `automated_security_helper/assets/` (14 entries) and the wheel's
+    `.dist-info/` (6), the two directories that exist to carry data rather than
+    code, which is what makes payload dropped into either indistinguishable from
+    what belongs there. Two are pinned BY DIRECTORY NAME: the subdirectories
+    directly under `automated_security_helper/` (12), and the top-level roots of
+    the artifact itself (one -- the package, plus the wheel's `.dist-info`). In
+    all four the default answer is NO: anything not on the list fails, and adding
+    to the list is a diff a reviewer sees.
+
+    Loose FILES at the artifact root are deliberately unconstrained -- that set
+    churns with ordinary work (a CHANGELOG, a CITATION.cff) and a tree cannot
+    hide in it. The corollary is that nothing may MINT a root file: an artifact
+    carrying more than one top-level distribution root is refused outright,
+    because a second version-stamped wrapper directory would otherwise strip away
+    and leave its contents looking like loose root files.
 
   * A PER-MEMBER SIZE CEILING, because scanner binaries and vulnerability
     databases are orders of magnitude larger than any file ASH authors.
