@@ -170,6 +170,33 @@ describe('the key CloudWatch Logs is pointed at actually lets it encrypt', () =>
   });
 });
 
+describe('the key survives the stack that created it', () => {
+  // The property under test is unrecoverability, not tidiness. ash-encryption.ts
+  // records that deleting the key takes every log group encrypted with it beyond
+  // recovery, and the gate's ScanLogs is itself DeletionPolicy: Retain — so a key
+  // flipped to DESTROY leaves retained scan logs that nothing can ever read again
+  // after a stack delete. Nothing in the suite reddened on that flip before these
+  // tests existed: RemovalPolicy is not a resource property, so the
+  // findResources-based property tests above cannot see it at all.
+  test.each(CASES)('%s retains its key on delete and on replace', (_name, template) => {
+    // Both halves matter and they are different failures. DeletionPolicy covers
+    // deleting the stack; UpdateReplacePolicy covers a property change that makes
+    // CloudFormation replace the key rather than update it in place, which would
+    // strand the old key's ciphertext just as thoroughly.
+    template.hasResource('AWS::KMS::Key', {
+      DeletionPolicy: 'Retain',
+      UpdateReplacePolicy: 'Retain',
+    });
+  });
+
+  test.each(CASES)('%s rotates its key', (_name, template) => {
+    // Asserted here rather than left to cdk-nag: no cdk-nag rule in AwsSolutions
+    // covers key rotation, so nothing else in this repository fails if it is
+    // turned off.
+    template.hasResourceProperties('AWS::KMS::Key', { EnableKeyRotation: true });
+  });
+});
+
 describe('the image-build bootstrap starter is concurrency-bounded', () => {
   const functions = everyResource('AWS::Lambda::Function').filter(([name]) =>
     name.includes('BootstrapStarter'),
