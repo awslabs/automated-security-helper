@@ -38,24 +38,6 @@ export AWS_EC2_METADATA_DISABLED=true
 export AWS_REGION="${AWS_REGION:-us-east-1}"
 unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_PROFILE 2>/dev/null || true
 
-# Unsetting the environment variables is NOT isolation on its own, and getting
-# that wrong weakens this script's own control rather than just leaking a call.
-# `unset AWS_PROFILE` does not stop the SDK reading ~/.aws/credentials — it makes
-# it read the DEFAULT profile — so on a developer machine with ambient
-# credentials the plans below reach AWS and resolve caller identity, region and
-# partition for real. Measured: that is exactly what happened before this line
-# existed.
-#
-# The cost is not the read-only API calls. It is that the mustnot direction takes
-# its evidence from the plan failing on "No valid credential sources found":
-# reaching that failure is what proves variable validation ran and passed rather
-# than being skipped. With credentials available the plan fails later, or not at
-# all, and the mustnot case still passes — for the wrong reason. Pointing both
-# config files at paths that do not exist is what makes the control mean
-# something.
-export AWS_CONFIG_FILE="${TMPDIR:-/tmp}/ash-validate-inputs-no-such-config"
-export AWS_SHARED_CREDENTIALS_FILE="${TMPDIR:-/tmp}/ash-validate-inputs-no-such-credentials"
-
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 MODULES="$(cd -- "$SCRIPT_DIR/../modules" && pwd)"
 
@@ -183,37 +165,6 @@ run_case "malformed repository ARN -> refused" must \
 run_case "well-formed repository ARN -> allowed" mustnot \
   "must be a CodeCommit repository ARN" \
   "$MODULES/codecommit-gate" -var codecommit_repository_arn=arn:aws:codecommit:us-east-1:0:repo -var base_image_uri=x
-
-echo
-echo "### encryption key inputs (every module carries the same two rules)"
-# An alias ARN is the interesting rejection. It looks like a KMS ARN and KMS accepts
-# it for most calls, but CloudWatch Logs and Secrets Manager record the *resolved*
-# key, so a later alias repoint silently leaves data under a key the configuration no
-# longer names. The rule refuses it up front rather than letting that drift start.
-run_case "kms_key_arn as an alias ARN -> refused" must \
-  "must be a KMS key ARN" \
-  "$MODULES/fargate" "${FARGATE_BASE[@]}" \
-  -var kms_key_arn=arn:aws:kms:us-east-1:0:alias/ash
-run_case "kms_key_arn as a key ARN -> allowed" mustnot \
-  "must be a KMS key ARN" \
-  "$MODULES/fargate" "${FARGATE_BASE[@]}" \
-  -var kms_key_arn=arn:aws:kms:us-east-1:0:key/placeholder
-run_case "kms_key_arn null (the default, module creates a key) -> allowed" mustnot \
-  "must be a KMS key ARN" \
-  "$MODULES/fargate" "${FARGATE_BASE[@]}"
-run_case "kms_key_deletion_window_days below KMS's floor -> refused" must \
-  "must be between 7 and 30" \
-  "$MODULES/codepipeline-executor" "${EXEC_BASE[@]}" -var kms_key_deletion_window_days=6
-run_case "kms_key_deletion_window_days above KMS's ceiling -> refused" must \
-  "must be between 7 and 30" \
-  "$MODULES/codepipeline-executor" "${EXEC_BASE[@]}" -var kms_key_deletion_window_days=31
-run_case "kms_key_deletion_window_days at the 7-day floor -> allowed" mustnot \
-  "must be between 7 and 30" \
-  "$MODULES/codepipeline-executor" "${EXEC_BASE[@]}" -var kms_key_deletion_window_days=7
-run_case "agentcore alias ARN -> refused (secret-only module has the rule too)" must \
-  "must be a KMS key ARN" \
-  "$MODULES/agentcore" -var container_image_uri=x \
-  -var kms_key_arn=arn:aws:kms:us-east-1:0:alias/ash
 
 echo
 echo "validate-inputs: pass=$PASS fail=$FAIL"

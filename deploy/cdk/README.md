@@ -283,58 +283,6 @@ first:
 - **An unused Secrets Manager secret is created even with auth disabled.** The
   alternative was a CloudFormation Condition gating the resource, which makes every
   IAM grant that mentions its ARN an invalid template. Costs a few cents a month.
-- **The deploying principal needs `kms:DescribeKey`.** Every log group in these
-  stacks is encrypted with the stack's own customer-managed key, and CloudWatch
-  Logs requires `kms:DescribeKey` of whoever calls `CreateLogGroup` with a
-  `kmsKeyId`
-  ([reference](https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/encrypt-log-data-kms.html)).
-  The key's default policy grants the account root `kms:*`, so a console launch by
-  an administrator satisfies this; a deployment role with KMS carved out of it does
-  not, and will fail on the first log group rather than create it unencrypted.
-- **Deleting the key destroys the logs.** The key is `RETAIN` for this reason.
-  AWS: "If you revoke CloudWatch Logs access to an associated key or delete an
-  associated KMS key, your encrypted data in CloudWatch Logs can no longer be
-  retrieved." Deleting a stack leaves the key behind along with the repository and
-  buckets. The key carries the alias `alias/ash-<stack name>` and a description
-  naming the stack, so a leftover key is identifiable; the alias is created by the
-  stack and goes when the stack does, the description does not.
-- **Check what else uses a retained key before you schedule it for deletion.**
-  Two things the encryption-context condition does not stop, both of which turn
-  "clean up the leftover ASH key" into data loss. The condition is account-scoped,
-  so any principal in the account holding `logs:AssociateKmsKey` plus
-  `kms:DescribeKey` can bind the surviving key to **any** log group in the account —
-  including groups that have nothing to do with ASH. And scheduling deletion on a
-  key destroys the data in every group associated with it, not only the ones the
-  deleted stack created. Before `aws kms schedule-key-deletion`, run `aws logs
-  describe-log-groups` and check `kmsKeyId` against the key's ARN; if anything
-  outside the deleted stack comes back, disassociate it first.
-- **One key per stack, not one per log group.** AWS recommends a key per encrypted
-  log group so the key policy can name a single log group ARN. That is not done
-  here. Given CDK auto-naming the groups, naming them in the key policy is a
-  CloudFormation cycle — the only way to get a group's ARN is `Fn::GetAtt` on the
-  group, so the policy would reference the groups while the groups reference the
-  key. That is a cycle *given auto-naming*, not unconditionally: an explicit
-  `logGroupName` prefixed with `${AWS::StackName}` would let the condition ARN be
-  built from pseudo-parameters with no `GetAtt` and no cycle. Rejected for its cost
-  — an explicit log-group name makes every later rename a replacement rather than an
-  update, and replacing a log group discards the log data in it. So the
-  encryption-context condition is the account-scoped variant AWS documents for
-  exactly this case, and the boundary it enforces is the account, not the log group.
-- **No log producer needs a KMS grant of its own, because the key grants the
-  CloudWatch Logs service principal.** Checked rather than assumed for the one
-  producer here that writes through a separate delivery role instead of its own
-  workload role — VPC Flow Logs. AWS documents the flow-log role's required policy
-  as five `logs:` actions and no KMS
-  ([reference](https://docs.aws.amazon.com/vpc/latest/userguide/flow-logs-iam-role.html)),
-  and lists KMS among the causes of a flow-log delivery failure only for the S3
-  destination, where the fix is a key-policy grant to a service principal rather
-  than a role permission. The qualification, since the blanket claim is not what AWS
-  says: CloudWatch Logs also documents a caller-attributed route in which a
-  principal calling `PutLogEvents` on a CMK-encrypted group does need KMS
-  permissions, scoped by `kms:ViaService`. These stacks rely on the
-  service-principal route, which is the statement in `lib/ash-encryption.ts`. If
-  flow-log records ever stop arriving while the flow log reports enabled, that
-  statement is the thing to check first.
 - **ECR repositories and buckets are `RETAIN`.** `autoDeleteObjects` and
   `emptyOnDelete` synthesize asset-backed custom resources, which need a staging
   bucket and therefore `cdk bootstrap`, and these templates are meant to launch from
@@ -357,7 +305,7 @@ first:
 | --- | --- |
 | `AwsSolutions-VPC7` | Fixed: VPC flow logs to CloudWatch. |
 | `AwsSolutions-ELB2` | Fixed: ALB access logs, wired at the L1 with the `logdelivery.elasticloadbalancing.amazonaws.com` service principal so no per-region ELB account id is needed. `logAccessLogs` throws on an environment-agnostic stack. |
-| `AwsSolutions-CB4` | Fixed: one customer-managed KMS key per stack, shared by its CodeBuild projects, its CloudWatch log groups and the MCP auth secret. See `lib/ash-encryption.ts`. |
+| `AwsSolutions-CB4` | Fixed: one customer-managed KMS key per stack, shared by its CodeBuild projects. |
 | `AwsSolutions-IAM4` | Fixed: `AWSLambdaBasicExecutionRole` replaced by a logs policy scoped to one log group. |
 | `AwsSolutions-L1` | Fixed: newest available Python runtime. |
 | `AwsSolutions-IAM5` | Suppressed. Wildcards are the CodeBuild log-stream and report-group suffixes, `ecr:GetAuthorizationToken` (which IAM defines with no resource ARN), and object-level access inside buckets these stacks create. |
@@ -395,42 +343,6 @@ counting only `Non-Compliant`.
 `AwsSolutions-IAM5` suppressions deliberately do not use `appliesTo`. The granular
 form needs strings embedding CDK logical ids, which rot on any rename and fail
 open. The reasons enumerate every wildcard instead.
-
-## cfn-nag
-
-cfn-nag runs over `templates/` rather than over the CDK app, and it is a separate
-tool from cdk-nag with a separate suppression mechanism —
-`Metadata.cfn_nag.rules_to_suppress` on the resource, not
-`Metadata.cdk_nag.rules_to_suppress`. Current state of the five committed templates:
-**0 failures, 35 warnings.**
-
-One rule is suppressed rather than fixed.
-
-`W92` (a Lambda function should specify `ReservedConcurrentExecutions`) fires on the
-three image-build bootstrap starters and on the gate's `ScanFunction`. The
-reservation was implemented and then reverted, because satisfying the rule is worse
-than the warning: Lambda rejects any reservation that would leave the account's
-unreserved concurrency below 100, so an adopter launching one of these templates
-into a sandbox account with a reduced quota — or one already carrying reservations —
-gets `InvalidParameterValueException`, a function that fails to create, and a stack
-that rolls back. These are one-click templates for accounts whose quota is unknown.
-
-The rule also bounds nothing here. Each bootstrap starter's ARN appears exactly once
-per template, as the `ServiceToken` of a `Custom::AshImageBootstrap` resource, and no
-`AWS::Lambda::Permission` grants any service principal access to it, so
-CloudFormation is the only possible invoker and it invokes a custom resource
-serially. The three starters therefore carry a `W92` suppression stating that.
-
-The gate's `ScanFunction` keeps its `W92` warning unsuppressed, and its absence of a
-reservation is load-bearing rather than incidental: it is invoked by an EventBridge
-rule with `MaximumRetryAttempts: 1`, `MaximumEventAgeInSeconds: 3600` and **no
-dead-letter queue**, so a reservation below the pull-request arrival rate would
-throttle, exhaust the single retry, and drop the event — a pull request silently
-unscanned, which is the failure this whole deployment surface exists to remove.
-
-Local measurement hazard: with a `deploy/cdk/cdk.out` present, `ash scan --scanners
-cfn-nag` double-counts, because it scans both `templates/` and the assembly under
-`cdk.out/`. Delete `cdk.out` before measuring.
 
 ## Reproducibility
 

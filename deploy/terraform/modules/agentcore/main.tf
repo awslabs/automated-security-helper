@@ -86,11 +86,6 @@ resource "aws_secretsmanager_secret" "auth_header" {
   name        = "${var.name_prefix}-agentcore-mcp-auth-header"
   description = "Expected value of the static MCP auth header for the ASH AgentCore runtime."
 
-  # Under a key this configuration owns rather than aws/secretsmanager, so the
-  # policy protecting a replayable shared secret is one an adopter can read and
-  # narrow, and each use of it is attributable in CloudTrail. See kms.tf.
-  kms_key_id = local.encryption_key_arn
-
   tags = var.tags
 }
 
@@ -270,36 +265,6 @@ data "aws_iam_policy_document" "runtime" {
       effect    = "Allow"
       actions   = ["secretsmanager:GetSecretValue"]
       resources = [aws_secretsmanager_secret.auth_header[0].arn]
-    }
-  }
-
-  # GetSecretValue alone is not enough once the secret is under a customer
-  # managed key: Secrets Manager decrypts with the caller's credentials, so the
-  # runtime needs the key too. Missing this does not fail the apply -- the
-  # container starts, cannot read its auth header, and rejects every request.
-  #
-  # The kms:ViaService condition confines the grant to decryption Secrets Manager
-  # performs for this role, so it cannot be used against anything else the key
-  # protects.
-  dynamic "statement" {
-    for_each = local.manage_auth_secret ? [1] : []
-
-    content {
-      sid    = "DecryptAuthHeaderSecret"
-      effect = "Allow"
-
-      actions = [
-        "kms:Decrypt",
-        "kms:DescribeKey",
-      ]
-
-      resources = [local.encryption_key_arn]
-
-      condition {
-        test     = "StringEquals"
-        variable = "kms:ViaService"
-        values   = [local.secretsmanager_via_service]
-      }
     }
   }
 

@@ -152,7 +152,6 @@ jobs:
             echo "| cdk-nag | \`deploy/cdk/cdk.json\` | \`$cdk\` |"
             echo "| Generated buildspec drift | \`deploy/cdk-constructs/package.json\` | \`$constructs\` |"
             echo "| Terraform hygiene | \`deploy/terraform/**/*.tf\` | \`$terraform\` |"
-            echo "| CDK/Terraform parity | both of the above | \`$([ "$cdk" = true ] && [ "$terraform" = true ] && echo true || echo false)\` |"
             echo
             echo "A \`false\` row means that tree has not landed on this ref yet and its"
             echo "check was skipped. It does not mean the check passed."
@@ -1313,95 +1312,6 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
   # ---------------------------------------------------------------------------
-  # CDK/Terraform parity on encryption at rest.
-  #
-  # deploy/cdk and deploy/terraform are two implementations of the same targets and
-  # are meant to carry the same security posture. They stopped doing so silently:
-  # the CDK side was hardened to encrypt every log group and secret with a
-  # customer-managed key and the Terraform side was not, and nothing in CI noticed.
-  # Measured at the time -- zero aws_kms_key resources anywhere under
-  # deploy/terraform, no kms_key_id on any of its six log groups, none on either of
-  # its two secrets, against twelve encrypted CDK log groups and four encrypted CDK
-  # secrets. The absence of this job is the reason that was invisible.
-  #
-  # It lives in THIS workflow rather than a new one because this is already the
-  # workflow that keeps deploy/ honest, it already discovers which trees are
-  # present, and the aggregator below already gives branch protection one name to
-  # require. A separate workflow would duplicate the discover job and add a second
-  # required check for the same concern.
-  #
-  # WHY IT IS A SEPARATE JOB FROM terraform-hygiene
-  # ----------------------------------------------
-  # terraform-hygiene needs `terraform` on the runner and answers "does the
-  # Terraform parse". This needs nothing but python3 and answers "do the two
-  # implementations agree". Keeping them apart means a Terraform syntax error and a
-  # parity divergence are different red checks with different fixes, and this one
-  # still reports when setup-terraform is unavailable.
-  #
-  # WHAT IT DOES NOT DO, deliberately
-  # ---------------------------------
-  # It does not synthesize. The cdk-template-drift job above already proves the
-  # committed templates are byte-identical to a fresh synth, so this reads them
-  # directly and needs no npm install. That is a real dependency between the two
-  # jobs: if cdk-template-drift is ever removed or made advisory, this job starts
-  # comparing against a template nobody regenerated. The script says so in its own
-  # scope output rather than leaving it implicit.
-  #
-  # It also does not compute effective IAM permissions, touch networking, or check
-  # anything needing a plan. The script prints its full scope -- in and out -- on
-  # every run, pass or fail, because a gate that is read as proving more than it
-  # checks is the failure mode this repository keeps hitting.
-  #
-  # THE POSITIVE CONTROL RUNS ON EVERY RUN
-  # --------------------------------------
-  # The second step perturbs a COPY of deploy/terraform two ways and requires the
-  # gate to go red for each, naming the perturbation. A gate whose ability to fail
-  # was demonstrated once by hand at review time is a gate nobody knows still
-  # works, and its green is exactly the kind of evidence that gets trusted wrongly.
-  # The copies are written under RUNNER_TEMP, and the working tree is never touched.
-  # ---------------------------------------------------------------------------
-  iac-parity:
-    name: cdk/terraform parity
-    needs: discover
-    if: needs.discover.outputs.cdk == 'true' && needs.discover.outputs.terraform == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v7
-
-      # Ordered before the real check on purpose. If the control fails, the
-      # verdict of the check below means nothing, and finding that out first is
-      # cheaper than reading a green that proves nothing.
-      - name: Prove the parity gate can fail
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 deploy/tests/assert-iac-parity.py --self-test --work-dir "${RUNNER_TEMP}"
-
-      - name: Assert CDK and Terraform agree on encryption at rest
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 deploy/tests/assert-iac-parity.py | tee "${RUNNER_TEMP}/iac-parity.txt"
-
-      # The scope belongs in the run summary, not only in a collapsed step. A gate
-      # whose scope nobody reads gets credited with checks it never made.
-      - name: Record what was and was not compared
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          {
-            echo "### CDK/Terraform parity"
-            echo
-            echo '```'
-            cat "${RUNNER_TEMP}/iac-parity.txt" 2>/dev/null || echo "the check did not run to completion; see the step log"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  # ---------------------------------------------------------------------------
   # One stable name for branch protection to require.
   #
   # The four checks above are conditional, and a required check that is skipped
@@ -1418,7 +1328,6 @@ jobs:
       - generated-buildspec-drift
       - terraform-hygiene
       - cdk-nag
-      - iac-parity
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

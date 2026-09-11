@@ -78,7 +78,7 @@ the mapping is one to one.
 | `ash_version_tag_prefix` | — | `string` | `"ash-"` | Prefix for the per-build immutable audit tag. |
 | `ecr_image_tag_mutability` | — | `string` | `"MUTABLE"` | `IMMUTABLE` breaks the scheduled rebuild. See below. |
 | `ecr_force_delete` | — | `bool` | `false` | Let `destroy` remove a non-empty repository. |
-| `ecr_kms_key_arn` | — | `string` | `null` | Customer managed key for **ECR** encryption only. `null` uses AES256. |
+| `ecr_kms_key_arn` | — | `string` | `null` | Customer managed key for ECR encryption. `null` uses AES256. |
 | `image_retention_count` | — | `number` | `10` | Lifecycle policy expires images beyond this count. |
 | `enable_scheduled_rebuild` | — | `bool` | `true` | Set `false` only if something else rebuilds and pushes. |
 | `ssm_parameter_tier` | — | `string` | `"Intelligent-Tiering"` | `Standard`, `Advanced`, or `Intelligent-Tiering`. |
@@ -86,50 +86,14 @@ the mapping is one to one.
 | `build_image_override` | — | `string` | `null` | Defaults to the current Amazon Linux 2023 image for the chosen architecture. |
 | `build_timeout_minutes` | — | `number` | `120` | Offline builds install a lot. |
 | `log_retention_days` | — | `number` | `30` | CloudWatch Logs retention for build logs. |
-| `kms_key_arn` | — | `string` | `null` | Existing key for the build log and build output. `null` creates one. See below. |
-| `kms_key_deletion_window_days` | — | `number` | `30` | 7-30. Recovery window for a created key. |
 | `tags` | — | `map(string)` | `{}` | Applied to everything created. |
-
-## Encryption
-
-The build log group and the CodeBuild project's output are encrypted with a
-**customer managed** KMS key. A build log holds the whole buildspec's output,
-including the ASH configuration the deployment materialized and every scanner
-install, so it is protected the same way as the artifact it describes.
-
-By default this module creates the key. `kms_key_arn` overrides it with one you
-already have, which is how an adopter composing several ASH modules ends up with
-one key instead of one per module — every module exposes its key as the
-`kms_key_arn` output. `kms.tf` carries the rationale and the key policy.
-
-**`kms_key_arn` is not `ecr_kms_key_arn`.** They are separate on purpose:
-
-- `kms_key_arn` covers the build log and the build output.
-- `ecr_kms_key_arn` covers image layers at rest in ECR, and a customer managed key
-  there bills a KMS request per layer.
-
-Pass the same ARN to both to keep one key. **This changed:** the CodeBuild
-project's `encryption_key` used to be wired to `ecr_kms_key_arn`, so a deployment
-that sensibly left ECR on AES256 got no customer managed key for its build output
-either. It now follows `kms_key_arn`.
-
-If you supply a key, it must already grant the CloudWatch Logs service principal
-`kms:Encrypt`, `kms:Decrypt`, `kms:ReEncrypt*`, `kms:GenerateDataKey*` and
-`kms:Describe*` under a `kms:EncryptionContext:aws:logs:arn` condition matching
-this account. Terraform cannot check that, and a key without it plans and
-validates cleanly, then fails at `CreateLogGroup`. Copy the policy from `kms.tf`.
-
-The principal running `terraform apply` needs `kms:DescribeKey` on the key. AWS
-requires it of whoever calls `CreateLogGroup` with a `kmsKeyId`, and a deployment
-role with KMS carved out of it fails on the log group rather than creating it
-unencrypted.
 
 ## Outputs
 
 `image_uri`, `ecr_repository_url`, `ecr_repository_arn`, `ecr_repository_name`,
 `codebuild_project_name`, `codebuild_project_arn`,
 `base_config_ssm_parameter_name`, `base_config_ssm_parameter_arn`,
-`bootstrap_command`, `build_log_group_name`, `kms_key_arn`.
+`bootstrap_command`, `build_log_group_name`.
 
 ## Constraints and known limitations
 

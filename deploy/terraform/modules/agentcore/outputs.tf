@@ -49,18 +49,6 @@ output "log_group_name" {
   value       = "/aws/bedrock-agentcore/runtimes/${local.runtime_name}"
 }
 
-output "kms_key_arn" {
-  description = <<-EOT
-    ARN of the key the auth header secret is encrypted with, whether this module
-    created it or it came in through kms_key_arn.
-
-    Pass it to the other ASH modules to put a whole deployment under one key
-    instead of one key per module. Null when there is no secret and no key was
-    supplied, because this module then has nothing to encrypt.
-  EOT
-  value       = local.encryption_key_arn
-}
-
 output "request_header_allowlist" {
   description = "Headers AgentCore forwards to the container. Empty unless mcp_auth_header_name is set, since AgentCore drops anything not listed."
   value       = local.request_header_allowlist

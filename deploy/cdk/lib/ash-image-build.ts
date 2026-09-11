@@ -131,14 +131,11 @@ export interface AshImageBuildProps {
    */
   readonly bootstrapOnDeploy?: boolean;
   /**
-   * Customer-managed key for the build project's encryption and this
-   * construct's log groups.
+   * Customer-managed key for the build project's encryption.
    *
    * Shared across every project in a stack rather than created per project: one
    * key is enough to encrypt build output for all of them, and a key per project
-   * would multiply the standing charge for no additional isolation. Must be a key
-   * CloudWatch Logs is allowed to use — `ashEncryptionKey` in ash-encryption.ts
-   * is the one that grants that.
+   * would multiply the standing charge for no additional isolation.
    */
   readonly encryptionKey: kms.IKey;
 }
@@ -184,14 +181,9 @@ export class AshImageBuild extends Construct {
       ],
     });
 
-    // A build log holds the whole buildspec's output, which includes the ASH
-    // configuration the deployment materialized and every scanner install. The
-    // stack already owns a key for the build artifacts; using it here too means
-    // the log and the artifact it describes are protected the same way.
     const logGroup = new logs.LogGroup(this, 'BuildLogs', {
       retention: logs.RetentionDays.ONE_MONTH,
       removalPolicy: RemovalPolicy.DESTROY,
-      encryptionKey: props.encryptionKey,
     });
 
     // The project's role is created here rather than by `codebuild.Project`, so
@@ -311,7 +303,6 @@ export class AshImageBuild extends Construct {
     const starterLogs = new logs.LogGroup(this, 'BootstrapStarterLogs', {
       retention: logs.RetentionDays.ONE_MONTH,
       removalPolicy: RemovalPolicy.DESTROY,
-      encryptionKey: props.encryptionKey,
     });
     const starterRole = new iam.Role(this, 'BootstrapStarterRole', {
       assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
@@ -337,56 +328,26 @@ export class AshImageBuild extends Construct {
       runtime: lambda.Runtime.PYTHON_3_14,
       timeout: Duration.minutes(1),
       /**
-       * NO `reservedConcurrentExecutions`, deliberately. cfn-nag W92 asks for one
-       * and is suppressed below instead.
+       * One concurrent execution, which is one more than this function ever
+       * needs.
        *
-       * A reservation was tried here and reverted, because it makes stack CREATION
-       * depend on an account quota that it did not depend on before. Lambda refuses
-       * any reservation that would leave the account's unreserved concurrency below
-       * 100 — `InvalidParameterValueException: Specified ReservedConcurrentExecutions
-       * for function decreases account's UnreservedConcurrentExecution below its
-       * minimum value of [100]`. These templates are meant for arbitrary one-click
-       * console launches, so an adopter in a sandbox account with a reduced
-       * concurrency limit, or one already carrying reservations, gets a function that
-       * fails to create, a stack that rolls back, and a completely failed deploy —
-       * to remediate a warning.
+       * CloudFormation is the only caller: it invokes the custom resource once
+       * per Create, Update or Delete on this stack, and it waits for a response
+       * before doing anything else with the resource. There is no fan-out to
+       * absorb. Reserving 1 caps what the function can consume of the account's
+       * concurrency if it is ever invoked from somewhere else, and it does not
+       * throttle any invocation the design actually makes.
        *
-       * The functional case for the reservation was thin in the first place.
-       * CloudFormation is the sole invoker: this function's ARN appears in exactly
-       * one place in every template, the `ServiceToken` of the
-       * `Custom::AshImageBootstrap` resource, and no `AWS::Lambda::Permission` exists
-       * for it in any of the five templates, so no service principal can invoke it at
-       * all. CloudFormation invokes the custom resource serially and waits for a
-       * response. A reservation of 1 therefore bounds nothing that was not already
-       * bounded.
-       *
-       * The gate's ScanFunction is the case where the absence of a reservation is
-       * load-bearing rather than merely harmless — it is invoked by an EventBridge
-       * rule with one retry, a one-hour max event age and no dead-letter queue, so a
-       * reservation below the pull-request arrival rate would throttle and then drop
-       * the event, leaving a pull request silently unscanned.
+       * The cost is real but small: a reservation is subtracted from the
+       * account's unreserved pool, and Lambda refuses a reservation that would
+       * leave less than 100 unreserved. One function at 1 does not approach that
+       * on a default 1,000 limit.
        */
+      reservedConcurrentExecutions: 1,
       description:
         'Starts the ASH image build during stack creation and hands CloudFormation’s ' +
         'response URL to the build, which answers once the image exists.',
       environment: { PROJECT_NAME: this.project.projectName },
-    });
-    (starter.node.defaultChild as lambda.CfnFunction).addMetadata('cfn_nag', {
-      rules_to_suppress: [
-        {
-          id: 'W92',
-          reason:
-            'CloudFormation is the only invoker: this function is referenced only as the ' +
-            'ServiceToken of a Custom::AshImageBootstrap resource, no AWS::Lambda::Permission ' +
-            'grants any service principal access to it, and CloudFormation invokes a custom ' +
-            'resource serially and waits for the response. There is no fan-out for a ' +
-            'reservation to bound. Setting one instead introduces a create-time dependency on ' +
-            "the account's unreserved-concurrency headroom -- Lambda rejects a reservation " +
-            'that would leave the account below 100 unreserved -- which fails the deploy ' +
-            'outright in a constrained account. These templates launch one-click into ' +
-            'accounts whose quota is unknown, so that trade is not worth making.',
-        },
-      ],
     });
     // codebuild.Project exposes no grantStartBuild, so the statement is written
     // out. Scoped to this one project's ARN.

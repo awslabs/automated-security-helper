@@ -54,6 +54,7 @@ import {
   CfnParameter,
   Duration,
   Fn,
+  RemovalPolicy,
   Size,
   Stack,
   StackProps,
@@ -61,6 +62,7 @@ import {
 import * as events from 'aws-cdk-lib/aws-events';
 import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as kms from 'aws-cdk-lib/aws-kms';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
@@ -72,7 +74,6 @@ import {
   codeCommitRepositoryArn,
   rebuildSchedule,
 } from './ash-config';
-import { ashEncryptionKey } from './ash-encryption';
 import { AshImageBuild } from './ash-image-build';
 import { suppressLambdaLogWildcard, suppressSecretRotation } from './ash-nag-suppressions';
 import { AshRuntimeConfig } from './ash-runtime-config';
@@ -93,16 +94,7 @@ export class AshCodeCommitGateStack extends Stack {
     const offline = ashOfflineMode(this);
     const schedule = rebuildSchedule(this);
     const repositoryArn = codeCommitRepositoryArn(this);
-
-    // Created before the config so the secret can be encrypted with it. One key
-    // per stack covers the build project, the log groups and the auth secret —
-    // see ash-encryption.ts.
-    const encryptionKey = ashEncryptionKey(this);
-
-    const config = new AshRuntimeConfig(this, 'Config', {
-      includeMcpParameters: false,
-      encryptionKey,
-    });
+    const config = new AshRuntimeConfig(this, 'Config', { includeMcpParameters: false });
 
     const approvalGate = new CfnParameter(this, 'ApprovalGate', {
       type: 'String',
@@ -134,6 +126,15 @@ export class AshCodeCommitGateStack extends Stack {
         'does not distinguish them.',
     });
 
+    // One customer-managed key per stack, shared by every CodeBuild project here.
+    // Rotation is on: the key only protects build output, so a rotated key needs
+    // no coordination with anything outside the stack.
+    const encryptionKey = new kms.Key(this, 'EncryptionKey', {
+      description: 'Encrypts ASH CodeBuild project output for this stack.',
+      enableKeyRotation: true,
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+
     const image = new AshImageBuild(this, 'Image', {
       platform: 'amd64',
       flavors: ['lambda'],
@@ -148,13 +149,8 @@ export class AshCodeCommitGateStack extends Stack {
     // disagree with the ARN.
     const repositoryName = Fn.select(5, Fn.split(':', repositoryArn.valueAsString));
 
-    // The scan log is the most sensitive log group in any of these stacks: it
-    // carries ASH's own output about the adopter's source, which is findings and
-    // sometimes the matched text that produced them. Encrypted with the stack's
-    // key for that reason rather than for uniformity.
     const logGroup = new logs.LogGroup(this, 'ScanLogs', {
       retention: logs.RetentionDays.ONE_MONTH,
-      encryptionKey,
     });
 
     // Own role rather than the AWS managed AWSLambdaBasicExecutionRole: the only

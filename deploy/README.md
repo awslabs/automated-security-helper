@@ -112,60 +112,6 @@ The full per-module variable matrix is in `terraform/README.md` under "Variable
 contract". Where this table and that one disagree, that one is authoritative for
 Terraform.
 
-### Encryption at rest, and the three places the two implementations differ
-
-Both implementations encrypt every CloudWatch log group, every Secrets Manager
-secret and every CodeBuild project with a customer-managed KMS key, and both grant
-the regional CloudWatch Logs service principal on that key with an `ArnLike`
-condition on `kms:EncryptionContext:aws:logs:arn`. That grant is not optional
-decoration: setting a key on a log group creates no key policy on either side, so
-a log group pointed at an ungranted key synthesizes, validates and plans cleanly
-and then fails at `CreateLogGroup`.
-
-Three differences are real, deliberate, and will not be reconciled by the parity
-gate:
-
-1. **One key per stack, one key per module.** CDK creates a key per stack. Each
-   Terraform module creates its own and accepts `kms_key_arn` to reuse one
-   instead, because a module is composed by the adopter and "per stack" has no
-   Terraform analogue. Composing all five modules with defaults gives five keys;
-   passing one `kms_key_arn` to all five gives one.
-2. **Key retention.** CDK marks its key `RETAIN`, so deleting the stack leaves the
-   key and the log data it protects readable. Terraform cannot express that
-   conditionally -- `prevent_destroy` takes no expressions and the key is
-   `count`-gated -- so `kms_key_deletion_window_days` is the recovery window
-   instead. `terraform destroy` schedules the key for deletion; deleting a stack
-   does not.
-3. **Where the secret-decrypt grant lives.** CDK puts the AgentCore runtime
-   role's grant in the key policy and the CodeBuild roles' grants in identity
-   policies -- two placements for one key in one stack, because this app has not
-   enabled `@aws-cdk/aws-kms:defaultKeyPolicies`. Terraform grants identity-side
-   throughout, conditioned on
-   `kms:ViaService = secretsmanager.<region>.amazonaws.com`. Both work: the
-   account-root statement delegates to IAM for same-account principals, so a
-   service principal only needs naming in the key policy when the service acts on
-   its own behalf. **The operational cost is real** -- on CDK you learn who may
-   decrypt a secret by reading the key policy, here by reading the role policy.
-   Terraform was not reshaped to match, because CDK's placement is the one its own
-   feature flag exists to move away from; enabling that flag on the CDK side is
-   the symmetric fix and is a change in its own right.
-
-`deploy/tests/assert-iac-parity.py` checks the properties above that ARE shared,
-and runs in CI as the `cdk/terraform parity` job in `ash-iac-drift.yml`. Run it
-locally with `python3 deploy/tests/assert-iac-parity.py`; it needs no credentials
-and no toolchain beyond `python3`. It prints its own scope, in and out, on every
-run, and `--self-test` proves it can fail by perturbing a copy of the Terraform
-tree two ways and requiring a red for each.
-
-What it does NOT compare, so that a green is not read as more than it is:
-effective IAM permissions (so it would not notice one side granting decrypt to a
-principal the other did not), anything about the VPC, IAM policy contents, and
-anything needing a `terraform plan`. `map_public_ip_on_launch` is out of scope for
-a structural reason rather than an arbitrary one: the CDK Fargate stack creates
-its own VPC, subnets and NAT gateway and sets it there, while the Terraform
-fargate module takes `vpc_id` and subnet ids as inputs and creates none of them.
-There is no Terraform resource to compare against.
-
 ## Why `McpStatelessHttp` defaults to true on AgentCore
 
 AgentCore injects its own `Mcp-Session-Id` header into requests it forwards. Measured

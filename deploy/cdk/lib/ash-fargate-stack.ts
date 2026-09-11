@@ -49,6 +49,7 @@ import {
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as kms from 'aws-cdk-lib/aws-kms';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as s3 from 'aws-cdk-lib/aws-s3';
@@ -58,7 +59,6 @@ import {
   ashSynthesizer,
   ashOfflineMode, ashVersion, MCP_PORT, rebuildSchedule,
 } from './ash-config';
-import { ashEncryptionKey } from './ash-encryption';
 import { AshImageBuild } from './ash-image-build';
 import {
   suppressCodeBuildRoleWildcards,
@@ -151,15 +151,15 @@ export class AshFargateStack extends Stack {
     const version = ashVersion(this);
     const offline = ashOfflineMode(this);
     const schedule = rebuildSchedule(this);
+    const config = new AshRuntimeConfig(this, 'Config', { includeMcpParameters: true });
 
-    // Created before the config so the secret can be encrypted with it. One key
-    // per stack covers the build project, the log groups and the auth secret —
-    // see ash-encryption.ts.
-    const encryptionKey = ashEncryptionKey(this);
-
-    const config = new AshRuntimeConfig(this, 'Config', {
-      includeMcpParameters: true,
-      encryptionKey,
+    // One customer-managed key per stack, shared by every CodeBuild project here.
+    // Rotation is on: the key only protects build output, so a rotated key needs
+    // no coordination with anything outside the stack.
+    const encryptionKey = new kms.Key(this, 'EncryptionKey', {
+      description: 'Encrypts ASH CodeBuild project output for this stack.',
+      enableKeyRotation: true,
+      removalPolicy: RemovalPolicy.RETAIN,
     });
 
     const image = new AshImageBuild(this, 'Image', {
@@ -180,15 +180,13 @@ export class AshFargateStack extends Stack {
       subnetConfiguration: ashFargateSubnetLayout(NAT_GATEWAYS),
       // Flow logs are on because this VPC carries source code being scanned and
       // the findings about it; without them a suspected exfiltration has nothing
-      // to investigate. Encrypted with the stack key for the same reason: the
-      // flow record of an exfiltration is itself worth protecting.
+      // to investigate.
       flowLogs: {
         Vpc: {
           destination: ec2.FlowLogDestination.toCloudWatchLogs(
             new logs.LogGroup(this, 'VpcFlowLogs', {
               retention: logs.RetentionDays.ONE_MONTH,
               removalPolicy: RemovalPolicy.DESTROY,
-              encryptionKey,
             }),
           ),
           trafficType: ec2.FlowLogTrafficType.ALL,
@@ -201,12 +199,9 @@ export class AshFargateStack extends Stack {
       containerInsightsV2: ecs.ContainerInsights.ENABLED,
     });
 
-    // ASH's own stdout for every scan the service runs, so the same reasoning as
-    // the gate's scan log applies: it describes the adopter's source.
     const logGroup = new logs.LogGroup(this, 'TaskLogs', {
       retention: logs.RetentionDays.ONE_MONTH,
       removalPolicy: RemovalPolicy.DESTROY,
-      encryptionKey,
     });
 
     const taskDefinition = new ecs.FargateTaskDefinition(this, 'TaskDefinition', {

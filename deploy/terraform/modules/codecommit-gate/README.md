@@ -127,49 +127,14 @@ security judgment.
 | `image_retention_count` | — | `number` | `10` | |
 | `build_timeout_minutes` | — | `number` | `30` | |
 | `log_retention_days` | — | `number` | `30` | |
-| `kms_key_arn` | — | `string` | `null` | Existing key for both log groups and the build output. `null` creates one. See below. |
-| `kms_key_deletion_window_days` | — | `number` | `30` | 7-30. Recovery window for a created key. |
 | `tags` | — | `map(string)` | `{}` | |
-
-## Encryption
-
-Both log groups and the CodeBuild project's output are encrypted with a **customer
-managed** KMS key. The gate's log matters most here: it holds the findings the gate
-is about to post as a pull-request comment, which is scan output for the customer's
-own source.
-
-By default this module creates the key. `kms_key_arn` overrides it with one you
-already have, which is how an adopter composing several ASH modules ends up with
-one key instead of one per module — every module exposes its key as the
-`kms_key_arn` output. `kms.tf` carries the rationale and the key policy.
-
-One key covers the image build log, the gate log and the build output rather than
-one key each. AWS recommends a key per encrypted log group so a key policy can be
-narrowed to a single log group ARN; that narrowing is not available here anyway
-(see below), and both groups sit inside one trust boundary, so a second key would
-buy no isolation and would double a standing monthly charge.
-
-**The encryption-context condition is account-scoped, not log-group-scoped.** The
-tighter form names the log group's ARN, which would make the key reference the log
-groups while the log groups reference the key — a cycle Terraform rejects outright,
-and the same reason CloudFormation cannot express it either. AWS documents the
-account-scoped variant for this case.
-
-If you supply a key, it must already grant the CloudWatch Logs service principal
-`kms:Encrypt`, `kms:Decrypt`, `kms:ReEncrypt*`, `kms:GenerateDataKey*` and
-`kms:Describe*` under that condition. Terraform cannot check it, and a key without
-it plans and validates cleanly, then fails at `CreateLogGroup`. Copy the policy
-from `kms.tf`.
-
-The principal running `terraform apply` needs `kms:DescribeKey` on the key, which
-AWS requires of whoever calls `CreateLogGroup` with a `kmsKeyId`.
 
 ## Outputs
 
 `function_name`, `function_arn`, `role_arn`, `gate_image_uri`,
 `gate_ecr_repository_url`, `gate_image_codebuild_project_name`,
 `bootstrap_command`, `event_rule_arn`, `repository_name`,
-`approval_rule_template_name`, `log_group_name`, `kms_key_arn`.
+`approval_rule_template_name`, `log_group_name`.
 
 ## Constraints and known limitations
 

@@ -72,11 +72,6 @@ resource "aws_secretsmanager_secret" "auth_header" {
   name        = "${var.name_prefix}-mcp-auth-header"
   description = "Expected value of the static MCP auth header for the ASH Fargate service."
 
-  # Under a key this configuration owns rather than aws/secretsmanager, so the
-  # policy protecting a replayable shared secret is one an adopter can read and
-  # narrow, and each use of it is attributable in CloudTrail. See kms.tf.
-  kms_key_id = local.encryption_key_arn
-
   tags = var.tags
 }
 
@@ -273,11 +268,6 @@ resource "aws_cloudwatch_log_group" "task" {
   name              = "/aws/ecs/${var.name_prefix}"
   retention_in_days = var.log_retention_days
 
-  # A task log can carry scan output for whatever a caller asked ASH to scan, so it
-  # goes under the same key as the auth secret. See kms.tf for why setting this
-  # argument is not sufficient on its own.
-  kms_key_id = local.encryption_key_arn
-
   tags = var.tags
 }
 
@@ -292,46 +282,6 @@ resource "aws_iam_role" "execution" {
 resource "aws_iam_role_policy_attachment" "execution" {
   role       = aws_iam_role.execution.name
   policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
-}
-
-# AmazonECSTaskExecutionRolePolicy grants logs:CreateLogStream and
-# logs:PutLogEvents but says nothing about KMS, because it predates the log group
-# having a customer managed key. CloudWatch Logs makes its KMS calls for an
-# encrypted group on the writer's behalf through kms:ViaService, so the role the
-# awslogs driver writes with needs the key as well as the group.
-#
-# The failure mode this prevents is quiet: the service reaches a steady state and
-# the log group stays empty, which reads as an application that is not logging
-# rather than as a permissions problem.
-data "aws_iam_policy_document" "execution_logs_key" {
-  statement {
-    sid    = "UseEncryptionKeyForLogs"
-    effect = "Allow"
-
-    actions = [
-      "kms:Decrypt",
-      "kms:DescribeKey",
-      "kms:Encrypt",
-      "kms:GenerateDataKey*",
-      "kms:ReEncrypt*",
-    ]
-
-    resources = [local.encryption_key_arn]
-
-    # Confines the grant to calls CloudWatch Logs makes for this role, so it cannot
-    # read the auth secret the same key protects.
-    condition {
-      test     = "StringEquals"
-      variable = "kms:ViaService"
-      values   = [local.logs_service_principal]
-    }
-  }
-}
-
-resource "aws_iam_role_policy" "execution_logs_key" {
-  name   = "${var.name_prefix}-execution-logs-key"
-  role   = aws_iam_role.execution.id
-  policy = data.aws_iam_policy_document.execution_logs_key.json
 }
 
 resource "aws_iam_role" "task" {
@@ -360,30 +310,6 @@ data "aws_iam_policy_document" "task" {
     resources = ["${aws_cloudwatch_log_group.task.arn}:*"]
   }
 
-  # The container process writes its own log stream in addition to what the
-  # execution role does for it, so it needs the log group's key on the same terms.
-  # See the execution role's grant above for why CloudWatch Logs requires this.
-  statement {
-    sid    = "UseEncryptionKeyForLogs"
-    effect = "Allow"
-
-    actions = [
-      "kms:Decrypt",
-      "kms:DescribeKey",
-      "kms:Encrypt",
-      "kms:GenerateDataKey*",
-      "kms:ReEncrypt*",
-    ]
-
-    resources = [local.encryption_key_arn]
-
-    condition {
-      test     = "StringEquals"
-      variable = "kms:ViaService"
-      values   = [local.logs_service_principal]
-    }
-  }
-
   dynamic "statement" {
     for_each = local.use_base_config ? [1] : []
 
@@ -403,32 +329,6 @@ data "aws_iam_policy_document" "task" {
       effect    = "Allow"
       actions   = ["secretsmanager:GetSecretValue"]
       resources = [aws_secretsmanager_secret.auth_header[0].arn]
-    }
-  }
-
-  # GetSecretValue alone is not enough once the secret is under a customer managed
-  # key: Secrets Manager decrypts with the caller's credentials, so the task needs
-  # the key too. Missing this does not fail the apply -- the container starts,
-  # cannot read its auth header, and rejects every request.
-  dynamic "statement" {
-    for_each = local.manage_auth_secret ? [1] : []
-
-    content {
-      sid    = "DecryptAuthHeaderSecret"
-      effect = "Allow"
-
-      actions = [
-        "kms:Decrypt",
-        "kms:DescribeKey",
-      ]
-
-      resources = [local.encryption_key_arn]
-
-      condition {
-        test     = "StringEquals"
-        variable = "kms:ViaService"
-        values   = [local.secretsmanager_via_service]
-      }
     }
   }
 
@@ -543,8 +443,5 @@ resource "aws_ecs_service" "this" {
     aws_lb_listener.this,
     aws_iam_role_policy.task,
     aws_iam_role_policy_attachment.execution,
-    # Without this the first task can start before the execution role can use the
-    # log group's key, and its early output is lost rather than retried.
-    aws_iam_role_policy.execution_logs_key,
   ]
 }
