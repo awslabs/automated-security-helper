@@ -55,6 +55,40 @@
  *
  * Consequence for this file: if path metadata is ever re-enabled, these two
  * templates go back over the cap and this test is what will say so.
+ *
+ * WHY `@aws-cdk/core:suppressTemplateIndentation` IS SET IN cdk.json
+ * -----------------------------------------------------------------
+ * CloudFormation parses the template body as JSON, so the indentation is bytes
+ * the cap charges for and nothing reads. Setting that context key makes CDK emit
+ * each template as a single line, which is worth between 12% and 21% per stack:
+ *
+ *   AshAgentCore            66,663 -> 53,183
+ *   AshCodeCommitGate       58,181 -> 47,180
+ *   AshDistributedPipeline 229,782 -> 182,498
+ *   AshFargate              84,141 -> 65,078
+ *   AshImagePipeline        83,369 -> 69,988
+ *
+ * Less than it sounds like, because CDK's default is ONE space and not two --
+ * `Stack._synthesizeTemplate` does `indent = suppress ? undefined : 1`. So this
+ * removes one space per line plus the newline, not two.
+ *
+ * It is set as a global context key rather than per-stack `StackProps` because
+ * whitespace is not a property any single stack should get to disagree about, and
+ * because cdk.json is already where this app's size mitigations live next to
+ * `pathMetadata: false` and `minimizePolicies`. The three S3-only templates do not
+ * need the bytes; they get the key anyway, and the S3-only half of this file is
+ * what confirms none of them fell under the cap and quietly changed launch class.
+ *
+ * IT DOES NOT FIT ON ITS OWN. AshAgentCore comes out at 53,183, still 1,983 over
+ * the cap. The rest has to come from the cdk-nag suppression reasons, which are
+ * 20,424 of that 53,183 -- 38% of the template -- across 18 of its 28 resources.
+ *
+ * ONE MORE CONSEQUENCE, AND IT IS NOT IN THIS FILE: `.pre-commit-config.yaml` runs
+ * `pretty-format-json --autofix --indent=2` over every JSON file except
+ * `.vscode/*`, which claimed these templates. That hook already disagreed with the
+ * committed one-space output before this change; unindented, a contributor running
+ * pre-commit would reflate them to 2-space and break the drift gate. The templates
+ * directory is excluded from that hook for exactly that reason.
  */
 
 import * as fs from 'fs';
