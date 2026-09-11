@@ -31,22 +31,31 @@ Read the total honestly, because on its own it overstates the guarantee. Replace
 always-allow classifier, the exact defect the gate exists to rule out -- and a
 large minority of this file still passes. Measured, not estimated:
 
-    360 tests collected. Under always-allow: 166 fail, 194 still pass.
+    414 tests collected. Under always-allow: 195 fail, 219 still pass.
 
-So the anti-vacuity argument rests on those 166, not on 360. Where they live:
-115 in TestPlantedPayload, 17 in TestSelfTestIsTheControl, 16 in
-TestWheelSiblingDirectoriesAreEnumerated, 8 in
+So the anti-vacuity argument rests on those 195, not on 414. Where they live:
+131 in TestPlantedPayload, 19 in TestSelfTestIsTheControl, 16 in
+TestWheelSiblingDirectoriesAreEnumerated, 10 in
+TestAllowlistsAreWhatTheArtifactContains, 8 in
 TestUnnormalizedPathsCannotDefeatTheAllowlist, 5 in TestOnlyOneDistributionRoot,
-3 in TestArchiveReading, and one each in TestLegitimateMembersShip and
+4 in TestArchiveReading, and one each in TestLegitimateMembersShip and
 TestMutationSensitivity.
 
-The 194 that survive are the ones that should. Almost every test in
+The 219 that survive are the ones that should. Almost every test in
 TestLegitimateMembersShip passes necessarily -- they assert that a member is
 ALLOWED, and an always-allow classifier allows everything, so they cannot fail
 this way; their job is catching over-broad rules, which is a different mutation.
 TestKnownGapsArePinned passes for the same reason by construction. Most of
 TestNoVacuousPass passes because it exercises argument handling and archive
-readability rather than classification.
+readability rather than classification, and all of
+TestAllowlistsAreCheckedInBothDirections passes because
+`stale_allowlist_entries` reads the member list rather than classifying it.
+
+Re-measure with a pytest plugin that stubs `gate.classify_member` at
+`pytest_collection_finish` -- late enough that the module-level fixture constants
+derived from the real classifier are already built. The stub belongs in a
+throwaway plugin outside the tree, never in this file: an abandoned always-allow
+stub inside a security gate's own test suite is the worst possible residue.
 
 Two apparent exceptions, and neither is one: the single
 TestLegitimateMembersShip failure is
@@ -56,7 +65,7 @@ allowlists interact; the TestMutationSensitivity failure is
 test_every_planted_member_is_rejected_by_the_real_classifier, which is a
 load-bearing test by design.
 
-None of this is a defect. It is written down so nobody reads 360 as the strength
+None of this is a defect. It is written down so nobody reads 414 as the strength
 of the guarantee. The property the number summarizes is asserted directly in
 TestMutationSensitivity, which goes red if the self-test ever stops depending on
 classification at all.
@@ -65,13 +74,18 @@ What the gate does NOT prove
 ----------------------------
 Also worth stating, because the gate's own docstring now says it and these tests
 should not imply otherwise: the gate is a regression guard over known vendoring
-mechanisms plus fail-closed allowlists over every DIRECTORY namespace in the
-artifact -- `assets/` member by member, the package's subdirectories by name, the
-artifact's top-level roots, and the contents of `.dist-info`. It is not a proof
-that nothing is vendored. A single third-party `.py` file inside an
-already-pinned subdirectory, named nothing like a scanner, passes.
-TestKnownGapsArePinned pins that gap deliberately, so the limitation is a tested
-fact rather than a comment someone deletes.
+mechanisms plus fail-closed allowlists over every namespace in the artifact --
+`assets/` member by member, `.dist-info/` member by member, the files directly in
+the package member by member, the package's subdirectories by name, and the
+artifact's top-level roots by name. It is not a proof that nothing is vendored.
+
+The gate's docstring enumerates FIVE residual gaps and claims that list is
+exhaustive. TestKnownGapsArePinned makes four of them executable -- content at an
+allowlisted path, a loose file at the SDIST root, a third-party file or tree inside
+a pinned subdirectory, and the size ceiling trusting declared metadata -- and
+TestAllowlistsAreCheckedInBothDirections carries the fifth. If a future change
+closes one, the class goes red and the docstring should be corrected upward, which
+is a good failure to have.
 
 Two rounds of bypasses landed on this gate after the first version shipped. Both
 were fixed by inverting a default rather than by adding a pattern, and the
@@ -1586,6 +1600,39 @@ class TestKnownGapsArePinned:
             _classify("automated_security_helper/utils/helpers/thirdparty_util.py")
             is None
         )
+
+    def test_content_at_an_allowlisted_path_is_never_compared_to_anything(self):
+        """Residual gap 1, and the cheapest of the five to use.
+
+        The allowlists pin paths; nothing pins what is in them. This is the gate's
+        OWN planted unpinned-asset payload, placed at an allowlisted path -- and it
+        ships. Verified end to end: `uv pip install --no-cache --no-deps` delivered
+        the upstream bytes to
+        site-packages/automated_security_helper/assets/ash_stargrep_rules/appsec.yaml,
+        and the same swap succeeded at assets/Gemfile, assets/with-retry.sh,
+        assets/appsec_cfn_rules/IamUserExistsRule.rb and __init__.py.
+
+        Not closable with digests: two of the 14 assets are build-generated, so
+        pinned digests would fail on ordinary work and the gate would get deleted.
+        """
+        assert (
+            _classify(
+                "automated_security_helper/assets/ash_stargrep_rules/appsec.yaml",
+                magic=b"rules:\n  - id: upstream.audit\n",
+            )
+            is None
+        )
+
+    def test_a_third_party_file_at_the_sdist_root_passes(self):
+        """Residual gap 2, and the deliberate half of rule 5d.
+
+        Refused at a wheel root, allowed at an sdist root. Tolerated because the
+        churning set of root files lives there -- pinning it would fail the gate on a
+        new CHANGELOG -- and narrower than it looks, because an sdist root file is
+        not delivered to site-packages. It is still a published artifact carrying
+        third-party payload, so it is a real hole and a one-file one.
+        """
+        assert _classify("automated_security_helper-3.7.0/upstream_rules.yaml") is None
 
     def test_the_size_ceiling_trusts_declared_metadata(self):
         """A crafted archive can understate a member's size.
