@@ -42,8 +42,16 @@ class CdkNagWrapperResponse:
     ``failure`` is the part worth explaining. This wrapper distinguishes three outcomes: None
     returned from the call means the file was not a CloudFormation template and was skipped, a
     response with ``failure=None`` means cdk-nag evaluated the template, and a response with
-    ``failure`` set means the run produced no readable validation report -- so no rule was
-    evaluated and the empty ``results`` says nothing about the template's compliance.
+    ``failure`` set means no rule was evaluated -- so the empty ``results`` says nothing about
+    the template's compliance.
+
+    Three states reach ``failure``, and they were not always three. The original one is a run
+    that produced no readable validation report. The other two used to return bare None and so
+    arrived at the scanner as the legitimate skip: cdk-nag failing to import, and no nag pack
+    being registered. Both mean a real template went unevaluated, which is the opposite of a
+    skip -- the scanner un-counted the attempt for each of them, and a scan where every
+    template hit one of the two ended at zero attempts and reported SKIPPED with exit code 0.
+    Only "this file is not a CloudFormation template" is a skip, so only it returns None.
 
     Before this field existed the caller could only see None-versus-response, and a report-less
     run arrived as an ordinary response holding an empty dict. The scanner counted the target
@@ -588,13 +596,41 @@ def run_cdk_nag_against_cfn_template(
 
             try:
                 import cdk_nag
-            except (ImportError, FileNotFoundError):
+            except (ImportError, FileNotFoundError) as exc:
                 sys.stderr = original_stderr
-                ASH_LOGGER.warning(
-                    "NodeJS is missing and CDK Nag depends on it due to transitive dependencies. "
-                    "Please install NodeJS and try running your ASH scan again for CDK NagPack coverage on CloudFormation templates. "
+                # Names the module that actually could not be loaded. This used to
+                # report "NodeJS is missing" for every failure here, which is one
+                # cause among several and was measurably the wrong one: on a host
+                # with NodeJS 22 on PATH and cdk-nag installed without its
+                # dependencies, the import fails on a Python module and the log
+                # sent the operator to install NodeJS they already had.
+                #
+                # FileNotFoundError is the shape that really does mean NodeJS --
+                # jsii spawns `node` and the exec fails -- so it keeps that hint,
+                # and ImportError does not.
+                hint = (
+                    "cdk-nag runs NodeJS through jsii; check that `node` is on PATH."
+                    if isinstance(exc, FileNotFoundError)
+                    else "Reinstall the CDK dependencies with: ash dependencies install"
                 )
-                return None
+                # A response carrying ``failure``, not a bare None. None is this
+                # function's "that file was not a CloudFormation template" answer,
+                # which the scanner treats as an expected skip and un-counts. An
+                # import that failed is not a skip: the template was real, no rule
+                # ran against it, and returning the skip value made every template
+                # in the scan set un-count itself until the attempt total reached
+                # zero and the run reported SKIPPED with exit code 0.
+                ASH_LOGGER.error(
+                    f"cdk-nag could not be imported, so {template_path} was not "
+                    f"evaluated: {type(exc).__name__}: {exc}. {hint}"
+                )
+                return CdkNagWrapperResponse(
+                    results={},
+                    failure=(
+                        f"cdk-nag could not be imported "
+                        f"({type(exc).__name__}: {exc}), so no rule was evaluated"
+                    ),
+                )
             from aws_cdk import (
                 App,
                 Stack,
@@ -712,11 +748,43 @@ def run_cdk_nag_against_cfn_template(
             if not nag_packs:
                 # No pack means no rule can fire, which would otherwise yield an empty report
                 # indistinguishable from a compliant template.
+                #
+                # A response carrying ``failure``, not a bare None. This branch has always
+                # logged at ERROR and said "nothing was evaluated", and returning the
+                # not-a-template skip value contradicted both: the scanner un-counted the
+                # attempt, the total reached zero, and the run reported SKIPPED with exit
+                # code 0 and executionSuccessful=True. A previous revision pinned that
+                # outcome as intended on the reading that an all-packs-disabled config is an
+                # operator saying "do not run this". It is overturned here for three reasons.
+                # SKIPPED's place on the completeness allowlist is justified by a different
+                # meaning -- "the scanner was not selected", which is what sharding and
+                # --exclude-scanners produce -- and cdk-nag with zero packs was selected and
+                # did run, so it was riding on a justification not written for it. The
+                # operator who wants cdk-nag silent already has two unambiguous ways to say
+                # so, ``enabled: false`` and ``--exclude-scanners cdk-nag``, both of which
+                # still record SKIPPED, so nothing is taken away. And ``CdkNagPacks`` allows
+                # extra keys, so a config that reaches zero packs by accident -- a pack name
+                # that no longer exists, or a disable of the one default-on pack in the
+                # belief that another is on -- rendered identically to a deliberate one.
+                # Under SKIPPED an operator could not tell those apart; under ``failure``
+                # both are named out loud and the accidental one is fixable.
+                #
+                # Placed after the template model check above, not at the top of the
+                # function, and the order is load-bearing: a repository of ordinary JSON
+                # scanned with every pack disabled must still be a skip rather than a
+                # failure, because there was nothing to evaluate either way.
                 ASH_LOGGER.error(
                     f"No cdk-nag packs were registered for {template_path}; nothing was "
                     "evaluated."
                 )
-                return None
+                return CdkNagWrapperResponse(
+                    results={},
+                    failure=(
+                        "no cdk-nag pack was registered, so no rule was evaluated; "
+                        "enable a pack under nag_packs, or turn the scanner off with "
+                        "enabled: false if cdk-nag is not wanted"
+                    ),
+                )
 
             # Synth is where validation runs, and CDK raises when a plugin reports violations.
             # For this wrapper a raise is the ordinary case -- findings are the product -- so
