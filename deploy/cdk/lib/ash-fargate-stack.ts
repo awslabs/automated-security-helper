@@ -109,6 +109,29 @@ export class AshFargateStack extends Stack {
     const vpc = new ec2.Vpc(this, 'Vpc', {
       maxAzs: 2,
       natGateways: 1,
+      /**
+       * CDK's own default layout, restated only so the public subnets can stop
+       * auto-assigning public IPv4 addresses.
+       *
+       * The names and the absent `cidrMask` are exactly what `Vpc.DEFAULT_SUBNETS`
+       * uses, so the address allocation and every subnet's logical id are
+       * unchanged — the one difference is `mapPublicIpOnLaunch`.
+       *
+       * Nothing is launched into these public subnets. They exist to hold the NAT
+       * gateway and nothing else: the tasks run in PRIVATE_WITH_EGRESS and the
+       * load balancer is internal. `MapPublicIpOnLaunch` governs whether
+       * "instances launched in this subnet receive a public IPv4 address"
+       * (https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-ec2-subnet.html),
+       * and a NAT gateway is not an instance launch — it carries its own Elastic
+       * IP, allocated explicitly below by CDK. So turning it off removes a default
+       * that would silently expose anything an operator later launched here, and
+       * costs the deployment nothing. CDK defaults it to true for PUBLIC subnets;
+       * CloudFormation's own default is false.
+       */
+      subnetConfiguration: [
+        { name: 'Public', subnetType: ec2.SubnetType.PUBLIC, mapPublicIpOnLaunch: false },
+        { name: 'Private', subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      ],
       // Flow logs are on because this VPC carries source code being scanned and
       // the findings about it; without them a suspected exfiltration has nothing
       // to investigate. Encrypted with the stack key for the same reason: the
