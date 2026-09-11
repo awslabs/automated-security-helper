@@ -52,6 +52,34 @@ name: ASH - Package Build
 # Note for anyone comparing against ash-unified-ci.yml: that file also carries
 # `push: branches: ["!main"]`, which does not do what it appears to. It is a known
 # bug being fixed on another branch and is deliberately NOT reproduced here.
+#
+# WHY THERE IS NO `push` TRIGGER, WHICH IS A DECISION AND NOT AN OMISSION
+#
+# The obvious reading is that main gets no artifact gate. It does, via merge_group:
+# a queue entry runs on the `gh-readonly-queue/main/pr-<n>-<sha>` ref, which IS
+# main with the queued change applied -- the exact tree that becomes main. A
+# `push: [main]` leg would re-check a tree this workflow cleared moments earlier
+# and would report after the merge, when the verdict can no longer block anything.
+#
+# It also matches how this repository gates. Six workflows are pull_request +
+# merge_group with no push at all -- ash-repo-scan, ash-upgrade-paths,
+# ash-pr-title-check, ash-install-methods, dependency-review and this one. The
+# only two gate-shaped workflows that do declare a push filter (ash-unified-ci,
+# ash-iac-drift) declare `branches: ["!main"]`, a list containing nothing but a
+# negative pattern, which matches no branch and fires no run. Copying a push leg
+# from a neighbour here means copying that.
+#
+# The residual gap, stated plainly rather than left implied: if the merge queue is
+# ever disabled for this repository, or someone with admin rights pushes straight
+# to main, no artifact gate runs on the resulting commit. That is the condition
+# under which a push leg becomes worth adding -- not the mere absence of one.
+#
+# If it is ever added, `concurrency.group` must include github.sha for push
+# events. The group below is keyed on github.ref, which is `refs/heads/main` for
+# every push to main, and cancel-in-progress is false for non-pull_request events:
+# consecutive merges would land in one group where a pending run either queues
+# behind its predecessor or, if someone flips cancellation on, gets cancelled and
+# never reports -- a required check that never answers.
 
 on:
   pull_request:
@@ -109,10 +137,12 @@ jobs:
       # pass before its verdict on a real artifact means anything: a matcher that
       # silently stopped matching would otherwise clear every wheel forever, and
       # that is the failure mode this whole step exists to rule out. It plants
-      # known third-party payload in fixture archives and requires rejection, and
-      # pairs that with a fixture of the legitimate lookalikes -- Gemfile.lock,
-      # the ASH-authored cfn-nag rules, the trivy/snyk/bandit adapters -- and
-      # requires acceptance.
+      # known third-party payload in fixture archives -- one member per detector,
+      # ten of them -- and requires each to be rejected BY THE INTENDED DETECTOR,
+      # so a rule masked by another rule is reported rather than hidden. It pairs
+      # that with a fixture of the legitimate lookalikes -- all 14 pinned assets,
+      # Gemfile.lock, the ASH-authored cfn-nag rules, the trivy/snyk/bandit
+      # adapters -- and requires acceptance.
       #
       # It runs first so an ordering accident cannot leave the control unrun after
       # a build failure short-circuits the job.
@@ -139,10 +169,26 @@ jobs:
       # The operator invariant for the whole installer program: no artifact
       # published from this repository may carry third-party scanner source or
       # assets. ASH invokes bandit, checkov, semgrep, grype, syft, trivy,
-      # opengrep, detect-secrets, cdk-nag and cfn-nag; it redistributes none of
-      # them. Two vendored .jsii.tgz bundles (aws-cdk-lib, cdk-nag) lived in the
-      # tree until commit 760f3647, so this is a regression guard rather than a
-      # hypothetical.
+      # opengrep, npm-audit, detect-secrets, cdk-nag and cfn-nag; it redistributes
+      # none of them. Two vendored .jsii.tgz bundles (aws-cdk-lib, cdk-nag) lived
+      # in the tree until commit 760f3647, so this is a regression guard rather
+      # than a hypothetical.
+      #
+      # What a green result here does and does not mean is spelled out in the
+      # script's own docstring, and it matters: this is a regression guard over
+      # known vendoring mechanisms plus a fail-closed allowlist over assets/ and
+      # over the set of package subdirectories. It is not a proof that nothing is
+      # vendored -- a third-party .py file inside an already-pinned subdirectory,
+      # named nothing like a scanner, passes. Read green as "none of the known
+      # mechanisms fired", not as "audited clean".
+      #
+      # Two failure modes are worth recognizing in a log rather than debugging
+      # cold. `unpinned-asset` means a file arrived in
+      # automated_security_helper/assets/ that is not in ASSETS_ALLOWLIST, and
+      # `unpinned-package-subdirectory` means a new directory appeared directly
+      # under automated_security_helper/. If the file is ASH's own, the fix is a
+      # one-line addition to the corresponding list in the script, in the same
+      # commit that adds the file. That diff is the point of the rule.
       - name: Assert no artifact ships third-party scanner code
         run: python3 .github/scripts/assert-artifact-contents.py dist/*.whl dist/*.tar.gz
 
