@@ -31,14 +31,16 @@ Read the total honestly, because on its own it overstates the guarantee. Replace
 always-allow classifier, the exact defect the gate exists to rule out -- and a
 large minority of this file still passes. Measured, not estimated:
 
-    287 tests collected. Under always-allow: 140 fail, 147 still pass.
+    360 tests collected. Under always-allow: 166 fail, 194 still pass.
 
-So the anti-vacuity argument rests on those 140, not on 287. Where they live:
-116 in TestPlantedPayload, 19 in TestSelfTestIsTheControl, 3 in
-TestArchiveReading, and one each in TestLegitimateMembersShip and
+So the anti-vacuity argument rests on those 166, not on 360. Where they live:
+115 in TestPlantedPayload, 17 in TestSelfTestIsTheControl, 16 in
+TestWheelSiblingDirectoriesAreEnumerated, 8 in
+TestUnnormalizedPathsCannotDefeatTheAllowlist, 5 in TestOnlyOneDistributionRoot,
+3 in TestArchiveReading, and one each in TestLegitimateMembersShip and
 TestMutationSensitivity.
 
-The 147 that survive are the ones that should. Almost every test in
+The 194 that survive are the ones that should. Almost every test in
 TestLegitimateMembersShip passes necessarily -- they assert that a member is
 ALLOWED, and an always-allow classifier allows everything, so they cannot fail
 this way; their job is catching over-broad rules, which is a different mutation.
@@ -54,7 +56,7 @@ allowlists interact; the TestMutationSensitivity failure is
 test_every_planted_member_is_rejected_by_the_real_classifier, which is a
 load-bearing test by design.
 
-None of this is a defect. It is written down so nobody reads 287 as the strength
+None of this is a defect. It is written down so nobody reads 360 as the strength
 of the guarantee. The property the number summarizes is asserted directly in
 TestMutationSensitivity, which goes red if the self-test ever stops depending on
 classification at all.
@@ -63,11 +65,23 @@ What the gate does NOT prove
 ----------------------------
 Also worth stating, because the gate's own docstring now says it and these tests
 should not imply otherwise: the gate is a regression guard over known vendoring
-mechanisms plus a fail-closed allowlist over `assets/` and the set of package
-subdirectories. It is not a proof that nothing is vendored. A single third-party
-`.py` file inside an already-pinned subdirectory, named nothing like a scanner,
-passes. TestKnownGapsArePinned pins that gap deliberately, so the limitation is a
-tested fact rather than a comment someone deletes.
+mechanisms plus fail-closed allowlists over every DIRECTORY namespace in the
+artifact -- `assets/` member by member, the package's subdirectories by name, the
+artifact's top-level roots, and the contents of `.dist-info`. It is not a proof
+that nothing is vendored. A single third-party `.py` file inside an
+already-pinned subdirectory, named nothing like a scanner, passes.
+TestKnownGapsArePinned pins that gap deliberately, so the limitation is a tested
+fact rather than a comment someone deletes.
+
+Two rounds of bypasses landed on this gate after the first version shipped. Both
+were fixed by inverting a default rather than by adding a pattern, and the
+remaining classes of tests -- TestUnnormalizedPathsCannotDefeatTheAllowlist,
+TestWheelSiblingDirectoriesAreEnumerated, TestOnlyOneDistributionRoot -- are the
+committed record of each. Every case in them was verified end to end before the
+fix: appended to the real wheel, gate run and exit code recorded, then
+`uv pip install --no-cache --no-deps` into a fresh venv to confirm the payload
+actually reached disk. All seven representative payloads were delivered, one of
+them onto PATH and one as a new top-level package in site-packages.
 
 The gate also ships its own `--self-test`, which the workflow runs before the
 real check. These tests are not a substitute for it: the self-test proves the
@@ -132,7 +146,11 @@ def _write_wheel(path: Path, members: dict) -> Path:
     return path
 
 
-CLEAN_MEMBERS = {name: b"# ash\n" for name in gate.LEGITIMATE_MEMBERS}
+# Wheel-shaped, not the union: an artifact carrying both a bare package root and
+# a version-stamped wrapper has two distribution roots and check_artifact refuses
+# it before any rule runs. gate.LEGITIMATE_MEMBERS is the union, usable for
+# per-member classification but not as one fixture.
+CLEAN_MEMBERS = {name: b"# ash\n" for name in gate.LEGITIMATE_WHEEL_MEMBERS}
 
 # automated_security_helper/schemas/AshAggregatedResults.json, the largest member
 # of the wheel and sdist built by `uv build` at the commit that added the size
@@ -310,26 +328,17 @@ class TestLegitimateMembersShip:
         """The sdist carries loose files beside the package. They must ship."""
         assert _classify(f"automated_security_helper-3.7.0/{root_file}") is None
 
-    @pytest.mark.parametrize(
-        "metadata_member",
-        [
-            "automated_security_helper-3.7.0.dist-info/METADATA",
-            "automated_security_helper-3.7.0.dist-info/RECORD",
-            "automated_security_helper-3.7.0.dist-info/WHEEL",
-            "automated_security_helper-3.7.0.dist-info/entry_points.txt",
-            "automated_security_helper-3.7.0.dist-info/licenses/LICENSE",
-            "automated_security_helper-3.7.0.data/scripts/ash",
-        ],
-    )
-    def test_wheel_metadata_directory_is_allowed(self, metadata_member):
-        """`.dist-info` and `.data` are recognized by suffix, not by version.
+    @pytest.mark.parametrize("inner", sorted(gate.DIST_INFO_ALLOWLIST))
+    def test_pinned_dist_info_member_is_allowed(self, inner):
+        """The six members hatchling writes into .dist-info, and only those.
 
-        They also must NOT be stripped as if they were the sdist wrapper -- both
-        begin `automated_security_helper-`. Stripping `.dist-info/METADATA` would
-        leave a bare `METADATA` at the artifact root, which rule 5c would then
-        have to either reject or be widened to permit.
+        They must also NOT be stripped as if the directory were the sdist wrapper
+        -- it too begins `automated_security_helper-`. Stripping
+        `.dist-info/METADATA` would leave a bare `METADATA` at the artifact root,
+        which rule 5c does not constrain, so the member would be allowed
+        unconditionally rather than because it is pinned.
         """
-        assert _classify(metadata_member) is None
+        assert _classify(f"automated_security_helper-3.7.0.dist-info/{inner}") is None
 
     @pytest.mark.parametrize(
         "version",
@@ -714,6 +723,260 @@ class TestPlantedPayload:
         assert violation is not None
         assert violation.member == name
 
+
+class TestUnnormalizedPathsCannotDefeatTheAllowlist:
+    """The whole of relayed finding 1, which was verified end to end.
+
+    A reviewer appended each of these to the REAL wheel, ran the gate (exit 0),
+    then `uv pip install --no-cache --no-deps` into a fresh venv and confirmed the
+    payload landed at site-packages/automated_security_helper/assets/upstream.yaml
+    -- the exact directory the 14-entry allowlist enumerates. The payload was a
+    genuine upstream LGPL-2.1 semgrep-registry rule.
+
+    The root cause was a single raw-string comparison. Rule 5a tested
+    `relative.startswith(ASSETS_PREFIX)`; every other rule read `path.parts`,
+    which PurePosixPath has already canonicalized. The tell was that the identical
+    path inside the SDIST was caught, because the wrapper strip rebuilt the string
+    from `parts` and the `.` disappeared on the way -- same input, two verdicts,
+    which isolates the cause to the raw string and nothing else.
+    """
+
+    @pytest.mark.parametrize(
+        ("label", "name"),
+        [
+            ("dot segment", "automated_security_helper/./assets/upstream.yaml"),
+            ("double slash", "automated_security_helper//assets/upstream.yaml"),
+            ("leading dot slash", "./automated_security_helper/assets/upstream.yaml"),
+            ("trailing dot dir", "automated_security_helper/assets/./upstream.yaml"),
+            ("many segments", "automated_security_helper/.//./assets//upstream.yaml"),
+        ],
+    )
+    def test_unnormalized_asset_path_is_still_rejected(self, label, name):
+        violation = _classify(name)
+        assert violation is not None, label
+        assert violation.rule == "unpinned-asset", label
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "automated_security_helper/./assets/upstream.yaml",
+            "automated_security_helper//assets/upstream.yaml",
+            "./automated_security_helper/assets/upstream.yaml",
+        ],
+    )
+    def test_wheel_and_sdist_agree_on_the_same_member(self, name):
+        """The asymmetry itself is the bug, so pin the agreement.
+
+        Before the fix the wheel spelling was ALLOWED and the sdist spelling was
+        rejected. A gate whose answer depends on which artifact it is reading has
+        no answer, and testing one surface would have shown one of the two and
+        called it the verdict.
+        """
+        wheel_verdict = _classify(name)
+        sdist_verdict = _classify(f"automated_security_helper-3.7.0/{name}")
+        assert wheel_verdict is not None, name
+        assert sdist_verdict is not None, name
+        assert wheel_verdict.rule == sdist_verdict.rule == "unpinned-asset", name
+
+    def test_normalization_leaves_a_canonical_path_alone(self):
+        """The normalizer must be identity on paths that are already canonical."""
+        for name in gate.LEGITIMATE_MEMBERS:
+            assert gate.normalize_member_path(name) == name, name
+
+    @pytest.mark.parametrize(
+        ("raw", "canonical"),
+        [
+            ("a/./b", "a/b"),
+            ("a//b", "a/b"),
+            ("./a/b", "a/b"),
+            ("a/b", "a/b"),
+            ("a", "a"),
+        ],
+    )
+    def test_normalizer_canonicalizes(self, raw, canonical):
+        assert gate.normalize_member_path(raw) == canonical
+
+
+class TestWheelSiblingDirectoriesAreEnumerated:
+    """Relayed findings 2, 3 and 5, which share one root cause.
+
+    Accepting any component that ENDS in `.dist-info` or `.data` as wheel metadata
+    was an exemption keyed on a name shape, and it let three things through at
+    once. All were verified delivered by `uv pip install` into a fresh venv:
+
+      .data/purelib/semgrep_registry/python.yaml -> site-packages/semgrep_registry/
+      .data/scripts/run-scanner                  -> <venv>/bin/run-scanner, on PATH
+      .dist-info/upstream_rules.yaml             -> site-packages/...dist-info/
+      .dist-info/licenses/upstream_rules.yaml    -> same, at any depth
+      evil.data/purelib/...                      -> site-packages/evil.data/purelib/
+
+    The fix is the inversion: enumerate the roots that are accepted. `.data` is not
+    one of them, because the real wheel has no `.data` directory at all -- its only
+    two roots are the package and `.dist-info`. A future build that legitimately
+    needs one fails this gate until somebody adds it deliberately, which is the
+    right cost for a directory whose purpose is writing outside the package.
+    """
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "automated_security_helper-3.7.0.data/purelib/semgrep_registry/python.yaml",
+            "automated_security_helper-3.7.0.data/purelib/checkov_vendored/main.py",
+            "automated_security_helper-3.7.0.data/scripts/run-scanner",
+            "automated_security_helper-3.7.0.data/platlib/a/b/c/rules.yaml",
+            "automated_security_helper-3.7.0.data/headers/x.h",
+            "automated_security_helper-3.7.0.data/data/share/rules.yaml",
+        ],
+    )
+    def test_wheel_data_scheme_tree_is_rejected(self, name):
+        """pip unpacks purelib/ into site-packages and scripts/ onto PATH."""
+        violation = _classify(name)
+        assert violation is not None, name
+        assert violation.rule == "unpinned-distribution-directory", name
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "automated_security_helper-3.7.0.dist-info/upstream_rules.yaml",
+            "automated_security_helper-3.7.0.dist-info/licenses/upstream_rules.yaml",
+            "automated_security_helper-3.7.0.dist-info/licenses/a/b/rules.yaml",
+            "automated_security_helper-3.7.0.dist-info/license_files/upstream.yaml",
+            "automated_security_helper-3.7.0.dist-info/vendor_lib/index.js",
+            "automated_security_helper-3.7.0.dist-info/top_level.txt",
+        ],
+    )
+    def test_unpinned_dist_info_member_is_rejected(self, name):
+        """pip copies .dist-info verbatim, so it is pinned exactly like assets/."""
+        violation = _classify(name)
+        assert violation is not None, name
+        assert violation.rule == "unpinned-dist-info-member", name
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "evil.data/purelib/semgrep_registry/python.yaml",
+            "evil.dist-info/upstream.yaml",
+            "not-ours-1.0.dist-info/METADATA",
+            "totally.data/scripts/run-scanner",
+        ],
+    )
+    def test_a_directory_merely_ending_in_a_metadata_suffix_is_rejected(self, name):
+        """The suffix test accepted these as metadata purely by how they end."""
+        violation = _classify(name)
+        assert violation is not None, name
+        assert violation.rule == "unpinned-distribution-directory", name
+
+    def test_the_real_wheel_has_no_data_directory(self):
+        """The premise for not accepting `.data` at all, asserted not assumed.
+
+        If a build ever starts emitting one, the self-test's clean fixture stops
+        resembling the artifact and this is the test that says so first.
+        """
+        assert not any(".data/" in member for member in gate.LEGITIMATE_WHEEL_MEMBERS)
+        assert ".data" not in gate.DISTRIBUTION_ROOT_DIRECTORIES
+
+
+class TestOnlyOneDistributionRoot:
+    """Relayed finding 4, and the part of it no per-member rule can reach.
+
+    `automated_security_helper-vendor/upstream_semgrep_rules.yaml` was stripped by
+    a `startswith(f"{PACKAGE_ROOT}-")` wrapper test, and its contents became
+    "loose root files", which rule 5c deliberately does not constrain. Verified
+    delivered to site-packages/automated_security_helper-vendor/. Requiring a
+    digit where the version starts fixes that spelling.
+
+    It does not fix `automated_security_helper-9.9.9/`, which is a legitimately
+    wrapper-shaped name. Per member there is no way to tell the real wrapper from
+    a planted one -- both match. Across the artifact there is, and that is why the
+    check lives in check_artifact rather than in classify_member.
+    """
+
+    @pytest.mark.parametrize(
+        "directory",
+        [
+            "automated_security_helper-vendor",
+            "automated_security_helper-tools",
+            "automated_security_helper-",
+            "automated-security-helper-vendor",
+        ],
+    )
+    def test_wrapper_lookalike_directory_is_rejected(self, directory):
+        violation = _classify(f"{directory}/upstream_semgrep_rules.yaml")
+        assert violation is not None, directory
+        assert violation.rule == "unpinned-distribution-directory", directory
+
+    @pytest.mark.parametrize(
+        "version", ["9.9.9", "0.0.1", "4.0.0rc1", "1!2.0", "3.7.0"]
+    )
+    def test_second_wrapper_shaped_root_is_refused_for_the_whole_artifact(
+        self, tmp_path, version
+    ):
+        """A wheel has no wrapper; an sdist has one. Two of anything is neither.
+
+        Refused rather than reported as a violation, deliberately: with two
+        candidate roots the gate cannot say which members are inside the
+        distribution, so every other verdict would be a guess.
+        """
+        wheel = _write_wheel(
+            tmp_path / f"two-roots-{version}.whl",
+            {
+                **{n: b"# ash\n" for n in gate.LEGITIMATE_WHEEL_MEMBERS},
+                f"automated_security_helper-{version}/upstream_semgrep_rules.yaml": b"rules: []\n",
+            },
+        )
+        with pytest.raises(ValueError, match="distribution roots"):
+            gate.check_artifact(str(wheel))
+
+    def test_two_wrappers_in_an_sdist_shape_are_refused(self, tmp_path):
+        wheel = _write_wheel(
+            tmp_path / "two-wrappers.whl",
+            {
+                **{n: b"# ash\n" for n in gate.LEGITIMATE_SDIST_MEMBERS},
+                "automated_security_helper-9.9.9/upstream_semgrep_rules.yaml": b"rules: []\n",
+            },
+        )
+        with pytest.raises(ValueError, match="distribution roots"):
+            gate.check_artifact(str(wheel))
+
+    def test_the_real_shapes_have_exactly_one_distribution_root(self):
+        for label, members in (
+            ("wheel", gate.LEGITIMATE_WHEEL_MEMBERS),
+            ("sdist", gate.LEGITIMATE_SDIST_MEMBERS),
+        ):
+            roots = gate.distribution_roots(
+                [gate.Member(name=n, size=8, magic=b"# ash\n") for n in members]
+            )
+            assert len(roots) == 1, f"{label}: {roots}"
+
+    def test_dist_info_is_not_counted_as_a_distribution_root(self):
+        """It matches the wrapper shape but is metadata beside the distribution."""
+        members = [
+            gate.Member(name=n, size=8, magic=b"# ash\n")
+            for n in gate.LEGITIMATE_WHEEL_MEMBERS
+        ]
+        assert gate.distribution_roots(members) == ["automated_security_helper"]
+
+    @pytest.mark.parametrize(
+        ("component", "expected"),
+        [
+            ("automated_security_helper-3.7.0", True),
+            ("automated-security-helper-3.7.0", True),
+            ("automated_security_helper-3.8.0rc1", True),
+            ("automated_security_helper-3.8.0+g12ab-dirty", True),
+            ("automated_security_helper-vendor", False),
+            ("automated_security_helper-", False),
+            ("automated_security_helper", False),
+            # Both wheel siblings match the wrapper regex on their own; treating
+            # either as a wrapper would strip it and put its contents at the
+            # artifact root as unconstrained loose files.
+            ("automated_security_helper-3.7.0.dist-info", False),
+            ("automated_security_helper-3.7.0.data", False),
+            ("evil.data", False),
+        ],
+    )
+    def test_wrapper_recognition(self, component, expected):
+        assert gate.is_sdist_wrapper(component) is expected, component
+
     def test_oversize_member_is_rejected(self):
         violation = _classify(
             "automated_security_helper/utils/payload.dat",
@@ -1017,6 +1280,10 @@ NEUTERED = [
         "DISTRIBUTION_ROOT_DIRECTORIES",
         frozenset(gate.DISTRIBUTION_ROOT_DIRECTORIES) | {"third_party_tools"},
     ),
+    (
+        "DIST_INFO_ALLOWLIST",
+        frozenset(gate.DIST_INFO_ALLOWLIST) | {"licenses/upstream_rules.yaml"},
+    ),
     # Exactly the fixture's own size, so `size > ceiling` is False. Raising it to
     # something enormous would be the obvious move and would make the fixture try
     # to allocate the new ceiling.
@@ -1047,11 +1314,19 @@ class TestSelfTestIsTheControl:
         assert rules.count("nested-archive") == 2
         assert rules.count("native-binary") == 2
         assert rules.count("vendored-scanner") == 2
-        assert len(gate.PLANTED_MEMBERS) == 12
-        # One neutering experiment per detector, minus the two that share a
-        # detector's rule set: `vendored-scanner-manifest` exercises the same
-        # SCANNER_DIST_NAMES table as `vendored-scanner`.
-        assert len(NEUTERED) == 11
+        # Two detectors also share `unpinned-asset`: the plain unpinned file and
+        # the unnormalized-path spelling of it, which reached the same rule by a
+        # different route and used to escape it entirely.
+        assert rules.count("unpinned-asset") == 2
+        assert rules.count("unpinned-distribution-directory") == 3
+        assert len(gate.PLANTED_MEMBERS) == 16
+        # One neutering experiment per RULE SET, which is fewer than the number of
+        # detectors: several detectors share a table. `vendored-scanner-manifest`
+        # exercises the same SCANNER_DIST_NAMES as `vendored-scanner`;
+        # `unnormalized-path-defeats-the-assets-allowlist` shares ASSETS_ALLOWLIST;
+        # the `.data` and wrapper-lookalike detectors share
+        # DISTRIBUTION_ROOT_DIRECTORIES.
+        assert len(NEUTERED) == 12
         assert {c for c, _ in NEUTERED} == {
             "malformed_path_reason",
             "VENDOR_DIR_COMPONENTS",
@@ -1063,6 +1338,7 @@ class TestSelfTestIsTheControl:
             "ASSETS_ALLOWLIST",
             "PACKAGE_SUBDIRECTORIES",
             "DISTRIBUTION_ROOT_DIRECTORIES",
+            "DIST_INFO_ALLOWLIST",
             "MAX_MEMBER_BYTES",
         }
 
@@ -1119,7 +1395,15 @@ class TestSelfTestIsTheControl:
             "SCANNER_DIST_NAMES": "vendored-scanner",
             "ASSETS_ALLOWLIST": "unpinned-asset",
             "PACKAGE_SUBDIRECTORIES": "unpinned-package-subdirectory",
+            # Three detectors share this rule set -- the plain unenumerated root,
+            # the `.data` scheme tree and the wrapper-lookalike directory. The
+            # neutered value widens the set with `third_party_tools`, so the
+            # experiment is about the first of them; the other two are covered by
+            # their own committed test cases rather than by a second widening,
+            # which would have to name a different directory and would then be
+            # measuring the same table twice.
             "DISTRIBUTION_ROOT_DIRECTORIES": "unpinned-distribution-directory",
+            "DIST_INFO_ALLOWLIST": "unpinned-dist-info-member",
             "MAX_MEMBER_BYTES": "oversize-member",
         }
         label = label_for[constant]
@@ -1162,7 +1446,7 @@ class TestSelfTestIsTheControl:
                     f"dropping {dropped} from ASSETS_ALLOWLIST left the "
                     "self-test green, so that entry is not what admits the file"
                 )
-                assert "clean fixture was rejected" in stream.getvalue()
+                assert "fixture was rejected" in stream.getvalue()
             finally:
                 gate.ASSETS_ALLOWLIST = original
 
@@ -1173,7 +1457,7 @@ class TestSelfTestIsTheControl:
             gate.PACKAGE_SUBDIRECTORIES = frozenset(original) - {"utils"}
             stream = io.StringIO()
             assert gate.run_self_test(stream) == 1
-            assert "clean fixture was rejected" in stream.getvalue()
+            assert "fixture was rejected" in stream.getvalue()
         finally:
             gate.PACKAGE_SUBDIRECTORIES = original
 
@@ -1184,29 +1468,20 @@ class TestSelfTestIsTheControl:
             gate.DISTRIBUTION_ROOT_DIRECTORIES = frozenset()
             stream = io.StringIO()
             assert gate.run_self_test(stream) == 1
-            assert "clean fixture was rejected" in stream.getvalue()
+            assert "fixture was rejected" in stream.getvalue()
         finally:
             gate.DISTRIBUTION_ROOT_DIRECTORIES = original
 
-    def test_wheel_metadata_is_neither_stripped_nor_rejected(self):
-        """The honest experiment for WHEEL_METADATA_SUFFIXES.
+    def test_dist_info_is_neither_stripped_nor_rejected(self):
+        """The metadata directory must survive stripping AND be accepted.
 
-        Emptying it is NOT a valid neutering experiment, and finding that out is
-        the reason this test exists in this shape. The tuple is read in two places
-        with opposing effects: strip_distribution_root() uses it to decline to
-        strip a metadata directory as if it were the sdist wrapper, and rule 5c
-        uses it to permit one at the artifact root. Empty it and
-        `...dist-info/METADATA` is stripped to a bare `METADATA`, a
-        single-component root FILE that rule 5c does not constrain -- so the
-        member is still allowed, by a different route, and the self-test stays
-        green. A test asserting "emptying it turns the control red" would have
-        failed for a reason that has nothing to do with the property it claimed to
-        measure.
-
-        So the property is asserted directly instead: a metadata member keeps its
-        directory (it is not stripped) and is allowed (it is not rejected). Both
-        halves matter, and only the conjunction distinguishes correct behaviour
-        from the cancelling pair above.
+        Both halves matter, and only the conjunction is meaningful. `.dist-info`
+        matches the sdist wrapper shape on its own, so if the wrapper strip claimed
+        it, `.dist-info/METADATA` would become a bare `METADATA` at the artifact
+        root -- a single-component loose FILE that rule 5c does not constrain. The
+        member would then be allowed for the wrong reason: not because it is
+        pinned, but because the gate had lost track of where it lives. A test that
+        only asserted "it is allowed" would pass in both worlds.
         """
         member = "automated_security_helper-3.7.0.dist-info/METADATA"
         assert gate.strip_distribution_root(member) == member, (
@@ -1214,44 +1489,26 @@ class TestSelfTestIsTheControl:
         )
         assert _classify(member) is None
 
-    # Names chosen so no other rule can claim them: `gems` would have been caught
-    # by the vendor-directory rule instead, which would make this test pass
-    # without exercising rule 5c at all.
-    @pytest.mark.parametrize(
-        "subdirectory",
-        ["vendor_lib", "third_party_tools", "bundled_rules", "toolchain"],
-    )
-    def test_unpinned_directory_inside_wheel_metadata_is_rejected(self, subdirectory):
-        """A tree parked inside `.dist-info/` ships like one in the package.
-
-        Rule 5c permits the metadata directory at the root and rule 5b only looks
-        under the package, so the second level inside `.dist-info/` was an
-        unconstrained namespace -- and pip copies that directory verbatim into
-        site-packages. Found while writing the accept-side experiment above.
-        """
-        name = f"automated_security_helper-3.7.0.dist-info/{subdirectory}/index.js"
-        violation = _classify(name)
-        assert violation is not None, subdirectory
-        assert violation.rule == "unpinned-distribution-directory", subdirectory
-
-    @pytest.mark.parametrize(
-        "member",
-        [
-            "automated_security_helper-3.7.0.dist-info/licenses/LICENSE",
-            "automated_security_helper-3.7.0.dist-info/licenses/NOTICE",
-            "automated_security_helper-3.7.0.data/scripts/ash",
-            "automated_security_helper-3.7.0.data/purelib/x.py",
-        ],
-    )
-    def test_real_wheel_metadata_subdirectories_are_allowed(self, member):
-        """`licenses/` is what hatchling writes; the rest are wheel scheme dirs."""
-        assert _classify(member) is None, member
+    def test_shrinking_the_dist_info_allowlist_rejects_the_real_metadata(self):
+        """Accept-side control for DIST_INFO_ALLOWLIST, entry by entry."""
+        original = gate.DIST_INFO_ALLOWLIST
+        try:
+            for dropped in sorted(original):
+                gate.DIST_INFO_ALLOWLIST = frozenset(original) - {dropped}
+                stream = io.StringIO()
+                assert gate.run_self_test(stream) == 1, (
+                    f"dropping {dropped} from DIST_INFO_ALLOWLIST left the "
+                    "self-test green, so that entry is not what admits the file"
+                )
+                assert "fixture was rejected" in stream.getvalue()
+        finally:
+            gate.DIST_INFO_ALLOWLIST = original
 
 
 class TestMutationSensitivity:
     """Measures how much of this file is actually load-bearing.
 
-    The module docstring reports that 140 of 287 tests redden under an
+    The module docstring reports that 166 of 360 tests redden under an
     always-allow classifier. A counted claim like that decays silently as tests
     are added, so what is checked here is not the count but the property the
     count summarizes: the rejection-side controls genuinely depend on

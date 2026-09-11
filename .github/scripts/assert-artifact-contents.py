@@ -226,6 +226,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 import tarfile
 import tempfile
@@ -440,48 +441,85 @@ SCANNER_DIST_NAMES = frozenset(
 
 PACKAGE_ROOT = "automated_security_helper"
 
-# Suffixes of the metadata directories a wheel carries beside the package:
-# `<name>-<version>.dist-info/` always, and `<name>-<version>.data/` when the
-# build has data files. Recognized by suffix rather than spelled out with a
-# version, so a version bump does not need an edit here.
+# The wheel metadata directory, matched WHOLE rather than by suffix.
 #
-# NOTE for anyone writing a neutering experiment: emptying this tuple does NOT
-# disable anything, and that is worth understanding before trusting a green run.
-# It is read in two places with opposing effects. strip_distribution_root() uses
-# it to decline to strip a metadata directory as if it were the sdist wrapper,
-# and rule 5c uses it to permit one at the artifact root. Empty it and
-# `...dist-info/METADATA` gets stripped to a bare `METADATA`, which is a
-# single-component root FILE that rule 5c does not constrain -- so the member is
-# still allowed, by a different route. The two effects cancel. The experiment
-# that does mean something is
-# test_wheel_metadata_is_neither_stripped_nor_rejected, which asserts the
-# behaviour directly instead of inferring it from a self-test verdict.
-WHEEL_METADATA_SUFFIXES = (".dist-info", ".data")
+# An earlier revision accepted any component ending `.dist-info` or `.data`, and
+# that was three bypasses at once. `evil.data/purelib/python.yaml` and
+# `evil.dist-info/upstream.yaml` were read as wheel metadata purely because of how
+# they ended. And `.data` was accepted at all despite the real wheel having no
+# `.data` directory whatsoever -- its only two roots are the package and
+# `.dist-info` -- so the entire `<scheme>/` tree under it was an unconstrained
+# namespace that `pip install` unpacks straight into site-packages and, for
+# `scripts/`, onto PATH.
+#
+# `.data` is therefore not accepted. If a build ever legitimately produces one,
+# this gate fails until somebody adds it here deliberately, which is the correct
+# cost for a directory whose whole purpose is writing files outside the package.
+#
+# The digit after the dash matters: it is what stops `automated_security_helper-`
+# plus anything from passing as metadata.
+DIST_INFO_PATTERN = re.compile(
+    r"^automated[-_]security[-_]helper-[0-9][^/]*\.dist-info$"
+)
 
-# Directories permitted INSIDE a wheel metadata directory.
+# The sdist's `<name>-<version>/` wrapper, same shape, minus the `.dist-info`.
+# Also requires a digit, because `automated_security_helper-vendor/` was accepted
+# as a wrapper by an earlier `startswith` test -- and once stripped, its contents
+# became "loose root files", which rule 5c deliberately does not constrain. So a
+# directory named after the package with any suffix at all could deliver flat
+# files, in unlimited number.
+SDIST_WRAPPER_PATTERN = re.compile(r"^automated[-_]security[-_]helper-[0-9][^/]*$")
+
+# Suffixes that mark a top-level directory as a wheel SIBLING of the package
+# rather than an sdist wrapper. Used only to answer "this is not a wrapper", so it
+# can only ever make the gate stricter -- `evil.data/` stops being eligible for
+# wrapper stripping and is then rejected by rule 5c as an unenumerated root. That
+# direction matters: matching these suffixes to EXEMPT something is what caused
+# three bypasses, matching them to REFUSE stripping cannot.
+WHEEL_SIBLING_SUFFIXES = (".dist-info", ".data")
+
+
+def is_sdist_wrapper(component: str) -> bool:
+    """True if a top-level component is this project's sdist wrapper directory.
+
+    `automated_security_helper-3.7.0.data` matches SDIST_WRAPPER_PATTERN on its
+    own -- a digit where the version starts, no `/` -- so without this exclusion it
+    was treated as a wrapper and STRIPPED, which put its contents at the artifact
+    root as unconstrained loose files. Neither `.dist-info` nor `.data` is a
+    wrapper; both sit beside the distribution rather than containing it.
+    """
+    if component.endswith(WHEEL_SIBLING_SUFFIXES):
+        return False
+    return bool(SDIST_WRAPPER_PATTERN.match(component))
+
+
+# Complete contents of the wheel's .dist-info directory, as paths relative to it:
+# 6 members, measured from the built wheel. Pinned exactly like assets/, and for
+# the same reason -- `pip install` copies this directory verbatim into
+# site-packages, so an upstream ruleset dropped in it is delivered precisely like
+# package content. `...dist-info/upstream_rules.yaml` and
+# `...dist-info/licenses/upstream_rules.yaml` were both live bypasses, at
+# arbitrary depth.
 #
-# Without this, `<name>-<version>.dist-info/vendor_lib/index.js` passes
-# everything: rule 5c permits the metadata directory at the root, and rule 5b
-# only ever looks under the package, so the second level inside `.dist-info/` was
-# an unconstrained namespace. `pip install` copies dist-info verbatim into
-# site-packages, so a tree parked there is delivered exactly like one in the
-# package. `licenses` is what hatchling writes; the `.data` names are the
-# scheme directories the wheel specification defines.
-WHEEL_METADATA_SUBDIRECTORIES = frozenset(
+# HOW THIS IS MAINTAINED: identical to ASSETS_ALLOWLIST. These are what hatchling
+# writes. Members pip adds at INSTALL time (INSTALLER, RECORD rewrites,
+# direct_url.json, REQUESTED) never appear in a built wheel, so they are
+# deliberately absent; if one shows up here it means something other than the
+# build backend wrote into the artifact.
+DIST_INFO_ALLOWLIST = frozenset(
     {
-        "licenses",
-        "license_files",
-        "data",
-        "headers",
-        "platlib",
-        "purelib",
-        "scripts",
+        "METADATA",
+        "RECORD",
+        "WHEEL",
+        "entry_points.txt",
+        "licenses/LICENSE",
+        "licenses/NOTICE",
     }
 )
 
 # Directories permitted at the top level of an artifact, once the sdist's
-# `<name>-<version>/` wrapper is stripped. Wheel metadata directories are
-# accepted by suffix in addition to this set.
+# `<name>-<version>/` wrapper is stripped. The `.dist-info` directory is accepted
+# in addition, by DIST_INFO_PATTERN.
 #
 # There is exactly one, and that is the point. The sdist also carries loose FILES
 # at its root -- pyproject.toml, hatch_build.py, LICENSE, NOTICE, README.md,
@@ -653,42 +691,77 @@ class Member:
         return bool(self.link_target)
 
 
+def normalize_member_path(name: str) -> str:
+    """Rebuilds a member path from its components, canonically.
+
+    THIS IS LOAD-BEARING, and the reason it exists as its own function is that
+    forgetting it once was a complete bypass of the assets allowlist. `.` segments
+    and repeated separators are meaningless in a path and PurePosixPath drops
+    them, so `path.parts` is already canonical -- but the raw string is not.
+    Rule 5a was the only rule comparing the raw string
+    (`relative.startswith(ASSETS_PREFIX)`), and so:
+
+        automated_security_helper/./assets/upstream.yaml     exit 0
+        automated_security_helper//assets/upstream.yaml      exit 0
+        ./automated_security_helper/assets/upstream.yaml     exit 0
+
+    all shipped, and `pip install` delivered every one to
+    site-packages/automated_security_helper/assets/upstream.yaml -- the exact
+    directory the 14-entry allowlist enumerates.
+
+    The tell was that the identical path inside the SDIST was caught: there the
+    wrapper strip rebuilt the string from `parts`, and the `.` vanished on the
+    way. Same input, two verdicts, which isolated the cause to the raw-string
+    comparison. Normalizing once, here, at the single point where a member path
+    enters the rules, is what makes that class of difference impossible rather
+    than making it one rule's problem.
+    """
+    return "/".join(PurePosixPath(name).parts)
+
+
 def strip_distribution_root(name: str) -> str:
-    """Drops the leading component an sdist wraps every member in.
+    """Normalizes a member path and drops the sdist's `<name>-<version>/` wrapper.
 
     A wheel's members are already repository-relative
     (`automated_security_helper/...`); an sdist's are prefixed with
-    `automated_security_helper-3.7.0/`. Normalizing here means the rules below
+    `automated_security_helper-3.7.0/`. Reducing both to one shape means the rules
     reason about one path shape instead of two, and -- more importantly -- means
     the version-bearing prefix cannot be mistaken for a vendor directory.
+
+    Every return path normalizes, including the ones that do not strip. That is
+    the fix for the bypass described in normalize_member_path: the old version
+    returned the raw `name` unchanged whenever there was no wrapper to remove,
+    which is precisely the wheel case.
     """
     parts = PurePosixPath(name).parts
     if len(parts) < 2:
-        return name
+        return "/".join(parts)
     first = parts[0]
-    # A wheel's metadata directory also begins `automated_security_helper-`, and
-    # stripping it would turn `...dist-info/METADATA` into a bare `METADATA` at
-    # the artifact root -- a member the distribution-root rule would then reject.
-    # Checked first for that reason.
-    if first.endswith(WHEEL_METADATA_SUFFIXES):
-        return name
+    # A wheel's metadata directory also matches the wrapper shape, and stripping
+    # it would turn `...dist-info/METADATA` into a bare `METADATA` at the artifact
+    # root -- a member rule 5c does not constrain, so it would then be allowed
+    # unconditionally. Checked first for that reason.
+    if DIST_INFO_PATTERN.match(first):
+        return "/".join(parts)
     # Only this project's own `<name>-<version>` wrapper is stripped, and only
     # when there is something under it. Anything else is a real member path --
     # stripping a leading component in general would let a vendored tree hide by
     # being one level deeper than expected.
     #
-    # Matched as a prefix rather than by splitting on the last `-`. The old form
-    # was `first.rsplit("-", 1)[0] in {...}`, which silently stops stripping if
-    # the version itself contains a hyphen: a local version like
-    # `3.8.0+g12ab-dirty` left the wrapper in place, and every asset inside would
-    # then have read as unpinned. PEP 440 normalization means `uv build` does not
-    # currently produce one, so this was latent rather than live -- but a rule
-    # whose correctness depends on a version never containing a hyphen is a rule
-    # waiting to reject ASH's own sdist.
-    for wrapper in (f"{PACKAGE_ROOT}-", "automated-security-helper-"):
-        if first.startswith(wrapper):
-            return "/".join(parts[1:])
-    return name
+    # Matched by pattern, not by `startswith` and not by splitting on the last
+    # `-`. Both of those were wrong in opposite directions. `rsplit("-", 1)[0]`
+    # stopped stripping when the VERSION contained a hyphen, so a local version
+    # like `3.8.0+g12ab-dirty` left the wrapper in place and every asset inside
+    # read as unpinned -- the gate rejecting ASH's own sdist. Replacing it with
+    # `startswith(f"{PACKAGE_ROOT}-")` then accepted ANY suffix, so
+    # `automated_security_helper-vendor/upstream_semgrep_rules.yaml` was stripped
+    # to a bare filename, which rule 5c treats as an unconstrained loose root
+    # file: a live bypass delivering flat files in unlimited number. The pattern
+    # requires a digit where the version starts, which is what PEP 440 guarantees
+    # and what `vendor` cannot supply.
+    if is_sdist_wrapper(first):
+        return "/".join(parts[1:])
+    return "/".join(parts)
 
 
 def malformed_path_reason(name: str) -> str | None:
@@ -906,42 +979,54 @@ def classify_member(member: Member, artifact: str) -> Violation | None:
                 "PACKAGE_SUBDIRECTORIES in the same commit that adds it.",
             )
 
-    # Rule 5c -- a directory at the top level of the artifact that nobody pinned.
+    # Rule 5c -- a top-level directory of the artifact that nobody enumerated.
     #
     # Complements 5b rather than duplicating it: 5b guards the inside of the
     # package, this guards everything beside it. A vendored tree parked next to
     # pyproject.toml in the sdist -- `third_party_tools/leftpad/index.js` -- is
     # outside the package, so 5b never looks at it. Loose FILES at the root are
     # not constrained; see DISTRIBUTION_ROOT_DIRECTORIES for why.
+    #
+    # This is written as an enumeration of what is ACCEPTED rather than as a set
+    # of exemptions for things that look like metadata, and that inversion is the
+    # whole fix for three separate bypasses. Matching `.dist-info`/`.data` by
+    # SUFFIX let `evil.data/` and `evil.dist-info/` in, and let the entire
+    # `.data/<scheme>/` tree in -- a tree the real wheel does not even have.
+    # Enumerating instead means a new root has to be added here to ship, and the
+    # three stop being three patches.
     if len(components) > 1:
         root = components[0]
-        is_metadata = root.endswith(WHEEL_METADATA_SUFFIXES)
-        if root not in DISTRIBUTION_ROOT_DIRECTORIES and not is_metadata:
+        is_dist_info = bool(DIST_INFO_PATTERN.match(root))
+        if root not in DISTRIBUTION_ROOT_DIRECTORIES and not is_dist_info:
             return Violation(
                 artifact,
                 relative,
                 "unpinned-distribution-directory",
-                f"sits under a top-level directory {root!r} that is not "
-                f"{PACKAGE_ROOT}/ and is not a wheel metadata directory. A "
-                "vendored tree needs a directory to live in, and the artifact "
-                "has room for exactly one. Loose files at the artifact root are "
+                f"sits under a top-level directory {root!r}. The only directories "
+                f"an artifact may carry at its root are {PACKAGE_ROOT}/ and the "
+                "wheel's own <name>-<version>.dist-info/. A vendored tree needs a "
+                "directory to live in, and there is room for neither a third one "
+                "nor a .data/ scheme tree. Loose files at the artifact root are "
                 "unconstrained; a new directory there is not.",
             )
-        # Inside a metadata directory the second level is pinned too. pip copies
-        # dist-info verbatim into site-packages, so a tree parked there ships
-        # exactly like one in the package, and rule 5b never looks here.
-        if is_metadata and len(components) > 2:
-            subdirectory = components[1]
-            if subdirectory not in WHEEL_METADATA_SUBDIRECTORIES:
+        # Inside .dist-info every member is pinned by name, exactly like assets/.
+        # pip copies this directory verbatim into site-packages, so an upstream
+        # ruleset parked in it -- or under licenses/, at any depth -- ships
+        # precisely like package content. Both were live bypasses.
+        if is_dist_info:
+            inner = "/".join(components[1:])
+            if inner not in DIST_INFO_ALLOWLIST:
                 return Violation(
                     artifact,
                     relative,
-                    "unpinned-distribution-directory",
-                    f"sits under {root}/{subdirectory}/, and {subdirectory!r} is "
-                    "not one of the directories a wheel metadata tree is allowed "
-                    "to contain (see WHEEL_METADATA_SUBDIRECTORIES). pip copies "
-                    "this directory verbatim into site-packages, so a tree here "
-                    "is delivered exactly like one inside the package.",
+                    "unpinned-dist-info-member",
+                    f"is not one of the {len(DIST_INFO_ALLOWLIST)} members pinned "
+                    "in DIST_INFO_ALLOWLIST. pip copies .dist-info verbatim into "
+                    "site-packages, so anything here is delivered exactly like "
+                    "package content, which is why its contents are enumerated "
+                    "rather than trusted to the build backend. If a backend "
+                    "upgrade legitimately adds this file, add its path in the "
+                    "same commit.",
                 )
 
     # Rule 6 -- bigger than anything ASH authors.
@@ -1051,11 +1136,37 @@ class Report:
         return [m for m in self.members if m.is_link]
 
 
+def distribution_roots(members: list[Member]) -> list[str]:
+    """The top-level components that claim to BE the distribution.
+
+    That is: the bare package directory, plus anything shaped like the sdist's
+    `<name>-<version>/` wrapper. The wheel's `.dist-info` is excluded -- it also
+    matches the wrapper shape, being `<name>-<version>.dist-info`, and it is
+    metadata beside the distribution rather than a second copy of it.
+
+    A well-formed artifact has exactly one. A wheel has the bare package and no
+    wrapper; an sdist has one wrapper and no bare package. Anything else is a
+    contradiction, and check_artifact refuses it -- see there for why that matters.
+    """
+    roots: list[str] = []
+    for member in members:
+        parts = PurePosixPath(member.name).parts
+        if not parts:
+            continue
+        root = parts[0]
+        if root in roots or DIST_INFO_PATTERN.match(root):
+            continue
+        if root == PACKAGE_ROOT or is_sdist_wrapper(root):
+            roots.append(root)
+    return roots
+
+
 def check_artifact(path: str) -> Report:
     """Checks one artifact.
 
     Raises on anything that would leave the member list empty, because a clean
-    verdict over zero members is the failure this whole script exists to avoid.
+    verdict over zero members is the failure this whole script exists to avoid,
+    and on an artifact carrying more than one distribution root.
     """
     members = read_members(path)
     if not members:
@@ -1063,6 +1174,33 @@ def check_artifact(path: str) -> Report:
             f"{path} contains zero file members. An empty artifact is a broken "
             "build, not a clean one -- and iterating an empty member list is "
             "exactly how a gate reports success having judged nothing."
+        )
+
+    # More than one distribution root is a contradiction, and it was the last
+    # live bypass of the wrapper-stripping rule. `automated_security_helper-9.9.9/`
+    # matches the wrapper shape legitimately -- a digit where the version starts,
+    # nothing malformed about it -- so its contents were stripped to bare
+    # filenames, which rule 5c treats as unconstrained loose root files. Nothing
+    # per-member can catch that, because per-member there is no way to tell the
+    # real wrapper from a planted one. Across the whole artifact there is: a wheel
+    # has the bare package and no wrapper, an sdist has one wrapper and no bare
+    # package, and either way the count is one.
+    #
+    # Raised rather than reported as a violation, and deliberately so: with two
+    # candidate roots this cannot say which members are inside the distribution,
+    # so every subsequent verdict would be a guess. It joins the existing
+    # exit-2 family -- an artifact whose shape this cannot reason about is one it
+    # cannot clear.
+    roots = distribution_roots(members)
+    if len(roots) > 1:
+        raise ValueError(
+            f"{path} has {len(roots)} top-level distribution roots: "
+            + ", ".join(repr(r) for r in roots)
+            + ". A wheel carries the package directory and no version-stamped "
+            "wrapper; an sdist carries exactly one wrapper and no bare package "
+            "directory. With more than one, which members are inside the "
+            "distribution is undecidable, so no verdict about them would mean "
+            "anything. Refusing to report it clean."
         )
 
     label = os.path.basename(path)
@@ -1087,15 +1225,13 @@ def check_artifact(path: str) -> Report:
 # Positive control.
 # --------------------------------------------------------------------------
 
-# Members every real ASH wheel carries, including the lookalikes the substring
-# approach gets wrong. The clean fixture must be accepted with these present, or
-# the rules are too broad to live with.
-#
-# All 14 assets/ members are here, not a sample. That makes the clean fixture the
-# accept-side control for ASSETS_ALLOWLIST: drop any one entry from the allowlist
-# and this fixture is rejected, which is the experiment
-# test_self_test_fails_when_the_assets_allowlist_loses_an_entry runs.
-LEGITIMATE_MEMBERS = (
+FIXTURE_VERSION = "3.7.0"
+
+# Members inside the package, shared by both artifact shapes. Includes the
+# lookalikes the substring approach gets wrong, and all 14 assets/ members rather
+# than a sample -- which is what makes the clean fixtures the accept-side control
+# for ASSETS_ALLOWLIST: drop any one entry and they are rejected.
+_PACKAGE_MEMBERS = (
     "automated_security_helper/__init__.py",
     "automated_security_helper/utils/cdk_nag_wrapper.py",
     "automated_security_helper/plugin_modules/ash_builtin/scanners/bandit_scanner.py",
@@ -1103,24 +1239,57 @@ LEGITIMATE_MEMBERS = (
     "automated_security_helper/plugin_modules/ash_trivy_plugins/trivy_repo_scanner.py",
     "automated_security_helper/plugin_modules/ash_snyk_plugins/snyk_code_scanner.py",
     "automated_security_helper/schemas/AshAggregatedResults.json",
-    # Wheel metadata, which lives beside the package rather than inside it.
-    "automated_security_helper-3.7.0.dist-info/METADATA",
-    "automated_security_helper-3.7.0.dist-info/RECORD",
-    # The sdist's loose root files, wrapper prefix and all. The fixture is
-    # therefore a union of wheel-shaped and sdist-shaped members, which no real
-    # artifact is -- deliberately, because the real check runs over BOTH a wheel
-    # and an sdist and a control covering only one shape is half a control. These
-    # are what prove rule 5c constrains top-level DIRECTORIES and not top-level
-    # files: pin them and a new CHANGELOG.md cannot fail the gate.
-    "automated_security_helper-3.7.0/pyproject.toml",
-    "automated_security_helper-3.7.0/hatch_build.py",
-    "automated_security_helper-3.7.0/LICENSE",
-    "automated_security_helper-3.7.0/NOTICE",
-    "automated_security_helper-3.7.0/README.md",
-    "automated_security_helper-3.7.0/PKG-INFO",
-    "automated_security_helper-3.7.0/Dockerfile",
-    "automated_security_helper-3.7.0/.gitignore",
 ) + tuple(sorted(ASSETS_ALLOWLIST))
+
+# A wheel: the package plus its .dist-info, and no version-stamped wrapper. All
+# six pinned dist-info members, so these fixtures are also the accept-side
+# control for DIST_INFO_ALLOWLIST.
+LEGITIMATE_WHEEL_MEMBERS = _PACKAGE_MEMBERS + tuple(
+    f"{PACKAGE_ROOT}-{FIXTURE_VERSION}.dist-info/{inner}"
+    for inner in sorted(DIST_INFO_ALLOWLIST)
+)
+
+# An sdist: everything under one wrapper, with loose files at its root and no
+# .dist-info. The loose files are what prove rule 5c constrains top-level
+# DIRECTORIES and not top-level files -- pin them and a new CHANGELOG.md could
+# not ship.
+LEGITIMATE_SDIST_MEMBERS = tuple(
+    f"{PACKAGE_ROOT}-{FIXTURE_VERSION}/{member}" for member in _PACKAGE_MEMBERS
+) + tuple(
+    f"{PACKAGE_ROOT}-{FIXTURE_VERSION}/{root_file}"
+    for root_file in (
+        "pyproject.toml",
+        "hatch_build.py",
+        "LICENSE",
+        "NOTICE",
+        "README.md",
+        "PKG-INFO",
+        "Dockerfile",
+        ".gitignore",
+    )
+)
+
+# The union, for per-member classification tests. NOT usable as one fixture: a
+# single artifact carrying both a bare package root and a version-stamped wrapper
+# has two distribution roots, which check_artifact now refuses. An earlier
+# revision did build one fixture from the union, and it worked only because
+# nothing yet noticed the contradiction.
+LEGITIMATE_MEMBERS = LEGITIMATE_WHEEL_MEMBERS + LEGITIMATE_SDIST_MEMBERS
+
+
+def clean_members_for(member: str) -> tuple[str, ...]:
+    """Picks the artifact shape a planted member belongs in.
+
+    Derived from the member's own path rather than declared alongside it, so the
+    two cannot drift: a member already carrying a `<name>-<version>/` wrapper is
+    sdist-shaped and must be planted among sdist-shaped members, or the fixture
+    would have two distribution roots and be refused before any rule ran.
+    """
+    parts = PurePosixPath(member).parts
+    if parts and is_sdist_wrapper(parts[0]):
+        return LEGITIMATE_SDIST_MEMBERS
+    return LEGITIMATE_WHEEL_MEMBERS
+
 
 # One planted member per DETECTOR, not per rule name: two detectors share the
 # rule name `nested-archive` and two share `native-binary`, and collapsing them
@@ -1225,6 +1394,36 @@ PLANTED_MEMBERS = {
         b'{"vulnerabilities": []}\n',
         "malformed-member-path",
     ),
+    # A `.` segment in the middle. The rules read `path.parts`, which drops it, but
+    # rule 5a compared the RAW string, so this landed in the one directory the
+    # allowlist enumerates. Verified delivered to
+    # site-packages/automated_security_helper/assets/ by `uv pip install`.
+    "unnormalized-path-defeats-the-assets-allowlist": (
+        "automated_security_helper/./assets/upstream.audit.yaml",
+        b"rules:\n  - id: upstream.audit\n",
+        "unpinned-asset",
+    ),
+    # A `.data/<scheme>/` tree, which the real wheel does not have at all. pip
+    # unpacks purelib/ into site-packages and scripts/ onto PATH.
+    "wheel-data-scheme-tree": (
+        f"{PACKAGE_ROOT}-{FIXTURE_VERSION}.data/purelib/semgrep_registry/python.yaml",
+        b"rules:\n  - id: upstream.python\n",
+        "unpinned-distribution-directory",
+    ),
+    # An unpinned file inside .dist-info, which pip copies verbatim.
+    "unpinned-dist-info-member": (
+        f"{PACKAGE_ROOT}-{FIXTURE_VERSION}.dist-info/licenses/upstream_rules.yaml",
+        b"rules:\n  - id: upstream.audit\n",
+        "unpinned-dist-info-member",
+    ),
+    # A directory named after the package with a non-version suffix. An earlier
+    # `startswith` wrapper test stripped it, turning its contents into
+    # "loose root files" that rule 5c deliberately does not constrain.
+    "wrapper-lookalike-directory": (
+        f"{PACKAGE_ROOT}-vendor/upstream_semgrep_rules.yaml",
+        b"rules:\n  - id: upstream.audit\n",
+        "unpinned-distribution-directory",
+    ),
     "oversize-member": (
         "automated_security_helper/utils/payload.dat",
         None,  # built by _planted_data(); MAX_MEMBER_BYTES + 1 bytes
@@ -1276,13 +1475,20 @@ def run_self_test(stream) -> int:
     Three assertions, each closing a way this script could pass vacuously:
     a planted payload must be rejected and named per detector; a fixture of only
     legitimate members must be accepted; an empty archive must be rejected.
+
+    The clean fixture is built twice, once wheel-shaped and once sdist-shaped, and
+    that is not thoroughness for its own sake. A reviewer found the same member
+    path getting DIFFERENT verdicts on the two surfaces -- allowed in the wheel,
+    rejected in the sdist -- because only the sdist route happened to normalize
+    the path on the way through. One fixture would have shown one of those two
+    answers and called it the answer.
     """
     failures: list[str] = []
-    clean = {name: b"# ash\n" for name in LEGITIMATE_MEMBERS}
 
     with tempfile.TemporaryDirectory() as tmp:
         # (1) Every planted payload must be caught, by the detector meant for it.
         for label, (member, data, expected_rule) in PLANTED_MEMBERS.items():
+            clean = {name: b"# ash\n" for name in clean_members_for(member)}
             fixture = os.path.join(tmp, f"planted-{label}.whl")
             _write_fixture_wheel(fixture, {**clean, member: _planted_data(label, data)})
             try:
@@ -1320,22 +1526,27 @@ def run_self_test(stream) -> int:
                     f"({report.count} members examined)\n"
                 )
 
-        # (2) The legitimate lookalikes must NOT be rejected.
-        fixture = os.path.join(tmp, "clean.whl")
-        _write_fixture_wheel(fixture, clean)
-        try:
-            report = check_artifact(fixture)
-        except ValueError as err:  # pragma: no cover - fixture is well formed
-            failures.append(f"clean fixture unreadable: {err}")
-        else:
+        # (2) The legitimate lookalikes must NOT be rejected, on BOTH surfaces.
+        for shape, legitimate in (
+            ("wheel-shaped", LEGITIMATE_WHEEL_MEMBERS),
+            ("sdist-shaped", LEGITIMATE_SDIST_MEMBERS),
+        ):
+            fixture = os.path.join(tmp, f"clean-{shape}.whl")
+            _write_fixture_wheel(fixture, {n: b"# ash\n" for n in legitimate})
+            try:
+                report = check_artifact(fixture)
+            except ValueError as err:  # pragma: no cover - fixture is well formed
+                failures.append(f"clean {shape} fixture unreadable: {err}")
+                continue
             if report.violations:
                 failures.append(
-                    "clean fixture was rejected, so the rules are too broad: "
+                    f"clean {shape} fixture was rejected, so the rules are too "
+                    "broad: "
                     + "; ".join(f"{v.member} [{v.rule}]" for v in report.violations)
                 )
             else:
                 stream.write(
-                    f"  self-test: clean fixture accepted ({report.count} "
+                    f"  self-test: clean {shape} fixture accepted ({report.count} "
                     f"members, including all {len(ASSETS_ALLOWLIST)} pinned "
                     "assets, Gemfile.lock, the cfn-nag rule .rb files, and the "
                     "trivy/snyk/bandit adapters)\n"
