@@ -31,14 +31,14 @@ Read the total honestly, because on its own it overstates the guarantee. Replace
 always-allow classifier, the exact defect the gate exists to rule out -- and a
 large minority of this file still passes. Measured, not estimated:
 
-    226 tests collected. Under always-allow: 122 fail, 104 still pass.
+    287 tests collected. Under always-allow: 140 fail, 147 still pass.
 
-So the anti-vacuity argument rests on those 122, not on 226. Where they live:
-105 in TestPlantedPayload, 12 in TestSelfTestIsTheControl, 3 in
+So the anti-vacuity argument rests on those 140, not on 287. Where they live:
+116 in TestPlantedPayload, 19 in TestSelfTestIsTheControl, 3 in
 TestArchiveReading, and one each in TestLegitimateMembersShip and
 TestMutationSensitivity.
 
-The 104 that survive are the ones that should. Almost every test in
+The 147 that survive are the ones that should. Almost every test in
 TestLegitimateMembersShip passes necessarily -- they assert that a member is
 ALLOWED, and an always-allow classifier allows everything, so they cannot fail
 this way; their job is catching over-broad rules, which is a different mutation.
@@ -54,7 +54,7 @@ allowlists interact; the TestMutationSensitivity failure is
 test_every_planted_member_is_rejected_by_the_real_classifier, which is a
 load-bearing test by design.
 
-None of this is a defect. It is written down so nobody reads 226 as the strength
+None of this is a defect. It is written down so nobody reads 287 as the strength
 of the guarantee. The property the number summarizes is asserted directly in
 TestMutationSensitivity, which goes red if the self-test ever stops depending on
 classification at all.
@@ -286,6 +286,86 @@ class TestLegitimateMembersShip:
     def test_the_largest_real_member_is_under_the_ceiling(self):
         name = "automated_security_helper/schemas/AshAggregatedResults.json"
         assert _classify(name, size=LARGEST_REAL_MEMBER_BYTES) is None
+
+    @pytest.mark.parametrize(
+        "root_file",
+        [
+            "pyproject.toml",
+            "hatch_build.py",
+            "LICENSE",
+            "NOTICE",
+            "README.md",
+            "PKG-INFO",
+            "Dockerfile",
+            ".gitignore",
+            # Not in the sdist today. Included because rule 5c constrains
+            # top-level DIRECTORIES only, and the whole reason for that choice is
+            # that a new root-level file must not fail the gate.
+            "CHANGELOG.md",
+            "CITATION.cff",
+            "SECURITY.md",
+        ],
+    )
+    def test_sdist_root_file_is_allowed(self, root_file):
+        """The sdist carries loose files beside the package. They must ship."""
+        assert _classify(f"automated_security_helper-3.7.0/{root_file}") is None
+
+    @pytest.mark.parametrize(
+        "metadata_member",
+        [
+            "automated_security_helper-3.7.0.dist-info/METADATA",
+            "automated_security_helper-3.7.0.dist-info/RECORD",
+            "automated_security_helper-3.7.0.dist-info/WHEEL",
+            "automated_security_helper-3.7.0.dist-info/entry_points.txt",
+            "automated_security_helper-3.7.0.dist-info/licenses/LICENSE",
+            "automated_security_helper-3.7.0.data/scripts/ash",
+        ],
+    )
+    def test_wheel_metadata_directory_is_allowed(self, metadata_member):
+        """`.dist-info` and `.data` are recognized by suffix, not by version.
+
+        They also must NOT be stripped as if they were the sdist wrapper -- both
+        begin `automated_security_helper-`. Stripping `.dist-info/METADATA` would
+        leave a bare `METADATA` at the artifact root, which rule 5c would then
+        have to either reject or be widened to permit.
+        """
+        assert _classify(metadata_member) is None
+
+    @pytest.mark.parametrize(
+        "version",
+        [
+            "3.7.0",
+            "3.8.0",
+            "3.8.0rc1",
+            "3.8.0b2",
+            "3.8.0.post1",
+            "3.8.0.dev3",
+            "3.8.0+g12ab",
+            # PEP 440 normalization means uv build will not emit a hyphen in a
+            # version, so this is latent rather than live. It is pinned because
+            # the previous implementation split on the LAST hyphen, which stopped
+            # stripping the wrapper here -- and an unstripped wrapper makes every
+            # asset inside read as unpinned, i.e. the gate rejects ASH's own
+            # sdist. A rule whose correctness rests on "versions never contain a
+            # hyphen" is a rule waiting to fire on a release.
+            "3.8.0+g12ab-dirty",
+        ],
+    )
+    def test_sdist_wrapper_is_stripped_for_any_version_string(self, version):
+        prefix = f"automated_security_helper-{version}"
+        member = f"{prefix}/automated_security_helper/assets/Gemfile"
+        assert gate.strip_distribution_root(member) == (
+            "automated_security_helper/assets/Gemfile"
+        )
+        assert _classify(member) is None, member
+
+    @pytest.mark.parametrize(
+        "wrapper", ["automated_security_helper", "automated-security-helper"]
+    )
+    def test_both_spellings_of_the_wrapper_are_stripped(self, wrapper):
+        """sdists have been produced under both the dash and underscore names."""
+        member = f"{wrapper}-3.7.0/automated_security_helper/assets/Gemfile"
+        assert _classify(member) is None, member
 
 
 class TestPlantedPayload:
@@ -575,6 +655,65 @@ class TestPlantedPayload:
         assert violation is not None, subdirectory
         assert violation.rule == "unpinned-package-subdirectory", subdirectory
 
+    @pytest.mark.parametrize(
+        "directory", ["third_party_tools", "vendor_lib", "toolchain", "gems_home"]
+    )
+    def test_unpinned_top_level_directory_is_rejected(self, directory):
+        """A vendored tree parked BESIDE the package, in the sdist.
+
+        `automated_security_helper-3.7.0/third_party_tools/leftpad/index.js` was a
+        live bypass after rule 5b landed: `third_party_tools` is not a
+        vendor-directory token, and it is outside the package, so the
+        package-subdirectory rule never looks at it. The sdist has room for
+        exactly one top-level directory and this is the rule that says so.
+        """
+        name = f"automated_security_helper-3.7.0/{directory}/leftpad/index.js"
+        violation = _classify(name)
+        assert violation is not None, directory
+        assert violation.rule == "unpinned-distribution-directory", directory
+
+    def test_uppercase_package_directory_is_rejected(self):
+        """Component checks lowercase; the pinned lists do not.
+
+        `AUTOMATED_SECURITY_HELPER/assets/trivy-db.json` misses ASSETS_PREFIX
+        (case-sensitive startswith) and misses rule 5b (which compares
+        components[0] to PACKAGE_ROOT exactly), so before rule 5c it passed.
+        """
+        violation = _classify("AUTOMATED_SECURITY_HELPER/assets/trivy-db.json")
+        assert violation is not None
+        assert violation.rule == "unpinned-distribution-directory"
+
+    @pytest.mark.parametrize(
+        ("label", "name"),
+        [
+            ("backslash", "automated_security_helper\\assets\\trivy-db.json"),
+            ("backslash deep", "automated_security_helper\\vendor\\trivy"),
+            ("absolute", "/usr/local/bin/leftpad.js"),
+            ("windows drive", "C:/tools/leftpad.js"),
+            ("dotdot", "../third_party_tools/leftpad.js"),
+        ],
+    )
+    def test_malformed_member_path_is_rejected(self, label, name):
+        """A path the other rules cannot read defeats all of them at once.
+
+        The backslash form was a live bypass: PurePosixPath reads
+        `automated_security_helper\\assets\\trivy-db.json` as ONE component, so
+        ASSETS_PREFIX does not match, no component equals a vendor or scanner
+        token, and the stem is the whole string -- while an extractor on Windows
+        writes the file into assets/ regardless. Absolute names and `..` are
+        refused for the zip-slip reason; both formats require relative members.
+        """
+        violation = _classify(name)
+        assert violation is not None, label
+        assert violation.rule == "malformed-member-path", label
+
+    def test_malformed_path_violation_reports_the_raw_name(self):
+        """Do not normalize the thing whose abnormality is the finding."""
+        name = "automated_security_helper\\assets\\trivy-db.json"
+        violation = _classify(name)
+        assert violation is not None
+        assert violation.member == name
+
     def test_oversize_member_is_rejected(self):
         violation = _classify(
             "automated_security_helper/utils/payload.dat",
@@ -857,6 +996,9 @@ class TestNoVacuousPass:
 # Module-level rather than a class attribute: a mutable class attribute is
 # RUF012, and this is shared by two test methods anyway.
 NEUTERED = [
+    # Rule 0 is a function rather than a table, so it is neutered by stubbing it
+    # to find nothing wrong with any path.
+    ("malformed_path_reason", lambda name: None),
     ("VENDOR_DIR_COMPONENTS", frozenset()),
     ("ARCHIVE_SUFFIXES", ()),
     ("ARCHIVE_MAGICS", ()),
@@ -870,6 +1012,10 @@ NEUTERED = [
     (
         "PACKAGE_SUBDIRECTORIES",
         frozenset(gate.PACKAGE_SUBDIRECTORIES) | {"_vendored_scanners"},
+    ),
+    (
+        "DISTRIBUTION_ROOT_DIRECTORIES",
+        frozenset(gate.DISTRIBUTION_ROOT_DIRECTORIES) | {"third_party_tools"},
     ),
     # Exactly the fixture's own size, so `size > ceiling` is False. Raising it to
     # something enormous would be the obvious move and would make the fixture try
@@ -900,7 +1046,25 @@ class TestSelfTestIsTheControl:
         rules = [expected for _, _, expected in gate.PLANTED_MEMBERS.values()]
         assert rules.count("nested-archive") == 2
         assert rules.count("native-binary") == 2
-        assert len(gate.PLANTED_MEMBERS) == 10
+        assert rules.count("vendored-scanner") == 2
+        assert len(gate.PLANTED_MEMBERS) == 12
+        # One neutering experiment per detector, minus the two that share a
+        # detector's rule set: `vendored-scanner-manifest` exercises the same
+        # SCANNER_DIST_NAMES table as `vendored-scanner`.
+        assert len(NEUTERED) == 11
+        assert {c for c, _ in NEUTERED} == {
+            "malformed_path_reason",
+            "VENDOR_DIR_COMPONENTS",
+            "ARCHIVE_SUFFIXES",
+            "ARCHIVE_MAGICS",
+            "NATIVE_SUFFIXES",
+            "NATIVE_MAGICS",
+            "SCANNER_DIST_NAMES",
+            "ASSETS_ALLOWLIST",
+            "PACKAGE_SUBDIRECTORIES",
+            "DISTRIBUTION_ROOT_DIRECTORIES",
+            "MAX_MEMBER_BYTES",
+        }
 
     @pytest.mark.parametrize(
         ("constant", "neutered"), NEUTERED, ids=[c for c, _ in NEUTERED]
@@ -946,6 +1110,7 @@ class TestSelfTestIsTheControl:
         member is classified by NOTHING.
         """
         label_for = {
+            "malformed_path_reason": "malformed-member-path",
             "VENDOR_DIR_COMPONENTS": "vendor-directory",
             "ARCHIVE_SUFFIXES": "nested-archive-by-suffix",
             "ARCHIVE_MAGICS": "nested-archive-by-header",
@@ -954,6 +1119,7 @@ class TestSelfTestIsTheControl:
             "SCANNER_DIST_NAMES": "vendored-scanner",
             "ASSETS_ALLOWLIST": "unpinned-asset",
             "PACKAGE_SUBDIRECTORIES": "unpinned-package-subdirectory",
+            "DISTRIBUTION_ROOT_DIRECTORIES": "unpinned-distribution-directory",
             "MAX_MEMBER_BYTES": "oversize-member",
         }
         label = label_for[constant]
@@ -1011,11 +1177,81 @@ class TestSelfTestIsTheControl:
         finally:
             gate.PACKAGE_SUBDIRECTORIES = original
 
+    def test_emptying_the_root_directory_list_rejects_the_package_itself(self):
+        """Rule 5c's accept side: the one permitted directory is load-bearing."""
+        original = gate.DISTRIBUTION_ROOT_DIRECTORIES
+        try:
+            gate.DISTRIBUTION_ROOT_DIRECTORIES = frozenset()
+            stream = io.StringIO()
+            assert gate.run_self_test(stream) == 1
+            assert "clean fixture was rejected" in stream.getvalue()
+        finally:
+            gate.DISTRIBUTION_ROOT_DIRECTORIES = original
+
+    def test_wheel_metadata_is_neither_stripped_nor_rejected(self):
+        """The honest experiment for WHEEL_METADATA_SUFFIXES.
+
+        Emptying it is NOT a valid neutering experiment, and finding that out is
+        the reason this test exists in this shape. The tuple is read in two places
+        with opposing effects: strip_distribution_root() uses it to decline to
+        strip a metadata directory as if it were the sdist wrapper, and rule 5c
+        uses it to permit one at the artifact root. Empty it and
+        `...dist-info/METADATA` is stripped to a bare `METADATA`, a
+        single-component root FILE that rule 5c does not constrain -- so the
+        member is still allowed, by a different route, and the self-test stays
+        green. A test asserting "emptying it turns the control red" would have
+        failed for a reason that has nothing to do with the property it claimed to
+        measure.
+
+        So the property is asserted directly instead: a metadata member keeps its
+        directory (it is not stripped) and is allowed (it is not rejected). Both
+        halves matter, and only the conjunction distinguishes correct behaviour
+        from the cancelling pair above.
+        """
+        member = "automated_security_helper-3.7.0.dist-info/METADATA"
+        assert gate.strip_distribution_root(member) == member, (
+            "the metadata directory was stripped as if it were the sdist wrapper"
+        )
+        assert _classify(member) is None
+
+    # Names chosen so no other rule can claim them: `gems` would have been caught
+    # by the vendor-directory rule instead, which would make this test pass
+    # without exercising rule 5c at all.
+    @pytest.mark.parametrize(
+        "subdirectory",
+        ["vendor_lib", "third_party_tools", "bundled_rules", "toolchain"],
+    )
+    def test_unpinned_directory_inside_wheel_metadata_is_rejected(self, subdirectory):
+        """A tree parked inside `.dist-info/` ships like one in the package.
+
+        Rule 5c permits the metadata directory at the root and rule 5b only looks
+        under the package, so the second level inside `.dist-info/` was an
+        unconstrained namespace -- and pip copies that directory verbatim into
+        site-packages. Found while writing the accept-side experiment above.
+        """
+        name = f"automated_security_helper-3.7.0.dist-info/{subdirectory}/index.js"
+        violation = _classify(name)
+        assert violation is not None, subdirectory
+        assert violation.rule == "unpinned-distribution-directory", subdirectory
+
+    @pytest.mark.parametrize(
+        "member",
+        [
+            "automated_security_helper-3.7.0.dist-info/licenses/LICENSE",
+            "automated_security_helper-3.7.0.dist-info/licenses/NOTICE",
+            "automated_security_helper-3.7.0.data/scripts/ash",
+            "automated_security_helper-3.7.0.data/purelib/x.py",
+        ],
+    )
+    def test_real_wheel_metadata_subdirectories_are_allowed(self, member):
+        """`licenses/` is what hatchling writes; the rest are wheel scheme dirs."""
+        assert _classify(member) is None, member
+
 
 class TestMutationSensitivity:
     """Measures how much of this file is actually load-bearing.
 
-    The module docstring reports that 122 of 226 tests redden under an
+    The module docstring reports that 140 of 287 tests redden under an
     always-allow classifier. A counted claim like that decays silently as tests
     are added, so what is checked here is not the count but the property the
     count summarizes: the rejection-side controls genuinely depend on
@@ -1045,7 +1281,11 @@ class TestMutationSensitivity:
         assert "was NOT rejected" in output
         for label in gate.PLANTED_MEMBERS:
             member = gate.PLANTED_MEMBERS[label][0]
-            assert member in output, (
+            # repr() and not the bare name: the self-test's failure line formats
+            # the member with !r, which doubles the backslashes in the
+            # malformed-member-path fixture. Comparing bare names reported that
+            # fixture as uncovered when it was named right there in the output.
+            assert repr(member) in output, (
                 f"{label} was not named as unrejected, so the self-test does not "
                 "cover it"
             )
