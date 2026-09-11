@@ -125,17 +125,22 @@ export class AshAgentCoreStack extends Stack {
       }),
     });
 
+    /**
+     * `grantPull` carries the ECR authorization-token grant with it.
+     *
+     * `Repository.grantPull` emits two statements: the repository-scoped pull
+     * actions, and `ecr:GetAuthorizationToken` on `"*"` — which is the only
+     * resource IAM accepts for it, as AWS's own single-repository example shows
+     * (https://docs.aws.amazon.com/AmazonECR/latest/userguide/security_iam_id-based-policy-examples.html).
+     * This role used to add a second, identical statement of its own under the
+     * sid `EcrTokenAccess`. It was pure duplication, and the sid is what stopped
+     * CDK's policy minimizer from folding the two together, so the deployed role
+     * carried the same grant twice. Removed rather than kept: if `grantPull` ever
+     * stops emitting it, the image pull fails loudly at once instead of relying
+     * on a spare copy nobody remembers is there.
+     */
     image.repository.grantPull(role);
     config.grantRead(role);
-
-    // ECR's authorization token is account-scoped and has no resource ARN.
-    role.addToPolicy(
-      new iam.PolicyStatement({
-        sid: 'EcrTokenAccess',
-        actions: ['ecr:GetAuthorizationToken'],
-        resources: ['*'],
-      }),
-    );
 
     const runtimeLogGroups = `arn:${Aws.PARTITION}:logs:${Aws.REGION}:${Aws.ACCOUNT_ID}:log-group:/aws/bedrock-agentcore/runtimes`;
     role.addToPolicy(
