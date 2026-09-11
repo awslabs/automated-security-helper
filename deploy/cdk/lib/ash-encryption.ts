@@ -72,9 +72,24 @@ import * as kms from 'aws-cdk-lib/aws-kms';
  */
 export function ashEncryptionKey(scope: Stack): kms.Key {
   const key = new kms.Key(scope, 'EncryptionKey', {
+    // Console-visible, and once the stack is gone this is most of what identifies
+    // the key that outlived it. Two deliberate choices:
+    //
+    //   - It does not enumerate what it encrypts. It used to end "and the MCP auth
+    //     secret", which is not true of AshImagePipeline: that stack has no
+    //     AWS::SecretsManager::Secret and its key policy has exactly two statements.
+    //     Keeping an enumeration true would mean threading a per-stack list through
+    //     five call sites for a description field, and the actual coverage is
+    //     readable from the key policy and from the `encryptionKey` arguments in
+    //     lib/. So the field says what the key is, not what it happens to cover.
+    //   - It names the stack. `AWS::StackName` renders as a pseudo-parameter, so it
+    //     costs nothing in reproducibility and it is what makes a RETAINed key
+    //     attributable to the deployment that created it after that deployment has
+    //     been deleted.
     description:
-      'Encrypts this stack\'s ASH CodeBuild project output, CloudWatch log groups and ' +
-      'the MCP auth secret.',
+      `Customer-managed key for the ASH stack ${Aws.STACK_NAME}. Encrypts every resource ` +
+      'in that stack which accepts one. Retained when the stack is deleted, because ' +
+      'deleting it would put the log data encrypted with it beyond recovery.',
     enableKeyRotation: true,
     removalPolicy: RemovalPolicy.RETAIN,
   });

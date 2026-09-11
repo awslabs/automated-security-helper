@@ -65,7 +65,18 @@
   "EncryptionKey1B843E66": {
    "Type": "AWS::KMS::Key",
    "Properties": {
-    "Description": "Encrypts this stack's ASH CodeBuild project output, CloudWatch log groups and the MCP auth secret.",
+    "Description": {
+     "Fn::Join": [
+      "",
+      [
+       "Customer-managed key for the ASH stack ",
+       {
+        "Ref": "AWS::StackName"
+       },
+       ". Encrypts every resource in that stack which accepts one. Retained when the stack is deleted, because deleting it would put the log data encrypted with it beyond recovery."
+      ]
+     ]
+    },
     "EnableKeyRotation": true,
     "KeyPolicy": {
      "Statement": [
