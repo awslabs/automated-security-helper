@@ -64,8 +64,9 @@ def _missing_cdk_distributions(
     What the metadata read cannot see is a state where all three distributions are
     installed but importing them still fails -- a half-finished pip run, a missing
     jsii transitive dependency, NodeJS absent. That case is not left silent: the
-    wrapper's own import guard reports the failure per template, which the scanner
-    records against the target it was scanning.
+    wrapper's import guard returns a response carrying ``failure``, the scanner
+    counts a failed target, and the container reports ERROR. So the two together
+    cover both shapes, and neither exits 0.
 
     Probing all three rather than only ``cdk_nag`` is the point of this function.
     A one-distribution probe passes on an install where cdk-nag is present and
@@ -583,9 +584,14 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                     # Decrementing back to a running total of zero is not a silent success
                     # either. When every file in the scan set lands here the count ends at 0,
                     # which the container reads as "tracked, attempted none" and reports
-                    # SKIPPED. The wrapper also returns None when no nag pack is enabled and
-                    # when NodeJS is unavailable, so those two reach the same place: nothing was
-                    # evaluated, and the report says so instead of rendering green.
+                    # SKIPPED.
+                    #
+                    # This branch is now reached by exactly one wrapper state, and that is the
+                    # point. The wrapper used to return None for two further states -- cdk-nag
+                    # failing to import, and no nag pack registered -- and both landed here,
+                    # so a real template that no rule ever ran against un-counted itself and
+                    # the scan reported SKIPPED with exit code 0. Both now return a response
+                    # carrying ``failure`` and are counted below.
                     self.targets_attempted -= 1
                     ASH_LOGGER.debug(f"Not a CloudFormation file: {cfn_file}")
                     continue
@@ -705,6 +711,18 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                             # Derived, not hardcoded. A SARIF run asserting success while
                             # carrying zero results is indistinguishable to any consumer from
                             # a clean scan, so a total failure has to say so here.
+                            #
+                            # What this is NOT is the mechanism that makes a failed cdk-nag run
+                            # exit non-zero. These three fields are a contract with whatever
+                            # reads this scanner's own SARIF file; nothing inside ASH reads them
+                            # back. There is no `invocations` handling in `utils/sarif_utils.py`
+                            # or in `core/phases/`, so this invocation never reaches
+                            # `ash.sarif`, and the exit code comes entirely from the status the
+                            # container derives from `targets_attempted`/`targets_failed`. An
+                            # earlier version of this comment read as though the derivation
+                            # closed the defect; it does not, and a reader who believed it would
+                            # be looking in the wrong place. That the fields are unread inside
+                            # ASH is a real gap and is not addressed here.
                             executionSuccessful=scan_succeeded,
                             exitCode=0 if scan_succeeded else 1,
                             exitCodeDescription="\n".join(self.errors),

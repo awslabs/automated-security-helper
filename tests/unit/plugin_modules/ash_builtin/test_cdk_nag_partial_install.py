@@ -27,8 +27,10 @@ Why a metadata probe and not an import probe
 Importing ``cdk_nag`` to prove it works would catch strictly more, and was rejected on cost: this
 module is imported during plugin discovery on every ASH invocation, ``ash --help`` included, and
 importing cdk_nag starts a jsii kernel, which spawns a NodeJS child process. The residual gap --
-all three distributions installed but importing them still fails -- is left to the wrapper's own
-import guard, which reports the failure against the template it was scanning.
+all three distributions installed but importing them still fails -- is covered loudly rather than
+left silent: the wrapper's import guard returns a response carrying ``failure``, the scanner
+counts a failed target, and the container reports ERROR. See
+``test_cdk_nag_unevaluated_is_not_skipped.py``.
 """
 
 import re
