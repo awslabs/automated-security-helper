@@ -15,6 +15,26 @@ runs:
         mkdir -p /tmp/ash-selftest
         echo 'print("hello")' > /tmp/ash-selftest/test_sample.py
 
+    # Every self-test scan below passes `--scanners bandit`, and that is a
+    # statement about what these jobs test rather than a way to quieten them.
+    #
+    # This action answers one question: after installing ASH by method X, does
+    # `ash scan` run end to end? It installs ASH and nothing else -- no
+    # `ash dependencies install`, no `[cdk]` extra, no ruby gem, no Go binaries --
+    # so of the ten default scanners only the pip-installed ones could possibly
+    # run here. Left unnarrowed, the scan selects all ten, five report MISSING for
+    # tools this job never intended to provide, and `ash scan` exits non-zero
+    # because a scan that could not run what it was asked to run is not a pass.
+    #
+    # Naming bandit says which scanner the smoke test covers. The nine it leaves
+    # out are recorded SKIPPED -- not selected -- so the report shows what was and
+    # was not measured. The alternative, `--no-fail-on-incomplete-scanners`, would
+    # have kept the same green while asserting nothing about whether any scanner
+    # ran, which is the failure mode the completeness gate exists to remove.
+    #
+    # bandit specifically because it is a core dependency in pyproject.toml, so it
+    # is present under every install method this action exercises.
+
     # === pip ===
     - name: "pip: install"
       if: inputs.method == 'pip'
@@ -29,7 +49,7 @@ runs:
     - name: "pip: self-test scan"
       if: inputs.method == 'pip'
       shell: bash
-      run: ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report
+      run: ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report --scanners bandit
 
     # === pipx ===
     - name: "pipx: install pipx"
@@ -49,7 +69,7 @@ runs:
     - name: "pipx: self-test scan"
       if: inputs.method == 'pipx'
       shell: bash
-      run: ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report
+      run: ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report --scanners bandit
 
     # === uvx ===
     - name: "uvx: install uv (Unix)"
@@ -67,7 +87,7 @@ runs:
     - name: "uvx: self-test scan"
       if: inputs.method == 'uvx'
       shell: bash
-      run: uvx --from . ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report
+      run: uvx --from . ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report --scanners bandit
 
     # === homebrew ===
     - name: "homebrew: validate formula"

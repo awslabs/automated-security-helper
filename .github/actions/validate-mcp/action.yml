@@ -43,6 +43,12 @@ runs:
       shell: bash
       run: npm install -g @modelcontextprotocol/inspector
 
+    # `--scanners bandit` for the same reason as validate-install: this job checks
+    # that the MCP install can run a scan, and it installs ASH alone, so bandit is
+    # the only default scanner whose tool is present. Naming it records which
+    # scanner the smoke test covers and leaves the other nine SKIPPED rather than
+    # MISSING -- the report then says what was measured, where suppressing the
+    # completeness check would have asserted nothing at all.
     - name: "mcp: self-test scan"
       shell: bash
-      run: ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report
+      run: ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report --scanners bandit

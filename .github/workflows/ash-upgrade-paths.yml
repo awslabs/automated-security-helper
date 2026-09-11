@@ -164,8 +164,14 @@ jobs:
           FIX="${RUNNER_TEMP}/selftest"
           mkdir -p "$FIX"
           printf 'print("hello")\n' > "${FIX}/test_sample.py"
+          # --scanners bandit because this arm installs ASH into a bare venv and
+          # nothing else, so bandit -- a core dependency -- is the only default
+          # scanner whose tool is present. What is being verified is that a scan
+          # still runs after the upgrade, and naming the scanner says so; the nine
+          # left out are recorded SKIPPED rather than MISSING, so the report shows
+          # what this arm did and did not measure.
           "${VENV}/ash" scan --source-dir "$FIX" --output-dir "${FIX}/output" \
-            --simple --phases scan --phases report
+            --simple --phases scan --phases report --scanners bandit
 
       - name: Record the arm in the run summary
         if: success() || failure()
