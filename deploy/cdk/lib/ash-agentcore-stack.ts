@@ -59,7 +59,12 @@ import {
 } from './ash-config';
 import { ashEncryptionKey } from './ash-encryption';
 import { AshImageBuild } from './ash-image-build';
-import { suppressSecretRotation, suppressUnevaluableRules } from './ash-nag-suppressions';
+import {
+  suppressAgentCoreRuntimeWildcards,
+  suppressSecretRotation,
+  suppressUnevaluableRules,
+} from './ash-nag-suppressions';
+import { AshSplitPolicyRole } from './ash-policy-split';
 import { AshRuntimeConfig } from './ash-runtime-config';
 
 export class AshAgentCoreStack extends Stack {
@@ -109,7 +114,21 @@ export class AshAgentCoreStack extends Stack {
      */
     const runtimeName = Fn.join('', Fn.split('-', Aws.STACK_NAME));
 
-    const role = new iam.Role(this, 'RuntimeRole', {
+    // AshSplitPolicyRole, not iam.Role: this role collects statements for six
+    // services and the single DefaultPolicy they used to share scored 29 against
+    // cfn-nag's W76 ceiling of 25. Splitting them per service changes no
+    // permission — see ash-policy-split.ts. The construct id is unchanged, so the
+    // role's logical id is too.
+    const role = new AshSplitPolicyRole(this, 'RuntimeRole', {
+      // Applied per policy as each is created, not once over the role: a
+      // suppression only reaches resources that already exist when it runs, and
+      // these policies come into being one grant at a time. Both suppressions are
+      // needed because the split separates the statements cdk-nag can evaluate
+      // (which use "*") from the ones it cannot (whose ARNs are intrinsics).
+      onPolicyCreated: (policy) => {
+        suppressAgentCoreRuntimeWildcards(policy);
+        suppressUnevaluableRules(policy, ['AwsSolutions-IAM5']);
+      },
       description: 'Execution role AgentCore Runtime assumes to run the ASH MCP server.',
       // Trust policy verified against
       // https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-permissions.html

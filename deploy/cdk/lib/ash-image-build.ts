@@ -59,8 +59,9 @@ import * as kms from 'aws-cdk-lib/aws-kms';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
 
-import { suppressCodeBuildRoleWildcards, suppressLambdaLogWildcard, suppressUnevaluableRules } from './ash-nag-suppressions';
+import { suppressCodeBuildRoleWildcards, suppressLambdaLogWildcard, suppressSplitCodeBuildPolicy, suppressUnevaluableRules } from './ash-nag-suppressions';
 import { MCP_ENTRYPOINT_SCRIPT, CODECOMMIT_GATE_HANDLER, ASH_MATERIALIZED_CONFIG_PATH } from './ash-container-scripts';
+import { GENERATED_CONSTRUCT_ID, ashRoleSplitScope } from './ash-policy-split';
 
 /** Upstream ASH repository. Public, so an anonymous clone works. */
 export const ASH_REPOSITORY_URL = 'https://github.com/awslabs/automated-security-helper.git';
@@ -193,7 +194,24 @@ export class AshImageBuild extends Construct {
       encryptionKey: props.encryptionKey,
     });
 
-    this.project = new codebuild.Project(this, 'Build', {
+    // The project's role is created here rather than by `codebuild.Project`, so
+    // that the statements the Project adds to it — logs, report groups, the ECR
+    // pull for the build image, the KMS grant for the artifact key — are filed per
+    // service instead of piling into one DefaultPolicy. In the distributed pipeline
+    // stack that pile scores 28 against cfn-nag's W76 ceiling of 25, and the
+    // statement that pushes it over is added by CodePipeline's CodeBuild action,
+    // not by this construct, so there is nothing here to move out of the way
+    // instead. `GENERATED_CONSTRUCT_ID` keeps every logical id, the role's
+    // included, exactly where it was — see ash-policy-split.ts.
+    const build = ashRoleSplitScope(
+      this,
+      'Build',
+      'codebuild.amazonaws.com',
+      suppressSplitCodeBuildPolicy,
+    );
+
+    this.project = new codebuild.Project(build.scope, GENERATED_CONSTRUCT_ID, {
+      role: build.role,
       description:
         `Builds the ASH ${props.platform} image (${props.flavors.join(', ')}) into this ` +
         "account's ECR repository. ASH publishes no public image, so this build is what " +
@@ -251,11 +269,17 @@ export class AshImageBuild extends Construct {
       this.bootstrap = this.addBootstrap(props);
     }
 
-    suppressCodeBuildRoleWildcards(this.project);
+    // Applied to `build.scope`, not to `this.project`. These suppressions reach
+    // their targets through `applyToChildren`, and the project's role is now the
+    // project's sibling under that scope rather than its child — so suppressing on
+    // the project alone would leave the role's policies unsuppressed and fail
+    // synth on an ERROR-level IAM5 finding. The scope holds exactly the project
+    // and the role, so this covers the same resources as before and no others.
+    suppressCodeBuildRoleWildcards(build.scope);
     // AwsSolutions-CB5 pins the build image; it cannot evaluate one supplied as
     // an Fn::Join over ECR attributes, which is how every consumer of this
     // construct references the image it just built.
-    suppressUnevaluableRules(this.project, ['AwsSolutions-CB5']);
+    suppressUnevaluableRules(build.scope, ['AwsSolutions-CB5']);
   }
 
   /**

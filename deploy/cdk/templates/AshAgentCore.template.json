@@ -384,7 +384,7 @@
     }
    }
   },
-  "ImageBuildRoleDefaultPolicy3DC330B3": {
+  "ImageBuildRoleLogsAccess5CAE3F32": {
    "Type": "AWS::IAM::Policy",
    "Properties": {
     "PolicyDocument": {
@@ -458,7 +458,44 @@
          ]
         }
        ]
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "ImageBuildRoleLogsAccess5CAE3F32",
+    "Roles": [
+     {
+      "Ref": "ImageBuildRole1BB51BF0"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshAgentCore/Image/Build/Role/LogsAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
       },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "ImageBuildRoleCodebuildAccess4E36B96A": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": [
         "codebuild:BatchPutCodeCoverages",
@@ -492,7 +529,44 @@
          ]
         ]
        }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "ImageBuildRoleCodebuildAccess4E36B96A",
+    "Roles": [
+     {
+      "Ref": "ImageBuildRole1BB51BF0"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshAgentCore/Image/Build/Role/CodebuildAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
       },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "ImageBuildRoleKmsAccess6B467E84": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": [
         "kms:Decrypt",
@@ -507,7 +581,44 @@
          "Arn"
         ]
        }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "ImageBuildRoleKmsAccess6B467E84",
+    "Roles": [
+     {
+      "Ref": "ImageBuildRole1BB51BF0"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshAgentCore/Image/Build/Role/KmsAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
       },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "ImageBuildRoleEcrAccess0D916E99": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": [
         "ecr:BatchCheckLayerAvailability",
@@ -534,7 +645,7 @@
      ],
      "Version": "2012-10-17"
     },
-    "PolicyName": "ImageBuildRoleDefaultPolicy3DC330B3",
+    "PolicyName": "ImageBuildRoleEcrAccess0D916E99",
     "Roles": [
      {
       "Ref": "ImageBuildRole1BB51BF0"
@@ -542,12 +653,17 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshAgentCore/Image/Build/Role/DefaultPolicy/Resource",
+    "aws:cdk:path": "AshAgentCore/Image/Build/Role/EcrAccess/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
        "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
        "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
       },
       {
        "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
@@ -708,7 +824,7 @@
     "TimeoutInMinutes": 120
    },
    "Metadata": {
-    "aws:cdk:path": "AshAgentCore/Image/Build/Resource",
+    "aws:cdk:path": "AshAgentCore/Image/Build/Default/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -741,7 +857,7 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshAgentCore/Image/Build/EventsRole/Resource",
+    "aws:cdk:path": "AshAgentCore/Image/Build/Default/EventsRole/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -783,7 +899,7 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshAgentCore/Image/Build/EventsRole/DefaultPolicy/Resource",
+    "aws:cdk:path": "AshAgentCore/Image/Build/Default/EventsRole/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -1068,7 +1184,7 @@
     }
    }
   },
-  "RuntimeRoleDefaultPolicy31263C89": {
+  "RuntimeRoleEcrAccess7F0C0B38": {
    "Type": "AWS::IAM::Policy",
    "Properties": {
     "PolicyDocument": {
@@ -1091,7 +1207,39 @@
        "Action": "ecr:GetAuthorizationToken",
        "Effect": "Allow",
        "Resource": "*"
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "RuntimeRoleEcrAccess7F0C0B38",
+    "Roles": [
+     {
+      "Ref": "RuntimeRoleFD8790A4"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshAgentCore/RuntimeRole/EcrAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Every wildcard here is an action IAM defines with no resource ARN, so \"*\" is the only value the policy will accept: ecr:GetAuthorizationToken, the four X-Ray tracing actions, and cloudwatch:PutMetricData. PutMetricData is scoped by a cloudwatch:namespace condition on its statement rather than by a resource. Nothing here reaches a resource outside this stack, and no statement was widened to obtain this suppression.",
+       "id": "AwsSolutions-IAM5"
       },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "RuntimeRoleSsmAccessE88DA5CF": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": [
         "ssm:DescribeParameters",
@@ -1123,7 +1271,39 @@
          ]
         ]
        }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "RuntimeRoleSsmAccessE88DA5CF",
+    "Roles": [
+     {
+      "Ref": "RuntimeRoleFD8790A4"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshAgentCore/RuntimeRole/SsmAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Every wildcard here is an action IAM defines with no resource ARN, so \"*\" is the only value the policy will accept: ecr:GetAuthorizationToken, the four X-Ray tracing actions, and cloudwatch:PutMetricData. PutMetricData is scoped by a cloudwatch:namespace condition on its statement rather than by a resource. Nothing here reaches a resource outside this stack, and no statement was widened to obtain this suppression.",
+       "id": "AwsSolutions-IAM5"
       },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "RuntimeRoleSecretsmanagerAccess44E48B2B": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": [
         "secretsmanager:DescribeSecret",
@@ -1133,7 +1313,39 @@
        "Resource": {
         "Ref": "ConfigMcpAuthHeaderSecret99D04B65"
        }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "RuntimeRoleSecretsmanagerAccess44E48B2B",
+    "Roles": [
+     {
+      "Ref": "RuntimeRoleFD8790A4"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshAgentCore/RuntimeRole/SecretsmanagerAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Every wildcard here is an action IAM defines with no resource ARN, so \"*\" is the only value the policy will accept: ecr:GetAuthorizationToken, the four X-Ray tracing actions, and cloudwatch:PutMetricData. PutMetricData is scoped by a cloudwatch:namespace condition on its statement rather than by a resource. Nothing here reaches a resource outside this stack, and no statement was widened to obtain this suppression.",
+       "id": "AwsSolutions-IAM5"
       },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "RuntimeRoleLogsAccessF0093057": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": [
         "logs:CreateLogGroup",
@@ -1249,7 +1461,39 @@
         ]
        },
        "Sid": "RuntimeLogResourcePolicy"
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "RuntimeRoleLogsAccessF0093057",
+    "Roles": [
+     {
+      "Ref": "RuntimeRoleFD8790A4"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshAgentCore/RuntimeRole/LogsAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Every wildcard here is an action IAM defines with no resource ARN, so \"*\" is the only value the policy will accept: ecr:GetAuthorizationToken, the four X-Ray tracing actions, and cloudwatch:PutMetricData. PutMetricData is scoped by a cloudwatch:namespace condition on its statement rather than by a resource. Nothing here reaches a resource outside this stack, and no statement was widened to obtain this suppression.",
+       "id": "AwsSolutions-IAM5"
       },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "RuntimeRoleXrayAccess87A7AC04": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": [
         "xray:GetSamplingRules",
@@ -1260,7 +1504,39 @@
        "Effect": "Allow",
        "Resource": "*",
        "Sid": "RuntimeTelemetry"
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "RuntimeRoleXrayAccess87A7AC04",
+    "Roles": [
+     {
+      "Ref": "RuntimeRoleFD8790A4"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshAgentCore/RuntimeRole/XrayAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Every wildcard here is an action IAM defines with no resource ARN, so \"*\" is the only value the policy will accept: ecr:GetAuthorizationToken, the four X-Ray tracing actions, and cloudwatch:PutMetricData. PutMetricData is scoped by a cloudwatch:namespace condition on its statement rather than by a resource. Nothing here reaches a resource outside this stack, and no statement was widened to obtain this suppression.",
+       "id": "AwsSolutions-IAM5"
       },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "RuntimeRoleCloudwatchAccess5784F223": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": "cloudwatch:PutMetricData",
        "Condition": {
@@ -1275,7 +1551,7 @@
      ],
      "Version": "2012-10-17"
     },
-    "PolicyName": "RuntimeRoleDefaultPolicy31263C89",
+    "PolicyName": "RuntimeRoleCloudwatchAccess5784F223",
     "Roles": [
      {
       "Ref": "RuntimeRoleFD8790A4"
@@ -1283,9 +1559,13 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshAgentCore/RuntimeRole/DefaultPolicy/Resource",
+    "aws:cdk:path": "AshAgentCore/RuntimeRole/CloudwatchAccess/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
+      {
+       "reason": "Every wildcard here is an action IAM defines with no resource ARN, so \"*\" is the only value the policy will accept: ecr:GetAuthorizationToken, the four X-Ray tracing actions, and cloudwatch:PutMetricData. PutMetricData is scoped by a cloudwatch:namespace condition on its statement rather than by a resource. Nothing here reaches a resource outside this stack, and no statement was widened to obtain this suppression.",
+       "id": "AwsSolutions-IAM5"
+      },
       {
        "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
        "id": "CdkNagValidationFailure",

@@ -370,7 +370,7 @@
     }
    }
   },
-  "ImageBuildRoleDefaultPolicy3DC330B3": {
+  "ImageBuildRoleLogsAccess5CAE3F32": {
    "Type": "AWS::IAM::Policy",
    "Properties": {
     "PolicyDocument": {
@@ -444,7 +444,44 @@
          ]
         }
        ]
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "ImageBuildRoleLogsAccess5CAE3F32",
+    "Roles": [
+     {
+      "Ref": "ImageBuildRole1BB51BF0"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Image/Build/Role/LogsAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
       },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "ImageBuildRoleCodebuildAccess4E36B96A": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": [
         "codebuild:BatchPutCodeCoverages",
@@ -478,7 +515,44 @@
          ]
         ]
        }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "ImageBuildRoleCodebuildAccess4E36B96A",
+    "Roles": [
+     {
+      "Ref": "ImageBuildRole1BB51BF0"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Image/Build/Role/CodebuildAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
       },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "ImageBuildRoleKmsAccess6B467E84": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": [
         "kms:Decrypt",
@@ -493,7 +567,44 @@
          "Arn"
         ]
        }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "ImageBuildRoleKmsAccess6B467E84",
+    "Roles": [
+     {
+      "Ref": "ImageBuildRole1BB51BF0"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Image/Build/Role/KmsAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
       },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "ImageBuildRoleEcrAccess0D916E99": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": [
         "ecr:BatchCheckLayerAvailability",
@@ -516,7 +627,44 @@
        "Action": "ecr:GetAuthorizationToken",
        "Effect": "Allow",
        "Resource": "*"
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "ImageBuildRoleEcrAccess0D916E99",
+    "Roles": [
+     {
+      "Ref": "ImageBuildRole1BB51BF0"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Image/Build/Role/EcrAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
       },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "ImageBuildRoleS3AccessAE3DCF13": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": [
         "s3:GetBucket*",
@@ -550,7 +698,7 @@
      ],
      "Version": "2012-10-17"
     },
-    "PolicyName": "ImageBuildRoleDefaultPolicy3DC330B3",
+    "PolicyName": "ImageBuildRoleS3AccessAE3DCF13",
     "Roles": [
      {
       "Ref": "ImageBuildRole1BB51BF0"
@@ -558,7 +706,7 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Image/Build/Role/DefaultPolicy/Resource",
+    "aws:cdk:path": "AshDistributedPipeline/Image/Build/Role/S3Access/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -566,7 +714,7 @@
        "id": "AwsSolutions-IAM5"
       },
       {
-       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
        "id": "CdkNagValidationFailure",
        "is_reason_encoded": true
       }
@@ -724,7 +872,7 @@
     "TimeoutInMinutes": 120
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Image/Build/Resource",
+    "aws:cdk:path": "AshDistributedPipeline/Image/Build/Default/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -757,7 +905,7 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Image/Build/EventsRole/Resource",
+    "aws:cdk:path": "AshDistributedPipeline/Image/Build/Default/EventsRole/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -799,7 +947,7 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Image/Build/EventsRole/DefaultPolicy/Resource",
+    "aws:cdk:path": "AshDistributedPipeline/Image/Build/Default/EventsRole/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -1316,7 +1464,7 @@
     }
    }
   },
-  "Shard0ProjectRoleDefaultPolicy287DD725": {
+  "Shard0ProjectRoleEcrAccess1D5C4ED5": {
    "Type": "AWS::IAM::Policy",
    "Properties": {
     "PolicyDocument": {
@@ -1339,7 +1487,44 @@
        "Action": "ecr:GetAuthorizationToken",
        "Effect": "Allow",
        "Resource": "*"
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "Shard0ProjectRoleEcrAccess1D5C4ED5",
+    "Roles": [
+     {
+      "Ref": "Shard0ProjectRoleF3A1C5B4"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard0Project/Role/EcrAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
       },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard0ProjectRoleLogsAccess40500F09": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": [
         "logs:CreateLogGroup",
@@ -1396,7 +1581,44 @@
          ]
         }
        ]
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "Shard0ProjectRoleLogsAccess40500F09",
+    "Roles": [
+     {
+      "Ref": "Shard0ProjectRoleF3A1C5B4"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard0Project/Role/LogsAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
       },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard0ProjectRoleCodebuildAccess45B42F79": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": [
         "codebuild:BatchPutCodeCoverages",
@@ -1430,7 +1652,44 @@
          ]
         ]
        }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "Shard0ProjectRoleCodebuildAccess45B42F79",
+    "Roles": [
+     {
+      "Ref": "Shard0ProjectRoleF3A1C5B4"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard0Project/Role/CodebuildAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
       },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard0ProjectRoleKmsAccess0621CF75": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": [
         "kms:Decrypt",
@@ -1445,7 +1704,44 @@
          "Arn"
         ]
        }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "Shard0ProjectRoleKmsAccess0621CF75",
+    "Roles": [
+     {
+      "Ref": "Shard0ProjectRoleF3A1C5B4"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard0Project/Role/KmsAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
       },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard0ProjectRoleS3Access61328E67": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": [
         "s3:Abort*",
@@ -1482,48 +1778,6 @@
       },
       {
        "Action": [
-        "ssm:DescribeParameters",
-        "ssm:GetParameter",
-        "ssm:GetParameterHistory",
-        "ssm:GetParameters"
-       ],
-       "Effect": "Allow",
-       "Resource": {
-        "Fn::Join": [
-         "",
-         [
-          "arn:",
-          {
-           "Ref": "AWS::Partition"
-          },
-          ":ssm:",
-          {
-           "Ref": "AWS::Region"
-          },
-          ":",
-          {
-           "Ref": "AWS::AccountId"
-          },
-          ":parameter/",
-          {
-           "Ref": "ConfigBaseConfig623C762C"
-          }
-         ]
-        ]
-       }
-      },
-      {
-       "Action": [
-        "secretsmanager:DescribeSecret",
-        "secretsmanager:GetSecretValue"
-       ],
-       "Effect": "Allow",
-       "Resource": {
-        "Ref": "ConfigMcpAuthHeaderSecret99D04B65"
-       }
-      },
-      {
-       "Action": [
         "s3:GetBucket*",
         "s3:GetObject*",
         "s3:List*"
@@ -1555,7 +1809,7 @@
      ],
      "Version": "2012-10-17"
     },
-    "PolicyName": "Shard0ProjectRoleDefaultPolicy287DD725",
+    "PolicyName": "Shard0ProjectRoleS3Access61328E67",
     "Roles": [
      {
       "Ref": "Shard0ProjectRoleF3A1C5B4"
@@ -1563,12 +1817,133 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Shard0Project/Role/DefaultPolicy/Resource",
+    "aws:cdk:path": "AshDistributedPipeline/Shard0Project/Role/S3Access/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
        "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
        "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard0ProjectRoleSsmAccess34479532": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "ssm:DescribeParameters",
+        "ssm:GetParameter",
+        "ssm:GetParameterHistory",
+        "ssm:GetParameters"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":ssm:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":parameter/",
+          {
+           "Ref": "ConfigBaseConfig623C762C"
+          }
+         ]
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "Shard0ProjectRoleSsmAccess34479532",
+    "Roles": [
+     {
+      "Ref": "Shard0ProjectRoleF3A1C5B4"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard0Project/Role/SsmAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard0ProjectRoleSecretsmanagerAccessD212D785": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "secretsmanager:DescribeSecret",
+        "secretsmanager:GetSecretValue"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Ref": "ConfigMcpAuthHeaderSecret99D04B65"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "Shard0ProjectRoleSecretsmanagerAccessD212D785",
+    "Roles": [
+     {
+      "Ref": "Shard0ProjectRoleF3A1C5B4"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard0Project/Role/SecretsmanagerAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
       },
       {
        "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
@@ -1700,7 +2075,7 @@
     "TimeoutInMinutes": 60
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Shard0Project/Resource",
+    "aws:cdk:path": "AshDistributedPipeline/Shard0Project/Default/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -1749,7 +2124,7 @@
     }
    }
   },
-  "Shard1ProjectRoleDefaultPolicy4B7CA148": {
+  "Shard1ProjectRoleEcrAccess4373EFE1": {
    "Type": "AWS::IAM::Policy",
    "Properties": {
     "PolicyDocument": {
@@ -1772,7 +2147,44 @@
        "Action": "ecr:GetAuthorizationToken",
        "Effect": "Allow",
        "Resource": "*"
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "Shard1ProjectRoleEcrAccess4373EFE1",
+    "Roles": [
+     {
+      "Ref": "Shard1ProjectRole6761C196"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard1Project/Role/EcrAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
       },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard1ProjectRoleLogsAccessFF02CD94": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": [
         "logs:CreateLogGroup",
@@ -1829,7 +2241,44 @@
          ]
         }
        ]
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "Shard1ProjectRoleLogsAccessFF02CD94",
+    "Roles": [
+     {
+      "Ref": "Shard1ProjectRole6761C196"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard1Project/Role/LogsAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
       },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard1ProjectRoleCodebuildAccess4C3B9220": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": [
         "codebuild:BatchPutCodeCoverages",
@@ -1863,7 +2312,44 @@
          ]
         ]
        }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "Shard1ProjectRoleCodebuildAccess4C3B9220",
+    "Roles": [
+     {
+      "Ref": "Shard1ProjectRole6761C196"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard1Project/Role/CodebuildAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
       },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard1ProjectRoleKmsAccessF587683C": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": [
         "kms:Decrypt",
@@ -1878,7 +2364,44 @@
          "Arn"
         ]
        }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "Shard1ProjectRoleKmsAccessF587683C",
+    "Roles": [
+     {
+      "Ref": "Shard1ProjectRole6761C196"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard1Project/Role/KmsAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
       },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard1ProjectRoleS3Access58CD265B": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": [
         "s3:Abort*",
@@ -1915,48 +2438,6 @@
       },
       {
        "Action": [
-        "ssm:DescribeParameters",
-        "ssm:GetParameter",
-        "ssm:GetParameterHistory",
-        "ssm:GetParameters"
-       ],
-       "Effect": "Allow",
-       "Resource": {
-        "Fn::Join": [
-         "",
-         [
-          "arn:",
-          {
-           "Ref": "AWS::Partition"
-          },
-          ":ssm:",
-          {
-           "Ref": "AWS::Region"
-          },
-          ":",
-          {
-           "Ref": "AWS::AccountId"
-          },
-          ":parameter/",
-          {
-           "Ref": "ConfigBaseConfig623C762C"
-          }
-         ]
-        ]
-       }
-      },
-      {
-       "Action": [
-        "secretsmanager:DescribeSecret",
-        "secretsmanager:GetSecretValue"
-       ],
-       "Effect": "Allow",
-       "Resource": {
-        "Ref": "ConfigMcpAuthHeaderSecret99D04B65"
-       }
-      },
-      {
-       "Action": [
         "s3:GetBucket*",
         "s3:GetObject*",
         "s3:List*"
@@ -1988,7 +2469,7 @@
      ],
      "Version": "2012-10-17"
     },
-    "PolicyName": "Shard1ProjectRoleDefaultPolicy4B7CA148",
+    "PolicyName": "Shard1ProjectRoleS3Access58CD265B",
     "Roles": [
      {
       "Ref": "Shard1ProjectRole6761C196"
@@ -1996,12 +2477,133 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Shard1Project/Role/DefaultPolicy/Resource",
+    "aws:cdk:path": "AshDistributedPipeline/Shard1Project/Role/S3Access/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
        "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
        "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard1ProjectRoleSsmAccess6E0E14B6": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "ssm:DescribeParameters",
+        "ssm:GetParameter",
+        "ssm:GetParameterHistory",
+        "ssm:GetParameters"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":ssm:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":parameter/",
+          {
+           "Ref": "ConfigBaseConfig623C762C"
+          }
+         ]
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "Shard1ProjectRoleSsmAccess6E0E14B6",
+    "Roles": [
+     {
+      "Ref": "Shard1ProjectRole6761C196"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard1Project/Role/SsmAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard1ProjectRoleSecretsmanagerAccessD10E8A33": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "secretsmanager:DescribeSecret",
+        "secretsmanager:GetSecretValue"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Ref": "ConfigMcpAuthHeaderSecret99D04B65"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "Shard1ProjectRoleSecretsmanagerAccessD10E8A33",
+    "Roles": [
+     {
+      "Ref": "Shard1ProjectRole6761C196"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard1Project/Role/SecretsmanagerAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
       },
       {
        "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
@@ -2133,7 +2735,7 @@
     "TimeoutInMinutes": 60
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Shard1Project/Resource",
+    "aws:cdk:path": "AshDistributedPipeline/Shard1Project/Default/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -2182,7 +2784,7 @@
     }
    }
   },
-  "Shard2ProjectRoleDefaultPolicy0E87B629": {
+  "Shard2ProjectRoleEcrAccess443C9AB5": {
    "Type": "AWS::IAM::Policy",
    "Properties": {
     "PolicyDocument": {
@@ -2205,7 +2807,44 @@
        "Action": "ecr:GetAuthorizationToken",
        "Effect": "Allow",
        "Resource": "*"
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "Shard2ProjectRoleEcrAccess443C9AB5",
+    "Roles": [
+     {
+      "Ref": "Shard2ProjectRole2D41E181"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard2Project/Role/EcrAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
       },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard2ProjectRoleLogsAccess008E82C4": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": [
         "logs:CreateLogGroup",
@@ -2262,7 +2901,44 @@
          ]
         }
        ]
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "Shard2ProjectRoleLogsAccess008E82C4",
+    "Roles": [
+     {
+      "Ref": "Shard2ProjectRole2D41E181"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard2Project/Role/LogsAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
       },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard2ProjectRoleCodebuildAccess4FACF332": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": [
         "codebuild:BatchPutCodeCoverages",
@@ -2296,7 +2972,44 @@
          ]
         ]
        }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "Shard2ProjectRoleCodebuildAccess4FACF332",
+    "Roles": [
+     {
+      "Ref": "Shard2ProjectRole2D41E181"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard2Project/Role/CodebuildAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
       },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard2ProjectRoleKmsAccessFECDB88A": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": [
         "kms:Decrypt",
@@ -2311,7 +3024,44 @@
          "Arn"
         ]
        }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "Shard2ProjectRoleKmsAccessFECDB88A",
+    "Roles": [
+     {
+      "Ref": "Shard2ProjectRole2D41E181"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard2Project/Role/KmsAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
       },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard2ProjectRoleS3AccessCCE66233": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": [
         "s3:Abort*",
@@ -2348,48 +3098,6 @@
       },
       {
        "Action": [
-        "ssm:DescribeParameters",
-        "ssm:GetParameter",
-        "ssm:GetParameterHistory",
-        "ssm:GetParameters"
-       ],
-       "Effect": "Allow",
-       "Resource": {
-        "Fn::Join": [
-         "",
-         [
-          "arn:",
-          {
-           "Ref": "AWS::Partition"
-          },
-          ":ssm:",
-          {
-           "Ref": "AWS::Region"
-          },
-          ":",
-          {
-           "Ref": "AWS::AccountId"
-          },
-          ":parameter/",
-          {
-           "Ref": "ConfigBaseConfig623C762C"
-          }
-         ]
-        ]
-       }
-      },
-      {
-       "Action": [
-        "secretsmanager:DescribeSecret",
-        "secretsmanager:GetSecretValue"
-       ],
-       "Effect": "Allow",
-       "Resource": {
-        "Ref": "ConfigMcpAuthHeaderSecret99D04B65"
-       }
-      },
-      {
-       "Action": [
         "s3:GetBucket*",
         "s3:GetObject*",
         "s3:List*"
@@ -2421,7 +3129,7 @@
      ],
      "Version": "2012-10-17"
     },
-    "PolicyName": "Shard2ProjectRoleDefaultPolicy0E87B629",
+    "PolicyName": "Shard2ProjectRoleS3AccessCCE66233",
     "Roles": [
      {
       "Ref": "Shard2ProjectRole2D41E181"
@@ -2429,12 +3137,133 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Shard2Project/Role/DefaultPolicy/Resource",
+    "aws:cdk:path": "AshDistributedPipeline/Shard2Project/Role/S3Access/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
        "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
        "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard2ProjectRoleSsmAccess832EE763": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "ssm:DescribeParameters",
+        "ssm:GetParameter",
+        "ssm:GetParameterHistory",
+        "ssm:GetParameters"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":ssm:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":parameter/",
+          {
+           "Ref": "ConfigBaseConfig623C762C"
+          }
+         ]
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "Shard2ProjectRoleSsmAccess832EE763",
+    "Roles": [
+     {
+      "Ref": "Shard2ProjectRole2D41E181"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard2Project/Role/SsmAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard2ProjectRoleSecretsmanagerAccessC61F8AC4": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "secretsmanager:DescribeSecret",
+        "secretsmanager:GetSecretValue"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Ref": "ConfigMcpAuthHeaderSecret99D04B65"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "Shard2ProjectRoleSecretsmanagerAccessC61F8AC4",
+    "Roles": [
+     {
+      "Ref": "Shard2ProjectRole2D41E181"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard2Project/Role/SecretsmanagerAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
       },
       {
        "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
@@ -2566,7 +3395,7 @@
     "TimeoutInMinutes": 60
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Shard2Project/Resource",
+    "aws:cdk:path": "AshDistributedPipeline/Shard2Project/Default/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -2615,7 +3444,7 @@
     }
    }
   },
-  "Shard3ProjectRoleDefaultPolicyB948A147": {
+  "Shard3ProjectRoleEcrAccess97A23D6E": {
    "Type": "AWS::IAM::Policy",
    "Properties": {
     "PolicyDocument": {
@@ -2638,7 +3467,44 @@
        "Action": "ecr:GetAuthorizationToken",
        "Effect": "Allow",
        "Resource": "*"
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "Shard3ProjectRoleEcrAccess97A23D6E",
+    "Roles": [
+     {
+      "Ref": "Shard3ProjectRole052E7B3A"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard3Project/Role/EcrAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
       },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard3ProjectRoleLogsAccessE7C5807B": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": [
         "logs:CreateLogGroup",
@@ -2695,7 +3561,44 @@
          ]
         }
        ]
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "Shard3ProjectRoleLogsAccessE7C5807B",
+    "Roles": [
+     {
+      "Ref": "Shard3ProjectRole052E7B3A"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard3Project/Role/LogsAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
       },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard3ProjectRoleCodebuildAccessF448FF03": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": [
         "codebuild:BatchPutCodeCoverages",
@@ -2729,7 +3632,44 @@
          ]
         ]
        }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "Shard3ProjectRoleCodebuildAccessF448FF03",
+    "Roles": [
+     {
+      "Ref": "Shard3ProjectRole052E7B3A"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard3Project/Role/CodebuildAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
       },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard3ProjectRoleKmsAccessE43CF049": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": [
         "kms:Decrypt",
@@ -2744,7 +3684,44 @@
          "Arn"
         ]
        }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "Shard3ProjectRoleKmsAccessE43CF049",
+    "Roles": [
+     {
+      "Ref": "Shard3ProjectRole052E7B3A"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard3Project/Role/KmsAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
       },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard3ProjectRoleS3Access7C0DA3D9": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": [
         "s3:Abort*",
@@ -2781,48 +3758,6 @@
       },
       {
        "Action": [
-        "ssm:DescribeParameters",
-        "ssm:GetParameter",
-        "ssm:GetParameterHistory",
-        "ssm:GetParameters"
-       ],
-       "Effect": "Allow",
-       "Resource": {
-        "Fn::Join": [
-         "",
-         [
-          "arn:",
-          {
-           "Ref": "AWS::Partition"
-          },
-          ":ssm:",
-          {
-           "Ref": "AWS::Region"
-          },
-          ":",
-          {
-           "Ref": "AWS::AccountId"
-          },
-          ":parameter/",
-          {
-           "Ref": "ConfigBaseConfig623C762C"
-          }
-         ]
-        ]
-       }
-      },
-      {
-       "Action": [
-        "secretsmanager:DescribeSecret",
-        "secretsmanager:GetSecretValue"
-       ],
-       "Effect": "Allow",
-       "Resource": {
-        "Ref": "ConfigMcpAuthHeaderSecret99D04B65"
-       }
-      },
-      {
-       "Action": [
         "s3:GetBucket*",
         "s3:GetObject*",
         "s3:List*"
@@ -2854,7 +3789,7 @@
      ],
      "Version": "2012-10-17"
     },
-    "PolicyName": "Shard3ProjectRoleDefaultPolicyB948A147",
+    "PolicyName": "Shard3ProjectRoleS3Access7C0DA3D9",
     "Roles": [
      {
       "Ref": "Shard3ProjectRole052E7B3A"
@@ -2862,12 +3797,133 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Shard3Project/Role/DefaultPolicy/Resource",
+    "aws:cdk:path": "AshDistributedPipeline/Shard3Project/Role/S3Access/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
        "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
        "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard3ProjectRoleSsmAccess897CF19F": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "ssm:DescribeParameters",
+        "ssm:GetParameter",
+        "ssm:GetParameterHistory",
+        "ssm:GetParameters"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":ssm:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":parameter/",
+          {
+           "Ref": "ConfigBaseConfig623C762C"
+          }
+         ]
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "Shard3ProjectRoleSsmAccess897CF19F",
+    "Roles": [
+     {
+      "Ref": "Shard3ProjectRole052E7B3A"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard3Project/Role/SsmAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "Shard3ProjectRoleSecretsmanagerAccess62F87D61": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "secretsmanager:DescribeSecret",
+        "secretsmanager:GetSecretValue"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Ref": "ConfigMcpAuthHeaderSecret99D04B65"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "Shard3ProjectRoleSecretsmanagerAccess62F87D61",
+    "Roles": [
+     {
+      "Ref": "Shard3ProjectRole052E7B3A"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Shard3Project/Role/SecretsmanagerAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
       },
       {
        "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
@@ -2999,7 +4055,7 @@
     "TimeoutInMinutes": 60
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Shard3Project/Resource",
+    "aws:cdk:path": "AshDistributedPipeline/Shard3Project/Default/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -3048,7 +4104,7 @@
     }
    }
   },
-  "MergeProjectRoleDefaultPolicy82EB8D60": {
+  "MergeProjectRoleEcrAccess13B0F845": {
    "Type": "AWS::IAM::Policy",
    "Properties": {
     "PolicyDocument": {
@@ -3071,7 +4127,44 @@
        "Action": "ecr:GetAuthorizationToken",
        "Effect": "Allow",
        "Resource": "*"
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "MergeProjectRoleEcrAccess13B0F845",
+    "Roles": [
+     {
+      "Ref": "MergeProjectRoleE1E953C0"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/MergeProject/Role/EcrAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
       },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "MergeProjectRoleLogsAccess2BCFA4D8": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": [
         "logs:CreateLogGroup",
@@ -3128,7 +4221,44 @@
          ]
         }
        ]
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "MergeProjectRoleLogsAccess2BCFA4D8",
+    "Roles": [
+     {
+      "Ref": "MergeProjectRoleE1E953C0"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/MergeProject/Role/LogsAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
       },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "MergeProjectRoleCodebuildAccessA9E08CA7": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": [
         "codebuild:BatchPutCodeCoverages",
@@ -3162,7 +4292,44 @@
          ]
         ]
        }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "MergeProjectRoleCodebuildAccessA9E08CA7",
+    "Roles": [
+     {
+      "Ref": "MergeProjectRoleE1E953C0"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/MergeProject/Role/CodebuildAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
       },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "MergeProjectRoleKmsAccess390DB345": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": [
         "kms:Decrypt",
@@ -3177,7 +4344,44 @@
          "Arn"
         ]
        }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "MergeProjectRoleKmsAccess390DB345",
+    "Roles": [
+     {
+      "Ref": "MergeProjectRoleE1E953C0"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/MergeProject/Role/KmsAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
       },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "MergeProjectRoleS3Access7BE3D9B1": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": [
         "s3:Abort*",
@@ -3217,48 +4421,6 @@
       },
       {
        "Action": [
-        "ssm:DescribeParameters",
-        "ssm:GetParameter",
-        "ssm:GetParameterHistory",
-        "ssm:GetParameters"
-       ],
-       "Effect": "Allow",
-       "Resource": {
-        "Fn::Join": [
-         "",
-         [
-          "arn:",
-          {
-           "Ref": "AWS::Partition"
-          },
-          ":ssm:",
-          {
-           "Ref": "AWS::Region"
-          },
-          ":",
-          {
-           "Ref": "AWS::AccountId"
-          },
-          ":parameter/",
-          {
-           "Ref": "ConfigBaseConfig623C762C"
-          }
-         ]
-        ]
-       }
-      },
-      {
-       "Action": [
-        "secretsmanager:DescribeSecret",
-        "secretsmanager:GetSecretValue"
-       ],
-       "Effect": "Allow",
-       "Resource": {
-        "Ref": "ConfigMcpAuthHeaderSecret99D04B65"
-       }
-      },
-      {
-       "Action": [
         "s3:GetBucket*",
         "s3:GetObject*",
         "s3:List*"
@@ -3290,7 +4452,7 @@
      ],
      "Version": "2012-10-17"
     },
-    "PolicyName": "MergeProjectRoleDefaultPolicy82EB8D60",
+    "PolicyName": "MergeProjectRoleS3Access7BE3D9B1",
     "Roles": [
      {
       "Ref": "MergeProjectRoleE1E953C0"
@@ -3298,12 +4460,133 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/MergeProject/Role/DefaultPolicy/Resource",
+    "aws:cdk:path": "AshDistributedPipeline/MergeProject/Role/S3Access/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
        "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
        "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "MergeProjectRoleSsmAccess1E80FCB3": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "ssm:DescribeParameters",
+        "ssm:GetParameter",
+        "ssm:GetParameterHistory",
+        "ssm:GetParameters"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Fn::Join": [
+         "",
+         [
+          "arn:",
+          {
+           "Ref": "AWS::Partition"
+          },
+          ":ssm:",
+          {
+           "Ref": "AWS::Region"
+          },
+          ":",
+          {
+           "Ref": "AWS::AccountId"
+          },
+          ":parameter/",
+          {
+           "Ref": "ConfigBaseConfig623C762C"
+          }
+         ]
+        ]
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "MergeProjectRoleSsmAccess1E80FCB3",
+    "Roles": [
+     {
+      "Ref": "MergeProjectRoleE1E953C0"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/MergeProject/Role/SsmAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
+      }
+     ]
+    }
+   }
+  },
+  "MergeProjectRoleSecretsmanagerAccess84E869D3": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
+      {
+       "Action": [
+        "secretsmanager:DescribeSecret",
+        "secretsmanager:GetSecretValue"
+       ],
+       "Effect": "Allow",
+       "Resource": {
+        "Ref": "ConfigMcpAuthHeaderSecret99D04B65"
+       }
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "MergeProjectRoleSecretsmanagerAccess84E869D3",
+    "Roles": [
+     {
+      "Ref": "MergeProjectRoleE1E953C0"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/MergeProject/Role/SecretsmanagerAccess/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "id": "AwsSolutions-IAM5"
+      },
+      {
+       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1JQU01LiBSZWNvcmRlZCByYXRoZXIgdGhhbiBzaWxlbnRseSBpZ25vcmVkIOKAlCB0aGVzZSBydWxlcyBkaWQgbm90IHJ1biwgc28gdGhleSBuZWl0aGVyIHBhc3NlZCBub3IgZmFpbGVkLg==",
+       "id": "CdkNagValidationFailure",
+       "is_reason_encoded": true
       },
       {
        "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
@@ -3430,7 +4713,7 @@
     "TimeoutInMinutes": 30
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/MergeProject/Resource",
+    "aws:cdk:path": "AshDistributedPipeline/MergeProject/Default/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -3474,7 +4757,7 @@
     }
    }
   },
-  "PipelineRoleDefaultPolicyC7A05455": {
+  "PipelineRoleS3Access554D432A": {
    "Type": "AWS::IAM::Policy",
    "Properties": {
     "PolicyDocument": {
@@ -3515,7 +4798,34 @@
          ]
         }
        ]
-      },
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "PipelineRoleS3Access554D432A",
+    "Roles": [
+     {
+      "Ref": "PipelineRoleD68726F7"
+     }
+    ]
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Role/S3Access/Resource",
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "Object-level access within the artifact and source buckets this stack creates, plus assuming the per-action roles this stack creates. CodePipeline cannot name the artifact object keys in advance because they are generated per execution.",
+       "id": "AwsSolutions-IAM5"
+      }
+     ]
+    }
+   }
+  },
+  "PipelineRoleStsAccess353EF49F": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": "sts:AssumeRole",
        "Effect": "Allow",
@@ -3567,7 +4877,7 @@
      ],
      "Version": "2012-10-17"
     },
-    "PolicyName": "PipelineRoleDefaultPolicyC7A05455",
+    "PolicyName": "PipelineRoleStsAccess353EF49F",
     "Roles": [
      {
       "Ref": "PipelineRoleD68726F7"
@@ -3575,7 +4885,7 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Role/DefaultPolicy/Resource",
+    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Role/StsAccess/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -3816,11 +5126,12 @@
     ]
    },
    "DependsOn": [
-    "PipelineRoleDefaultPolicyC7A05455",
-    "PipelineRoleD68726F7"
+    "PipelineRoleD68726F7",
+    "PipelineRoleS3Access554D432A",
+    "PipelineRoleStsAccess353EF49F"
    ],
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Resource",
+    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Default/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -3853,7 +5164,7 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Source/Source/CodePipelineActionRole/Resource",
+    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Default/Source/Source/CodePipelineActionRole/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -3944,7 +5255,7 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Source/Source/CodePipelineActionRole/DefaultPolicy/Resource",
+    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Default/Source/Source/CodePipelineActionRole/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -3977,7 +5288,7 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Pipeline/BuildImage/BuildAshImage/CodePipelineActionRole/Resource",
+    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Default/BuildImage/BuildAshImage/CodePipelineActionRole/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -4018,7 +5329,7 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Pipeline/BuildImage/BuildAshImage/CodePipelineActionRole/DefaultPolicy/Resource",
+    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Default/BuildImage/BuildAshImage/CodePipelineActionRole/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -4051,7 +5362,7 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Scan/Shard0/CodePipelineActionRole/Resource",
+    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Default/Scan/Shard0/CodePipelineActionRole/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -4092,7 +5403,7 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Scan/Shard0/CodePipelineActionRole/DefaultPolicy/Resource",
+    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Default/Scan/Shard0/CodePipelineActionRole/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -4125,7 +5436,7 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Scan/Shard1/CodePipelineActionRole/Resource",
+    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Default/Scan/Shard1/CodePipelineActionRole/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -4166,7 +5477,7 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Scan/Shard1/CodePipelineActionRole/DefaultPolicy/Resource",
+    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Default/Scan/Shard1/CodePipelineActionRole/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -4199,7 +5510,7 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Scan/Shard2/CodePipelineActionRole/Resource",
+    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Default/Scan/Shard2/CodePipelineActionRole/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -4240,7 +5551,7 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Scan/Shard2/CodePipelineActionRole/DefaultPolicy/Resource",
+    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Default/Scan/Shard2/CodePipelineActionRole/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -4273,7 +5584,7 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Scan/Shard3/CodePipelineActionRole/Resource",
+    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Default/Scan/Shard3/CodePipelineActionRole/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -4314,7 +5625,7 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Scan/Shard3/CodePipelineActionRole/DefaultPolicy/Resource",
+    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Default/Scan/Shard3/CodePipelineActionRole/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -4347,7 +5658,7 @@
     }
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Merge/MergeAndGate/CodePipelineActionRole/Resource",
+    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Default/Merge/MergeAndGate/CodePipelineActionRole/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {
@@ -4388,7 +5699,7 @@
     ]
    },
    "Metadata": {
-    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Merge/MergeAndGate/CodePipelineActionRole/DefaultPolicy/Resource",
+    "aws:cdk:path": "AshDistributedPipeline/Pipeline/Default/Merge/MergeAndGate/CodePipelineActionRole/DefaultPolicy/Resource",
     "cdk_nag": {
      "rules_to_suppress": [
       {

@@ -58,6 +58,71 @@ export function suppressCodeBuildRoleWildcards(scope: IConstruct): void {
 }
 
 /**
+ * Both CodeBuild-role suppressions, for one policy produced by the per-service
+ * split in ash-policy-split.ts.
+ *
+ * Pass this as that role's `onPolicyCreated`. It has to run per policy AS THE
+ * POLICY IS CREATED rather than once over the role, because a suppression applied
+ * to a scope only reaches the resources that exist when it is applied — and a
+ * grant made later creates a policy resource the earlier walk could not see. The
+ * measured case is the artifact-bucket read `codepipeline_actions.CodeBuildAction`
+ * adds to a project's role while the pipeline is assembled.
+ *
+ * `AwsSolutions-IAM5` for the wildcards, which are the same wildcards as before
+ * the split and are enumerated in `suppressCodeBuildRoleWildcards`.
+ * `CdkNagValidationFailure` for `AwsSolutions-IAM5` because a policy whose
+ * resources are all CloudFormation intrinsics makes the rule throw rather than
+ * pass or fail — which is exactly what the single DefaultPolicy needed too.
+ */
+export function suppressSplitCodeBuildPolicy(policy: IConstruct): void {
+  suppressCodeBuildRoleWildcards(policy);
+  suppressUnevaluableRules(policy, ['AwsSolutions-IAM5']);
+}
+
+/**
+ * The wildcards on the AgentCore execution role, which the per-service split made
+ * visible for the first time.
+ *
+ * These grants did not change. What changed is that cdk-nag can now evaluate
+ * them. Before the split every statement on this role shared one policy document,
+ * and because some of those statements scope themselves with ARNs built from
+ * pseudo-parameters, AwsSolutions-IAM5 threw on the document as a whole and was
+ * recorded as a CdkNagValidationFailure. The rule therefore never reached the
+ * three statements that genuinely use "*". Split per service, those three sit in
+ * documents the rule can read, and it correctly reports them.
+ *
+ * So this suppression is not new permissiveness; it is a finding that was masked
+ * becoming a finding that is stated. Each of the three is a wildcard IAM itself
+ * requires:
+ *
+ *   * `ecr:GetAuthorizationToken` is an account-level operation that IAM defines
+ *     with no resource ARN, so "*" is the only value it accepts.
+ *   * The four X-Ray actions the AgentCore runtime needs for tracing are likewise
+ *     defined with no resource ARN.
+ *   * `cloudwatch:PutMetricData` has no resource ARN either. It is scoped by the
+ *     `cloudwatch:namespace` condition on the statement instead, which limits it
+ *     to the one namespace the runtime publishes to.
+ */
+export function suppressAgentCoreRuntimeWildcards(scope: IConstruct): void {
+  NagSuppressions.addResourceSuppressions(
+    scope,
+    [
+      {
+        id: 'AwsSolutions-IAM5',
+        reason:
+          'Every wildcard here is an action IAM defines with no resource ARN, so "*" is the ' +
+          'only value the policy will accept: ecr:GetAuthorizationToken, the four X-Ray ' +
+          'tracing actions, and cloudwatch:PutMetricData. PutMetricData is scoped by a ' +
+          'cloudwatch:namespace condition on its statement rather than by a resource. ' +
+          'Nothing here reaches a resource outside this stack, and no statement was ' +
+          'widened to obtain this suppression.',
+      },
+    ],
+    true,
+  );
+}
+
+/**
  * The Lambda-side equivalent, for the inline logs policy.
  *
  * A log group's streams cannot be enumerated in advance, so `:*` on the group's
