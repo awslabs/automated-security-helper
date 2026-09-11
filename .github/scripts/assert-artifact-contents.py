@@ -2,7 +2,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Asserts a built wheel or sdist carries ASH's own code and nothing vendored.
+"""Checks a built wheel or sdist for vendored third-party scanner code and assets.
 
 WHY THIS EXISTS
 ---------------
@@ -13,22 +13,61 @@ CI. That makes the wheel the single artifact the whole distribution story rests
 on, and until this ran, CI never built one: the only `uv build` in the tree is
 inside Dockerfile, where its output never leaves the image.
 
-The invariant being protected is narrow and absolute: no artifact published from
-this repository may contain third-party scanner source or assets. ASH shells out
-to bandit, checkov, semgrep, grype, syft, trivy, opengrep, detect-secrets,
-cdk-nag and cfn-nag; it does not redistribute any of them. Their licenses are
-not this project's to relicense under Apache-2.0, their binaries would make the
-artifact unauditable, and a vendored scanner is a supply-chain dependency nobody
-reviews.
+The operator's rule is absolute: no artifact published from this repository may
+contain third-party scanner source or assets. ASH shells out to bandit, checkov,
+semgrep, grype, syft, trivy, opengrep, npm-audit, detect-secrets, cdk-nag and
+cfn-nag; it does not redistribute any of them. Their licenses are not this
+project's to relicense under Apache-2.0, their binaries would make the artifact
+unauditable, and a vendored scanner is a supply-chain dependency nobody reviews.
 
-The invariant holds today. It has not always: two vendored `.jsii.tgz` bundles
-(aws-cdk-lib at 57.9 MB and cdk-nag at 644 KB) lived in the tree until commit
-760f3647 removed them. That is the shape of the regression this guards -- a
-build-time convenience that ships, unnoticed, because nobody unpacks the
-artifact in review.
+WHAT THIS SCRIPT PROVES, AND WHAT IT DOES NOT
+---------------------------------------------
+The rule is absolute. This script is not a proof of it, and an earlier version of
+this docstring said otherwise -- it called the invariant "narrow and absolute",
+which invited the reader to treat a green run as a proof of absence. It is not
+one, and the overclaim was the most dangerous thing in the file: the next
+reviewer reads green as proof and stops unpacking artifacts.
 
-WHY THE RULE IS ABOUT PATH SHAPE AND NOT ABOUT SCANNER NAMES
-------------------------------------------------------------
+What it actually is, stated plainly:
+
+  * A REGRESSION GUARD over the mechanisms by which third-party payload has
+    actually arrived here and arrives in Python projects generally: dependency
+    trees, nested archives, compiled objects, and a tool's own source tree
+    checked in under its own name. Each is detected by path shape or by content
+    header, not by grepping for tool names -- see the next section for why.
+
+  * A FAIL-CLOSED ALLOWLIST over the two namespaces where new payload can hide
+    without looking like any of those shapes: `automated_security_helper/assets/`
+    (pinned member by member) and the set of subdirectories directly under
+    `automated_security_helper/` (pinned by name). In those two places the
+    default answer is NO: anything not on the list fails, and adding to the list
+    is a diff a reviewer sees.
+
+  * A PER-MEMBER SIZE CEILING, because scanner binaries and vulnerability
+    databases are orders of magnitude larger than any file ASH authors.
+
+What it does NOT prove, concretely. A single third-party Python source file,
+placed inside a subdirectory that is already pinned, under a filename that is
+not a scanner distribution name -- say a copy of some helper module at
+`automated_security_helper/utils/leftpad.py` -- has no distinguishing path shape
+and no distinguishing header, is well under the size ceiling, and WILL PASS. So
+will a vendored tree that keeps to a pinned subdirectory. Detecting those needs
+provenance (does every shipped file exist in this repository at this commit?) or
+license scanning, and neither is what this does.
+
+The honest summary: this makes the cheap and historically-real ways of vendoring
+a scanner fail loudly, and it makes adding anything to `assets/` or any new
+top-level package directory a conscious, reviewed act. It raises the cost of
+vendoring. It does not certify that nothing is vendored. Treat a green run as
+"none of the known mechanisms fired", not as "audited clean".
+
+The rule has been broken before: two vendored `.jsii.tgz` bundles (aws-cdk-lib at
+57.9 MB and cdk-nag at 644 KB) lived in the tree until commit 760f3647 removed
+them. That is the shape of the regression this guards -- a build-time convenience
+that ships, unnoticed, because nobody unpacks the artifact in review.
+
+WHY THE SHAPE RULES ARE ABOUT PATH SHAPE AND NOT ABOUT SCANNER NAMES
+--------------------------------------------------------------------
 The obvious implementation -- deny any member path containing "bandit" or
 "trivy" -- is wrong, and measurably so. Every scanner ASH supports appears in a
 legitimate, ASH-authored member path of the current wheel:
@@ -45,38 +84,55 @@ Those are adapters -- ASH code that invokes a tool and parses its output. A
 substring denylist reports 20 such files in the wheel as vendored scanners, and
 a gate that fails on correct configuration is a gate someone deletes.
 
-So the question this asks of each member is not "does a scanner name appear in
-it" but "is this member shaped like vendored third-party payload". Four
-independent shapes answer yes, and each catches a real vendoring mechanism:
+So the question the shape rules ask of each member is not "does a scanner name
+appear in it" but "is this member shaped like vendored third-party payload":
 
   1. A dependency-tree directory component -- node_modules, vendor, gems,
-     site-packages, .jsii. Package managers put third-party trees under these
-     and nowhere else, so the component is the signal regardless of what the
-     vendored project is called. This is the rule that would have caught the
-     cdk-nag bundled JS.
+     site-packages, .jsii, __pycache__. Package managers and build tools put
+     third-party or generated trees under these and nowhere else, so the
+     component is the signal regardless of what the vendored project is called.
+     This is the rule that would have caught the cdk-nag bundled JS.
 
-  2. An archive extension -- .tgz, .gem, .whl, .jar and friends. A nested
-     archive is opaque to review and to every scanner ASH runs on itself. This
-     is the rule that would have caught aws-cdk-lib.jsii.tgz by shape, without
-     anyone having predicted that particular filename.
+  2. An archive or opaque bundle, by extension AND by content header. A nested
+     archive is opaque to review and to every scanner ASH runs on itself. The
+     header matters because an extension is one `mv` away from being absent:
+     tar's `ustar` magic sits at offset 257, so a tarball with its suffix
+     stripped is invisible to any check that reads only the first few bytes.
 
-  3. A native executable, detected by extension AND by magic bytes. grype,
-     syft, trivy and opengrep all ship as one statically-linked binary with no
-     extension at all, so extension alone would miss precisely the tools most
-     likely to be vendored. Reading four bytes is cheaper than being wrong.
+  3. A compiled object, by extension AND by magic bytes. grype, syft, trivy and
+     opengrep all ship as one statically-linked binary with no extension at all,
+     so extension alone would miss precisely the tools most likely to be
+     vendored.
 
   4. A scanner's own distribution name as a whole path component or as a whole
      filename stem. `bandit/__init__.py` is a vendored copy; `bandit_scanner.py`
      is an adapter. Component and stem equality is what separates them, and it
      is why this compares whole tokens instead of searching for substrings.
 
+Those four are necessary and jointly insufficient, which is the whole argument
+for rules 5 and 6 below. Chasing each new bypass with one more pattern is a
+losing game: the pattern list is finite and the space of filenames is not. The
+fail-closed rules change the default instead of extending the list.
+
+  5. Not on the pinned list, in a namespace that is pinned. `assets/` holds
+     14 members in the current wheel and exists precisely to carry non-Python
+     data, which makes it the most comfortable hiding place in the tree -- an
+     upstream ruleset or a tool database dropped there looks exactly like the
+     ASH-authored data next to it. Same for a brand-new subdirectory under
+     `automated_security_helper/`: a vendored tree needs somewhere to live, and
+     "somewhere new" is now a failure rather than a blind spot.
+
+  6. Bigger than anything ASH authors. See MAX_MEMBER_BYTES.
+
 WHAT IS DELIBERATELY ALLOWED
 ----------------------------
-automated_security_helper/assets/ ships and must keep shipping: 12 tracked files
-totalling 9,198 bytes in the built wheel, all ASH-authored, plus two the build
-hook generates (assets/Dockerfile and assets/ASH_INSTALLED_REVISION, 13,161 bytes
-together). Measured from the wheel rather than with `du`, which reports 84K for
-that directory because it counts 4K disk blocks, not content.
+automated_security_helper/assets/ ships and must keep shipping: 14 members in
+the built wheel, all ASH-authored or build-generated, listed one by one in
+ASSETS_ALLOWLIST below. Twelve are tracked files; two are produced by
+hatch_build.py during the build (assets/Dockerfile, generated from the root
+Dockerfile, and assets/ASH_INSTALLED_REVISION, which holds a branch name). Sizes
+measured from the wheel rather than with `du`, which reports 84K for that
+directory because it counts 4K disk blocks, not content.
 
 Two parts of it look like cfn-nag at a glance and are not:
 
@@ -90,6 +146,23 @@ Two parts of it look like cfn-nag at a glance and are not:
   assets/appsec_cfn_rules/*.rb are seven ASH-authored rules that
   `require 'cfn-nag/custom_rules/base'` and subclass it. They consume cfn-nag's
   plugin API; they are not copies of it.
+
+An earlier revision carried a DEPENDENCY_DECLARATION_FILENAMES exemption that
+returned early for `Gemfile`, `Gemfile.lock`, `package.json`, `pyproject.toml`
+and friends, on the theory that those two assets needed it. They do not, and the
+exemption was worse than useless. Neither file was ever at risk: `.lock` is not
+an archive suffix and `Gemfile` is not a scanner distribution name, so both are
+allowed by token comparison alone -- emptying the exemption changed nothing about
+them. What the exemption did do was run BEFORE the scanner-component check, so
+`automated_security_helper/checkov/pyproject.toml`,
+`automated_security_helper/bandit/requirements.txt` and
+`automated_security_helper/semgrep/uv.lock` were all allowed. Those are precisely
+the files that reveal a vendored tree -- the manifest at its root. It has been
+deleted rather than reordered: for a basename in that set the filename stem is
+always one of Gemfile, package, package-lock, poetry, pyproject, requirements, uv
+or yarn, none of which is a scanner distribution name, so after reordering the
+branch could never have changed an outcome. A dead guard that reads like a live
+one is how the hole got there.
 
 NO VACUOUS PASSES
 -----------------
@@ -107,13 +180,22 @@ path to an empty examination is closed and each one is a distinct failure:
     the member paths are shaped differently than this understands, so the
     classifier ran against nothing it could reason about.
 
+Symlink and hardlink members are classified like any other member and counted
+into the reported total. They used to be skipped, which mattered more than it
+sounds: the member count this prints is the gate's own evidence of how much it
+examined, and a skipped member is invisible in that number. A tar can carry a
+symlink named `.../bin/trivy` pointing anywhere, and the count would not have
+moved. Their targets are printed when any are present, because a link is a claim
+about something outside the artifact and the reader should see it.
+
 `--self-test` closes the last gap, which is the classifier itself silently
-matching nothing. It plants known third-party payload in a fixture archive and
-requires this script to reject it, and pairs that with a fixture holding only
-the legitimate lookalikes above and requires acceptance. A rule that stops
-firing fails the self-test rather than quietly passing every artifact forever.
-The workflow runs it before it runs the real check, so the gate proves it can
-fail on every CI run rather than only when a reviewer thinks to ask.
+matching nothing. It plants known third-party payload in fixture archives, one
+member per detector, and requires this script to reject each by the intended
+rule; it pairs that with a fixture holding every legitimate member of the real
+wheel's `assets/` plus the lookalikes above and requires acceptance. A rule that
+stops firing fails the self-test rather than quietly passing every artifact
+forever. The workflow runs it before it runs the real check, so the gate proves
+it can fail on every CI run rather than only when a reviewer thinks to ask.
 
 USAGE
 -----
@@ -131,20 +213,36 @@ import sys
 import tarfile
 import tempfile
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
 # --------------------------------------------------------------------------
-# The rules. Each constant below is one of the four shapes described above.
+# The rules. Each constant below belongs to one of the six shapes described
+# above. Every one of them has a neutering experiment in
+# tests/unit/test_artifact_contents_gate.py: emptied (or, for the allowlists,
+# made unable to fire) it must turn --self-test red. A rule set with no such
+# experiment is a rule set nobody has proved is load-bearing.
 # --------------------------------------------------------------------------
 
-# Directory names package managers use for third-party trees. A component match
-# is conclusive: nothing ASH authors lives under any of these.
+# Directory names package managers and build tools use for third-party or
+# generated trees. A component match is conclusive: nothing ASH authors lives
+# under any of these.
+#
+# `__pycache__` is here because a wheel carrying compiled bytecode is a broken
+# build regardless of whose bytecode it is, and because it was a live bypass:
+# `automated_security_helper/__pycache__/bandit_core.cpython-312.pyc` passed
+# every earlier rule. `_vendor`, `_vendored`, `third_party`, `third-party` and
+# `thirdparty` complete spellings the list already had in part -- it carried both
+# `vendor` and `vendored` but not the underscore-prefixed or third-party forms,
+# which is an inconsistency rather than a new heuristic.
 VENDOR_DIR_COMPONENTS = frozenset(
     {
         ".bundle",
         ".jsii",
         ".venv",
+        "__pycache__",
+        "_vendor",
+        "_vendored",
         "bower_components",
         "dist-packages",
         "gems",
@@ -152,49 +250,119 @@ VENDOR_DIR_COMPONENTS = frozenset(
         "node_modules",
         "site-packages",
         "specifications",
+        "third-party",
+        "third_party",
+        "thirdparty",
         "vendor",
         "vendored",
     }
 )
 
-# Archive suffixes. A nested archive inside a published artifact is opaque to
-# review, so it is refused on shape without needing to know what is inside.
+# Archive and opaque-bundle suffixes. A nested archive inside a published
+# artifact is opaque to review, so it is refused on shape without needing to know
+# what is inside.
+#
+# The compression suffixes beyond `.tar.gz` are not decoration. A scanner
+# database ships as a bare `.gz`, `.zst` or `.xz` far more often than as a
+# tarball -- `assets/trivy-db.gz` was a live bypass against a list that had
+# `.tar.gz` and `.tgz` but not `.gz`.
+#
+# `.ar`, `.br` and `.iso` are deliberately NOT here. `.ar` and `.br` collide with
+# plausible non-archive names (a translation file `messages.ar`, a Brotli-encoded
+# asset), and an `.iso` is caught by the size ceiling many times over. `.ar`
+# archives are still caught, by their `!<arch>` header in ARCHIVE_MAGICS.
 ARCHIVE_SUFFIXES = (
+    ".7z",
     ".apk",
+    ".bz2",
+    ".cab",
+    ".cpio",
     ".crate",
     ".deb",
     ".dmg",
     ".egg",
     ".gem",
+    ".gz",
     ".jar",
+    ".jsii",
+    ".lz4",
+    ".lzma",
     ".msi",
     ".nupkg",
     ".pkg",
+    ".rar",
     ".rpm",
+    ".snap",
     ".tar",
     ".tar.bz2",
     ".tar.gz",
+    ".tar.lz4",
+    ".tar.lzma",
     ".tar.xz",
+    ".tar.zst",
     ".tbz2",
     ".tgz",
     ".txz",
+    ".tzst",
     ".war",
     ".whl",
+    ".xz",
+    ".z",
     ".zip",
+    ".zst",
+)
+
+# Archive headers, as (offset, magic) pairs. An extension is one `mv` away from
+# being absent, and this is the rule that survives that.
+#
+# The offset matters and is the reason MAGIC_READ_BYTES is 512 rather than 8: a
+# tar's `ustar` identifier lives at byte 257 of the first header block, so a real
+# tarball renamed to `assets/toolbundle` looks like an 8-byte prefix of ASCII
+# filename and nothing else. That was a live bypass.
+ARCHIVE_MAGICS = (
+    (0, b"PK\x03\x04"),  # zip / whl / jar / egg
+    (0, b"PK\x05\x06"),  # zip, empty archive
+    (0, b"PK\x07\x08"),  # zip, spanned archive
+    (0, b"\x1f\x8b"),  # gzip
+    (0, b"BZh"),  # bzip2
+    (0, b"\xfd7zXZ\x00"),  # xz
+    (0, b"\x28\xb5\x2f\xfd"),  # zstd
+    (0, b"7z\xbc\xaf\x27\x1c"),  # 7-Zip
+    (0, b"Rar!\x1a\x07"),  # RAR
+    (0, b"\x04\x22\x4d\x18"),  # LZ4 frame
+    (0, b"!<arch>"),  # ar / deb / static library
+    (0, b"MSCF"),  # Microsoft cabinet
+    (0, b"\xed\xab\xee\xdb"),  # RPM
+    (257, b"ustar"),  # tar (POSIX ustar and GNU both carry it here)
 )
 
 # Compiled/native suffixes. Complemented by magic-byte sniffing below, because
 # the scanners most likely to be vendored ship with no suffix at all.
+#
+# `.pyc`/`.pyo` are compiled objects for the purpose of this rule -- ASH is pure
+# Python source and ships no bytecode -- and their absence here was a live
+# bypass. They are caught by suffix and by the `__pycache__` component, and
+# deliberately NOT by magic: a CPython bytecode header's first two bytes change
+# with every minor release, and the only version-stable part is `\r\n` at offset
+# 2, which would flag any file whose third and fourth bytes happen to be CRLF.
+# A signature that weak buys nothing that the suffix does not already buy.
 NATIVE_SUFFIXES = (
     ".a",
+    ".bundle",
+    ".class",
     ".dll",
     ".dylib",
     ".exe",
+    ".ko",
     ".lib",
     ".node",
     ".o",
+    ".obj",
+    ".pyc",
     ".pyd",
+    ".pyo",
     ".so",
+    ".wasm",
 )
 
 # Magic bytes for ELF, Mach-O (32/64, both endiannesses, universal) and PE.
@@ -212,7 +380,8 @@ NATIVE_MAGICS = (
 
 # Distribution names of the tools ASH invokes, in every spelling a vendored copy
 # would use. Matched against whole path components and whole filename stems only
-# -- see WHY THE RULE IS ABOUT PATH SHAPE above for why substrings are wrong.
+# -- see WHY THE SHAPE RULES ARE ABOUT PATH SHAPE above for why substrings are
+# wrong.
 #
 # cfn-model and aws-cdk-lib are here because they are not scanners ASH invokes
 # directly: they are what a vendored cfn-nag and a vendored cdk-nag drag in, and
@@ -232,6 +401,8 @@ SCANNER_DIST_NAMES = frozenset(
         "detect-secrets",
         "detect_secrets",
         "grype",
+        "npm-audit",
+        "npm_audit",
         "opengrep",
         "semgrep",
         "semgrep-core",
@@ -241,25 +412,127 @@ SCANNER_DIST_NAMES = frozenset(
     }
 )
 
-# Filenames that DECLARE a dependency rather than contain one. Listed explicitly
-# so the allowance is a decision a reviewer can see and a test can pin, rather
-# than an accident of how the rules happen to tokenize.
-DEPENDENCY_DECLARATION_FILENAMES = frozenset(
+# --------------------------------------------------------------------------
+# Rule 5 -- the fail-closed allowlists.
+#
+# These are the only rules whose default answer is NO. The four shape rules
+# above answer "this looks like payload"; these answer "nobody said this was
+# supposed to be here", which is the question that catches payload nobody
+# predicted the shape of.
+# --------------------------------------------------------------------------
+
+PACKAGE_ROOT = "automated_security_helper"
+
+# Every member under this prefix must appear in ASSETS_ALLOWLIST.
+ASSETS_PREFIX = f"{PACKAGE_ROOT}/assets/"
+
+# The complete contents of automated_security_helper/assets/ in the built wheel
+# and sdist, verified identical in both: 14 members, no more.
+#
+# HOW THIS IS MAINTAINED. Adding a file to assets/ fails this gate until the path
+# is added here. That is the intended cost -- assets/ is where non-Python payload
+# legitimately lives, so it is where illegitimate payload is least conspicuous,
+# and a one-line diff to this list is exactly the reviewer-visible moment the
+# rule exists to create. To regenerate after an intentional addition:
+#
+#     uv build --out-dir dist
+#     python3 -c "import zipfile,glob; \
+#       print('\n'.join(sorted(n for n in zipfile.ZipFile(glob.glob('dist/*.whl')[0]).namelist() \
+#       if n.startswith('automated_security_helper/assets/'))))"
+#
+# Pinned by path and NOT by SHA256, and that is a considered decision rather than
+# laziness. Two of the 14 are generated at build time: assets/Dockerfile is
+# derived from the root Dockerfile by hatch_build.py, so its digest changes
+# whenever the root Dockerfile does, and assets/ASH_INSTALLED_REVISION holds the
+# current branch name, so its digest differs on literally every branch. Pinning
+# digests would make the gate fail on ordinary work, and a gate that fails on
+# correct configuration is a gate someone deletes. The content-level protection
+# comes from the shape rules instead: this allowlist is ADDITIVE, never an
+# exemption, so an allowlisted path whose content is swapped for a tarball still
+# trips nested-archive, for an ELF still trips native-binary, and for a 40 MB
+# database still trips the size ceiling.
+ASSETS_ALLOWLIST = frozenset(
     {
-        "Gemfile",
-        "Gemfile.lock",
-        "package.json",
-        "package-lock.json",
-        "poetry.lock",
-        "pyproject.toml",
-        "requirements.txt",
-        "uv.lock",
-        "yarn.lock",
+        f"{ASSETS_PREFIX}ASH_INSTALLED_REVISION",
+        f"{ASSETS_PREFIX}Dockerfile",
+        f"{ASSETS_PREFIX}Gemfile",
+        f"{ASSETS_PREFIX}Gemfile.lock",
+        f"{ASSETS_PREFIX}appsec_cfn_rules/IamUserExistsRule.rb",
+        f"{ASSETS_PREFIX}appsec_cfn_rules/KeyPairAsCFnParameterRule.rb",
+        f"{ASSETS_PREFIX}appsec_cfn_rules/ResourcePolicyStarAccessVerbPolicyRule.rb",
+        f"{ASSETS_PREFIX}appsec_cfn_rules/StarResourceAccessPolicyRule.rb",
+        f"{ASSETS_PREFIX}appsec_cfn_rules/beta/FlowLogsEnabledForVPCsRule.rb",
+        f"{ASSETS_PREFIX}appsec_cfn_rules/beta/PasswordAsCFnParameterRule.rb",
+        f"{ASSETS_PREFIX}appsec_cfn_rules/beta/RotationEnabledForSecretsManagerRule.rb",
+        f"{ASSETS_PREFIX}ash_stargrep_rules/README.md",
+        f"{ASSETS_PREFIX}ash_stargrep_rules/appsec.yaml",
+        f"{ASSETS_PREFIX}with-retry.sh",
     }
 )
 
-# How many bytes of a member are read to sniff a native header.
-MAGIC_READ_BYTES = 8
+# The subdirectories that exist directly under automated_security_helper/ in the
+# built wheel and sdist, verified identical in both. A member deeper than the
+# package root must sit under one of these.
+#
+# HOW THIS IS MAINTAINED. Adding a new top-level subpackage fails this gate until
+# the name is added here -- a rare and deliberately reviewable event, unlike
+# adding a module inside an existing one, which this does not touch. It is what
+# turns "put the vendored tree somewhere the pattern list does not know about"
+# from a bypass into a failure: `_vendored_scanners/`, `third_party/`, `bin/` and
+# `lib/` all fail here without anyone having to predict the name.
+PACKAGE_SUBDIRECTORIES = frozenset(
+    {
+        "assets",
+        "base",
+        "cli",
+        "config",
+        "core",
+        "interactions",
+        "models",
+        "plugin_modules",
+        "plugins",
+        "schemas",
+        "utils",
+        "workspace",
+    }
+)
+
+# --------------------------------------------------------------------------
+# Rule 6 -- the size ceiling.
+# --------------------------------------------------------------------------
+
+# 4 MiB. Chosen from the measured distribution of the real artifact rather than
+# picked round: the largest legitimate member of the current wheel and sdist is
+# automated_security_helper/schemas/AshAggregatedResults.json at 647,578 bytes, a
+# generated JSON schema. Second is a generated CycloneDX model at 197,526 bytes;
+# the largest hand-written file is 88,028 bytes. So the ceiling sits ~6.8x above
+# the largest thing ASH ships, which leaves the generated schemas room to keep
+# growing without anyone having to revisit this number.
+#
+# The other side of the gap is what makes 4 MiB safe rather than arbitrary. The
+# payload this rule is for is bulk: a statically-linked Go scanner binary (grype,
+# syft, trivy) or a vulnerability database, which run to tens of megabytes -- an
+# order of magnitude above the ceiling, not a near miss. Anything in the 1-10 MiB
+# band would work; 4 MiB is the middle of it.
+#
+# Read honestly, this rule is a tripwire for bulk payload arriving by accident or
+# by convenience, not an adversarial control: it reads the size the archive
+# declares in its own metadata, and a hand-crafted archive can understate that.
+# The header sniffing above is what covers the crafted case.
+MAX_MEMBER_BYTES = 4 * 1024 * 1024
+
+# Size of the oversize self-test fixture, frozen at import rather than computed
+# from MAX_MEMBER_BYTES at fixture-build time. The neutering test raises
+# MAX_MEMBER_BYTES to disable the ceiling, and if the fixture tracked it the
+# fixture would grow to match -- an experiment that tries to allocate the new
+# ceiling instead of testing it.
+OVERSIZE_FIXTURE_BYTES = MAX_MEMBER_BYTES + 1
+
+# How many bytes of each member are read to sniff a header. 512 rather than 8
+# because a tar's `ustar` identifier sits at offset 257; one tar header block is
+# 512 bytes, so this reads exactly enough to cover every offset in
+# ARCHIVE_MAGICS.
+MAGIC_READ_BYTES = 512
 
 
 @dataclass(frozen=True)
@@ -286,13 +559,24 @@ class Member:
     The failure surfaced as an unreadable fixture in --self-test rather than as a
     wrong verdict, but on a real artifact the same bug would have turned the
     native-binary header rule into an error path -- a rule that cannot run
-    cannot catch a vendored binary. Eight bytes per member is nothing next to
-    that.
+    cannot catch a vendored binary. Half a kilobyte per member is nothing next
+    to that.
+
+    `link_target` is non-empty only for a tar symlink or hardlink member. Those
+    carry no content of their own, so `magic` is empty and only the path rules
+    can speak about them -- which is exactly why they must not be skipped: the
+    path is the whole signal, and a link named `.../bin/trivy` is a claim worth
+    failing on.
     """
 
     name: str
     size: int
     magic: bytes
+    link_target: str = ""
+
+    @property
+    def is_link(self) -> bool:
+        return bool(self.link_target)
 
 
 def strip_distribution_root(name: str) -> str:
@@ -319,15 +603,27 @@ def strip_distribution_root(name: str) -> str:
     return name
 
 
+# Compound suffixes that must be read as one unit, longest first, so that
+# `foo.tar.zst` reports `.tar.zst` rather than `.zst`.
+COMPOUND_SUFFIXES = (
+    ".tar.bz2",
+    ".tar.gz",
+    ".tar.lz4",
+    ".tar.lzma",
+    ".tar.xz",
+    ".tar.zst",
+)
+
+
 def split_suffixes(basename: str) -> tuple[str, str]:
     """Returns (stem, lowercased compound suffix) for a member basename.
 
-    `.tar.gz` has to be read as one suffix, so this checks the two-part form
+    `.tar.gz` has to be read as one suffix, so this checks the two-part forms
     before the one-part form. Returning the stem as well lets the caller test
     stem equality against a scanner name without splitting the name twice.
     """
     lowered = basename.lower()
-    for suffix in (".tar.gz", ".tar.bz2", ".tar.xz"):
+    for suffix in COMPOUND_SUFFIXES:
         if lowered.endswith(suffix):
             return basename[: -len(suffix)], suffix
     dot = basename.rfind(".")
@@ -337,66 +633,89 @@ def split_suffixes(basename: str) -> tuple[str, str]:
 
 
 def classify_member(member: Member, artifact: str) -> Violation | None:
-    """Applies the four shape rules to one member. None means it may ship."""
+    """Applies the rules to one member. None means it may ship.
+
+    Order is deliberate. The four shape rules run first, because they say what
+    the member IS and produce the message a maintainer can act on. The two
+    fail-closed rules run next, because "not on the list" is a weaker statement
+    about a member than "this is an ELF binary". The size ceiling runs last: it
+    is the least specific signal of all, so anything else that can name the
+    member should get the chance first. The self-test depends on this ordering
+    holding -- each planted member is chosen to be caught by exactly one rule, so
+    a rule that stops firing is reported by name instead of being masked.
+    """
     relative = strip_distribution_root(member.name)
     path = PurePosixPath(relative)
     components = path.parts
     basename = path.name
     stem, suffix = split_suffixes(basename)
 
-    # Rule 1 -- a third-party dependency tree.
+    # Rule 1 -- a third-party or generated dependency tree.
     for component in components[:-1]:
         if component.lower() in VENDOR_DIR_COMPONENTS:
             return Violation(
                 artifact,
                 relative,
                 "vendor-directory",
-                f"path component {component!r} is where a package manager puts "
-                "third-party trees. ASH authors nothing under it, so this member "
-                "is a vendored dependency rather than ASH code.",
+                f"path component {component!r} is where a package manager or "
+                "build tool puts third-party or generated trees. ASH authors "
+                "nothing under it, so this member is a vendored dependency or a "
+                "build artifact rather than ASH source.",
             )
 
-    # Rule 2 -- a nested archive.
+    # Rule 2 -- a nested archive, by suffix or by header.
     if suffix in ARCHIVE_SUFFIXES:
         return Violation(
             artifact,
             relative,
             "nested-archive",
-            f"{suffix} is an archive. A published artifact must not carry another "
-            "archive inside it: the contents are invisible to review and to the "
-            "scanners ASH runs on itself. Two such bundles (aws-cdk-lib and "
-            "cdk-nag .jsii.tgz) were removed in commit 760f3647.",
+            f"{suffix} is an archive or packaged bundle. A published artifact "
+            "must not carry another archive inside it: the contents are "
+            "invisible to review and to the scanners ASH runs on itself. Two "
+            "such bundles (aws-cdk-lib and cdk-nag .jsii.tgz) were removed in "
+            "commit 760f3647.",
         )
+    for offset, magic in ARCHIVE_MAGICS:
+        if member.magic[offset : offset + len(magic)] == magic:
+            return Violation(
+                artifact,
+                relative,
+                "nested-archive",
+                f"carries the {magic!r} archive header at offset {offset}, "
+                "whatever its filename says. Renaming an archive does not make "
+                "it reviewable, and tar keeps its identifier at offset 257 where "
+                "a short header read never sees it.",
+            )
 
-    # Rule 3 -- a native executable, by suffix or by header.
+    # Rule 3 -- a compiled object, by suffix or by header.
     if suffix in NATIVE_SUFFIXES:
         return Violation(
             artifact,
             relative,
             "native-binary",
-            f"{suffix} is a compiled object. ASH is pure Python and ships no "
-            "compiled artifacts, so this is a third-party binary.",
+            f"{suffix} is a compiled object. ASH is pure Python source and ships "
+            "no compiled artifacts, so this is third-party or generated.",
         )
-    if member.size >= len(b"\x7fELF"):
-        for magic in NATIVE_MAGICS:
-            if member.magic.startswith(magic):
-                return Violation(
-                    artifact,
-                    relative,
-                    "native-binary",
-                    f"begins with the {magic!r} header of a native executable. "
-                    "grype, syft, trivy and opengrep each ship as one "
-                    "statically-linked binary with no file extension, which is "
-                    "why this is checked by header and not only by suffix.",
-                )
+    # No length guard here on purpose. `bytes.startswith` already returns False
+    # for a prefix longer than the data, so a guard adds nothing -- and the
+    # obvious guard is subtly wrong: this used to gate on `member.size`, which is
+    # the size the ARCHIVE claims, not the number of bytes actually read. A
+    # member declaring size 0 with real ELF magic in it was allowed through.
+    # Gating on `len(member.magic) >= 4` would fix that but break `MZ`, which is
+    # a two-byte signature.
+    for magic in NATIVE_MAGICS:
+        if member.magic.startswith(magic):
+            return Violation(
+                artifact,
+                relative,
+                "native-binary",
+                f"begins with the {magic!r} header of a native executable. "
+                "grype, syft, trivy and opengrep each ship as one "
+                "statically-linked binary with no file extension, which is "
+                "why this is checked by header and not only by suffix.",
+            )
 
     # Rule 4 -- a scanner's own distribution tree.
-    #
-    # Declaration files are exempted first and explicitly: Gemfile.lock names
-    # cfn-nag in its dependency graph, and resolving a dependency is not
-    # vendoring one.
-    if basename in DEPENDENCY_DECLARATION_FILENAMES:
-        return None
     for component in components[:-1]:
         if component.lower() in SCANNER_DIST_NAMES:
             return Violation(
@@ -407,7 +726,9 @@ def classify_member(member: Member, artifact: str) -> Violation | None:
                 "scanner ASH invokes but does not redistribute. A whole "
                 "component -- not a substring -- means this is that tool's own "
                 "source tree. ASH's adapters are named ash_*_plugins/ and "
-                "*_scanner.py and never match here.",
+                "*_scanner.py and never match here. This fires on the tree's "
+                "own manifest too: a pyproject.toml or Gemfile.lock inside such "
+                "a directory is the clearest evidence of vendoring there is.",
             )
     if stem.lower() in SCANNER_DIST_NAMES:
         return Violation(
@@ -417,6 +738,49 @@ def classify_member(member: Member, artifact: str) -> Violation | None:
             f"filename stem {stem!r} is exactly the distribution name of a "
             "scanner ASH invokes but does not redistribute. An adapter would be "
             f"named {stem}_scanner.py; a bare {basename} is the tool itself.",
+        )
+
+    # Rule 5a -- anything under assets/ that nobody pinned.
+    if relative.startswith(ASSETS_PREFIX) and relative not in ASSETS_ALLOWLIST:
+        return Violation(
+            artifact,
+            relative,
+            "unpinned-asset",
+            f"is not one of the {len(ASSETS_ALLOWLIST)} members pinned in "
+            "ASSETS_ALLOWLIST. assets/ exists to carry non-Python data, which "
+            "makes it the least conspicuous place to hide an upstream ruleset or "
+            "a tool database -- so its contents are enumerated and the default "
+            "answer is no. If this file is ASH's own, add its path to "
+            "ASSETS_ALLOWLIST in the same commit that adds the file.",
+        )
+
+    # Rule 5b -- a brand-new subdirectory of the package.
+    if components[:1] == (PACKAGE_ROOT,) and len(components) > 2:
+        subdirectory = components[1]
+        if subdirectory not in PACKAGE_SUBDIRECTORIES:
+            return Violation(
+                artifact,
+                relative,
+                "unpinned-package-subdirectory",
+                f"sits under {PACKAGE_ROOT}/{subdirectory}/, which is not one of "
+                f"the {len(PACKAGE_SUBDIRECTORIES)} subdirectories pinned in "
+                "PACKAGE_SUBDIRECTORIES. A vendored tree has to live somewhere, "
+                "and a directory nobody declared is the cheapest somewhere. If "
+                "this is a new ASH subpackage, add its name to "
+                "PACKAGE_SUBDIRECTORIES in the same commit that adds it.",
+            )
+
+    # Rule 6 -- bigger than anything ASH authors.
+    if member.size > MAX_MEMBER_BYTES:
+        return Violation(
+            artifact,
+            relative,
+            "oversize-member",
+            f"is {member.size:,} bytes, over the {MAX_MEMBER_BYTES:,}-byte "
+            "ceiling. The largest member ASH legitimately ships is a generated "
+            "JSON schema at 647,578 bytes; scanner binaries and vulnerability "
+            "databases run to tens of megabytes. Something this large is bulk "
+            "payload, not source.",
         )
 
     return None
@@ -429,17 +793,37 @@ def read_wheel_members(path: str) -> list[Member]:
         for info in archive.infolist():
             if info.is_dir():
                 continue
-            with archive.open(info.filename) as handle:
+            # `archive.open(info)` and not `archive.open(info.filename)`: opening
+            # by name resolves through ZipFile.NameToInfo, which keeps only the
+            # LAST entry for a duplicated name. A zip may legally carry the same
+            # name twice, and with the by-name form this member's size would come
+            # from one copy while its magic came from another -- a member whose
+            # two halves describe different files cannot be classified. Opening
+            # the ZipInfo reads the copy actually being iterated.
+            with archive.open(info) as handle:
                 magic = handle.read(MAGIC_READ_BYTES)
             members.append(Member(info.filename, info.file_size, magic))
     return members
 
 
 def read_sdist_members(path: str) -> list[Member]:
-    """Lists file members of an sdist tarball."""
+    """Lists file, symlink and hardlink members of an sdist tarball.
+
+    Links are included rather than skipped. They were skipped, and that quietly
+    excluded them from the member count this script prints as its evidence of
+    thoroughness -- a tar carrying a symlink named `.../bin/trivy` would have
+    moved neither the count nor the verdict.
+    """
     members: list[Member] = []
     with tarfile.open(path, "r:*") as archive:
         for info in archive.getmembers():
+            if info.issym() or info.islnk():
+                # A link has no content of its own; the path rules are the only
+                # ones that can speak about it, and they are enough.
+                members.append(
+                    Member(info.name, info.size, b"", link_target=info.linkname)
+                )
+                continue
             if not info.isfile():
                 continue
             handle = archive.extractfile(info)
@@ -468,8 +852,24 @@ def read_members(path: str) -> list[Member]:
     )
 
 
-def check_artifact(path: str) -> tuple[list[Violation], int]:
-    """Checks one artifact. Returns (violations, member count examined).
+@dataclass(frozen=True)
+class Report:
+    """What one artifact was found to contain."""
+
+    violations: list[Violation] = field(default_factory=list)
+    members: list[Member] = field(default_factory=list)
+
+    @property
+    def count(self) -> int:
+        return len(self.members)
+
+    @property
+    def links(self) -> list[Member]:
+        return [m for m in self.members if m.is_link]
+
+
+def check_artifact(path: str) -> Report:
+    """Checks one artifact.
 
     Raises on anything that would leave the member list empty, because a clean
     verdict over zero members is the failure this whole script exists to avoid.
@@ -488,27 +888,30 @@ def check_artifact(path: str) -> tuple[list[Violation], int]:
     # A member list this cannot recognize at all means the classifier reasoned
     # about nothing, which must not read as a pass.
     recognized = sum(
-        1
-        for m in members
-        if strip_distribution_root(m.name).startswith("automated_security_helper")
+        1 for m in members if strip_distribution_root(m.name).startswith(PACKAGE_ROOT)
     )
     if recognized == 0:
         raise ValueError(
             f"{path} has {len(members)} member(s) but none under "
-            "automated_security_helper/. The member paths are shaped differently "
+            f"{PACKAGE_ROOT}/. The member paths are shaped differently "
             "than this check understands, so it examined nothing meaningful."
         )
 
-    return violations, len(members)
+    return Report(violations=violations, members=members)
 
 
 # --------------------------------------------------------------------------
 # Positive control.
 # --------------------------------------------------------------------------
 
-# Members every real ASH wheel carries, including the three lookalikes the
-# substring approach gets wrong. The clean fixture must be accepted with these
-# present, or the rules are too broad to live with.
+# Members every real ASH wheel carries, including the lookalikes the substring
+# approach gets wrong. The clean fixture must be accepted with these present, or
+# the rules are too broad to live with.
+#
+# All 14 assets/ members are here, not a sample. That makes the clean fixture the
+# accept-side control for ASSETS_ALLOWLIST: drop any one entry from the allowlist
+# and this fixture is rejected, which is the experiment
+# test_self_test_fails_when_the_assets_allowlist_loses_an_entry runs.
 LEGITIMATE_MEMBERS = (
     "automated_security_helper/__init__.py",
     "automated_security_helper/utils/cdk_nag_wrapper.py",
@@ -516,33 +919,134 @@ LEGITIMATE_MEMBERS = (
     "automated_security_helper/plugin_modules/ash_builtin/scanners/cfn_nag_scanner.py",
     "automated_security_helper/plugin_modules/ash_trivy_plugins/trivy_repo_scanner.py",
     "automated_security_helper/plugin_modules/ash_snyk_plugins/snyk_code_scanner.py",
-    "automated_security_helper/assets/Gemfile",
-    "automated_security_helper/assets/Gemfile.lock",
-    "automated_security_helper/assets/appsec_cfn_rules/IamUserExistsRule.rb",
-    "automated_security_helper/assets/ash_stargrep_rules/appsec.yaml",
+    "automated_security_helper/schemas/AshAggregatedResults.json",
     "automated_security_helper-3.7.0.dist-info/METADATA",
-)
+) + tuple(sorted(ASSETS_ALLOWLIST))
 
-# One planted member per rule, so a rule that stops firing is named rather than
-# hidden behind another rule's finding.
+# One planted member per DETECTOR, not per rule name: two detectors share the
+# rule name `nested-archive` and two share `native-binary`, and collapsing them
+# under one key is how NATIVE_SUFFIXES came to have no positive control at all.
+# With that set emptied the self-test stayed green, because the extensionless
+# fixture was caught by magic instead -- so nothing was measuring the suffix
+# list, which is the only thing that catches `.a` (magic `!<arch>`, absent from
+# NATIVE_MAGICS) and `.lib`.
+#
+# Each member is chosen to be caught by EXACTLY ONE detector, and the neutering
+# tests verify it: disable that detector and the member goes UNCLASSIFIED, so the
+# self-test reports "was NOT rejected" and names it. Getting there took care --
+# every fixture below sits inside a pinned subdirectory and carries content that
+# matches no other header, because otherwise rule 5b or a magic table catches it
+# and the experiment silently stops being about the rule it claims to test.
 PLANTED_MEMBERS = {
+    # `vendor/leftpad/` and not `vendor/cdk-nag/`: the old fixture contained
+    # `cdk-nag`, so emptying VENDOR_DIR_COMPONENTS alone left it caught by the
+    # vendored-scanner rule instead. The control still went red, but via the
+    # rule-attribution assertion rather than the member going unclassified, so
+    # the comment claiming a single-variable experiment was wrong. Nested under
+    # plugin_modules/ so rule 5b does not catch it either.
     "vendor-directory": (
-        "automated_security_helper/vendor/cdk-nag/lib/index.js",
-        b"// bundled cdk-nag\n",
+        "automated_security_helper/plugin_modules/vendor/leftpad/index.js",
+        b"module.exports = function () {};\n",
+        "vendor-directory",
     ),
-    "nested-archive": (
-        "automated_security_helper/assets/aws-cdk-lib@2.100.0.jsii.tgz",
-        b"\x1f\x8b\x08\x00fake gzip\n",
+    # Content is deliberately NOT gzip. The obvious fixture body
+    # (b"\x1f\x8b\x08\x00fake gzip") also matches the gzip entry in
+    # ARCHIVE_MAGICS, which would leave ARCHIVE_SUFFIXES with no experiment of
+    # its own -- the same defect NATIVE_SUFFIXES had.
+    #
+    # Not under assets/: the historical bundles lived there, but a fixture there
+    # would now also trip unpinned-asset and stop being single-variable. That
+    # path is covered by the unpinned-asset control below.
+    "nested-archive-by-suffix": (
+        "automated_security_helper/plugin_modules/aws-cdk-lib@2.100.0.jsii.tgz",
+        b"not actually compressed, only named .tgz\n",
+        "nested-archive",
     ),
-    "native-binary": (
-        "automated_security_helper/bin/grype-no-extension",
+    # A real tar with the suffix removed. Its `ustar` identifier is at offset
+    # 257, so this is the fixture that fails if MAGIC_READ_BYTES is ever reduced
+    # back to a short read.
+    "nested-archive-by-header": (
+        "automated_security_helper/utils/toolbundle",
+        None,  # built by _tar_bytes(); see _planted_data below
+        "nested-archive",
+    ),
+    "native-binary-by-suffix": (
+        "automated_security_helper/utils/libscanner.a",
+        b"# deliberately not a native header, so only the suffix can catch this\n",
+        "native-binary",
+    ),
+    "native-binary-by-header": (
+        "automated_security_helper/utils/grype-no-extension",
         b"\x7fELFfake elf binary\n",
+        "native-binary",
     ),
+    # Inside plugin_modules/ rather than at the package root, so that emptying
+    # SCANNER_DIST_NAMES leaves these two unclassified instead of caught by rule
+    # 5b. It is also the more realistic place to vendor a scanner: right next to
+    # the adapters that invoke it.
     "vendored-scanner": (
-        "automated_security_helper/checkov/main.py",
+        "automated_security_helper/plugin_modules/checkov/main.py",
         b"# vendored checkov\n",
+        "vendored-scanner",
+    ),
+    # The manifest at the root of a vendored tree. This is the member the deleted
+    # DEPENDENCY_DECLARATION_FILENAMES exemption used to allow.
+    "vendored-scanner-manifest": (
+        "automated_security_helper/plugin_modules/checkov/pyproject.toml",
+        b'[project]\nname = "checkov"\n',
+        "vendored-scanner",
+    ),
+    # Upstream semgrep-registry rules are LGPL-2.1. They are an ASSET, which the
+    # operator's rule covers as squarely as source, and assets/ash_stargrep_rules
+    # already ships ASH-authored rules -- so one more YAML file there is the
+    # single most plausible way this artifact gets a license it cannot honour.
+    "unpinned-asset": (
+        "automated_security_helper/assets/ash_stargrep_rules/upstream.audit.yaml",
+        b"rules:\n  - id: upstream.audit\n",
+        "unpinned-asset",
+    ),
+    "unpinned-package-subdirectory": (
+        "automated_security_helper/_vendored_scanners/bandit_lib/__init__.py",
+        b"# vendored bandit\n",
+        "unpinned-package-subdirectory",
+    ),
+    "oversize-member": (
+        "automated_security_helper/utils/payload.dat",
+        None,  # built by _planted_data(); MAX_MEMBER_BYTES + 1 bytes
+        "oversize-member",
     ),
 }
+
+
+def _tar_bytes() -> bytes:
+    """A real tar archive, for the nested-archive-by-header fixture.
+
+    Built rather than hard-coded so the `ustar` identifier really is at the
+    offset tar puts it at, instead of at an offset this file asserts it is at.
+    """
+    import io
+
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        payload = b"#!/bin/sh\n# pretend scanner launcher\n"
+        info = tarfile.TarInfo("trivy")
+        info.size = len(payload)
+        archive.addfile(info, io.BytesIO(payload))
+    return buffer.getvalue()
+
+
+def _planted_data(label: str, data: bytes | None) -> bytes:
+    """Fills in the fixtures that have to be generated rather than literal."""
+    if data is not None:
+        return data
+    if label == "nested-archive-by-header":
+        return _tar_bytes()
+    if label == "oversize-member":
+        # One byte over the ceiling as it stood at import. Compresses to nothing
+        # in the zip, so this costs the self-test a few milliseconds rather than
+        # 4 MiB on disk.
+        return b"\x00" * OVERSIZE_FIXTURE_BYTES
+    raise AssertionError(f"no generator for planted fixture {label!r}")
 
 
 def _write_fixture_wheel(path: str, members: dict) -> None:
@@ -555,57 +1059,59 @@ def run_self_test(stream) -> int:
     """Proves the rules can fail, and that they do not fail on real ASH paths.
 
     Three assertions, each closing a way this script could pass vacuously:
-    a planted payload must be rejected and named per rule; a fixture of only
+    a planted payload must be rejected and named per detector; a fixture of only
     legitimate members must be accepted; an empty archive must be rejected.
     """
     failures: list[str] = []
     clean = {name: b"# ash\n" for name in LEGITIMATE_MEMBERS}
 
     with tempfile.TemporaryDirectory() as tmp:
-        # (1) Every planted payload must be caught, by the rule intended for it.
-        for rule, (member, data) in PLANTED_MEMBERS.items():
-            fixture = os.path.join(tmp, f"planted-{rule}.whl")
-            _write_fixture_wheel(fixture, {**clean, member: data})
+        # (1) Every planted payload must be caught, by the detector meant for it.
+        for label, (member, data, expected_rule) in PLANTED_MEMBERS.items():
+            fixture = os.path.join(tmp, f"planted-{label}.whl")
+            _write_fixture_wheel(fixture, {**clean, member: _planted_data(label, data)})
             try:
-                violations, count = check_artifact(fixture)
+                report = check_artifact(fixture)
             except ValueError as err:  # pragma: no cover - fixture is well formed
-                failures.append(f"planted {rule}: fixture unreadable: {err}")
+                failures.append(f"planted {label}: fixture unreadable: {err}")
                 continue
-            hit = [v for v in violations if v.member == member]
+            hit = [v for v in report.violations if v.member == member]
             if not hit:
                 failures.append(
-                    f"planted {member!r} was NOT rejected -- the {rule!r} rule "
-                    "matched nothing. The gate would pass an artifact carrying "
-                    "third-party scanner payload."
+                    f"planted {member!r} was NOT rejected -- the {label!r} "
+                    "detector matched nothing. The gate would pass an artifact "
+                    "carrying third-party scanner payload."
                 )
-            elif hit[0].rule != rule:
+            elif hit[0].rule != expected_rule:
                 failures.append(
                     f"planted {member!r} was rejected by {hit[0].rule!r} rather "
-                    f"than {rule!r}; the intended rule may have stopped firing."
+                    f"than {expected_rule!r}; the {label!r} detector may have "
+                    "stopped firing, with another rule masking it."
                 )
             else:
                 stream.write(
-                    f"  self-test: {rule} rejected {member} "
-                    f"({count} members examined)\n"
+                    f"  self-test: {label} rejected {member} "
+                    f"({report.count} members examined)\n"
                 )
 
         # (2) The legitimate lookalikes must NOT be rejected.
         fixture = os.path.join(tmp, "clean.whl")
         _write_fixture_wheel(fixture, clean)
         try:
-            violations, count = check_artifact(fixture)
+            report = check_artifact(fixture)
         except ValueError as err:  # pragma: no cover - fixture is well formed
             failures.append(f"clean fixture unreadable: {err}")
         else:
-            if violations:
+            if report.violations:
                 failures.append(
                     "clean fixture was rejected, so the rules are too broad: "
-                    + "; ".join(f"{v.member} [{v.rule}]" for v in violations)
+                    + "; ".join(f"{v.member} [{v.rule}]" for v in report.violations)
                 )
             else:
                 stream.write(
-                    f"  self-test: clean fixture accepted ({count} members, "
-                    "including Gemfile.lock, the cfn-nag rule .rb, and the "
+                    f"  self-test: clean fixture accepted ({report.count} "
+                    f"members, including all {len(ASSETS_ALLOWLIST)} pinned "
+                    "assets, Gemfile.lock, the cfn-nag rule .rb files, and the "
                     "trivy/snyk/bandit adapters)\n"
                 )
 
@@ -627,14 +1133,17 @@ def run_self_test(stream) -> int:
         for failure in failures:
             stream.write(f"  - {failure}\n")
         return 1
-    stream.write("self-test OK: every rule fires, and no legitimate member trips one\n")
+    stream.write(
+        f"self-test OK: all {len(PLANTED_MEMBERS)} detectors fire, and no "
+        "legitimate member trips one\n"
+    )
     return 0
 
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
-        description="Assert a built wheel or sdist contains no vendored "
-        "third-party scanner code.",
+        description="Check a built wheel or sdist for vendored third-party "
+        "scanner code and assets.",
     )
     parser.add_argument("artifacts", nargs="*", help="wheel and/or sdist paths")
     parser.add_argument(
@@ -667,15 +1176,24 @@ def main(argv: list[str]) -> int:
 
     all_violations: list[Violation] = []
     total_members = 0
+    total_links = 0
     for path in args.artifacts:
         try:
-            violations, count = check_artifact(path)
+            report = check_artifact(path)
         except (ValueError, OSError, tarfile.TarError, zipfile.BadZipFile) as err:
             sys.stderr.write(f"artifact-contents: {err}\n")
             return 2
-        total_members += count
-        all_violations.extend(violations)
-        sys.stdout.write(f"  {os.path.basename(path)}: {count} member(s) examined\n")
+        total_members += report.count
+        total_links += len(report.links)
+        all_violations.extend(report.violations)
+        sys.stdout.write(
+            f"  {os.path.basename(path)}: {report.count} member(s) examined\n"
+        )
+        # Printed rather than folded into the count, because a link is a claim
+        # about something outside the artifact and the reader should see it. The
+        # current sdist has none, so this line appearing at all is news.
+        for link in report.links:
+            sys.stdout.write(f"      link member: {link.name} -> {link.link_target}\n")
 
     # Flushed before anything goes to stderr so the per-artifact member counts
     # appear above the verdict in a CI log rather than after it. A reader needs
@@ -692,14 +1210,25 @@ def main(argv: list[str]) -> int:
         sys.stderr.write(
             "\nASH invokes these tools; it does not redistribute them. Remove the "
             "member, or fetch the tool at run time the way "
-            "automated_security_helper/assets/Gemfile does for cfn-nag.\n"
+            "automated_security_helper/assets/Gemfile does for cfn-nag. If the "
+            "member is ASH's own and the rule is unpinned-asset or "
+            "unpinned-package-subdirectory, add it to the allowlist in "
+            ".github/scripts/assert-artifact-contents.py in the same commit.\n"
         )
         return 1
 
+    link_note = (
+        f", {total_links} of them symlink/hardlink members" if total_links else ""
+    )
     sys.stdout.write(
         f"artifact contents OK: {total_members} member(s) across "
-        f"{len(args.artifacts)} artifact(s), none vendored third-party scanner "
-        "code or assets\n"
+        f"{len(args.artifacts)} artifact(s){link_note}; none matched a vendoring "
+        "shape, everything under assets/ and every package subdirectory is "
+        "pinned, and no member exceeds "
+        f"{MAX_MEMBER_BYTES:,} bytes.\n"
+        "This is a regression guard plus a pinned allowlist, not a proof that "
+        "nothing is vendored -- see the module docstring for what it does not "
+        "cover.\n"
     )
     return 0
 
