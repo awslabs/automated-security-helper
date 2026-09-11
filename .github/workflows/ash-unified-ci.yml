@@ -1,25 +1,62 @@
 name: ASH - Unified CI
 
 on:
-  # A branch filter built only from negative patterns matches nothing, so "!main"
-  # did not exempt main -- it disabled the push trigger for every branch. Measured
-  # before this change: 1 push run against 793 pull_request runs, and that single
-  # push predates the filter. A commit landing on main therefore ran no lint, no
-  # unit tests, no scan validation and no install validation, which is how a broken
-  # constant reached main unwatched and reddened every open pull request.
+  # NO PUSH TRIGGER, AND main IS STILL COVERED. WHY.
   #
-  # `main` rather than `**`: pull_request already reports on every branch that has a
-  # pull request open, so `**` would duplicate all 793 of those runs while adding no
-  # coverage. main is the one ref no other trigger here speaks for.
+  # An earlier revision of this file added `push: branches: [main]`, reasoning that a
+  # broken branch filter ("!main", a filter built only from negative patterns, which
+  # matches nothing) had left main with no trigger at all -- so a commit landing on
+  # main ran no lint, no unit tests and no validation. The observation was right; the
+  # conclusion did not follow. "The push trigger ran nothing" is not "nothing ran".
   #
-  # The full matrix runs on a main push rather than a reduced one, deliberately.
-  # required-checks below counts `skipped` as a failure -- see the comment on that
-  # job -- so gating the expensive jobs behind `if: github.event_name != 'push'`
-  # would turn that gate red on every main push instead of shrinking it. Main pushes
-  # are merges, and rare next to PR pushes, so the honest gate is the affordable one.
-  push:
-    branches:
-      - main
+  # merge_group below already gates the exact tree that becomes main, and the merge
+  # queue is not optional here. The repository's active "Protect main" ruleset carries
+  # a merge_queue rule (SQUASH, grouping ALLGREEN, up to 10 entries per merge) and
+  # names `required-checks` -- this workflow's gate job -- as a required status check.
+  # Verified against the API rather than assumed: pull requests 544, 547 and 558 each
+  # ran this whole matrix on gh-readonly-queue/main/pr-<n>-<base-sha>, and those runs
+  # are what let them merge. The release workflow is not an exception; it pushes a
+  # topic branch and opens a pull request (ash-create-release.yml), so release commits
+  # reach main through the same queue.
+  #
+  # THE COST OF ADDING IT BACK, AND THE DEFECT THAT CAME WITH IT
+  #
+  # Counted, not estimated: this workflow expands to 142 jobs and ash-iac-drift.yml to
+  # 6. With both push and merge_group firing, one queued merge is 296 runner jobs
+  # instead of 148, for one verdict.
+  #
+  # Worse, the duplicate could silently go missing. `github.ref` is refs/heads/main for
+  # every main push, so all main pushes share one concurrency group, and
+  # cancel-in-progress is false for push (see below). GitHub allows one pending run per
+  # group: queuing a third run evicts the second before it starts, and there is no pull
+  # request for the absent verdict to block. That is not hypothetical here. Run
+  # 34418283475 -- event push, branch main, sha 91ff3f51 -- was created at 23:45:03,
+  # cancelled at 23:45:26 with **zero jobs ever started**, one second after the next
+  # main push queued its run into the same group. A second instance, run 33515520652,
+  # looks identical. Both were "Docs Build & Deploy", which still carries
+  # `push: ["*"]`; for a deploy workflow superseding an intermediate run is harmless
+  # because the newest publish wins, which is why that file is left alone. For a
+  # verdict workflow it means a main commit that reports nothing at all.
+  #
+  # Keeping push and keying the group on github.sha would fix the eviction while
+  # keeping the 296 jobs. Dropping push removes both, and leaves no run to evict.
+  #
+  # RECONCILING WITH THE WORKFLOWS THAT DO CARRY A PUSH TRIGGER
+  #
+  # ash-repo-scan.yml, ash-upgrade-paths.yml, dependency-review.yml and
+  # ash-pr-title-check.yml are all pull_request + merge_group with no push trigger,
+  # which is the same position this file now takes, and a sibling branch adding a new
+  # workflow reached it independently. One rule covers every case: a workflow needs a
+  # push trigger only when its subject is a ref that no other trigger speaks for. For
+  # a required gate on main, merge_group speaks for it. ash-repo-docs.yml and
+  # ash-typescript-ci.yml keep theirs because they publish or measure per-commit
+  # artifacts rather than gate a merge.
+  #
+  # The residual gap, stated rather than papered over: the ruleset grants an
+  # always-on bypass to one repository role, so an administrator can push straight to
+  # main and no trigger in this file can see it. That is what the bypass is for, and a
+  # push trigger would not police it either -- it would only report after the fact,
+  # which is what the merge queue already does for everyone else.
   pull_request:
     # "**" not "*": GitHub branch filters treat "*" as matching any character
     # except "/", so a PR whose BASE is a nested branch (a stacked PR targeting
@@ -45,7 +82,12 @@ concurrency:
   # in its own group and entries never serialize behind one another.
   group: ${{ github.workflow }}-${{ github.ref }}
   # Only pull_request runs may be cancelled. A merge_group run must finish or the
-  # queue loses its verdict, and push/tag runs feed docs and releases.
+  # queue loses its verdict, and a workflow_dispatch run was asked for by a person.
+  #
+  # With no push trigger there is no event here whose github.ref is a shared branch
+  # name, which is what made a single group dangerous: see the eviction described on
+  # the triggers above. Every remaining event carries a ref unique to one pull
+  # request, one queue entry, or one manual invocation.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
