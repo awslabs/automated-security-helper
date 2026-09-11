@@ -233,6 +233,7 @@ Exit status: 0 clean, 1 violations found, 2 usage or internal error.
 from __future__ import annotations
 
 import argparse
+import io
 import os
 import re
 import sys
@@ -1397,6 +1398,11 @@ PLANTED_MEMBERS = {
     ),
     # Backslashes, which PurePosixPath reads as one component, so the assets
     # prefix never matches and the file lands in assets/ on extraction anyway.
+    #
+    # Planted in a TAR, not a zip, and that routing is load-bearing rather than
+    # incidental: CPython's zipfile rewrites `os.sep` to `/` when it reads a
+    # central directory, so on Windows this member read back normalized and the
+    # control reported the wrong detector. See needs_byte_exact_path_surface.
     "malformed-member-path": (
         "automated_security_helper\\assets\\trivy-db.json",
         b'{"vulnerabilities": []}\n',
@@ -1446,8 +1452,6 @@ def _tar_bytes() -> bytes:
     Built rather than hard-coded so the `ustar` identifier really is at the
     offset tar puts it at, instead of at an offset this file asserts it is at.
     """
-    import io
-
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w") as archive:
         payload = b"#!/bin/sh\n# pretend scanner launcher\n"
@@ -1477,6 +1481,60 @@ def _write_fixture_wheel(path: str, members: dict) -> None:
             archive.writestr(name, data)
 
 
+def _write_fixture_sdist(path: str, members: dict) -> None:
+    """Writes fixture members into a tar, preserving each name byte for byte.
+
+    Exists because the zip format cannot carry a member name containing a
+    backslash through CPython's zipfile at all -- see needs_byte_exact_path_surface
+    for the mechanism. tar has no such rewrite in either direction, so a fixture
+    whose whole point is the raw bytes of its path has to be planted here.
+    """
+    with tarfile.open(path, "w") as archive:
+        for name, data in members.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+
+
+def needs_byte_exact_path_surface(member: str) -> bool:
+    """True if this fixture must be planted in a tar rather than a zip.
+
+    THE ZIP SURFACE SILENTLY REWRITES THESE PATHS, ON READ AS WELL AS ON WRITE.
+    CPython's `zipfile._sanitize_filename` contains
+
+        if os.sep != "/" and os.sep in filename:
+            filename = filename.replace(os.sep, "/")
+
+    and `ZipFile._RealGetContents` runs every name in the central directory
+    through `ZipInfo(filename)`, which calls it. So on a platform where `os.sep`
+    is a backslash -- Windows -- a member written as
+    `automated_security_helper\\assets\\trivy-db.json` READS BACK as
+    `automated_security_helper/assets/trivy-db.json`. The bytes on disk are
+    irrelevant: an archive whose central directory really does contain a
+    backslash is normalized on the way out too.
+
+    That made the malformed-member-path control report "was NOT rejected" on all
+    four `windows-latest` rows while passing on Linux and macOS. It was an
+    ATTRIBUTION false alarm rather than a hole -- the normalized member is still
+    refused, by unpinned-asset, so no payload could ship either way -- but a
+    control that names the wrong detector is a control nobody can read.
+
+    Three alternatives were rejected. A "portable" zip fixture is impossible:
+    read-side normalization defeats every authoring trick, including writing the
+    central directory by hand. Teaching the gate to treat the NORMALIZED form as
+    malformed would reject every legitimate member in the artifact. And accepting
+    unpinned-asset attribution when `os.sep != "/"` is worse than the bug: it
+    stops testing rule 0 on Windows entirely while printing a green self-test,
+    and rule 0 is load-bearing -- neuter `malformed_path_reason` and both
+    backslash members become ALLOWED, with nothing else catching them.
+
+    Derived from the member path rather than hand-listed, so a future fixture
+    that also depends on raw path bytes is routed correctly without anyone
+    remembering to add it to a second list.
+    """
+    return "\\" in member
+
+
 def run_self_test(stream) -> int:
     """Proves the rules can fail, and that they do not fail on real ASH paths.
 
@@ -1484,12 +1542,19 @@ def run_self_test(stream) -> int:
     a planted payload must be rejected and named per detector; a fixture of only
     legitimate members must be accepted; an empty archive must be rejected.
 
-    The clean fixture is built twice, once wheel-shaped and once sdist-shaped, and
-    that is not thoroughness for its own sake. A reviewer found the same member
-    path getting DIFFERENT verdicts on the two surfaces -- allowed in the wheel,
-    rejected in the sdist -- because only the sdist route happened to normalize
-    the path on the way through. One fixture would have shown one of those two
-    answers and called it the answer.
+    The clean fixture is built twice, once wheel-shaped in a zip and once
+    sdist-shaped in a tar, and that is not thoroughness for its own sake. A reviewer
+    found the same member path getting DIFFERENT verdicts on the two surfaces --
+    allowed in the wheel, rejected in the sdist -- because only the sdist route
+    happened to normalize the path on the way through. One fixture would have shown
+    one of those two answers and called it the answer.
+
+    BOTH CONTAINERS, not just both path shapes. Every fixture here used to be a zip,
+    including the one labelled sdist-shaped, so `read_sdist_members` was never
+    executed by --self-test -- and --self-test is the only check the packaging
+    workflow runs, so the link and special-member counting had no control there at
+    all. The clean sdist fixture and the malformed-member-path fixture are now real
+    tars, which covers both readers on both sides of the accept/reject line.
     """
     failures: list[str] = []
 
@@ -1497,8 +1562,18 @@ def run_self_test(stream) -> int:
         # (1) Every planted payload must be caught, by the detector meant for it.
         for label, (member, data, expected_rule) in PLANTED_MEMBERS.items():
             clean = {name: b"# ash\n" for name in clean_members_for(member)}
-            fixture = os.path.join(tmp, f"planted-{label}.whl")
-            _write_fixture_wheel(fixture, {**clean, member: _planted_data(label, data)})
+            # Surface chosen from the member itself. Most fixtures go in a zip,
+            # because that is the shape of the artifact that actually gets
+            # published; the ones whose point is the raw bytes of a path go in a
+            # tar, because zipfile rewrites those on read. See
+            # needs_byte_exact_path_surface.
+            if needs_byte_exact_path_surface(member):
+                fixture = os.path.join(tmp, f"planted-{label}.tar")
+                write_fixture = _write_fixture_sdist
+            else:
+                fixture = os.path.join(tmp, f"planted-{label}.whl")
+                write_fixture = _write_fixture_wheel
+            write_fixture(fixture, {**clean, member: _planted_data(label, data)})
             try:
                 report = check_artifact(fixture)
             except ValueError as err:  # pragma: no cover - fixture is well formed
@@ -1534,13 +1609,18 @@ def run_self_test(stream) -> int:
                     f"({report.count} members examined)\n"
                 )
 
-        # (2) The legitimate lookalikes must NOT be rejected, on BOTH surfaces.
-        for shape, legitimate in (
-            ("wheel-shaped", LEGITIMATE_WHEEL_MEMBERS),
-            ("sdist-shaped", LEGITIMATE_SDIST_MEMBERS),
+        # (2) The legitimate lookalikes must NOT be rejected, on BOTH surfaces --
+        # meaning both PATH SHAPES and both CONTAINERS. The sdist-shaped fixture is
+        # written as a real tar, not a zip with sdist-looking names: every fixture
+        # here used to be a zip, so read_sdist_members had no control in --self-test
+        # at all, and the link counting the module docstring spends a paragraph on
+        # was unexercised by the only check the packaging workflow runs.
+        for shape, legitimate, extension, write_fixture in (
+            ("wheel-shaped", LEGITIMATE_WHEEL_MEMBERS, "whl", _write_fixture_wheel),
+            ("sdist-shaped", LEGITIMATE_SDIST_MEMBERS, "tar", _write_fixture_sdist),
         ):
-            fixture = os.path.join(tmp, f"clean-{shape}.whl")
-            _write_fixture_wheel(fixture, {n: b"# ash\n" for n in legitimate})
+            fixture = os.path.join(tmp, f"clean-{shape}.{extension}")
+            write_fixture(fixture, {n: b"# ash\n" for n in legitimate})
             try:
                 report = check_artifact(fixture)
             except ValueError as err:  # pragma: no cover - fixture is well formed
