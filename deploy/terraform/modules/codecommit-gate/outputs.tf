@@ -58,3 +58,15 @@ output "log_group_name" {
   description = "CloudWatch Logs group the gate writes to."
   value       = aws_cloudwatch_log_group.gate.name
 }
+
+output "kms_key_arn" {
+  description = <<-EOT
+    ARN of the key this module's log groups and CodeBuild output are encrypted
+    with, whether the module created it or it arrived through kms_key_arn.
+
+    Pass it as `kms_key_arn` to the other ASH modules to put a whole deployment
+    under one key rather than one key per module. Its policy already grants the
+    CloudWatch Logs service principal what the other modules' log groups need.
+  EOT
+  value       = local.encryption_key_arn
+}

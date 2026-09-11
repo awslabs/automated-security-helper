@@ -100,14 +100,46 @@ against the API's own pattern (`[A-Za-z][A-Za-z0-9_-]{0,255}`, max 20 entries).
 | `create_endpoint` | — | `bool` | `true` | Creates a named runtime endpoint. |
 | `endpoint_name` | — | `string` | `null` | Defaults to `DEFAULT`. |
 | `enable_bedrock_model_invocation` | — | `bool` | `false` | ASH's MCP server does not call Bedrock models. |
+| `kms_key_arn` | — | `string` | `null` | Existing key for the auth secret. `null` creates one. See below. |
+| `kms_key_deletion_window_days` | — | `number` | `30` | 7-30. Recovery window for a created key. |
 | `tags` | — | `map(string)` | `{}` | Applied to everything created. |
+
+## Encryption
+
+The MCP auth header secret is encrypted with a **customer managed** KMS key, never
+with `aws/secretsmanager`. It is a static shared secret replayed on every request,
+and an AWS-managed key's policy cannot be read or narrowed by an adopter, nor is
+its use attributable per-caller in CloudTrail.
+
+By default this module creates that key. `kms_key_arn` overrides it with one you
+already have, which is how an adopter composing several ASH modules ends up with
+one key instead of one per module — every module exposes its key as the
+`kms_key_arn` output. See `kms.tf` for the whole rationale.
+
+Two things about this module specifically:
+
+- **The key is only created when there is something to encrypt.** No
+  `mcp_auth_header_value` means no secret, so no key, so no standing monthly
+  charge. The other four modules always create log groups, so their keys are
+  unconditional.
+- **The key policy carries no CloudWatch Logs statement**, because this module
+  creates no log group. AgentCore writes runtime logs to a service-managed group
+  under `/aws/bedrock-agentcore/runtimes` that Terraform here neither creates nor
+  can associate a key with — see `log_group_name` and the limitation below.
+
+The execution role is granted `kms:Decrypt` on the key, conditioned on
+`kms:ViaService = secretsmanager.<region>.amazonaws.com`. That grant is not
+optional: Secrets Manager decrypts using the *caller's* credentials, so
+`secretsmanager:GetSecretValue` alone is not enough once the secret is under a
+customer managed key. Without it the apply succeeds, the container starts, and
+every request is rejected because the auth header could not be read.
 
 ## Outputs
 
 `agent_runtime_arn`, `agent_runtime_id`, `agent_runtime_name`,
 `agent_runtime_version`, `agent_runtime_endpoint_arn`, `execution_role_arn`,
 `execution_role_name`, `auth_header_secret_arn`, `log_group_name`,
-`request_header_allowlist`.
+`kms_key_arn`, `request_header_allowlist`.
 
 ## Constraints and known limitations
 

@@ -83,6 +83,9 @@ resource "aws_cloudwatch_log_group" "build" {
   name              = "/aws/codebuild/${var.name_prefix}-image-build"
   retention_in_days = var.log_retention_days
 
+  # See kms.tf for why setting this argument is not sufficient on its own.
+  kms_key_id = local.encryption_key_arn
+
   tags = var.tags
 }
 
@@ -146,6 +149,30 @@ data "aws_iam_policy_document" "build" {
       "arn:${data.aws_partition.current.partition}:ecr:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:repository/*",
     ]
   }
+
+  # CodeBuild encrypts its build output with the project's encryption_key using
+  # this role, and CloudWatch Logs encrypts the build log on the role's behalf, so
+  # the role needs the key as well as the log group. Without this the project is
+  # created and every build fails.
+  #
+  # Deliberately not narrowed by a kms:ViaService condition. CodeBuild's own
+  # artifact encryption is not documented as a ViaService call, and a condition
+  # that turns out not to be met fails builds in a way that reads as a KMS
+  # misconfiguration rather than as an over-tight policy.
+  statement {
+    sid    = "UseEncryptionKey"
+    effect = "Allow"
+
+    actions = [
+      "kms:Decrypt",
+      "kms:DescribeKey",
+      "kms:Encrypt",
+      "kms:GenerateDataKey*",
+      "kms:ReEncrypt*",
+    ]
+
+    resources = [local.encryption_key_arn]
+  }
 }
 
 resource "aws_iam_role_policy" "build" {
@@ -159,6 +186,10 @@ resource "aws_codebuild_project" "gate_image" {
   description   = "Adds a Lambda runtime interface client and the gate handler to the ASH image."
   service_role  = aws_iam_role.build.arn
   build_timeout = var.build_timeout_minutes
+
+  # Under the module's key rather than the account's default CodeBuild key, so the
+  # build output and the log describing it are protected the same way.
+  encryption_key = local.encryption_key_arn
 
   source {
     type      = "NO_SOURCE"
@@ -285,6 +316,11 @@ resource "aws_cloudwatch_log_group" "gate" {
   name              = "/aws/lambda/${var.name_prefix}"
   retention_in_days = var.log_retention_days
 
+  # The gate logs the findings it is about to comment on a pull request, so this
+  # group holds scan results for the customer's source. See kms.tf for why setting
+  # this argument is not sufficient on its own.
+  kms_key_id = local.encryption_key_arn
+
   tags = var.tags
 }
 
@@ -319,6 +355,35 @@ data "aws_iam_policy_document" "gate" {
     ]
 
     resources = ["${aws_cloudwatch_log_group.gate.arn}:*"]
+  }
+
+  # CloudWatch Logs makes its KMS calls for an encrypted log group on the writer's
+  # behalf through kms:ViaService, so a principal calling PutLogEvents against this
+  # group needs the key as well as the group. AWS documents this for roles that
+  # call CloudWatch Logs, and the failure mode without it is a gate that runs and
+  # logs nothing.
+  #
+  # The condition confines the grant to calls CloudWatch Logs makes for this role,
+  # so it cannot decrypt the build output the same key protects.
+  statement {
+    sid    = "UseEncryptionKeyForLogs"
+    effect = "Allow"
+
+    actions = [
+      "kms:Decrypt",
+      "kms:DescribeKey",
+      "kms:Encrypt",
+      "kms:GenerateDataKey*",
+      "kms:ReEncrypt*",
+    ]
+
+    resources = [local.encryption_key_arn]
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = [local.logs_service_principal]
+    }
   }
 
   # Every action here is scoped to the single supplied repository. Read actions

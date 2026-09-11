@@ -99,10 +99,62 @@ requires Terraform >= 1.9.0. Note that it fires at **plan** time —
 | `health_check_interval_seconds` | — | `number` | `30` | |
 | `health_check_grace_period_seconds` | — | `number` | `300` | Short values cause a restart loop. |
 | `log_retention_days` | — | `number` | `30` | |
+| `kms_key_arn` | — | `string` | `null` | Existing key for the task log group and the auth secret. `null` creates one. See below. |
+| `kms_key_deletion_window_days` | — | `number` | `30` | 7-30. Recovery window for a created key. |
 | `enable_execute_command` | — | `bool` | `false` | ECS Exec is an extra access path. |
 | `enable_deletion_protection` | — | `bool` | `false` | |
 | `additional_environment_variables` | — | `map(string)` | `{}` | Module keys win on collision. |
 | `tags` | — | `map(string)` | `{}` | |
+
+## Encryption
+
+The task log group and the MCP auth header secret are encrypted with a **customer
+managed** KMS key. A task log can carry scan output for whatever a caller asked ASH
+to scan, and the auth header is a static shared secret replayed on every request,
+so neither is left under an AWS-managed key whose policy an adopter cannot read or
+narrow and whose use is not attributable per-caller in CloudTrail.
+
+By default this module creates the key. `kms_key_arn` overrides it with one you
+already have, which is how an adopter composing several ASH modules ends up with
+one key instead of one per module — every module exposes its key as the
+`kms_key_arn` output. `kms.tf` carries the rationale and the key policy.
+
+**The encryption-context condition is account-scoped, not log-group-scoped.** The
+tighter form names the log group's ARN, which would make the key reference the log
+group while the log group references the key — a cycle Terraform rejects outright,
+and the same reason CloudFormation cannot express it either. AWS documents the
+account-scoped variant for this case.
+
+If you supply a key, it must already grant the CloudWatch Logs service principal
+`kms:Encrypt`, `kms:Decrypt`, `kms:ReEncrypt*`, `kms:GenerateDataKey*` and
+`kms:Describe*` under that condition. Terraform cannot check it, and a key without
+it plans and validates cleanly, then fails at `CreateLogGroup`. Copy the policy
+from `kms.tf`.
+
+The principal running `terraform apply` needs `kms:DescribeKey` on the key, which
+AWS requires of whoever calls `CreateLogGroup` with a `kmsKeyId`.
+
+### Three grants that are not optional
+
+Both roles gained KMS statements, and each one prevents a failure that an apply
+would not have surfaced:
+
+- **The execution role** gets the key conditioned on
+  `kms:ViaService = logs.<region>.amazonaws.com`. `AmazonECSTaskExecutionRolePolicy`
+  grants `logs:PutLogEvents` but says nothing about KMS, because it predates the log
+  group having a customer managed key. Without this the service reaches a steady
+  state and the log group stays empty, which reads as an application that is not
+  logging rather than as a permissions problem.
+- **The task role** gets the same, because the container process writes its own log
+  stream in addition to what the execution role does for it.
+- **The task role** also gets `kms:Decrypt` conditioned on
+  `kms:ViaService = secretsmanager.<region>.amazonaws.com`. Secrets Manager decrypts
+  using the *caller's* credentials, so `secretsmanager:GetSecretValue` alone is not
+  enough once the secret is under a customer managed key. Without it the container
+  starts and rejects every request, because the auth header could not be read.
+
+The `kms:ViaService` conditions keep these narrow: the log grant cannot read the
+secret, and the secret grant cannot read the log.
 
 ## Outputs
 
@@ -110,7 +162,7 @@ requires Terraform >= 1.9.0. Note that it fires at **plan** time —
 `load_balancer_zone_id`, `listener_arn`, `target_group_arn`, `allowed_hosts`,
 `cluster_arn`, `service_name`, `task_definition_arn`, `task_role_arn`,
 `execution_role_arn`, `service_security_group_id`, `alb_security_group_id`,
-`auth_header_secret_arn`, `log_group_name`.
+`auth_header_secret_arn`, `log_group_name`, `kms_key_arn`.
 
 ## Constraints and known limitations
 
@@ -120,6 +172,17 @@ serving HTTP but cannot scan reads as healthy.
 **Terraform cannot verify the image architecture.** A `cpu_architecture` that
 disagrees with the image plans and applies cleanly, then fails when the task
 starts.
+
+**This module creates no VPC, so subnet-level settings are not its to make.**
+`vpc_id`, `service_subnet_ids` and `alb_subnet_ids` are inputs; there is no
+`aws_vpc`, `aws_subnet` or `aws_nat_gateway` resource here. Anything that is a
+property of a subnet rather than of a service — `map_public_ip_on_launch` is the
+one that comes up, since a public-IP-on-launch subnet is a finding in its own
+right — therefore has no resource in this module to set it on, and belongs to
+whoever built the VPC. The service itself sets `assign_public_ip = false`, which is
+the part this module does control. The CDK implementation of this target does create
+a VPC and so does own that setting; the asymmetry is real and is not something
+Terraform can close here.
 
 **Egress is open.** The task security group allows all outbound, because the
 right narrowing depends on whether the VPC reaches AWS APIs through NAT or

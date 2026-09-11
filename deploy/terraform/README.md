@@ -77,6 +77,90 @@ comfortably fit there. Ceiling: 8 KB, the Advanced-tier maximum, which is valida
 in a task definition or an AgentCore environment map, both of which are readable
 by anyone able to describe the resource.
 
+## Encryption at rest: one key per module, or one key for the lot
+
+Every log group and every secret across all five modules is encrypted with a
+**customer managed** KMS key. None is left on an Amazon-owned or AWS-managed key,
+because those policies cannot be read or narrowed by an adopter and their use is not
+attributable per-caller in CloudTrail. The same key also covers each module's
+CodeBuild output, and in `codepipeline-executor` the results bucket and the
+pipeline's artifacts.
+
+Each module creates its own key by default. **Composing all five modules with
+defaults therefore produces five keys** — four unconditionally, plus `agentcore`'s,
+which exists only when `mcp_auth_header_value` is set, since the auth secret is that
+module's only encryptable resource.
+
+To get **one** key instead, create it once and pass its ARN as `kms_key_arn` to
+every module. The natural source is `ash-image-pipeline`, which every other module
+already depends on:
+
+```hcl
+module "ash_image" {
+  source     = "./modules/ash-image-pipeline"
+  ash_version = "v3.6.0"
+}
+
+module "ash_fargate" {
+  source              = "./modules/fargate"
+  container_image_uri = module.ash_image.image_uri
+  kms_key_arn         = module.ash_image.kms_key_arn
+  # ...
+}
+```
+
+Every module exposes `kms_key_arn` as an output, so any of them can be the source.
+A key created by one of these modules already carries the CloudWatch Logs grant the
+others' log groups need. A key from anywhere else does not, and that is the trap:
+
+> `aws_cloudwatch_log_group.kms_key_id` creates **no key policy**. A log group
+> pointed at a key CloudWatch Logs has not been granted plans cleanly, validates
+> cleanly, and then fails at `CreateLogGroup`.
+
+A hand-made key must grant `logs.<region>.amazonaws.com` — the regionalized
+principal, in the key's own region — the actions `kms:Encrypt`, `kms:Decrypt`,
+`kms:ReEncrypt*`, `kms:GenerateDataKey*` and `kms:Describe*`, under an `ArnLike`
+condition on `kms:EncryptionContext:aws:logs:arn`. Each module's `kms.tf` writes
+exactly that policy for its own key; copy it. Note the condition is **account**
+scoped (`arn:<partition>:logs:<region>:<account>:*`) rather than naming a log group:
+the narrower form would make the key reference the log groups while the log groups
+reference the key, which is a cycle Terraform rejects outright and the same reason
+the CDK implementation cannot express it either.
+
+Two further requirements, both of which fail at apply or at run time rather than at
+validate:
+
+- **The principal running `terraform apply` needs `kms:DescribeKey`** on the key.
+  AWS requires it of whoever calls `CreateLogGroup` with a `kmsKeyId` and returns
+  `AccessDeniedException` otherwise, so the log group fails to create rather than
+  being created unencrypted. A deployment role with KMS carved out of it fails on
+  the first log group.
+- **Roles that write to an encrypted log group, or read an encrypted secret, need
+  the key too.** CloudWatch Logs and Secrets Manager both make their KMS calls with
+  the caller's credentials, so the modules grant their own roles the key under a
+  `kms:ViaService` condition. `fargate` is the sharp case: without the grant the
+  service goes healthy and its log group stays empty, and without the Secrets
+  Manager grant the container starts and rejects every request.
+
+### Destroying a key, and why there is no `prevent_destroy`
+
+Deleting a KMS key makes everything encrypted under it permanently unreadable; AWS
+states it plainly for CloudWatch Logs. The CDK implementation marks its key RETAIN
+for that reason.
+
+Terraform's equivalent is a `prevent_destroy` lifecycle block, and it is **not**
+used here. The meta-argument takes a literal rather than a variable, so it cannot be
+made conditional, and it would make `terraform destroy` fail for every adopter and
+for every example in this repository — including the examples this README tells you
+to tear down because they cost money while they exist.
+
+`kms_key_deletion_window_days` is the analogue that was used instead, defaulting to
+30, the maximum. While a key is pending deletion it cannot decrypt, but nothing is
+lost: `aws kms cancel-key-deletion` restores it and the data with it. If you want
+the harder guarantee, create the key outside these modules and pass it in through
+`kms_key_arn`; a key the modules do not own is one they cannot schedule for
+deletion.
+
 ## Which target to use
 
 **AgentCore** — you want ASH available to agents over MCP and want the platform to

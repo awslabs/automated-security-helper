@@ -125,6 +125,13 @@ resource "aws_cloudwatch_log_group" "build" {
   name              = "/aws/codebuild/${local.name}-image-build"
   retention_in_days = var.log_retention_days
 
+  # A build log holds the whole buildspec's output, including the ASH
+  # configuration the deployment materialized and every scanner install. It is
+  # encrypted with the same key as the image build's output, so the log and the
+  # artifact it describes are protected the same way. See kms.tf for why setting
+  # this argument is not sufficient on its own.
+  kms_key_id = local.encryption_key_arn
+
   tags = var.tags
 }
 
@@ -184,6 +191,30 @@ data "aws_iam_policy_document" "build" {
 
     resources = [aws_ecr_repository.this.arn]
   }
+
+  # CodeBuild encrypts its build output with the project's encryption_key using
+  # this role, and CloudWatch Logs encrypts the build log on the role's behalf, so
+  # the role needs the key as well as the log group. Without this the project is
+  # created and every build fails.
+  #
+  # Deliberately not narrowed by a kms:ViaService condition. CodeBuild's own
+  # artifact encryption is not documented as a ViaService call, and a condition
+  # that turns out not to be met fails builds in a way that reads as a KMS
+  # misconfiguration rather than as an over-tight policy.
+  statement {
+    sid    = "UseEncryptionKey"
+    effect = "Allow"
+
+    actions = [
+      "kms:Decrypt",
+      "kms:DescribeKey",
+      "kms:Encrypt",
+      "kms:GenerateDataKey*",
+      "kms:ReEncrypt*",
+    ]
+
+    resources = [local.encryption_key_arn]
+  }
 }
 
 resource "aws_iam_role_policy" "build" {
@@ -193,11 +224,17 @@ resource "aws_iam_role_policy" "build" {
 }
 
 resource "aws_codebuild_project" "this" {
-  name           = "${local.name}-image-build"
-  description    = "Builds the ASH container image from ${var.ash_version} into ${aws_ecr_repository.this.name}."
-  service_role   = aws_iam_role.build.arn
-  build_timeout  = var.build_timeout_minutes
-  encryption_key = var.ecr_kms_key_arn
+  name          = "${local.name}-image-build"
+  description   = "Builds the ASH container image from ${var.ash_version} into ${aws_ecr_repository.this.name}."
+  service_role  = aws_iam_role.build.arn
+  build_timeout = var.build_timeout_minutes
+
+  # This module's own key, not ecr_kms_key_arn. Build output and image layers at
+  # rest in ECR are separate concerns with separate costs -- a CMK on ECR bills a
+  # KMS request per layer -- and tying build-output encryption to the ECR setting
+  # meant a deployment that left ECR on AES256 got no customer-managed key for its
+  # build output either. Pass the same ARN to both variables to keep one key.
+  encryption_key = local.encryption_key_arn
 
   source {
     type      = "NO_SOURCE"

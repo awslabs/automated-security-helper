@@ -165,9 +165,60 @@ work it does is idempotent.
 | `results_prefix` | — | `string` | `"shard-results"` | |
 | `results_retention_days` | — | `number` | `90` | Scan output accumulates per execution. |
 | `artifact_bucket_force_destroy` | — | `bool` | `false` | |
-| `kms_key_arn` | — | `string` | `null` | `null` uses SSE-S3. |
+| `kms_key_arn` | — | `string` | `null` | Existing key for the bucket, artifacts, build output and both log groups. `null` **creates one** — this changed, see below. |
+| `kms_key_deletion_window_days` | — | `number` | `30` | 7-30. Recovery window for a created key. |
 | `log_retention_days` | — | `number` | `30` | |
 | `tags` | — | `map(string)` | `{}` | |
+
+## Encryption
+
+The results and artifact bucket, the pipeline's artifacts, both CodeBuild projects'
+output and both build log groups are encrypted with a **customer managed** KMS key.
+The merge log is the one to care about: it carries the whole scan's verdict and
+every finding behind it.
+
+**`kms_key_arn = null` changed meaning.** It used to mean "no customer managed
+key", which left the bucket on SSE-S3 and both log groups under an Amazon-owned key
+whose policy nobody here can read. It now means "create one". That is a behavior
+change if you were relying on the old default, and the cost is one key's standing
+monthly charge. There is no longer a third option.
+
+**On upgrade this shows up as an unrequested resource.** If you have `kms_key_arn`
+set to `null` explicitly, or never set it, the next `terraform plan` proposes
+creating a KMS key you did not ask for and `terraform apply` starts billing for it.
+The opt-out is to pass an existing key ARN, which is also how you avoid one key per
+module; there is no way to opt back out of a customer managed key entirely.
+
+`kms_key_arn` still overrides with a key you already have, which is how an adopter
+composing several ASH modules ends up with one key instead of one per module — every
+module exposes its key as the `kms_key_arn` output. `kms.tf` carries the rationale
+and the key policy.
+
+One key covers the results, the artifacts and both log groups rather than one key
+each. AWS recommends a key per encrypted log group so a key policy can be narrowed
+to a single log group ARN; that narrowing is not available here anyway (see below),
+and the shard log, the merge log and the results they describe sit inside one trust
+boundary, so a second key would buy no isolation and would multiply a standing
+monthly charge.
+
+**The encryption-context condition is account-scoped, not log-group-scoped.** The
+tighter form names each log group's ARN, which would make the key reference the log
+groups while the log groups reference the key — a cycle Terraform rejects outright,
+and the same reason CloudFormation cannot express it either. AWS documents the
+account-scoped variant for this case.
+
+If you supply a key, it must already grant the CloudWatch Logs service principal
+`kms:Encrypt`, `kms:Decrypt`, `kms:ReEncrypt*`, `kms:GenerateDataKey*` and
+`kms:Describe*` under that condition. Terraform cannot check it, and a key without
+it plans and validates cleanly, then fails at `CreateLogGroup`. Copy the policy
+from `kms.tf`.
+
+The principal running `terraform apply` needs `kms:DescribeKey` on the key, which
+AWS requires of whoever calls `CreateLogGroup` with a `kmsKeyId`.
+
+Bucket keys are on, which cuts the per-object KMS request count. That matters here:
+a sharded scan writes one result set per shard per execution and the merge reads all
+of them.
 
 ## Outputs
 
@@ -175,7 +226,7 @@ work it does is idempotent.
 `merge_project_name`, `artifact_bucket_name`, `results_prefix`,
 `merged_results_location_template`, `min_severity`, `fail_on_findings`,
 `shard_log_group_name`, `merge_log_group_name`, `pipeline_role_arn`,
-`shard_role_arn`, `merge_role_arn`.
+`shard_role_arn`, `merge_role_arn`, `kms_key_arn`.
 
 ## Constraints and known limitations
 

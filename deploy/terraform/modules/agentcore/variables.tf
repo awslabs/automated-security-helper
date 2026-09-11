@@ -271,6 +271,58 @@ variable "enable_bedrock_model_invocation" {
   default     = false
 }
 
+variable "kms_key_arn" {
+  description = <<-EOT
+    ARN of an existing customer managed KMS key to encrypt the MCP auth header
+    secret with, instead of the key this module creates.
+
+    Leave it null and the module creates its own key. There is no third option:
+    the secret is always under a customer managed key, never under
+    `aws/secretsmanager`, whose policy this configuration cannot narrow and whose
+    use does not appear per-caller in CloudTrail.
+
+    Set it when composing several ASH modules, so they share one key rather than
+    creating one each -- a KMS key carries a standing monthly charge whether or
+    not anything is encrypted under it. Every ASH module exposes its key as the
+    `kms_key_arn` output, so one module's key can be passed to the rest.
+
+    The key must be symmetric and in the same region as this deployment.
+  EOT
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.kms_key_arn == null || can(regex("^arn:[a-z0-9-]+:kms:[a-z0-9-]+:[0-9]+:key/", var.kms_key_arn))
+    error_message = "kms_key_arn must be a KMS key ARN, for example arn:aws:kms:<region>:<account>:key/<key-id>. An alias ARN is not accepted, because CloudWatch Logs and Secrets Manager record the resolved key."
+  }
+}
+
+variable "kms_key_deletion_window_days" {
+  description = <<-EOT
+    Days KMS waits before destroying this module's key after `terraform destroy`
+    schedules its deletion. Ignored when kms_key_arn is set.
+
+    This is the recovery window, and it is why there is no `prevent_destroy` on
+    the key. Deleting a key that encrypted data makes that data permanently
+    unreadable, so the CDK implementation of this target marks its key RETAIN.
+    Terraform's equivalent, a `prevent_destroy` lifecycle block, cannot be made
+    conditional -- the meta-argument takes a literal, not a variable -- so it
+    would make `terraform destroy` fail for every adopter and for every example
+    in this repository, including the ones the READMEs tell you to tear down.
+
+    The window is the honest analogue: while the key is pending deletion it
+    cannot decrypt, but nothing is lost, and `aws kms cancel-key-deletion`
+    restores it. Defaults to the maximum.
+  EOT
+  type        = number
+  default     = 30
+
+  validation {
+    condition     = var.kms_key_deletion_window_days >= 7 && var.kms_key_deletion_window_days <= 30
+    error_message = "kms_key_deletion_window_days must be between 7 and 30, the range KMS accepts."
+  }
+}
+
 variable "tags" {
   description = "Tags applied to every resource this module creates."
   type        = map(string)

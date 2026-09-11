@@ -30,7 +30,6 @@ locals {
   repository_name = element(split(":", var.codecommit_repository_arn), 5)
 
   use_base_config = var.base_config_ssm_parameter_name != null
-  use_kms         = var.kms_key_arn != null
 
   shard_indices = range(var.shard_count)
 
@@ -98,10 +97,14 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "artifacts" {
 
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm     = local.use_kms ? "aws:kms" : "AES256"
-      kms_master_key_id = var.kms_key_arn
+      sse_algorithm     = "aws:kms"
+      kms_master_key_id = local.encryption_key_arn
     }
-    bucket_key_enabled = local.use_kms
+
+    # Bucket keys cut the per-object KMS request count, which matters here: a
+    # sharded scan writes one result set per shard per execution, and the merge
+    # reads all of them.
+    bucket_key_enabled = true
   }
 }
 
@@ -172,12 +175,20 @@ resource "aws_cloudwatch_log_group" "shard" {
   name              = "/aws/codebuild/${var.name_prefix}-shard"
   retention_in_days = var.log_retention_days
 
+  # A shard log carries the scan output for its slice of the repository, so it is
+  # encrypted with the same key as the results themselves. See kms.tf for why
+  # setting this argument is not sufficient on its own.
+  kms_key_id = local.encryption_key_arn
+
   tags = var.tags
 }
 
 resource "aws_cloudwatch_log_group" "merge" {
   name              = "/aws/codebuild/${var.name_prefix}-merge"
   retention_in_days = var.log_retention_days
+
+  # The merge log carries the whole scan's verdict and every finding behind it.
+  kms_key_id = local.encryption_key_arn
 
   tags = var.tags
 }
@@ -248,23 +259,26 @@ data "aws_iam_policy_document" "build_common" {
     }
   }
 
-  dynamic "statement" {
-    for_each = local.use_kms ? [1] : []
+  # Covers three uses of the one key: the results and artifacts in S3, the build
+  # project's own output encryption, and the build log, which CloudWatch Logs
+  # encrypts on this role's behalf. Unconditional now that the key is never absent.
+  #
+  # GenerateDataKey* rather than GenerateDataKey: S3 calls GenerateDataKey and
+  # CodeBuild calls GenerateDataKeyWithoutPlaintext, and the bare action name
+  # covered only the first.
+  statement {
+    sid    = "UseKmsKey"
+    effect = "Allow"
 
-    content {
-      sid    = "UseKmsKey"
-      effect = "Allow"
+    actions = [
+      "kms:Decrypt",
+      "kms:DescribeKey",
+      "kms:Encrypt",
+      "kms:GenerateDataKey*",
+      "kms:ReEncrypt*",
+    ]
 
-      actions = [
-        "kms:Decrypt",
-        "kms:DescribeKey",
-        "kms:Encrypt",
-        "kms:GenerateDataKey",
-        "kms:ReEncrypt*",
-      ]
-
-      resources = [var.kms_key_arn]
-    }
+    resources = [local.encryption_key_arn]
   }
 }
 
@@ -363,6 +377,10 @@ resource "aws_codebuild_project" "shard" {
   service_role  = aws_iam_role.shard.arn
   build_timeout = var.shard_build_timeout_minutes
 
+  # The same key as the results and the log, so a shard's output is protected
+  # identically wherever it lands.
+  encryption_key = local.encryption_key_arn
+
   source {
     type      = "CODEPIPELINE"
     buildspec = local.shard_buildspec
@@ -406,6 +424,8 @@ resource "aws_codebuild_project" "merge" {
   description   = "Merges every shard's ASH results and forms the pipeline verdict."
   service_role  = aws_iam_role.merge.arn
   build_timeout = var.merge_build_timeout_minutes
+
+  encryption_key = local.encryption_key_arn
 
   source {
     type      = "CODEPIPELINE"
@@ -530,23 +550,22 @@ data "aws_iam_policy_document" "pipeline" {
     ]
   }
 
-  dynamic "statement" {
-    for_each = local.use_kms ? [1] : []
+  # CodePipeline encrypts the artifacts it hands between stages with this key, so
+  # the pipeline role needs it as well as the bucket. Unconditional now that the key
+  # is never absent.
+  statement {
+    sid    = "UseKmsKey"
+    effect = "Allow"
 
-    content {
-      sid    = "UseKmsKey"
-      effect = "Allow"
+    actions = [
+      "kms:Decrypt",
+      "kms:DescribeKey",
+      "kms:Encrypt",
+      "kms:GenerateDataKey*",
+      "kms:ReEncrypt*",
+    ]
 
-      actions = [
-        "kms:Decrypt",
-        "kms:DescribeKey",
-        "kms:Encrypt",
-        "kms:GenerateDataKey",
-        "kms:ReEncrypt*",
-      ]
-
-      resources = [var.kms_key_arn]
-    }
+    resources = [local.encryption_key_arn]
   }
 }
 
@@ -568,13 +587,9 @@ resource "aws_codepipeline" "this" {
     location = aws_s3_bucket.artifacts.bucket
     type     = "S3"
 
-    dynamic "encryption_key" {
-      for_each = local.use_kms ? [1] : []
-
-      content {
-        id   = var.kms_key_arn
-        type = "KMS"
-      }
+    encryption_key {
+      id   = local.encryption_key_arn
+      type = "KMS"
     }
   }
 

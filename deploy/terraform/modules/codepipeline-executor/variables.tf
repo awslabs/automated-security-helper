@@ -238,12 +238,62 @@ variable "artifact_bucket_force_destroy" {
 
 variable "kms_key_arn" {
   description = <<-EOT
-    Customer managed KMS key ARN for the artifact and results bucket and for the
-    pipeline's artifact encryption. When null, SSE-S3 with an Amazon-managed key
-    is used.
+    ARN of an existing customer managed KMS key to encrypt the artifact and results
+    bucket, the pipeline's artifacts, the two CodeBuild projects' output and the two
+    build log groups with, instead of the key this module creates.
+
+    Leave it null and the module creates its own key. **This changed:** null used to
+    mean "no customer-managed key", which left the bucket on SSE-S3 and both log
+    groups under an Amazon-owned key whose policy nobody here can read. There is no
+    longer a third option, and the cost of the change is one key's standing monthly
+    charge.
+
+    Set it when composing several ASH modules, so they share one key rather than
+    creating one each. Every ASH module exposes its key as the `kms_key_arn` output,
+    so one module's key can be passed to the rest.
+
+    A supplied key must already grant the CloudWatch Logs service principal
+    kms:Encrypt, kms:Decrypt, kms:ReEncrypt*, kms:GenerateDataKey* and
+    kms:Describe* under a `kms:EncryptionContext:aws:logs:arn` condition that
+    matches this account. Terraform cannot check that, and a key without it plans
+    and validates cleanly, then fails at CreateLogGroup. kms.tf has the policy this
+    module writes for its own key; copy it.
   EOT
   type        = string
   default     = null
+
+  validation {
+    condition     = var.kms_key_arn == null || can(regex("^arn:[a-z0-9-]+:kms:[a-z0-9-]+:[0-9]+:key/", var.kms_key_arn))
+    error_message = "kms_key_arn must be a KMS key ARN, for example arn:aws:kms:<region>:<account>:key/<key-id>. An alias ARN is not accepted, because CloudWatch Logs records the resolved key."
+  }
+}
+
+variable "kms_key_deletion_window_days" {
+  description = <<-EOT
+    Days KMS waits before destroying this module's key after `terraform destroy`
+    schedules its deletion. Ignored when kms_key_arn is set.
+
+    This is the recovery window, and it is why there is no `prevent_destroy` on
+    the key. Deleting a key that encrypted log data makes that data permanently
+    unreadable -- AWS states it plainly -- and the same key protects every scan
+    result in the bucket, so the CDK implementation of this target marks its key
+    RETAIN. Terraform's equivalent, a `prevent_destroy` lifecycle block, cannot be
+    made conditional, because the meta-argument takes a literal rather than a
+    variable. It would make `terraform destroy` fail for every adopter and for
+    every example in this repository, including the ones the READMEs tell you to
+    tear down because they cost money while they exist.
+
+    The window is the honest analogue: while the key is pending deletion it cannot
+    decrypt, but nothing is lost, and `aws kms cancel-key-deletion` restores it.
+    Defaults to the maximum.
+  EOT
+  type        = number
+  default     = 30
+
+  validation {
+    condition     = var.kms_key_deletion_window_days >= 7 && var.kms_key_deletion_window_days <= 30
+    error_message = "kms_key_deletion_window_days must be between 7 and 30, the range KMS accepts."
+  }
 }
 
 variable "log_retention_days" {
