@@ -357,7 +357,14 @@ ARCHIVE_MAGICS = (
     (0, b"PK\x05\x06"),  # zip, empty archive
     (0, b"PK\x07\x08"),  # zip, spanned archive
     (0, b"\x1f\x8b"),  # gzip
-    (0, b"BZh"),  # bzip2
+    # bzip2 is `BZh` plus the block-size digit 1-9, and the digit is part of the
+    # signature rather than decoration. A bare `BZh` made it possible for this gate
+    # to fail on ASH's own build: assets/ASH_INSTALLED_REVISION is build-generated
+    # and its whole content is a BRANCH NAME, so a branch called `BZh-something`
+    # turned an allowlisted, ASH-authored asset into a nested-archive violation.
+    # Requiring the digit costs nothing -- every real bzip2 stream has one -- and
+    # removes that spelling of the false positive.
+    *((0, b"BZh%d" % level) for level in range(1, 10)),
     (0, b"\xfd7zXZ\x00"),  # xz
     (0, b"\x28\xb5\x2f\xfd"),  # zstd
     (0, b"7z\xbc\xaf\x27\x1c"),  # 7-Zip
@@ -401,6 +408,25 @@ NATIVE_SUFFIXES = (
 # Magic bytes for ELF, Mach-O (32/64, both endiannesses, universal) and PE.
 # grype, syft, trivy and opengrep are single statically-linked binaries; a
 # vendored copy would arrive with no suffix, and only the header gives it away.
+#
+# KNOWN IMPRECISION, left in deliberately and recorded rather than fixed: `MZ` is
+# two bytes matched by `startswith` with no structural check, so any member whose
+# content simply begins `MZ` reads as a Windows executable. The one member that
+# could realistically do that is assets/ASH_INSTALLED_REVISION, which is
+# build-generated and holds a branch name, so a branch named `MZ-something` would
+# fail this gate on correct configuration.
+#
+# Not fixed here because the honest fix is a real DOS-header check -- `MZ` at 0,
+# then the `PE\0\0` signature at the offset stored little-endian at 0x3C -- and
+# that reverses a deliberate earlier decision pinned by
+# test_two_byte_pe_signature_is_still_matched, which exists because an earlier
+# `len(magic) >= 4` guard silently lost `MZ` altogether. Doing it properly is
+# worth a change of its own rather than a rider on this one. The exposure is also
+# narrow: on `pull_request` the file holds the literal `HEAD` (detached checkout),
+# so only `merge_group` and `workflow_dispatch` see a real branch name, and every
+# branch in this repository carries a `type/` prefix. An EXEMPTION for that path
+# is the wrong fix and must not be added -- it would break the additive property
+# ASSETS_ALLOWLIST depends on.
 NATIVE_MAGICS = (
     b"\x7fELF",  # ELF (Linux)
     b"\xfe\xed\xfa\xce",  # Mach-O 32-bit
@@ -783,10 +809,17 @@ def strip_distribution_root(name: str) -> str:
     if len(parts) < 2:
         return "/".join(parts)
     first = parts[0]
-    # A wheel's metadata directory also matches the wrapper shape, and stripping
-    # it would turn `...dist-info/METADATA` into a bare `METADATA` at the artifact
-    # root -- a member rule 5c does not constrain, so it would then be allowed
-    # unconditionally. Checked first for that reason.
+    # A wheel's metadata directory also matches the wrapper shape, and stripping it
+    # would turn `...dist-info/METADATA` into a bare `METADATA` at the artifact root
+    # -- which rule 5d now refuses outright, and which rule 5c never constrained.
+    #
+    # REDUNDANT BY CONSTRUCTION, and said plainly because the comment here used to
+    # claim this branch was what prevented that: `is_sdist_wrapper` already returns
+    # False for anything ending `.dist-info`, via WHEEL_SIBLING_SUFFIXES, so
+    # deleting this branch changes no outcome -- the fall-through returns the same
+    # string. It is kept as defence in depth against WHEEL_SIBLING_SUFFIXES being
+    # narrowed, not because it is the live mechanism. `test_wrapper_recognition`
+    # pins the mechanism that actually does the work.
     if DIST_INFO_PATTERN.match(first):
         return "/".join(parts)
     # Only this project's own `<name>-<version>` wrapper is stripped, and only
@@ -902,13 +935,22 @@ def is_plain_filename(component: str) -> bool:
 
 # Compound suffixes that must be read as one unit, longest first, so that
 # `foo.tar.zst` reports `.tar.zst` rather than `.zst`.
-COMPOUND_SUFFIXES = (
-    ".tar.bz2",
-    ".tar.gz",
-    ".tar.lz4",
-    ".tar.lzma",
-    ".tar.xz",
-    ".tar.zst",
+#
+# DERIVED from ARCHIVE_SUFFIXES rather than restated, because a hand-maintained
+# copy encodes an invariant nobody states or tests. It was a literal list of the
+# same six entries, and the drift it allowed is silent in the dangerous direction:
+# add `.tar.lzo` to ARCHIVE_SUFFIXES only, and `payload.tar.lzo` splits to the
+# suffix `.lzo`, which is NOT in ARCHIVE_SUFFIXES, so rule 2's suffix arm never
+# fires on a member the maintainer just finished adding a rule for. Deriving it
+# means one edit in one place cannot half-land.
+#
+# Longest first because `split_suffixes` returns on the first match.
+COMPOUND_SUFFIXES = tuple(
+    sorted(
+        (suffix for suffix in ARCHIVE_SUFFIXES if suffix.count(".") > 1),
+        key=len,
+        reverse=True,
+    )
 )
 
 
@@ -1353,9 +1395,17 @@ def distribution_roots(members: list[Member]) -> list[str]:
     matches the wrapper shape, being `<name>-<version>.dist-info`, and it is
     metadata beside the distribution rather than a second copy of it.
 
-    A well-formed artifact has exactly one. A wheel has the bare package and no
-    wrapper; an sdist has one wrapper and no bare package. Anything else is a
-    contradiction, and check_artifact refuses it -- see there for why that matters.
+    The explicit DIST_INFO_PATTERN test below is REDUNDANT BY CONSTRUCTION, for the
+    same reason as the one in strip_distribution_root: `is_sdist_wrapper` already
+    rejects anything ending `.dist-info`, so removing it changes no outcome. Kept as
+    defence in depth, and labelled as such rather than left reading like the live
+    mechanism.
+
+    A well-formed artifact has exactly one root -- NOT "at most one". A wheel has
+    the bare package and no wrapper; an sdist has one wrapper and no bare package.
+    Zero is as wrong as two: an artifact of nothing but `.dist-info` returns an
+    empty list here, and check_artifact refuses that, because a wheel with no
+    package in it is not a clean wheel.
     """
     roots: list[str] = []
     for member in members:
