@@ -844,6 +844,41 @@ def malformed_path_reason(name: str) -> str | None:
     return None
 
 
+def link_target_escape_reason(name: str, target: str) -> str | None:
+    """Says why a link's TARGET points outside the artifact, or None if it does not.
+
+    Rule 0 vets the member NAME and said nothing about where a link points, so a
+    tar symlink at a perfectly ordinary path with a target of `../../../../etc/`
+    was reported on stdout and then cleared: the gate printed the target as news
+    and exited 0.
+
+    This is not a vendoring bypass -- a link carries no source, so nothing
+    third-party ships by this route -- which is why it is checked late rather than
+    as a precondition. It is closed because it is cheap and because a link is the
+    one member that makes a claim about something the artifact does not contain.
+
+    Resolved against the RAW member name rather than the wrapper-stripped one,
+    because the boundary that matters is the archive's own extraction root, which
+    is where an extractor would write.
+    """
+    if not target:
+        return None
+    if PurePosixPath(target).is_absolute():
+        return f"points at {target!r}, an absolute path outside the artifact"
+    resolved: list[str] = []
+    for part in (*PurePosixPath(name).parts[:-1], *PurePosixPath(target).parts):
+        if part == "..":
+            if not resolved:
+                return (
+                    f"points at {target!r}, which resolves above the root of the "
+                    "archive"
+                )
+            resolved.pop()
+        elif part != ".":
+            resolved.append(part)
+    return None
+
+
 def is_plain_filename(component: str) -> bool:
     """True if `component` is a single filename rather than a path in disguise.
 
@@ -1166,6 +1201,23 @@ def classify_member(member: Member, artifact: str) -> Violation | None:
             "which is unconstrained for that reason.",
         )
 
+    # Rule 5e -- a link pointing outside the artifact.
+    #
+    # Checked here, not up with rule 0, so that a link whose NAME already says
+    # something more specific keeps that attribution: a symlink named
+    # `.../utils/trivy` is reported as a vendored scanner, which is the finding a
+    # maintainer can act on, rather than as a bad target.
+    escape = link_target_escape_reason(member.name, member.link_target)
+    if escape is not None:
+        return Violation(
+            artifact,
+            relative,
+            "link-target-escapes-artifact",
+            f"is a link that {escape}. Extracting it would read or write outside "
+            "the artifact, and nothing a correct build produces needs to. The "
+            "target was already printed as news; now it fails.",
+        )
+
     # Rule 6 -- bigger than anything ASH authors.
     if member.size > MAX_MEMBER_BYTES:
         return Violation(
@@ -1203,31 +1255,51 @@ def read_wheel_members(path: str) -> list[Member]:
 
 
 def read_sdist_members(path: str) -> list[Member]:
-    """Lists file, symlink and hardlink members of an sdist tarball.
+    """Lists every non-directory member of an sdist tarball.
 
     Links are included rather than skipped. They were skipped, and that quietly
     excluded them from the member count this script prints as its evidence of
     thoroughness -- a tar carrying a symlink named `.../bin/trivy` would have
     moved neither the count nor the verdict.
+
+    So are FIFOs, character devices, block devices and any type tarfile does not
+    recognize. They were dropped by an `if not info.isfile(): continue`, which
+    contradicted the reason links are counted: the count is this gate's own claim
+    about how much it examined, and a member absent from it is a member the reader
+    is told nothing about. None of these appears in a correct sdist -- measured, the
+    built one is 213 regular files and nothing else -- so counting them costs the
+    real artifact nothing and makes an anomalous one visible.
+
+    DIRECTORIES ARE THE ONE DELIBERATE EXCLUSION, in both readers:
+    read_wheel_members skips them too. A directory entry carries no content and
+    exists only to describe structure that its children already imply, and counting
+    it in the tar while the zip ignores it would make the two surfaces' member
+    counts incomparable -- which is the number this gate reports as evidence.
     """
     members: list[Member] = []
     with tarfile.open(path, "r:*") as archive:
         for info in archive.getmembers():
+            if info.isdir():
+                continue
             if info.issym() or info.islnk():
-                # A link has no content of its own; the path rules are the only
-                # ones that can speak about it, and they are enough.
+                # A link has no content of its own; the path rules and the
+                # target check are the only ones that can speak about it.
                 members.append(
                     Member(info.name, info.size, b"", link_target=info.linkname)
                 )
                 continue
-            if not info.isfile():
+            if info.isfile():
+                handle = archive.extractfile(info)
+                magic = b""
+                if handle is not None:
+                    with handle:
+                        magic = handle.read(MAGIC_READ_BYTES)
+                members.append(Member(info.name, info.size, magic))
                 continue
-            handle = archive.extractfile(info)
-            magic = b""
-            if handle is not None:
-                with handle:
-                    magic = handle.read(MAGIC_READ_BYTES)
-            members.append(Member(info.name, info.size, magic))
+            # A FIFO, device node, or something tarfile has no predicate for.
+            # extractfile() returns None for all of these, so there is no content
+            # to read; the path rules still apply, and the member is counted.
+            members.append(Member(info.name, info.size, b""))
     return members
 
 

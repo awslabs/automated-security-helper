@@ -750,6 +750,75 @@ class TestPlantedPayload:
             is None
         )
 
+    @pytest.mark.parametrize(
+        ("label", "target"),
+        [
+            ("absolute", "/usr/local/bin/scanner"),
+            ("parent traversal", "../../../../etc/passwd"),
+            # Exactly one level too far: the link sits two deep, so three `..`
+            # segments leave the archive. Two would not -- see the accept-side test
+            # below, which pins that boundary rather than leaving it to chance.
+            ("one level too far", "../../../outside.py"),
+        ],
+    )
+    def test_link_whose_target_escapes_the_artifact_is_rejected(self, label, target):
+        """Rule 0 vets the member NAME and says nothing about where a link points.
+
+        The gate printed the target as news and then exited 0. Not a vendoring
+        bypass -- a link carries no source -- which is why rule 5e runs late, after
+        anything that can name the member more specifically.
+        """
+        member = gate.Member(
+            name="automated_security_helper/utils/alias.py",
+            size=0,
+            magic=b"",
+            link_target=target,
+        )
+        violation = gate.classify_member(member, "fixture.tar.gz")
+        assert violation is not None, label
+        assert violation.rule == "link-target-escapes-artifact", label
+
+    @pytest.mark.parametrize(
+        "target",
+        [
+            "helper.py",
+            "./helper.py",
+            "sub/helper.py",
+            # Two `..` from a two-deep link lands exactly at the archive root, which
+            # is inside it. This is the boundary case, and getting it wrong in the
+            # strict direction would fail an artifact that is fine.
+            "../helper.py",
+            "../../helper.py",
+        ],
+    )
+    def test_link_staying_inside_the_artifact_is_allowed(self, target):
+        """The accept side: an ordinary relative link must not trip rule 5e."""
+        member = gate.Member(
+            name="automated_security_helper/utils/alias.py",
+            size=0,
+            magic=b"",
+            link_target=target,
+        )
+        assert gate.classify_member(member, "fixture.tar.gz") is None, target
+
+    def test_a_link_named_after_a_scanner_keeps_that_attribution(self):
+        """Rule 5e must not steal a more specific finding.
+
+        A symlink at `.../utils/trivy` pointing at a system binary is BOTH a
+        vendored-scanner name and an escaping target. The vendoring verdict is the
+        one a maintainer can act on, so rule 5e runs after rule 4 and this pins
+        that ordering.
+        """
+        member = gate.Member(
+            name="automated_security_helper/utils/trivy",
+            size=0,
+            magic=b"",
+            link_target="/usr/local/bin/trivy",
+        )
+        violation = gate.classify_member(member, "fixture.tar.gz")
+        assert violation is not None
+        assert violation.rule == "vendored-scanner"
+
     def test_uppercase_package_directory_is_rejected(self):
         """Component checks lowercase; the pinned lists do not.
 
@@ -1204,6 +1273,100 @@ class TestArchiveReading:
         assert report.count == 2
         assert len(report.links) == 1
         assert [v.rule for v in report.violations] == ["vendored-scanner"]
+
+    @pytest.mark.parametrize(
+        ("label", "tar_type"),
+        [
+            ("fifo", tarfile.FIFOTYPE),
+            ("character device", tarfile.CHRTYPE),
+            ("block device", tarfile.BLKTYPE),
+        ],
+    )
+    def test_special_member_types_are_counted_not_skipped(
+        self, tmp_path, label, tar_type
+    ):
+        """They were dropped by `if not info.isfile(): continue`.
+
+        That contradicted the stated reason links are counted: the member total is
+        this gate's own evidence of how much it examined, so a member absent from it
+        is a member the reader is told nothing about. None of these appears in a
+        correct sdist -- measured, the built one is 213 regular files and nothing
+        else -- so counting them costs the real artifact nothing.
+        """
+        sdist = tmp_path / f"{label.replace(' ', '-')}.tar.gz"
+        with tarfile.open(sdist, "w:gz") as archive:
+            payload = b"# ash\n"
+            regular = tarfile.TarInfo(
+                "automated_security_helper-3.7.0/automated_security_helper/__init__.py"
+            )
+            regular.size = len(payload)
+            archive.addfile(regular, io.BytesIO(payload))
+
+            special = tarfile.TarInfo(
+                "automated_security_helper-3.7.0/automated_security_helper/utils/odd"
+            )
+            special.type = tar_type
+            archive.addfile(special)
+
+        members = gate.read_sdist_members(str(sdist))
+        assert len(members) == 2, f"{label} was skipped, so it is absent from the count"
+        report = gate.check_artifact(str(sdist))
+        assert report.count == 2, label
+
+    def test_directories_are_excluded_from_both_readers(self, tmp_path):
+        """The one deliberate exclusion, and it must stay symmetric.
+
+        read_wheel_members skips directory entries, so read_sdist_members must too:
+        counting them on one surface and not the other makes the two totals
+        incomparable, and the total is what this gate offers as evidence.
+        """
+        sdist = tmp_path / "withdirs.tar.gz"
+        with tarfile.open(sdist, "w:gz") as archive:
+            for name in (
+                "automated_security_helper-3.7.0",
+                "automated_security_helper-3.7.0/automated_security_helper",
+            ):
+                info = tarfile.TarInfo(name)
+                info.type = tarfile.DIRTYPE
+                archive.addfile(info)
+            payload = b"# ash\n"
+            regular = tarfile.TarInfo(
+                "automated_security_helper-3.7.0/automated_security_helper/__init__.py"
+            )
+            regular.size = len(payload)
+            archive.addfile(regular, io.BytesIO(payload))
+
+        members = gate.read_sdist_members(str(sdist))
+        assert [m.name for m in members] == [
+            "automated_security_helper-3.7.0/automated_security_helper/__init__.py"
+        ]
+
+    def test_an_escaping_symlink_in_a_real_tar_fails_the_gate(self, tmp_path):
+        """Rule 5e end to end, on the container that can actually carry a link.
+
+        Before this, the gate printed the target on stdout as news and exited 0 --
+        the reader was shown a claim about something outside the artifact and told
+        it was fine.
+        """
+        sdist = tmp_path / "escaping.tar.gz"
+        with tarfile.open(sdist, "w:gz") as archive:
+            payload = b"# ash\n"
+            regular = tarfile.TarInfo(
+                "automated_security_helper-3.7.0/automated_security_helper/__init__.py"
+            )
+            regular.size = len(payload)
+            archive.addfile(regular, io.BytesIO(payload))
+
+            link = tarfile.TarInfo(
+                "automated_security_helper-3.7.0/automated_security_helper/utils/alias.py"
+            )
+            link.type = tarfile.SYMTYPE
+            link.linkname = "../../../../../../etc/passwd"
+            archive.addfile(link)
+
+        report = gate.check_artifact(str(sdist))
+        assert [v.rule for v in report.violations] == ["link-target-escapes-artifact"]
+        assert gate.main(["assert-artifact-contents.py", str(sdist)]) == 1
 
     def test_link_members_are_reported_on_stdout(self, tmp_path, capsys):
         """A link is a claim about something outside the artifact. Print it."""
