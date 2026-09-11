@@ -684,6 +684,32 @@ class TestPlantedPayload:
     @pytest.mark.parametrize(
         "basename",
         [
+            "upstream_rules.yaml",
+            "cfn_nag_engine.rb",
+            "trivy-db-index.json",
+            "leftpad_upstream.py",
+            # No extension at all, because the hole was extension-independent.
+            "upstream_rules",
+        ],
+    )
+    def test_file_directly_in_the_package_root_is_rejected(self, basename):
+        """Depth 2 was examined by no rule at all, on either surface.
+
+        `automated_security_helper/upstream_rules.yaml` missed everything at once:
+        5a's prefix test wants `assets/`, 5b's subdirectory arm was guarded on
+        `len(components) > 2` so it never read `components[1]` at this depth, and 5c
+        passed because `components[0]` is the one permitted root. Verified as a live
+        bypass on BOTH the built wheel and the built sdist -- exit 0 before, and
+        `uv pip install --no-cache --no-deps` delivered it to
+        site-packages/automated_security_helper/ for all five spellings above.
+        """
+        violation = _classify(f"automated_security_helper/{basename}")
+        assert violation is not None, basename
+        assert violation.rule == "unpinned-package-root-file", basename
+
+    @pytest.mark.parametrize(
+        "basename",
+        [
             "upstream_semgrep_rules.yaml",
             "bandit_core.py",
             "cfn_nag_engine.rb",
@@ -1079,6 +1105,16 @@ class TestAllowlistsAreWhatTheArtifactContains:
     def test_assets_prefix_is_derived_from_the_package_root(self):
         assert gate.ASSETS_PREFIX == f"{gate.PACKAGE_ROOT}/assets/"
 
+    def test_package_root_files_has_the_measured_count(self):
+        """One member at depth 2 in both the wheel and the sdist, measured.
+
+        Also measured over the whole history of the repository -- 619 commits, full
+        clone -- where exactly one path has ever existed at this depth and none has
+        ever been deleted. That is what makes pinning it member by member cost
+        nothing, unlike the loose sdist root files.
+        """
+        assert gate.PACKAGE_ROOT_FILES == frozenset({"__init__.py"})
+
 
 class TestArchiveReading:
     """Reading the archive is where two members' halves got mixed up."""
@@ -1371,6 +1407,10 @@ NEUTERED = [
         "DIST_INFO_ALLOWLIST",
         frozenset(gate.DIST_INFO_ALLOWLIST) | {"licenses/upstream_rules.yaml"},
     ),
+    (
+        "PACKAGE_ROOT_FILES",
+        frozenset(gate.PACKAGE_ROOT_FILES) | {"upstream_rules.yaml"},
+    ),
     # Rule 5d is structural rather than a table, so like rule 0 it is neutered by
     # stubbing the predicate it consults -- here, by denying that anything is a
     # plain filename, which makes the rule unable to fire.
@@ -1396,6 +1436,7 @@ NEUTERED_LABEL = {
     "SCANNER_DIST_NAMES": "vendored-scanner",
     "ASSETS_ALLOWLIST": "unpinned-asset",
     "PACKAGE_SUBDIRECTORIES": "unpinned-package-subdirectory",
+    "PACKAGE_ROOT_FILES": "unpinned-package-root-file",
     # Three detectors share this rule set -- the plain unenumerated root, the
     # `.data` scheme tree and the wrapper-lookalike directory. The neutered value
     # widens the set with `third_party_tools`, so the experiment is about the first
@@ -1448,14 +1489,14 @@ class TestSelfTestIsTheControl:
         # different route and used to escape it entirely.
         assert rules.count("unpinned-asset") == 2
         assert rules.count("unpinned-distribution-directory") == 3
-        assert len(gate.PLANTED_MEMBERS) == 17
+        assert len(gate.PLANTED_MEMBERS) == 18
         # One neutering experiment per RULE SET, which is fewer than the number of
         # detectors: several detectors share a table. `vendored-scanner-manifest`
         # exercises the same SCANNER_DIST_NAMES as `vendored-scanner`;
         # `unnormalized-path-defeats-the-assets-allowlist` shares ASSETS_ALLOWLIST;
         # the `.data` and wrapper-lookalike detectors share
         # DISTRIBUTION_ROOT_DIRECTORIES.
-        assert len(NEUTERED) == 13
+        assert len(NEUTERED) == 14
         assert {c for c, _ in NEUTERED} == {
             "malformed_path_reason",
             "VENDOR_DIR_COMPONENTS",
@@ -1466,6 +1507,7 @@ class TestSelfTestIsTheControl:
             "SCANNER_DIST_NAMES",
             "ASSETS_ALLOWLIST",
             "PACKAGE_SUBDIRECTORIES",
+            "PACKAGE_ROOT_FILES",
             "DISTRIBUTION_ROOT_DIRECTORIES",
             "DIST_INFO_ALLOWLIST",
             "is_plain_filename",

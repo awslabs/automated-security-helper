@@ -624,6 +624,37 @@ PACKAGE_SUBDIRECTORIES = frozenset(
     }
 )
 
+# The files that may sit DIRECTLY in automated_security_helper/, as opposed to in
+# one of the subdirectories above. Measured from the built wheel and sdist: there
+# is exactly one, `__init__.py`, in both.
+#
+# This closes a slot that no rule examined. A member at depth 2 -- say
+# `automated_security_helper/upstream_rules.yaml` -- missed every rule at once:
+# 5a's prefix test wants `assets/`, 5b was guarded on `len(components) > 2` so it
+# never compared `components[1]`, and 5c passed because `components[0]` is the one
+# permitted root. Verified as a live bypass on BOTH the wheel and the sdist, and
+# `uv pip install` delivered it to
+# site-packages/automated_security_helper/upstream_rules.yaml. It was
+# extension-independent: `.yaml`, `.rb`, `.json`, `.py` and no extension at all
+# behaved identically.
+#
+# PINNED MEMBER BY MEMBER rather than by extension, and the choice matters. A
+# "depth 2 must be .py" rule would refuse the four non-Python spellings above
+# while still admitting `automated_security_helper/leftpad_upstream.py` -- a
+# vendored third-party module delivered straight into site-packages, which is the
+# same shape as the residual gap this gate already cannot close and no reason to
+# open a second door to it. Enumeration is also the mechanism the other three
+# namespaces already use (assets/, .dist-info/, the subdirectory names), so this
+# adds a fourth instance of one idea instead of a second kind of rule.
+#
+# The churn objection that keeps loose SDIST root files unpinned does not apply
+# here. Measured over the whole history of the repository -- 619 commits, full
+# clone, not a shallow one -- exactly one path has ever existed at this depth and
+# nothing has ever been deleted from it. Adding a module directly at the package
+# root is a reviewable event; adding one inside an existing subdirectory, which is
+# the common case, this does not touch.
+PACKAGE_ROOT_FILES = frozenset({"__init__.py"})
+
 # --------------------------------------------------------------------------
 # Rule 6 -- the size ceiling.
 # --------------------------------------------------------------------------
@@ -1006,15 +1037,33 @@ def classify_member(member: Member, artifact: str) -> Violation | None:
             "ASSETS_ALLOWLIST in the same commit that adds the file.",
         )
 
-    # Rule 5b -- a brand-new subdirectory of the package.
-    if components[:1] == (PACKAGE_ROOT,) and len(components) > 2:
-        subdirectory = components[1]
-        if subdirectory not in PACKAGE_SUBDIRECTORIES:
+    # Rule 5b -- the package's own namespace, in two complementary arms: which
+    # files may sit directly in it, and which subdirectories it may have. The two
+    # `len(components)` tests partition the namespace, which is the property that
+    # was missing: the subdirectory arm alone was guarded on `> 2`, so depth 2 --
+    # a file directly in the package root -- was examined by no rule at all.
+    if components[:1] == (PACKAGE_ROOT,):
+        if len(components) == 2 and components[1] not in PACKAGE_ROOT_FILES:
+            return Violation(
+                artifact,
+                relative,
+                "unpinned-package-root-file",
+                f"sits directly in {PACKAGE_ROOT}/ and is not among the "
+                f"{len(PACKAGE_ROOT_FILES)} path(s) pinned in PACKAGE_ROOT_FILES. "
+                "pip delivers this depth straight into "
+                f"site-packages/{PACKAGE_ROOT}/, and until this rule existed no "
+                "other rule looked here: the assets prefix does not match, the "
+                "subdirectory arm below never reads a component at this depth, "
+                "and the artifact root is legitimately this package. If this is "
+                "ASH's own module, add its name to PACKAGE_ROOT_FILES in the same "
+                "commit that adds the file.",
+            )
+        if len(components) > 2 and components[1] not in PACKAGE_SUBDIRECTORIES:
             return Violation(
                 artifact,
                 relative,
                 "unpinned-package-subdirectory",
-                f"sits under {PACKAGE_ROOT}/{subdirectory}/, which is not one of "
+                f"sits under {PACKAGE_ROOT}/{components[1]}/, which is not one of "
                 f"the {len(PACKAGE_SUBDIRECTORIES)} subdirectories pinned in "
                 "PACKAGE_SUBDIRECTORIES. A vendored tree has to live somewhere, "
                 "and a directory nobody declared is the cheapest somewhere. If "
@@ -1541,6 +1590,19 @@ PLANTED_MEMBERS = {
         f"{PACKAGE_ROOT}-vendor/upstream_semgrep_rules.yaml",
         b"rules:\n  - id: upstream.audit\n",
         "unpinned-distribution-directory",
+    ),
+    # A file sitting DIRECTLY in the package, at the one depth no rule examined:
+    # 5a's prefix wants assets/, 5b's subdirectory arm was guarded on
+    # `len(components) > 2`, and 5c is satisfied because the root really is this
+    # package. Verified delivered to site-packages/automated_security_helper/ on
+    # both the wheel and the sdist, for five different extensions.
+    #
+    # `.yaml` rather than `.py` so the fixture is not also a plausible module: the
+    # payload is an upstream ruleset, which is what would actually be dropped here.
+    "unpinned-package-root-file": (
+        "automated_security_helper/upstream_rules.yaml",
+        b"rules:\n  - id: upstream.audit\n",
+        "unpinned-package-root-file",
     ),
     # A loose file at the WHEEL root, which pip copies straight into site-packages
     # while it belongs to no package. Deliberately NOT wrapper-prefixed:
