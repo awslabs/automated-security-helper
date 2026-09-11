@@ -1174,6 +1174,69 @@ class TestAllowlistsAreWhatTheArtifactContains:
     def test_assets_prefix_is_derived_from_the_package_root(self):
         assert gate.ASSETS_PREFIX == f"{gate.PACKAGE_ROOT}/assets/"
 
+    def test_compound_suffixes_are_derived_not_restated(self):
+        """A hand-copied list encodes an invariant nobody states or tests.
+
+        It was a literal list of the same six entries, and the drift it allowed was
+        silent in the dangerous direction: add `.tar.lzo` to ARCHIVE_SUFFIXES only,
+        and `payload.tar.lzo` splits to the suffix `.lzo`, which is not in
+        ARCHIVE_SUFFIXES, so rule 2's suffix arm never fires on a member the
+        maintainer just added a rule for.
+        """
+        assert set(gate.COMPOUND_SUFFIXES) == {
+            suffix for suffix in gate.ARCHIVE_SUFFIXES if suffix.count(".") > 1
+        }
+        # Longest first, because split_suffixes returns on the first match.
+        lengths = [len(s) for s in gate.COMPOUND_SUFFIXES]
+        assert lengths == sorted(lengths, reverse=True), gate.COMPOUND_SUFFIXES
+
+    def test_adding_a_compound_suffix_to_one_list_reaches_the_other(self, monkeypatch):
+        """The derivation, exercised rather than merely asserted.
+
+        Recomputes COMPOUND_SUFFIXES the way the module does, from a widened
+        ARCHIVE_SUFFIXES, and requires the new compound form to be split as one unit.
+        This is the test that would have caught the drift the literal list allowed.
+        """
+        widened = (*gate.ARCHIVE_SUFFIXES, ".tar.lzo")
+        monkeypatch.setattr(gate, "ARCHIVE_SUFFIXES", widened)
+        monkeypatch.setattr(
+            gate,
+            "COMPOUND_SUFFIXES",
+            tuple(
+                sorted((s for s in widened if s.count(".") > 1), key=len, reverse=True)
+            ),
+        )
+        assert gate.split_suffixes("payload.tar.lzo") == ("payload", ".tar.lzo")
+        violation = _classify("automated_security_helper/utils/payload.tar.lzo")
+        assert violation is not None
+        assert violation.rule == "nested-archive"
+
+    @pytest.mark.parametrize("level", range(1, 10))
+    def test_every_bzip2_block_size_is_still_matched(self, level):
+        """Tightening `BZh` to `BZh<digit>` must not lose a real bzip2 stream.
+
+        The digit is the block size and every real stream carries one, which is why
+        requiring it costs nothing. It removes a way this gate could fail on ASH's
+        own build: assets/ASH_INSTALLED_REVISION holds a branch name, so a branch
+        called `BZh-something` used to read as a nested archive.
+        """
+        violation = _classify(
+            "automated_security_helper/utils/toolbundle",
+            magic=b"BZh%d1AY&SY" % level,
+        )
+        assert violation is not None, level
+        assert violation.rule == "nested-archive", level
+
+    def test_a_branch_name_is_not_mistaken_for_a_bzip2_stream(self):
+        """The false positive the digit requirement removes, pinned directly."""
+        assert (
+            _classify(
+                "automated_security_helper/assets/ASH_INSTALLED_REVISION",
+                magic=b"BZh-fix/some-branch\n",
+            )
+            is None
+        )
+
     def test_package_root_files_has_the_measured_count(self):
         """One member at depth 2 in both the wheel and the sdist, measured.
 
