@@ -93,7 +93,10 @@ class FakeOrchestrator:
         return cls(**kwargs)
 
     def execute_scan(self, phases=None):
-        from automated_security_helper.models.asharp_model import AshAggregatedResults
+        from automated_security_helper.models.asharp_model import (
+            AshAggregatedResults,
+            ScannerTargetStatusInfo,
+        )
         from automated_security_helper.schemas.sarif_schema_model import SarifReport
 
         spec = FakeOrchestrator.behaviour.get(self.key, {})
@@ -109,6 +112,31 @@ class FakeOrchestrator:
 
         model = AshAggregatedResults()
         model.sarif = SarifReport.model_validate(spec.get("sarif") or _sarif(count=0))
+
+        # A real scan writes a scanner_results entry for every scanner it ran --
+        # measured at 10 of 10 on a local run, including the ones that were
+        # MISSING. This fake used to write none, and that is not a neutral
+        # simplification: ScannerStatisticsCalculator gives a scanner it has no
+        # record for the status ERROR, because findings attributed to a scanner the
+        # report has no evidence ran is exactly what an unrecorded scanner looks
+        # like. Fail-closed and right, but it made every fixture here model a state
+        # no real scan produces, so the completeness gate fired on all of them.
+        #
+        # Derived from the SARIF rather than hardcoded to "bandit", so a test that
+        # attributes findings to another scanner does not silently get an ERROR.
+        for run in model.sarif.runs or []:
+            for result in getattr(run, "results", None) or []:
+                properties = getattr(result, "properties", None)
+                name = getattr(properties, "scanner_name", None)
+                if name and str(name) not in model.scanner_results:
+                    model.scanner_results[str(name)] = ScannerTargetStatusInfo(
+                        status="PASSED",
+                        excluded=False,
+                        dependencies_satisfied=True,
+                    )
+        # The explicit spec wins, so a test can say a scanner did not complete.
+        for name, info in (spec.get("scanner_results") or {}).items():
+            model.scanner_results[name] = ScannerTargetStatusInfo(**info)
         return model
 
 
@@ -542,6 +570,211 @@ class TestPerProjectThresholds:
         FakeOrchestrator.behaviour["api"] = {"sarif": _sarif(level="note")}
         outcome = _run(tmp_path, plan, min_severity="high")
         assert outcome.payload.projects[0].exceeds_threshold is False
+
+
+# ---------------------------------------------------------------------------
+# Scanner completeness
+# ---------------------------------------------------------------------------
+
+
+def _scanner(status, *, excluded=False, satisfied=True):
+    """One ``scanner_results`` entry, as the fake orchestrator takes them."""
+    return {
+        "status": status,
+        "excluded": excluded,
+        "dependencies_satisfied": satisfied,
+    }
+
+
+class TestScannerCompleteness:
+    """A project whose scanners did not all run must not report clean.
+
+    The gap this closes. ``_compute_exit_code`` asks two questions in order --
+    did the selected scanners run, and did they find anything -- and workspace
+    mode only ever asked the second. So ``ash --source-dir P`` exited 1 on a host
+    missing P's scanners while the same P inside a workspace reported SUCCESS,
+    for the same reason a finding-count verdict cannot tell "nothing was wrong"
+    from "nothing was checked".
+
+    Workspace mode keeps its own contract rather than borrowing single-project
+    precedence. An incomplete project is an unknown, so it lands on
+    ``INTERNAL_ERROR`` (1) -- which in workspace mode sits BELOW
+    ``ACTIONABLE_FINDINGS`` (2), the reverse of single-project mode, because an
+    unknown must not suppress a certainty. ``WORKSPACE_ERROR`` (4) is untouched:
+    it means nothing was attempted, and these projects were.
+    """
+
+    def test_a_missing_scanner_stops_a_clean_project_reporting_success(self, tmp_path):
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        FakeOrchestrator.behaviour["api"] = {
+            "sarif": _sarif(count=0),
+            "scanner_results": {
+                "bandit": _scanner("PASSED"),
+                "cfn-nag": _scanner("MISSING", satisfied=False),
+            },
+        }
+        outcome = _run(tmp_path, plan)
+        entry = outcome.payload.projects[0]
+
+        # Control: no findings at all, so a threshold-only verdict says SUCCESS
+        # and only the completeness pass can move this.
+        assert entry.actionable_finding_count == 0
+        assert entry.exceeds_threshold is False
+
+        assert outcome.exit_code == WorkspaceExitCode.INTERNAL_ERROR
+        assert entry.incomplete_scanners == ["cfn-nag"]
+        assert entry.scan_incomplete is True
+
+    def test_an_error_scanner_stops_a_clean_project_reporting_success(self, tmp_path):
+        """ERROR and MISSING are the same news: the scanner did not complete."""
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        FakeOrchestrator.behaviour["api"] = {
+            "sarif": _sarif(count=0),
+            "scanner_results": {"bandit": _scanner("ERROR")},
+        }
+        outcome = _run(tmp_path, plan)
+
+        assert outcome.exit_code == WorkspaceExitCode.INTERNAL_ERROR
+        assert outcome.payload.projects[0].incomplete_scanners == ["bandit"]
+
+    def test_a_scanner_the_operator_excluded_is_not_incomplete(self, tmp_path):
+        """The control that separates a correct gate from a plausible one.
+
+        This entry is excluded AND its tool is absent, which is what
+        ``--exclude-scanners cfn-nag`` looks like on a host without cfn-nag. Read
+        through ``get_unified_scanner_metrics`` the exclusion wins and the status
+        is SKIPPED; read straight off ``scanner_results`` it is MISSING. A gate
+        built on the raw statuses passes every other test in this class and fails
+        a workspace for a scanner the operator told it not to run -- which is also
+        how sharding divides work, so it would fail every shard of a healthy
+        sharded scan.
+        """
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        FakeOrchestrator.behaviour["api"] = {
+            "sarif": _sarif(count=0),
+            "scanner_results": {
+                "bandit": _scanner("PASSED"),
+                "cfn-nag": _scanner("MISSING", excluded=True, satisfied=False),
+            },
+        }
+        outcome = _run(tmp_path, plan)
+        entry = outcome.payload.projects[0]
+
+        assert entry.incomplete_scanners == []
+        assert entry.scan_incomplete is False
+        assert outcome.exit_code == WorkspaceExitCode.SUCCESS
+
+    def test_the_gate_can_be_turned_off_without_hiding_which_scanners_missed(
+        self, tmp_path
+    ):
+        """Same shape as fail_on_findings: the count stays honest, the verdict moves.
+
+        An operator who turns the gate off has accepted the risk; they have not
+        asked to be told the scan was complete. So the disclosure survives and
+        only ``scan_incomplete`` follows the flag.
+        """
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        FakeOrchestrator.behaviour["api"] = {
+            "sarif": _sarif(count=0),
+            "scanner_results": {"cfn-nag": _scanner("MISSING", satisfied=False)},
+        }
+        outcome = _run(tmp_path, plan, fail_on_incomplete_scanners=False)
+        entry = outcome.payload.projects[0]
+
+        assert entry.incomplete_scanners == ["cfn-nag"]
+        assert entry.scan_incomplete is False
+        assert outcome.exit_code == WorkspaceExitCode.SUCCESS
+
+    def test_findings_still_outrank_an_incomplete_project(self, tmp_path):
+        """Workspace precedence is preserved, not replaced by single-project's.
+
+        Single-project mode answers 1 when both hold. Workspace mode answers 2,
+        and that difference is deliberate -- see the ordering rationale in
+        models/workspace.py. Collapsing the two models here would make a CI gate
+        that retries 1 stop blocking on real findings.
+        """
+        _, plan = _make_workspace(tmp_path, ("api", "LOW"), ("web", "MEDIUM"))
+        FakeOrchestrator.behaviour["api"] = {
+            "sarif": _sarif(level="error"),
+            "scanner_results": {"bandit": _scanner("PASSED")},
+        }
+        FakeOrchestrator.behaviour["web"] = {
+            "sarif": _sarif(count=0),
+            "scanner_results": {"cfn-nag": _scanner("MISSING", satisfied=False)},
+        }
+        outcome = _run(tmp_path, plan)
+        verdicts = {p.project: p.scan_incomplete for p in outcome.payload.projects}
+
+        # Control: the incomplete project really is flagged, so 2 is precedence
+        # winning rather than the completeness pass never having fired.
+        assert verdicts == {"api": False, "web": True}
+        assert outcome.exit_code == WorkspaceExitCode.ACTIONABLE_FINDINGS
+
+    def test_a_complete_clean_project_still_reports_success(self, tmp_path):
+        """Load-bearing: the gate must not fail every workspace it looks at."""
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        FakeOrchestrator.behaviour["api"] = {
+            "sarif": _sarif(count=0),
+            "scanner_results": {
+                "bandit": _scanner("PASSED"),
+                "cfn-nag": _scanner("SKIPPED", excluded=True),
+            },
+        }
+        outcome = _run(tmp_path, plan)
+
+        assert outcome.payload.projects[0].incomplete_scanners == []
+        assert outcome.exit_code == WorkspaceExitCode.SUCCESS
+
+    def test_the_incomplete_project_is_named_in_the_written_file(self, tmp_path):
+        """A consumer reads the file, not the return value."""
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        FakeOrchestrator.behaviour["api"] = {
+            "sarif": _sarif(count=0),
+            "scanner_results": {"cfn-nag": _scanner("MISSING", satisfied=False)},
+        }
+        _run(tmp_path, plan)
+
+        written = json.loads(
+            (tmp_path / "out" / "ash_aggregated_results.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        project = written["workspace"]["projects"][0]
+        assert project["incomplete_scanners"] == ["cfn-nag"]
+        assert project["scan_incomplete"] is True
+
+    def test_the_rollup_does_not_claim_a_missing_scanner_had_its_dependencies(
+        self, tmp_path
+    ):
+        """The workspace file must not contradict itself about one scanner.
+
+        ``scanner_results`` in the written file is the shape every reader already
+        knows, and ``ScannerStatisticsCalculator`` derives "missing" from
+        ``dependencies_satisfied`` rather than from ``status``. Asserting True
+        there while status says MISSING makes any tool that re-derives a verdict
+        from the workspace file -- ``ash report`` on a workspace output, or the
+        completeness gate itself -- read the scanner as present.
+        """
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        FakeOrchestrator.behaviour["api"] = {
+            "sarif": _sarif(count=0),
+            "scanner_results": {
+                "bandit": _scanner("PASSED"),
+                "cfn-nag": _scanner("MISSING", satisfied=False),
+            },
+        }
+        _run(tmp_path, plan)
+
+        written = json.loads(
+            (tmp_path / "out" / "ash_aggregated_results.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        rollup = written["scanner_results"]
+        assert rollup["cfn-nag"]["status"] == "MISSING"
+        assert rollup["cfn-nag"]["dependencies_satisfied"] is False
+        # Control: the honest entry is unchanged, so this is not a blanket flip.
+        assert rollup["bandit"]["dependencies_satisfied"] is True
 
 
 # ---------------------------------------------------------------------------

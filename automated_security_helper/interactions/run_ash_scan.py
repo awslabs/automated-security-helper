@@ -799,6 +799,7 @@ def _run_workspace_mode(opts: ScanOptions, logger) -> "WorkspaceRunResult":
         ignore_suppressions=opts.ignore_suppressions,
         min_severity=opts.min_severity,
         fail_on_findings=opts.fail_on_findings,
+        fail_on_incomplete_scanners=opts.fail_on_incomplete_scanners,
         changed_files_only=opts.changed_files_only,
         base_ref=opts.base_ref,
         precommit=opts.mode == RunMode.precommit,

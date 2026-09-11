@@ -1093,3 +1093,20 @@ records `SKIPPED` and the report says which scanners were not part of it, where
 `1` the merge was refused so the union's findings are unknown, `2` findings at or
 above the threshold. See [Merge Exit Codes](#merge-exit-codes). A shard's own exit
 code is not the verdict for a sharded run — see [Sharding](#sharding).
+
+Workspace mode applies the gate per project, so `ash --workspace` and
+`ash --source-dir <one project>` agree about whether that project's scan happened.
+A project that completed with a scanner at `ERROR` or `MISSING` is reported with
+`scan_incomplete: true` and the scanner named in `incomplete_scanners`, and the run
+exits `1`. `--no-fail-on-incomplete-scanners` applies per project as well, and it
+clears only the verdict: `incomplete_scanners` still names the scanners that did
+not run, because turning the gate off accepts the risk rather than asserting the
+scan was complete.
+
+One difference from a single-project scan, and it is deliberate. Here findings
+outrank an incomplete project rather than the reverse: a workspace where project A
+is incomplete and project B has actionable findings exits `2`, not `1`. A workspace
+can hold both outcomes at once, and leading with the unknown would let A's absent
+tool suppress B's findings. A single-project scan has no second project to
+suppress, which is why it can afford to lead with the unknown. Exit `4` is
+unaffected either way — it means no project was attempted at all.

@@ -21331,6 +21331,14 @@
           "title": "Finding Count",
           "type": "integer"
         },
+        "incomplete_scanners": {
+          "description": "Scanners this project was asked to run that did not complete -- ERROR or MISSING. Populated whether or not the completeness gate is on, because an operator who turned the gate off has accepted the risk and has not asked to be told the scan was complete. Read through the unified metrics rather than off `scanners`, so a scanner the operator excluded on a host that also lacks its tool reads SKIPPED here rather than MISSING.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Incomplete Scanners",
+          "type": "array"
+        },
         "invalid_config": {
           "default": false,
           "description": "Whether the failure was this project's own configuration. Separated from a general failure because it selects exit code 3 rather than 1, and those route to different people.",
@@ -21368,6 +21376,12 @@
           "default": null,
           "description": "Index of this project's run in the aggregated SARIF, so a consumer can extract one project by selecting a run. Null when the project contributed no run.",
           "title": "Sarif Run Index"
+        },
+        "scan_incomplete": {
+          "default": false,
+          "description": "Whether the incomplete scanners above fail this project. Stored rather than derived from the list for the same reason exceeds_threshold is: fail_on_incomplete_scanners can be off, in which case a project has scanners that did not run and still passes.",
+          "title": "Scan Incomplete",
+          "type": "boolean"
         },
         "scanners": {
           "additionalProperties": {

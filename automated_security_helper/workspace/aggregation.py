@@ -544,6 +544,45 @@ def has_finding_at_min_severity(
     return False
 
 
+def incomplete_scanners_for_project(results: Any) -> List[str]:
+    """Names of the scanners this project ran that did not complete.
+
+    The completeness half of the parity this module exists to hold. The threshold
+    half is ``count_actionable_results`` above, and the two are written in
+    opposite styles on purpose.
+
+    ``count_actionable_results`` MIRRORS ``_compute_exit_code``, because that
+    function derives the threshold count inline from a SARIF document it re-reads
+    from disk -- there is no function to call, so a copy was the only option, and
+    ``TestParityWithComputeExitCode`` exists to keep the copy honest.
+
+    This one DELEGATES, because the completeness pass already is a function.
+    Copying it would put one decision in two places, and the decision is subtler
+    than it looks: ``incomplete_scanners`` reads through
+    ``get_unified_scanner_metrics``, where an excluded scanner is SKIPPED even
+    when its tool is also absent. Read straight off ``results.scanner_results``
+    the same entry is MISSING. So a mirrored version would fail a workspace for a
+    scanner the operator excluded -- and since sharding excludes the scanners the
+    other shards own, it would fail every shard of a healthy sharded scan.
+
+    Imported inside the function. ``run_ash_scan`` imports this package's
+    ``execution`` module for workspace mode, so a module-level import here closes
+    that into a cycle.
+
+    Args:
+        results: One project's ``AshAggregatedResults``, or ``None``.
+
+    Returns:
+        Scanner names in the order ``incomplete_scanners`` reports them, which is
+        scanner-name order. Empty when every selected scanner completed.
+    """
+    from automated_security_helper.interactions.run_ash_scan import (
+        incomplete_scanners,
+    )
+
+    return [name for name, _status in incomplete_scanners(results)]
+
+
 def _worse_status(left: Optional[str], right: Optional[str]) -> Optional[str]:
     """Whichever scanner status is worse news, for the workspace-level rollup."""
     if left is None:
@@ -685,15 +724,30 @@ class WorkspaceAggregator:
         return ordered
 
     def _scanner_results_payload(self) -> Dict[str, Dict[str, Any]]:
-        """The lossy workspace-level rollup. Per-project truth is in ``projects``."""
+        """The lossy workspace-level rollup. Per-project truth is in ``projects``.
+
+        Lossy about counts, which is what "lossy" meant here, and it must not be
+        lossy about whether a scanner ran. ``dependencies_satisfied`` and
+        ``excluded`` were written as constants, and the pair contradicted the
+        ``status`` beside them: ``ScannerStatisticsCalculator`` derives "this
+        scanner is missing" from ``dependencies_satisfied`` and not from
+        ``status``, so anything re-deriving a verdict from this file -- ``ash
+        report`` over a workspace output, or the completeness gate itself -- read
+        a MISSING scanner as present and reported a complete scan.
+
+        Derived from the rolled-up status rather than carried separately, because
+        the status is already the worst across projects and a second rollup of the
+        same fact could disagree with it.
+        """
         payload: Dict[str, Dict[str, Any]] = {}
         for scanner in sorted(set(self._scanner_status) | set(self._scanner_findings)):
+            status = self._scanner_status.get(scanner) or "PASSED"
             payload[scanner] = {
-                "status": self._scanner_status.get(scanner) or "PASSED",
+                "status": status,
                 "finding_count": self._scanner_findings.get(scanner, 0),
                 "actionable_finding_count": self._scanner_actionable.get(scanner, 0),
-                "dependencies_satisfied": True,
-                "excluded": False,
+                "dependencies_satisfied": status != "MISSING",
+                "excluded": status == "SKIPPED",
                 "exit_code": 0,
             }
         return payload

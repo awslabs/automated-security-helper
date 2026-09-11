@@ -30,6 +30,7 @@ from automated_security_helper.workspace.aggregation import (
     WorkspaceAggregator,
     count_actionable_results,
     has_finding_at_min_severity,
+    incomplete_scanners_for_project,
     project_relative_uri,
     project_root_uri,
     rebase_run_for_project,
@@ -624,6 +625,116 @@ class TestParityWithComputeExitCode:
         standalone = self._standalone_exit_code(tmp_path, [], threshold)
         assert standalone == 0
         assert self._mine([], threshold) == 0
+
+
+class TestCompletenessParityWithComputeExitCode:
+    """The other half of the same invariant, on the pass that was not mirrored.
+
+    ``_compute_exit_code`` asks two questions in order: did the selected scanners
+    run, and did they find anything. The class above pins the second. This pins
+    the first, which the workspace layer did not mirror at all -- so a project
+    whose scanners never ran reported zero findings, and zero findings read as a
+    pass. ``ash --source-dir P`` exited 1 on that project and the same P inside a
+    workspace exited 0.
+
+    Asserted as an agreement between the two derivations rather than against
+    literals, for the same reason the threshold parity is: a test that hardcoded 1
+    on one side would keep passing if the other side stopped answering.
+    """
+
+    @staticmethod
+    def _model(scanner_statuses):
+        """One project's results, with ``scanner_results`` as a real scan writes it.
+
+        ``scanner_statuses`` maps scanner name to ``(status, excluded,
+        dependencies_satisfied)``. A finding is attributed to each scanner because
+        ``ScannerStatisticsCalculator`` enumerates from both the SARIF and
+        ``scanner_results``, and a scanner present in only one of them exercises a
+        different branch than a real scan reaches.
+        """
+        from automated_security_helper.config.ash_config import AshConfig
+        from automated_security_helper.models.asharp_model import (
+            AshAggregatedResults,
+            ScannerTargetStatusInfo,
+        )
+        from automated_security_helper.schemas.sarif_schema_model import SarifReport
+
+        entries = [
+            _result(level="note", severity="INFO", scanner=name)
+            for name in scanner_statuses
+        ]
+        config = AshConfig()
+        config.global_settings.severity_threshold = "CRITICAL"
+        model = AshAggregatedResults(ash_config=config)
+        model.sarif = SarifReport.model_validate(
+            {"version": "2.1.0", "runs": [_run(*entries)]}
+        )
+        for name, (status, excluded, satisfied) in scanner_statuses.items():
+            model.scanner_results[name] = ScannerTargetStatusInfo(
+                status=status,
+                excluded=excluded,
+                dependencies_satisfied=satisfied,
+            )
+        return model
+
+    def _standalone_exit_code(self, tmp_path, scanner_statuses):
+        from automated_security_helper.interactions.run_ash_scan import (
+            ScanOptions,
+            _compute_exit_code,
+        )
+
+        model = self._model(scanner_statuses)
+        opts = ScanOptions(source_dir=tmp_path, output_dir=tmp_path)
+        return _compute_exit_code(model, opts, None)
+
+    @pytest.mark.parametrize("status", ["MISSING", "ERROR"])
+    def test_an_incomplete_scanner_is_seen_by_both_derivations(self, tmp_path, status):
+        statuses = {
+            "bandit": ("PASSED", False, True),
+            "cfn-nag": (status, False, status != "MISSING"),
+        }
+        standalone = self._standalone_exit_code(tmp_path, statuses)
+        mine = incomplete_scanners_for_project(self._model(statuses))
+
+        assert (standalone == 1) == bool(mine)
+        # And the same scanner, not merely the same yes-or-no answer.
+        assert mine == ["cfn-nag"]
+
+    def test_a_complete_run_is_clean_to_both_derivations(self, tmp_path):
+        """The control. Without it the agreement above could hold at always-fail."""
+        statuses = {"bandit": ("PASSED", False, True)}
+        standalone = self._standalone_exit_code(tmp_path, statuses)
+        mine = incomplete_scanners_for_project(self._model(statuses))
+
+        assert standalone == 0
+        assert mine == []
+
+    def test_an_excluded_scanner_is_clean_to_both_derivations(self, tmp_path):
+        """The case that separates delegating from mirroring.
+
+        Excluded AND its tool absent, which is ``--exclude-scanners cfn-nag`` on a
+        host without cfn-nag, and also every shard of a sharded scan. Both
+        derivations must read SKIPPED, which they do only because this function
+        delegates to ``incomplete_scanners`` -- a copy reading
+        ``scanner_results[*].status`` directly would see MISSING.
+        """
+        statuses = {
+            "bandit": ("PASSED", False, True),
+            "cfn-nag": ("MISSING", True, False),
+        }
+        standalone = self._standalone_exit_code(tmp_path, statuses)
+        mine = incomplete_scanners_for_project(self._model(statuses))
+
+        assert standalone == 0
+        assert mine == []
+
+    def test_neither_derivation_reads_a_none_model_as_incomplete(self):
+        """``None`` is "the scan crashed", which is already exit 1 on its own.
+
+        Answering "every scanner is incomplete" here would be a second, weaker
+        claim about the same event.
+        """
+        assert incomplete_scanners_for_project(None) == []
 
 
 class TestAggregatorOutput:
