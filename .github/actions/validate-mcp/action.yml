@@ -43,12 +43,19 @@ runs:
       shell: bash
       run: npm install -g @modelcontextprotocol/inspector
 
-    # `--scanners bandit` for the same reason as validate-install: this job checks
-    # that the MCP install can run a scan, and it installs ASH alone, so bandit is
-    # the only default scanner whose tool is present. Naming it records which
-    # scanner the smoke test covers and leaves the other nine SKIPPED rather than
-    # MISSING -- the report then says what was measured, where suppressing the
-    # completeness check would have asserted nothing at all.
+    # `--scanners detect-secrets` for the same reason as validate-install: this job
+    # checks that the MCP install can run a scan, and it installs ASH alone, so
+    # detect-secrets is the only default scanner whose tool arrives with it --
+    # `detect-secrets>=1.5.0,<2` is in [project] dependencies and the scanner drives
+    # the library in process. Naming it records which scanner the smoke test covers
+    # and leaves the other nine SKIPPED rather than MISSING, so the report says what
+    # was measured, where suppressing the completeness check would have asserted
+    # nothing at all.
+    #
+    # This used to name bandit and claim bandit was the only scanner whose tool was
+    # present. bandit is in no part of pyproject.toml; BanditScanner provisions it
+    # with `uv tool install` at scan time, so this cell's green depended on a PyPI
+    # fetch and a registry blip read as a completeness failure.
     - name: "mcp: self-test scan"
       shell: bash
-      run: ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report --scanners bandit
+      run: ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report --scanners detect-secrets
