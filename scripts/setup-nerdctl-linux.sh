@@ -33,7 +33,24 @@ NERDCTL_VERSION="2.3.5"
 # sha256 of nerdctl-full-2.3.5-linux-amd64.tar.gz, from the release SHA256SUMS.
 NERDCTL_SHA256_AMD64="b697295c623639734aaab737523c808fd3cc8d3046039fd94fff1744e4c317aa"
 
-ARCH="$(dpkg --print-architecture)"
+# WHY NOT `dpkg --print-architecture`
+#
+# That was the original probe, and dpkg exists only on Debian derivatives. On any
+# other host the shell reports "command not found" and exits 127 -- via the
+# command substitution, so `set -e` never sees a failing simple command and the
+# error text is the shell's, naming dpkg rather than saying this script needs a
+# Debian derivative. uname is in POSIX and on every runner, and the bundle's own
+# filenames use Debian's amd64/arm64 spelling, so the mapping is explicit here.
+case "$(uname -m)" in
+    x86_64 | amd64) ARCH="amd64" ;;
+    aarch64 | arm64) ARCH="arm64" ;;
+    *)
+        echo "ERROR: unsupported machine type '$(uname -m)'." >&2
+        echo "containerd/nerdctl publishes linux-amd64 and linux-arm64 bundles only." >&2
+        exit 1
+        ;;
+esac
+
 case "${ARCH}" in
     amd64) EXPECTED_SHA256="${NERDCTL_SHA256_AMD64}" ;;
     *)
@@ -53,8 +70,43 @@ URL="https://github.com/containerd/nerdctl/releases/download/v${NERDCTL_VERSION}
 # Docker's containerd is the same unit name this bundle installs, so leaving
 # Docker running means two things contending for one socket. nerdctl is the
 # runtime under test in this job; nothing here needs Docker.
+#
+# THIS IS ONE-WAY, AND THAT IS DELIBERATE
+#
+# Nothing below restarts Docker, and no trap restores it on failure. The intended
+# caller is an ephemeral GitHub-hosted runner that is destroyed at the end of the
+# job -- `sudo bash scripts/setup-nerdctl-linux.sh`, from the nerdctl leg of
+# .github/actions/validate-container/action.yml -- so there is nothing to restore
+# to. Restoring would also be wrong mid-script: the bundle's containerd unit
+# shadows the distro one from /usr/local/lib/systemd/system (see the note further
+# down), so a restarted Docker would be talking to a containerd it did not start.
+#
+# The consequence on a developer machine is that this script stops your Docker and
+# leaves it stopped, which is why the reversal is printed rather than left to be
+# discovered. Run this in a throwaway VM or container, not on a workstation.
 echo "=== Stopping Docker so it does not contend for containerd ==="
-systemctl stop docker.socket docker.service 2>/dev/null || true
+echo "    (one-way: to undo, 'sudo systemctl start docker.socket docker.service'"
+echo "     after 'sudo systemctl stop buildkit' and a 'systemctl daemon-reload')"
+# The previous form was `systemctl stop docker.socket docker.service 2>/dev/null ||
+# true`, which discarded the message and the status together. A runner image with no
+# Docker is a fine place to install nerdctl, so absence must be tolerated -- but a
+# unit that is running and REFUSES to stop means something still holds the containerd
+# socket, and `ash build-image` would then fail a long way from that cause. So the two
+# cases are separated: absence is checked for, and a real failure to stop is left to
+# `set -e`.
+#
+# `is-active` rather than `list-unit-files`: it answers the question that matters
+# (is there something running to stop) in one call, reports a socket unit's
+# `listening` state as active, and needs no pipeline -- a `| grep -q` here would be
+# subject to `pipefail` and could kill the script over a missing unit.
+for unit in docker.socket docker.service; do
+    if systemctl is-active --quiet "${unit}"; then
+        echo "  ${unit}: active, stopping"
+        systemctl stop "${unit}"
+    else
+        echo "  ${unit}: not active, nothing to stop"
+    fi
+done
 
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "${WORKDIR}"' EXIT
@@ -72,9 +124,46 @@ tar -C /usr/local -xzf "${WORKDIR}/${TARBALL}"
 # /usr/local/libexec/cni on some paths, and a container that cannot get a
 # network interface fails at run time rather than at install time. Publishing
 # them in both places costs nothing and removes the ordering question.
+#
+# WHY THIS COPY IS NOT ALLOWED TO FAIL QUIETLY
+#
+# It used to read `cp -n /usr/local/libexec/cni/* /opt/cni/bin/ 2>/dev/null || true`,
+# which threw away both halves of the answer. If the bundle ever relocates its CNI
+# plugins -- nerdctl 2.x has moved paths before -- the glob matches nothing, bash
+# passes the pattern through literally, cp fails with ENOENT, and `|| true` records
+# that as success. Nothing else in this script reads /opt/cni/bin, so the first
+# symptom is a container with no network interface, roughly forty-five minutes later,
+# inside `ash scan --mode container`.
+#
+# Two changes, because dropping `|| true` alone is not enough. `cp -n` exits 0 when it
+# skips a file that already exists, so on a runner whose Docker install already
+# populated /opt/cni/bin the copy can succeed having copied nothing -- which is fine,
+# but means a zero status is not evidence the plugins are there. So the source
+# directory is required to exist and be non-empty first, and the result is asserted by
+# name afterwards.
 echo "=== Publishing CNI plugins to /opt/cni/bin ==="
+CNI_SRC="/usr/local/libexec/cni"
+if [ ! -d "${CNI_SRC}" ]; then
+    echo "ERROR: ${CNI_SRC} does not exist after unpacking the nerdctl-full bundle." >&2
+    echo "The bundle is expected to ship the CNI plugins; if v${NERDCTL_VERSION} moved" >&2
+    echo "them, update CNI_SRC here rather than letting the copy fail silently." >&2
+    exit 1
+fi
 mkdir -p /opt/cni/bin
-cp -n /usr/local/libexec/cni/* /opt/cni/bin/ 2>/dev/null || true
+# Unquoted glob on purpose -- it must expand. `set -u` does not apply to globs, and
+# the guard above plus the assertion below cover the empty-match case.
+cp -n "${CNI_SRC}"/* /opt/cni/bin/
+
+# `bridge` is the plugin nerdctl's default network actually loads, so its presence is
+# the specific fact worth asserting rather than a file count.
+if [ ! -x /opt/cni/bin/bridge ]; then
+    echo "ERROR: /opt/cni/bin/bridge is missing or not executable after the copy." >&2
+    echo "nerdctl's default network needs it, and a container without it fails at run" >&2
+    echo "time with an unhelpful network error. Contents of both directories:" >&2
+    ls -la "${CNI_SRC}" /opt/cni/bin >&2 || true
+    exit 1
+fi
+echo "  /opt/cni/bin/bridge: present"
 
 # The bundle ships units at /usr/local/lib/systemd/system, which systemd loads
 # ahead of /lib/systemd/system, so `containerd` now resolves to the bundle's
