@@ -9,7 +9,7 @@ pin both that default and the one combination that opts in.
 """
 
 import logging
-import subprocess
+import subprocess  # nosec B404 - CompletedProcess and TimeoutExpired only; the probe's own call is monkeypatched, so nothing here spawns a process
 
 import pytest
 
@@ -256,7 +256,14 @@ class TestBuildxCapabilityProbe:
         assert _runner_supports_buildx("/usr/bin/docker") is False
 
     def test_a_raising_probe_is_treated_as_unsupported(self, monkeypatch):
-        """A timeout or a missing binary must decline the cache, not crash the build."""
+        """A timeout or a missing binary must decline the cache, not crash the build.
+
+        ``TimeoutExpired`` has to be the real class rather than a stand-in, which is
+        why this file imports subprocess at all. The probe catches
+        ``(OSError, SubprocessError)``, so a bare ``Exception`` would propagate and
+        fail this test, and the base ``SubprocessError`` would stop pinning the
+        timeout that ``run_command`` actually raises.
+        """
 
         def boom(*args, **kwargs):
             raise subprocess.TimeoutExpired(cmd="docker buildx version", timeout=30)
