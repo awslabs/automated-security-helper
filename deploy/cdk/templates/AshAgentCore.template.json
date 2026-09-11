@@ -238,6 +238,31 @@
     "aws:cdk:path": "AshAgentCore/EncryptionKey/Resource"
    }
   },
+  "EncryptionKeyAliasC2D38C25": {
+   "Type": "AWS::KMS::Alias",
+   "Properties": {
+    "AliasName": {
+     "Fn::Join": [
+      "",
+      [
+       "alias/ash-",
+       {
+        "Ref": "AWS::StackName"
+       }
+      ]
+     ]
+    },
+    "TargetKeyId": {
+     "Fn::GetAtt": [
+      "EncryptionKey1B843E66",
+      "Arn"
+     ]
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshAgentCore/EncryptionKeyAlias/Resource"
+   }
+  },
   "ConfigBaseConfig623C762C": {
    "Type": "AWS::SSM::Parameter",
    "Properties": {

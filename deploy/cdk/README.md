@@ -295,13 +295,31 @@ first:
   AWS: "If you revoke CloudWatch Logs access to an associated key or delete an
   associated KMS key, your encrypted data in CloudWatch Logs can no longer be
   retrieved." Deleting a stack leaves the key behind along with the repository and
-  buckets.
+  buckets. The key carries the alias `alias/ash-<stack name>` and a description
+  naming the stack, so a leftover key is identifiable; the alias is created by the
+  stack and goes when the stack does, the description does not.
+- **Check what else uses a retained key before you schedule it for deletion.**
+  Two things the encryption-context condition does not stop, both of which turn
+  "clean up the leftover ASH key" into data loss. The condition is account-scoped,
+  so any principal in the account holding `logs:AssociateKmsKey` plus
+  `kms:DescribeKey` can bind the surviving key to **any** log group in the account —
+  including groups that have nothing to do with ASH. And scheduling deletion on a
+  key destroys the data in every group associated with it, not only the ones the
+  deleted stack created. Before `aws kms schedule-key-deletion`, run `aws logs
+  describe-log-groups` and check `kmsKeyId` against the key's ARN; if anything
+  outside the deleted stack comes back, disassociate it first.
 - **One key per stack, not one per log group.** AWS recommends a key per encrypted
   log group so the key policy can name a single log group ARN. That is not done
-  here: naming the log groups in the key policy is a CloudFormation cycle — the
-  policy would reference the groups and the groups reference the key — so the
+  here. Given CDK auto-naming the groups, naming them in the key policy is a
+  CloudFormation cycle — the only way to get a group's ARN is `Fn::GetAtt` on the
+  group, so the policy would reference the groups while the groups reference the
+  key. That is a cycle *given auto-naming*, not unconditionally: an explicit
+  `logGroupName` prefixed with `${AWS::StackName}` would let the condition ARN be
+  built from pseudo-parameters with no `GetAtt` and no cycle. Rejected for its cost
+  — an explicit log-group name makes every later rename a replacement rather than an
+  update, and replacing a log group discards the log data in it. So the
   encryption-context condition is the account-scoped variant AWS documents for
-  exactly this case. The boundary it enforces is the account, not the log group.
+  exactly this case, and the boundary it enforces is the account, not the log group.
 - **ECR repositories and buckets are `RETAIN`.** `autoDeleteObjects` and
   `emptyOnDelete` synthesize asset-backed custom resources, which need a staging
   bucket and therefore `cdk bootstrap`, and these templates are meant to launch from

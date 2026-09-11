@@ -28,29 +28,26 @@
  *
  * WHY THE ENCRYPTION-CONTEXT CONDITION IS ACCOUNT-SCOPED
  * -----------------------------------------------------
- * The tighter form of the condition names the log group's ARN. It cannot be used
- * here: the key policy would reference the log groups, the log groups reference
- * the key, and CloudFormation rejects the cycle. AWS documents the account-scoped
- * variant for exactly this case — "limits the use of the AWS KMS key to the
- * specified account, but it can be used for any log group" — so that is what this
- * grants, and the boundary it enforces is the account rather than the log group.
+ * The tighter form of the condition names the log group's ARN. Given the way these
+ * stacks create log groups, that is a CloudFormation cycle: CDK auto-names them, so
+ * the only way to obtain a group's ARN is `Fn::GetAtt` on the group, which would
+ * make the key policy reference the groups while the groups reference the key.
  *
- * WHAT THE DEPLOYING PRINCIPAL NEEDS
- * ----------------------------------
- * `kms:DescribeKey` on this key. CloudWatch Logs requires it of whoever calls
- * `CreateLogGroup` with a `kmsKeyId`, and without it the log group fails to
- * create rather than being created unencrypted. The key's default policy grants
- * the account root `kms:*`, so any principal in the account whose own identity
- * policy allows KMS — which a console-launch admin has — satisfies it. A
- * deployment role with KMS carved out of it does not, and will fail on the first
- * log group.
+ * That is a cycle given auto-naming, not unconditionally, and the difference is
+ * worth stating because the unconditional claim is false. Setting an explicit
+ * `logGroupName` prefixed with `${AWS::StackName}` would let the condition ARN be
+ * built entirely from pseudo-parameters — `arn:${AWS::Partition}:logs:${AWS::Region}:
+ * ${AWS::AccountId}:log-group:${AWS::StackName}-*` — with no GetAtt and therefore no
+ * cycle. Considered and rejected for its cost: an explicit log-group name makes
+ * every subsequent rename a replacement rather than an update, and replacing a log
+ * group discards the log data in it. For a set of groups that exist to hold scan
+ * output about an adopter's source, that trade is not worth a condition that
+ * narrows the boundary from the account to a name prefix within the same account.
  *
- * WHY THE LOG PRODUCERS NEED NO KMS PERMISSION OF THEIR OWN
- * --------------------------------------------------------
- * CloudWatch Logs does the encrypting, on its own service principal. A CodeBuild
- * project, a Lambda function or an ECS task writing into an encrypted group needs
- * nothing added to its role — which is why none of the roles in these stacks grew
- * a KMS statement for this.
+ * So the account-scoped variant is what this grants — AWS documents it for exactly
+ * this case, "limits the use of the AWS KMS key to the specified account, but it can
+ * be used for any log group" — and the boundary it enforces is the account rather
+ * than the log group.
  */
 
 import { Aws, RemovalPolicy, Stack } from 'aws-cdk-lib';
@@ -118,6 +115,36 @@ export function ashEncryptionKey(scope: Stack): kms.Key {
       },
     }),
   );
+
+  /**
+   * An alias, so the key that outlives the stack is not just a uuid.
+   *
+   * `RemovalPolicy.RETAIN` above means a stack delete leaves the key behind. Without
+   * an alias, what an operator then sees in the console and in `aws kms list-keys`
+   * is a uuid whose only distinguishing feature is its description — and the README
+   * tells them to consider cleaning it up. An alias makes it navigable, and makes
+   * CloudTrail entries for key use legible while the stack is running.
+   *
+   * WHY THE NAME COMES FROM `AWS::StackName`
+   * A fixed name would collide: two ASH deployments in one account are two stacks,
+   * and the second launch would fail with `AlreadyExistsException` on the alias.
+   * CloudFormation admits no two stacks of the same name in one region, so keying
+   * the alias to the stack name is collision-free by construction rather than by
+   * convention.
+   *
+   * WHY THE ALIAS IS *NOT* RETAINED, THOUGH THE KEY IS
+   * The tempting symmetry is wrong. A retained alias would keep labelling the
+   * retained key after a stack delete, but it would also make relaunching a stack of
+   * the same name fail on `AlreadyExistsException`, with nothing in the template
+   * explaining why — a harder trap than the one it fixes, and one that would strand
+   * an adopter mid-launch. So the alias goes with the stack, and the after-delete
+   * case is carried by the key's own description, which names the stack and cannot
+   * be orphaned.
+   */
+  new kms.Alias(scope, 'EncryptionKeyAlias', {
+    aliasName: `alias/ash-${Aws.STACK_NAME}`,
+    targetKey: key,
+  });
 
   return key;
 }

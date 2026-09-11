@@ -242,6 +242,31 @@
     "aws:cdk:path": "AshCodeCommitGate/EncryptionKey/Resource"
    }
   },
+  "EncryptionKeyAliasC2D38C25": {
+   "Type": "AWS::KMS::Alias",
+   "Properties": {
+    "AliasName": {
+     "Fn::Join": [
+      "",
+      [
+       "alias/ash-",
+       {
+        "Ref": "AWS::StackName"
+       }
+      ]
+     ]
+    },
+    "TargetKeyId": {
+     "Fn::GetAtt": [
+      "EncryptionKey1B843E66",
+      "Arn"
+     ]
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshCodeCommitGate/EncryptionKeyAlias/Resource"
+   }
+  },
   "ConfigBaseConfig623C762C": {
    "Type": "AWS::SSM::Parameter",
    "Properties": {

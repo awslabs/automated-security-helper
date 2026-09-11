@@ -125,6 +125,31 @@
     "aws:cdk:path": "AshImagePipeline/EncryptionKey/Resource"
    }
   },
+  "EncryptionKeyAliasC2D38C25": {
+   "Type": "AWS::KMS::Alias",
+   "Properties": {
+    "AliasName": {
+     "Fn::Join": [
+      "",
+      [
+       "alias/ash-",
+       {
+        "Ref": "AWS::StackName"
+       }
+      ]
+     ]
+    },
+    "TargetKeyId": {
+     "Fn::GetAtt": [
+      "EncryptionKey1B843E66",
+      "Arn"
+     ]
+    }
+   },
+   "Metadata": {
+    "aws:cdk:path": "AshImagePipeline/EncryptionKeyAlias/Resource"
+   }
+  },
   "Arm64Repository2F867C55": {
    "Type": "AWS::ECR::Repository",
    "Properties": {

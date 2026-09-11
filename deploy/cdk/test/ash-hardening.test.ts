@@ -391,6 +391,40 @@ describe('the key survives the stack that created it', () => {
     });
   });
 
+  test.each(CASES)('%s gives the key an alias that cannot collide', (stack, template) => {
+    // Retained and unaliased, the key is a uuid in the console and in `aws kms
+    // list-keys`, distinguishable only by its description. `alias/ash-<stack>` makes
+    // it navigable, which matters most in the situation that produced this
+    // assertion: an operator finding a leftover key after a stack delete and
+    // deciding whether it is safe to schedule for deletion.
+    //
+    // The name comes from AWS::StackName, not from the CDK construct id. Two ASH
+    // deployments in one account are two stacks with two names, so a fixed
+    // `alias/ash-fargate` would make the second launch fail with
+    // AlreadyExistsException. CloudFormation admits no two stacks of the same name
+    // in one region, which makes the pseudo-parameter collision-free by
+    // construction rather than by convention.
+    template.resourceCountIs('AWS::KMS::Alias', 1);
+    template.hasResourceProperties('AWS::KMS::Alias', {
+      AliasName: { 'Fn::Join': ['', ['alias/ash-', { Ref: 'AWS::StackName' }]] },
+      TargetKeyId: STACK_KEY_ARN[stack],
+    });
+  });
+
+  test.each(CASES)('%s lets the alias go and keeps the name in the key', (_name, template) => {
+    // The alias deliberately does NOT get RemovalPolicy.RETAIN, even though it is
+    // the retained key's label. A retained alias would keep naming the key after the
+    // stack was deleted, and would also make relaunching a stack of the same name
+    // fail on AlreadyExistsException with nothing in the template explaining why --
+    // a worse trap than the one it fixes. So the post-delete case is carried by the
+    // key's own Description, which names AWS::StackName and cannot be orphaned.
+    const alias = Object.values<any>(template.findResources('AWS::KMS::Alias'))[0];
+    expect(alias.DeletionPolicy).toBeUndefined();
+    expect(alias.UpdateReplacePolicy).toBeUndefined();
+    const description = Object.values<any>(theOneKey(template))[0].Properties.Description;
+    expect(JSON.stringify(description)).toContain('AWS::StackName');
+  });
+
   test.each(CASES)('%s rotates its key', (_name, template) => {
     // Asserted here rather than left to cdk-nag: no cdk-nag rule in AwsSolutions
     // covers key rotation, so nothing else in this repository fails if it is
