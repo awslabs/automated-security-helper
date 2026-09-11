@@ -18,9 +18,26 @@
  * ------------------------------------
  * "every log group is encrypted" is trivially true of a stack with no log groups,
  * and a rename that stopped the iteration finding any would pass silently. Each
- * property test is therefore preceded by a count with a floor taken from the
- * cfn-nag measurement that prompted it.
+ * property test is therefore preceded by an EXACT count, taken from the cfn-nag
+ * measurement that prompted it. Exact rather than a floor deliberately: a floor
+ * catches the iteration going blind but not a resource arriving that nobody
+ * looked at, and the second is the failure these tests exist for -- a sixth log
+ * group in the Fargate stack should fail here on the day it lands, whether or not
+ * somebody remembered to pass it the key.
+ *
+ * WHAT "ENCRYPTED WITH THE STACK KEY" IS ASSERTED TO MEAN
+ * ------------------------------------------------------
+ * Equality against `{"Fn::GetAtt": [<the one key>, "Arn"]}`, with the logical id
+ * read out of the template rather than written down here. Asserting only that a
+ * `KmsKeyId` is present is not enough to hold the describe blocks' own claim: a
+ * log group handed `kms.Key.fromKeyArn(...)` carries a KmsKeyId, creates no
+ * `AWS::KMS::Key` resource, and so satisfies both a presence check and
+ * `resourceCountIs('AWS::KMS::Key', 1)` while being encrypted under a key this
+ * stack's policy does not govern.
  */
+
+import * as fs from 'fs';
+import * as path from 'path';
 
 import { App, Stack } from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
@@ -41,24 +58,100 @@ const STACKS: Record<string, StackFactory> = {
   AshDistributedPipeline: (app, id) => new AshDistributedPipelineStack(app, id),
 };
 
+/**
+ * The context `cdk.json` supplies, which a bare `new App()` in a test does not get.
+ *
+ * The CDK CLI reads `cdk.json`'s `context` block and hands it to the app; jest does
+ * not. Without it the templates a test builds are NOT the templates
+ * scripts/synth-templates.sh commits, and the difference is not cosmetic — the
+ * block turns on `@aws-cdk/aws-iam:minimizePolicies`, so an unminimized in-memory
+ * policy document has statements the shipped template has merged away. That was
+ * measured while writing the key-policy assertions below: the Fargate key policy
+ * has 4 statements as committed and 5 as this file used to construct it.
+ *
+ * Loading it here means these tests pin the artifact an adopter launches.
+ */
+const CDK_JSON_CONTEXT: Record<string, unknown> = JSON.parse(
+  fs.readFileSync(path.join(__dirname, '..', 'cdk.json'), 'utf8'),
+).context;
+
 const TEMPLATES: Record<string, Template> = Object.fromEntries(
   Object.entries(STACKS).map(([name, factory]) => [
     name,
-    Template.fromStack(factory(new App({ analyticsReporting: false }), name)),
+    Template.fromStack(
+      factory(new App({ analyticsReporting: false, context: CDK_JSON_CONTEXT }), name),
+    ),
   ]),
 );
 
 const CASES = Object.entries(TEMPLATES);
 
-/** Every resource of one type across every stack, as `[stack/logicalId, props]`. */
-function everyResource(type: string): [string, Record<string, any>][] {
+/**
+ * Every resource of one type across every stack, as
+ * `[stack/logicalId, props, stack]`.
+ *
+ * The stack name is carried through so an assertion can compare against that
+ * stack's own key rather than against any key.
+ */
+function everyResource(type: string): [string, Record<string, any>, string][] {
   return CASES.flatMap(([stack, template]) =>
     Object.entries<any>(template.findResources(type)).map(
       ([logicalId, resource]) =>
-        [`${stack}/${logicalId}`, resource.Properties ?? {}] as [string, Record<string, any>],
+        [`${stack}/${logicalId}`, resource.Properties ?? {}, stack] as [
+          string,
+          Record<string, any>,
+          string,
+        ],
     ),
   );
 }
+
+/**
+ * The statements of the one KMS key in a stack.
+ *
+ * Throws rather than `expect`s on the count, because this runs at module scope to
+ * build the per-stack key reference below and a thrown error there names the
+ * problem; a failed `expect` outside a test does not.
+ */
+function keyPolicyStatements(template: Template): Record<string, any>[] {
+  const keys = Object.values<any>(theOneKey(template));
+  return keys[0].Properties.KeyPolicy.Statement;
+}
+
+/** `{logicalId: resource}` for the stack's single key, or a throw naming what it found. */
+function theOneKey(template: Template): Record<string, any> {
+  const keys = template.findResources('AWS::KMS::Key');
+  const ids = Object.keys(keys);
+  if (ids.length !== 1) {
+    throw new Error(`expected exactly one AWS::KMS::Key, found ${ids.length}: ${ids.join(', ')}`);
+  }
+  return keys;
+}
+
+/**
+ * What a resource encrypted with the stack's own key renders as.
+ *
+ * Derived from the template, not hardcoded, so a construct rename moves this with
+ * it instead of rotting into an assertion that silently matches nothing.
+ */
+const STACK_KEY_ARN: Record<string, unknown> = Object.fromEntries(
+  CASES.map(([stack, template]) => [
+    stack,
+    { 'Fn::GetAtt': [Object.keys(theOneKey(template))[0], 'Arn'] },
+  ]),
+);
+
+describe('the templates under test are the templates that ship', () => {
+  test('cdk.json context reached the App', () => {
+    // Non-vacuity for the block above. If the path breaks or cdk.json is
+    // restructured, `CDK_JSON_CONTEXT` becomes undefined, `new App({context:
+    // undefined})` is silently accepted, and every assertion in this file quietly
+    // starts measuring an unminimized template again. Pinning the one flag whose
+    // absence was observed to change the output stops that.
+    expect(CDK_JSON_CONTEXT).toBeDefined();
+    expect(CDK_JSON_CONTEXT['@aws-cdk/aws-iam:minimizePolicies']).toBe(true);
+  });
+});
 
 describe('every log group is encrypted with the stack key', () => {
   const groups = everyResource('AWS::Logs::LogGroup');
@@ -66,19 +159,19 @@ describe('every log group is encrypted with the stack key', () => {
   test('there are log groups to check', () => {
     // 12 is what cfn-nag counted as W84 findings before this was fixed: two per
     // image build, one per bootstrap starter, plus the gate's scan log and the
-    // Fargate task and flow logs. A number below that means the iteration stopped
-    // finding them, not that the stacks got simpler.
+    // Fargate task and flow logs. Exact, so neither a rename that stops the
+    // iteration finding them nor a thirteenth group nobody looked at passes.
     expect(groups.length).toBe(12);
   });
 
-  test.each(groups.map(([name, props]) => [name, props] as const))(
-    '%s specifies a KmsKeyId',
-    (_name, props) => {
-      // cfn-nag W84. The value is a token, so only its presence is asserted here;
-      // the key-policy test below is what makes the key usable.
-      expect(props.KmsKeyId).toBeDefined();
-    },
-  );
+  test.each(groups)('%s is encrypted with its own stack key', (_name, props, stack) => {
+    // cfn-nag W84 only asks for a KmsKeyId. This asserts the stronger property the
+    // describe block claims: the key is THIS stack's key, the one whose policy the
+    // tests below check. An imported key would satisfy a presence check and add no
+    // AWS::KMS::Key resource, so the count assertion further down would not catch
+    // it either.
+    expect(props.KmsKeyId).toEqual(STACK_KEY_ARN[stack]);
+  });
 });
 
 describe('every secret is encrypted with the stack key', () => {
@@ -90,13 +183,10 @@ describe('every secret is encrypted with the stack key', () => {
     expect(secrets.length).toBe(4);
   });
 
-  test.each(secrets.map(([name, props]) => [name, props] as const))(
-    '%s specifies a KmsKeyId',
-    (_name, props) => {
-      // cfn-nag W77.
-      expect(props.KmsKeyId).toBeDefined();
-    },
-  );
+  test.each(secrets)('%s is encrypted with its own stack key', (_name, props, stack) => {
+    // cfn-nag W77, plus the same strengthening as the log groups above.
+    expect(props.KmsKeyId).toEqual(STACK_KEY_ARN[stack]);
+  });
 });
 
 describe('the key CloudWatch Logs is pointed at actually lets it encrypt', () => {
@@ -111,10 +201,9 @@ describe('the key CloudWatch Logs is pointed at actually lets it encrypt', () =>
   // about which field was wrong; pulling the statement out first means a failure
   // names the field.
   function logsGrant(template: Template): Record<string, any> {
-    const keys = Object.values<any>(template.findResources('AWS::KMS::Key'));
-    expect(keys).toHaveLength(1);
-    const statements: Record<string, any>[] = keys[0].Properties.KeyPolicy.Statement;
-    const matching = statements.filter((s) => s.Sid === 'AllowCloudWatchLogsEncryption');
+    const matching = keyPolicyStatements(template).filter(
+      (s) => s.Sid === 'AllowCloudWatchLogsEncryption',
+    );
     expect(matching).toHaveLength(1);
     return matching[0];
   }
@@ -167,6 +256,115 @@ describe('the key CloudWatch Logs is pointed at actually lets it encrypt', () =>
     // log group could point at the one without the statement, and the tests above
     // would still pass on the other.
     template.resourceCountIs('AWS::KMS::Key', 1);
+  });
+});
+
+describe('the key policy is also what makes the auth secret readable', () => {
+  // The KmsKeyId assertions above prove the secret names this key. They do not
+  // prove the key lets Secrets Manager use it, and they do not prove any principal
+  // can read through it. Both of those live in the key policy, and neither was
+  // covered before: delete both statements and the secret still carries a
+  // KmsKeyId, every count still matches, cdk-nag and cfn-nag both stay clean, and
+  // the container fails at start with an access-denied nobody predicted.
+  //
+  // The two statements are CDK's, not written out in this repository -- passing
+  // `encryptionKey` to `new Secret(...)` emits the first and each `grantRead`
+  // extends the second -- which is exactly why they need asserting. Nothing in
+  // lib/ would have to change for them to disappear.
+
+  /** `secretsmanager.<region>.amazonaws.com`, region-agnostic like the logs form. */
+  const VIA_SECRETSMANAGER = {
+    'Fn::Join': ['', ['secretsmanager.', { Ref: 'AWS::Region' }, '.amazonaws.com']],
+  };
+  const ACCOUNT_ROOT = {
+    AWS: {
+      'Fn::Join': [
+        '',
+        ['arn:', { Ref: 'AWS::Partition' }, ':iam::', { Ref: 'AWS::AccountId' }, ':root'],
+      ],
+    },
+  };
+
+  function viaSecretsManager(template: Template): Record<string, any>[] {
+    return keyPolicyStatements(template).filter(
+      (s) =>
+        JSON.stringify(s.Condition?.StringEquals?.['kms:ViaService']) ===
+        JSON.stringify(VIA_SECRETSMANAGER),
+    );
+  }
+
+  const hasSecret = (template: Template) =>
+    Object.keys(template.findResources('AWS::SecretsManager::Secret')).length > 0;
+  const WITH_SECRET = CASES.filter(([, template]) => hasSecret(template));
+  const WITHOUT_SECRET = CASES.filter(([, template]) => !hasSecret(template));
+
+  test('four stacks declare a secret and one does not', () => {
+    // Both lists are pinned so neither arm of the split can quietly empty out. The
+    // four match the W77 count asserted above; AshImagePipeline builds images and
+    // serves nothing, so it has no MCP auth surface at all.
+    expect(WITH_SECRET.map(([name]) => name).sort()).toEqual([
+      'AshAgentCore',
+      'AshCodeCommitGate',
+      'AshDistributedPipeline',
+      'AshFargate',
+    ]);
+    expect(WITHOUT_SECRET.map(([name]) => name)).toEqual(['AshImagePipeline']);
+  });
+
+  test.each(WITH_SECRET)('%s lets Secrets Manager use the key', (_name, template) => {
+    const statements = viaSecretsManager(template);
+    expect(statements).toHaveLength(2);
+
+    // Split by shape rather than by position: CDK's rendering order is not a
+    // property worth pinning, and a reordering would otherwise read as a missing
+    // grant.
+    const forTheService = statements.filter((s) => Array.isArray(s.Action));
+    expect(forTheService).toHaveLength(1);
+    expect(forTheService[0].Effect).toBe('Allow');
+    expect([...forTheService[0].Action].sort()).toEqual([
+      'kms:CreateGrant',
+      'kms:Decrypt',
+      'kms:DescribeKey',
+      'kms:Encrypt',
+      'kms:GenerateDataKey*',
+      'kms:ReEncrypt*',
+    ]);
+    // The account root, confined by kms:ViaService. Note what this statement is
+    // NOT: it does not name Secrets Manager as a principal, it delegates to
+    // identity policies and then restricts the route. That is the same root
+    // delegation ash-runtime-config.ts records as the reason deleting the reader
+    // statement below revokes nothing.
+    expect(forTheService[0].Principal).toEqual(ACCOUNT_ROOT);
+  });
+
+  test.each(WITH_SECRET)('%s lets its own readers decrypt', (_name, template) => {
+    const forReaders = viaSecretsManager(template).filter((s) => s.Action === 'kms:Decrypt');
+    expect(forReaders).toHaveLength(1);
+    expect(forReaders[0].Effect).toBe('Allow');
+
+    // One principal in most stacks, several in the sharded pipeline. Asserted as
+    // "every principal is a role this template declares" rather than by name, so a
+    // rename cannot leave a dangling reference that still reads as a grant.
+    const principal = forReaders[0].Principal.AWS;
+    const principals: any[] = Array.isArray(principal) ? principal : [principal];
+    expect(principals.length).toBeGreaterThan(0);
+    const roles = Object.keys(template.findResources('AWS::IAM::Role'));
+    for (const entry of principals) {
+      expect(Object.keys(entry)).toEqual(['Fn::GetAtt']);
+      const [logicalId, attribute] = entry['Fn::GetAtt'];
+      expect(attribute).toBe('Arn');
+      expect(roles).toContain(logicalId);
+    }
+  });
+
+  test.each(WITHOUT_SECRET)('%s carries no Secrets Manager statement', (_name, template) => {
+    // The absence is measured, not skipped. Two statements is the whole policy of a
+    // stack with no secret: the root delegation KMS creates by default, and the
+    // CloudWatch Logs grant. ash-encryption.ts's key description is written to be
+    // true of this stack too, and this is what would redden if a secret arrived
+    // here without that being revisited.
+    expect(viaSecretsManager(template)).toHaveLength(0);
+    expect(keyPolicyStatements(template)).toHaveLength(2);
   });
 });
 
@@ -247,27 +445,41 @@ describe('the Fargate VPC does not auto-assign public IPv4 addresses', () => {
   });
 });
 
-describe('the AgentCore execution role grants the ECR token once', () => {
-  test('no statement is a duplicate of another', () => {
-    // `Repository.grantPull` already emits ecr:GetAuthorizationToken on "*". This
-    // role used to add an identical statement of its own under a sid, and the sid
-    // is what stopped CDK's policy minimizer from folding the two together, so the
-    // deployed role carried the grant twice. Stated as "no duplicates anywhere in
-    // the document" rather than "no second token statement", because the mechanism
-    // — a sid defeating minimization — applies to any statement, not just this one.
-    const policies = Object.entries<any>(
-      TEMPLATES.AshAgentCore.findResources('AWS::IAM::Policy'),
-    );
-    expect(policies.length).toBeGreaterThan(0);
+describe('no IAM policy grants the same thing twice', () => {
+  // `Repository.grantPull` already emits ecr:GetAuthorizationToken on "*". The
+  // AgentCore execution role used to add an identical statement of its own under a
+  // sid, and the sid is what stopped CDK's policy minimizer from folding the two
+  // together, so the deployed role carried the grant twice.
+  //
+  // Stated as "no duplicates anywhere in the document" rather than "no second
+  // token statement", because the mechanism — a sid defeating minimization —
+  // applies to any statement in any policy. So it is measured over every stack
+  // rather than over the one where it was first noticed: the sharded pipeline has
+  // 40-odd policies, and the next occurrence is likelier there than in AgentCore.
+  const policiesPerStack = CASES.map(
+    ([stack, template]) =>
+      [stack, Object.entries<any>(template.findResources('AWS::IAM::Policy'))] as const,
+  );
+
+  test('there are policies to check in every stack', () => {
+    // 33 across the five stacks, in the order STACKS declares them. Exact and
+    // per-stack, so one stack losing its policies to a rename cannot leave the loop
+    // for that stack iterating over nothing while the others carry the assertion.
+    expect(policiesPerStack.map(([, policies]) => policies.length)).toEqual([4, 4, 6, 4, 15]);
+  });
+
+  test.each(policiesPerStack)('%s has no statement that duplicates another', (_stack, policies) => {
     for (const [logicalId, policy] of policies) {
       const statements: unknown[] = policy.Properties.PolicyDocument.Statement;
       const withoutSids = statements.map((statement) => {
         const { Sid, ...rest } = statement as Record<string, unknown>;
         return JSON.stringify(rest);
       });
-      expect(new Set(withoutSids).size).toBe(withoutSids.length);
       // Named in the failure output, so a reader knows which policy to open.
-      expect(logicalId).toBeTruthy();
+      expect({ policy: logicalId, distinct: new Set(withoutSids).size }).toEqual({
+        policy: logicalId,
+        distinct: withoutSids.length,
+      });
     }
   });
 });
