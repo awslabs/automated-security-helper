@@ -471,6 +471,32 @@ class ScanPhase(EnginePhase):
                             or display_name.lower().strip()
                             in [s.lower().strip() for s in enabled_scanners]
                         )
+                        # The hasattr is structurally always true, and is kept only
+                        # because a bare attribute access here would read as an
+                        # assumption rather than a checked one.
+                        #
+                        # It matters that it cannot be false, because the filter this
+                        # replaced -- EnginePhase.filter_enabled_plugins -- treats a
+                        # config with no `enabled` attribute as *enabled*, and this
+                        # expression treats it as not selected. If that state were
+                        # reachable, a third-party scanner would have gone from running
+                        # to being recorded SKIPPED, and SKIPPED is invisible to the
+                        # completeness gate. Measured on this tree, it is not:
+                        #
+                        #   - config=None raises ScannerError("Configuration is
+                        #     empty") in ScannerPluginBase.model_post_init, so no
+                        #     instance with a None config exists to reach this line.
+                        #   - config=<object without 'enabled'> is rejected by pydantic
+                        #     ("Input should be a valid dictionary or instance of
+                        #     ScannerPluginConfigBase"), because the field is annotated
+                        #     to that type.
+                        #   - every ScannerPluginConfigBase inherits `enabled: bool =
+                        #     True` from PluginConfigBase, and a pydantic model field
+                        #     cannot be removed per instance.
+                        #
+                        # So the two forms are equivalent in every reachable state, and
+                        # "restoring parity" by writing `not hasattr(...) or ...` would
+                        # change nothing while implying it fixed something.
                         is_enabled = hasattr(
                             plugin_instance.config, "enabled"
                         ) and bool(plugin_instance.config.enabled)
