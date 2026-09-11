@@ -21,7 +21,7 @@ version of this file: the tests asserted the buggy behavior.
 
 import re
 import sys
-from importlib.metadata import PackageNotFoundError, packages_distributions
+from importlib.metadata import PackageNotFoundError, packages_distributions, requires
 from unittest.mock import patch
 
 import pytest
@@ -89,6 +89,68 @@ def _scannable(values: list[str]) -> str:
 def _requirement_name(requirement: str) -> str:
     """Extract the distribution name from a PEP 508 requirement string."""
     return re.split(r"[\[<>=!~;\s]", requirement, maxsplit=1)[0].strip().lower()
+
+
+# The ``extra == "cdk"`` half of a PEP 508 marker. Deliberately spelled out here
+# rather than imported from the scanner: a single shared regex would fail on both
+# sides at once and take the drift guard quiet with it, and a guard that cannot
+# fail is the exact defect this file now exists to prevent.
+_CDK_EXTRA_MARKER = re.compile(r"""extra\s*==\s*['"]cdk['"]""")
+
+# Both separator spellings of ASH's distribution name. importlib.metadata
+# normalizes them, so either resolves; both are tried so that a rename touching
+# only one spelling cannot silently retire the guard below.
+_ASH_DISTRIBUTION_NAMES = ("automated-security-helper", "automated_security_helper")
+
+
+def _declared_cdk_extra() -> list[str]:
+    """The cdk extra exactly as the installed distribution declares it.
+
+    Reads metadata by *naming* the distribution instead of inferring the name
+    from the top-level package. That inference is why the drift guard in
+    ``TestCdkExtraResolution`` was vacuous: ``packages_distributions()`` returns
+    no mapping for ``automated_security_helper`` under the editable install CI
+    uses, because an editable ``RECORD`` lists no ``.py`` files and Hatchling
+    writes no ``top_level.txt``, leaving py3.10 and py3.11 nothing to infer
+    from. Measured on all four supported interpreters: the inference fails on
+    3.10 and 3.11 and succeeds on 3.12 and 3.13, while ``requires()`` given the
+    name directly returns the correct extra on all four.
+
+    Naming the distribution is safe here in a way it is not in the scanner. This
+    reads local metadata and never becomes an install target, so the
+    supply-chain rule that stops ``_cdk_extra_requirements()`` from naming a
+    distribution does not apply.
+
+    Fails the test rather than returning an empty list. Returning empty would
+    put the caller back to comparing the constant against nothing, which is the
+    failure mode being removed.
+    """
+    attempts: list[str] = []
+    for dist_name in _ASH_DISTRIBUTION_NAMES:
+        try:
+            declared = requires(dist_name)
+        except (PackageNotFoundError, OSError, ValueError) as exc:
+            attempts.append(f"{dist_name}: {type(exc).__name__}: {exc}")
+            continue
+        if not declared:
+            attempts.append(f"{dist_name}: requires() returned {declared!r}")
+            continue
+        cdk = [
+            requirement.split(";", 1)[0].strip()
+            for requirement in declared
+            if _CDK_EXTRA_MARKER.search(requirement)
+        ]
+        if cdk:
+            return cdk
+        attempts.append(
+            f"{dist_name}: {len(declared)} requirements, none marked extra == 'cdk'"
+        )
+    pytest.fail(
+        "Could not read the cdk extra out of installed metadata, so the drift "
+        "guard has nothing to compare the hardcoded fallback against. This is a "
+        "hard failure on purpose: silently falling back is what let the fallback "
+        "drift unnoticed. Attempts: " + "; ".join(attempts)
+    )
 
 
 AshConfig.model_rebuild()
@@ -236,14 +298,32 @@ class TestCdkExtraResolution:
         """The hardcoded fallback must not drift from the declared extra.
 
         The fallback is a copy of [project.optional-dependencies] cdk. Comparing
-        it against metadata is what catches someone bumping a bound in
+        it against the declared extra is what catches someone bumping a bound in
         pyproject.toml without updating the copy, which would otherwise only
         surface as the installer resolving stale versions on machines where
         metadata is unreadable.
 
+        Compared against ``_declared_cdk_extra()`` rather than against
+        ``_cdk_extra_requirements()``, and that substitution is the whole point
+        of this test's present shape. ``_cdk_extra_requirements()`` returns
+        ``_CDK_EXTRA_FALLBACK_REQUIREMENTS`` whenever it cannot resolve its own
+        distribution, so asserting against it compared the constant to itself:
+        a tautology hidden one call deep, which passed for every value of the
+        constant and reported a genuine PASSED with no skip marker. It is how an
+        ``aws-cdk-lib`` floor stayed drifted from pyproject.toml on py3.10 and
+        py3.11 for as long as the drift existed. Any function shaped "derive X,
+        else return HARDCODED_X" has this hazard and must not be the authority
+        a test compares HARDCODED_X against.
+
         Compared as name plus an unordered set of specifier clauses, because
-        importlib.metadata reorders them: pyproject's ">=2.257.0,<3.0.0" comes
-        back as "<3.0.0,>=2.257.0".
+        importlib.metadata reorders them: pyproject's ">=2.268.0,<3.0.0" comes
+        back as "<3.0.0,>=2.268.0".
+
+        Known limit: the authority is the *installed* metadata, so an
+        environment predating an edit to pyproject.toml is compared against the
+        older declaration. CI runs ``uv sync`` before pytest, which closes that
+        gap; a stale local environment should be re-synced before a green result
+        here is trusted.
         """
 
         def normalize(requirement: str) -> tuple[str, frozenset[str]]:
@@ -254,7 +334,7 @@ class TestCdkExtraResolution:
             )
 
         assert {normalize(req) for req in _CDK_EXTRA_FALLBACK_REQUIREMENTS} == {
-            normalize(req) for req in _cdk_extra_requirements()
+            normalize(req) for req in _declared_cdk_extra()
         }, (
             "_CDK_EXTRA_FALLBACK_REQUIREMENTS has drifted from "
             "[project.optional-dependencies] cdk in pyproject.toml"
