@@ -1564,8 +1564,7 @@ class TestAllowlistsAreCheckedInBothDirections:
         present = {
             gate.strip_distribution_root(m.name).split("/")[1]
             for m in subset
-            if m.name.startswith(f"{gate.PACKAGE_ROOT}/")
-            and len(m.name.split("/")) > 2
+            if m.name.startswith(f"{gate.PACKAGE_ROOT}/") and len(m.name.split("/")) > 2
         }
         assert present < gate.PACKAGE_SUBDIRECTORIES, (
             "the clean fixture now carries every pinned subdirectory, so a "

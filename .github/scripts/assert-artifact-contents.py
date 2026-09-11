@@ -1677,8 +1677,7 @@ def check_artifact(path: str) -> Report:
     recognized = sum(
         1
         for m in members
-        if PurePosixPath(strip_distribution_root(m.name)).parts[:1]
-        == (PACKAGE_ROOT,)
+        if PurePosixPath(strip_distribution_root(m.name)).parts[:1] == (PACKAGE_ROOT,)
     )
     if recognized == 0:
         raise ValueError(
