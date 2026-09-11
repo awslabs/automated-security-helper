@@ -36,15 +36,23 @@ What it actually is, stated plainly:
     checked in under its own name. Each is detected by path shape or by content
     header, not by grepping for tool names -- see the next section for why.
 
-  * A FAIL-CLOSED ALLOWLIST over the two namespaces where new payload can hide
-    without looking like any of those shapes: `automated_security_helper/assets/`
-    (pinned member by member) and the set of subdirectories directly under
-    `automated_security_helper/` (pinned by name). In those two places the
-    default answer is NO: anything not on the list fails, and adding to the list
-    is a diff a reviewer sees.
+  * A FAIL-CLOSED ALLOWLIST over every DIRECTORY namespace in the artifact --
+    the places new payload can hide without looking like any of those shapes.
+    `automated_security_helper/assets/` is pinned member by member; the
+    subdirectories directly under `automated_security_helper/` are pinned by
+    name; so are the directories at the artifact root and the ones inside a
+    wheel's metadata directory. In all of those the default answer is NO:
+    anything not on the list fails, and adding to the list is a diff a reviewer
+    sees. Loose FILES at the artifact root are deliberately unconstrained -- that
+    set churns with ordinary work and a tree cannot hide in it.
 
   * A PER-MEMBER SIZE CEILING, because scanner binaries and vulnerability
     databases are orders of magnitude larger than any file ASH authors.
+
+  * A REFUSAL TO CLASSIFY A PATH IT CANNOT READ. Every rule here treats a member
+    name as `/`-separated components. A name with backslashes, an absolute name,
+    or one containing `..` is not that, and would defeat all of them at once
+    rather than one at a time, so it is refused up front.
 
 What it does NOT prove, concretely. A single third-party Python source file,
 placed inside a subdirectory that is already pinned, under a filename that is
@@ -118,11 +126,20 @@ fail-closed rules change the default instead of extending the list.
      14 members in the current wheel and exists precisely to carry non-Python
      data, which makes it the most comfortable hiding place in the tree -- an
      upstream ruleset or a tool database dropped there looks exactly like the
-     ASH-authored data next to it. Same for a brand-new subdirectory under
-     `automated_security_helper/`: a vendored tree needs somewhere to live, and
-     "somewhere new" is now a failure rather than a blind spot.
+     ASH-authored data next to it. Same for a brand-new directory anywhere in the
+     artifact's structure: under `automated_security_helper/` (5b), at the
+     artifact root beside pyproject.toml (5c), or inside the wheel's
+     `.dist-info/`, which pip copies verbatim into site-packages (also 5c). A
+     vendored tree needs somewhere to live, and "somewhere new" is now a failure
+     rather than a blind spot.
 
   6. Bigger than anything ASH authors. See MAX_MEMBER_BYTES.
+
+  0. And, before any of the above, a member name the rules cannot read at all.
+     Numbered zero because it is a precondition rather than a shape: a path with
+     backslashes is one component to PurePosixPath, so
+     `automated_security_helper\\assets\\trivy-db.json` matched no rule while
+     still extracting into assets/ on Windows.
 
 WHAT IS DELIBERATELY ALLOWED
 ----------------------------
@@ -423,6 +440,63 @@ SCANNER_DIST_NAMES = frozenset(
 
 PACKAGE_ROOT = "automated_security_helper"
 
+# Suffixes of the metadata directories a wheel carries beside the package:
+# `<name>-<version>.dist-info/` always, and `<name>-<version>.data/` when the
+# build has data files. Recognized by suffix rather than spelled out with a
+# version, so a version bump does not need an edit here.
+#
+# NOTE for anyone writing a neutering experiment: emptying this tuple does NOT
+# disable anything, and that is worth understanding before trusting a green run.
+# It is read in two places with opposing effects. strip_distribution_root() uses
+# it to decline to strip a metadata directory as if it were the sdist wrapper,
+# and rule 5c uses it to permit one at the artifact root. Empty it and
+# `...dist-info/METADATA` gets stripped to a bare `METADATA`, which is a
+# single-component root FILE that rule 5c does not constrain -- so the member is
+# still allowed, by a different route. The two effects cancel. The experiment
+# that does mean something is
+# test_wheel_metadata_is_neither_stripped_nor_rejected, which asserts the
+# behaviour directly instead of inferring it from a self-test verdict.
+WHEEL_METADATA_SUFFIXES = (".dist-info", ".data")
+
+# Directories permitted INSIDE a wheel metadata directory.
+#
+# Without this, `<name>-<version>.dist-info/vendor_lib/index.js` passes
+# everything: rule 5c permits the metadata directory at the root, and rule 5b
+# only ever looks under the package, so the second level inside `.dist-info/` was
+# an unconstrained namespace. `pip install` copies dist-info verbatim into
+# site-packages, so a tree parked there is delivered exactly like one in the
+# package. `licenses` is what hatchling writes; the `.data` names are the
+# scheme directories the wheel specification defines.
+WHEEL_METADATA_SUBDIRECTORIES = frozenset(
+    {
+        "licenses",
+        "license_files",
+        "data",
+        "headers",
+        "platlib",
+        "purelib",
+        "scripts",
+    }
+)
+
+# Directories permitted at the top level of an artifact, once the sdist's
+# `<name>-<version>/` wrapper is stripped. Wheel metadata directories are
+# accepted by suffix in addition to this set.
+#
+# There is exactly one, and that is the point. The sdist also carries loose FILES
+# at its root -- pyproject.toml, hatch_build.py, LICENSE, NOTICE, README.md,
+# PKG-INFO, Dockerfile, .gitignore -- and those are deliberately NOT pinned,
+# because the set churns with ordinary work (a CHANGELOG, a CITATION.cff, a
+# SECURITY.md) and none of them is a place a tree can hide. A vendored tree needs
+# a DIRECTORY, and this is the rule that says a new one at the top level fails.
+#
+# Without it, `automated_security_helper-3.7.0/third_party_tools/leftpad/index.js`
+# passes everything: `third_party_tools` is not one of the vendor-directory
+# tokens, it is outside the package so the package-subdirectory rule never looks
+# at it, and nothing about a `.js` file's shape is suspicious. Verified as a live
+# bypass before this rule existed.
+DISTRIBUTION_ROOT_DIRECTORIES = frozenset({PACKAGE_ROOT})
+
 # Every member under this prefix must appear in ASSETS_ALLOWLIST.
 ASSETS_PREFIX = f"{PACKAGE_ROOT}/assets/"
 
@@ -589,18 +663,66 @@ def strip_distribution_root(name: str) -> str:
     the version-bearing prefix cannot be mistaken for a vendor directory.
     """
     parts = PurePosixPath(name).parts
-    if not parts:
+    if len(parts) < 2:
         return name
     first = parts[0]
+    # A wheel's metadata directory also begins `automated_security_helper-`, and
+    # stripping it would turn `...dist-info/METADATA` into a bare `METADATA` at
+    # the artifact root -- a member the distribution-root rule would then reject.
+    # Checked first for that reason.
+    if first.endswith(WHEEL_METADATA_SUFFIXES):
+        return name
     # Only this project's own `<name>-<version>` wrapper is stripped, and only
     # when there is something under it. Anything else is a real member path --
     # stripping a leading component in general would let a vendored tree hide by
     # being one level deeper than expected.
-    if len(parts) > 1 and "-" in first:
-        stem = first.rsplit("-", 1)[0]
-        if stem in {"automated_security_helper", "automated-security-helper"}:
+    #
+    # Matched as a prefix rather than by splitting on the last `-`. The old form
+    # was `first.rsplit("-", 1)[0] in {...}`, which silently stops stripping if
+    # the version itself contains a hyphen: a local version like
+    # `3.8.0+g12ab-dirty` left the wrapper in place, and every asset inside would
+    # then have read as unpinned. PEP 440 normalization means `uv build` does not
+    # currently produce one, so this was latent rather than live -- but a rule
+    # whose correctness depends on a version never containing a hyphen is a rule
+    # waiting to reject ASH's own sdist.
+    for wrapper in (f"{PACKAGE_ROOT}-", "automated-security-helper-"):
+        if first.startswith(wrapper):
             return "/".join(parts[1:])
     return name
+
+
+def malformed_path_reason(name: str) -> str | None:
+    """Says why a member path cannot be reasoned about, or None if it can.
+
+    Every other rule here reads a member path as a sequence of `/`-separated
+    components. A path that does not mean what that reading assumes defeats all
+    of them at once rather than one at a time, so it is refused up front instead
+    of being classified.
+
+    Both forms below were live bypasses. `automated_security_helper\\assets\\
+    trivy-db.json` uses backslashes, which PurePosixPath reads as ONE component,
+    so the assets prefix does not match, no component equals a vendor or scanner
+    token, and the member sails through -- while an extractor on Windows writes
+    it into assets/ anyway. `/usr/local/bin/leftpad.js` is absolute: the zip and
+    tar formats both require relative member names, and an absolute one is either
+    a broken build or an attempt at writing outside the extraction root.
+
+    `..` is included for the same family of reasons (zip-slip), even though it
+    happened to be caught incidentally by the component rules in the cases
+    tested. Relying on "incidentally" is how the other bypasses got in.
+    """
+    if "\\" in name:
+        return (
+            "contains a backslash, which is not a path separator in a zip or tar member"
+        )
+    if len(name) > 1 and name[1] == ":" and name[0].isalpha():
+        return "begins with a Windows drive letter"
+    path = PurePosixPath(name)
+    if path.is_absolute():
+        return "is an absolute path; artifact members must be relative"
+    if ".." in path.parts:
+        return "contains a '..' component, which points outside the artifact"
+    return None
 
 
 # Compound suffixes that must be read as one unit, longest first, so that
@@ -644,6 +766,20 @@ def classify_member(member: Member, artifact: str) -> Violation | None:
     holding -- each planted member is chosen to be caught by exactly one rule, so
     a rule that stops firing is reported by name instead of being masked.
     """
+    # Rule 0 -- a path the other rules cannot read. Checked on the RAW name,
+    # before the wrapper is stripped, because stripping already assumes the
+    # `/`-separated reading this is verifying.
+    reason = malformed_path_reason(member.name)
+    if reason is not None:
+        return Violation(
+            artifact,
+            member.name,
+            "malformed-member-path",
+            f"{reason}. Every other rule here reads a member path as "
+            "`/`-separated components, so a path that is not that defeats all of "
+            "them at once. Refused rather than classified.",
+        )
+
     relative = strip_distribution_root(member.name)
     path = PurePosixPath(relative)
     components = path.parts
@@ -769,6 +905,44 @@ def classify_member(member: Member, artifact: str) -> Violation | None:
                 "this is a new ASH subpackage, add its name to "
                 "PACKAGE_SUBDIRECTORIES in the same commit that adds it.",
             )
+
+    # Rule 5c -- a directory at the top level of the artifact that nobody pinned.
+    #
+    # Complements 5b rather than duplicating it: 5b guards the inside of the
+    # package, this guards everything beside it. A vendored tree parked next to
+    # pyproject.toml in the sdist -- `third_party_tools/leftpad/index.js` -- is
+    # outside the package, so 5b never looks at it. Loose FILES at the root are
+    # not constrained; see DISTRIBUTION_ROOT_DIRECTORIES for why.
+    if len(components) > 1:
+        root = components[0]
+        is_metadata = root.endswith(WHEEL_METADATA_SUFFIXES)
+        if root not in DISTRIBUTION_ROOT_DIRECTORIES and not is_metadata:
+            return Violation(
+                artifact,
+                relative,
+                "unpinned-distribution-directory",
+                f"sits under a top-level directory {root!r} that is not "
+                f"{PACKAGE_ROOT}/ and is not a wheel metadata directory. A "
+                "vendored tree needs a directory to live in, and the artifact "
+                "has room for exactly one. Loose files at the artifact root are "
+                "unconstrained; a new directory there is not.",
+            )
+        # Inside a metadata directory the second level is pinned too. pip copies
+        # dist-info verbatim into site-packages, so a tree parked there ships
+        # exactly like one in the package, and rule 5b never looks here.
+        if is_metadata and len(components) > 2:
+            subdirectory = components[1]
+            if subdirectory not in WHEEL_METADATA_SUBDIRECTORIES:
+                return Violation(
+                    artifact,
+                    relative,
+                    "unpinned-distribution-directory",
+                    f"sits under {root}/{subdirectory}/, and {subdirectory!r} is "
+                    "not one of the directories a wheel metadata tree is allowed "
+                    "to contain (see WHEEL_METADATA_SUBDIRECTORIES). pip copies "
+                    "this directory verbatim into site-packages, so a tree here "
+                    "is delivered exactly like one inside the package.",
+                )
 
     # Rule 6 -- bigger than anything ASH authors.
     if member.size > MAX_MEMBER_BYTES:
@@ -920,7 +1094,23 @@ LEGITIMATE_MEMBERS = (
     "automated_security_helper/plugin_modules/ash_trivy_plugins/trivy_repo_scanner.py",
     "automated_security_helper/plugin_modules/ash_snyk_plugins/snyk_code_scanner.py",
     "automated_security_helper/schemas/AshAggregatedResults.json",
+    # Wheel metadata, which lives beside the package rather than inside it.
     "automated_security_helper-3.7.0.dist-info/METADATA",
+    "automated_security_helper-3.7.0.dist-info/RECORD",
+    # The sdist's loose root files, wrapper prefix and all. The fixture is
+    # therefore a union of wheel-shaped and sdist-shaped members, which no real
+    # artifact is -- deliberately, because the real check runs over BOTH a wheel
+    # and an sdist and a control covering only one shape is half a control. These
+    # are what prove rule 5c constrains top-level DIRECTORIES and not top-level
+    # files: pin them and a new CHANGELOG.md cannot fail the gate.
+    "automated_security_helper-3.7.0/pyproject.toml",
+    "automated_security_helper-3.7.0/hatch_build.py",
+    "automated_security_helper-3.7.0/LICENSE",
+    "automated_security_helper-3.7.0/NOTICE",
+    "automated_security_helper-3.7.0/README.md",
+    "automated_security_helper-3.7.0/PKG-INFO",
+    "automated_security_helper-3.7.0/Dockerfile",
+    "automated_security_helper-3.7.0/.gitignore",
 ) + tuple(sorted(ASSETS_ALLOWLIST))
 
 # One planted member per DETECTOR, not per rule name: two detectors share the
@@ -1010,6 +1200,22 @@ PLANTED_MEMBERS = {
         b"# vendored bandit\n",
         "unpinned-package-subdirectory",
     ),
+    # An sdist-shaped path, wrapper and all, because that is the only artifact
+    # with room beside the package. `third_party_tools` rather than
+    # `third_party`: the latter is now a vendor-directory token, which would make
+    # this fixture catchable by two rules and stop it being single-variable.
+    "unpinned-distribution-directory": (
+        "automated_security_helper-3.7.0/third_party_tools/leftpad/index.js",
+        b"module.exports = function () {};\n",
+        "unpinned-distribution-directory",
+    ),
+    # Backslashes, which PurePosixPath reads as one component, so the assets
+    # prefix never matches and the file lands in assets/ on extraction anyway.
+    "malformed-member-path": (
+        "automated_security_helper\\assets\\trivy-db.json",
+        b'{"vulnerabilities": []}\n',
+        "malformed-member-path",
+    ),
     "oversize-member": (
         "automated_security_helper/utils/payload.dat",
         None,  # built by _planted_data(); MAX_MEMBER_BYTES + 1 bytes
@@ -1075,7 +1281,18 @@ def run_self_test(stream) -> int:
             except ValueError as err:  # pragma: no cover - fixture is well formed
                 failures.append(f"planted {label}: fixture unreadable: {err}")
                 continue
-            hit = [v for v in report.violations if v.member == member]
+            # Matched against the STRIPPED path, not the archive name. Every rule
+            # but rule 0 reports `relative`, so for an sdist-shaped fixture the
+            # violation names `third_party_tools/leftpad/index.js` while
+            # PLANTED_MEMBERS holds the wrapper-prefixed original. Comparing the
+            # raw names made the unpinned-distribution-directory control report
+            # "matched nothing" when the member had in fact been rejected -- a
+            # false alarm, but the same comparison would equally have hidden a
+            # real one. Rule 0 reports the raw name by design, since a malformed
+            # path is precisely what must not be normalized before display, so
+            # both spellings are accepted here.
+            expected = {member, strip_distribution_root(member)}
+            hit = [v for v in report.violations if v.member in expected]
             if not hit:
                 failures.append(
                     f"planted {member!r} was NOT rejected -- the {label!r} "
