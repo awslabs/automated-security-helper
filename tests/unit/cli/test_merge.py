@@ -1137,6 +1137,120 @@ def _make_shard_contribute_nothing(
     return owned
 
 
+class TestRequireScannerCompletionResolution:
+    """The third copy of ``fail_on_incomplete_scanners``'s default, and its precedence.
+
+    Two copies of the default are pinned in
+    ``tests/unit/interactions/test_fail_on_incomplete_scanners.py`` -- the AshConfig
+    field and ``run_ash_scan``'s resolver fallback. This is the third, and until now
+    no test reached it: ``build_shard`` assigns a real ``AshConfig`` to every fixture,
+    so ``_resolve_require_scanner_completion`` always returned through the
+    ``isinstance(value, bool)`` branch and the final literal was dead as far as this
+    suite was concerned. Flipping it to ``return False`` left every test in this file
+    passing, while ``ash merge`` over shards carrying no config silently returned to
+    exit 0 for a merge where a shard had completed nothing.
+
+    Every branch is exercised here so the precedence is pinned as an order and not
+    just as three separate facts.
+    """
+
+    def test_no_config_anywhere_falls_back_to_the_models_default(self):
+        """The literal, reached only when no shard carries a config at all.
+
+        Agrees with ``AshConfig.fail_on_incomplete_scanners`` rather than being
+        independently lenient. This is the least trustworthy input ``ash merge``
+        accepts -- results it cannot attribute to any configuration -- so defaulting
+        to permissive here would give it the most trusting treatment.
+        """
+        from automated_security_helper.config.ash_config import AshConfig
+        from automated_security_helper.cli.merge import (
+            _resolve_require_scanner_completion,
+        )
+
+        shards = build_shards(3)
+        for shard in shards:
+            shard.ash_config = None
+
+        resolved = _resolve_require_scanner_completion(as_loaded(shards), None)
+
+        assert resolved is AshConfig(project_name="x").fail_on_incomplete_scanners, (
+            "the fallback literal and the model default are the same decision written "
+            "twice; when they disagree, which answer a merge gets depends on whether "
+            "its shards happened to carry a config"
+        )
+
+    @pytest.mark.parametrize("cli_value", [True, False])
+    def test_the_cli_flag_wins_over_every_shard_config(self, cli_value):
+        from automated_security_helper.cli.merge import (
+            _resolve_require_scanner_completion,
+        )
+
+        shards = build_shards(2)
+        for shard in shards:
+            shard.ash_config.fail_on_incomplete_scanners = not cli_value
+
+        assert (
+            _resolve_require_scanner_completion(as_loaded(shards), cli_value)
+            is cli_value
+        )
+
+    @pytest.mark.parametrize("config_value", [True, False])
+    def test_the_shard_config_is_read_when_the_cli_is_unset(self, config_value):
+        from automated_security_helper.cli.merge import (
+            _resolve_require_scanner_completion,
+        )
+
+        shards = build_shards(2)
+        for shard in shards:
+            shard.ash_config.fail_on_incomplete_scanners = config_value
+
+        assert (
+            _resolve_require_scanner_completion(as_loaded(shards), None) is config_value
+        )
+
+    def test_the_first_shard_carrying_a_config_answers_for_the_set(self):
+        """An unstamped or config-less shard must not shadow one that has a config.
+
+        Called before coverage has been verified, so the shards are in whatever order
+        --results listed them. Every shard of one run carries the same config, so the
+        first that has one is as good as any -- but only if a None is skipped rather
+        than treated as an answer.
+        """
+        from automated_security_helper.cli.merge import (
+            _resolve_require_scanner_completion,
+        )
+
+        shards = build_shards(3)
+        shards[0].ash_config = None
+        shards[1].ash_config.fail_on_incomplete_scanners = False
+        shards[2].ash_config.fail_on_incomplete_scanners = False
+
+        assert _resolve_require_scanner_completion(as_loaded(shards), None) is False
+
+    def test_a_non_bool_on_the_config_does_not_answer(self):
+        """Only a genuine bool counts.
+
+        The attribute is reached by ``getattr`` on whatever object the caller
+        supplied, so a partially-built model or a test double would otherwise
+        contribute a truthy non-answer and decide the verdict by accident.
+        """
+        from unittest.mock import MagicMock
+
+        from automated_security_helper.config.ash_config import AshConfig
+        from automated_security_helper.cli.merge import (
+            _resolve_require_scanner_completion,
+        )
+
+        shards = build_shards(2)
+        for shard in shards:
+            shard.ash_config = MagicMock()
+            shard.ash_config.fail_on_incomplete_scanners = "false"
+
+        assert _resolve_require_scanner_completion(as_loaded(shards), None) is AshConfig(
+            project_name="x"
+        ).fail_on_incomplete_scanners
+
+
 class TestCompletedClassifiesUnknownStatusesAsIncomplete:
     """``ash merge`` is the reader most exposed to a status it does not know.
 
