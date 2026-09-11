@@ -76,6 +76,54 @@ class ScanPhase(EnginePhase):
         """Return the name of this phase."""
         return "scan"
 
+    def _record_scanner_not_selected(
+        self,
+        display_name: str,
+        reason: str,
+        aggregated_results: AshAggregatedResults,
+        excluded_scanner_names: List[str],
+    ) -> AshAggregatedResults:
+        """Record *display_name* as SKIPPED because it was not selected to run.
+
+        One recording path for every reason a scanner is not part of this run --
+        the operator narrowed with ``--scanners``, the config disabled it, or a
+        Python-only run excluded it. Extracted because the selection decision is
+        now made in two places, before and after the dependency check, and two
+        copies of this bookkeeping would be two chances for them to diverge on
+        what a not-selected scanner looks like in the report.
+
+        SKIPPED with ``excluded=True`` rather than MISSING, and
+        ``dependencies_satisfied=True`` rather than the truth about the tool,
+        because neither is a claim about the tool: this scanner was never asked
+        to run, so whether its dependencies are present is not a fact about this
+        scan. It is also what keeps the completeness gate off a scan that did
+        everything it was asked to do.
+        """
+        ASH_LOGGER.info(f"Scanner {display_name} excluded from execution: {reason}")
+
+        excluded_scanner_names.append(display_name)
+
+        self.validation_manager.update_scanner_state(
+            display_name,
+            registration_status="registered",
+            enablement_status="excluded",
+            enablement_reason=f"Scanner excluded during filtering: {reason}",
+            queued_for_execution=False,
+            execution_completed=False,
+        )
+
+        aggregated_results = self._process_results(
+            results=ScanResultsContainer.for_excluded(display_name),
+            aggregated_results=aggregated_results,
+        )
+
+        aggregated_results.scanner_results[display_name] = ScannerStatusInfo(
+            status=ScannerStatus.SKIPPED,
+            excluded=True,
+            dependencies_satisfied=True,
+        )
+        return aggregated_results
+
     def _execute_phase(
         self,
         aggregated_results: AshAggregatedResults,
@@ -334,6 +382,49 @@ class ScanPhase(EnginePhase):
 
                             continue
 
+                        # Selection before diagnosis.
+                        #
+                        # A scanner the operator did not select does not need its
+                        # dependencies, and asking anyway gave two scanners in the
+                        # identical position -- not selected -- different statuses
+                        # depending on whether their tool happened to be installed.
+                        # Measured on a host without cfn-nag, grype and syft:
+                        # `ash scan --scanners bandit` recorded those three MISSING
+                        # and the six tool-present scanners it also left out SKIPPED.
+                        # With the completeness gate on by default that is a non-zero
+                        # exit for a scan that ran everything it was asked to run.
+                        #
+                        # Only the two dependency-free tests move up here. The
+                        # `filter_enabled_plugins` call below stays after the
+                        # dependency check, because it calls
+                        # validate_plugin_dependencies itself: run first it would
+                        # return False for a scanner whose tool is absent, and that
+                        # scanner would be recorded SKIPPED, erasing the MISSING
+                        # signal this whole change exists to preserve.
+                        is_in_enabled_scanners = (
+                            not enabled_scanners
+                            or display_name.lower().strip()
+                            in [s.lower().strip() for s in enabled_scanners]
+                        )
+                        is_enabled = hasattr(
+                            plugin_instance.config, "enabled"
+                        ) and bool(plugin_instance.config.enabled)
+                        if not (is_in_enabled_scanners and is_enabled):
+                            not_selected_reasons = []
+                            if not is_enabled:
+                                not_selected_reasons.append("scanner config disabled")
+                            if not is_in_enabled_scanners:
+                                not_selected_reasons.append(
+                                    "not in enabled scanners list"
+                                )
+                            aggregated_results = self._record_scanner_not_selected(
+                                display_name,
+                                ", ".join(not_selected_reasons),
+                                aggregated_results,
+                                excluded_scanner_names,
+                            )
+                            continue
+
                         # Check dependencies early
                         ASH_LOGGER.debug(f"Validating dependencies for: {display_name}")
                         plugin_instance.dependencies_satisfied = (
@@ -377,12 +468,10 @@ class ScanPhase(EnginePhase):
                         # The helper also calls validate_plugin_dependencies internally; since
                         # we already know deps are satisfied at this point, the second call is
                         # a no-op that always returns True and does not change state.
-                        is_in_enabled_scanners = (
-                            not enabled_scanners
-                            or display_name.lower().strip()
-                            in [s.lower().strip() for s in enabled_scanners]
-                        )
-
+                        #
+                        # is_enabled and is_in_enabled_scanners were decided before the
+                        # dependency check and are both True here, so all this decides is
+                        # the Python-only filter.
                         passes_enabled_and_python = bool(
                             self.filter_enabled_plugins(
                                 plugin_instances=[plugin_instance],
@@ -391,24 +480,18 @@ class ScanPhase(EnginePhase):
                             )
                         )
 
-                        is_enabled = hasattr(
-                            plugin_instance.config, "enabled"
-                        ) and bool(plugin_instance.config.enabled)
                         is_python_only_scanner = (
                             plugin_instance.is_python_only()
                             if python_based_plugins_only
                             else True
                         )
 
-                        ASH_LOGGER.debug(
-                            f"Scanner {display_name}: enabled={is_enabled}, in_enabled_list={is_in_enabled_scanners}"
-                        )
                         if python_based_plugins_only:
                             ASH_LOGGER.info(
                                 f"Scanner {display_name}: Python-only check result: {is_python_only_scanner}"
                             )
 
-                        final_check = passes_enabled_and_python and is_in_enabled_scanners
+                        final_check = passes_enabled_and_python
                         ASH_LOGGER.debug(
                             f"Scanner {display_name}: final check result: {final_check}"
                         )
@@ -459,12 +542,10 @@ class ScanPhase(EnginePhase):
                                 execution_completed=False,
                             )
                         else:
-                            # Determine why scanner failed final check and track appropriately
+                            # Only the Python-only filter can land here now; the
+                            # config-disabled and not-in-allowlist reasons were
+                            # decided and recorded before the dependency check.
                             exclusion_reason = []
-                            if not is_enabled:
-                                exclusion_reason.append("scanner config disabled")
-                            if not is_in_enabled_scanners:
-                                exclusion_reason.append("not in enabled scanners list")
                             if python_based_plugins_only and not is_python_only_scanner:
                                 exclusion_reason.append("not Python-only compatible")
 
@@ -473,43 +554,11 @@ class ScanPhase(EnginePhase):
                                 if exclusion_reason
                                 else "unknown reason"
                             )
-                            ASH_LOGGER.info(
-                                f"Scanner {display_name} excluded from execution: {reason_str}"
-                            )
-
-                            # Track as excluded scanner for validation
-                            excluded_scanner_names.append(display_name)
-
-                            # CRITICAL: Update validation manager state immediately
-                            self.validation_manager.update_scanner_state(
+                            aggregated_results = self._record_scanner_not_selected(
                                 display_name,
-                                registration_status="registered",
-                                enablement_status="excluded",
-                                enablement_reason=f"Scanner excluded during filtering: {reason_str}",
-                                queued_for_execution=False,
-                                execution_completed=False,
-                            )
-
-                            # Create a ScanResultsContainer with excluded=True
-                            results_container = ScanResultsContainer.for_excluded(
-                                display_name
-                            )
-
-                            # Process the container through _process_results to store duration info
-                            aggregated_results = self._process_results(
-                                results=results_container,
-                                aggregated_results=aggregated_results,
-                            )
-
-                            # Do NOT add to completed scanners - this scanner was excluded and didn't run
-                            # self._completed_scanners.append(plugin_instance)
-
-                            aggregated_results.scanner_results[display_name] = (
-                                ScannerStatusInfo(
-                                    status=ScannerStatus.SKIPPED,
-                                    excluded=True,
-                                    dependencies_satisfied=True,
-                                )
+                                reason_str,
+                                aggregated_results,
+                                excluded_scanner_names,
                             )
                     except Exception as e:
                         ASH_LOGGER.error(
@@ -542,29 +591,44 @@ class ScanPhase(EnginePhase):
             )
             ASH_LOGGER.info(f"   Enabled scanner names: {enabled_scanner_names}")
 
-            # Count scanners in different states from additional_reports
-            excluded_scanners_count = 0
-            missing_deps_count = 0
-            for (
-                scanner_name,
-                report_data,
-            ) in aggregated_results.additional_reports.items():
-                if "source" in report_data:
-                    source_data = report_data["source"]
-                    if isinstance(source_data, dict):
-                        if source_data.get("excluded", False):
-                            excluded_scanners_count += 1
-                            ASH_LOGGER.debug(f"   Scanner {scanner_name}: EXCLUDED")
-                        elif not source_data.get("dependencies_satisfied", True):
-                            missing_deps_count += 1
-                            ASH_LOGGER.debug(
-                                f"   Scanner {scanner_name}: MISSING DEPENDENCIES"
-                            )
+            # Count scanners in different states from the collections the loop
+            # above actually wrote.
+            #
+            # These two numbers used to be re-derived by walking
+            # additional_reports looking for a "source" key, and both were
+            # structurally pinned at 0: _process_results keys that dict by
+            # ScanResultsContainer.target_type, which is None for the excluded and
+            # missing-dependency containers built during preparation, so the
+            # "source" key the walk required was never there. Measured on a host
+            # without cfn-nag, grype and syft: preparation logged
+            # "Missing dependencies: 0" while validation, reading
+            # dependency_error_scanners through the validation manager, reported
+            # Missing_Deps (3) for the same run. A wrong count is worse than no
+            # count, because "Total accounted for" was silently just the enabled
+            # count and read as a reconciliation.
+            #
+            # Keying additional_reports by `target_type or "source"` instead was
+            # rejected: ScannerStatisticsCalculator.get_scanner_status_info and
+            # cli.merge both read the None key deliberately to tell a shard's
+            # own scanners from the ones it recorded as not its own, so renaming
+            # it would break the distributed path to fix a log line.
+            excluded_scanners_count = len(excluded_scanner_names)
+            missing_deps_count = len(dependency_error_scanners)
+            for scanner_name in excluded_scanner_names:
+                ASH_LOGGER.debug(f"   Scanner {scanner_name}: EXCLUDED")
+            for scanner_name in dependency_error_scanners:
+                ASH_LOGGER.debug(f"   Scanner {scanner_name}: MISSING DEPENDENCIES")
 
             ASH_LOGGER.info(f"   Excluded scanners: {excluded_scanners_count}")
             ASH_LOGGER.info(f"   Missing dependencies: {missing_deps_count}")
+            # Scoped to preparation on purpose. A scanner can still be marked
+            # MISSING later, in ScannerExecutor, when its scan() returns falsy --
+            # that discovery happens after this line and cannot be counted here,
+            # so the label says what the number covers rather than implying it is
+            # the final tally.
             ASH_LOGGER.info(
-                f"   Total accounted for: {len(enabled_scanner_names) + excluded_scanners_count + missing_deps_count}"
+                "   Total accounted for after preparation: "
+                f"{len(enabled_scanner_names) + excluded_scanners_count + missing_deps_count}"
             )
 
             ASH_LOGGER.verbose(
