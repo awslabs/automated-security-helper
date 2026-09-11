@@ -54,3 +54,8 @@ jobs:
       install-grype: true
       install-syft: true
       install-opengrep: true
+      # .ash/.ash.yaml enables cfn-nag, so the runner has to carry it. Without
+      # this the scanner resolves MISSING and the run reports an incomplete
+      # scan -- correctly, because the CloudFormation in this repository was
+      # never actually being checked.
+      install-cfn-nag: true

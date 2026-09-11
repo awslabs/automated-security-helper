@@ -108,9 +108,11 @@ import { AshImageBuild } from './ash-image-build';
 import {
   suppressCodeBuildRoleWildcards,
   suppressPipelineRoleWildcards,
+  suppressSplitCodeBuildPolicy,
   suppressSecretRotation,
   suppressUnevaluableRules,
 } from './ash-nag-suppressions';
+import { GENERATED_CONSTRUCT_ID, ashRoleSplitScope, ashRoleSplitScopeOf } from './ash-policy-split';
 import { AshRuntimeConfig } from './ash-runtime-config';
 
 /** Object key the adopter uploads the source archive to. */
@@ -283,7 +285,25 @@ export class AshDistributedPipelineStack extends Stack {
     shardProjects.forEach((project) => config.grantRead(project));
     config.grantRead(mergeProject);
 
-    const pipeline = new codepipeline.Pipeline(this, 'Pipeline', {
+    // The pipeline role is the one case where nothing this stack does could have
+    // helped: both of its statements are added by codepipeline.Pipeline itself.
+    // One is artifact-bucket access; the other is the sts:AssumeRole naming the
+    // seven per-action roles, which scores 22 on its own precisely because it
+    // names them. Supplying the role is the only way to file the two separately.
+    //
+    // The per-action roles this Pipeline generates keep their logical ids: the
+    // scope is named `Pipeline` and the Pipeline itself sits at
+    // `GENERATED_CONSTRUCT_ID`, which aws-cdk-lib drops from logical id derivation
+    // entirely. See ash-policy-split.ts.
+    const pipelineScope = ashRoleSplitScope(
+      this,
+      'Pipeline',
+      'codepipeline.amazonaws.com',
+      suppressPipelineRoleWildcards,
+    );
+
+    const pipeline = new codepipeline.Pipeline(pipelineScope.scope, GENERATED_CONSTRUCT_ID, {
+      role: pipelineScope.role,
       artifactBucket,
       restartExecutionOnUpdate: false,
       // V1 explicitly. V2 bills per action-execution minute, which a fan-out of N
@@ -357,12 +377,17 @@ export class AshDistributedPipelineStack extends Stack {
 
     suppressSecretRotation(config.authSecret);
     suppressPipelineRoleWildcards(pipeline.role);
+    // ashRoleSplitScopeOf, not the project itself. These suppressions reach their
+    // targets through `applyToChildren`, and each project's role is now its sibling
+    // under the shared scope rather than its child — suppressing on the project
+    // alone would leave the role's policies unsuppressed and fail synth on an
+    // ERROR-level IAM5 finding. The scope holds exactly the project and its role.
     shardProjects.forEach((project) => {
-      suppressCodeBuildRoleWildcards(project);
-      suppressUnevaluableRules(project, ['AwsSolutions-CB5']);
+      suppressCodeBuildRoleWildcards(ashRoleSplitScopeOf(project));
+      suppressUnevaluableRules(ashRoleSplitScopeOf(project), ['AwsSolutions-CB5']);
     });
-    suppressCodeBuildRoleWildcards(mergeProject);
-    suppressUnevaluableRules(mergeProject, ['AwsSolutions-CB5']);
+    suppressCodeBuildRoleWildcards(ashRoleSplitScopeOf(mergeProject));
+    suppressUnevaluableRules(ashRoleSplitScopeOf(mergeProject), ['AwsSolutions-CB5']);
     // The S3 source action gets its own generated role, separate from the
     // pipeline role, with the same object-level wildcard.
     suppressPipelineRoleWildcards(pipeline);
@@ -409,7 +434,20 @@ export class AshDistributedPipelineStack extends Stack {
     config: AshRuntimeConfig,
     encryptionKey: kms.IKey,
   ): codebuild.Project {
-    return new codebuild.Project(this, `Shard${index}Project`, {
+    // Own the role rather than letting codebuild.Project generate it, so its
+    // statements are filed per service. Merged into one DefaultPolicy they score
+    // 39 against cfn-nag's W76 ceiling of 25, and only 15 of that comes from
+    // grants this stack makes — the rest the Project adds to its own role, which
+    // is only reachable by supplying the role. See ash-policy-split.ts.
+    const { scope, role } = ashRoleSplitScope(
+      this,
+      `Shard${index}Project`,
+      'codebuild.amazonaws.com',
+      suppressSplitCodeBuildPolicy,
+    );
+
+    return new codebuild.Project(scope, GENERATED_CONSTRUCT_ID, {
+      role,
       description: `ASH scan shard ${index} of ${shardCount}.`,
       environment: { buildImage, computeType: codebuild.ComputeType.LARGE },
       encryptionKey,
@@ -509,7 +547,17 @@ export class AshDistributedPipelineStack extends Stack {
       (_, index) => `  --results ./shard-results/shard-${index} \\`,
     );
 
-    return new codebuild.Project(this, 'MergeProject', {
+    // Same reason as the shard projects: 39 against W76's ceiling of 25 when the
+    // Project's own statements and this stack's grants share one document.
+    const { scope, role } = ashRoleSplitScope(
+      this,
+      'MergeProject',
+      'codebuild.amazonaws.com',
+      suppressSplitCodeBuildPolicy,
+    );
+
+    return new codebuild.Project(scope, GENERATED_CONSTRUCT_ID, {
+      role,
       description:
         `Merges ${shardCount} ASH shard result sets and owns the pass/fail verdict for ` +
         'the pipeline.',

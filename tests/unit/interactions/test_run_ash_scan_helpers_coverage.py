@@ -48,6 +48,7 @@ from automated_security_helper.core.enums import (
     AshLogLevel,
     ExecutionPhase,
     RunMode,
+    ScannerStatus,
 )
 from automated_security_helper.interactions import run_ash_scan as ras
 from automated_security_helper.interactions.run_ash_scan import (
@@ -695,10 +696,25 @@ class TestRunLocalModeFailure:
 
 @pytest.fixture
 def unified_metrics(monkeypatch):
-    """Fix what get_unified_scanner_metrics reports, so counts are deterministic."""
+    """Fix what get_unified_scanner_metrics reports, so counts are deterministic.
+
+    ``scanner_name`` and ``status`` are here because ``_compute_exit_code`` reads
+    this same function twice: once for ``actionable``, and once through
+    ``_incomplete_scanners``, which reads the other two. PASSED, so the
+    completeness gate finds nothing incomplete and these cases keep measuring
+    what they are named for -- fail-on-findings and min-severity -- rather than
+    picking up the incomplete-scan exit code. The classes that exercise the gate
+    itself set the status they need explicitly.
+    """
 
     def install(actionable: int):
-        metrics = [SimpleNamespace(actionable=actionable)]
+        metrics = [
+            SimpleNamespace(
+                actionable=actionable,
+                scanner_name="fake-scanner",
+                status=ScannerStatus.PASSED.value,
+            )
+        ]
         monkeypatch.setattr(
             ras, "get_unified_scanner_metrics", lambda asharp_model: metrics
         )

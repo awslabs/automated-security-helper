@@ -1,0 +1,209 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Fail a CI job when a scanner it was supposed to run did not complete.
+
+Reads ``scanner_results[*].status`` out of ``ash_aggregated_results.json`` and exits
+1 unless every scanner is PASSED, FAILED or SKIPPED. Today that means it fails on
+ERROR (ran and failed) and MISSING (its dependencies were unavailable, so it never
+ran), and on any status it does not recognise. SKIPPED scanners are ones the run did
+not select -- ``--exclude-scanners``, a config that disables them, or one shard of a
+sharded run -- and are reported but do not fail the job.
+
+Stated as what is accepted rather than what is rejected, deliberately: a results file
+from a different ASH version can carry a status this script has never heard of, and a
+rejected-list would let it through a gate whose whole job is to notice that a scanner
+did not run.
+
+It also exits 1 when *no* scanner executed, which is a separate assertion and not
+implied by the first. Because SKIPPED has to be tolerated one entry at a time, a
+file in which every entry is SKIPPED passes the per-scanner check while having
+measured nothing at all.
+
+Why this exists in this shape
+-----------------------------
+It replaces five separate in-line guards, four of which grepped the *prose* text
+report for the substring "ERROR" and compared the line count against 1 to
+discount the report's own legend line ("ERROR = Scanner execution error"). That
+construction had three faults, and every one of them was measured on a real run
+rather than reasoned about:
+
+1. It could not see MISSING at all. A grep for ERROR does not match MISSING, so a
+   cell where four of ten scanners never ran passed the guard. That is the whole
+   defect this script exists to close: on one measured pull-request run, four
+   green check runs each carried three or four MISSING scanners, each at under a
+   millisecond, and in the cells where those scanners did run one of them
+   reported 82 findings. The green cells were not clean, they were unmeasured.
+2. The legend subtraction made the threshold depend on the report's formatting. A
+   report rendered without the legend gives a genuine single ERROR a count of 1,
+   which is not greater than 1, so it passed.
+3. The grep matched anywhere in the report, so a finding message, rule id or file
+   path containing the letters ERROR failed the job for no reason.
+
+The fifth guard read JSON but at a path that does not exist -- ``scanners`` keyed
+by ``result`` rather than ``scanner_results`` keyed by ``status``. In PowerShell's
+default non-strict mode that resolves to $null, the loop body never ran, and the
+step reported success unconditionally. A gate that cannot fail is worse than no
+gate, because its green is read as evidence.
+
+Reading the JSON status rather than the rendered report also means the guard and
+ASH's own exit code answer from the same field, so they cannot disagree.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+# The statuses whose outcome is known, and the only ones that do not fail the job.
+#
+# An allowlist, not a denylist of the bad ones. This used to be
+# ``INCOMPLETE_STATUSES = ("ERROR", "MISSING")`` tested with ``in``, so every status
+# it did not name counted as complete -- including one this script has never heard
+# of. A results file written by a different ASH version, or a future rename of
+# ERROR, would then pass a gate whose entire purpose is to notice that a scanner did
+# not run. The five predecessors this script replaced were each disarmed in some
+# equally quiet way, so the default has to be "fail" rather than "pass".
+#
+# SKIPPED is tolerated because it means the scanner was not selected: one shard of a
+# sharded run records the scanners the other shards own that way, and
+# --exclude-scanners records an operator's choice that way. Whether the *whole set*
+# being SKIPPED is acceptable is a separate question, answered below.
+#
+# Kept in step with automated_security_helper.interactions.run_ash_scan's
+# _COMPLETE_SCANNER_STATUSES. Spelled as literals here rather than imported because
+# this script runs before -- and independently of -- an importable ASH: the bash and
+# PowerShell scan methods leave no ASH on the runner's PATH at all.
+COMPLETE_STATUSES = ("PASSED", "FAILED", "SKIPPED")
+
+# The statuses that mean "this scanner executed". Mirrors ScannerState.ran in
+# scripts/verify_external_target_scan.py, which the sibling gate uses for the same
+# assertion.
+RAN_STATUSES = ("PASSED", "FAILED")
+
+DEFAULT_RESULTS = Path(".ash") / "ash_output" / "ash_aggregated_results.json"
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "results",
+        nargs="?",
+        default=DEFAULT_RESULTS,
+        type=Path,
+        help=f"Path to ash_aggregated_results.json (default: {DEFAULT_RESULTS})",
+    )
+    args = parser.parse_args()
+
+    if not args.results.is_file():
+        print(f"::error::Scan results not found at {args.results}")
+        return 1
+
+    try:
+        results = json.loads(args.results.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        print(f"::error::Could not read {args.results}: {exc}")
+        return 1
+
+    scanner_results = results.get("scanner_results")
+    if not isinstance(scanner_results, dict) or not scanner_results:
+        # No scanner reported at all. Treated as a failure rather than a vacuous
+        # pass for the same reason the rest of this script exists: zero scanners
+        # produce zero findings, which is indistinguishable from a clean scan if
+        # you only look at the findings.
+        print(
+            f"::error::{args.results} reports no scanners. "
+            "A scan that ran nothing has not shown the target to be clean."
+        )
+        return 1
+
+    print(f"Scanner completion, read from {args.results}:")
+    incomplete: list[tuple[str, str]] = []
+    observed: list[tuple[str, str]] = []
+    for name in sorted(scanner_results):
+        entry = scanner_results[name] or {}
+        status = entry.get("status") if isinstance(entry, dict) else None
+        status = str(status) if status is not None else "UNKNOWN"
+        print(f"  {name:<24} {status}")
+        observed.append((name, status))
+        # Anything not on the allowlist counts as incomplete, which covers the
+        # "UNKNOWN" this loop substitutes for an entry whose status could not be read
+        # at all. An unreadable status is not evidence that the scanner ran.
+        if status not in COMPLETE_STATUSES:
+            incomplete.append((name, status))
+
+    # Consistency check on the counters, cheap and worth having: every scanner
+    # should land in exactly one outcome bucket. When they did not sum, the
+    # missing one was ERROR -- it had no counter, so two scanners that ran and
+    # failed were absent from every total while each total read clean.
+    stats = results.get("metadata", {}).get("summary_stats", {})
+    if isinstance(stats, dict):
+        buckets = ("passed", "failed", "missing", "skipped", "error")
+        if all(isinstance(stats.get(b), int) for b in buckets):
+            accounted = sum(stats[b] for b in buckets)
+            print(
+                f"summary_stats accounts for {accounted} of "
+                f"{len(scanner_results)} scanners "
+                + ", ".join(f"{b}={stats[b]}" for b in buckets)
+            )
+            if accounted != len(scanner_results):
+                print(
+                    f"::warning::summary_stats accounts for {accounted} scanners "
+                    f"but scanner_results holds {len(scanner_results)}. A counter "
+                    "is missing a status, so any verdict keyed on these totals is "
+                    "reading an incomplete tally."
+                )
+
+    failed = False
+
+    if incomplete:
+        for name, status in incomplete:
+            print(f"::error::Scanner {name} did not complete: {status}")
+        print(
+            f"::error::{len(incomplete)} of {len(scanner_results)} scanners did not "
+            "complete. ERROR means the scanner ran and failed; MISSING means its "
+            "dependencies were unavailable so it never ran. Either install the "
+            "tool on this platform or exclude the scanner explicitly, which "
+            "records it as SKIPPED and says so in the report. Any other status is "
+            "one this gate does not recognise -- most likely a results file from a "
+            f"different ASH version; the ones it accepts are {', '.join(COMPLETE_STATUSES)}."
+        )
+        failed = True
+
+    # At least one scanner has to have executed.
+    #
+    # Every status above is judged on its own, and SKIPPED has to stay tolerated
+    # there: it is how one shard of a sharded run records the scanners the other
+    # shards own, and how --exclude-scanners records an operator's choice. So a
+    # results file in which *every* scanner is SKIPPED passes the per-scanner loop
+    # while having measured nothing, and that is reachable from a typo -- measured
+    # on this tree, `ash scan --scanners detect_secrets` (the name is
+    # detect-secrets) matched no scanner, recorded ten SKIPPED, and this script
+    # returned 0.
+    #
+    # The assertion is therefore about the set rather than about any one entry,
+    # which is the shape scripts/verify_external_target_scan.py's
+    # check_some_scanner_ran already uses.
+    if not any(status in RAN_STATUSES for _, status in observed):
+        print(
+            f"::error::None of the {len(scanner_results)} scanners in "
+            f"{args.results} executed. Statuses: "
+            + ", ".join(f"{name}={status}" for name, status in observed)
+            + ". Every scanner being SKIPPED means the run selected nothing, so it "
+            "has shown the target to be neither clean nor dirty -- most often a "
+            "--scanners name that matches no scanner, or an allowlist wholly "
+            "cancelled by --exclude-scanners."
+        )
+        failed = True
+
+    if failed:
+        return 1
+
+    print(f"All {len(scanner_results)} scanners accounted for; none incomplete.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

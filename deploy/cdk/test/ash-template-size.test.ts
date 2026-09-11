@@ -55,6 +55,66 @@
  *
  * Consequence for this file: if path metadata is ever re-enabled, these two
  * templates go back over the cap and this test is what will say so.
+ *
+ * WHY `@aws-cdk/core:suppressTemplateIndentation` IS SET IN cdk.json
+ * -----------------------------------------------------------------
+ * CloudFormation parses the template body as JSON, so the indentation is bytes
+ * the cap charges for and nothing reads. Setting that context key makes CDK emit
+ * each template as a single line, which is worth between 12% and 21% per stack:
+ *
+ *   AshAgentCore            66,663 -> 53,183
+ *   AshCodeCommitGate       58,181 -> 47,180
+ *   AshDistributedPipeline 229,782 -> 182,498
+ *   AshFargate              84,141 -> 65,078
+ *   AshImagePipeline        83,369 -> 69,988
+ *
+ * Less than it sounds like, because CDK's default is ONE space and not two --
+ * `Stack._synthesizeTemplate` does `indent = suppress ? undefined : 1`. So this
+ * removes one space per line plus the newline, not two.
+ *
+ * It is set as a global context key rather than per-stack `StackProps` because
+ * whitespace is not a property any single stack should get to disagree about, and
+ * because cdk.json is already where this app's size mitigations live next to
+ * `pathMetadata: false` and `minimizePolicies`. The three S3-only templates do not
+ * need the bytes; they get the key anyway, and the S3-only half of this file is
+ * what confirms none of them fell under the cap and quietly changed launch class.
+ *
+ * IT DID NOT FIT ON ITS OWN. Unindented, AshAgentCore came out at 53,183, still
+ * 1,983 over. The rest came from the cdk-nag suppression reasons, which were
+ * 20,424 of that 53,183 -- 38% of the template -- across 18 of its 28 resources.
+ * Two changes, neither of which drops a justification:
+ *
+ *   * The `CdkNagValidationFailure` reason is now pure ASCII. cdk-nag
+ *     base64-encodes any reason holding a non-ASCII character, and AshAgentCore
+ *     carries 19 copies of that one, so a single em dash cost it 3,225 bytes.
+ *     See the note on `suppressUnevaluableRules` in lib/ash-nag-suppressions.ts.
+ *   * The CodeBuild and ECR wildcard reason was tightened by 45 characters over
+ *     its 8 copies. All four enumerated wildcard classes and the closing
+ *     out-of-stack claim survive, because they are what makes the suppression
+ *     checkable rather than merely present.
+ *
+ * AshAgentCore is 49,598, so it clears the cap by 1,602 bytes.
+ *
+ * READ THAT MARGIN AS THIN, BECAUSE IT IS: 3.1% of the cap, on a stack whose
+ * suppression metadata grows with every resource added. A new resource needing an
+ * IAM5 suppression costs roughly 400 bytes of reason plus its own body, so about
+ * three of them exhaust the headroom. This test is what will say so first, and
+ * the answer at that point is more likely to be reclassifying AshAgentCore as
+ * S3-only than finding another 1,600 bytes of prose.
+ *
+ * MEASURED AND REJECTED, so nobody re-derives them: hoisting the child-policy
+ * suppressions up to the role recovers nothing, because `applyToChildren`
+ * materializes a byte-identical reason on the role and on each child either way.
+ * Reclassifying the two inline templates as S3-only would empty the inline set
+ * and make the central assertion here vacuous, which is the same objection the
+ * pathMetadata section above records.
+ *
+ * ONE MORE CONSEQUENCE, AND IT IS NOT IN THIS FILE: `.pre-commit-config.yaml` runs
+ * `pretty-format-json --autofix --indent=2` over every JSON file except
+ * `.vscode/*`, which claimed these templates. That hook already disagreed with the
+ * committed one-space output before this change; unindented, a contributor running
+ * pre-commit would reflate them to 2-space and break the drift gate. The templates
+ * directory is excluded from that hook for exactly that reason.
  */
 
 import * as fs from 'fs';

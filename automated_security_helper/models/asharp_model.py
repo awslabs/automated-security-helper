@@ -115,10 +115,24 @@ class SummaryStats(BaseModel):
     duration: float = 0.0
     total: int = 0
     actionable: int = 0
+
+    # Scanner-outcome counters. Every scanner lands in exactly one of these, so
+    # passed + failed + missing + skipped + error is the number of scanners in the
+    # run and a consumer can tell a complete scan from a partial one by arithmetic.
+    #
+    # `error` is here because it was the one status with no counter. A scanner that
+    # ran and failed outright appeared in none of the other four, so on a run with
+    # two ERROR scanners the counters summed to 8 of 10 and every one of them read
+    # clean. Anything deriving a verdict from these -- a dashboard, a CI gate, a
+    # reviewer skimming ash.flat.json -- was reading a total that silently excluded
+    # the scanners with the worst outcome. The exit code does not read these fields
+    # (it reads per-scanner status through incomplete_scanners), which is why the
+    # gap survived: nothing that failed loudly depended on it.
     passed: int = 0
     failed: int = 0
     missing: int = 0
     skipped: int = 0
+    error: int = 0
 
     @model_validator(mode="before")
     @classmethod

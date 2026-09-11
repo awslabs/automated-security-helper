@@ -88,6 +88,11 @@ on:
         required: false
         default: false
         type: boolean
+      install-cfn-nag:
+        description: "Whether to install the cfn-nag scanner"
+        required: false
+        default: false
+        type: boolean
       changed-files-only:
         description: "Limit the scan to files changed in the PR (reduces scan time and focuses feedback)"
         required: false
@@ -185,6 +190,41 @@ jobs:
           fi
           ln -sf "$INSTALL_DIR/opengrep_manylinux_x86" "$INSTALL_DIR/opengrep"
           echo "$INSTALL_DIR" >> $GITHUB_PATH
+
+      # No ruby/setup-ruby step. ubuntu-latest installs Ruby from apt's
+      # `ruby-full`, which depends on `ruby-dev`, and the image also carries
+      # gcc, make and libyaml-dev -- which is everything the two native gems in
+      # this lock (bigdecimal and psych 3.x) need in order to build.
+      - name: Install cfn-nag
+        if: inputs.install-cfn-nag
+        env:
+          # Same repo and ref the scan itself is installed from, so the gem
+          # version can never disagree with the ASH that invokes it.
+          ASH_ASSETS_URL: https://raw.githubusercontent.com/${{ inputs.ash-repo }}/${{ inputs.ash-version }}/automated_security_helper/assets
+        run: |
+          set -euo pipefail
+          # ASH's own Gemfile and Gemfile.lock are the version pin -- naming
+          # 0.8.10 here as well would create a second place to update, and the
+          # container image already builds cfn-nag from these two files.
+          GEMFILE="${GITHUB_WORKSPACE}/automated_security_helper/assets/Gemfile"
+          if [ ! -f "${GEMFILE}" ]; then
+            # The checkout is the calling repository, not ASH's, so fetch the pin.
+            GEMFILE="${RUNNER_TEMP}/ash-cfn-nag/Gemfile"
+            mkdir -p "$(dirname "${GEMFILE}")"
+            curl -sSfL "${ASH_ASSETS_URL}/Gemfile" -o "${GEMFILE}"
+            curl -sSfL "${ASH_ASSETS_URL}/Gemfile.lock" -o "${GEMFILE}.lock"
+          fi
+          echo "Installing cfn-nag from ${GEMFILE}"
+          sudo BUNDLE_GEMFILE="${GEMFILE}" bundle install --jobs=4
+
+          # ASH runs `cfn_nag_scan` as a plain subprocess, so the binstub has to
+          # be reachable by name. Read the directory from rubygems rather than
+          # assuming one: if it were wrong, the scan would not fail here -- it
+          # would report cfn-nag MISSING, which is the exact silent-pass this
+          # branch exists to remove.
+          GEM_BIN="$(sudo gem environment | awk -F': ' '/EXECUTABLE DIRECTORY/ {print $2; exit}')"
+          echo "${GEM_BIN}" >> "${GITHUB_PATH}"
+          PATH="${GEM_BIN}:${PATH}" command -v cfn_nag_scan
 
       - name: Run ASH
         id: ash

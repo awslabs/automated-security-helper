@@ -1,20 +1,28 @@
-"""cdk-nag must report SKIPPED, not PASSED, when it evaluated nothing.
+"""cdk-nag must report SKIPPED, not PASSED, when there was nothing to evaluate.
 
-Three routes reach zero evaluated templates, and all three used to end the same way: an empty
-SARIF report, zero findings, PASSED, green.
+Two routes reach zero evaluated templates without anything having gone wrong, and both used to
+end the same way: an empty SARIF report, zero findings, PASSED, green.
 
   1. The scan set holds no JSON or YAML file at all, so the scan body returns before the loop.
   2. Files were found but every one turned out not to be a CloudFormation template, so the
      per-file skip decremented the attempt count back to zero.
-  3. Every nag pack is disabled, so the wrapper registers no plugin and returns None for every
-     template -- which lands in the same skip branch as route 2.
 
-Route 3 is worth stating explicitly because it is the one the PR #514 reviewer named ("empty
-packs"), and because reading the scanner alone suggests it produces a validation report with no
-plugin reports and therefore an ERROR. It does not:
-``cdk_nag_wrapper.run_cdk_nag_against_cfn_template`` checks ``if not nag_packs`` before synthesis
-and returns None, so no report is written and no ``failure`` is set. It is a green case, and it
-is fixed by the same counter that fixes route 2.
+A third route used to be covered here: every nag pack disabled, which made the wrapper register
+no plugin and return None for every template, landing in the same skip branch as route 2. It has
+moved to ``test_cdk_nag_unevaluated_is_not_skipped.py`` and its expected status has changed from
+SKIPPED to ERROR, because a real CloudFormation template that no rule ran against is not the same
+claim as a repository with no CloudFormation in it. The reasoning for overturning it is in that
+file's docstring. What stays here is route 3's *input* side --
+``test_the_wrapper_asks_for_no_packs_when_all_are_disabled`` -- which pins that a config with
+every pack off really does ask the wrapper for an empty pack list, and is unaffected by what the
+wrapper then does with it.
+
+Worth knowing before adding a route-3 test back to this file: the two tests that were removed
+alongside the docstring change did not both fail when the wrapper's behavior changed. One of them
+set ``wrapper_double.return_value = None`` and asserted SKIPPED, which is still true of a doubled
+None and always will be -- it pinned the scanner's skip branch while its name claimed to pin the
+every-pack-disabled route. Only the test that read the wrapper's source noticed. A route-3
+assertion driven through a double of the wrapper cannot detect a change in the wrapper.
 
 Asserted on the counters here and on the container's status in
 ``tests/unit/models/test_scan_results_container_nothing_scanned.py``, because the scanner's job
@@ -189,7 +197,8 @@ def test_one_real_template_among_skipped_files_is_not_skipped(
 
 
 # ---------------------------------------------------------------------------
-# Route 3: every nag pack disabled -- the case the reviewer named
+# Route 3, input side only. What the wrapper does with an empty pack list, and
+# what status that produces, is in test_cdk_nag_unevaluated_is_not_skipped.py.
 # ---------------------------------------------------------------------------
 
 
@@ -198,8 +207,10 @@ def test_the_wrapper_asks_for_no_packs_when_all_are_disabled(
 ):
     """Pins the input side: a config with every pack off produces an empty pack list.
 
-    Without this, the next test would prove only that a mocked None yields SKIPPED, and the
-    claim that disabling every pack reaches that branch would rest on reading the config code.
+    Without this, any claim about the every-pack-disabled route rests on reading the config
+    code rather than on running it -- and the filter this pins is not trivial. ``CdkNagPacks``
+    allows extra keys, so ``nag_packs.items()`` can hold names that are not packs at all, and
+    the comprehension in ``scan()`` decides which of them reach the wrapper.
     """
     scanner.config = CdkNagScannerConfig(
         options=CdkNagScannerConfigOptions(
@@ -222,60 +233,6 @@ def test_the_wrapper_asks_for_no_packs_when_all_are_disabled(
         assert call.kwargs["nag_packs"] == [], (
             f"expected no packs to be requested; got {call.kwargs['nag_packs']}"
         )
-
-
-def test_the_wrapper_returns_none_when_no_pack_is_registered():
-    """Pins the wrapper side: an empty pack list is None, not a report with no plugin reports.
-
-    Checked against the source rather than by calling the wrapper, because a call needs cdk-nag
-    and NodeJS and this is a unit test. The reading matters: if this branch instead synthesized
-    and wrote a report, ``_violations_from_validation_report`` would return a ``failure``, the
-    scanner would count a failed target, and every-pack-disabled would already report ERROR
-    rather than green. It returns None, so it does not.
-    """
-    import inspect
-
-    source = inspect.getsource(wrapper_module.run_cdk_nag_against_cfn_template)
-    guard = source.split("if not nag_packs:", 1)
-    assert len(guard) == 2, (
-        "run_cdk_nag_against_cfn_template no longer guards on an empty pack list; the "
-        "every-pack-disabled route may now take a different path"
-    )
-    after_guard = guard[1]
-    assert "return None" in after_guard.split("app.synth()", 1)[0], (
-        "the empty-pack guard must return None before synthesis; if it now synthesizes, this "
-        "route produces a validation report and needs its own handling"
-    )
-
-
-def test_every_pack_disabled_reports_skipped(scanner, cdk_available, wrapper_double):
-    """The reviewer's case, end to end through the scanner.
-
-    Every template returns None because no pack was registered, the attempt count returns to
-    zero, and the status says nothing was evaluated instead of rendering green.
-    """
-    scanner.config = CdkNagScannerConfig(
-        options=CdkNagScannerConfigOptions(
-            nag_packs=CdkNagPacks(
-                AwsSolutionsChecks=False,
-                HIPAASecurityChecks=False,
-                NIST80053R4Checks=False,
-                NIST80053R5Checks=False,
-                PCIDSS321Checks=False,
-            )
-        )
-    )
-    (scanner.context.work_dir / "bucket.yaml").write_text(CFN_TEMPLATE)
-    (scanner.context.work_dir / "queue.yaml").write_text(CFN_TEMPLATE)
-    wrapper_double.return_value = None
-
-    report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
-
-    assert scanner.targets_attempted == 0
-    assert _status_for(scanner) == ScannerStatus.SKIPPED
-    # The run itself completed; it simply had no rule to apply. executionSuccessful describes
-    # the run, and the "nothing evaluated" fact is carried by the status above.
-    assert report.runs[0].invocations[0].executionSuccessful is True
 
 
 # ---------------------------------------------------------------------------

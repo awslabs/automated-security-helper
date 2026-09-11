@@ -13,7 +13,21 @@ repos:
     rev: v5.0.0
     hooks:
       - id: pretty-format-json
-        exclude: ".vscode/.*"
+        # deploy/cdk/templates/*.template.json is `cdk synth` output, and CDK
+        # decides its whitespace: `@aws-cdk/core:suppressTemplateIndentation` in
+        # deploy/cdk/cdk.json makes it emit one line per template, because
+        # CloudFormation's inline `--template-body` cap counts the indentation it
+        # then throws away. Reindenting them here would put AshAgentCore back over
+        # that cap and fail the IaC drift gate, which compares the committed bytes
+        # to a fresh synth. Excluded rather than reformatted for the same reason
+        # any generated file is: the generator owns the format.
+        #
+        # This hook already disagreed with these files before that flag was set --
+        # CDK's default indent is one space, not two -- so a contributor running
+        # pre-commit locally was already rewriting them. Only the generated pattern
+        # is excluded, so a hand-authored JSON file added beside them is still
+        # formatted.
+        exclude: '\.vscode/.*|^deploy/cdk/templates/.*\.template\.json'
         args:
           - "--autofix"
           - "--indent=2"

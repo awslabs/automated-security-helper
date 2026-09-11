@@ -31,6 +31,7 @@ from typing import Dict, Any, Optional, Tuple
 
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
+from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     ScannerSeverityCount,
@@ -689,6 +690,33 @@ class ScannerStatisticsCalculator:
             elif hasattr(scanner_status_info, "dependencies_missing"):
                 # New ScannerMetrics structure
                 dependencies_missing = scanner_status_info.dependencies_missing
+
+            # ERROR has to be read off the recorded status here, and this branch is
+            # the one a scanner that actually ran takes.
+            #
+            # Nothing else recovers it. get_unified_scanner_metrics consults this
+            # flag before it tests `actionable > 0`, and only reaches the recorded
+            # status in the else after both. So with error left False, a scanner
+            # recorded ERROR that had written findings before it failed was reported
+            # FAILED -- "ran and found something" -- and disappeared from
+            # incomplete_scanners entirely. Measured on this tree, one scanner
+            # recorded ERROR: with 0 SARIF findings it read ERROR and tripped the
+            # gate; with 3 it read FAILED and the gate reported nothing incomplete,
+            # so `ash scan` exited 2 rather than 1 for a run in which a scanner had
+            # crashed.
+            #
+            # Only ERROR is taken from the status. excluded and dependencies_missing
+            # have their own dedicated fields above, which are the authoritative
+            # signals for SKIPPED and MISSING, and PASSED/FAILED must not be taken
+            # from here at all: the recorded status is not authoritative about the
+            # finding count, so a scanner recorded PASSED whose findings are
+            # actionable at this run's threshold has to keep reading FAILED. What the
+            # recorded status *is* authoritative about is whether the scanner crashed.
+            status_value = getattr(
+                getattr(scanner_status_info, "status", None), "value", None
+            ) or getattr(scanner_status_info, "status", None)
+            if status_value == ScannerStatus.ERROR.value:
+                error = True
         elif (
             scanner_name in asharp_model.additional_reports
             and "source" in asharp_model.additional_reports[scanner_name]

@@ -53,12 +53,77 @@ export function suppressCodeBuildRoleWildcards(scope: IConstruct): void {
       {
         id: 'AwsSolutions-IAM5',
         reason:
-          'Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: ' +
-          '(1) the log-stream suffix on this project\'s own CloudWatch log group, which is ' +
-          'created per build; (2) the per-report suffix on this project\'s own report group; ' +
+          'Inherent to CodeBuild and ECR, not a widening of scope. The wildcards are: ' +
+          '(1) the per-build log-stream suffix on this project\'s own log group; ' +
+          '(2) the per-report suffix on its own report group; ' +
           '(3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so "*" is ' +
-          'the only valid value; (4) object-level access inside buckets created by this ' +
-          'stack. None of them reach a resource outside this stack.',
+          'the only valid value; (4) object-level access inside buckets this stack creates. ' +
+          'None of them reach a resource outside this stack.',
+      },
+    ],
+    true,
+  );
+}
+
+/**
+ * Both CodeBuild-role suppressions, for one policy produced by the per-service
+ * split in ash-policy-split.ts.
+ *
+ * Pass this as that role's `onPolicyCreated`. It has to run per policy AS THE
+ * POLICY IS CREATED rather than once over the role, because a suppression applied
+ * to a scope only reaches the resources that exist when it is applied — and a
+ * grant made later creates a policy resource the earlier walk could not see. The
+ * measured case is the artifact-bucket read `codepipeline_actions.CodeBuildAction`
+ * adds to a project's role while the pipeline is assembled.
+ *
+ * `AwsSolutions-IAM5` for the wildcards, which are the same wildcards as before
+ * the split and are enumerated in `suppressCodeBuildRoleWildcards`.
+ * `CdkNagValidationFailure` for `AwsSolutions-IAM5` because a policy whose
+ * resources are all CloudFormation intrinsics makes the rule throw rather than
+ * pass or fail — which is exactly what the single DefaultPolicy needed too.
+ */
+export function suppressSplitCodeBuildPolicy(policy: IConstruct): void {
+  suppressCodeBuildRoleWildcards(policy);
+  suppressUnevaluableRules(policy, ['AwsSolutions-IAM5']);
+}
+
+/**
+ * The wildcards on the AgentCore execution role, which the per-service split made
+ * visible for the first time.
+ *
+ * These grants did not change. What changed is that cdk-nag can now evaluate
+ * them. Before the split every statement on this role shared one policy document,
+ * and because some of those statements scope themselves with ARNs built from
+ * pseudo-parameters, AwsSolutions-IAM5 threw on the document as a whole and was
+ * recorded as a CdkNagValidationFailure. The rule therefore never reached the
+ * three statements that genuinely use "*". Split per service, those three sit in
+ * documents the rule can read, and it correctly reports them.
+ *
+ * So this suppression is not new permissiveness; it is a finding that was masked
+ * becoming a finding that is stated. Each of the three is a wildcard IAM itself
+ * requires:
+ *
+ *   * `ecr:GetAuthorizationToken` is an account-level operation that IAM defines
+ *     with no resource ARN, so "*" is the only value it accepts.
+ *   * The four X-Ray actions the AgentCore runtime needs for tracing are likewise
+ *     defined with no resource ARN.
+ *   * `cloudwatch:PutMetricData` has no resource ARN either. It is scoped by the
+ *     `cloudwatch:namespace` condition on the statement instead, which limits it
+ *     to the one namespace the runtime publishes to.
+ */
+export function suppressAgentCoreRuntimeWildcards(scope: IConstruct): void {
+  NagSuppressions.addResourceSuppressions(
+    scope,
+    [
+      {
+        id: 'AwsSolutions-IAM5',
+        reason:
+          'Every wildcard here is an action IAM defines with no resource ARN, so "*" is the ' +
+          'only value the policy will accept: ecr:GetAuthorizationToken, the four X-Ray ' +
+          'tracing actions, and cloudwatch:PutMetricData. PutMetricData is scoped by a ' +
+          'cloudwatch:namespace condition on its statement rather than by a resource. ' +
+          'Nothing here reaches a resource outside this stack, and no statement was ' +
+          'widened to obtain this suppression.',
       },
     ],
     true,
@@ -119,6 +184,33 @@ export function suppressPipelineRoleWildcards(scope: IConstruct): void {
  * projects whose environment image is an `Fn::Join` over the ECR repository
  * attributes. Suppressing the failure is recorded explicitly so nobody reads a
  * clean run as "every rule passed" when one rule could not run.
+ *
+ * THIS REASON HAS TO STAY PURE ASCII, AND THAT IS A TEMPLATE-SIZE CONSTRAINT
+ * -------------------------------------------------------------------------
+ * cdk-nag base64-encodes any suppression reason containing a non-ASCII character
+ * and records that it did so with a sibling `"is_reason_encoded": true`. Verified
+ * against cdk-nag 2.38.2 by synthesizing one plain reason beside one carrying an
+ * em dash. Base64 spends 4 bytes per 3, so a 417-character reason arrives in the
+ * template as 586 bytes rather than 417.
+ *
+ * This is the most repeated reason in the app: AshAgentCore carries 19 copies and
+ * AshDistributedPipeline 93. So one em dash in this single string cost AshAgentCore
+ * 3,211 bytes against a 51,200-byte cap it was already 1,983 over. Replacing it
+ * with a colon changed one character and dropped no words.
+ *
+ * Size is how this was noticed and not why ASCII is right. The committed template
+ * is the deliverable, and until this change 19 of AshAgentCore's 36 suppression
+ * reasons reached an adopter as an opaque base64 blob. A justification nobody can
+ * read in the artifact it ships in is not doing the job it exists for.
+ *
+ * Two reasons in this file still hold an em dash on purpose:
+ * `suppressTaskDefinitionEnvironment` and `suppressParameterizedIngressRule`, six
+ * rows between them and all six in AshFargate, which is S3-only and 13,878 bytes
+ * clear of the cap. `.ash/.ash.yaml` describes the encoded-reason population from
+ * the other side -- it is one of the mechanisms behind that file's
+ * SECRET-BASE64-HIGH-ENTROPY-STRING entries on these templates -- so emptying the
+ * set entirely would obsolete that description in a change about template size.
+ * Those two are worth converting; they need that file updated with them.
  */
 export function suppressUnevaluableRules(scope: IConstruct, ruleIds: string[]): void {
   NagSuppressions.addResourceSuppressions(
@@ -131,7 +223,7 @@ export function suppressUnevaluableRules(scope: IConstruct, ruleIds: string[]): 
           'intrinsics rather than literals: the ECR image URI is an Fn::Join over the ' +
           'repository attributes, and the IAM resources are built from pseudo-parameters so ' +
           'the templates stay account- and region-agnostic. Rules affected: ' +
-          `${ruleIds.join(', ')}. Recorded rather than silently ignored — these rules did ` +
+          `${ruleIds.join(', ')}. Recorded rather than silently ignored: these rules did ` +
           'not run, so they neither passed nor failed.',
       },
     ],

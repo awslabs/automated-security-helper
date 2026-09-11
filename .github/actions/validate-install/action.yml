@@ -15,6 +15,40 @@ runs:
         mkdir -p /tmp/ash-selftest
         echo 'print("hello")' > /tmp/ash-selftest/test_sample.py
 
+    # Every self-test scan below passes `--scanners detect-secrets`, and that is a
+    # statement about what these jobs test rather than a way to quieten them.
+    #
+    # This action answers one question: after installing ASH by method X, does
+    # `ash scan` run end to end? It installs ASH and nothing else -- no
+    # `ash dependencies install`, no `[cdk]` extra, no ruby gem, no Go binaries --
+    # so of the ten default scanners only the pip-installed ones could possibly
+    # run here. Left unnarrowed, the scan selects all ten, five report MISSING for
+    # tools this job never intended to provide, and `ash scan` exits non-zero
+    # because a scan that could not run what it was asked to run is not a pass.
+    #
+    # Naming one scanner says which one the smoke test covers. The nine it leaves
+    # out are recorded SKIPPED -- not selected -- so the report shows what was and
+    # was not measured. The alternative, `--no-fail-on-incomplete-scanners`, would
+    # have kept the same green while asserting nothing about whether any scanner
+    # ran, which is the failure mode the completeness gate exists to remove.
+    #
+    # detect-secrets specifically, because it is the only default scanner that is
+    # genuinely vendored. `detect-secrets>=1.5.0,<2` is in [project] dependencies,
+    # and DetectSecretsScanner imports the library at module scope and drives it
+    # through the in-process Python API, so validate_plugin_dependencies returns
+    # True without consulting anything: if the library were absent, ASH's plugin
+    # loading would fail outright rather than the scanner reporting MISSING.
+    #
+    # This used to name bandit, on the stated grounds that bandit was "a core
+    # dependency in pyproject.toml". It is not, and never was -- bandit appears
+    # nowhere in pyproject.toml, in dependencies, in any extra, or in
+    # dependency-groups. BanditScanner sets use_uv_tool and its
+    # validate_plugin_dependencies runs `uv tool install bandit[sarif,toml]` on
+    # demand, so every one of these cells was reaching PyPI at scan time and a
+    # registry blip made the completeness gate fail rather than skip a scanner. A
+    # gate whose green depends on a network fetch is a flaky gate, and flaky gates
+    # get disabled.
+
     # === pip ===
     - name: "pip: install"
       if: inputs.method == 'pip'
@@ -29,7 +63,7 @@ runs:
     - name: "pip: self-test scan"
       if: inputs.method == 'pip'
       shell: bash
-      run: ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report
+      run: ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report --scanners detect-secrets
 
     # === pipx ===
     - name: "pipx: install pipx"
@@ -49,7 +83,7 @@ runs:
     - name: "pipx: self-test scan"
       if: inputs.method == 'pipx'
       shell: bash
-      run: ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report
+      run: ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report --scanners detect-secrets
 
     # === uvx ===
     - name: "uvx: install uv (Unix)"
@@ -67,7 +101,7 @@ runs:
     - name: "uvx: self-test scan"
       if: inputs.method == 'uvx'
       shell: bash
-      run: uvx --from . ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report
+      run: uvx --from . ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report --scanners detect-secrets
 
     # === homebrew ===
     - name: "homebrew: validate formula"

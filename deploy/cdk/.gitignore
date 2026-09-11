@@ -22,3 +22,9 @@ cdk.out
 dist
 .cdk.staging
 *.tsbuildinfo
+
+# jest --coverage output. Twenty files, regenerated on every coverage run, and
+# nothing reads them from the repository -- CI reads the run's own output. Not
+# ignored before, so a coverage run left the tree dirty and any later `git status`
+# check had to know to look past it.
+coverage/

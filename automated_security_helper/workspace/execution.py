@@ -246,6 +246,7 @@ from automated_security_helper.workspace.aggregation import (
     WorkspaceAggregator,
     count_actionable_results,
     has_finding_at_min_severity,
+    incomplete_scanners_for_project,
 )
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
 from automated_security_helper.workspace.policy import ceiling_unreachable_counts
@@ -291,6 +292,7 @@ class ProjectScanSettings:
     ignore_suppressions: bool = False
     min_severity: str = "low"
     fail_on_findings: Optional[bool] = None
+    fail_on_incomplete_scanners: Optional[bool] = None
     changed_files_only: bool = False
     base_ref: str = "origin/main"
     precommit: bool = False
@@ -636,6 +638,13 @@ def _scan_one_project(
 
     fail_on_findings = _resolve_fail_on_findings(settings, results)
 
+    # The completeness half of the verdict, alongside the threshold half above.
+    # Without it a project whose scanners never ran reported zero findings and
+    # SUCCESS, while `ash --source-dir P` on the same project exited 1 -- the
+    # workspace layer mirrored only the threshold pass.
+    incomplete = incomplete_scanners_for_project(results)
+    fail_on_incomplete = _resolve_fail_on_incomplete_scanners(settings, results)
+
     if abandoned is not None and abandoned.is_set():
         # Given up on while this was running. Do not write, and do not return an
         # outcome -- the outer loop already recorded FAILED for this project, and
@@ -682,6 +691,8 @@ def _scan_one_project(
         duration_seconds=time.monotonic() - started,
         output_path=output_path,
         scanners=_scanner_statuses(results),
+        incomplete_scanners=incomplete,
+        scan_incomplete=bool(incomplete) and fail_on_incomplete,
         ceiling_unreachable_findings=unreachable,
     )
     return _ProjectRun(outcome=outcome, run=run)
@@ -785,6 +796,33 @@ def _resolve_fail_on_findings(settings: ProjectScanSettings, results: Any) -> bo
     configured = getattr(config, "fail_on_findings", None)
     if configured is not None:
         return bool(configured)
+    return True
+
+
+def _resolve_fail_on_incomplete_scanners(
+    settings: ProjectScanSettings, results: Any
+) -> bool:
+    """Whether this project's unrun scanners should fail it.
+
+    Same three-step precedence as ``_resolve_fail_on_findings`` above and as
+    ``run_ash_scan._resolve_fail_on_incomplete_scanners``: the CLI value, then the
+    project's own config, then True.
+
+    True as the fallback, matching ``AshConfig.fail_on_incomplete_scanners``. The
+    two are the same question answered twice, and when they disagreed the answer
+    depended on how far config resolution had got before it was asked.
+
+    ``isinstance(..., bool)`` rather than a truthiness test on the config value,
+    because this reaches into whatever object the orchestrator handed back: a
+    partially-built model or a test double would otherwise contribute a truthy
+    non-answer and turn the gate on for a project whose config never mentioned it.
+    """
+    if settings.fail_on_incomplete_scanners is not None:
+        return settings.fail_on_incomplete_scanners
+    config = getattr(results, "ash_config", None)
+    configured = getattr(config, "fail_on_incomplete_scanners", None)
+    if isinstance(configured, bool):
+        return configured
     return True
 
 

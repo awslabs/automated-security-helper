@@ -9,6 +9,7 @@ from typing import List, Optional, Literal
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.core.enums import ExecutionPhase, ExecutionStrategy
+from automated_security_helper.core.exceptions import ScannerSelectionError
 from automated_security_helper.core.metrics_table import display_metrics_table
 from automated_security_helper.core.phases.convert_phase import ConvertPhase
 from automated_security_helper.core.phases.report_phase import ReportPhase
@@ -344,12 +345,41 @@ class ScanExecutionEngine:
                 ASH_LOGGER.info(f"Excluding scanners: {self._init_excluded_scanners}")
                 # If we have both enabled and excluded scanners, we need to filter the enabled list
                 if self._init_enabled_scanners:
-                    self._init_enabled_scanners = [
+                    excluded_keys = [
+                        s.lower().strip() for s in self._init_excluded_scanners
+                    ]
+                    remaining = [
                         scanner
                         for scanner in self._init_enabled_scanners
-                        if scanner.lower()
-                        not in [s.lower() for s in self._init_excluded_scanners]
+                        if scanner.lower().strip() not in excluded_keys
                     ]
+                    # Refused rather than resolved to either of its readings.
+                    #
+                    # The subtraction is what makes this the only layer that can see
+                    # the contradiction: after it runs, an allowlist emptied by
+                    # exclusions is indistinguishable from one the operator never
+                    # gave, and the scan phase reads an empty allowlist as "no
+                    # narrowing, run everything". Measured on a host with five of the
+                    # ten tools installed, `--scanners detect-secrets
+                    # --exclude-scanners detect-secrets` ran the nine scanners the
+                    # operator had not asked for and SKIPPED the one they had.
+                    #
+                    # Running nothing instead would be no better: every scanner would
+                    # land in SKIPPED, which the completeness gate has to tolerate one
+                    # entry at a time, so it would be the silent-zero shape rather
+                    # than a visible refusal.
+                    if not remaining:
+                        raise ScannerSelectionError(
+                            "Every scanner named by --scanners is also named by "
+                            "--exclude-scanners, so the selection cancels itself: "
+                            f"selected {', '.join(self._init_enabled_scanners)}; "
+                            f"excluded {', '.join(self._init_excluded_scanners)}. "
+                            "Refused rather than guessed: an empty allowlist means "
+                            "'every scanner' further down, so this would silently run "
+                            "the scanners you excluded and skip the ones you chose. "
+                            "Drop one of the two flags."
+                        )
+                    self._init_enabled_scanners = remaining
 
             # Mark initialization complete
             self._initialized = True

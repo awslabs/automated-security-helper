@@ -118,6 +118,24 @@ def _make_results_no_findings():
     return results
 
 
+def _ran_metric(actionable: int):
+    """One scanner metric that states it ran, which every metric double must.
+
+    ``status`` is set explicitly rather than left to MagicMock's fabrication. Scanner
+    completeness is classified by membership of the *complete* statuses, so a
+    fabricated attribute is not one of them and the metric reads as a scanner whose
+    outcome is unknown -- which makes ``_compute_exit_code`` return 1 for
+    incompleteness before it reaches the findings verdict these tests are about.
+
+    FAILED when there are actionable findings and PASSED when there are none, because
+    those are the statuses a real scan produces for those counts.
+    """
+    metric = MagicMock()
+    metric.actionable = actionable
+    metric.status = "FAILED" if actionable else "PASSED"
+    return metric
+
+
 class TestComputeExitCode:
     def test_no_findings_returns_zero(self, tmp_path):
         from automated_security_helper.interactions.run_ash_scan import (
@@ -132,8 +150,7 @@ class TestComputeExitCode:
         )
         mock_results = MagicMock()
         # get_unified_scanner_metrics returns a list of metrics each with actionable=0
-        mock_metric = MagicMock()
-        mock_metric.actionable = 0
+        mock_metric = _ran_metric(0)
         with patch(
             "automated_security_helper.interactions.run_ash_scan.get_unified_scanner_metrics",
             return_value=[mock_metric],
@@ -159,8 +176,7 @@ class TestComputeExitCode:
         mock_results = MagicMock()
         # Make sarif.runs return empty so has_qualifying defaults to True via the None-branch
         mock_results.sarif = None
-        mock_metric = MagicMock()
-        mock_metric.actionable = 3
+        mock_metric = _ran_metric(3)
         with patch(
             "automated_security_helper.interactions.run_ash_scan.get_unified_scanner_metrics",
             return_value=[mock_metric],
@@ -180,8 +196,7 @@ class TestComputeExitCode:
             fail_on_findings=False,
         )
         mock_results = MagicMock()
-        mock_metric = MagicMock()
-        mock_metric.actionable = 5
+        mock_metric = _ran_metric(5)
         with patch(
             "automated_security_helper.interactions.run_ash_scan.get_unified_scanner_metrics",
             return_value=[mock_metric],
@@ -202,8 +217,7 @@ class TestComputeExitCode:
             fail_on_findings=True,
         )
         mock_results = MagicMock()
-        mock_metric = MagicMock()
-        mock_metric.actionable = 0
+        mock_metric = _ran_metric(0)
 
         with patch("builtins.open", side_effect=AssertionError("disk read in _compute_exit_code")):
             with patch(
@@ -378,8 +392,7 @@ class TestRunLocalModeTupleUnpacking:
         # Verify that calling _compute_exit_code with result (not a tuple) does not raise
         from automated_security_helper.interactions.run_ash_scan import _compute_exit_code
 
-        mock_metric = MagicMock()
-        mock_metric.actionable = 0
+        mock_metric = _ran_metric(0)
         with patch(
             "automated_security_helper.interactions.run_ash_scan.get_unified_scanner_metrics",
             return_value=[mock_metric],

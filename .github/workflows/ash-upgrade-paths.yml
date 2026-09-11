@@ -164,8 +164,20 @@ jobs:
           FIX="${RUNNER_TEMP}/selftest"
           mkdir -p "$FIX"
           printf 'print("hello")\n' > "${FIX}/test_sample.py"
+          # --scanners detect-secrets because this arm installs ASH into a bare venv
+          # and nothing else, so detect-secrets is the only default scanner whose
+          # tool arrives with it: `detect-secrets>=1.5.0,<2` is in [project]
+          # dependencies and DetectSecretsScanner drives the library in process.
+          # What is being verified is that a scan still runs after the upgrade, and
+          # naming the scanner says so; the nine left out are recorded SKIPPED rather
+          # than MISSING, so the report shows what this arm did and did not measure.
+          #
+          # This used to name bandit and call it a core dependency. It is not one --
+          # bandit is absent from pyproject.toml entirely, and BanditScanner installs
+          # it with `uv tool install` at scan time, so this arm was reaching PyPI
+          # mid-scan and a registry failure read as an upgrade that broke scanning.
           "${VENV}/ash" scan --source-dir "$FIX" --output-dir "${FIX}/output" \
-            --simple --phases scan --phases report
+            --simple --phases scan --phases report --scanners detect-secrets
 
       - name: Record the arm in the run summary
         if: success() || failure()

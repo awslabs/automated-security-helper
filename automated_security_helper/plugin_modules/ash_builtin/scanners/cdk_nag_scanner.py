@@ -36,18 +36,84 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.utils.subprocess_utils import find_executable
 
-_CDK_AVAILABLE = True
-try:
-    from importlib.metadata import version as _get_version
+#: Every distribution ASH's ``cdk`` extra installs. All three have to be present
+#: for the wrapper to get as far as evaluating a rule: ``cdk_nag`` supplies the
+#: packs, ``aws-cdk-lib`` the App/Stack/CfnInclude the wrapper synthesizes, and
+#: ``constructs`` the base class both of those are built on.
+#:
+#: Kept as a literal tuple rather than derived from ``_cdk_extra_requirements()``
+#: below. That function reads pyproject's own metadata, which is the right source
+#: for *what to install* but the wrong one for *what to probe*: it falls back to a
+#: pinned list when the metadata is unreadable, and probing a fallback would let a
+#: checkout with no distribution metadata at all report every dependency present.
+_CDK_REQUIRED_DISTRIBUTIONS = ("cdk_nag", "aws-cdk-lib", "constructs")
 
-    _cdk_nag_version = _get_version("cdk_nag")
-    from automated_security_helper.utils.cdk_nag_wrapper import (
-        run_cdk_nag_against_cfn_template,
-    )
-except (ImportError, Exception):
-    _CDK_AVAILABLE = False
-    _cdk_nag_version = "unavailable"
-    run_cdk_nag_against_cfn_template = None  # type: ignore[assignment]
+
+def _missing_cdk_distributions(
+    distributions: "tuple[str, ...]" = _CDK_REQUIRED_DISTRIBUTIONS,
+) -> List[str]:
+    """Which of ``distributions`` have no installed metadata, in declared order.
+
+    A metadata read, not an import. The alternative -- importing ``cdk_nag`` here
+    to prove it works -- was rejected on cost: this module is imported during
+    plugin discovery on every ASH invocation, including ``ash --help`` and runs
+    that never select cdk-nag, and importing cdk_nag starts a jsii kernel, which
+    spawns a NodeJS child process. Paying that on every invocation to sharpen one
+    scanner's availability check is the wrong trade.
+
+    What the metadata read cannot see is a state where all three distributions are
+    installed but importing them still fails -- a half-finished pip run, a missing
+    jsii transitive dependency, NodeJS absent. That case is not left silent: the
+    wrapper's import guard returns a response carrying ``failure``, the scanner
+    counts a failed target, and the container reports ERROR. So the two together
+    cover both shapes, and neither exits 0.
+
+    Probing all three rather than only ``cdk_nag`` is the point of this function.
+    A one-distribution probe passes on an install where cdk-nag is present and
+    aws-cdk-lib is not -- reproducible with ``pip install --no-deps cdk-nag`` --
+    and every template then failed to import, decremented the attempt count back
+    toward zero, and the scan reported SKIPPED with exit code 0 while both
+    completeness gates passed it. ``get_installation_commands`` gates on the same
+    flag, so the documented remediation was a no-op in exactly that state too.
+    """
+    from importlib.metadata import version as _dist_version
+
+    missing: List[str] = []
+    for distribution in distributions:
+        try:
+            _dist_version(distribution)
+        except Exception:
+            # Broad on purpose. PackageNotFoundError is the expected answer, but a
+            # malformed *.dist-info on sys.path raises other things, and any
+            # failure to confirm the distribution is present has to read as "not
+            # present" -- resolving an unreadable install to "available" is the
+            # defect this probe exists to remove.
+            missing.append(distribution)
+    return missing
+
+
+#: Populated at import time so ``validate_plugin_dependencies`` can name what is
+#: absent instead of listing all three whatever the actual state is. Empty when
+#: ``_CDK_AVAILABLE`` is False because the *wrapper import* failed rather than
+#: because a distribution is missing, which is why the warning below has a
+#: fallback.
+_CDK_MISSING_DISTRIBUTIONS: List[str] = _missing_cdk_distributions()
+_CDK_AVAILABLE = not _CDK_MISSING_DISTRIBUTIONS
+_cdk_nag_version = "unavailable"
+run_cdk_nag_against_cfn_template = None  # type: ignore[assignment]
+
+if _CDK_AVAILABLE:
+    try:
+        from importlib.metadata import version as _get_version
+
+        _cdk_nag_version = _get_version("cdk_nag")
+        from automated_security_helper.utils.cdk_nag_wrapper import (
+            run_cdk_nag_against_cfn_template,
+        )
+    except Exception:
+        _CDK_AVAILABLE = False
+        _cdk_nag_version = "unavailable"
+        run_cdk_nag_against_cfn_template = None  # type: ignore[assignment]
 
 
 # Last-resort copy of the "cdk" extra's contents. The source of truth is
@@ -55,7 +121,7 @@ except (ImportError, Exception):
 # and can therefore go stale, which is exactly why it is only reached when the
 # metadata read below fails outright.
 _CDK_EXTRA_FALLBACK_REQUIREMENTS: List[str] = [
-    "aws-cdk-lib>=2.267,<3.0.0",
+    "aws-cdk-lib>=2.268.0,<3.0.0",
     "cdk-nag>=3.0,<4.0.0",
     "constructs>=10.8,<11.0.0",
 ]
@@ -246,12 +312,20 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
             ScannerError: If validation fails
         """
         if not _CDK_AVAILABLE:
+            # Names what is actually absent. Listing all three unconditionally
+            # described a partial install wrongly, and a wrong list is worse than
+            # none here: an operator who can see cdk-nag in `pip list` reads
+            # "cdk-nag is not installed" as a bug in ASH and stops reading.
+            #
             # Points at ASH's own command rather than at a pip install of
             # "automated-security-helper[cdk]". That name belongs to an
             # unrelated project on PyPI, so the old hint sent users to install a
             # stranger's package to fix an ASH problem.
+            absent = ", ".join(_CDK_MISSING_DISTRIBUTIONS) or ", ".join(
+                _CDK_REQUIRED_DISTRIBUTIONS
+            )
             ASH_LOGGER.warning(
-                "CDK dependencies (aws-cdk-lib, cdk-nag, constructs) are not installed. "
+                f"CDK dependencies are not usable ({absent} unavailable). "
                 "Install them with: ash dependencies install"
             )
             self.dependencies_satisfied = False
@@ -327,6 +401,25 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
 
         # Per-call state, reset before anything else in the method can return.
         #
+        # ``errors`` is reset here for the same reason and by the same argument as the two
+        # counters, and it was the field the counters' fix missed. It is declared on
+        # PluginBase and nothing else resets it -- not ``_pre_scan``, not the executor, not
+        # ``scan()`` -- so it accumulated across every target a plugin instance was handed.
+        # The observable consequence is a failure message attached to a run that did not
+        # fail: the source pass appends "a.yaml: RuntimeError: ..." at the append sites
+        # below, the converted pass succeeds, and the converted pass's SARIF then carries
+        # executionSuccessful=True and exitCode=0 alongside
+        # exitCodeDescription="a.yaml: RuntimeError: ...". ``ScannerExecutor`` splices the
+        # same list into a second target's error list on its exception path, re-reporting the
+        # first target's errors against the second.
+        #
+        # Note that ``_plugin_log`` also appends here for anything logged at ERROR or with
+        # ``append_to_stream="stderr"``, so the leak is not confined to the two explicit
+        # ``self.errors.append`` calls below -- the "target directory is empty" notice lands
+        # in it too. Resetting at the top of the call covers every writer at once, and it has
+        # to be above the first ``_plugin_log`` call in this method rather than merely above
+        # the loop, or that notice would be cleared after being recorded.
+        #
         # These are instance attributes on a plugin object that ScanPhase reuses:
         # ``_scanner_tasks`` carries one task per scanner holding ``[source, converted]``, and
         # ``ScannerExecutor._execute_scanner`` loops that list against the same instance, reading
@@ -356,6 +449,7 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
         # wearing a different name.
         self.targets_attempted = 0
         self.targets_failed = 0
+        self.errors = []
 
         tool_component = ToolComponent(
             name="ash-cdk-nag-wrapper",
@@ -510,9 +604,14 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                     # Decrementing back to a running total of zero is not a silent success
                     # either. When every file in the scan set lands here the count ends at 0,
                     # which the container reads as "tracked, attempted none" and reports
-                    # SKIPPED. The wrapper also returns None when no nag pack is enabled and
-                    # when NodeJS is unavailable, so those two reach the same place: nothing was
-                    # evaluated, and the report says so instead of rendering green.
+                    # SKIPPED.
+                    #
+                    # This branch is now reached by exactly one wrapper state, and that is the
+                    # point. The wrapper used to return None for two further states -- cdk-nag
+                    # failing to import, and no nag pack registered -- and both landed here,
+                    # so a real template that no rule ever ran against un-counted itself and
+                    # the scan reported SKIPPED with exit code 0. Both now return a response
+                    # carrying ``failure`` and are counted below.
                     self.targets_attempted -= 1
                     ASH_LOGGER.debug(f"Not a CloudFormation file: {cfn_file}")
                     continue
@@ -632,6 +731,18 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                             # Derived, not hardcoded. A SARIF run asserting success while
                             # carrying zero results is indistinguishable to any consumer from
                             # a clean scan, so a total failure has to say so here.
+                            #
+                            # What this is NOT is the mechanism that makes a failed cdk-nag run
+                            # exit non-zero. These three fields are a contract with whatever
+                            # reads this scanner's own SARIF file; nothing inside ASH reads them
+                            # back. There is no `invocations` handling in `utils/sarif_utils.py`
+                            # or in `core/phases/`, so this invocation never reaches
+                            # `ash.sarif`, and the exit code comes entirely from the status the
+                            # container derives from `targets_attempted`/`targets_failed`. An
+                            # earlier version of this comment read as though the derivation
+                            # closed the defect; it does not, and a reader who believed it would
+                            # be looking in the wrong place. That the fields are unread inside
+                            # ASH is a real gap and is not addressed here.
                             executionSuccessful=scan_succeeded,
                             exitCode=0 if scan_succeeded else 1,
                             exitCodeDescription="\n".join(self.errors),
