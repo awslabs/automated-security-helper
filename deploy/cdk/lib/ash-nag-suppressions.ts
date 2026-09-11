@@ -184,6 +184,33 @@ export function suppressPipelineRoleWildcards(scope: IConstruct): void {
  * projects whose environment image is an `Fn::Join` over the ECR repository
  * attributes. Suppressing the failure is recorded explicitly so nobody reads a
  * clean run as "every rule passed" when one rule could not run.
+ *
+ * THIS REASON HAS TO STAY PURE ASCII, AND THAT IS A TEMPLATE-SIZE CONSTRAINT
+ * -------------------------------------------------------------------------
+ * cdk-nag base64-encodes any suppression reason containing a non-ASCII character
+ * and records that it did so with a sibling `"is_reason_encoded": true`. Verified
+ * against cdk-nag 2.38.2 by synthesizing one plain reason beside one carrying an
+ * em dash. Base64 spends 4 bytes per 3, so a 417-character reason arrives in the
+ * template as 586 bytes rather than 417.
+ *
+ * This is the most repeated reason in the app: AshAgentCore carries 19 copies and
+ * AshDistributedPipeline 93. So one em dash in this single string cost AshAgentCore
+ * 3,211 bytes against a 51,200-byte cap it was already 1,983 over. Replacing it
+ * with a colon changed one character and dropped no words.
+ *
+ * Size is how this was noticed and not why ASCII is right. The committed template
+ * is the deliverable, and until this change 19 of AshAgentCore's 36 suppression
+ * reasons reached an adopter as an opaque base64 blob. A justification nobody can
+ * read in the artifact it ships in is not doing the job it exists for.
+ *
+ * Two reasons in this file still hold an em dash on purpose:
+ * `suppressTaskDefinitionEnvironment` and `suppressParameterizedIngressRule`, six
+ * rows between them and all six in AshFargate, which is S3-only and 13,878 bytes
+ * clear of the cap. `.ash/.ash.yaml` describes the encoded-reason population from
+ * the other side -- it is one of the mechanisms behind that file's
+ * SECRET-BASE64-HIGH-ENTROPY-STRING entries on these templates -- so emptying the
+ * set entirely would obsolete that description in a change about template size.
+ * Those two are worth converting; they need that file updated with them.
  */
 export function suppressUnevaluableRules(scope: IConstruct, ruleIds: string[]): void {
   NagSuppressions.addResourceSuppressions(
@@ -196,7 +223,7 @@ export function suppressUnevaluableRules(scope: IConstruct, ruleIds: string[]): 
           'intrinsics rather than literals: the ECR image URI is an Fn::Join over the ' +
           'repository attributes, and the IAM resources are built from pseudo-parameters so ' +
           'the templates stay account- and region-agnostic. Rules affected: ' +
-          `${ruleIds.join(', ')}. Recorded rather than silently ignored — these rules did ` +
+          `${ruleIds.join(', ')}. Recorded rather than silently ignored: these rules did ` +
           'not run, so they neither passed nor failed.',
       },
     ],
