@@ -94,9 +94,22 @@ name: TypeScript CI
 # TypeScript build will not be caught here, because the job will not run.
 on:
   push:
+    # "**" not "*". GitHub branch filters are glob patterns in which "*" matches any
+    # character EXCEPT "/", so "*" matched no branch anyone here actually uses --
+    # every one is ci/..., fix/... or feat/... -- and this workflow ran on none of
+    # them. Three other files in this repository already carry a comment explaining
+    # exactly this about their own filters; this file was the instance that kept the
+    # bug while its neighbours documented it.
+    #
+    # The .nvmrc entry below makes the point concrete. This gate now reads its Node
+    # version from .nvmrc, so a pull request editing .nvmrc changes what this gate
+    # tests -- and under "*" it would have triggered nothing at all.
     branches:
-      - "*"
+      - "**"
     tags:
+      # Left as "*" deliberately. Every tag this repository publishes is v3.7.0-shaped
+      # with no "/" in it, so "*" matches all of them, and widening a tag filter is a
+      # separate decision from fixing a branch filter that matched nothing.
       - "*"
     paths:
       - "deploy/cdk/**"
@@ -106,8 +119,11 @@ on:
       # file that decides what a gate tests belongs in the gate's own filter.
       - ".nvmrc"
   pull_request:
+    # "**" for the same reason as the push filter above: a pull request whose BASE is
+    # a nested branch -- a stacked pull request targeting e.g. ci/close-gate-gaps --
+    # never matched "*", so it silently got no TypeScript CI at all.
     branches:
-      - "*"
+      - "**"
     paths:
       - "deploy/cdk/**"
       - "deploy/cdk-constructs/**"
@@ -120,12 +136,25 @@ permissions:
 concurrency:
   # One in-flight run per pull request; pushing again supersedes the previous run.
   #
-  # github.ref is refs/pull/<n>/merge on pull_request, and on merge_group it is the
-  # per-entry gh-readonly-queue/main/pr-<n>-<sha> branch, so every queue entry lands
-  # in its own group and entries never serialize behind one another.
-  group: ${{ github.workflow }}-${{ github.ref }}
-  # Only pull_request runs may be cancelled. A merge_group run must finish or the
-  # queue loses its verdict.
+  # github.ref is refs/pull/<n>/merge on pull_request, so each pull request has its own
+  # group. On push it is a plain branch name, which every push to that branch shares --
+  # and THAT is why github.sha is appended for push events only.
+  #
+  # GitHub allows one pending run per group. With cancel-in-progress false (which is
+  # what the expression below evaluates to for push), a third run queuing into an
+  # occupied group evicts the second before it starts a single job, and on a push there
+  # is no pull request for the missing verdict to block. Measured in this repository:
+  # run 34418283475, event push, branch main, was cancelled with zero jobs one second
+  # after the next main push queued into the same group. Keying on the commit gives
+  # every pushed commit its own group, so no pushed commit can lose its verdict to a
+  # later one.
+  #
+  # Deliberately NOT applied to pull_request: superseding is wanted there, and adding
+  # the sha would give each PR push its own group and defeat cancel-in-progress
+  # entirely -- turning a bounded one-run-per-PR into a run per commit.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || '' }}
+  # Only pull_request runs may be cancelled. A push run is the sole verdict for the
+  # commit it names, and a workflow_dispatch run was asked for by a person.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
