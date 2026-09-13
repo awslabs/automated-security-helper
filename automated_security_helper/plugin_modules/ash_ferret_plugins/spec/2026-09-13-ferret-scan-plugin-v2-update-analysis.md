@@ -247,3 +247,65 @@ GenAI block-list entry is needed. `extract_text` maps to `--preprocess-only`/`-p
    suppressions/excludes (retains detection, more maintenance)?
 5. **`--fail-on-incomplete`:** adopt it (surfaces partial-scan integrity as exit 3, needs
    return-contract handling), or leave it off for now?
+
+---
+
+## 9. Decisions & Findings — Resolved (2026-09-13)
+
+### 9.1 Requester decisions (locked)
+1. **Version window:** pin **conservatively to the tested current line** →
+   `DEFAULT_VERSION_CONSTRAINT = ">=2.4.5,<2.5.0"`, `MIN_SUPPORTED_VERSION = "2.4.5"`,
+   `MAX_SUPPORTED_VERSION = "2.5.0"`, `RECOMMENDED_VERSION = "2.4.5"`. (Narrower than the
+   `>=2.3.4,<3.0.0` originally floated — chosen to guarantee we only claim support for a
+   version we actually test against.)
+2. **Scope:** deliver **Track A first**, then Track B.
+3. **Old branch:** start fresh from `main` (done); mine
+   `origin/feature/ferret-scan-plugin-updates` for carry-over (see §9.3).
+4. **API_KEY_OR_SECRET:** **disable the generic type globally** in the bundled
+   `ferret-config.yaml`; document as an explicit design decision in DEVELOPMENT.md and
+   README.md. (Named secret patterns stay on.)
+5. **`--fail-on-incomplete`:** **adopt it**, with exit-code-3 handling in the return path.
+
+### 9.2 Posture updates (verified against the installed binary)
+- ferret-scan **v2.4.5 is installed** in this environment; all findings below were
+  confirmed against `ferret-scan --help` / `--help checks`, not just the docs.
+- **Authoritative check list = 20 checks** (see work log). README documents 11 — the gap
+  is real; A6/B6 will reconcile it. Never hardcode the list (upstream `upstream-asks.md`
+  explicitly warns integrators about doc drift).
+- `--limit` default **200** confirmed (`0` = unlimited) → A2 is a genuine correctness fix.
+- `--exclude` help text itself shows glob usage (`--exclude '.git,*.log'`), confirming the
+  plugin/README "simple names only" wording is wrong (§5.4).
+- Baseline **69 unit tests pass**; `scripts/validate_ferret_plugin.py` `EXPECTED_MIN_TESTS`
+  is **67** (stale-low vs the 69 present). DEVELOPMENT.md still cites "66 tests" in places —
+  a stale assumption to correct as tests are added.
+
+### 9.3 Old-branch carry-over analysis (`origin/feature/ferret-scan-plugin-updates` @ `435eba0`)
+That branch is based on a commit **predating the current incident fixes on `main`**, so
+its diff *removes* work we must keep. Classification:
+
+**Do NOT carry (regressions relative to current `main`):**
+- Deletion of `get_installation_commands` — this is the very fix that pins the install to
+  the supported range (the anti-incident guard). Keep it.
+- Deletion of `offline_strategy = OfflineStrategy.BUNDLED`. Keep it.
+- Deletion of `_execute_scan` stub, removal of subprocess `timeout=self._effective_scan_timeout()`,
+  and reverting `shlex.join(...)` → `" ".join(...)` for the SARIF `commandLine`. All are
+  regressions; keep current `main` behaviour.
+- Weakened "binary not found" error message. Keep current, richer guidance.
+
+**Worth carrying (genuinely new, additive):**
+- `respect_gitignore` → `--respect-gitignore` → **B1**.
+- `disable_ip_types` → `--disable-ip-types` → **B2**.
+- Block-list additions `preprocess_only`, `pre_commit_mode`, `list_profiles` → **A5**
+  (cheap, safe, correct — pulled forward into Track A).
+- Always append `--quiet` (progress output is noise ASH captures on stderr) → folded into
+  **A5** as a low-risk convention change.
+
+### 9.4 Revised file-change map (supersedes §7 where they differ)
+- A1 version pin also touches the install-command test's inline comment (it references
+  "2.3.3 past MAX_SUPPORTED_VERSION", which is no longer true once MAX=2.5.0).
+- A3 records design decision **DD-1** in DEVELOPMENT.md + README.md, edits
+  `ferret-config.yaml`, and re-checks `scripts/validate_ferret_plugin.py` (the
+  SUPPRESSION-COVERAGE check may need no change since we disable at the tool level, not via
+  ASH suppressions — to be confirmed when A3 lands).
+- A4 adds return-contract handling for exit code 3; DEVELOPMENT.md "Scanner Return Contract"
+  section gets a note that `--fail-on-incomplete` can make ferret-scan exit 3 with valid SARIF.
