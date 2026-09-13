@@ -64,4 +64,15 @@ verification run, result, and the pushed commit SHA.
 - Tests: `test_finding_limit_default_is_unlimited`, `test_finding_limit_custom_value` (71 total).
 - Docs: README + DEVELOPMENT option tables.
 - Verification: **71 passed**; validation **all 10 checks passed**.
+- Commit: `e1412f7`
+
+### WL-3 — A3 investigation: API_KEY_OR_SECRET disable is NOT config-driven (2026-09-13)
+- Verified against installed ferret-scan v2.4.5 that `validators.secrets.disabled_types`
+  is silently ignored (only `intellectual_property` honors `disabled_types`).
+- Reproduced the incident FP in v2.4.5: `session: Optional[Session] = None` →
+  `API_KEY_OR_SECRET` @ 93 HIGH (see analysis §9.5 for full evidence).
+- **A3 paused** — the requester's chosen mechanism (bundled-config disable) is impossible.
+  Recorded the invalidated assumption in analysis §9.5 and surfaced a mechanism decision to
+  the requester. No code change to the plugin yet.
+- Verification: docs-only; **71 passed**.
 - Commit: _(recorded on next push)_

@@ -309,3 +309,43 @@ its diff *removes* work we must keep. Classification:
   ASH suppressions — to be confirmed when A3 lands).
 - A4 adds return-contract handling for exit code 3; DEVELOPMENT.md "Scanner Return Contract"
   section gets a note that `--fail-on-incomplete` can make ferret-scan exit 3 with valid SARIF.
+
+### 9.5 ⚠️ Assumption invalidated — API_KEY_OR_SECRET cannot be disabled via config (2026-09-13)
+
+**Original assumption (analysis §5.2, and the sub-agent recommendation):** the bundled
+`ferret-config.yaml` could disable the generic finding type with
+`validators.secrets.disabled_types: [API_KEY_OR_SECRET]`. **This is false for ferret-scan
+v2.4.5.**
+
+**Evidence (tested against the installed binary):**
+- `disabled_types` is honored **only by the `intellectual_property` validator**. Source:
+  `internal/validators/intellectualproperty/disabled_subtypes.go` and
+  `docs/configuration.md`: *"A `disabled_types` block under a validator that does not read
+  it — every validator except `intellectual_property` — is correctly silent."* The
+  `secrets` validator's own help says *"No additional configuration is required."*
+- Empirical scan of a Pydantic-style file (`session: Optional[Session] = None`) with
+  `--checks SECRETS`:
+  - Without config: **4 `API_KEY_OR_SECRET` findings**, the `session` line at **93 (HIGH)** —
+    the incident pattern **still reproduces in v2.4.5** (it was not fixed after v2.3.3).
+  - With `validators.secrets.disabled_types: [API_KEY_OR_SECRET]`: **still 4 findings** —
+    the config block is silently ignored, exactly as the source predicts.
+
+**Consequence:** decision #4 ("disable the generic type globally in the bundled config")
+is **not implementable as stated** — the tool provides no such knob. The requester's
+*intent* (API_KEY_OR_SECRET must not redden PRs / flood FPs, off by default, documented)
+is still achievable, but only via a different mechanism.
+
+**Working mechanisms (in order of fidelity to the intent):**
+1. **Plugin-level post-filter (recommended):** drop `API_KEY_OR_SECRET` results from the
+   `SarifReport` before returning, gated by a new option (e.g.
+   `suppress_generic_secret: bool = True`). Fully within the plugin's control, default-on,
+   documentable as DD-1, and keeps every *named* secret pattern (AWS keys, GitHub tokens,
+   etc.) active. Downside: post-processing filter rather than a tool-native disable.
+2. **ASH suppression** (`rule_id: API_KEY_OR_SECRET` in `.ash/.ash.yaml` +
+   `.ash_community_plugins.yaml`): fixes ASH's *own* CI self-scan (the red-PR symptom) but
+   does not change behaviour for downstream plugin users.
+3. **Drop `SECRETS` from default checks:** rejected — loses all secret detection.
+
+**Status:** A3 paused pending requester confirmation of the mechanism (the named mechanism
+is impossible). Recommendation: Option 1 (plugin post-filter, default-on) + Option 2 for
+ASH's own CI. This is logged in the work log (WL-3) and the delta (A3).
