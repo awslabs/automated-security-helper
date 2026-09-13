@@ -257,6 +257,17 @@ class FerretScannerConfigOptions(ScannerOptionsBase):
         ),
     ] = True
 
+    finding_limit: Annotated[
+        int,
+        Field(
+            description="Maximum number of findings ferret-scan will emit, passed as "
+            "'--limit'. ferret-scan defaults to 200, which silently truncates results "
+            "on large scans; ASH defaults this to 0 (unlimited) so no findings are "
+            "dropped from the SARIF report. Set a positive integer to cap output.",
+            ge=0,
+        ),
+    ] = 0
+
     # Ferret-scan's own log level controls (independent of ASH logging)
     ferret_debug: Annotated[
         bool,
@@ -642,6 +653,13 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             self.args.extra_args.append(
                 ToolExtraArg(key="--enable-preprocessors", value=None)
             )
+
+        # Finding limit. ferret-scan defaults to 200 (silent truncation); ASH always
+        # passes an explicit --limit so the SARIF report is not quietly capped. 0 =
+        # unlimited (the plugin default).
+        self.args.extra_args.append(
+            ToolExtraArg(key="--limit", value=str(options.finding_limit))
+        )
 
         # Ferret-scan's own debug/verbose (independent of ASH logging)
         if options.ferret_debug:

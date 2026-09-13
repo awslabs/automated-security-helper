@@ -223,6 +223,36 @@ class TestFerretScannerConfigProcessing:
         checks_arg = next((arg for arg in extra_args if arg.key == "--checks"), None)
         assert checks_arg is None
 
+    def test_finding_limit_default_is_unlimited(
+        self, mock_plugin_context, default_ferret_config
+    ):
+        """By default the plugin passes --limit 0 so ferret-scan's 200-cap never
+        silently truncates the SARIF report."""
+        scanner = FerretScanScanner(
+            context=mock_plugin_context, config=default_ferret_config
+        )
+        scanner._process_config_options()
+
+        limit_arg = next(
+            (arg for arg in scanner.args.extra_args if arg.key == "--limit"), None
+        )
+        assert limit_arg is not None
+        assert limit_arg.value == "0"
+
+    def test_finding_limit_custom_value(self, mock_plugin_context):
+        """A positive finding_limit is passed through as --limit <n>."""
+        config = FerretScannerConfig(
+            options=FerretScannerConfigOptions(finding_limit=500)
+        )
+        scanner = FerretScanScanner(context=mock_plugin_context, config=config)
+        scanner._process_config_options()
+
+        limit_arg = next(
+            (arg for arg in scanner.args.extra_args if arg.key == "--limit"), None
+        )
+        assert limit_arg is not None
+        assert limit_arg.value == "500"
+
     def test_process_config_options_custom(
         self, mock_plugin_context, custom_ferret_config
     ):

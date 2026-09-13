@@ -55,4 +55,13 @@ verification run, result, and the pushed commit SHA.
 - Docs: README install line + `tool_version` examples; DEVELOPMENT.md constants block and
   options-table default.
 - Verification: **69 passed**; `validate_ferret_plugin.py` **all 10 checks passed**.
+- Commit: `d1a3130`
+
+### WL-2 — A2: `--limit 0` (stop silent truncation) (2026-09-13)
+- `ferret_scanner.py`: added `finding_limit: int = 0` (ge=0) option; `_process_config_options`
+  now always appends `--limit <finding_limit>` (default 0 = unlimited). ferret-scan's own
+  default is 200, which silently drops findings on large scans.
+- Tests: `test_finding_limit_default_is_unlimited`, `test_finding_limit_custom_value` (71 total).
+- Docs: README + DEVELOPMENT option tables.
+- Verification: **71 passed**; validation **all 10 checks passed**.
 - Commit: _(recorded on next push)_

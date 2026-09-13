@@ -14,8 +14,8 @@ This is the running list of concrete changes shipped in this update. Status lege
 
 | ID | Change | Type | Status | Commit |
 |----|--------|------|--------|--------|
-| A1 | Version window → `>=2.4.5,<2.5.0`; `MIN=2.4.5`, `MAX=2.5.0`, `RECOMMENDED=2.4.5` | fix | ☑ | 921f1cb→ |
-| A2 | Emit `--limit 0` by default (new `finding_limit` option) to stop silent 200-finding truncation | fix | ☐ | |
+| A1 | Version window → `>=2.4.5,<2.5.0`; `MIN=2.4.5`, `MAX=2.5.0`, `RECOMMENDED=2.4.5` | fix | ☑ | d1a3130 |
+| A2 | Emit `--limit 0` by default (new `finding_limit` option) to stop silent 200-finding truncation | fix | ☑ | 921f1cb→ |
 | A3 | Disable `API_KEY_OR_SECRET` globally in bundled `ferret-config.yaml` (`validators.secrets.disabled_types`) | fix | ☐ | |
 | A4 | Adopt `--fail-on-incomplete` (new `fail_on_incomplete` option) + exit-code-3 handling | feature | ☐ | |
 | A5 | Block-list additions: `preprocess_only`, `pre_commit_mode`, `list_profiles` | fix | ☐ | |
