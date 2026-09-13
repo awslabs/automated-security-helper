@@ -130,3 +130,16 @@ verification run, result, and the pushed commit SHA.
 - Verified: `ash scan --scanners ferret-scan` → **PASSED, 0 actionable** (8 suppressed);
   77 unit tests; validation 10/10; `ash config validate` valid; 0 self-findings in new text.
 - Commit: `35c5dbe`
+
+### WL-8 — Expand API_KEY_OR_SECRET documentation (2026-09-13)
+- DEVELOPMENT.md "Design decision" section expanded into a full decision record:
+  an **Alternatives considered** table (option 1 disable-in-config = not viable with
+  empirical proof; option 2 plugin post-filter = rejected; option 3 keep+suppress =
+  chosen), an explicit **why option 1 isn't viable** proof block (docs + source + a
+  reproduced before/after scan), a **suppression behaviour** explanation (ASH suppresses
+  at aggregation; findings are recorded-not-hidden), the **FP inventory** table, and a
+  **verification** paragraph.
+- Paraphrased the proof block so it does not quote the triggering line (which would make
+  DEVELOPMENT.md itself a finding — the documented gotcha).
+- Verified: 0 self-findings on the edited docs; 77 unit tests; validation 10/10.
+- Commit: _(recorded on next push)_
