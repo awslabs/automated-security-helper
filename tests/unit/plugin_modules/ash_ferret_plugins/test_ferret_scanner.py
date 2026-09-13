@@ -275,6 +275,42 @@ class TestFerretScannerConfigProcessing:
         assert limit_arg is not None
         assert limit_arg.value == "500"
 
+    def test_fail_on_incomplete_default_off(
+        self, mock_plugin_context, default_ferret_config
+    ):
+        """By default the plugin does not pass --fail-on-incomplete."""
+        scanner = FerretScanScanner(
+            context=mock_plugin_context, config=default_ferret_config
+        )
+        scanner._process_config_options()
+
+        arg = next(
+            (a for a in scanner.args.extra_args if a.key == "--fail-on-incomplete"),
+            None,
+        )
+        assert arg is None
+
+    def test_fail_on_incomplete_when_enabled(self, mock_plugin_context):
+        """fail_on_incomplete=True adds the --fail-on-incomplete flag."""
+        config = FerretScannerConfig(
+            options=FerretScannerConfigOptions(fail_on_incomplete=True)
+        )
+        scanner = FerretScanScanner(context=mock_plugin_context, config=config)
+        scanner._process_config_options()
+
+        arg = next(
+            (a for a in scanner.args.extra_args if a.key == "--fail-on-incomplete"),
+            None,
+        )
+        assert arg is not None
+        assert arg.value is None
+
+    def test_incomplete_exit_code_is_accepted(self, mock_plugin_context):
+        """Exit 3 (--fail-on-incomplete, partial coverage) is a non-fatal accepted code."""
+        scanner = FerretScanScanner(context=mock_plugin_context)
+        assert 3 in scanner.success_exit_codes
+        assert 0 in scanner.success_exit_codes
+
     def test_process_config_options_custom(
         self, mock_plugin_context, custom_ferret_config
     ):

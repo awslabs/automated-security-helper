@@ -272,6 +272,18 @@ class FerretScannerConfigOptions(ScannerOptionsBase):
         ),
     ] = 0
 
+    fail_on_incomplete: Annotated[
+        bool,
+        Field(
+            description="Pass '--fail-on-incomplete' so ferret-scan exits 3 when a file "
+            "could not be fully scanned (coverage cut short by a timeout/budget, or the "
+            "file could not be opened). Findings may be missing in that case. The plugin "
+            "still returns the (partial) SARIF; exit 3 is recorded as an unsuccessful, "
+            "incomplete invocation rather than a hard error. Off by default to match "
+            "ferret-scan, which otherwise only warns on stderr."
+        ),
+    ] = False
+
     # Ferret-scan's own log level controls (independent of ASH logging)
     ferret_debug: Annotated[
         bool,
@@ -385,6 +397,13 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
     )
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+
+    # ferret-scan exits 0 on a normal scan (even with findings) and 3 when
+    # --fail-on-incomplete is set and a file could not be fully scanned. Exit 3 is a
+    # deliberate integrity signal that still ships valid (partial) SARIF, so it is an
+    # accepted, non-fatal outcome rather than a scanner failure. (1 is kept from the
+    # base default for parity with other scanners.)
+    success_exit_codes: ClassVar[set[int]] = {0, 1, 3}
 
     def model_post_init(self, context):
         if self.config is None:
@@ -665,6 +684,13 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             ToolExtraArg(key="--limit", value=str(options.finding_limit))
         )
 
+        # Fail-on-incomplete: make ferret-scan exit 3 when a file could not be fully
+        # scanned, so partial coverage is surfaced rather than only warned on stderr.
+        if options.fail_on_incomplete:
+            self.args.extra_args.append(
+                ToolExtraArg(key="--fail-on-incomplete", value=None)
+            )
+
         # Ferret-scan's own debug/verbose (independent of ASH logging)
         if options.ferret_debug:
             self.args.extra_args.append(ToolExtraArg(key="--debug", value=None))
@@ -901,6 +927,20 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             )
 
             self._post_scan(target=target, target_type=target_type)
+
+            # --fail-on-incomplete makes ferret-scan exit 3 when coverage was cut short.
+            # The SARIF is still valid (partial); surface it as a warning so missing
+            # findings are not silent.
+            if self.exit_code == 3:
+                self._plugin_log(
+                    "ferret-scan reported incomplete coverage (exit 3, "
+                    "--fail-on-incomplete): some files were not fully scanned and "
+                    "findings may be missing. See the SARIF toolExecutionNotifications "
+                    "for the affected files.",
+                    target_type=target_type,
+                    level=logging.WARNING,
+                    append_to_stream="stderr",
+                )
 
             # Read SARIF output from file
             if not results_file.exists():

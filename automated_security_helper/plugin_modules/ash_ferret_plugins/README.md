@@ -170,6 +170,7 @@ scanners:
 | `show_match` | bool | `false` | ⚠️ Display matched text in findings (see security warning above) |
 | `enable_preprocessors` | bool | `true` | Enable text extraction from documents |
 | `finding_limit` | int | `0` | Max findings ferret-scan emits (`--limit`). `0` = unlimited. ASH defaults to `0` because ferret-scan's own default of `200` silently truncates large scans. |
+| `fail_on_incomplete` | bool | `false` | Pass `--fail-on-incomplete` so ferret-scan exits 3 when a file could not be fully scanned (findings may be missing). ASH still returns the partial SARIF and records the invocation as unsuccessful/incomplete. |
 | `tool_version` | string | `null` | Version constraint for ferret-scan (e.g., `>=1.0.0,<2.0.0`) |
 | `skip_version_check` | bool | `false` | Skip version compatibility check (use with caution) |
 

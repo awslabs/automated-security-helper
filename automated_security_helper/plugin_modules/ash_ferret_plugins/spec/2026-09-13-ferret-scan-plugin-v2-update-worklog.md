@@ -85,4 +85,18 @@ verification run, result, and the pushed commit SHA.
 - Docs: README unsupported-options table; DEVELOPMENT categories table + hardcoded-flags
   table (`--quiet`).
 - Verification: **74 passed**.
+- Commit: `12f28c0`
+
+### WL-5 — A4: adopt `--fail-on-incomplete` (2026-09-13)
+- Verified against v2.4.5: an incomplete scan (forced via `--validator-budget all=1ns`)
+  exits **3** and still writes valid SARIF.
+- `ferret_scanner.py`: new `fail_on_incomplete: bool = False` option → emits
+  `--fail-on-incomplete`; `success_exit_codes` overridden to `{0, 1, 3}` (added `Set`
+  import); `scan()` logs a WARNING when `exit_code == 3`. Invocation records
+  `executionSuccessful=False, exitCode=3`; partial SARIF still returned.
+- Tests: `test_fail_on_incomplete_default_off`, `test_fail_on_incomplete_when_enabled`,
+  `test_incomplete_exit_code_is_accepted` (77 total).
+- Docs: README + DEVELOPMENT option tables; new "Exit codes and --fail-on-incomplete"
+  subsection in the Scanner Return Contract.
+- Verification: **77 passed**.
 - Commit: _(recorded on next push)_

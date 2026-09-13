@@ -225,6 +225,7 @@ def validate_no_unsupported_options(cls, data: Any) -> Any:
 | `show_match` | Display matched text in findings | `false` |
 | `enable_preprocessors` | Extract text from documents | `true` |
 | `finding_limit` | Max findings emitted via `--limit` (`0` = unlimited; guards against ferret-scan's 200 default silently truncating) | `0` |
+| `fail_on_incomplete` | Pass `--fail-on-incomplete` → ferret-scan exits 3 on partial coverage (accepted as non-fatal; SARIF still returned) | `false` |
 | `ferret_debug` | Enable ferret-scan's own debug logging (preprocessing/validation flow) | `false` |
 | `ferret_verbose` | Enable ferret-scan's own verbose output (detailed finding info) | `false` |
 | `tool_version` | Version constraint for installation | `">=2.4.5,<2.5.0"` |
@@ -1007,6 +1008,20 @@ snyk-code, trivy-repo). This plugin follows the same contract.
 Ad-hoc dicts like `{"findings": [], "errors": [...]}` without `"status": "failed"`
 will be treated as a successful scan with zero findings by `scan_phase.py`. Use
 `return` (None) instead — the framework correctly marks the container as failed.
+
+### Exit codes and `--fail-on-incomplete`
+
+ferret-scan exits `0` on a normal scan (even when it finds sensitive data) and `3`
+when `--fail-on-incomplete` is set (`fail_on_incomplete: true`) and a file could not be
+fully scanned — coverage cut short by a timeout/budget, or the file could not be opened.
+
+- `_run_subprocess` runs with `check=False`, so a non-zero exit never raises; `scan()`
+  reads the SARIF file regardless of exit code.
+- The scanner overrides `success_exit_codes = {0, 1, 3}` so exit 3 is an **accepted,
+  non-fatal** outcome — the (partial) SARIF is still returned. The invocation records
+  `executionSuccessful=False` and `exitCode=3`, and the plugin logs a WARNING naming the
+  incomplete coverage. Exit 3 is *not* a scanner failure; it is a deliberate integrity
+  signal that findings may be missing.
 
 ## ASH Integration Registration
 
