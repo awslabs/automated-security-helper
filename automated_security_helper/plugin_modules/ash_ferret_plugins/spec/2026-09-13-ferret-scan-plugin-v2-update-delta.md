@@ -16,7 +16,7 @@ This is the running list of concrete changes shipped in this update. Status lege
 |----|--------|------|--------|--------|
 | A1 | Version window → `>=2.4.5,<2.5.0`; `MIN=2.4.5`, `MAX=2.5.0`, `RECOMMENDED=2.4.5` | fix | ☑ | d1a3130 |
 | A2 | Emit `--limit 0` by default (new `finding_limit` option) to stop silent 200-finding truncation | fix | ☑ | e1412f7 |
-| A3 | ~~Disable `API_KEY_OR_SECRET` in bundled config~~ → **blocked: config knob doesn't exist** (see analysis §9.5). Recommended: plugin post-filter option, default-on. Awaiting decision. | fix | ⏸ | |
+| A3 | Keep `API_KEY_OR_SECRET` enabled; suppress the 6 v2.4.5 FPs in the community config + document the policy | fix | ☑ | (this commit) |
 | A4 | Adopt `--fail-on-incomplete` (new `fail_on_incomplete` option) + exit-code-3 handling | feature | ☑ | 2b0458c |
 | A5 | Block-list additions: `preprocess_only`, `pre_commit_mode`, `list_profiles`; always `--quiet` | fix | ☑ | 12f28c0 |
 | A5 | Block-list additions: `preprocess_only`, `pre_commit_mode`, `list_profiles`; always `--quiet` | fix | ☑ | 1d34b4f→ |
@@ -35,15 +35,16 @@ This is the running list of concrete changes shipped in this update. Status lege
 
 ## Status summary (2026-09-13)
 
-**Track A: 5 of 6 delivered** (A1, A2, A4, A5, A6 ☑; A3 ⏸ blocked — the requester-chosen
-mechanism does not exist in ferret-scan, see analysis §9.5, awaiting a mechanism decision).
-Every delivered item was pushed with the ferret unit suite green (77 tests) and the
-pre-push validation script passing (10/10). **Track B not started.**
+**Track A: COMPLETE (6 of 6).** A1, A2, A3, A4, A5, A6 all delivered, each pushed with the
+ferret unit suite green (77 tests) and the pre-push validation script passing (10/10).
+**Track B not started.**
 
 ## Design decisions recorded
 
-- **DD-1 (API_KEY_OR_SECRET off):** The bundled config disables the generic
-  `API_KEY_OR_SECRET` finding type because ferret-scan v2.3.3's unquoted-assignment
-  detection flags ordinary typed code (e.g. `session: Optional[Session]`) at ~95% HIGH.
-  Named secret patterns (AWS keys, GitHub tokens, etc.) remain active. Rationale and
-  revert instructions live in DEVELOPMENT.md and README.md.
+- **DD-1 (API_KEY_OR_SECRET) — REVISED:** the original plan (disable the generic type in
+  the bundled config) is **impossible** — ferret-scan honors `disabled_types` only for
+  `intellectual_property`, not `secrets` (verified v2.4.5, analysis §9.5). Final policy:
+  **keep the detector enabled** (so real secrets are still found) and manage its false
+  positives with ASH suppressions (`rule_id: API_KEY_OR_SECRET`) + `exclude_patterns`.
+  Six v2.4.5 FPs are suppressed in `.ash/.ash_community_plugins.yaml`; documented in
+  DEVELOPMENT.md and README.md. Verified: `ash scan` → ferret PASSED, 0 actionable.

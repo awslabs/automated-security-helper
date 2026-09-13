@@ -524,12 +524,51 @@ suppression with line number to both `.ash/.ash.yaml` and `.ash/.ash_community_p
 
 ## False Positive Suppression and CI
 
+### Design decision: API_KEY_OR_SECRET stays ENABLED, false positives are suppressed
+
+**Context.** ferret-scan v2.3.3 added unquoted keyword-assignment detection to the
+`SECRETS` validator. An ordinary identifier whose *name* is a secret keyword
+(`session`, `token`, `secret`, `password`, `api_key`, …) placed next to an assignment
+is now reported as `API_KEY_OR_SECRET`, at HIGH confidence, regardless of the value.
+Generated Pydantic/OCSF models (a login/session object field), MCP session locals,
+Terraform locals whose name contains "secret", and test fixtures all trip it. This is
+the detector that reddened PRs when CI floated to a newer binary.
+
+**Why we do not disable it.** ferret-scan provides **no configuration knob to disable a
+`SECRETS` sub-type**. `validators.<name>.disabled_types` is honoured **only by the
+`intellectual_property` validator** — a `disabled_types` block under `secrets` is
+silently ignored (verified against v2.4.5; the FP still fires). Dropping `SECRETS` from
+`checks` entirely would lose all real secret detection (AWS keys, GitHub tokens, etc.),
+which is unacceptable. There is no bundled-config setting that removes just this type.
+
+**The policy (chosen 2026-09-13).** Keep `API_KEY_OR_SECRET` **enabled** and manage its
+false positives with ASH's own controls:
+
+1. **`exclude_patterns`** in the ferret scanner block for whole directories that only
+   ever produce noise (build output, vendored trees).
+2. **Path-scoped suppressions** (`rule_id: API_KEY_OR_SECRET`) in
+   `.ash/.ash_community_plugins.yaml` for specific FP files/globs. The current set
+   covers the generated CycloneDX and OCSF schemas, `pyproject.toml`, the MCP
+   `sessions.py` local, the Fargate `manage_auth_secret` local, and `tests/**`.
+
+**Gotcha — do not quote the offending line in a suppression reason.** The suppression
+`reason` text lives in a file ferret-scan also scans (`.ash/` is not excluded). Writing
+the `keyword` + assignment shape verbatim makes the reason itself a new
+`API_KEY_OR_SECRET` finding. Paraphrase instead (e.g. "a login/session object field")
+— the existing entries do this deliberately.
+
+**If ferret-scan later adds a real disable knob** (e.g. `secrets.disabled_types`), revisit
+this: prefer disabling the generic type at the tool level over maintaining a suppression
+list. Until then, suppressions/excludes are the only working mechanism.
+
 ### Suppression Strategy
 
 ASH supports suppressions in the config file under `global_settings.suppressions`.
 Ferret-scan suppressions must be added to **both** `.ash/.ash.yaml` and
 `.ash/.ash_community_plugins.yaml` — the PR scan workflow uses `.ash.yaml`
 while the community validation workflow uses `.ash_community_plugins.yaml`.
+(Exception: ferret-scan is only *enabled* in `.ash_community_plugins.yaml`, so
+ferret-specific rules like `API_KEY_OR_SECRET` only need to live there.)
 
 Suppressions with `line_start`/`line_end` fields are the preferred approach for
 documentation examples that intentionally contain triggering patterns. For test

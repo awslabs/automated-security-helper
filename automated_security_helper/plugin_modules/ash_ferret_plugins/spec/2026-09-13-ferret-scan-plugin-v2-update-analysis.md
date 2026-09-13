@@ -346,6 +346,20 @@ is still achievable, but only via a different mechanism.
    does not change behaviour for downstream plugin users.
 3. **Drop `SECRETS` from default checks:** rejected — loses all secret detection.
 
-**Status:** A3 paused pending requester confirmation of the mechanism (the named mechanism
-is impossible). Recommendation: Option 1 (plugin post-filter, default-on) + Option 2 for
-ASH's own CI. This is logged in the work log (WL-3) and the delta (A3).
+**Status:** RESOLVED (2026-09-13). Requester chose to **keep `API_KEY_OR_SECRET` enabled
+and rely on suppressions/excludes** (not the post-filter). Implemented as A3:
+- Scanning the repo at v2.4.5 with the plugin's config (`SECRETS`, high confidence)
+  surfaced **6 high-confidence `API_KEY_OR_SECRET` false positives** — all the incident
+  shape (a `session`/`secret` keyword next to an assignment): the two generated OCSF
+  model fields, the MCP `sessions.py` local, the Fargate `manage_auth_secret` local, and
+  two `test_sessions.py` locals. The config's old "ferret-scan contributes nothing"
+  comment was **stale** (true for the pre-2.x binary only) and has been corrected.
+- Added path-scoped `API_KEY_OR_SECRET` suppressions to `.ash/.ash_community_plugins.yaml`
+  (OCSF generated schema, `cli/mcp/sessions.py`, `fargate/main.tf`, `tests/**`), with
+  reasons paraphrased so they don't re-trigger the detector on the YAML itself.
+- Documented as a design decision in DEVELOPMENT.md ("Design decision: API_KEY_OR_SECRET
+  stays ENABLED") and README.md (user-facing note + suppression recipe).
+- **Verified end-to-end:** `ash scan --scanners ferret-scan --config
+  .ash/.ash_community_plugins.yaml` → ferret-scan **PASSED, 0 actionable** (8 findings, all
+  suppressed). Unit tests 77 green; `validate_ferret_plugin.py` 10/10; the new doc/reason
+  text produces 0 self-findings; `ash config validate` passes.

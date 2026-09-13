@@ -127,6 +127,34 @@ The following ferret-scan CLI options are **NOT supported** in the ASH plugin an
 
 **Recommendation**: Keep `show_match: false` (the default) in production environments. Only enable it temporarily for debugging in isolated, secure environments where log files are properly protected and purged.
 
+### Note: `API_KEY_OR_SECRET` false positives (SECRETS check)
+
+ferret-scan's `SECRETS` check includes a generic `API_KEY_OR_SECRET` detector that
+matches on the *name* of an assignment when the name is a secret keyword (`session`,
+`token`, `secret`, `password`, `api_key`, …) — **regardless of the value**. So typed
+code and config such as a `session` field on a generated model, a `session` local, or a
+Terraform local named `manage_auth_secret` can be flagged at HIGH confidence even though
+no credential is present.
+
+This detector **cannot be turned off in ferret-scan's config** — the tool only supports
+`disabled_types` for the `INTELLECTUAL_PROPERTY` check, not `SECRETS`. The plugin
+therefore keeps the detector enabled (so real secrets are still found) and expects you to
+manage false positives with ASH's own controls:
+
+- **Suppress** the false positives with a path-scoped ASH suppression:
+  ```yaml
+  global_settings:
+    suppressions:
+      - path: path/to/generated_or_test_file.py
+        rule_id: API_KEY_OR_SECRET
+        reason: "False positive — variable/field name matches the secret-keyword heuristic, not a credential"
+  ```
+- Or **exclude** whole noise directories via the plugin's `exclude_patterns`.
+- Or scope the `checks` option to omit `SECRETS` if you do not need secret detection.
+
+See `DEVELOPMENT.md` → "Design decision: API_KEY_OR_SECRET stays ENABLED" for the full
+rationale.
+
 ## Configuration
 
 ### Basic Configuration

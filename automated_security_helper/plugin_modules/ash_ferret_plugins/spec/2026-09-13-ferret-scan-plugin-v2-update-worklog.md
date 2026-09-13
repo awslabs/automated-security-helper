@@ -115,3 +115,18 @@ verification run, result, and the pushed commit SHA.
   the bundled `ferret-config.yaml`); left those, noted for a later config refresh.
 - Verification: **77 passed**; validation **all 10 checks passed**; ruff unchanged (21).
 - Commit: `f55ef54` (this doc-sync of SHAs follows in the next commit).
+
+### WL-7 — A3 resolved: keep API_KEY_OR_SECRET + suppress/exclude (2026-09-13)
+- Requester decision: keep the detector enabled, manage FPs via suppressions/excludes.
+- Enumerated the real hits at v2.4.5 (`SECRETS`, high confidence): 6 API_KEY_OR_SECRET
+  FPs — `schemas/ocsf/ocsf_vulnerability_finding.py` (×2, generated), `cli/mcp/sessions.py`,
+  `deploy/terraform/modules/fargate/main.tf`, `tests/unit/cli/mcp/test_sessions.py` (×2).
+- `.ash/.ash_community_plugins.yaml`: added 4 path-scoped `API_KEY_OR_SECRET` suppressions
+  (OCSF file, sessions.py, fargate main.tf, `tests/**`) with paraphrased reasons (so the
+  YAML doesn't self-trigger); corrected the stale "ferret-scan contributes nothing" comment.
+- Docs: DEVELOPMENT.md design-decision section + README.md user note & suppression recipe;
+  clarified that ferret-only rules live in the community config (ferret isn't enabled in
+  `.ash.yaml`).
+- Verified: `ash scan --scanners ferret-scan` → **PASSED, 0 actionable** (8 suppressed);
+  77 unit tests; validation 10/10; `ash config validate` valid; 0 self-findings in new text.
+- Commit: _(recorded on next push)_
