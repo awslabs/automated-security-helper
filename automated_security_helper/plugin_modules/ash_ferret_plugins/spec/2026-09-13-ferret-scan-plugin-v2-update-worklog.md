@@ -129,4 +129,4 @@ verification run, result, and the pushed commit SHA.
   `.ash.yaml`).
 - Verified: `ash scan --scanners ferret-scan` → **PASSED, 0 actionable** (8 suppressed);
   77 unit tests; validation 10/10; `ash config validate` valid; 0 self-findings in new text.
-- Commit: _(recorded on next push)_
+- Commit: `35c5dbe`

@@ -16,7 +16,7 @@ This is the running list of concrete changes shipped in this update. Status lege
 |----|--------|------|--------|--------|
 | A1 | Version window → `>=2.4.5,<2.5.0`; `MIN=2.4.5`, `MAX=2.5.0`, `RECOMMENDED=2.4.5` | fix | ☑ | d1a3130 |
 | A2 | Emit `--limit 0` by default (new `finding_limit` option) to stop silent 200-finding truncation | fix | ☑ | e1412f7 |
-| A3 | Keep `API_KEY_OR_SECRET` enabled; suppress the 6 v2.4.5 FPs in the community config + document the policy | fix | ☑ | (this commit) |
+| A3 | Keep `API_KEY_OR_SECRET` enabled; suppress the 6 v2.4.5 FPs in the community config + document the policy | fix | ☑ | 35c5dbe |
 | A4 | Adopt `--fail-on-incomplete` (new `fail_on_incomplete` option) + exit-code-3 handling | feature | ☑ | 2b0458c |
 | A5 | Block-list additions: `preprocess_only`, `pre_commit_mode`, `list_profiles`; always `--quiet` | fix | ☑ | 12f28c0 |
 | A5 | Block-list additions: `preprocess_only`, `pre_commit_mode`, `list_profiles`; always `--quiet` | fix | ☑ | 1d34b4f→ |
