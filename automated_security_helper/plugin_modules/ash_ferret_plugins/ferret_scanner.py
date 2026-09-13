@@ -203,9 +203,12 @@ class FerretScannerConfigOptions(ScannerOptionsBase):
     checks: Annotated[
         str,
         Field(
-            description="Specific checks to run, comma-separated: CREDIT_CARD, EMAIL, "
-            "INTELLECTUAL_PROPERTY, IP_ADDRESS, METADATA, PASSPORT, PERSON_NAME, "
-            "PHONE, SECRETS, SOCIAL_MEDIA, SSN, or 'all'"
+            description="Specific checks to run, comma-separated. As of ferret-scan "
+            "v2.4.5: BANK_ACCOUNT, CLOUD_RESOURCES, CREDIT_CARD, DATE_OF_BIRTH, "
+            "DRIVERS_LICENSE, EMAIL, INTELLECTUAL_PROPERTY, IP_ADDRESS, MEDICAL_ID, "
+            "METADATA, OTP, PASSPORT, PERSON_NAME, PHONE, PHYSICAL_ADDRESS, SECRETS, "
+            "SOCIAL_MEDIA, SSN, VIN, or 'all'. The authoritative list for the installed "
+            "version is 'ferret-scan --help checks'."
         ),
     ] = "all"
 

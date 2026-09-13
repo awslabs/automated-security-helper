@@ -472,7 +472,11 @@ For example: `.ash/ash_output/scanners/ferret-scan/source/ferret-scan.sarif`
 
 ### 6. Edge Case: Empty and Missing Target Directories
 
-**Empty directory**: The plugin invokes ferret-scan, which produces a SARIF file with `results: null`. ASH completes with 0 actionable findings. No crash, no error — graceful skip.
+**Empty directory**: The plugin skips the invocation entirely (the `scan()` empty/missing
+guard returns `True` before ferret-scan is called). If ferret-scan *is* invoked on a tree
+with no findings, current versions (v2.3.1+) emit `results: []` (an empty array, not the
+older `null`); `SarifReport.model_validate` accepts both. ASH completes with 0 actionable
+findings. No crash, no error — graceful skip.
 
 **Missing directory**: ASH itself throws `FileNotFoundError` before any plugin is invoked (the framework calls `os.chdir(source_dir)` in `run_ash_scan.py`). This is an ASH-level issue, not a plugin concern. The plugin's own `scan()` method also guards against this by returning `True` (skip) for non-existent paths, but that code path is never reached when running through `ash scan`.
 
@@ -484,11 +488,18 @@ The `validate_no_unsupported_options` validator runs in `mode="before"`, meaning
 
 The `_process_config_options()` method appends to `self.args.extra_args`. To prevent accumulation when called multiple times, the method clears `self.args.extra_args = []` at the start of each invocation. This was added to handle the case where `_resolve_arguments` calls `_process_config_options`, and the base class `model_post_init` also calls it.
 
-### 9. Exclude Patterns: Simple Names, Not Globs
+### 9. Exclude Patterns: Glob (no `**`) + Substring, Not "Simple Names"
 
-Ferret-scan's `--exclude` flag uses simple directory/file name matching, not glob
-patterns. Use `.venv` instead of `.venv/**`. The plugin joins all exclude patterns
-into a single comma-separated `--exclude` value (e.g., `--exclude .venv,.git,*.pyc`).
+Correction (verified against ferret-scan v2.4.5, `isExcluded` in `cmd/main.go`): the
+earlier claim that `--exclude` uses "simple names, not globs" is wrong. Each pattern is
+tested several ways — Go `filepath.Match` glob against the full path **and** the
+basename (`*`, `?`, `[abc]` supported; `**` globstar is **not**), a plain
+`strings.Contains` substring match against the full path, and a `dir/`-segment match.
+So `*.pyc` works as a glob, and a bare `.venv` excludes any path containing "`.venv`".
+The practical guidance is unchanged — use `.venv`, not `.venv/**` (globstar is
+unsupported) — but note the substring branch means a short token like `test` or `build`
+can over-exclude any path containing it. The plugin joins all patterns into a single
+comma-separated `--exclude` value (e.g., `--exclude .venv,.git,*.pyc`).
 
 ### 10. Bundled Config File Overrides CLI `--exclude`
 
@@ -597,7 +608,7 @@ The script checks for:
 | `SECRET-SECRET-KEYWORD` | Variable names like `API_KEY`, `PASSWORD`, `TOKEN` that trigger secret detection regardless of value |
 | `HARDCODED-PII` | Credit card numbers or SSNs as string literals in source |
 | `HEX-HIGH-ENTROPY-STRING` | Long hex strings (32+ chars) that trigger entropy detectors |
-| `EXCLUDE-GLOB-SYNTAX` | Exclude patterns using `**/` glob syntax instead of simple names (ferret-scan doesn't support globs) |
+| `EXCLUDE-GLOB-SYNTAX` | Exclude patterns using `**/` globstar syntax (ferret-scan's `filepath.Match` supports `*`/`?`/`[..]` but not `**`) |
 | `TEST-COUNT` | Ensures the unit test count hasn't regressed below 67 |
 | `WINDOWS-PATH` | `str(Path)` instead of `Path.as_posix()` in CLI argument building — backslashes break ferret-scan on Windows |
 | `EXCLUDE-MULTIPLE-ARGS` | Looping over exclude patterns to append individual `--exclude` args instead of joining into one comma-separated value |
@@ -839,7 +850,7 @@ rm /tmp/test-ash-config.yaml
 ```bash
 mkdir -p /tmp/empty-test-dir
 uv run ash scan --source-dir /tmp/empty-test-dir --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins --no-aggregated-results 2>&1
-# Expected: ferret-scan completes with 0 findings, SARIF has results: null, no crash
+# Expected: ferret-scan completes with 0 findings, SARIF has results: [] (empty array), no crash
 rmdir /tmp/empty-test-dir
 ```
 
@@ -1066,8 +1077,9 @@ scanners:
 > full control to the ASH plugin options above.
 
 > **Why simple directory names in `exclude_patterns`**: Ferret-scan's `--exclude`
-> flag uses simple name matching, not glob patterns. Use `.venv` instead of
-> `.venv/**`. Patterns are joined into a single comma-separated `--exclude` value.
+> matches with `filepath.Match` glob plus a substring fallback; the `**` globstar is
+> not supported, so use `.venv` rather than `.venv/**`. Patterns are joined into a
+> single comma-separated `--exclude` value.
 
 ### 2. Update CI workflow (`.github/workflows/ash-repo-scan-validation.yml`)
 

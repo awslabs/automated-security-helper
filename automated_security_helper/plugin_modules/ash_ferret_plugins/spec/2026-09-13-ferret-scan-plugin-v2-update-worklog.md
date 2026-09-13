@@ -99,4 +99,19 @@ verification run, result, and the pushed commit SHA.
 - Docs: README + DEVELOPMENT option tables; new "Exit codes and --fail-on-incomplete"
   subsection in the Scanner Return Contract.
 - Verification: **77 passed**.
+- Commit: `2b0458c` (amended to use builtin `set[int]` — avoided introducing 2 new ruff
+  `UP006/UP035` findings; file stays at its pre-existing 21, same as `origin/main`).
+
+### WL-6 — A6: doc corrections (2026-09-13)
+- Corrected `--exclude` semantics in README + DEVELOPMENT (×2) + the EXCLUDE-GLOB-SYNTAX
+  check description: it is `filepath.Match` glob (`*`,`?`,`[..]`; no `**`) **plus** a
+  substring fallback — not "simple names, not globs". Verified against `cmd/main.go`.
+- Corrected the empty-results note: current ferret-scan emits `results: []`, not `null`
+  (verified against v2.4.5); `SarifReport.model_validate` accepts both.
+- Expanded README "Available Checks" from 11 to the full 19 (v2.4.5) with a
+  "use `ferret-scan --help checks`, don't hardcode" note; updated the `checks` field
+  description in `ferret_scanner.py` to match.
+- No GenAI references exist in the plugin README/DEVELOPMENT (only harmless comments in
+  the bundled `ferret-config.yaml`); left those, noted for a later config refresh.
+- Verification: **77 passed**; validation **all 10 checks passed**; ruff unchanged (21).
 - Commit: _(recorded on next push)_

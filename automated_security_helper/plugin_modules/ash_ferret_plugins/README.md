@@ -152,9 +152,12 @@ scanners:
 > full control via ASH plugin options. Alternatively, keep it enabled and use `profile`
 > to select a specific scanning profile from the bundled config.
 
-> **Note on `exclude_patterns`**: Ferret-scan uses simple directory/file name matching
-> for excludes, not glob patterns. Use `.venv` instead of `.venv/**`. Patterns are
-> passed as a comma-separated `--exclude` value to the ferret-scan CLI.
+> **Note on `exclude_patterns`**: Ferret-scan's `--exclude` matches each pattern with
+> Go's `filepath.Match` glob (`*`, `?`, `[abc]` — `**` globstar is **not** supported)
+> **and** as a plain substring of the full path. So `.venv` excludes any path containing
+> "`.venv`", and `*.log` matches log files; use `.venv` rather than `.venv/**`. Because of
+> the substring branch, a short bare token (e.g. `test`) can over-exclude any path
+> containing it. Patterns are passed as a single comma-separated `--exclude` value.
 
 ### Configuration Options
 
@@ -271,17 +274,28 @@ scanners:
 
 ### Available Checks
 
+The authoritative list for your installed version is `ferret-scan --help checks` — do not
+hardcode it, as ferret-scan adds detectors between releases. As of v2.4.5 the checks are:
+
+- `BANK_ACCOUNT` - Bank account / IBAN / routing numbers
+- `CLOUD_RESOURCES` - Cloud resource identifiers (AWS ARNs, Azure/GCP/OCI/IBM/Alibaba IDs)
 - `CREDIT_CARD` - Credit card numbers
+- `DATE_OF_BIRTH` - Dates of birth
+- `DRIVERS_LICENSE` - Driver's license numbers (state formats)
 - `EMAIL` - Email addresses
-- `INTELLECTUAL_PROPERTY` - Patents, trademarks, copyrights
+- `INTELLECTUAL_PROPERTY` - Patents, trademarks, copyrights (internal-URL detection requires config)
 - `IP_ADDRESS` - IPv4 and IPv6 addresses
-- `METADATA` - Document and image metadata
+- `MEDICAL_ID` - Medical / health identifiers (PHI)
+- `METADATA` - Document, image, audio, and video metadata
+- `OTP` - One-time-passcode / two-factor secrets
 - `PASSPORT` - Passport numbers
 - `PERSON_NAME` - Person names
 - `PHONE` - Phone numbers
+- `PHYSICAL_ADDRESS` - Physical / postal addresses
 - `SECRETS` - API keys, tokens, passwords
 - `SOCIAL_MEDIA` - Social media profiles
 - `SSN` - Social Security Numbers
+- `VIN` - Vehicle Identification Numbers
 
 ### Available Profiles (in default config)
 
