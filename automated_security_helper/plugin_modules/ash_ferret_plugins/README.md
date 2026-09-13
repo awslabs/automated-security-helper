@@ -113,6 +113,9 @@ The following ferret-scan CLI options are **NOT supported** in the ASH plugin an
 | `enable_redaction`, `redaction_*`, `memory_scrub` | Redaction is post-processing, not scanning. |
 | `generate_suppressions`, `show_suppressed`, `suppressions_file` | ASH manages suppressions centrally. |
 | `extract_text` | Text extraction mode is a utility, not scanning. |
+| `preprocess_only` | Outputs extracted text and exits — produces no SARIF results. |
+| `pre_commit_mode` | ASH manages output formatting and exit codes centrally; use ASH's own pre-commit hook. |
+| `list_profiles` | Only prints available profiles and exits — produces no scan results. |
 
 ### Security Warning: show_match Option
 

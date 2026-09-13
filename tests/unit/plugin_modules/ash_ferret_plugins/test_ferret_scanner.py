@@ -149,6 +149,28 @@ class TestFerretScanScannerUnsupportedOptions:
         assert "Unsupported option 'extract_text'" in str(exc_info.value)
         assert "Text extraction mode is not supported" in str(exc_info.value)
 
+    def test_unsupported_option_preprocess_only_raises_error(self):
+        """Test that using 'preprocess_only' option raises an error."""
+        with pytest.raises(ValueError) as exc_info:
+            FerretScannerConfigOptions(preprocess_only=True)
+
+        assert "Unsupported option 'preprocess_only'" in str(exc_info.value)
+        assert "no SARIF results" in str(exc_info.value)
+
+    def test_unsupported_option_pre_commit_mode_raises_error(self):
+        """Test that using 'pre_commit_mode' option raises an error."""
+        with pytest.raises(ValueError) as exc_info:
+            FerretScannerConfigOptions(pre_commit_mode=True)
+
+        assert "Unsupported option 'pre_commit_mode'" in str(exc_info.value)
+
+    def test_unsupported_option_list_profiles_raises_error(self):
+        """Test that using 'list_profiles' option raises an error."""
+        with pytest.raises(ValueError) as exc_info:
+            FerretScannerConfigOptions(list_profiles=True)
+
+        assert "Unsupported option 'list_profiles'" in str(exc_info.value)
+
     def test_all_unsupported_options_documented(self):
         """Test that all unsupported options have documentation."""
         for option, message in UNSUPPORTED_FERRET_OPTIONS.items():

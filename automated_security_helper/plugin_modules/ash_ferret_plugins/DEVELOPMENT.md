@@ -202,6 +202,7 @@ def validate_no_unsupported_options(cls, data: Any) -> Any:
 |---------|-----------------|
 | Output format | Always SARIF (hardcoded via `--format sarif`) |
 | Color output | Always `--no-color` (ASH handles formatting) |
+| Progress output | Always `--quiet` (ASH captures stderr and renders its own progress) |
 
 ### Managed by ASH Framework (not plugin-controlled)
 
@@ -296,7 +297,8 @@ def test_unsupported_option_new_option_raises_error(self):
 | Web server | `web`, `port` | Not applicable for batch scanning |
 | Redaction | `enable_redaction`, `redaction_*`, `memory_scrub` | Post-processing, not scanning |
 | Suppressions | `generate_suppressions`, `show_suppressed`, `suppressions_file` | ASH manages centrally |
-| Utility modes | `extract_text` | Not a scanning mode |
+| Utility modes | `extract_text`, `preprocess_only`, `list_profiles` | Produce no SARIF scan results |
+| Pre-commit | `pre_commit_mode` | ASH manages output/exit codes; use ASH's own pre-commit hook |
 | Logging | `debug`, `verbose` | Use `ferret_debug`/`ferret_verbose` instead (avoids confusion with ASH flags) |
 
 ## Testing

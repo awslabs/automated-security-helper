@@ -75,4 +75,14 @@ verification run, result, and the pushed commit SHA.
   Recorded the invalidated assumption in analysis §9.5 and surfaced a mechanism decision to
   the requester. No code change to the plugin yet.
 - Verification: docs-only; **71 passed**.
+- Commit: `1d34b4f`
+
+### WL-4 — A5: block-list additions + always `--quiet` (2026-09-13)
+- `ferret_scanner.py`: added `preprocess_only`, `pre_commit_mode`, `list_profiles` to
+  `UNSUPPORTED_FERRET_OPTIONS`; `_process_config_options` now always appends `--quiet`
+  (carried from old-branch analysis §9.3).
+- Tests: 3 new unsupported-option tests (74 total).
+- Docs: README unsupported-options table; DEVELOPMENT categories table + hardcoded-flags
+  table (`--quiet`).
+- Verification: **74 passed**.
 - Commit: _(recorded on next push)_
