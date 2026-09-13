@@ -20,7 +20,7 @@ This is the running list of concrete changes shipped in this update. Status lege
 | A4 | Adopt `--fail-on-incomplete` (new `fail_on_incomplete` option) + exit-code-3 handling | feature | ☑ | 2b0458c |
 | A5 | Block-list additions: `preprocess_only`, `pre_commit_mode`, `list_profiles`; always `--quiet` | fix | ☑ | 12f28c0 |
 | A5 | Block-list additions: `preprocess_only`, `pre_commit_mode`, `list_profiles`; always `--quiet` | fix | ☑ | 1d34b4f→ |
-| A6 | Doc corrections: `--exclude` glob+substring semantics, empty-result `null`→`[]`, full check list, remove dead GenAI references | docs | ☑ | 12f28c0→ |
+| A6 | Doc corrections: `--exclude` glob+substring semantics, empty-result `null`→`[]`, full check list, remove dead GenAI references | docs | ☑ | f55ef54 |
 
 ## Track B — Feature surfacing (after Track A)
 
@@ -32,6 +32,13 @@ This is the running list of concrete changes shipped in this update. Status lege
 | B4 | `validator_budget` → `--validator-budget` | feature | ☐ | |
 | B5 | `max_live_bytes` → `--max-live-bytes` | feature | ☐ | |
 | B6 | Document new detectors in README Available Checks (BANK_ACCOUNT, OTP, DOB, DRIVERS_LICENSE, MEDICAL_ID, VIN, CLOUD_RESOURCES, PHYSICAL_ADDRESS) | docs | ☐ | |
+
+## Status summary (2026-09-13)
+
+**Track A: 5 of 6 delivered** (A1, A2, A4, A5, A6 ☑; A3 ⏸ blocked — the requester-chosen
+mechanism does not exist in ferret-scan, see analysis §9.5, awaiting a mechanism decision).
+Every delivered item was pushed with the ferret unit suite green (77 tests) and the
+pre-push validation script passing (10/10). **Track B not started.**
 
 ## Design decisions recorded
 

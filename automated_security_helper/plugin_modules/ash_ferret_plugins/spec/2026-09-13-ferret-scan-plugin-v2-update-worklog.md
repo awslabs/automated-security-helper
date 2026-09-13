@@ -114,4 +114,4 @@ verification run, result, and the pushed commit SHA.
 - No GenAI references exist in the plugin README/DEVELOPMENT (only harmless comments in
   the bundled `ferret-config.yaml`); left those, noted for a later config refresh.
 - Verification: **77 passed**; validation **all 10 checks passed**; ruff unchanged (21).
-- Commit: _(recorded on next push)_
+- Commit: `f55ef54` (this doc-sync of SHAs follows in the next commit).
