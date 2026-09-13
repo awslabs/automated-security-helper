@@ -148,10 +148,10 @@ The plugin validates ferret-scan version compatibility during dependency validat
 
 ```python
 # Version constants (update when ferret-scan releases breaking changes)
-MIN_SUPPORTED_VERSION = "0.1.0"
-MAX_SUPPORTED_VERSION = "2.0.0"
-DEFAULT_VERSION_CONSTRAINT = ">=0.1.0,<2.0.0"
-RECOMMENDED_VERSION = "1.0.0"
+MIN_SUPPORTED_VERSION = "2.4.5"
+MAX_SUPPORTED_VERSION = "2.5.0"
+DEFAULT_VERSION_CONSTRAINT = ">=2.4.5,<2.5.0"
+RECOMMENDED_VERSION = "2.4.5"
 ```
 
 **Behavior**:
@@ -225,7 +225,7 @@ def validate_no_unsupported_options(cls, data: Any) -> Any:
 | `enable_preprocessors` | Extract text from documents | `true` |
 | `ferret_debug` | Enable ferret-scan's own debug logging (preprocessing/validation flow) | `false` |
 | `ferret_verbose` | Enable ferret-scan's own verbose output (detailed finding info) | `false` |
-| `tool_version` | Version constraint for installation | `">=0.1.0,<2.0.0"` |
+| `tool_version` | Version constraint for installation | `">=2.4.5,<2.5.0"` |
 | `skip_version_check` | Bypass version validation | `false` |
 
 Note: Bare `debug` and `verbose` are blocked to avoid confusion with ASH's `--debug`/`--verbose` flags. Use the `ferret_` prefixed versions instead.

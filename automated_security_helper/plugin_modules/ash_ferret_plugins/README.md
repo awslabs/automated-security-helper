@@ -30,7 +30,7 @@ ash dependencies install --config .ash/.ash_community_plugins.yaml
 # Or install by hand. Use the constraint, not a bare `pip install ferret-scan`:
 # the latter resolves to whatever is newest, which is how a release published
 # mid-CI-run once turned every open pull request red.
-pip install 'ferret-scan>=0.1.0,<2.0.0'
+pip install 'ferret-scan>=2.4.5,<2.5.0'
 
 # Or build from source
 git clone https://github.com/awslabs/ferret-scan.git
@@ -241,7 +241,7 @@ scanners:
   ferret-scan:
     enabled: true
     options:
-      tool_version: "==1.2.0"  # Exact version
+      tool_version: "==2.4.5"  # Exact version
 ```
 
 Or use a version range:
@@ -251,7 +251,7 @@ scanners:
   ferret-scan:
     enabled: true
     options:
-      tool_version: ">=1.0.0,<1.5.0"  # Compatible range
+      tool_version: ">=2.4.5,<2.5.0"  # Compatible range
 ```
 
 To bypass version checks (not recommended for production):

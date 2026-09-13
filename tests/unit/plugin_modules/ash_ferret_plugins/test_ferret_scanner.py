@@ -961,8 +961,10 @@ class TestFerretScanScannerVersionSupport:
 
         The plugin declared a supported range and installed nothing, so callers
         ran `pip install ferret-scan` and got whatever was newest. On
-        2026-08-20 that was 2.3.3 -- past MAX_SUPPORTED_VERSION -- and its new
-        API_KEY_OR_SECRET detector failed the self-scan on two false positives.
+        2026-08-20 that was 2.3.3, whose new API_KEY_OR_SECRET detector failed
+        the self-scan on two false positives. The plugin now pins conservatively
+        to the tested current line (>=2.4.5,<2.5.0), so both the CI-breaking
+        2.3.3 and any future 2.5.x are excluded until explicitly tested.
         """
         from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
             DEFAULT_VERSION_CONSTRAINT,
@@ -977,11 +979,12 @@ class TestFerretScanScannerVersionSupport:
         specs = [c[-1] for c in install_cmds if c[-1].startswith("ferret-scan")]
         assert specs == [f"ferret-scan{DEFAULT_VERSION_CONSTRAINT}"]
 
-        # The point of the constraint is excluding the version that broke CI.
+        # The point of the constraint is excluding the version that broke CI
+        # while admitting the version we actually test against.
         packaging_requirements = pytest.importorskip("packaging.requirements")
         specifier = packaging_requirements.Requirement(specs[0]).specifier
         assert "2.3.3" not in specifier
-        assert "1.10.0" in specifier
+        assert "2.4.5" in specifier
 
     def test_installation_command_honours_a_user_pin(self, mock_plugin_context):
         """An explicit tool_version must win over the plugin default."""
@@ -1066,11 +1069,11 @@ class TestFerretScanScannerVersionSupport:
 
         scanner = FerretScanScanner(context=mock_plugin_context)
 
-        with patch.object(scanner, "_get_installed_version", return_value="1.0.0"):
+        with patch.object(scanner, "_get_installed_version", return_value="2.4.5"):
             is_compatible, version, warning = scanner._check_version_compatibility()
 
             assert is_compatible is True
-            assert version == "1.0.0"
+            assert version == "2.4.5"
             assert warning is None
 
     @patch(

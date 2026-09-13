@@ -44,4 +44,15 @@ verification run, result, and the pushed commit SHA.
   analysis (§9), refreshed posture notes (baseline 69 tests, ferret-scan 2.4.5 verified,
   `--limit`/exclude semantics confirmed against the installed binary).
 - Verification: docs-only change; ferret unit suite still **69 passed**.
-- Commit: _(recorded on push)_
+- Commit: `921f1cb`
+
+### WL-1 — A1: version window pin (2026-09-13)
+- `ferret_scanner.py`: `MIN_SUPPORTED_VERSION 0.1.0→2.4.5`, `MAX 2.0.0→2.5.0`,
+  `DEFAULT_VERSION_CONSTRAINT ">=0.1.0,<2.0.0"→">=2.4.5,<2.5.0"`, `RECOMMENDED 1.0.0→2.4.5`.
+- Tests: updated `test_check_version_compatibility_compatible` (1.0.0→2.4.5) and
+  `test_installation_command_applies_the_declared_constraint` (asserts `2.4.5 in specifier`,
+  `2.3.3 not in`; docstring updated to explain the conservative pin).
+- Docs: README install line + `tool_version` examples; DEVELOPMENT.md constants block and
+  options-table default.
+- Verification: **69 passed**; `validate_ferret_plugin.py` **all 10 checks passed**.
+- Commit: _(recorded on next push)_

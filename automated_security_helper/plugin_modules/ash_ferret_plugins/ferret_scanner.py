@@ -45,16 +45,16 @@ DEFAULT_FERRET_CONFIG = Path(__file__).parent / "ferret-config.yaml"
 # ============================================================================
 
 # Minimum supported ferret-scan version (inclusive)
-MIN_SUPPORTED_VERSION = "0.1.0"
+MIN_SUPPORTED_VERSION = "2.4.5"
 
 # Maximum supported ferret-scan version (exclusive - versions >= this may have breaking changes)
-MAX_SUPPORTED_VERSION = "2.0.0"
+MAX_SUPPORTED_VERSION = "2.5.0"
 
 # Default version constraint for installation (if using uv tool)
-DEFAULT_VERSION_CONSTRAINT = ">=0.1.0,<2.0.0"
+DEFAULT_VERSION_CONSTRAINT = ">=2.4.5,<2.5.0"
 
 # Recommended version for best compatibility
-RECOMMENDED_VERSION = "1.0.0"
+RECOMMENDED_VERSION = "2.4.5"
 
 # ============================================================================
 # UNSUPPORTED OPTIONS DOCUMENTATION
