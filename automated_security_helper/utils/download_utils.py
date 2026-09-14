@@ -486,6 +486,57 @@ def create_url_download_command(
     )
 
 
+def pinned_tool_install_commands(
+    tool: str,
+) -> "dict[str, dict[str, list[CustomCommand]]]":
+    """Build the ``custom_install_commands`` table for one pinned tool.
+
+    Only the platform/arch pairs the vendor actually publishes get an entry. A
+    pair with no asset is left *absent* rather than mapped to an empty list, and
+    that distinction is the whole point: ``_has_install_commands`` reports
+    ``len(...) > 0``, so an empty list made syft and npm-audit look like they had
+    an install path while installing nothing, and the installer then reported
+    success for a tool it had not installed.
+    """
+    from automated_security_helper.utils.tool_downloads import supported_platforms
+
+    table: dict[str, dict[str, list[CustomCommand]]] = {}
+    for target_platform, arch in supported_platforms(tool):
+        table.setdefault(target_platform, {})[arch] = [
+            create_pinned_tool_install_command(tool, target_platform, arch)
+        ]
+    return table
+
+
+def current_platform_arch() -> "tuple[str, str]":
+    """The (platform, arch) key pair for the machine this is running on.
+
+    Matches the vocabulary ``cli/dependencies.py`` uses, and derives the
+    architecture from ``platform.machine()``.
+
+    The older per-scanner helpers derived it from ``struct.calcsize("P") * 8``,
+    which answers 64-vs-32-bit and not amd64-vs-arm64 -- so on an arm64 host they
+    reported "amd64". That was harmless only because the tables they indexed had
+    identical entries for both arches. It stops being harmless the moment a table
+    has an asset for one arch and not the other, which is now the case.
+    """
+    system = platform.system().lower()
+    machine = platform.machine().lower()
+    if machine in ("x86_64", "amd64"):
+        arch = "amd64"
+    elif machine in ("aarch64", "arm64"):
+        arch = "arm64"
+    else:
+        arch = "unknown"
+    return system, arch
+
+
+def has_install_commands_for_current_platform(table: dict) -> bool:
+    """Whether a ``custom_install_commands`` table has commands for this machine."""
+    system, arch = current_platform_arch()
+    return len(table.get(system, {}).get(arch, [])) > 0
+
+
 def get_opengrep_url(
     target_platform: Literal["linux", "darwin", "macos", "windows"],
     arch: Literal["amd64", "arm64", "x86_64", "aarch64"],

@@ -4,8 +4,9 @@ import logging
 from pathlib import Path
 from typing import Annotated, ClassVar, List, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from automated_security_helper.base.options import ScannerOptionsBase
+from automated_security_helper.base.plugin_base import CustomCommand
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
@@ -33,6 +34,7 @@ from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.normalizers import get_normalized_filename
+from automated_security_helper.utils.tool_downloads import CFN_NAG_GEM_VERSION
 
 
 class CfnNagScannerConfigOptions(ScannerOptionsBase):
@@ -89,6 +91,49 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         )
 
         super().model_post_init(context)
+
+    @model_validator(mode="after")
+    def setup_custom_install_commands(self) -> "CfnNagScanner":
+        """Set up the installation command for cfn-nag.
+
+        cfn-nag is a Ruby gem, not a release binary, so it does not go through the
+        pinned-digest download path the way grype, syft and trivy do. Forcing it
+        into that path would mean pinning a digest for every gem in its dependency
+        closure, which is what a lockfile is for.
+
+        What that costs, stated plainly: this command pins cfn-nag itself exactly
+        and lets RubyGems resolve the closure within cfn-nag's own constraints.
+        The committed ``assets/Gemfile.lock`` pins the whole closure and remains
+        the stricter artifact -- it is what the container image builds against.
+        ``bundle install --gemfile`` was tried instead and rejected: that lock's
+        PLATFORMS section lists only ``ruby``, so on Windows and macOS bundler
+        needs the platform added before it will resolve, and an installer that
+        works on one platform and errors on two is worse than one that pins
+        slightly less.
+
+        A Ruby interpreter is a prerequisite, not something ASH installs. Where
+        ruby is absent this command fails with a nonzero exit and the installer
+        reports it as a failure -- which is the point. Previously cfn-nag had no
+        install command at all, so it stayed absent and the installer said
+        everything succeeded.
+        """
+        command = CustomCommand(
+            args=[
+                "gem",
+                "install",
+                "cfn-nag",
+                "-v",
+                CFN_NAG_GEM_VERSION,
+                "--no-document",
+            ],
+            shell=False,
+        )
+        for target_platform in ("linux", "darwin", "windows"):
+            for arch in ("amd64", "arm64"):
+                self.custom_install_commands.setdefault(target_platform, {})[arch] = [
+                    command
+                ]
+        return self
 
     def _process_config_options(self):
         # Add any additional config option parsing here, if necessary
