@@ -195,4 +195,4 @@ Review finding: DEVELOPMENT.md §10 was inaccurate for v2.4.5.
   `INTERNAL_URL_MIGRATION_GUIDE.md` reference, noted GenAI-stub deferral is conscious).
 - Verification: **79 passed**; validation **9/9 passed**; ruff unchanged (21); `ash config
   validate` valid.
-- Commit: _(recorded on next push)_
+- Commit: `e789825`
