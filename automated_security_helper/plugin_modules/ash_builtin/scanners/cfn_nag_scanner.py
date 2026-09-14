@@ -35,6 +35,7 @@ from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.download_utils import current_bin_path
 from automated_security_helper.utils.normalizers import get_normalized_filename
+from automated_security_helper.utils.subprocess_utils import find_executable
 from automated_security_helper.utils.tool_downloads import CFN_NAG_GEM_VERSION
 
 
@@ -112,12 +113,32 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         works on one platform and errors on two is worse than one that pins
         slightly less.
 
-        A Ruby interpreter is a prerequisite, not something ASH installs. Where
-        ruby is absent this command fails with a nonzero exit and the installer
-        reports it as a failure -- which is the point. Previously cfn-nag had no
-        install command at all, so it stayed absent and the installer said
-        everything succeeded.
+        A Ruby interpreter is a prerequisite, not something ASH installs, and the
+        command is therefore declared only when `gem` is actually present.
+
+        Declaring it unconditionally was wrong in a way worth recording. `gem`
+        missing makes run_command return 1 on FileNotFoundError, which counts as a
+        failed install command, which fails the whole run -- so on a machine without
+        Ruby, `ash dependencies install` would exit non-zero for every plugin
+        together, before any scan. That is a different and worse outcome than
+        cfn-nag being unavailable, and it contradicts how the same condition is
+        treated one plugin over: npm-audit needs a Node runtime ASH does not
+        install, declares no command, and is reported as a constraint rather than a
+        malfunction. Two identical situations should not diverge on the accident of
+        whether one of them declares a command that cannot work.
+
+        With the gate, a machine without Ruby reports cfn-nag under "no install path
+        on this platform" -- by name, next to npm-audit -- and a machine with Ruby
+        installs it.
         """
+        if find_executable("gem") is None:
+            ASH_LOGGER.warning(
+                "cfn-nag needs RubyGems (`gem`) to install and it was not found. "
+                "cfn-nag will be reported as having no install path on this "
+                "machine rather than failing the install of everything else."
+            )
+            return self
+
         # --user-install and --bindir together, and both are load-bearing.
         #
         # --user-install because a plain `gem install` writes to the interpreter's

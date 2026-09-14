@@ -17,6 +17,7 @@ against mocks that agree with the implementation by construction.
 
 import hashlib
 import io
+import platform
 import tarfile
 import zipfile
 from pathlib import Path
@@ -30,9 +31,12 @@ from automated_security_helper.core.exceptions import (
 )
 from automated_security_helper.utils import tool_downloads
 from automated_security_helper.utils.download_utils import (
+    RECEIPT_DIR_NAME,
     _extract_single_member,
+    install_binary_from_url,
     install_pinned_tool,
     read_receipt,
+    receipt_path,
     sha256_file,
     verify_sha256,
 )
@@ -76,10 +80,16 @@ class _FakeResponse(io.BytesIO):
 
 
 def _serve(payload: bytes):
-    """Patch download_utils' urlopen to serve exactly these bytes."""
+    """Patch download_utils' urlopen to serve exactly these bytes.
+
+    A fresh response per call, via side_effect rather than return_value.
+    _FakeResponse closes itself on __exit__, so a single shared instance made the
+    second download inside one _serve context fail with "I/O operation on closed
+    file" -- a test-harness artifact that would have read as a product bug.
+    """
     return patch(
         "automated_security_helper.utils.download_utils.urllib.request.urlopen",
-        return_value=_FakeResponse(payload),
+        side_effect=lambda *_a, **_k: _FakeResponse(payload),
     )
 
 
@@ -228,6 +238,69 @@ class TestIdempotence:
             install_pinned_tool("grype", "linux", "amd64", bin_dir)
         assert served.called
 
+    def test_a_substituted_binary_is_reinstalled_not_trusted(
+        self, tmp_path, fake_grype_release
+    ):
+        """The receipt must not vouch for bytes that changed after it was written.
+
+        This is the case idempotence created and then had to close. The pinned
+        digest covers the release *archive*, so it says nothing about the extracted
+        executable -- a receipt match alone would report a replaced binary as
+        "already installed" and skip it forever.
+
+        Not hypothetical in ASH's own image: Dockerfile:243 makes ASH_BIN_PATH
+        world-writable, :254 puts it first on PATH, and :253 and :328 both install
+        into it. Before idempotence every install re-downloaded, so the second run
+        overwrote a substitution; the redundant download was accidentally a
+        self-healing property.
+        """
+        payload, real_digest = fake_grype_release
+        bin_dir = tmp_path / "bin"
+
+        with _pin(_grype_asset_filename(), real_digest), _serve(payload):
+            installed = install_pinned_tool("grype", "linux", "amd64", bin_dir)
+
+        # Stand in for a substituted scanner: same path, same receipt, other bytes.
+        installed.write_bytes(b"#!/bin/sh\nexit 0\n")
+
+        with _pin(_grype_asset_filename(), real_digest), _serve(payload) as served:
+            install_pinned_tool("grype", "linux", "amd64", bin_dir)
+
+        assert served.called, "a replaced binary was trusted instead of reinstalled"
+        assert installed.read_bytes() == PAYLOAD
+
+    def test_an_unpinned_download_is_never_cached(self, tmp_path):
+        """Without a pinned digest there is nothing to be idempotent against.
+
+        opengrep is in this state: create_url_download_command passes no digest, so
+        its receipt records `sha256: null`. Comparing null to null matches, so a
+        substituted opengrep -- fetched behind only a `startswith("https://")` check
+        -- would be cached and skipped on every later install. Re-downloading is the
+        conservative answer until opengrep gets a pin.
+        """
+        bin_dir = tmp_path / "bin"
+        url = "https://example.invalid/opengrep"
+
+        with _serve(PAYLOAD):
+            install_binary_from_url(url, bin_dir, "opengrep")
+        receipt = read_receipt(bin_dir, "opengrep")
+        assert receipt["sha256"] is None, "fixture assumes an unpinned install"
+
+        with _serve(PAYLOAD) as served:
+            install_binary_from_url(url, bin_dir, "opengrep")
+        assert served.called, "an unverified download was cached"
+
+    def test_a_receipt_that_is_not_an_object_is_ignored(self, tmp_path):
+        """read_receipt promises None for anything it cannot read.
+
+        `[]` is valid JSON and has no .get(), so returning it crashed the caller
+        with AttributeError instead of triggering a reinstall.
+        """
+        bin_dir = tmp_path / "bin"
+        (bin_dir / RECEIPT_DIR_NAME).mkdir(parents=True)
+        receipt_path(bin_dir, "grype").write_text("[]", encoding="utf-8")
+        assert read_receipt(bin_dir, "grype") is None
+
     def test_binary_without_receipt_reinstalls(self, tmp_path, fake_grype_release):
         """A binary ASH did not install is not assumed to be the pinned version."""
         payload, real_digest = fake_grype_release
@@ -287,8 +360,70 @@ class TestArchiveExtraction:
         bin_dir = tmp_path / "nested" / "bin"
         target = bin_dir / "grype"
         _extract_single_member(archive, "grype", target)
+        # The load-bearing assertion: the bytes landed at the caller's path. The
+        # traversal name had no effect because it was never used as a destination.
         assert target.read_bytes() == PAYLOAD
-        assert not (tmp_path.parent / "grype").exists()
+        # Where `../../../../grype` would have escaped to, had the archive path been
+        # honoured. Resolved explicitly rather than guessed at: four levels up from
+        # tmp_path/nested/bin is tmp_path.parent.parent.
+        escaped = (bin_dir / "../../../../grype").resolve()
+        assert escaped != target
+        assert not escaped.exists(), f"extraction escaped to {escaped}"
+
+    def test_zip_traversal_entry_cannot_escape_the_target(self, tmp_path):
+        """Same property for zips, which take a different code path.
+
+        The tar branch and the zip branch locate and write their member separately,
+        so a fix applied to one proves nothing about the other.
+        """
+        archive = tmp_path / "a.zip"
+        _make_zip(archive, ["../../../../grype.exe"])
+        bin_dir = tmp_path / "nested" / "bin"
+        target = bin_dir / "grype.exe"
+        _extract_single_member(archive, "grype.exe", target)
+        assert target.read_bytes() == PAYLOAD
+        escaped = (bin_dir / "../../../../grype.exe").resolve()
+        assert not escaped.exists(), f"extraction escaped to {escaped}"
+
+    @pytest.mark.skipif(
+        platform.system() == "Windows",
+        reason="symlink creation needs elevation on Windows",
+    )
+    def test_a_symlink_at_the_target_is_replaced_not_written_through(self, tmp_path):
+        """A planted symlink must not receive the extracted binary.
+
+        Reachable rather than theoretical: ASH's image makes ASH_BIN_PATH
+        world-writable and puts it first on PATH, and ASH executes repository code
+        during a scan, so a scanned project can plant the link before a later
+        install. A plain `open(target, "wb")` follows the link and writes the
+        vendor's binary into whatever it points at, then chmods that file +x.
+        """
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        victim = tmp_path / "victim.txt"
+        victim.write_bytes(b"do not touch me")
+        target = bin_dir / "grype"
+        target.symlink_to(victim)
+
+        archive = tmp_path / "a.tar.gz"
+        _make_tarball(archive, ["grype"])
+        _extract_single_member(archive, "grype", target)
+
+        assert victim.read_bytes() == b"do not touch me", (
+            "the symlink target was written through"
+        )
+        assert not target.is_symlink(), "the symlink survived the install"
+        assert target.read_bytes() == PAYLOAD
+
+    def test_a_failed_extraction_leaves_no_partial_file(self, tmp_path):
+        """An archive missing its member must not leave a staging file behind."""
+        archive = tmp_path / "a.tar.gz"
+        _make_tarball(archive, ["LICENSE"])
+        target = tmp_path / "bin" / "grype"
+        with pytest.raises(ToolDownloadIntegrityError):
+            _extract_single_member(archive, "grype", target)
+        assert not target.exists()
+        assert not target.with_name("grype.ash-partial").exists()
 
 
 class TestAssetResolution:

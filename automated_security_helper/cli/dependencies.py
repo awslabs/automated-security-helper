@@ -70,8 +70,14 @@ class PluginInstallOutcome:
 
     @property
     def declared_no_commands(self) -> bool:
-        """No usable install command was declared for this platform/arch."""
-        return self.commands_attempted == 0
+        """No usable install command was declared for this platform/arch.
+
+        Excludes plugins that raised while producing their commands. Those have an
+        unknown install path rather than no install path, and reporting a crash as
+        "no install path on this platform" is the wrong diagnosis in the one
+        function whose whole purpose is to report accurately.
+        """
+        return self.commands_attempted == 0 and not self.errors
 
     @property
     def needs_external_tool(self) -> bool:
@@ -392,18 +398,24 @@ def _report_and_exit(
     The verdict is computed from counts, never assumed. Three things fail a run:
 
     1. Any install command exited non-zero, or a plugin raised.
-    2. Nothing was attempted at all. A run in which every command list was empty
-       installed nothing, and reporting that as success is what let three scanners
-       stay absent from ASH's own CI while the installer said it had finished.
+    2. Nothing was attempted **and** a needed tool is still absent. A run in which
+       every command list was empty installed nothing, and reporting that as
+       success is what let three scanners stay absent from ASH's own CI while the
+       installer said it had finished. The second half of the condition matters:
+       attempting nothing because everything is already present is a no-op, and
+       failing it would turn `--tool npm-audit` on a machine with node into a false
+       alarm.
     3. A tool named explicitly with --tool is not on PATH afterwards. Asking for a
        specific tool and getting a clean exit without it is the same failure in
-       miniature.
+       miniature. Restricted to plugins that actually run an external binary, since
+       a reporter has no executable to find.
 
     Tools with no install path on this platform are reported by name and do not
-    fail the run on their own. That is a real constraint rather than a malfunction
-    -- npm-audit needs a Node runtime ASH does not install, and grype and trivy
-    publish no windows/arm64 build -- and it is named in the output rather than
-    left for the reader to infer from silence.
+    fail the run on their own when they are already present. That is a real
+    constraint rather than a malfunction -- npm-audit needs a Node runtime ASH does
+    not install, cfn-nag needs RubyGems, and grype and trivy publish no
+    windows/arm64 build -- and it is named in the output rather than left for the
+    reader to infer from silence.
     """
     table = Table(title="Dependency installation results")
     table.add_column("Plugin")
@@ -445,24 +457,42 @@ def _report_and_exit(
         if o.needs_external_tool and not o.executable and o.commands_attempted
     )
 
+    # An external tool that is needed, has no install path here, and is not present.
+    # This is what makes "nothing was installed" a failure rather than a no-op: the
+    # run installed nothing *and* something it needs is still missing.
+    still_missing = sorted(
+        o.name
+        for o in outcomes
+        if o.needs_external_tool and not o.executable and o.declared_no_commands
+    )
+
     reasons: List[str] = []
     if commands_failed:
         reasons.append(f"{commands_failed} install command(s) failed")
     if plugins_with_errors:
         reasons.append(f"plugin error(s): {', '.join(sorted(plugins_with_errors))}")
-    if commands_attempted == 0:
+    if commands_attempted == 0 and still_missing:
+        # Deliberately conditioned on something actually being absent. A run that
+        # attempts nothing because everything it needs is already present is a no-op,
+        # not a failure -- `--tool npm-audit` on a machine with node is the case, and
+        # failing it would be a false alarm. But a run that attempts nothing while a
+        # needed tool is missing is exactly the state grype, syft and cfn-nag were in
+        # on every CI runner, and that must not read as success.
         reasons.append(
-            "no install commands were run, so nothing was installed"
-            + (
-                ""
-                if not unprovisionable
-                else f" (no install path for: {', '.join(unprovisionable)})"
-            )
+            "no install commands were run and these are still absent: "
+            + ", ".join(still_missing)
         )
     unsatisfied_requests = sorted(
         o.name
         for o in outcomes
-        if requested_tools and o.name in requested_tools and not o.executable
+        # needs_external_tool is required: `executable` is only ever populated for
+        # plugins that have a command, so without it every Python-only plugin named
+        # with --tool (any reporter, or the archive converter) failed the run for
+        # lacking a binary it was never going to have.
+        if requested_tools
+        and o.name in requested_tools
+        and o.needs_external_tool
+        and not o.executable
     )
     if unsatisfied_requests:
         reasons.append(

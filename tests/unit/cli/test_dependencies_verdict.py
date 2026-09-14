@@ -16,6 +16,9 @@ command's return value is discarded, so the previous implementation could print
 caller cannot observe is not a verdict.
 """
 
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
 import pytest
 import typer
 from typer.testing import CliRunner
@@ -116,6 +119,55 @@ class TestVerdictIsDerivedFromCounts:
             _report_and_exit(outcomes, requested_tools=["grype"])
         assert exc.value.exit_code == EXIT_INSTALL_FAILED
 
+    def test_requesting_a_python_only_plugin_succeeds(self):
+        """`--tool sarif` must not fail for lacking a binary.
+
+        `executable` is only ever populated for plugins that have a command, so a
+        request check that only tested `not o.executable` failed for every reporter
+        and for the archive converter -- plugins that were never going to have one.
+        """
+        outcomes = [_outcome(name="sarif", plugin_type="reporter", command=None)]
+        assert _report_and_exit(outcomes, requested_tools=["sarif"]) == EXIT_OK
+
+    def test_requesting_an_unprovisionable_tool_that_is_present_succeeds(self):
+        """`--tool npm-audit` on a machine with node is a no-op, not a failure.
+
+        ASH installed nothing, and it also had nothing to install: npm-audit needs a
+        Node runtime ASH does not provide. Exiting non-zero when the desired end
+        state already holds is a false alarm, and the docstring of the verdict
+        function commits to treating this as a constraint rather than a malfunction.
+        """
+        outcomes = [_outcome(name="npm-audit", command="npm", executable="/usr/bin/npm")]
+        assert _report_and_exit(outcomes, requested_tools=["npm-audit"]) == EXIT_OK
+
+    def test_requesting_an_unprovisionable_tool_that_is_absent_fails(self):
+        """The other half: asked for it, cannot install it, do not have it.
+
+        This is the counterpart that keeps the test above from being a licence to
+        exit 0 whenever nothing was attempted -- which is the original bug.
+        """
+        outcomes = [_outcome(name="grype", command="grype", executable=None)]
+        with pytest.raises(typer.Exit) as exc:
+            _report_and_exit(outcomes, requested_tools=["grype"])
+        assert exc.value.exit_code == EXIT_INSTALL_FAILED
+
+    def test_nothing_attempted_but_everything_present_is_not_a_failure(self):
+        """A whole run that had nothing to do is a no-op, not a failure.
+
+        Distinguished from the original bug by whether anything is still absent: the
+        scanners that were silently missing were both unprovisionable *and* not on
+        PATH.
+        """
+        outcomes = [
+            _outcome(name="npm-audit", command="npm", executable="/usr/bin/npm"),
+            _outcome(
+                name="detect-secrets",
+                command="detect-secrets",
+                executable="/usr/bin/detect-secrets",
+            ),
+        ]
+        assert _report_and_exit(outcomes, requested_tools=[]) == EXIT_OK
+
     def test_python_only_plugins_do_not_fail_a_run(self):
         """Reporters and converters have no external binary to find.
 
@@ -184,20 +236,93 @@ class TestOutcomeStatus:
             == "FAILED"
         )
 
-    def test_declared_no_commands_counts_attempts_not_declarations(self):
-        """An empty argv is not an attempt.
+    def test_a_plugin_that_raised_is_not_reported_as_having_no_install_path(self):
+        """A crash is an unknown install path, not an absent one.
 
-        Empty command lists reached run_command before this change and failed; they
-        are now skipped and counted separately, so a plugin that declared only
-        empty entries still reports as having attempted nothing.
+        Reporting a plugin that blew up under "no install path on this platform"
+        gives the wrong diagnosis in the function whose whole job is honest
+        reporting -- it reads as a documented constraint rather than a bug.
         """
-        outcome = _outcome(name="syft", commands_skipped_empty=3)
-        assert outcome.declared_no_commands is True
+        crashed = _outcome(name="grype", errors=["boom"])
+        assert crashed.declared_no_commands is False
+        assert _outcome(name="grype").declared_no_commands is True
+
+
+class TestEmptyArgvIsSkipped:
+    """Drives the install loop, because the counters are what the verdict reads.
+
+    The previous version of this test asserted `declared_no_commands is True` on an
+    outcome constructed with `commands_skipped_empty=3` -- but that property reads
+    `commands_attempted`, which defaults to 0, so the assertion was `0 == 0` and the
+    3 was inert. It passed with the skip branch deleted. These drive the real loop.
+    """
+
+    def _run(self, tmp_path, monkeypatch, commands):
+        monkeypatch.setenv("ASH_BIN_PATH", str(tmp_path / "bin"))
+        fake = MagicMock()
+        fake.config = SimpleNamespace(name="fake-scanner")
+        fake.command = "fake-scanner"
+        fake.get_installation_commands.return_value = commands
+
+        monkeypatch.setattr(
+            "automated_security_helper.cli.dependencies.load_plugins",
+            lambda *_a, **_k: {},
+        )
+        monkeypatch.setattr(
+            "automated_security_helper.cli.dependencies.ash_plugin_manager",
+            SimpleNamespace(
+                plugin_modules=lambda kind: [lambda **_kw: fake]
+                if kind == "scanner"
+                else []
+            ),
+        )
+        ran = []
+        monkeypatch.setattr(
+            "automated_security_helper.cli.dependencies.run_command",
+            lambda cmd, shell=False: ran.append(cmd) or 0,
+        )
+        result = runner.invoke(
+            dependencies_app,
+            ["--plugin-type", "scanner", "--bin-path", str(tmp_path / "bin")],
+        )
+        return result, ran
+
+    def test_an_empty_argv_is_not_executed(self, tmp_path, monkeypatch):
+        result, ran = self._run(tmp_path, monkeypatch, [[], ["echo", "real"]])
+        assert ran == [["echo", "real"]], "an empty argv was handed to run_command"
+        assert "Skipping an empty install command" in result.output
+
+    def test_only_empty_argv_counts_as_nothing_attempted(self, tmp_path, monkeypatch):
+        """A plugin declaring only empty entries has attempted nothing.
+
+        Before the skip existed these reached run_command, failed, and pushed the
+        exit code to 1 -- which then went nowhere, because the returned code was
+        discarded. Either way the run must not read as a success.
+        """
+        result, ran = self._run(tmp_path, monkeypatch, [[], []])
+        assert ran == []
+        assert result.exit_code == EXIT_INSTALL_FAILED
+        assert "no install commands were run" in result.output
 
 
 class TestToolSelection:
+    """Invoked through the CLI, isolated so it cannot leak into other tests.
+
+    `install_dependencies` sets os.environ["ASH_BIN_PATH"], and CliRunner runs
+    in-process -- so without monkeypatch.setenv these tests would leave that
+    variable set for every later test sharing the xdist worker, changing where
+    find_executable looks.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _isolate(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("ASH_BIN_PATH", str(tmp_path / "bin"))
+        self.bin_args = ["--bin-path", str(tmp_path / "bin")]
+
     def test_unknown_tool_exits_two_and_lists_what_exists(self):
-        result = runner.invoke(dependencies_app, ["--tool", "nonexistent"])
+        result = runner.invoke(
+            dependencies_app, ["--tool", "nonexistent", *self.bin_args]
+        )
         assert result.exit_code == EXIT_BAD_SELECTION
         assert "Unknown tool" in result.output
         # The available list is what makes the error actionable rather than a wall.
@@ -210,6 +335,8 @@ class TestToolSelection:
         alternative -- installing everything and then complaining -- would be worse
         than the typo.
         """
-        result = runner.invoke(dependencies_app, ["--tool", "nonexistent"])
+        result = runner.invoke(
+            dependencies_app, ["--tool", "nonexistent", *self.bin_args]
+        )
         assert "Nothing installed" in result.output
         assert "Running command" not in result.output

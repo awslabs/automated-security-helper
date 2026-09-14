@@ -39,6 +39,25 @@ def sha256_file(file_path: Path) -> str:
     return digest.hexdigest()
 
 
+def _digest_or_none(file_path: Path) -> Optional[str]:
+    """Hash a just-installed file, or return None if it cannot be read.
+
+    Used only to fill the ``installed_sha256`` field of a receipt. Hashing a file
+    that is already in place must not be able to fail the install that put it there,
+    and the degradation is in the safe direction: a receipt with no
+    ``installed_sha256`` is treated by ``_already_installed`` as not installed, so
+    the next run re-downloads rather than trusting bytes it cannot check.
+    """
+    try:
+        return sha256_file(file_path)
+    except OSError as e:
+        ASH_LOGGER.warning(
+            f"Could not hash {file_path} after installing it ({e}); the next install "
+            "will re-download rather than trust it"
+        )
+        return None
+
+
 def verify_sha256(file_path: Path, expected_sha256: str, source: str) -> str:
     """Verify a file against an expected SHA256, raising if it does not match.
 
@@ -168,10 +187,18 @@ def read_receipt(destination: Path, installed_as: str) -> Optional[dict]:
     if not path.is_file():
         return None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         ASH_LOGGER.debug(f"Ignoring unreadable install receipt at {path}")
         return None
+    # `[]`, `"x"` and `3` are all valid JSON and none of them has .get(), so a
+    # receipt containing one would crash the caller with AttributeError instead of
+    # being treated as absent -- which is what this function's contract promises for
+    # anything it cannot read.
+    if not isinstance(data, dict):
+        ASH_LOGGER.debug(f"Ignoring install receipt at {path}: not a JSON object")
+        return None
+    return data
 
 
 def write_receipt(
@@ -202,30 +229,68 @@ def write_receipt(
 def _already_installed(
     destination: Path, installed_as: str, url: str, expected_sha256: Optional[str]
 ) -> bool:
-    """Whether ``installed_as`` was already installed from exactly this asset.
+    """Whether ``installed_as`` on disk is still the bytes that were verified.
 
-    Both halves are required. A receipt with no file means the binary was deleted
-    out from under it; a file with no receipt means it came from somewhere else
-    (a package manager, a nix profile, an earlier ASH that predates receipts) and
-    ASH should not assume it is the pinned version.
+    Not "was installed once" -- *is still*. That distinction is the whole security
+    content of this function, and getting it wrong turns skipping a download into
+    trusting a file nobody checked.
 
-    The receipt is matched on url *and* digest rather than on the tool name, so a
-    version bump reinstalls instead of finding the old binary and reporting
-    success.
+    Five conditions, each closing a specific hole:
+
+    1. The target exists and is a regular file. A receipt whose file was deleted is
+       not an install.
+    2. There is a pinned digest at all. An unpinned download has nothing to be
+       idempotent against, so ``sha256: null`` in a receipt would match every later
+       unpinned install and cache a substituted binary forever. opengrep is in that
+       state until it gets a pin, so it re-downloads.
+    3. A receipt exists. A file with no receipt came from somewhere else -- a
+       package manager, a nix profile, an ASH that predates receipts -- and must not
+       be assumed to be the pinned version.
+    4. The receipt names this exact url and pinned digest, so a version bump
+       reinstalls rather than finding the old binary and reporting success.
+    5. **The file on disk still hashes to what was installed.** This is the one a
+       receipt alone cannot give: the pinned digest covers the release *archive*,
+       not the extracted executable, so comparing it proves nothing about the file
+       that will actually run.
+
+    Why (5) is not paranoia. ASH's own image does ``chmod -R 777 ${ASH_BIN_PATH}``
+    (Dockerfile:243), puts that directory first on PATH (:254), and runs
+    ``ash dependencies install`` into it twice (:253 and :328). Before idempotence
+    existed every install re-downloaded, so the second run overwrote anything
+    substituted in between -- the redundant download was accidentally a self-healing
+    property. Skipping on a receipt alone would have converted that into a persistent
+    one, in the one directory the image makes world-writable, in a tool whose output
+    is used to make security decisions. Re-hashing costs well under a second on a
+    30-100MB binary.
     """
     target = destination.joinpath(installed_as)
-    if not target.exists():
+    if not target.is_file():
+        return False
+    if expected_sha256 is None:
         return False
     receipt = read_receipt(destination, installed_as)
     if receipt is None:
         return False
     if receipt.get("url") != url:
         return False
-    # A receipt written before digests existed has no sha256; treat it as not
-    # matching a pinned install so the verified download happens once.
-    return receipt.get("sha256") == (
-        expected_sha256.lower() if expected_sha256 else None
-    )
+    if receipt.get("sha256") != expected_sha256.lower():
+        return False
+    installed_digest = receipt.get("installed_sha256")
+    if not installed_digest:
+        # Written by an ASH that recorded only the archive digest. Treated as not
+        # installed, so the next run replaces it with a receipt that can be checked.
+        return False
+    try:
+        if sha256_file(target) != installed_digest:
+            ASH_LOGGER.warning(
+                f"{target} no longer matches the digest recorded when it was "
+                "installed; reinstalling"
+            )
+            return False
+    except OSError as e:
+        ASH_LOGGER.debug(f"Could not hash {target} ({e}); treating as not installed")
+        return False
+    return True
 
 
 def install_binary_from_url(
@@ -276,6 +341,7 @@ def install_binary_from_url(
         {
             "url": url,
             "sha256": expected_sha256.lower() if expected_sha256 else None,
+            "installed_sha256": _digest_or_none(binary_path),
             "installed_as": installed_as,
         },
     )
@@ -299,40 +365,79 @@ def _extract_single_member(
       working, while an archive that contains two entries with the same basename
       is refused instead of resolved arbitrarily.
 
+    The extraction is staged and then renamed into place, and the staging file is
+    opened with O_CREAT|O_EXCL (plus O_NOFOLLOW where the platform has it). Three
+    things follow, and since the destination directory is world-writable in ASH's own
+    image (Dockerfile:243) none of them is hypothetical:
+
+    * A pre-existing symlink at the target is not written *through*. A plain
+      ``open(target, "wb")`` follows the link, so a link planted at
+      ``$ASH_BIN_PATH/grype`` would receive the vendor's ELF and then have its own
+      target made executable. ``os.replace`` replaces the link itself. Reachable
+      because ASH executes repository code during a scan -- cdk-nag synthesizes CDK
+      apps, npm-audit runs a package manager -- so a scanned project can plant the
+      link before a later install.
+    * A symlink cannot be planted at the staging path either, because O_EXCL fails on
+      an existing name, including a dangling link.
+    * An interrupted extraction cannot leave a truncated binary at the target,
+      because the target is only ever created by an atomic rename.
+
+    The mode is set explicitly on the staging file rather than left to
+    ``make_executable``'s read-modify-write of whatever the umask produced.
+
     Raises:
         ToolDownloadIntegrityError: if zero or more than one member matches.
     """
     suffixes = "".join(archive_path.suffixes[-2:]).lower()
     target.parent.mkdir(parents=True, exist_ok=True)
+    staging = target.with_name(target.name + ".ash-partial")
 
-    if suffixes.endswith(".zip"):
-        with zipfile.ZipFile(archive_path) as archive:
-            # ZipFile normalizes separators to "/" on read, so splitting on "/" is
-            # correct for archives built on Windows too.
-            matches = [
-                info
-                for info in archive.infolist()
-                if not info.is_dir() and info.filename.split("/")[-1] == member_name
-            ]
-            _require_one_match(matches, member_name, archive_path)
-            with archive.open(matches[0]) as source, open(target, "wb") as sink:
-                shutil.copyfileobj(source, sink)
-        return target
-
-    with tarfile.open(archive_path, "r:*") as archive:
-        matches = [
-            member
-            for member in archive.getmembers()
-            if member.isfile() and member.name.split("/")[-1] == member_name
-        ]
-        _require_one_match(matches, member_name, archive_path)
-        extracted = archive.extractfile(matches[0])
-        if extracted is None:  # pragma: no cover - isfile() already excludes this
-            raise ToolDownloadIntegrityError(
-                f"Archive member {member_name} in {archive_path} is not readable"
-            )
-        with extracted as source, open(target, "wb") as sink:
+    def _stage(source) -> None:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        # Remove a staging file left by an interrupted run rather than opening
+        # without O_EXCL, which would give up the "cannot be a symlink" property.
+        staging.unlink(missing_ok=True)
+        fd = os.open(staging, flags, 0o700)
+        with os.fdopen(fd, "wb") as sink:
             shutil.copyfileobj(source, sink)
+
+    try:
+        if suffixes.endswith(".zip"):
+            with zipfile.ZipFile(archive_path) as archive:
+                # ZipFile normalizes separators to "/" on read, so splitting on "/"
+                # is correct for archives built on Windows too.
+                matches = [
+                    info
+                    for info in archive.infolist()
+                    if not info.is_dir()
+                    and info.filename.split("/")[-1] == member_name
+                ]
+                _require_one_match(matches, member_name, archive_path)
+                with archive.open(matches[0]) as source:
+                    _stage(source)
+        else:
+            with tarfile.open(archive_path, "r:*") as archive:
+                matches = [
+                    member
+                    for member in archive.getmembers()
+                    if member.isfile() and member.name.split("/")[-1] == member_name
+                ]
+                _require_one_match(matches, member_name, archive_path)
+                extracted = archive.extractfile(matches[0])
+                if extracted is None:  # pragma: no cover - isfile() excludes this
+                    raise ToolDownloadIntegrityError(
+                        f"Archive member {member_name} in {archive_path} is not "
+                        "readable"
+                    )
+                with extracted as source:
+                    _stage(source)
+
+        if platform.system() != "Windows":
+            os.chmod(staging, 0o755)
+        os.replace(staging, target)
+    except BaseException:
+        staging.unlink(missing_ok=True)
+        raise
     return target
 
 
@@ -403,6 +508,8 @@ def install_pinned_tool(
         )
         _extract_single_member(archive, asset.member_name, target)
 
+    # _extract_single_member already set the mode on the staged file before renaming
+    # it into place; this covers the Windows branch, where it does not.
     make_executable(target)
     if platform.system() == "Darwin":
         unquarantine_macos_binary(target)
@@ -415,6 +522,10 @@ def install_pinned_tool(
             "version": asset.version,
             "url": asset.url,
             "sha256": asset.sha256.lower(),
+            # The digest of the *extracted executable*, which is what a later run
+            # re-hashes. asset.sha256 covers the archive and says nothing about the
+            # file that will actually be executed.
+            "installed_sha256": _digest_or_none(target),
             "installed_as": asset.install_as,
         },
     )
@@ -529,35 +640,6 @@ def pinned_tool_install_commands(
             create_pinned_tool_install_command(tool, target_platform, arch)
         ]
     return table
-
-
-def current_platform_arch() -> "tuple[str, str]":
-    """The (platform, arch) key pair for the machine this is running on.
-
-    Matches the vocabulary ``cli/dependencies.py`` uses, and derives the
-    architecture from ``platform.machine()``.
-
-    The older per-scanner helpers derived it from ``struct.calcsize("P") * 8``,
-    which answers 64-vs-32-bit and not amd64-vs-arm64 -- so on an arm64 host they
-    reported "amd64". That was harmless only because the tables they indexed had
-    identical entries for both arches. It stops being harmless the moment a table
-    has an asset for one arch and not the other, which is now the case.
-    """
-    system = platform.system().lower()
-    machine = platform.machine().lower()
-    if machine in ("x86_64", "amd64"):
-        arch = "amd64"
-    elif machine in ("aarch64", "arm64"):
-        arch = "arm64"
-    else:
-        arch = "unknown"
-    return system, arch
-
-
-def has_install_commands_for_current_platform(table: dict) -> bool:
-    """Whether a ``custom_install_commands`` table has commands for this machine."""
-    system, arch = current_platform_arch()
-    return len(table.get(system, {}).get(arch, [])) > 0
 
 
 def get_opengrep_url(
