@@ -244,4 +244,4 @@ sections are schema-opaque, so unrecognized keys can't be warned about today).
   the keep-and-suppress policy is unaffected).
 - No code/behaviour change; the plugin policy is unchanged. An upstream feature request
   against `awslabs/ferret-scan` remains an option (not yet filed).
-- Commit: _(recorded on next push)_
+- Commit: `9ca137e4`
