@@ -1197,7 +1197,6 @@ scanners:
 ```
 
 > **Why `use_default_config: false`**: The bundled `ferret-config.yaml` is a
-> **Why `use_default_config: false`**: The bundled `ferret-config.yaml` is a
 > comprehensive reference config. Setting `false` means the scan uses only ferret-scan's
 > built-in defaults plus the explicit ASH options above, rather than loading the bundled
 > validator/profile patterns. (It is **not** needed for excludes — CLI `--exclude` and
