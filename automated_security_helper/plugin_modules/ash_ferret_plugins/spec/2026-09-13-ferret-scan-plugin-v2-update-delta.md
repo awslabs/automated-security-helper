@@ -32,12 +32,24 @@ This is the running list of concrete changes shipped in this update. Status lege
 | B5 | `max_live_bytes` → `--max-live-bytes` | feature | ☑ | 151661a |
 | B6 | Document new detectors in README Available Checks | docs | ☑ | f55ef54 (done in A6) |
 
-## Status summary (2026-09-13)
+## Track C — Review-driven fixes (post Track A/B)
 
-**Track A: COMPLETE (6 of 6).** A1, A2, A3, A4, A5, A6 all delivered, each pushed with the
-ferret unit suite green and the pre-push validation script passing (10/10).
-**Track B: COMPLETE (6 of 6).** B1–B5 add opt-in plugin options for the new v2.4.5 flags;
-B6 (documenting the new detectors) was folded into A6. 79 unit tests green.
+| ID | Change | Type | Status | Commit |
+|----|--------|------|--------|--------|
+| C1 | Dedupe DEVELOPMENT `### Suppression Strategy`; narrow the `API_KEY_OR_SECRET` test suppression `tests/**`→`tests/unit/cli/mcp/test_sessions.py`; `success_exit_codes` `{0,1,3}`→`{0,3}` (ferret uses exit 1 for errors); fix stale analysis numbers (`20`→`19` checks, drop `KEYWORD_MATCH`, `77`→`79`) + duplicate A5 delta row | fix | ☑ | 5a62dec |
+| C2 | Correct DEVELOPMENT §10 — bundled config does NOT override CLI `--exclude`/`--recursive` (verified v2.4.5, CLI wins); fix README + registration `use_default_config` notes; **remove** the false-premise `CONFIG-OVERRIDE-EXCLUDES` validation check (now 9 checks); analysis §9.6 + §5.6 corrections | fix | ☑ | e789825 |
+| C3 | Remove duplicated `use_default_config` blockquote heading in DEVELOPMENT.md | docs | ☑ | 4db2163 |
+| C4 | Update the public docs page `docs/content/docs/plugins/community/ferret-scan-plugin.md` — versions `2.4.5`, all new options, 19-check list, `API_KEY_OR_SECRET` FP note | docs | ☑ | af5c92e |
+
+## Status summary
+
+**Track A: COMPLETE (6 of 6).** A1–A6 delivered.
+**Track B: COMPLETE (6 of 6).** B1–B5 opt-in options; B6 folded into A6.
+**Track C: review fixes C1–C4 delivered.**
+Current gates: **79 unit tests green**, pre-push validation **9/9** (was 10 before the
+false-premise check was removed in C2), `ash config validate` valid, ferret self-scan
+**PASSED / 0 actionable**. Each item above was committed and pushed individually; small
+audit-sync commits backfill the self-referential SHAs.
 
 ## Design decisions recorded
 
