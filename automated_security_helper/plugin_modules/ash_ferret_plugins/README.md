@@ -175,10 +175,12 @@ scanners:
 ```
 
 > **Note on `use_default_config`**: The bundled `ferret-config.yaml` is a comprehensive
-> reference config. When loaded via `--config`, ferret-scan's config file settings can
-> override CLI arguments like `--exclude`. Set `use_default_config: false` if you want
-> full control via ASH plugin options. Alternatively, keep it enabled and use `profile`
-> to select a specific scanning profile from the bundled config.
+> reference config. `use_default_config` controls whether its validator/profile settings
+> (IP `internal_urls`, social-media patterns, named profiles) are loaded — it does **not**
+> affect excludes: ferret-scan's CLI flags take precedence over the config file's defaults,
+> so ASH's `exclude_patterns` and `--recursive` are honoured either way (verified against
+> v2.4.5). Set `false` to rely only on ferret-scan's built-in defaults plus your explicit
+> ASH options; keep it `true` (or use `profile`) to pick up the bundled validator patterns.
 
 > **Note on `exclude_patterns`**: Ferret-scan's `--exclude` matches each pattern with
 > Go's `filepath.Match` glob (`*`, `?`, `[abc]` — `**` globstar is **not** supported)

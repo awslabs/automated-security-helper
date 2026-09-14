@@ -506,13 +506,37 @@ unsupported) — but note the substring branch means a short token like `test` o
 can over-exclude any path containing it. The plugin joins all patterns into a single
 comma-separated `--exclude` value (e.g., `--exclude .venv,.git,*.pyc`).
 
-### 10. Bundled Config File Overrides CLI `--exclude`
+### 10. CLI Args Override the Bundled Config's Defaults (`--exclude`, `--recursive`)
 
-When the bundled `ferret-config.yaml` is loaded via `--config`, ferret-scan's config
-file settings can override CLI arguments including `--exclude`. This means exclude
-patterns set via ASH plugin options may be silently ignored if `use_default_config`
-is `true` (the default). Set `use_default_config: false` in the ASH config to ensure
-CLI arguments take full effect.
+Correction (verified against ferret-scan v2.4.5): an earlier version of this note claimed
+the bundled `ferret-config.yaml`, when loaded via `--config`, overrides CLI arguments so
+ASH's `--exclude` "may be silently ignored" unless `use_default_config: false`. **That is
+backwards.** ferret-scan's CLI flags take precedence over the config file's `defaults`:
+
+```
+# bundled --config + --exclude skipdir   → skipdir IS excluded (CLI --exclude wins)
+# bundled --config + --recursive          → nested files ARE found, even though the
+#                                            bundled config's defaults set recursive:false
+```
+
+So ASH's `exclude_patterns` (and the `global_ignore_paths` the plugin folds into
+`--exclude`) are **honoured regardless of `use_default_config`** — a security-relevant
+guarantee: ignore paths are respected. Setting `use_default_config: false` is **not**
+required for excludes to work.
+
+What `use_default_config` actually controls is whether the bundled config's *validator and
+profile configuration* (IP `internal_urls`, social-media patterns, the named profiles) is
+loaded at all. Choose `false` when you want only ferret-scan's built-in defaults plus your
+explicit ASH options (as `.ash_community_plugins.yaml` does); choose `true` (the default)
+to pick up the bundled validator patterns. Either way, CLI `--exclude`/`--recursive` win.
+
+Caveat: this reasoning applies to the *bundled* config, whose `defaults` block declares no
+`exclude_patterns` of its own. A hand-written config file that itself sets excludes could
+still contribute additional exclusions on top of the CLI value — CLI precedence means the
+CLI value is applied, not that a config-defined exclude is discarded.
+
+(The pre-push validation script's former `CONFIG-OVERRIDE-EXCLUDES` check enforced the old,
+false premise and was removed on 2026-09-14 — see `scripts/validate_ferret_plugin.py` §9.)
 
 ### 11. `SECRET-SECRET-KEYWORD` Triggers on Variable Names, Not Values
 
@@ -712,7 +736,7 @@ The script checks for:
 | `WINDOWS-PATH` | `str(Path)` instead of `Path.as_posix()` in CLI argument building — backslashes break ferret-scan on Windows |
 | `EXCLUDE-MULTIPLE-ARGS` | Looping over exclude patterns to append individual `--exclude` args instead of joining into one comma-separated value |
 | `FERRET-IN-ASH-YAML` | ferret-scan registered in `.ash.yaml` instead of `.ash_community_plugins.yaml` (it's a community plugin) |
-| `CONFIG-OVERRIDE-EXCLUDES` | `exclude_patterns` set but `use_default_config` not `false` — the bundled config will silently override CLI excludes |
+| `CONFIG-OVERRIDE-EXCLUDES` | *(removed 2026-09-14 — false premise; ferret-scan CLI args override the bundled config's defaults, so excludes are honoured regardless of `use_default_config`. See gotcha §10.)* |
 | `SUPPRESSION-COVERAGE` | SECRET-SECRET-KEYWORD hits in ferret plugin files must have matching suppressions with `line_start`/`line_end` in `.ash_community_plugins.yaml` |
 
 These checks mirror what CI's `--ignore-suppressions` scan will flag. Passing this
@@ -1173,9 +1197,11 @@ scanners:
 ```
 
 > **Why `use_default_config: false`**: The bundled `ferret-config.yaml` is a
-> comprehensive reference config. When loaded via `--config`, ferret-scan's config
-> file settings can override CLI arguments like `--exclude`. Disabling it gives
-> full control to the ASH plugin options above.
+> **Why `use_default_config: false`**: The bundled `ferret-config.yaml` is a
+> comprehensive reference config. Setting `false` means the scan uses only ferret-scan's
+> built-in defaults plus the explicit ASH options above, rather than loading the bundled
+> validator/profile patterns. (It is **not** needed for excludes — CLI `--exclude` and
+> `--recursive` win over the config's defaults regardless; see gotcha §10.)
 
 > **Why simple directory names in `exclude_patterns`**: Ferret-scan's `--exclude`
 > matches with `filepath.Match` glob plus a substring fallback; the `**` globstar is

@@ -168,11 +168,16 @@ control is API-only.)
 ### 5.6 Low — stale docs / bundled config drift (P3)
 - Bundled `ferret-config.yaml` still carries `# GENAI_DISABLED:` blocks and GenAI
   profile stubs for features that **no longer exist** in the engine. Harmless (comments)
-  but misleading; safe to prune when refreshing from upstream `config.yaml`.
-- `DEVELOPMENT.md` edge-case note says empty dir yields `results: null` — upstream now
-  emits `[]`. `SarifReport.model_validate` handles both, but the note is stale.
-- README documents 11 checks; ~21 exist. `INTERNAL_URL_MIGRATION_GUIDE.md` referenced in
-  the bundled config is not present in this tree.
+  but misleading; safe to prune when refreshing from upstream `config.yaml`. **Status:**
+  consciously deferred (WL-6) — a config refresh, not a correctness issue. The `defaults`
+  block's `format: text` / `recursive: false` only look wrong in isolation; CLI flags
+  override them at runtime (verified — see §9.6).
+- `DEVELOPMENT.md` edge-case note said empty dir yields `results: null` — upstream now
+  emits `[]`. Fixed in A6.
+- README documented 11 checks; **19** exist (`ferret-scan --help checks`). Fixed in A6.
+  (An earlier draft of this doc referenced an `INTERNAL_URL_MIGRATION_GUIDE.md` in the
+  bundled config — that reference is **no longer present** in the file, so this sub-point
+  was itself stale and is retracted.)
 
 ### 5.7 Non-issue — GenAI block-list entries
 The plugin blocks `enable_redaction`, `redaction_*`, `memory_scrub`,
@@ -365,3 +370,28 @@ and rely on suppressions/excludes** (not the post-filter). Implemented as A3:
   .ash/.ash_community_plugins.yaml` → ferret-scan **PASSED, 0 actionable** (8 findings, all
   suppressed). Unit tests 79 green; `validate_ferret_plugin.py` 10/10; the new doc/reason
   text produces 0 self-findings; `ash config validate` passes.
+
+  *(Update per WL-10: the `tests/**` suppression above was later narrowed to the single
+  real FP file `tests/unit/cli/mcp/test_sessions.py`.)*
+
+### 9.6 ⚠️ Assumption invalidated — bundled config does NOT override CLI `--exclude` (2026-09-14)
+
+**Original claim (DEVELOPMENT.md gotcha §10, README note, and the `CONFIG-OVERRIDE-EXCLUDES`
+validation check):** with the bundled `ferret-config.yaml` loaded via `--config`, ferret-scan
+overrides CLI args, so ASH's `--exclude` may be "silently ignored" unless
+`use_default_config: false`. **This is backwards for v2.4.5.**
+
+**Evidence (tested against the installed binary):**
+- `--config <bundled> --exclude skipdir` (recursive) → `skipdir` **is** excluded; only the
+  other dirs are scanned. CLI `--exclude` wins.
+- `--config <bundled> --recursive` → nested files **are** found, even though the bundled
+  config's `defaults` set `recursive: false`. CLI `--recursive` wins.
+
+**Consequence:** ASH's `exclude_patterns` + `global_ignore_paths` (folded into `--exclude`)
+are honoured **regardless of `use_default_config`** — a security-relevant guarantee (ignore
+paths are respected). `use_default_config` only governs whether the bundled validator/profile
+patterns load. **Resolution:** corrected DEVELOPMENT.md §10, the README + registration
+`use_default_config` notes, and **removed** the `CONFIG-OVERRIDE-EXCLUDES` check (it enforced
+the false premise) — the validation script now has **9** checks, all passing. Caveat: a
+hand-written config that *itself* declares excludes could add to the CLI value; the bundled
+config declares none.

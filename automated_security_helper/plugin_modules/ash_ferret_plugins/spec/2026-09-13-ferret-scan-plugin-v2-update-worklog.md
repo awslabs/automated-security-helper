@@ -178,3 +178,21 @@ Addressed a code review of the branch:
 - Verification: **79 passed**; validation **10/10**; ruff unchanged (21); `ash scan
   --scanners ferret-scan` still **PASSED, 0 actionable**; `ash config validate` valid.
 - Commit: `5a62dec`
+
+### WL-11 — Correct the "bundled config overrides CLI --exclude" claim (2026-09-14)
+Review finding: DEVELOPMENT.md §10 was inaccurate for v2.4.5.
+- Reproduced against the real binary: `--config <bundled> --exclude skipdir` excludes
+  skipdir, and `--config <bundled> --recursive` finds nested files despite the config's
+  `recursive: false`. **CLI args win over the bundled config defaults** — opposite of §10.
+- Rewrote DEVELOPMENT.md §10 (CLI precedence; `use_default_config` only controls
+  validator/profile loading, not excludes; security-relevant: ignore paths ARE respected).
+- Corrected the README `use_default_config` note and the registration "Why
+  use_default_config: false" note.
+- **Removed** the `CONFIG-OVERRIDE-EXCLUDES` check from `scripts/validate_ferret_plugin.py`
+  (false premise) with a tombstone comment; removed its row from the DEVELOPMENT checks
+  table. Validation now reports **9 checks** (was 10).
+- Analysis: added §9.6 (invalidated assumption); fixed §5.6 stale sub-points (retracted the
+  `INTERNAL_URL_MIGRATION_GUIDE.md` reference, noted GenAI-stub deferral is conscious).
+- Verification: **79 passed**; validation **9/9 passed**; ruff unchanged (21); `ash config
+  validate` valid.
+- Commit: _(recorded on next push)_
