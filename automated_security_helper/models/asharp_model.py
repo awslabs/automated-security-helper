@@ -484,6 +484,25 @@ class AshAggregatedResults(BaseModel):
     # call it multiple times during rendering.
     _flat_cache: Optional[List[FlatVulnerability]] = PrivateAttr(default=None)
 
+    # Each of the three entry points below retries the AshConfig forward-reference
+    # rebuild before doing anything else, because the attempt made when this
+    # module is imported does not always get to run. _resolve_forward_refs at the
+    # bottom of this module explains when and why.
+
+    def __init__(self, /, **data: Any) -> None:
+        _resolve_forward_refs()
+        super().__init__(**data)
+
+    @classmethod
+    def model_validate(cls, *args: Any, **kwargs: Any) -> "AshAggregatedResults":
+        _resolve_forward_refs()
+        return super().model_validate(*args, **kwargs)
+
+    @classmethod
+    def model_validate_json(cls, *args: Any, **kwargs: Any) -> "AshAggregatedResults":
+        _resolve_forward_refs()
+        return super().model_validate_json(*args, **kwargs)
+
     @field_validator("ash_config")
     @classmethod
     def validate_ash_config(cls, v: Any):
@@ -733,17 +752,68 @@ class AshAggregatedResults(BaseModel):
         return cls.from_json(json_data)
 
 
-# Resolve the AshConfig forward reference so model_validate_json works
-# regardless of import order (e.g. in isolated uvx environments).
-# Uses a deferred function to avoid circular imports since ash_config.py
-# imports from this module's package.
-def _resolve_forward_refs():
+# Resolve the AshConfig forward reference so deserialization works regardless of
+# import order.
+#
+# ash_config is annotated Optional["AshConfig"] as a string, because AshConfig is
+# imported at the top of this module only under TYPE_CHECKING. Until a rebuild
+# resolves that string the model has no validator at all, and model_validate and
+# model_validate_json raise PydanticUserError instead of returning a model.
+#
+# This is called from two places and needs both:
+#
+#   * At import time, at the bottom of this module, which is all it used to be.
+#     That call cannot succeed when asharp_model is itself being imported from
+#     inside the ash_config import cycle: core.unified_metrics -> asharp_model ->
+#     config.ash_config -> converters.archive_converter -> ash_builtin.reporters
+#     -> reporters.html_reporter -> reporters.report_content_emitter, which
+#     imports get_unified_scanner_metrics back out of the still-initializing
+#     core.unified_metrics. Python then evicts the half-imported
+#     config.ash_config from sys.modules, so nothing left on that path holds a
+#     resolvable AshConfig and the model stays unusable for the whole process.
+#
+#   * On first use, from __init__, model_validate and model_validate_json.
+#     The cycle only exists while the package is being imported, so by the time
+#     anything constructs or deserializes the model the same import succeeds.
+#     That retry is what recovers the failing order.
+#
+# Resolving on first use is not a new idea here, it is the older one. Before
+# 9babca5f, interactions/run_ash_scan.py and cli/report.py each ran this rebuild
+# themselves, at call time, right before deserializing. That commit consolidated
+# both into the single import-time call below -- which is the one moment the
+# cycle can block it. The retry restores call-time resolution, in one place
+# instead of two.
+#
+# The import and the model_rebuild() call have to stay in one function body: the
+# AshConfig name is function-local, and model_rebuild() finds it by reading its
+# caller's frame locals (_parent_namespace_depth=2). Split them and
+# model_rebuild() has no AshConfig in scope.
+_forward_refs_resolved = False
+
+
+def _resolve_forward_refs() -> bool:
+    """Rebuild AshAggregatedResults against AshConfig.
+
+    Returns True once the forward reference is resolved, False while AshConfig is
+    still unimportable. Cheap to call repeatedly.
+    """
+    global _forward_refs_resolved
+    if _forward_refs_resolved:
+        return True
+
     try:
         from automated_security_helper.config.ash_config import AshConfig  # noqa: F401
-
-        AshAggregatedResults.model_rebuild()
     except ImportError:
-        pass  # Will be resolved when AshConfig is eventually imported
+        # Mid-cycle, so AshConfig does not exist yet. Not logged: this is the
+        # expected state on the import path described above, and the retry on
+        # first use is what clears it.
+        return False
+
+    AshAggregatedResults.model_rebuild()
+    # Set after the rebuild, never before. A concurrent caller that saw the flag
+    # early would skip the rebuild and run against the still-mocked validator.
+    _forward_refs_resolved = True
+    return True
 
 
 _resolve_forward_refs()
