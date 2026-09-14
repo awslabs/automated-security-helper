@@ -26,11 +26,11 @@ This is the running list of concrete changes shipped in this update. Status lege
 
 | ID | Change | Type | Status | Commit |
 |----|--------|------|--------|--------|
-| B1 | `respect_gitignore` → `--respect-gitignore` (carried from old branch) | feature | ☑ | (this commit) |
-| B2 | `disable_ip_types` → `--disable-ip-types` (carried from old branch) | feature | ☑ | (this commit) |
-| B3 | `explain` → `--explain` (offline per-finding rationale) | feature | ☑ | (this commit) |
-| B4 | `validator_budget` → `--validator-budget` | feature | ☑ | (this commit) |
-| B5 | `max_live_bytes` → `--max-live-bytes` | feature | ☑ | (this commit) |
+| B1 | `respect_gitignore` → `--respect-gitignore` (carried from old branch) | feature | ☑ | 151661a |
+| B2 | `disable_ip_types` → `--disable-ip-types` (carried from old branch) | feature | ☑ | 151661a |
+| B3 | `explain` → `--explain` (offline per-finding rationale) | feature | ☑ | 151661a |
+| B4 | `validator_budget` → `--validator-budget` | feature | ☑ | 151661a |
+| B5 | `max_live_bytes` → `--max-live-bytes` | feature | ☑ | 151661a |
 | B6 | Document new detectors in README Available Checks | docs | ☑ | f55ef54 (done in A6) |
 
 ## Status summary (2026-09-13)

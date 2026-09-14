@@ -155,4 +155,4 @@ verification run, result, and the pushed commit SHA.
 - Docs: README + DEVELOPMENT option tables. B6 (new-detector docs) was already delivered in
   A6, so no separate change.
 - Verification: **79 passed**; validation **10/10**; ruff unchanged (21).
-- Commit: _(recorded on next push)_
+- Commit: `151661a`
