@@ -72,7 +72,7 @@ import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
 
 import { AshCustomerKey, diagnosticLogGroupProps } from './ash-config';
-import { suppressCodeBuildRoleWildcards, suppressLambdaLogWildcard, suppressSplitCodeBuildPolicy, suppressUnevaluableRules } from './ash-nag-suppressions';
+import { suppressCodeBuildRoleWildcards, suppressLambdaLogWildcard, suppressSplitCodeBuildPolicy } from './ash-nag-suppressions';
 import { MCP_ENTRYPOINT_SCRIPT, CODECOMMIT_GATE_HANDLER, ASH_MATERIALIZED_CONFIG_PATH } from './ash-container-scripts';
 import { GENERATED_CONSTRUCT_ID, ashRoleSplitScope } from './ash-policy-split';
 
@@ -384,17 +384,30 @@ export class AshImageBuild extends Construct {
       rebuildRule.node.addDependency(this.bootstrap);
     }
 
-    // Applied to `build.scope`, not to `this.project`. These suppressions reach
-    // their targets through `applyToChildren`, and the project's role is now the
-    // project's sibling under that scope rather than its child — so suppressing on
-    // the project alone would leave the role's policies unsuppressed and fail
-    // synth on an ERROR-level IAM5 finding. The scope holds exactly the project
-    // and the role, so this covers the same resources as before and no others.
-    suppressCodeBuildRoleWildcards(build.scope);
-    // AwsSolutions-CB5 pins the build image; it cannot evaluate one supplied as
-    // an Fn::Join over ECR attributes, which is how every consumer of this
-    // construct references the image it just built.
-    suppressUnevaluableRules(build.scope, ['AwsSolutions-CB5']);
+    /*
+     * `build.role`, not `build.scope` and not `this.project`. The project's role is
+     * now the project's sibling rather than its child, so suppressing on the project
+     * would leave the role's policies unsuppressed and fail synth on an ERROR-level
+     * IAM5 finding; suppressing on the enclosing scope goes one principal too far.
+     * `targets.CodeBuildProject` above gives the rebuild rule its own `EventsRole`,
+     * created under the project, whose only statement is `codebuild:StartBuild` on one
+     * project ARN. IAM5 passes on it, so the entry was inert -- but the reason was
+     * also false there, enumerating four wildcards that policy does not have, which is
+     * the worse half. The role reaches its own per-service policies and its
+     * DefaultPolicy, and stops at the principal the reason describes.
+     *
+     * A `CdkNagValidationFailure` suppression for AwsSolutions-CB5 used to sit here
+     * too, on the grounds that CB5 cannot evaluate a build image supplied as an
+     * Fn::Join over ECR attributes. That is true, and it is not true of THIS project:
+     * this one builds the image, so its own `buildImage` is a literal AWS-managed
+     * standard image and CB5 evaluates it without throwing. The projects whose image
+     * is the Fn::Join are the shard and merge projects that RUN what this built, and
+     * they are suppressed where they are created, in
+     * ash-distributed-pipeline-stack.ts. Measured over all five stacks, CB5 threw on
+     * none of the five image-build projects, so the entry was written five times and
+     * read never.
+     */
+    suppressCodeBuildRoleWildcards(build.role);
   }
 
   /**

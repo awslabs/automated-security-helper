@@ -377,17 +377,27 @@ export class AshDistributedPipelineStack extends Stack {
 
     suppressSecretRotation(config.authSecret);
     suppressPipelineRoleWildcards(pipeline.role);
-    // ashRoleSplitScopeOf, not the project itself. These suppressions reach their
-    // targets through `applyToChildren`, and each project's role is now its sibling
-    // under the shared scope rather than its child — suppressing on the project
-    // alone would leave the role's policies unsuppressed and fail synth on an
-    // ERROR-level IAM5 finding. The scope holds exactly the project and its role.
+    /*
+     * The IAM5 wildcards are suppressed on `ashRoleSplitScopeOf(project)`, not on the
+     * project: each project's role is now its sibling under the shared scope rather
+     * than its child, so suppressing on the project alone would leave the role's
+     * policies unsuppressed and fail synth on an ERROR-level IAM5 finding. The helper
+     * walks that scope for policy resources.
+     *
+     * CB5 is the other way round, and this is the resource that throws. These
+     * projects run the ASH image out of ECR, so their `buildImage` is an Fn::Join over
+     * the repository attributes and CB5 fails inside the rule rather than returning a
+     * verdict. Only the `AWS::CodeBuild::Project` has an `Environment.Image` for it to
+     * read, so the suppression goes on the project itself. Passing the scope here put
+     * the same reason on the role and its five policies as well: six entries per
+     * project, five of which no rule could ever consult.
+     */
     shardProjects.forEach((project) => {
       suppressCodeBuildRoleWildcards(ashRoleSplitScopeOf(project));
-      suppressUnevaluableRules(ashRoleSplitScopeOf(project), ['AwsSolutions-CB5']);
+      suppressUnevaluableRules(project, ['AwsSolutions-CB5']);
     });
     suppressCodeBuildRoleWildcards(ashRoleSplitScopeOf(mergeProject));
-    suppressUnevaluableRules(ashRoleSplitScopeOf(mergeProject), ['AwsSolutions-CB5']);
+    suppressUnevaluableRules(mergeProject, ['AwsSolutions-CB5']);
     // The S3 source action gets its own generated role, separate from the
     // pipeline role, with the same object-level wildcard.
     suppressPipelineRoleWildcards(pipeline);
