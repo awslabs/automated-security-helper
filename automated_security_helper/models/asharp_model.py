@@ -504,6 +504,21 @@ class AshAggregatedResults(BaseModel):
         _resolve_forward_refs()
         super().__init__(**data)
 
+    # Keep __pydantic_custom_init__ False. _model_construction sets it from
+    # `not getattr(cls.__init__, '__pydantic_base_init__', False)`, so defining
+    # __init__ at all would otherwise flip it to True and bake custom_init=True
+    # into the core schema. pydantic-core then stops validating a mapping in place
+    # and instead materializes one and calls cls(**data), which turns every
+    # model_validate_json into parse, build objects, re-enter __init__, validate.
+    # That cost is invisible from the __init__ above, which is why this line is
+    # here rather than in a commit message. The claim it makes is true: the
+    # override adds a _resolve_forward_refs() call and delegates, so it is
+    # BaseModel.__init__ for every purpose Pydantic reads this flag for. Pydantic
+    # marks its own two pass-through inits the same way (main.py, root_model.py).
+    # Private attribute, so a Pydantic release could change what it means; the
+    # guard test's positive control is what would catch that.
+    __init__.__pydantic_base_init__ = True  # type: ignore[attr-defined]
+
     @classmethod
     def model_validate(cls, *args: Any, **kwargs: Any) -> "AshAggregatedResults":
         _resolve_forward_refs()

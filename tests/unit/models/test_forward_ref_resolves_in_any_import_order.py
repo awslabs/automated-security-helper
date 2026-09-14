@@ -89,7 +89,7 @@ checkable at all; it is deliberately not marked ``slow`` and not excluded from
 any CI selection, because a guard that CI skips is not a guard.
 """
 
-import subprocess
+import subprocess  # nosec B404 — a fresh interpreter is the property under test
 import sys
 import textwrap
 
