@@ -196,3 +196,16 @@ Review finding: DEVELOPMENT.md §10 was inaccurate for v2.4.5.
 - Verification: **79 passed**; validation **9/9 passed**; ruff unchanged (21); `ash config
   validate` valid.
 - Commit: `e789825`
+
+### WL-12 — Update the public docs page (2026-09-14)
+Review gap: `docs/content/docs/plugins/community/ferret-scan-plugin.md` (the full user
+docs) was never touched by the branch and still reflected the pre-update plugin.
+- Supported Versions `0.1.0–2.0.0`→`2.4.5–2.5.0`; install constraint and both `tool_version`
+  examples updated to the `>=2.4.5,<2.5.0` / `==2.4.5` line.
+- Options-reference table: added `finding_limit`, `fail_on_incomplete`, `respect_gitignore`,
+  `disable_ip_types`, `explain`, `validator_budget`, `max_live_bytes`.
+- Both unsupported-options tables: added `preprocess_only`, `pre_commit_mode`, `list_profiles`.
+- Available Checks expanded 11→19 (with the "use `--help checks`, don't hardcode" note) and
+  added the `API_KEY_OR_SECRET` false-positive note + suppression recipe.
+- Verification: 0 self-findings on the page; no stale version strings remain; validation 9/9.
+- Commit: _(recorded on next push)_
