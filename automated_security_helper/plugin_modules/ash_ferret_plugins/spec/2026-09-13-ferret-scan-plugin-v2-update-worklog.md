@@ -209,3 +209,25 @@ docs) was never touched by the branch and still reflected the pre-update plugin.
   added the `API_KEY_OR_SECRET` false-positive note + suppression recipe.
 - Verification: 0 self-findings on the page; no stale version strings remain; validation 9/9.
 - Commit: `af5c92ee`
+
+### WL-13 — Documentation surface audit (2026-09-14)
+Used the delta's change set to audit the whole repo docs surface for anything still stale.
+**Result: no required documentation changes remain.** Verified consistent:
+- plugin `README.md`, `DEVELOPMENT.md` — updated across A/B/C.
+- `docs/content/docs/plugins/community/ferret-scan-plugin.md` — updated in C4.
+- `docs/content/docs/supported-languages.md` — only a generic "plugins exist for Trivy,
+  Snyk, and Ferret" line; no version/option/detector detail to drift.
+- `docs/content/.nav.yml` — nav link only.
+- `.github/actions/run-scan-test/action.yml` (CI) — NOT stale: it reads
+  `DEFAULT_VERSION_CONSTRAINT` from the plugin at runtime and installs
+  `ferret-scan${constraint}`, so the A1 version bump propagates automatically (no bare
+  `pip install`, no incident risk).
+
+Two optional/cosmetic items deliberately **left unchanged** (user decision, 2026-09-14):
+- `docs/content/docs/plugins/community/index.md` — capability blurb ends "…and more", so it
+  is not stale; naming the new detectors would be polish only.
+- `automated_security_helper/base/plugin_base.py` docstring + its test use `>=0.1.0,<2.0.0`
+  purely as a **generic example** of the `pep440_requirement` helper, not ferret's declared
+  range — correct as an illustration; unrelated base module, left alone.
+
+No commit beyond this log entry.
