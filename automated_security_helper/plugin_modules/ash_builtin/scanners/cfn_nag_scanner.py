@@ -94,6 +94,43 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
 
         super().model_post_init(context)
 
+    @staticmethod
+    def _missing_gem_prerequisites() -> List[str]:
+        """Prerequisites for installing cfn-nag that are absent from this machine.
+
+        Two of them, and neither is speculative.
+
+        RubyGems, because cfn-nag is a gem. And a C compiler, because its closure
+        does not install without one: cfn-nag depends on cfn-model, which requires
+        ``psych ~> 3``, and psych has a C extension over libyaml. No psych 3.x release
+        publishes a precompiled gem for a modern Windows ABI -- checked against the
+        RubyGems API, 3.1.0 is the newest 3.x carrying any Windows binary and it is
+        tagged x64-mingw32 while Ruby 3.1+ needs x64-mingw-ucrt -- so it must build
+        from source. ASH's own container installs build-essential purely to get
+        through this step and then purges it.
+
+        Measured, not assumed: on windows-latest the gem install reached
+        "ERROR: Failed to build gem native extension" and returned 1, which failed
+        `ash dependencies install` outright and took every other scanner's install
+        down with it. Checking first turns that into cfn-nag reporting itself as
+        unprovisionable on this platform -- named in the installer's output, next to
+        npm-audit -- which is a constraint rather than a malfunction.
+
+        The compiler probe covers all platforms rather than just Windows, because the
+        requirement is not Windows-specific: a Linux image without a toolchain fails
+        the same way. The hosted Linux and macOS runners have `cc`, which is why
+        cfn-nag installs and runs there.
+        """
+        missing: List[str] = []
+        if find_executable("gem") is None:
+            missing.append("RubyGems (`gem`) is not on PATH")
+        if not any(find_executable(cc) for cc in ("cc", "gcc", "clang")):
+            missing.append(
+                "no C compiler (cc, gcc or clang) is on PATH, and cfn-nag's `psych` "
+                "dependency has no precompiled gem for this platform"
+            )
+        return missing
+
     @model_validator(mode="after")
     def setup_custom_install_commands(self) -> "CfnNagScanner":
         """Set up the installation command for cfn-nag.
@@ -131,11 +168,12 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         on this platform" -- by name, next to npm-audit -- and a machine with Ruby
         installs it.
         """
-        if find_executable("gem") is None:
+        missing = self._missing_gem_prerequisites()
+        if missing:
             ASH_LOGGER.warning(
-                "cfn-nag needs RubyGems (`gem`) to install and it was not found. "
-                "cfn-nag will be reported as having no install path on this "
-                "machine rather than failing the install of everything else."
+                f"cfn-nag cannot be installed here: {', '.join(missing)}. It will be "
+                "reported as having no install path on this machine rather than "
+                "failing the install of every other scanner."
             )
             return self
 

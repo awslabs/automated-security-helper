@@ -47,8 +47,17 @@ def context(tmp_path: Path) -> PluginContext:
     )
 
 
-def _commands(context, gem_path):
-    with patch(GEM_PROBE, return_value=gem_path):
+def _commands(context, *, gem=None, compiler=None):
+    """Build a scanner with `gem` and a C compiler each present or absent."""
+
+    def probe(command):
+        if command == "gem":
+            return gem
+        if command in ("cc", "gcc", "clang"):
+            return compiler
+        return f"/usr/bin/{command}"
+
+    with patch(GEM_PROBE, side_effect=probe):
         scanner = CfnNagScanner(context=context)
     return scanner.get_installation_commands("linux", "amd64")
 
@@ -60,7 +69,20 @@ def test_no_gem_means_no_install_command(context):
     the installer's report -- named, alongside npm-audit, and not fatal to the rest
     of the run.
     """
-    assert _commands(context, None) == []
+    assert _commands(context, gem=None, compiler="/usr/bin/cc") == []
+
+
+def test_no_compiler_means_no_install_command(context):
+    """RubyGems alone is not enough: the closure needs a native build.
+
+    This is the windows-latest case, and it is measured rather than predicted. With
+    the gem command declared unconditionally the install reached
+    "ERROR: Failed to build gem native extension", returned 1, and failed
+    `ash dependencies install` for every scanner at once -- so a Windows job whose
+    only command was the installer went red for a constraint that belongs to one
+    scanner.
+    """
+    assert _commands(context, gem="/usr/bin/gem", compiler=None) == []
 
 
 def test_gem_present_declares_the_pinned_install(context):
@@ -69,7 +91,7 @@ def test_gem_present_declares_the_pinned_install(context):
     Without it, the assertion above would pass just as well if cfn-nag had no
     install path at all, which is the state this whole change exists to end.
     """
-    commands = _commands(context, "/usr/bin/gem")
+    commands = _commands(context, gem="/usr/bin/gem", compiler="/usr/bin/cc")
     assert len(commands) == 1
     argv = commands[0]
     assert argv[:3] == ["gem", "install", "cfn-nag"]
@@ -97,4 +119,6 @@ def test_the_pinned_version_is_the_one_the_gemfile_declares(context):
         f"CFN_NAG_GEM_VERSION is {CFN_NAG_GEM_VERSION} but assets/Gemfile pins "
         "something else"
     )
-    assert CFN_NAG_GEM_VERSION in _commands(context, "/usr/bin/gem")[0]
+    assert CFN_NAG_GEM_VERSION in _commands(
+        context, gem="/usr/bin/gem", compiler="/usr/bin/cc"
+    )[0]
