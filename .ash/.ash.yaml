@@ -487,12 +487,13 @@ global_settings:
     # in total. Twelve of the thirteen carry no wildcard but ecr:GetAuthorizationToken.
     #
     # deploy/cdk/lib/ash-nag-suppressions.ts already makes this argument for cdk-nag's
-    # AwsSolutions-IAM5, in the RESOURCE half of suppressCodeBuildRoleWildcards' reason:
-    # IAM defines ecr:GetAuthorizationToken with no resource ARN, so "*" is the only
-    # value the action accepts. Reused here because it genuinely applies; the two rules
-    # read the same statements. (That reason used to be a numbered list and this comment
-    # cited "item (3)"; it was rewritten to cover wildcard ACTIONS as well as wildcard
-    # RESOURCES, so the clause is named rather than numbered now.)
+    # AwsSolutions-IAM5, in ECR_AUTHORIZATION_TOKEN_REASON: IAM defines
+    # ecr:GetAuthorizationToken with no resource ARN, so "*" is the only value the action
+    # accepts. Reused here because it genuinely applies; the two rules read the same
+    # statements. (That reason has moved twice. It was a numbered list, and this comment
+    # cited "item (3)"; then one role-scoped string covering wildcard ACTIONS as well as
+    # wildcard RESOURCES; and now one string per policy, so the constant is named rather
+    # than a clause pointed at.)
     - rule_id: CFN_NAG_W12
       path: deploy/cdk/templates/AshAgentCore.template.json
       reason: >-
@@ -503,7 +504,8 @@ global_settings:
         RuntimeTelemetry statement, and cloudwatch:PutMetricData, which is already
         narrowed the only way it can be, by a StringEquals condition pinning
         cloudwatch:namespace to the AgentCore namespace. See
-        suppressCodeBuildRoleWildcards in deploy/cdk/lib/ash-nag-suppressions.ts.
+        ECR_AUTHORIZATION_TOKEN_REASON and AGENTCORE_POLICY_REASONS in
+        deploy/cdk/lib/ash-nag-suppressions.ts.
     - rule_id: CFN_NAG_W12
       path: deploy/cdk/templates/AshCodeCommitGate.template.json
       reason: >-

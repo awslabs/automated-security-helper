@@ -622,9 +622,9 @@ export class AshFargateStack extends Stack {
      * explained instead; synth still exits 0 because they are warnings.
      */
 
-    // Not `suppressCodeBuildRoleWildcards`, which is what this used to call: that
-    // reason names a per-build log stream and a report group, and an ECS task
-    // execution role has neither. Its one wildcard is the ECR authorization token.
+    // Not the CodeBuild project-role helper, which is what this used to call: that reason
+    // named a per-build log stream and a report group, and an ECS task execution role has
+    // neither. Its one wildcard is the ECR authorization token.
     suppressTaskExecutionRoleWildcard(taskDefinition.executionRole!);
 
     new CfnOutput(this, 'McpEndpoint', {

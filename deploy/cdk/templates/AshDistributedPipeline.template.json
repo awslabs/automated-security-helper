@@ -316,7 +316,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "The only wildcard is the log-stream suffix \":*\" on this project's own CodeBuild log group. A build creates a stream per run, so the stream name is not knowable at deploy time and \":*\" on that one group is the narrowest grant that permits logging at all. No action in this policy is wildcarded.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -376,7 +376,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "The only wildcard is the \"-*\" suffix on this project's own report-group ARN. CodeBuild derives a report group name per report and prefixes it with the project name, so the name is not knowable at deploy time and the prefix keeps the grant inside this project. No action in this policy is wildcarded.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -417,7 +417,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "The two wildcards are the action suffixes kms:GenerateDataKey* and kms:ReEncrypt*, which CDK's key grant writes to cover the WithoutPlaintext and From/To variants. They widen the verb set, not the reach: every statement in this policy names the one customer-managed key this stack creates, so no resource here is wildcarded.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -466,7 +466,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "The only wildcard is Resource \"*\" on ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all, so \"*\" is the only value the policy will accept. Every other action in this policy is scoped to the one ECR repository this stack creates, and no action is wildcarded.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -522,7 +522,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "Read-only object access inside the pipeline artifact bucket this stack creates, which is the only bucket this policy names. RESOURCE: the \"/*\" object-key suffix on it, because CodePipeline names artifact objects per execution. ACTION: s3:GetBucket*, s3:GetObject* and s3:List*, API-family suffixes on that same bucket rather than extra reach.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -1407,7 +1407,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "The only wildcard is Resource \"*\" on ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all, so \"*\" is the only value the policy will accept. Every other action in this policy is scoped to the one ECR repository this stack creates, and no action is wildcarded.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -1490,7 +1490,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "The only wildcard is the log-stream suffix \":*\" on this project's own CodeBuild log group. A build creates a stream per run, so the stream name is not knowable at deploy time and \":*\" on that one group is the narrowest grant that permits logging at all. No action in this policy is wildcarded.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -1550,7 +1550,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "The only wildcard is the \"-*\" suffix on this project's own report-group ARN. CodeBuild derives a report group name per report and prefixes it with the project name, so the name is not knowable at deploy time and the prefix keeps the grant inside this project. No action in this policy is wildcarded.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -1591,7 +1591,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "The two wildcards are the action suffixes kms:GenerateDataKey* and kms:ReEncrypt*, which CDK's key grant writes to cover the WithoutPlaintext and From/To variants. They widen the verb set, not the reach: every statement in this policy names the one customer-managed key this stack creates, so no resource here is wildcarded.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -1681,7 +1681,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "Object access inside two buckets this stack creates: read on the pipeline artifact bucket, write on the results bucket. RESOURCE: the \"/*\" object-key suffix on each, because CodePipeline names artifact objects per execution and ASH writes one results prefix per execution. ACTION: s3:Abort*, s3:DeleteObject*, s3:GetBucket*, s3:GetObject* and s3:List*, API-family suffixes on those same two buckets rather than extra reach.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -1739,7 +1739,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "This policy holds no wildcard: ssm:GetParameter and its three read siblings are scoped to the one Parameter Store parameter this stack creates, and no action is wildcarded. IAM5 reports COMPLIANT here. The entry is kept because an aws-cdk-lib grant helper writes these statements, so which of this role's service groups holds a wildcard is aws-cdk-lib's choice rather than this app's.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -1775,7 +1775,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "This policy holds no wildcard: secretsmanager:GetSecretValue and secretsmanager:DescribeSecret are scoped to the one secret this stack creates, and no action is wildcarded. IAM5 reports COMPLIANT here. The entry is kept because an aws-cdk-lib grant helper writes these statements, so which of this role's service groups holds a wildcard is aws-cdk-lib's choice rather than this app's.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -1977,7 +1977,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "The only wildcard is Resource \"*\" on ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all, so \"*\" is the only value the policy will accept. Every other action in this policy is scoped to the one ECR repository this stack creates, and no action is wildcarded.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -2060,7 +2060,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "The only wildcard is the log-stream suffix \":*\" on this project's own CodeBuild log group. A build creates a stream per run, so the stream name is not knowable at deploy time and \":*\" on that one group is the narrowest grant that permits logging at all. No action in this policy is wildcarded.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -2120,7 +2120,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "The only wildcard is the \"-*\" suffix on this project's own report-group ARN. CodeBuild derives a report group name per report and prefixes it with the project name, so the name is not knowable at deploy time and the prefix keeps the grant inside this project. No action in this policy is wildcarded.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -2161,7 +2161,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "The two wildcards are the action suffixes kms:GenerateDataKey* and kms:ReEncrypt*, which CDK's key grant writes to cover the WithoutPlaintext and From/To variants. They widen the verb set, not the reach: every statement in this policy names the one customer-managed key this stack creates, so no resource here is wildcarded.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -2251,7 +2251,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "Object access inside two buckets this stack creates: read on the pipeline artifact bucket, write on the results bucket. RESOURCE: the \"/*\" object-key suffix on each, because CodePipeline names artifact objects per execution and ASH writes one results prefix per execution. ACTION: s3:Abort*, s3:DeleteObject*, s3:GetBucket*, s3:GetObject* and s3:List*, API-family suffixes on those same two buckets rather than extra reach.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -2309,7 +2309,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "This policy holds no wildcard: ssm:GetParameter and its three read siblings are scoped to the one Parameter Store parameter this stack creates, and no action is wildcarded. IAM5 reports COMPLIANT here. The entry is kept because an aws-cdk-lib grant helper writes these statements, so which of this role's service groups holds a wildcard is aws-cdk-lib's choice rather than this app's.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -2345,7 +2345,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "This policy holds no wildcard: secretsmanager:GetSecretValue and secretsmanager:DescribeSecret are scoped to the one secret this stack creates, and no action is wildcarded. IAM5 reports COMPLIANT here. The entry is kept because an aws-cdk-lib grant helper writes these statements, so which of this role's service groups holds a wildcard is aws-cdk-lib's choice rather than this app's.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -2547,7 +2547,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "The only wildcard is Resource \"*\" on ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all, so \"*\" is the only value the policy will accept. Every other action in this policy is scoped to the one ECR repository this stack creates, and no action is wildcarded.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -2630,7 +2630,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "The only wildcard is the log-stream suffix \":*\" on this project's own CodeBuild log group. A build creates a stream per run, so the stream name is not knowable at deploy time and \":*\" on that one group is the narrowest grant that permits logging at all. No action in this policy is wildcarded.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -2690,7 +2690,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "The only wildcard is the \"-*\" suffix on this project's own report-group ARN. CodeBuild derives a report group name per report and prefixes it with the project name, so the name is not knowable at deploy time and the prefix keeps the grant inside this project. No action in this policy is wildcarded.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -2731,7 +2731,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "The two wildcards are the action suffixes kms:GenerateDataKey* and kms:ReEncrypt*, which CDK's key grant writes to cover the WithoutPlaintext and From/To variants. They widen the verb set, not the reach: every statement in this policy names the one customer-managed key this stack creates, so no resource here is wildcarded.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -2821,7 +2821,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "Object access inside two buckets this stack creates: read on the pipeline artifact bucket, write on the results bucket. RESOURCE: the \"/*\" object-key suffix on each, because CodePipeline names artifact objects per execution and ASH writes one results prefix per execution. ACTION: s3:Abort*, s3:DeleteObject*, s3:GetBucket*, s3:GetObject* and s3:List*, API-family suffixes on those same two buckets rather than extra reach.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -2879,7 +2879,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "This policy holds no wildcard: ssm:GetParameter and its three read siblings are scoped to the one Parameter Store parameter this stack creates, and no action is wildcarded. IAM5 reports COMPLIANT here. The entry is kept because an aws-cdk-lib grant helper writes these statements, so which of this role's service groups holds a wildcard is aws-cdk-lib's choice rather than this app's.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -2915,7 +2915,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "This policy holds no wildcard: secretsmanager:GetSecretValue and secretsmanager:DescribeSecret are scoped to the one secret this stack creates, and no action is wildcarded. IAM5 reports COMPLIANT here. The entry is kept because an aws-cdk-lib grant helper writes these statements, so which of this role's service groups holds a wildcard is aws-cdk-lib's choice rather than this app's.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -3117,7 +3117,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "The only wildcard is Resource \"*\" on ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all, so \"*\" is the only value the policy will accept. Every other action in this policy is scoped to the one ECR repository this stack creates, and no action is wildcarded.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -3200,7 +3200,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "The only wildcard is the log-stream suffix \":*\" on this project's own CodeBuild log group. A build creates a stream per run, so the stream name is not knowable at deploy time and \":*\" on that one group is the narrowest grant that permits logging at all. No action in this policy is wildcarded.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -3260,7 +3260,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "The only wildcard is the \"-*\" suffix on this project's own report-group ARN. CodeBuild derives a report group name per report and prefixes it with the project name, so the name is not knowable at deploy time and the prefix keeps the grant inside this project. No action in this policy is wildcarded.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -3301,7 +3301,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "The two wildcards are the action suffixes kms:GenerateDataKey* and kms:ReEncrypt*, which CDK's key grant writes to cover the WithoutPlaintext and From/To variants. They widen the verb set, not the reach: every statement in this policy names the one customer-managed key this stack creates, so no resource here is wildcarded.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -3391,7 +3391,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "Object access inside two buckets this stack creates: read on the pipeline artifact bucket, write on the results bucket. RESOURCE: the \"/*\" object-key suffix on each, because CodePipeline names artifact objects per execution and ASH writes one results prefix per execution. ACTION: s3:Abort*, s3:DeleteObject*, s3:GetBucket*, s3:GetObject* and s3:List*, API-family suffixes on those same two buckets rather than extra reach.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -3449,7 +3449,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "This policy holds no wildcard: ssm:GetParameter and its three read siblings are scoped to the one Parameter Store parameter this stack creates, and no action is wildcarded. IAM5 reports COMPLIANT here. The entry is kept because an aws-cdk-lib grant helper writes these statements, so which of this role's service groups holds a wildcard is aws-cdk-lib's choice rather than this app's.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -3485,7 +3485,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "This policy holds no wildcard: secretsmanager:GetSecretValue and secretsmanager:DescribeSecret are scoped to the one secret this stack creates, and no action is wildcarded. IAM5 reports COMPLIANT here. The entry is kept because an aws-cdk-lib grant helper writes these statements, so which of this role's service groups holds a wildcard is aws-cdk-lib's choice rather than this app's.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -3687,7 +3687,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "The only wildcard is Resource \"*\" on ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all, so \"*\" is the only value the policy will accept. Every other action in this policy is scoped to the one ECR repository this stack creates, and no action is wildcarded.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -3770,7 +3770,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "The only wildcard is the log-stream suffix \":*\" on this project's own CodeBuild log group. A build creates a stream per run, so the stream name is not knowable at deploy time and \":*\" on that one group is the narrowest grant that permits logging at all. No action in this policy is wildcarded.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -3830,7 +3830,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "The only wildcard is the \"-*\" suffix on this project's own report-group ARN. CodeBuild derives a report group name per report and prefixes it with the project name, so the name is not knowable at deploy time and the prefix keeps the grant inside this project. No action in this policy is wildcarded.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -3871,7 +3871,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "The two wildcards are the action suffixes kms:GenerateDataKey* and kms:ReEncrypt*, which CDK's key grant writes to cover the WithoutPlaintext and From/To variants. They widen the verb set, not the reach: every statement in this policy names the one customer-managed key this stack creates, so no resource here is wildcarded.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -3964,7 +3964,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "Object access inside two buckets this stack creates: read on the pipeline artifact bucket, write on the results bucket. RESOURCE: the \"/*\" object-key suffix on each, because CodePipeline names artifact objects per execution and ASH writes one results prefix per execution. ACTION: s3:Abort*, s3:DeleteObject*, s3:GetBucket*, s3:GetObject* and s3:List*, API-family suffixes on those same two buckets rather than extra reach.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -4022,7 +4022,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "This policy holds no wildcard: ssm:GetParameter and its three read siblings are scoped to the one Parameter Store parameter this stack creates, and no action is wildcarded. IAM5 reports COMPLIANT here. The entry is kept because an aws-cdk-lib grant helper writes these statements, so which of this role's service groups holds a wildcard is aws-cdk-lib's choice rather than this app's.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -4058,7 +4058,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
+       "reason": "This policy holds no wildcard: secretsmanager:GetSecretValue and secretsmanager:DescribeSecret are scoped to the one secret this stack creates, and no action is wildcarded. IAM5 reports COMPLIANT here. The entry is kept because an aws-cdk-lib grant helper writes these statements, so which of this role's service groups holds a wildcard is aws-cdk-lib's choice rather than this app's.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -4273,7 +4273,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Object-level access inside the artifact and source buckets this stack creates. CodePipeline generates the artifact object keys per execution, so they cannot be named in advance, and the s3:GetObject*-style action wildcards are API-family suffixes on those same two buckets rather than extra reach. The sts:AssumeRole grant on this role holds no wildcard: it names each per-action role by ARN.",
+       "reason": "Object access inside the pipeline artifact bucket this stack creates, which is the only bucket this policy names. RESOURCE: the \"/*\" object-key suffix on it, because CodePipeline names artifact objects per execution. ACTION: s3:Abort*, s3:DeleteObject*, s3:GetBucket*, s3:GetObject* and s3:List*, API-family suffixes on that same bucket rather than extra reach.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -4347,7 +4347,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Object-level access inside the artifact and source buckets this stack creates. CodePipeline generates the artifact object keys per execution, so they cannot be named in advance, and the s3:GetObject*-style action wildcards are API-family suffixes on those same two buckets rather than extra reach. The sts:AssumeRole grant on this role holds no wildcard: it names each per-action role by ARN.",
+       "reason": "This policy holds no wildcard: its one sts:AssumeRole statement names each of the seven per-action roles CodePipeline generated, by ARN. IAM5 reports COMPLIANT here. The entry is kept because codepipeline.Pipeline writes that statement, so which of this role's service groups holds a wildcard is aws-cdk-lib's choice rather than this app's.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -4694,7 +4694,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Object-level access inside the artifact and source buckets this stack creates. CodePipeline generates the artifact object keys per execution, so they cannot be named in advance, and the s3:GetObject*-style action wildcards are API-family suffixes on those same two buckets rather than extra reach. The sts:AssumeRole grant on this role holds no wildcard: it names each per-action role by ARN.",
+       "reason": "Object access inside the source and artifact buckets this stack creates. RESOURCE: the \"/*\" object-key suffix on the artifact bucket, because CodePipeline names artifact objects per execution; the source object itself is named exactly. ACTION: s3:Abort*, s3:DeleteObject*, s3:GetBucket*, s3:GetObject* and s3:List*, API-family suffixes on those same two buckets rather than extra reach.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -4756,7 +4756,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Object-level access inside the artifact and source buckets this stack creates. CodePipeline generates the artifact object keys per execution, so they cannot be named in advance, and the s3:GetObject*-style action wildcards are API-family suffixes on those same two buckets rather than extra reach. The sts:AssumeRole grant on this role holds no wildcard: it names each per-action role by ARN.",
+       "reason": "This policy holds no wildcard: its codebuild:StartBuild, codebuild:StopBuild and codebuild:BatchGetBuilds grants name one project by ARN, and no action is wildcarded. IAM5 reports COMPLIANT here. The entry is kept because CodePipeline generates this role and its policy per pipeline action, so the shape is aws-cdk-lib's choice rather than this app's.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -4818,7 +4818,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Object-level access inside the artifact and source buckets this stack creates. CodePipeline generates the artifact object keys per execution, so they cannot be named in advance, and the s3:GetObject*-style action wildcards are API-family suffixes on those same two buckets rather than extra reach. The sts:AssumeRole grant on this role holds no wildcard: it names each per-action role by ARN.",
+       "reason": "This policy holds no wildcard: its codebuild:StartBuild, codebuild:StopBuild and codebuild:BatchGetBuilds grants name one project by ARN, and no action is wildcarded. IAM5 reports COMPLIANT here. The entry is kept because CodePipeline generates this role and its policy per pipeline action, so the shape is aws-cdk-lib's choice rather than this app's.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -4880,7 +4880,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Object-level access inside the artifact and source buckets this stack creates. CodePipeline generates the artifact object keys per execution, so they cannot be named in advance, and the s3:GetObject*-style action wildcards are API-family suffixes on those same two buckets rather than extra reach. The sts:AssumeRole grant on this role holds no wildcard: it names each per-action role by ARN.",
+       "reason": "This policy holds no wildcard: its codebuild:StartBuild, codebuild:StopBuild and codebuild:BatchGetBuilds grants name one project by ARN, and no action is wildcarded. IAM5 reports COMPLIANT here. The entry is kept because CodePipeline generates this role and its policy per pipeline action, so the shape is aws-cdk-lib's choice rather than this app's.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -4942,7 +4942,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Object-level access inside the artifact and source buckets this stack creates. CodePipeline generates the artifact object keys per execution, so they cannot be named in advance, and the s3:GetObject*-style action wildcards are API-family suffixes on those same two buckets rather than extra reach. The sts:AssumeRole grant on this role holds no wildcard: it names each per-action role by ARN.",
+       "reason": "This policy holds no wildcard: its codebuild:StartBuild, codebuild:StopBuild and codebuild:BatchGetBuilds grants name one project by ARN, and no action is wildcarded. IAM5 reports COMPLIANT here. The entry is kept because CodePipeline generates this role and its policy per pipeline action, so the shape is aws-cdk-lib's choice rather than this app's.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -5004,7 +5004,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Object-level access inside the artifact and source buckets this stack creates. CodePipeline generates the artifact object keys per execution, so they cannot be named in advance, and the s3:GetObject*-style action wildcards are API-family suffixes on those same two buckets rather than extra reach. The sts:AssumeRole grant on this role holds no wildcard: it names each per-action role by ARN.",
+       "reason": "This policy holds no wildcard: its codebuild:StartBuild, codebuild:StopBuild and codebuild:BatchGetBuilds grants name one project by ARN, and no action is wildcarded. IAM5 reports COMPLIANT here. The entry is kept because CodePipeline generates this role and its policy per pipeline action, so the shape is aws-cdk-lib's choice rather than this app's.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -5066,7 +5066,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Object-level access inside the artifact and source buckets this stack creates. CodePipeline generates the artifact object keys per execution, so they cannot be named in advance, and the s3:GetObject*-style action wildcards are API-family suffixes on those same two buckets rather than extra reach. The sts:AssumeRole grant on this role holds no wildcard: it names each per-action role by ARN.",
+       "reason": "This policy holds no wildcard: its codebuild:StartBuild, codebuild:StopBuild and codebuild:BatchGetBuilds grants name one project by ARN, and no action is wildcarded. IAM5 reports COMPLIANT here. The entry is kept because CodePipeline generates this role and its policy per pipeline action, so the shape is aws-cdk-lib's choice rather than this app's.",
        "id": "AwsSolutions-IAM5"
       }
      ]

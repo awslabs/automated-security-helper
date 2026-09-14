@@ -33,6 +33,51 @@
  * policy is checkable by a reviewer and does not rot. Where a policy is written
  * by hand in this app, the wildcard is also justified at the call site.
  *
+ * EVERY REASON IS A CLAIM ABOUT ONE POLICY, NOT ABOUT THE ROLE ABOVE IT
+ * --------------------------------------------------------------------
+ * This is the second half of "enumerates every wildcard in that policy", and it was
+ * missing. Three helpers here used to hold a single reason that was the UNION of every
+ * wildcard shape anywhere on the role, applied to every policy the per-service split
+ * produced. Each such reason was true at role scope and false at every site:
+ * `ImageBuildRole/KmsAccess` holds two wildcard ACTIONS and no wildcard resource, while
+ * the shared reason enumerated four resource wildcards; `RuntimeRole/XrayAccess` holds
+ * `Resource: "*"` for four X-Ray actions, while the shared reason also named
+ * `ecr:GetAuthorizationToken` and `cloudwatch:PutMetricData`, which live in two other
+ * policies. A reader checking the reason against the resource it is attached to would
+ * find most of it describing something else.
+ *
+ * So each helper now carries one reason per POLICY, keyed on the policy's construct id,
+ * and `suppressPolicyWildcardsByGroup` throws rather than guessing when it meets a
+ * policy the map does not name.
+ *
+ * KEYING ON THE CONSTRUCT ID IS NOT THE `appliesTo` ROT REFUSED ABOVE. `policyGroupFor`
+ * in ash-policy-split.ts derives a policy's construct id from its statements' action
+ * service, so an `ecr:` statement lands in `EcrAccess` by construction and cannot land
+ * anywhere else. The key is a service name, not a logical id and not an ARN fragment,
+ * and there is nothing in it for a construct rename to invalidate. It also fails closed:
+ * a wildcard granted under a service with no entry in the map is a synth-time throw
+ * naming the policy, where a stale `appliesTo` would have silently stopped matching.
+ *
+ * WHAT WAS REJECTED. Keeping the union and hedging it -- the reasons were previously
+ * phrased "every wildcard on this ROLE", which makes them true again by widening the
+ * subject. That reads as accurate and tells a reviewer looking at one policy almost
+ * nothing, which is the failure this file exists to prevent. Also rejected: deriving the
+ * enumeration from the policy document at suppression time. `onPolicyCreated` fires
+ * BEFORE the first statement is added (see `AshSplitPolicyRole.addToPrincipalPolicy`), so
+ * the document is empty exactly when the reason has to be written, and the only hook that
+ * sees a populated document before cdk-nag's aspect runs is another aspect registered
+ * ahead of it -- an ordering dependency between aspects, which is a new silent-failure
+ * mode rather than a fix for one.
+ *
+ * KNOWN LIMITATION, AND WHERE IT IS CAUGHT. A per-policy reason can go stale in one
+ * direction the throw does not cover: a new grant inside a service that ALREADY has an
+ * entry adds a wildcard the existing reason does not name, and the suppression keeps
+ * matching. Three tests in test/ash-template-size.test.ts close that, all computed from
+ * each policy's own committed document rather than from a list: every wildcard action a
+ * policy grants has to appear in its reason, a reason may not name an IAM action its
+ * policy does not grant, and a reason may claim the policy holds no wildcard only if it
+ * holds none.
+ *
  * WHY NOTHING HERE USES `applyToChildren: true` ANY MORE
  * -----------------------------------------------------
  * It used to, and against `main` it was writing 99 of the app's 129 suppression
@@ -65,6 +110,17 @@
  * `DefaultPolicy` resources whose only distinguishing handle is the pipeline STAGE and
  * ACTION name.
  *
+ * WHAT DID CHANGE ABOUT THEM IS THE TEXT. Retaining an inert entry is a byte cost;
+ * retaining one whose reason describes wildcards its policy does not have is a false
+ * statement in a public template, and all 17 carried one. `Shard0Project/Role/SsmAccess`
+ * grants four `ssm:*Parameter*` reads on a single parameter ARN and was shipping a reason
+ * about log streams and S3 object keys. Each of the four now says the thing that is
+ * actually true of it -- IAM5 evaluates this policy as COMPLIANT, it holds no wildcard,
+ * and the entry is kept because the statements come from an aws-cdk-lib grant helper
+ * rather than from this app. `no reason claims a policy holds no wildcard unless it holds
+ * none` in test/ash-template-size.test.ts is what stops that claim from outliving a grant
+ * that adds one.
+ *
  * SO EVERY SUPPRESSION HERE IS APPLIED TO THE RESOURCES THAT CONSUME IT, and the
  * classification is cdk-nag's own per-(rule, resource) verdict rather than a
  * reading of which rule looks applicable. Those two differ, and the difference is
@@ -82,7 +138,8 @@
  * with a belt-and-braces subtree walk.
  */
 
-import { CfnResource } from 'aws-cdk-lib';
+import { CfnResource, Stack } from 'aws-cdk-lib';
+import { CfnManagedPolicy, CfnPolicy } from 'aws-cdk-lib/aws-iam';
 import { NagPackSuppression, NagSuppressions } from 'cdk-nag';
 import { IConstruct } from 'constructs';
 
@@ -135,61 +192,197 @@ function suppressPolicyWildcards(scope: IConstruct, suppressions: NagPackSuppres
 }
 
 /**
- * The wildcards CDK's own CodeBuild project role always contains.
+ * The IAM policies under `scope`, each paired with the construct id that names it.
  *
- * CodeBuild writes to a log STREAM inside its log group, and a report group name
- * is suffixed per report, so neither can be named exactly ahead of time. ECR's
- * authorization token is an account-level operation with no resource ARN at all —
- * see the IAM reference for `ecr:GetAuthorizationToken`. The S3 wildcard is object
- * access within one bucket this stack owns, not bucket-level access.
+ * The id is read off the OWNING L2 rather than off the L1, because the L1 under an
+ * `iam.Policy` is always called `Resource` and it is the L2's id that carries the service
+ * group -- `KmsAccess`, `S3Access`, `DefaultPolicy`. `node.findAll()` is parent-first, so
+ * the L2 is seen first and claims the entry; the L1 is skipped when it turns up as its own
+ * construct a moment later. A raw `CfnResource` passed in with no L2 above it keeps its
+ * own id, which is the right answer for the only case that produces one.
  *
- * IAM5 FLAGS WILDCARD ACTIONS AS WELL AS WILDCARD RESOURCES, AND THE REASON HAS TO
- * COVER BOTH. This was measured rather than assumed, by reading the finding ids
- * cdk-nag emits: `AwsSolutions-IAM5[Action::kms:GenerateDataKey*]` and
- * `[Action::kms:ReEncrypt*]` are the ONLY two findings on every `KmsAccess` policy the
- * per-service split produces, and `[Action::s3:GetObject*]` and its siblings account
- * for five of the seven findings on each `S3Access` policy. An earlier version of this
- * reason enumerated four RESOURCE wildcards and nothing else, so on seven `KmsAccess`
- * policies across five stacks it suppressed a finding it did not mention at all --
- * which is a suppression without evidence, the exact thing IAM5 exists to force.
- *
- * The reason is also phrased as a claim about the ROLE, not about the one policy it
- * lands on. After the split each policy holds only its own service's wildcards, so a
- * per-resource enumeration would be false at every site; `suppressAgentCoreRuntimeWildcards`
- * below already had it this way. Writing a distinct reason per service group was
- * measured and rejected: it costs more template bytes than it saves and multiplies the
- * helper count, while a role-scoped union claim is checkable against the role's policies
- * as a set.
+ * Throws on an empty match for the same reason `suppressPolicyWildcards` does, and takes
+ * the timing half of that message from the caller because the two have different ones.
  */
-export function suppressCodeBuildRoleWildcards(scope: IConstruct): void {
-  suppressPolicyWildcards(scope, [
-    {
-      id: 'AwsSolutions-IAM5',
-      reason:
-        'Every wildcard on this role has one of two shapes, both written by CDK grant ' +
-        'helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this ' +
-        'project\'s own log group, the per-report suffix on its own report group, object ' +
-        'keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM ' +
-        'defines no resource ARN at all. ACTION: API-family suffixes like ' +
-        'kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped ' +
-        'resource, not its reach. Nothing here leaves this stack.',
-    },
-  ]);
+function policyGroupsUnder(scope: IConstruct, timingHint: string): Map<CfnResource, string> {
+  const found = new Map<CfnResource, string>();
+  for (const construct of scope.node.findAll()) {
+    const l1 = construct.node.defaultChild ?? construct;
+    if (!(l1 instanceof CfnResource) || !IAM_POLICY_DOCUMENT_TYPES.includes(l1.cfnResourceType)) {
+      continue;
+    }
+    if (l1 !== construct || !found.has(l1)) {
+      found.set(l1, construct.node.id);
+    }
+  }
+  if (found.size === 0) {
+    throw new Error(
+      `No ${IAM_POLICY_DOCUMENT_TYPES.join(' or ')} resource under ${scope.node.path} to ` +
+        `suppress. Either the wrong construct was passed, or ${timingHint}.`,
+    );
+  }
+  return found;
 }
 
 /**
- * Both CodeBuild-role suppressions, for one policy produced by the per-service
- * split in ash-policy-split.ts.
+ * Suppress `AwsSolutions-IAM5` on the policies under `scope`, giving each the reason
+ * written for ITS service group.
  *
- * Pass this as that role's `onPolicyCreated`. It has to run per policy AS THE
- * POLICY IS CREATED rather than once over the role, because a suppression applied
- * to a scope only reaches the resources that exist when it is applied — and a
- * grant made later creates a policy resource the earlier walk could not see. The
- * measured case is the artifact-bucket read `codepipeline_actions.CodeBuildAction`
- * adds to a project's role while the pipeline is assembled.
+ * `reasons` is keyed by policy construct id, which `policyGroupFor` in
+ * ash-policy-split.ts derives from the statements' action service. The header explains
+ * why that key does not rot and why a union reason is not an acceptable substitute.
  *
- * `AwsSolutions-IAM5` for the wildcards, which are the same wildcards as before
- * the split and are enumerated in `suppressCodeBuildRoleWildcards`.
+ * THROWS ON A POLICY THE MAP DOES NOT NAME, AND THAT IS THE POINT. The alternative is to
+ * fall back to some general reason, which is how a false justification reaches a public
+ * template: nobody wrote a claim about that policy, so there is no claim to make. A
+ * wildcard granted under a new service therefore fails synth naming the policy, and the
+ * fix is to write the sentence. Passing a scope that holds no policy at all throws too,
+ * for the reasons on `suppressPolicyWildcards`.
+ *
+ * IT RUNS TWICE OVER MOST POLICIES AND THAT IS SAFE. The CodeBuild and pipeline-role
+ * helpers each hand this to `onPolicyCreated` AND walk the finished role, because the
+ * callback is the only thing that sees a policy created by a later grant while the walk is
+ * the only thing that would see a policy the callback's keying declined. (The AgentCore
+ * runtime role is the exception: its call site filters by construct id inside the callback
+ * and never walks, so each of its three policies is reached once.)
+ * `NagSuppressionHelper.addRulesToMetadata` deduplicates entries by their serialized form,
+ * so the same (id, reason) pair applied twice collapses to one -- which holds only while
+ * both paths produce the SAME reason for the same policy, and is why this dispatch is a
+ * pure function of the policy's construct id rather than of which path reached it.
+ */
+function suppressPolicyWildcardsByGroup(scope: IConstruct, reasons: Record<string, string>): void {
+  const policies = policyGroupsUnder(
+    scope,
+    'this ran before the policy was created -- see onPolicyCreated in ash-policy-split.ts',
+  );
+  for (const [policy, group] of policies) {
+    const reason = reasons[group];
+    if (reason === undefined) {
+      throw new Error(
+        `No IAM5 suppression reason is written for the '${group}' policy at ` +
+          `${policy.node.path}. A reason has to be true of the resource it lands on, so ` +
+          'there is no default to fall back to: add an entry naming that policy\'s own ' +
+          'wildcards to the map in ash-nag-suppressions.ts, or stop suppressing it. ' +
+          `Known groups: ${Object.keys(reasons).sort().join(', ')}.`,
+      );
+    }
+    NagSuppressions.addResourceSuppressions(policy, [{ id: 'AwsSolutions-IAM5', reason }]);
+  }
+}
+
+/**
+ * The statements of one IAM policy L1, resolved to the shape they take in the template.
+ *
+ * `resolve` is what turns a `Fn::GetAtt` token into the `{ "Fn::GetAtt": [...] }` object
+ * the template carries, which is the form the wildcard test below has to see.
+ */
+function resolvedStatements(policy: CfnResource): { Effect?: string; Action?: unknown; Resource?: unknown }[] {
+  if (!(policy instanceof CfnPolicy) && !(policy instanceof CfnManagedPolicy)) {
+    throw new Error(`${policy.node.path} is a ${policy.cfnResourceType}, not an IAM policy.`);
+  }
+  const document = Stack.of(policy).resolve(policy.policyDocument);
+  return document?.Statement ?? [];
+}
+
+/**
+ * Whether `AwsSolutions-IAM5` would find a wildcard in this policy.
+ *
+ * Mirrors cdk-nag's own `analyzePolicy` (rules/iam/IAMNoWildcardPermissions): Allow
+ * statements only, a wildcard ACTION counts as much as a wildcard RESOURCE, and the
+ * resource is tested in its SERIALIZED form. That last part is not a detail -- after the
+ * per-service split most of these ARNs are `Fn::Join` structures whose literal tail is the
+ * wildcard (`:*`, `-*`, `/*`), so a check that only looked at string resources would
+ * report "no wildcard" on policies cdk-nag has just raised a finding against.
+ */
+function holdsWildcard(policy: CfnResource): boolean {
+  for (const statement of resolvedStatements(policy)) {
+    if (statement.Effect !== 'Allow') {
+      continue;
+    }
+    const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];
+    if (actions.some((action) => typeof action === 'string' && action.includes('*'))) {
+      return true;
+    }
+    const resources = Array.isArray(statement.Resource) ? statement.Resource : [statement.Resource];
+    if (resources.some((resource) => JSON.stringify(resource ?? null).includes('*'))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * The one wildcard shape every CodeBuild project role shares, per service group.
+ *
+ * WHY THESE ARE SEPARATE STRINGS RATHER THAN ONE. The header has the argument; the
+ * measurement behind it is that each group holds exactly one wildcard shape and holds it
+ * alone. Read off the committed templates, `AwsSolutions-IAM5` reports, per policy:
+ *
+ *   CodebuildAccess       Resource  report-group/<Project>-*
+ *   EcrAccess             Resource  *                            (GetAuthorizationToken)
+ *   KmsAccess             Action    kms:GenerateDataKey*, kms:ReEncrypt*   -- no resource
+ *   LogsAccess            Resource  log-group:/aws/codebuild/<Project>:*
+ *   SsmAccess             (none, COMPLIANT)
+ *   SecretsmanagerAccess  (none, COMPLIANT)
+ *
+ * IAM5 RAISES A FINDING PER WILDCARD ACTION AS WELL AS PER WILDCARD RESOURCE, which is
+ * why `KmsAccess` appears here at all and why a resource-only reading of these policies
+ * misses it entirely. It was a resource-only reading that produced the shared reason
+ * these replace: it enumerated four resource wildcards and stopped, so on eleven
+ * `KmsAccess` policies across five stacks it suppressed two findings it never mentioned.
+ */
+const CODEBUILD_REPORT_GROUP_REASON =
+  'The only wildcard is the "-*" suffix on this project\'s own report-group ARN. CodeBuild ' +
+  'derives a report group name per report and prefixes it with the project name, so the ' +
+  'name is not knowable at deploy time and the prefix keeps the grant inside this ' +
+  'project. No action in this policy is wildcarded.';
+
+/** Shared with the AgentCore runtime role, which holds the identical statement pair. */
+const ECR_AUTHORIZATION_TOKEN_REASON =
+  'The only wildcard is Resource "*" on ecr:GetAuthorizationToken, for which IAM defines ' +
+  'no resource ARN at all, so "*" is the only value the policy will accept. Every other ' +
+  'action in this policy is scoped to the one ECR repository this stack creates, and no ' +
+  'action is wildcarded.';
+
+const KMS_ACTION_SUFFIX_REASON =
+  'The two wildcards are the action suffixes kms:GenerateDataKey* and kms:ReEncrypt*, ' +
+  'which CDK\'s key grant writes to cover the WithoutPlaintext and From/To variants. They ' +
+  'widen the verb set, not the reach: every statement in this policy names the one ' +
+  'customer-managed key this stack creates, so no resource here is wildcarded.';
+
+const CODEBUILD_LOG_STREAM_REASON =
+  'The only wildcard is the log-stream suffix ":*" on this project\'s own CodeBuild log ' +
+  'group. A build creates a stream per run, so the stream name is not knowable at deploy ' +
+  'time and ":*" on that one group is the narrowest grant that permits logging at all. No ' +
+  'action in this policy is wildcarded.';
+
+/**
+ * The four groups both kinds of CodeBuild project role in this app produce, with the
+ * identical wildcard in each. `S3Access` is deliberately absent: the image-build role
+ * reads the artifact bucket and the scan and merge roles also write the results bucket,
+ * so the two have different wildcards and get different reasons below.
+ */
+const CODEBUILD_SHARED_REASONS: Record<string, string> = {
+  CodebuildAccess: CODEBUILD_REPORT_GROUP_REASON,
+  EcrAccess: ECR_AUTHORIZATION_TOKEN_REASON,
+  KmsAccess: KMS_ACTION_SUFFIX_REASON,
+  LogsAccess: CODEBUILD_LOG_STREAM_REASON,
+};
+
+/**
+ * The image-build project role, one policy at a time.
+ *
+ * Pass this as the role's `onPolicyCreated` AND call it once on the finished role: the
+ * callback is the only thing that catches a policy created by a grant made later, the
+ * walk is the only thing that would catch a policy the callback's keying declined, and
+ * `suppressPolicyWildcardsByGroup` explains why running both is safe.
+ *
+ * WHY IT HAS TO RUN PER POLICY AS THE POLICY IS CREATED. A suppression applied to a scope
+ * only reaches the resources that exist when it is applied, and a grant made later creates
+ * a policy resource the earlier walk could not see. The measured case is the
+ * artifact-bucket read `codepipeline_actions.CodeBuildAction` adds to this project's role
+ * while the pipeline is assembled -- which is also why `S3Access` is in the map even
+ * though nothing in ash-image-build.ts grants S3.
  *
  * IT USED TO ADD `CdkNagValidationFailure` TOO, AND THE SPLIT IS WHY IT NO LONGER
  * DOES. The argument for it was that a policy whose resources are all
@@ -218,19 +411,64 @@ export function suppressCodeBuildRoleWildcards(scope: IConstruct): void {
  * 40-odd bytes-costing entries that no code path can read. The same first-match rule is
  * why `LogsAccess` is kept out of `AGENTCORE_WILDCARD_POLICIES` below.
  *
- * THE COST OF THAT, STATED PLAINLY: the reason recorded against such a throw would be
- * the wildcard enumeration in `suppressCodeBuildRoleWildcards`, which does not explain a
- * rule that could not run. So the throw stays visible -- SUPPRESSED_ERROR, which the
- * app's compliance reports carry -- but the string attached to it would be the wrong
- * explanation. Measured at this commit there is no such case: all seven throws in the
- * app are absorbed by a `CdkNagValidationFailure` entry and none by an IAM5 entry.
- * test/ash-template-size.test.ts pins that, so a new one is a test failure rather than a
- * misleading justification shipped in a public template, and
- * test/ash-nag-gate.test.ts proves the absorption mechanism above against cdk-nag
+ * THE COST OF THAT, STATED PLAINLY: the reason recorded against such a throw would be the
+ * per-group wildcard enumeration, which does not explain a rule that could not run. So the
+ * throw stays visible -- SUPPRESSED_ERROR, which the app's compliance reports carry -- but
+ * the string attached to it would be the wrong explanation. Measured at this commit there
+ * is no such case: all seven throws in the app are absorbed by a `CdkNagValidationFailure`
+ * entry and none by an IAM5 entry. test/ash-template-size.test.ts pins that, so a new one
+ * is a test failure rather than a misleading justification shipped in a public template,
+ * and test/ash-nag-gate.test.ts proves the absorption mechanism above against cdk-nag
  * itself rather than leaving it as a reading of the source.
  */
-export function suppressSplitCodeBuildPolicy(policy: IConstruct): void {
-  suppressCodeBuildRoleWildcards(policy);
+export function suppressImageBuildRoleWildcards(scope: IConstruct): void {
+  suppressPolicyWildcardsByGroup(scope, {
+    ...CODEBUILD_SHARED_REASONS,
+    S3Access:
+      'Read-only object access inside the pipeline artifact bucket this stack creates, ' +
+      'which is the only bucket this policy names. RESOURCE: the "/*" object-key suffix on ' +
+      'it, because CodePipeline names artifact objects per execution. ACTION: ' +
+      's3:GetBucket*, s3:GetObject* and s3:List*, API-family suffixes on that same bucket ' +
+      'rather than extra reach.',
+  });
+}
+
+/**
+ * The scan-shard and merge project roles, one policy at a time. Same two call shapes as
+ * `suppressImageBuildRoleWildcards` and for the same reasons.
+ *
+ * TWO GROUPS HERE HOLD NO WILDCARD AT ALL, AND THEIR ENTRIES STAY. `SsmAccess` and
+ * `SecretsmanagerAccess` are ten of the seventeen entries no rule consults, pinned and
+ * enumerated by test/ash-template-size.test.ts; the header says why removing them would
+ * be a claim about aws-cdk-lib's grant implementations rather than about this app. What
+ * they must not do is carry a reason describing wildcards they do not have, which is what
+ * the shared reason did to them -- `Shard0Project/Role/SsmAccess` grants four
+ * `ssm:*Parameter*` reads on one parameter ARN and was shipping a sentence about log
+ * streams and S3 object keys.
+ */
+export function suppressScanProjectRoleWildcards(scope: IConstruct): void {
+  suppressPolicyWildcardsByGroup(scope, {
+    ...CODEBUILD_SHARED_REASONS,
+    S3Access:
+      'Object access inside two buckets this stack creates: read on the pipeline artifact ' +
+      'bucket, write on the results bucket. RESOURCE: the "/*" object-key suffix on each, ' +
+      'because CodePipeline names artifact objects per execution and ASH writes one results ' +
+      'prefix per execution. ACTION: s3:Abort*, s3:DeleteObject*, s3:GetBucket*, ' +
+      's3:GetObject* and s3:List*, API-family suffixes on those same two buckets rather ' +
+      'than extra reach.',
+    SsmAccess:
+      'This policy holds no wildcard: ssm:GetParameter and its three read siblings are ' +
+      'scoped to the one Parameter Store parameter this stack creates, and no action is ' +
+      'wildcarded. IAM5 reports COMPLIANT here. The entry is kept because an aws-cdk-lib ' +
+      'grant helper writes these statements, so which of this role\'s service groups holds ' +
+      'a wildcard is aws-cdk-lib\'s choice rather than this app\'s.',
+    SecretsmanagerAccess:
+      'This policy holds no wildcard: secretsmanager:GetSecretValue and ' +
+      'secretsmanager:DescribeSecret are scoped to the one secret this stack creates, and ' +
+      'no action is wildcarded. IAM5 reports COMPLIANT here. The entry is kept because an ' +
+      'aws-cdk-lib grant helper writes these statements, so which of this role\'s service ' +
+      'groups holds a wildcard is aws-cdk-lib\'s choice rather than this app\'s.',
+  });
 }
 
 /**
@@ -247,44 +485,41 @@ export function suppressSplitCodeBuildPolicy(policy: IConstruct): void {
  *
  * So this suppression is not new permissiveness; it is a finding that was masked
  * becoming a finding that is stated. Each of the three is a wildcard IAM itself
- * requires:
- *
- *   * `ecr:GetAuthorizationToken` is an account-level operation that IAM defines
- *     with no resource ARN, so "*" is the only value it accepts.
- *   * The four X-Ray actions the AgentCore runtime needs for tracing are likewise
- *     defined with no resource ARN.
- *   * `cloudwatch:PutMetricData` has no resource ARN either. It is scoped by the
- *     `cloudwatch:namespace` condition on the statement instead, which limits it
- *     to the one namespace the runtime publishes to.
- *
- * The three live in three different policies, because the per-service split files
- * each statement under its action's service. `AGENTCORE_WILDCARD_POLICIES` names
- * them, and the call site is what decides which policies this reaches.
+ * requires, and each is in a policy of its own, so each gets its own reason -- the
+ * shared reason they used to carry named all three on all three, which meant two
+ * thirds of every one of those sentences was about a different resource.
  */
+const AGENTCORE_POLICY_REASONS: Record<string, string> = {
+  EcrAccess: ECR_AUTHORIZATION_TOKEN_REASON,
+  XrayAccess:
+    'The only wildcard is Resource "*", which is the only value IAM accepts for the four ' +
+    'X-Ray actions here: none of xray:GetSamplingRules, xray:GetSamplingTargets, ' +
+    'xray:PutTelemetryRecords or xray:PutTraceSegments is defined with a resource ARN. No ' +
+    'action in this policy is wildcarded.',
+  CloudwatchAccess:
+    'The only wildcard is Resource "*", which is the only value IAM accepts for ' +
+    'cloudwatch:PutMetricData. The statement is scoped by a cloudwatch:namespace condition ' +
+    'instead, limiting it to the one namespace the AgentCore runtime publishes to. No ' +
+    'action in this policy is wildcarded.',
+};
+
 export function suppressAgentCoreRuntimeWildcards(scope: IConstruct): void {
-  suppressPolicyWildcards(scope, [
-    {
-      id: 'AwsSolutions-IAM5',
-      reason:
-        'Every wildcard on this role is an action IAM defines with no resource ARN, so "*" ' +
-        'is the only value the policy will accept: ecr:GetAuthorizationToken, the four ' +
-        'X-Ray tracing actions, and cloudwatch:PutMetricData. PutMetricData is scoped by a ' +
-        'cloudwatch:namespace condition on its statement rather than by a resource. ' +
-        'Nothing here reaches a resource outside this stack, and no statement was ' +
-        'widened to obtain this suppression.',
-    },
-  ]);
+  suppressPolicyWildcardsByGroup(scope, AGENTCORE_POLICY_REASONS);
 }
 
 /**
  * The construct ids of the AgentCore runtime role's policies that hold a wildcard.
  *
+ * Derived from `AGENTCORE_POLICY_REASONS` rather than written out again, so the list the
+ * call site filters on and the list of reasons that exist cannot drift apart. The three
+ * correspond one-to-one with the three `resources: ['*']` statements in
+ * ash-agentcore-stack.ts.
+ *
  * WHY NAMING THEM IS NOT THE `appliesTo` ROT THIS FILE REFUSES ELSEWHERE. These are
  * not logical ids and not ARN fragments: `policyGroupFor` in ash-policy-split.ts
  * derives a policy's construct id from its statements' action service, so
  * `ecr:GetAuthorizationToken` lands in `EcrAccess` by construction and cannot land
- * anywhere else. The three entries here correspond one-to-one with the three
- * `resources: ['*']` statements in ash-agentcore-stack.ts.
+ * anywhere else.
  *
  * And it fails closed. A wildcard added under a fourth service gets no suppression,
  * so ERROR-level IAM5 reports it and synth fails naming the policy. A stale
@@ -297,16 +532,16 @@ export function suppressAgentCoreRuntimeWildcards(scope: IConstruct): void {
  * `rules_to_suppress` in array order and returns on the first match, so the second
  * entry would be metadata in the deliverable that nothing can ever read.
  */
-export const AGENTCORE_WILDCARD_POLICIES = ['EcrAccess', 'XrayAccess', 'CloudwatchAccess'];
+export const AGENTCORE_WILDCARD_POLICIES = Object.keys(AGENTCORE_POLICY_REASONS);
 
 /**
  * The ECS task execution role's one wildcard.
  *
- * SPLIT OUT OF `suppressCodeBuildRoleWildcards`, WHICH WAS THE WRONG REASON HERE. This
- * role was handed to that helper, so the AshFargate template shipped a justification
- * naming a per-build log stream, a report group and S3 object keys on a role that has
- * none of the three and nothing to do with CodeBuild. The reason was not merely
- * over-broad, it described a different resource.
+ * SPLIT OUT OF THE CODEBUILD PROJECT-ROLE HELPER, WHICH WAS THE WRONG REASON HERE. This
+ * role was handed to that helper while its reason was still one role-scoped union, so the
+ * AshFargate template shipped a justification naming a per-build log stream, a report
+ * group and S3 object keys on a role that has none of the three and nothing to do with
+ * CodeBuild. The reason was not merely over-broad, it described a different resource.
  *
  * What the resource actually holds, read off the committed AshFargate template: exactly
  * one IAM5 finding, `Resource::*` on `ecr:GetAuthorizationToken`. The ECR pull actions
@@ -348,10 +583,13 @@ export function suppressLambdaLogWildcard(scope: IConstruct): void {
 }
 
 /**
- * CodePipeline's generated roles.
+ * The pipeline's OWN role, one policy at a time.
  *
  * The pipeline needs object access across its artifact bucket, and it assumes the
- * per-action roles it created. Only the first of those contributes a wildcard.
+ * per-action roles it created. Only the first of those contributes a wildcard, and after
+ * the per-service split the two are in different policies -- which is why one reason
+ * cannot serve both. Same two call shapes as the CodeBuild helpers above: this is the
+ * role's `onPolicyCreated` and it is also called once on the finished role.
  *
  * THE ASSUME-ROLE CLAUSE WAS DROPPED BECAUSE THE SPLIT REMOVED THE THING IT DESCRIBED.
  * Before the per-service split, both statements shared one `DefaultPolicy` and the
@@ -359,25 +597,83 @@ export function suppressLambdaLogWildcard(scope: IConstruct): void {
  * seven per-action role ARNs by `Fn::GetAtt` and holds no wildcard at all -- read off the
  * committed AshDistributedPipeline template. A reason that kept claiming an assume-role
  * wildcard would be naming a state the code left behind, which is the failure mode the
- * header of this file is about. The reason now says the grant carries no wildcard, which
- * is true where it lands and tells the reader why they will not find one.
+ * header of this file is about.
  *
- * The remaining findings are five action wildcards (`s3:GetObject*` and siblings) and one
- * resource wildcard (`<artifact bucket>.Arn/*`) per consulted policy, so the reason has
- * to address both shapes -- see the note on `suppressCodeBuildRoleWildcards`.
+ * `S3Access` names ONE bucket, not two. The reason these replace said "the artifact and
+ * source buckets", which is true of the source ACTION's role below and false here: this
+ * policy's five action wildcards and its one `/*` object-key wildcard are all on the
+ * artifact bucket. The source bucket is reached only by the role
+ * `codepipeline_actions.S3SourceAction` gets for itself.
  */
 export function suppressPipelineRoleWildcards(scope: IConstruct): void {
-  suppressPolicyWildcards(scope, [
-    {
-      id: 'AwsSolutions-IAM5',
-      reason:
-        'Object-level access inside the artifact and source buckets this stack creates. ' +
-        'CodePipeline generates the artifact object keys per execution, so they cannot be ' +
-        'named in advance, and the s3:GetObject*-style action wildcards are API-family ' +
-        'suffixes on those same two buckets rather than extra reach. The sts:AssumeRole ' +
-        'grant on this role holds no wildcard: it names each per-action role by ARN.',
-    },
-  ]);
+  suppressPolicyWildcardsByGroup(scope, {
+    S3Access:
+      'Object access inside the pipeline artifact bucket this stack creates, which is the ' +
+      'only bucket this policy names. RESOURCE: the "/*" object-key suffix on it, because ' +
+      'CodePipeline names artifact objects per execution. ACTION: s3:Abort*, ' +
+      's3:DeleteObject*, s3:GetBucket*, s3:GetObject* and s3:List*, API-family suffixes on ' +
+      'that same bucket rather than extra reach.',
+    StsAccess:
+      'This policy holds no wildcard: its one sts:AssumeRole statement names each of the ' +
+      'seven per-action roles CodePipeline generated, by ARN. IAM5 reports COMPLIANT here. ' +
+      'The entry is kept because codepipeline.Pipeline writes that statement, so which of ' +
+      'this role\'s service groups holds a wildcard is aws-cdk-lib\'s choice rather than ' +
+      'this app\'s.',
+  });
+}
+
+/**
+ * The role CodePipeline generates PER ACTION, of which this pipeline has seven.
+ *
+ * WHY THIS IS NOT `suppressPipelineRoleWildcards`. These are seven different roles under
+ * the `codepipeline.Pipeline` construct rather than policies of the one role this stack
+ * supplies, and only one of them holds a wildcard: the S3 source action's role, which gets
+ * the same object-level artifact access the pipeline role has plus a read on the source
+ * bucket. The other six each name one CodeBuild project by ARN and hold nothing wildcarded
+ * at all. They were all sharing the pipeline role's reason, so six of the seven shipped a
+ * sentence about S3 object keys on a policy whose only actions are `codebuild:StartBuild`
+ * and two siblings.
+ *
+ * KEYED ON WHETHER THE POLICY HOLDS A WILDCARD, NOT ON WHICH ACTION IT BELONGS TO. All
+ * seven policies are CDK-generated and all seven are called `DefaultPolicy`, so the
+ * construct id says nothing here and the only handle CDK leaves is the pipeline STAGE and
+ * ACTION name -- which is the `appliesTo` rot the header refuses. What the two reasons
+ * differ on IS the presence of a wildcard, so reading that off the document is not a proxy
+ * for the classification, it is the classification. This runs after the pipeline is fully
+ * assembled, which is when those documents are populated.
+ *
+ * THE ASSUMPTION THAT MAKES IT SAFE, AND WHERE IT IS CHECKED: nothing adds a statement to
+ * one of these roles after this call. If something did, a policy that acquired a wildcard
+ * afterwards would keep the "holds no wildcard" reason -- so `no reason claims a policy
+ * holds no wildcard unless it holds none` in test/ash-template-size.test.ts asserts it
+ * against the committed template, where the outcome rather than the timing is visible.
+ */
+export function suppressPipelineActionRoleWildcards(scope: IConstruct): void {
+  const withWildcard =
+    'Object access inside the source and artifact buckets this stack creates. RESOURCE: ' +
+    'the "/*" object-key suffix on the artifact bucket, because CodePipeline names artifact ' +
+    'objects per execution; the source object itself is named exactly. ACTION: s3:Abort*, ' +
+    's3:DeleteObject*, s3:GetBucket*, s3:GetObject* and s3:List*, API-family suffixes on ' +
+    'those same two buckets rather than extra reach.';
+  const withoutWildcard =
+    'This policy holds no wildcard: its codebuild:StartBuild, codebuild:StopBuild and ' +
+    'codebuild:BatchGetBuilds grants name one project by ARN, and no action is wildcarded. ' +
+    'IAM5 reports COMPLIANT here. The entry is kept because CodePipeline generates this ' +
+    'role and its policy per pipeline action, so the shape is aws-cdk-lib\'s choice rather ' +
+    'than this app\'s.';
+
+  const policies = policyGroupsUnder(
+    scope,
+    'this ran before CodePipeline generated its per-action roles',
+  );
+  for (const policy of policies.keys()) {
+    NagSuppressions.addResourceSuppressions(policy, [
+      {
+        id: 'AwsSolutions-IAM5',
+        reason: holdsWildcard(policy) ? withWildcard : withoutWildcard,
+      },
+    ]);
+  }
 }
 
 /**

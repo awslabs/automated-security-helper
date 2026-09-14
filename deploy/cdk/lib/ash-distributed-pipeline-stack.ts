@@ -106,9 +106,9 @@ import {
 } from './ash-container-scripts';
 import { AshImageBuild } from './ash-image-build';
 import {
-  suppressCodeBuildRoleWildcards,
+  suppressPipelineActionRoleWildcards,
   suppressPipelineRoleWildcards,
-  suppressSplitCodeBuildPolicy,
+  suppressScanProjectRoleWildcards,
   suppressSecretRotation,
   suppressUnevaluableRules,
 } from './ash-nag-suppressions';
@@ -393,14 +393,19 @@ export class AshDistributedPipelineStack extends Stack {
      * project, five of which no rule could ever consult.
      */
     shardProjects.forEach((project) => {
-      suppressCodeBuildRoleWildcards(ashRoleSplitScopeOf(project));
+      suppressScanProjectRoleWildcards(ashRoleSplitScopeOf(project));
       suppressUnevaluableRules(project, ['AwsSolutions-CB5']);
     });
-    suppressCodeBuildRoleWildcards(ashRoleSplitScopeOf(mergeProject));
+    suppressScanProjectRoleWildcards(ashRoleSplitScopeOf(mergeProject));
     suppressUnevaluableRules(mergeProject, ['AwsSolutions-CB5']);
-    // The S3 source action gets its own generated role, separate from the
-    // pipeline role, with the same object-level wildcard.
-    suppressPipelineRoleWildcards(pipeline);
+    /*
+     * CodePipeline generates a role per ACTION, seven of them here, and they are not
+     * policies of the role this stack supplied -- so they need a separate call and, since
+     * only the S3 source action's role holds a wildcard at all, separate reasons. Passing
+     * `pipeline` rather than `pipelineScope` is what keeps this off the pipeline role,
+     * whose two policies are handled above.
+     */
+    suppressPipelineActionRoleWildcards(pipeline);
 
     new CfnOutput(this, 'ShardCount', {
       description:
@@ -453,7 +458,7 @@ export class AshDistributedPipelineStack extends Stack {
       this,
       `Shard${index}Project`,
       'codebuild.amazonaws.com',
-      suppressSplitCodeBuildPolicy,
+      suppressScanProjectRoleWildcards,
     );
 
     return new codebuild.Project(scope, GENERATED_CONSTRUCT_ID, {
@@ -563,7 +568,7 @@ export class AshDistributedPipelineStack extends Stack {
       this,
       'MergeProject',
       'codebuild.amazonaws.com',
-      suppressSplitCodeBuildPolicy,
+      suppressScanProjectRoleWildcards,
     );
 
     return new codebuild.Project(scope, GENERATED_CONSTRUCT_ID, {

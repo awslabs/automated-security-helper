@@ -44,6 +44,10 @@ import { AshDistributedPipelineStack } from '../lib/ash-distributed-pipeline-sta
 import { AshFargateStack } from '../lib/ash-fargate-stack';
 import { AshImagePipelineStack } from '../lib/ash-image-pipeline-stack';
 import {
+  suppressImageBuildRoleWildcards,
+  suppressScanProjectRoleWildcards,
+} from '../lib/ash-nag-suppressions';
+import {
   AshSplitPolicyRole,
   GENERATED_CONSTRUCT_ID,
   ashRoleSplitScope,
@@ -413,5 +417,89 @@ describe('the transparent scope', () => {
     // Refusing is the point: returning some unrelated parent would silently widen
     // whatever suppression the caller was about to apply.
     expect(() => ashRoleSplitScopeOf(wrong)).toThrow(/expects the construct created at 'Default'/);
+  });
+});
+
+describe('the per-group suppression helpers refuse a policy they have no reason for', () => {
+  // HERE RATHER THAN WITH THE OTHER SUPPRESSION TESTS because the guard is reachable only
+  // through `AshSplitPolicyRole.onPolicyCreated`, and this file is where that fixture
+  // lives. test/ash-template-size.test.ts owns the artifact side; this is the source side.
+  //
+  // WHY THE GUARD EXISTS. Every reason in lib/ash-nag-suppressions.ts is now a claim about
+  // one policy, keyed on the policy's construct id, which `policyGroupFor` derives from the
+  // statements' action service. A grant in a service the map does not name therefore has no
+  // written justification -- and the wrong answer is to fall back to a general one, because
+  // that is exactly how a reason that describes a different resource reaches a public
+  // template. So it throws at synth naming the policy.
+  //
+  // WHAT BREAKS THESE: adding a fallback branch to `suppressPolicyWildcardsByGroup`, or
+  // widening its map with an entry that is not true of the policies it would land on.
+  function roleWith(
+    onPolicyCreated: (policy: iam.Policy) => void,
+  ): (actions: string[]) => AshSplitPolicyRole {
+    const stack = new Stack(new App({ analyticsReporting: false }), 'Guard');
+    const role = new AshSplitPolicyRole(stack, 'Role', {
+      assumedBy: new iam.ServicePrincipal('codebuild.amazonaws.com'),
+      onPolicyCreated,
+    });
+    return (actions: string[]) => {
+      role.addToPrincipalPolicy(new iam.PolicyStatement({ actions, resources: ['*'] }));
+      return role;
+    };
+  }
+
+  it('accepts a service group it has a reason for', () => {
+    // The positive control. Without it, a helper that threw on EVERYTHING would satisfy the
+    // two assertions below, and the app would not synthesize at all.
+    const grant = roleWith(suppressImageBuildRoleWildcards);
+    expect(() => grant(['kms:Decrypt'])).not.toThrow();
+  });
+
+  it('refuses an unmapped service group, naming it and the policy', () => {
+    const grant = roleWith(suppressImageBuildRoleWildcards);
+    // dynamodb is not a service any role in this app grants, so `policyGroupFor` keys it to
+    // `DynamodbAccess` and no reason exists for it.
+    expect(() => grant(['dynamodb:GetItem'])).toThrow(
+      /No IAM5 suppression reason is written for the 'DynamodbAccess' policy at Guard\/Role\/DynamodbAccess/,
+    );
+  });
+
+  it('refuses the DefaultPolicy an unkeyable statement falls back to', () => {
+    // The other way in: `policyGroupFor` returns undefined for `Action: "*"`, so the
+    // statement lands in the base class's `DefaultPolicy`. The callback never fires for it,
+    // but the walk over the finished role reaches it -- and there is no reason written for a
+    // policy whose contents the split declined to key.
+    const stack = new Stack(new App({ analyticsReporting: false }), 'Fallback');
+    const role = new AshSplitPolicyRole(stack, 'Role', {
+      assumedBy: new iam.ServicePrincipal('codebuild.amazonaws.com'),
+      onPolicyCreated: suppressImageBuildRoleWildcards,
+    });
+    role.addToPrincipalPolicy(new iam.PolicyStatement({ actions: ['*'], resources: ['*'] }));
+    expect(splitPolicyIds(role)).toEqual([]);
+    expect(() => suppressImageBuildRoleWildcards(role)).toThrow(
+      /No IAM5 suppression reason is written for the 'DefaultPolicy' policy/,
+    );
+  });
+
+  it('refuses a scope with no policy under it at all', () => {
+    // A caller that suppresses the wrong construct spends no bytes and protects nothing,
+    // and IAM5 is ERROR level, so the finding it was meant to cover fails synth somewhere
+    // else entirely. Failing here names the scope instead.
+    const stack = new Stack(new App({ analyticsReporting: false }), 'Empty');
+    const bare = new Construct(stack, 'NoPolicies');
+    expect(() => suppressImageBuildRoleWildcards(bare)).toThrow(
+      /No AWS::IAM::Policy or AWS::IAM::ManagedPolicy resource under Empty\/NoPolicies/,
+    );
+  });
+
+  it('the scan-project helper covers the two groups the image-build one does not', () => {
+    // `SsmAccess` and `SecretsmanagerAccess` exist only on the scan and merge project roles.
+    // Asserting the asymmetry rather than only the happy path: if the two maps were merged
+    // the image-build role would accept an ssm grant it never receives, and the reason it
+    // would attach names a parameter that role has no access to.
+    const scan = roleWith(suppressScanProjectRoleWildcards);
+    expect(() => scan(['ssm:GetParameter'])).not.toThrow();
+    const imageBuild = roleWith(suppressImageBuildRoleWildcards);
+    expect(() => imageBuild(['ssm:GetParameter'])).toThrow(/'SsmAccess'/);
   });
 });

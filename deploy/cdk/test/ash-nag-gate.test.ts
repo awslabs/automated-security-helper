@@ -21,12 +21,23 @@
  *      in the gate, would make every run report a clean repo forever. The second
  *      test forces a real finding and asserts the string turns up.
  *
- * WHAT THIS FILE DELIBERATELY DOES NOT DO
- * ---------------------------------------
- * It does not assert that this app has zero findings. That is the CI gate's job,
- * against a full synth, and duplicating the verdict here would mean a genuine
- * finding fails two things for one reason and the second failure adds nothing. The
- * tests here are about the MEASUREMENT being alive, not about the verdict.
+ * WHAT THIS FILE DELIBERATELY DOES NOT DO, AND THE ONE EXCEPTION
+ * --------------------------------------------------------------
+ * The first three describe blocks do not assert that this app has zero findings. That is
+ * the CI gate's job, against a full synth, and duplicating the verdict there would mean a
+ * genuine finding fails two things for one reason while the second failure adds nothing.
+ * Those tests are about the MEASUREMENT being alive, not about the verdict.
+ *
+ * The last block does assert it, in `there are no unsuppressed errors and no unsuppressed
+ * findings`, and this paragraph used to deny that. The exception is not a lapse and is not
+ * the duplication the rule above rejects: it is a PRECONDITION for the assertion beside
+ * it. `every suppressed throw was absorbed by a CdkNagValidationFailure entry` is a claim
+ * about the throws this app produces, and over an app that already had unsuppressed
+ * findings it would be a claim about a state nobody intends to ship -- passing or failing
+ * for reasons unrelated to absorption. So it is stated where it is cheap, in a run that has
+ * already synthesized all five stacks in-process, and it is stated as the setup for the
+ * next test rather than as a second gate. When it fails, read the CI gate's output rather
+ * than this one.
  *
  * IT ALSO PINS ONE PIECE OF cdk-nag MECHANICS THIS REPOSITORY'S SUPPRESSION LAYOUT
  * DEPENDS ON: which suppression entry absorbs a rule that THROWS. The reasoning in
@@ -643,11 +654,13 @@ describe('no throw in this app is absorbed by a wildcard reason', () => {
   });
 
   test('every suppressed throw was absorbed by a CdkNagValidationFailure entry', () => {
-    let thrown = 0;
+    const thrownPerStack: Record<string, number> = Object.fromEntries(
+      Object.keys(STACK_FACTORIES).map((stack) => [stack, 0]),
+    );
     for (const { stack, rows, template } of observed) {
       for (const row of rows) {
         if (row.verdict !== 'SUPPRESSED_ERROR') continue;
-        thrown++;
+        thrownPerStack[stack]++;
         const entries: { id: string; reason: string }[] =
           template.Resources?.[row.logicalId]?.Metadata?.cdk_nag?.rules_to_suppress ?? [];
         // The recorded reason has to be the one attached under the
@@ -665,9 +678,32 @@ describe('no throw in this app is absorbed by a wildcard reason', () => {
         });
       }
     }
-    // Positive control. Seven at the time of writing; asserted as a floor rather than
-    // an equality so a legitimately added throw does not fail here, and pinned above
-    // zero so a run that produced none cannot pass silently.
-    expect(thrown).toBeGreaterThanOrEqual(7);
+    // PINNED EXACTLY, PER STACK, AND NOT AS A FLOOR. This used to be
+    // `expect(thrown).toBeGreaterThanOrEqual(7)`, justified as leaving room for "a
+    // legitimately added throw". That reasoning is backwards: every throw here is a rule
+    // that did not EVALUATE, so the number growing is the bad direction and a floor is
+    // blind to it. Seven becoming twenty would have passed -- twenty rules silently not
+    // running while the loop above cheerfully confirmed each one was absorbed.
+    //
+    // Per stack rather than as one total so a failure names where the throw appeared, and
+    // so a throw moving between stacks is visible instead of cancelling out. The seven are
+    // AwsSolutions-IAM5 on AshAgentCore/RuntimeRole/LogsAccess, whose ARNs are built from
+    // pseudo-parameters; AwsSolutions-CB5 on the five AshDistributedPipeline CodeBuild
+    // projects, whose build image is an Fn::Join over the ECR repository attributes; and
+    // AwsSolutions-EC23 on the AshFargate MCP ingress rule, whose CidrIp is an Fn::Ref.
+    //
+    // WHAT BREAKS THIS, and both directions are worth a look rather than a re-pin: a new
+    // resource whose property resolves to an intrinsic (the count goes up, and the question
+    // is whether that rule can be made evaluable instead), or a cdk-nag release that
+    // evaluates one of these (the count goes down, and the suppression should be removed
+    // rather than the number lowered). Zero would also fail, which is what keeps a run that
+    // recorded nothing from passing silently.
+    expect(thrownPerStack).toEqual({
+      AshAgentCore: 1,
+      AshCodeCommitGate: 0,
+      AshDistributedPipeline: 5,
+      AshFargate: 1,
+      AshImagePipeline: 0,
+    });
   });
 });

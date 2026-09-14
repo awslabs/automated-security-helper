@@ -72,7 +72,7 @@ import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
 
 import { AshCustomerKey, diagnosticLogGroupProps } from './ash-config';
-import { suppressCodeBuildRoleWildcards, suppressLambdaLogWildcard, suppressSplitCodeBuildPolicy } from './ash-nag-suppressions';
+import { suppressImageBuildRoleWildcards, suppressLambdaLogWildcard } from './ash-nag-suppressions';
 import { MCP_ENTRYPOINT_SCRIPT, CODECOMMIT_GATE_HANDLER, ASH_MATERIALIZED_CONFIG_PATH } from './ash-container-scripts';
 import { GENERATED_CONSTRUCT_ID, ashRoleSplitScope } from './ash-policy-split';
 
@@ -272,7 +272,7 @@ export class AshImageBuild extends Construct {
       this,
       'Build',
       'codebuild.amazonaws.com',
-      suppressSplitCodeBuildPolicy,
+      suppressImageBuildRoleWildcards,
     );
 
     this.project = new codebuild.Project(build.scope, GENERATED_CONSTRUCT_ID, {
@@ -393,8 +393,15 @@ export class AshImageBuild extends Construct {
      * created under the project, whose only statement is `codebuild:StartBuild` on one
      * project ARN. IAM5 passes on it, so the entry was inert -- but the reason was
      * also false there, enumerating four wildcards that policy does not have, which is
-     * the worse half. The role reaches its own per-service policies and its
-     * DefaultPolicy, and stops at the principal the reason describes.
+     * the worse half. The role reaches its own per-service policies and stops at the
+     * principal those reasons describe.
+     *
+     * Passing the scope now fails loudly rather than shipping that: the helper is keyed by
+     * service group and an `EventsRole/DefaultPolicy` matches no key, so it throws at synth
+     * naming the policy instead of inventing a justification for it. The same holds for a
+     * `DefaultPolicy` on this role, which the split creates only for a statement it cannot
+     * key -- there is none today, and if one appears it needs a sentence written for it
+     * rather than a borrowed one.
      *
      * A `CdkNagValidationFailure` suppression for AwsSolutions-CB5 used to sit here
      * too, on the grounds that CB5 cannot evaluate a build image supplied as an
@@ -407,7 +414,7 @@ export class AshImageBuild extends Construct {
      * none of the five image-build projects, so the entry was written five times and
      * read never.
      */
-    suppressCodeBuildRoleWildcards(build.role);
+    suppressImageBuildRoleWildcards(build.role);
   }
 
   /**

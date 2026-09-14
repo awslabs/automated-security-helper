@@ -155,6 +155,15 @@
  * against it. IAM5 also raises a finding per wildcard ACTION, which is a second thing
  * a resource-only detector misses entirely.
  *
+ * `iam5SuppressedPolicies` below is that detector, written the way the paragraph above says
+ * it has to be, and `every shipped reason is true of the policy it lands on` is the four
+ * assertions built on it. It was checked against cdk-nag rather than trusted: recording
+ * all six `INagLogger` callbacks over the five stacks and comparing per policy, the two
+ * agree on the exact wildcard-action set and the wildcard-resource count for all 89
+ * policies IAM5 evaluates. The only divergence is `AshAgentCore/RuntimeRole/LogsAccess`,
+ * where IAM5 THROWS, so the rule never produced a finding to compare against -- and the
+ * detector correctly says that policy does hold wildcards.
+ *
  * The em-dash fix went with it, for the same defect class rather than for size.
  * cdk-nag base64-encodes any reason containing a non-ASCII character, which spends 4
  * bytes per 3 and reaches the adopter as an opaque blob. `.ash/.ash.yaml` records the
@@ -164,34 +173,42 @@
  * each for the diff a reviewer reads:
  *
  *                            bytes    margin        on main    margin on main
- *   AshAgentCore            50,135    under 1,065    50,934     under     266
- *   AshCodeCommitGate       47,161    under 4,039    50,714     under     486
- *   AshDistributedPipeline 162,354    over  111,154 148,394     over  97,194
- *   AshFargate              69,391    over   18,191  76,674     over  25,474
- *   AshImagePipeline        62,961    over   11,761  68,435     over  17,235
+ *   AshAgentCore            48,809    under 2,391    50,934     under     266
+ *   AshCodeCommitGate       46,272    under 4,928    50,714     under     486
+ *   AshDistributedPipeline 154,630    over  103,430 148,394     over  97,194
+ *   AshFargate              68,502    over   17,302  76,674     over  25,474
+ *   AshImagePipeline        61,183    over    9,983  68,435     over  17,235
  *
- * READ THE AGENTCORE MARGIN AS THIN, BECAUSE IT IS: 1,065 bytes, 2.1% of the cap, on
- * a stack whose suppression metadata grows with every resource added. A new resource
- * needing an IAM5 suppression costs roughly 550 bytes indented plus its own body, so
- * about two of them exhaust the headroom. It is nonetheless a 4.0x improvement on
- * `main`, which has 266 bytes -- less than one suppression entry -- and the earlier
- * description of the 266 as comfortable was wrong.
+ * PER-POLICY REASONS ARE CHEAPER THAN THE ROLE-SCOPED UNION THEY REPLACED, WHICH IS THE
+ * OPPOSITE OF WHAT AN EARLIER NOTE HERE PREDICTED. A union reason has to describe every
+ * wildcard shape anywhere on the role and then lands on each of that role's policies, so
+ * the longest string is paid at every site; a per-policy reason describes one shape.
+ * Measured across the five templates the swap is -12,606 bytes: AshAgentCore -1,326,
+ * AshCodeCommitGate -889, AshDistributedPipeline -7,724, AshFargate -889,
+ * AshImagePipeline -1,778. Sixteen distinct IAM5 reasons now ship where five did, over the
+ * same 77 entries on the same 77 policies.
  *
- * AshDistributedPipeline is the one stack that GREW against `main`, by 13,960 bytes.
+ * READ THE AGENTCORE MARGIN AS STILL WORTH WATCHING: 2,391 bytes, 4.7% of the cap, on a
+ * stack whose suppression metadata grows with every resource added. An indented entry costs
+ * 71 bytes of structure plus its reason -- about 390 at the 321-character mean across the
+ * five templates, 357 for AshAgentCore's eight -- and a new suppressed resource brings its
+ * own body on top of that. So the headroom is a handful of resources, not dozens. It is 9x
+ * `main`'s 266 bytes, which was less than one entry, and the earlier description of the 266
+ * as comfortable was wrong.
+ *
+ * AshDistributedPipeline is the one stack that GREW against `main`, by 6,236 bytes.
  * The per-service policy split trades one `DefaultPolicy` per role for one policy per
- * action service, which is more resources and more metadata. It is 111,154 bytes over
+ * action service, which is more resources and more metadata. It is 103,430 bytes over
  * an S3-only cap either way, so it pays nothing for the trade and the other four
  * stacks collect it.
  *
- * The answer when the AgentCore margin runs out is NOT to unindent -- that is the
- * trivy panic above -- and is probably not more prose-tightening either, since the
- * fan-out is already gone and the reasons have since been LENGTHENED to cover the
- * wildcard-action findings they used to omit (see `suppressCodeBuildRoleWildcards`).
- * The remaining honest moves are narrowing the 17 entries no rule consults (all of
- * them in AshDistributedPipeline, so they buy AshAgentCore nothing; the helper header
- * says why they are pinned rather than removed) or reclassifying AshAgentCore as
- * S3-only. Reclassifying costs the inline set half its members and is a README
- * change, not just a list edit.
+ * The answer when the AgentCore margin runs out is NOT to unindent -- that is the trivy
+ * panic above. Prose-tightening is close to spent: the fan-out is gone and the reasons are
+ * already one-shape-per-policy. The remaining honest moves are narrowing the 17 entries no
+ * rule consults (all of them in AshDistributedPipeline, so they buy AshAgentCore nothing;
+ * the helper header says why they are pinned rather than removed) or reclassifying
+ * AshAgentCore as S3-only. Reclassifying costs the inline set half its members and is a
+ * README change, not just a list edit.
  *
  * ALSO MEASURED AND REJECTED: hoisting the child-policy suppressions up to the role.
  * It recovers nothing, because `applyToChildren` materialized a byte-identical reason
@@ -228,9 +245,14 @@ const INLINE_TEMPLATE_BODY_MAX_BYTES = 51_200;
  * a test that only says so at 51,200 gives whoever added the resource no room to fix
  * it in the same change.
  *
- * 512 bytes is deliberately just under what ONE indented IAM5 suppression entry costs
- * in this app (about 550, measured). So when the budget trips, the change that tripped
- * it can still be landed and then narrowed, rather than having to be reverted.
+ * 512 bytes was chosen as just under what ONE indented IAM5 suppression entry cost when
+ * the reasons were role-scoped unions (about 550, measured). Per-policy reasons brought
+ * that to about 390 -- 71 bytes of structure plus a 321-character mean reason -- so the
+ * reserve now covers one entry with room rather than falling just short of one. Either way
+ * the property it exists for holds: when the budget trips, the change that tripped it can
+ * still be landed and then narrowed, rather than having to be reverted. Left at 512 because
+ * re-deriving it from the current mean reason length would tie a size guard to prose that
+ * is expected to move.
  */
 const INLINE_RESERVE_BYTES = 512;
 const INLINE_TEMPLATE_BUDGET_BYTES = INLINE_TEMPLATE_BODY_MAX_BYTES - INLINE_RESERVE_BYTES;
@@ -626,13 +648,17 @@ describe('the suppressions whose placement is load-bearing', () => {
   });
 
   test('the AshFargate task execution role does not carry the CodeBuild reason', () => {
-    // It used to. `suppressCodeBuildRoleWildcards` was applied to this role, so the
-    // template shipped a justification naming a per-build log stream, a report group
-    // and S3 object keys on an ECS task execution role that has none of them. Its one
-    // IAM5 finding is `Resource::*` on `ecr:GetAuthorizationToken`.
+    // It used to. The CodeBuild project-role helper was applied to this role while its
+    // reason was still one role-scoped union, so the template shipped a justification
+    // naming a per-build log stream, a report group and S3 object keys on an ECS task
+    // execution role that has none of them. Its one IAM5 finding is `Resource::*` on
+    // `ecr:GetAuthorizationToken`.
     //
     // WHAT BREAKS THIS: pointing that helper at this role again, or widening
-    // `suppressTaskExecutionRoleWildcard`'s reason to mention CodeBuild.
+    // `suppressTaskExecutionRoleWildcard`'s reason to mention CodeBuild. Kept as a named
+    // test even though `every shipped reason is true of the policy it lands on` below now
+    // generalizes it, because this is the resource the defect was found on and a named
+    // failure says so in one line.
     const entries = suppressionEntries('AshFargate').filter((e) =>
       e.logicalId.startsWith('TaskDefinitionExecutionRoleDefaultPolicy'),
     );
@@ -641,50 +667,242 @@ describe('the suppressions whose placement is load-bearing', () => {
     expect(entries[0].reason).toContain('ecr:GetAuthorizationToken');
     expect(entries[0].reason).not.toMatch(/CodeBuild|report group|log stream/);
   });
+});
 
-  test('a policy with wildcard ACTIONS is suppressed by a reason that names one', () => {
-    // AwsSolutions-IAM5 raises a finding per wildcard ACTION as well as per wildcard
-    // RESOURCE. `AwsSolutions-IAM5[Action::kms:GenerateDataKey*]` and
-    // `[Action::kms:ReEncrypt*]` are the ONLY two findings on every `KmsAccess` policy
-    // the per-service split produces, and the reasons used to enumerate four resource
-    // wildcards and stop -- so seven KmsAccess policies across five stacks suppressed
-    // a finding their justification never mentioned. A suppression without evidence
-    // for the thing suppressed is exactly what IAM5 exists to force.
-    //
-    // The requirement is derived from each policy's own document rather than from a
-    // list written here: a policy carrying a wildcard action must be suppressed by a
-    // reason that names one of THAT policy's wildcard actions. Policies whose only
-    // wildcard is in the resource are not asked for anything, which is why the Lambda
-    // log-group reason and the ECR-token reasons pass unchanged.
-    //
-    // WHAT BREAKS THIS: shortening a shared reason back to a resource-only
-    // enumeration, or adding a `grant` whose action family is wildcarded to a role
-    // whose reason does not cover that shape.
-    let checked = 0;
-    for (const stack of ALL_STACKS) {
-      const template = JSON.parse(templateText(stack));
-      for (const entry of suppressionEntries(stack)) {
-        if (entry.id !== 'AwsSolutions-IAM5' || entry.type !== 'AWS::IAM::Policy') continue;
-        const document = template.Resources[entry.logicalId].Properties?.PolicyDocument;
-        const wildcardActions = ((document?.Statement ?? []) as any[])
-          .flatMap((statement) =>
-            Array.isArray(statement.Action) ? statement.Action : [statement.Action],
-          )
-          .filter((action) => typeof action === 'string' && action.includes('*'));
-        if (wildcardActions.length === 0) continue;
-        checked++;
-        expect({
-          resource: `${stack}/${entry.logicalId}`,
-          namesOneOfItsWildcardActions: wildcardActions.some((action) =>
-            entry.reason.includes(action),
-          ),
-        }).toEqual({ resource: `${stack}/${entry.logicalId}`, namesOneOfItsWildcardActions: true });
+/**
+ * One IAM5-suppressed policy, with everything the four assertions below need read off the
+ * committed template rather than off a list written here.
+ */
+interface SuppressedPolicy {
+  where: string;
+  reason: string;
+  /** Every action the document grants, wildcarded or not. */
+  grantedActions: string[];
+  /** The actions `AwsSolutions-IAM5` reports as `Action::<action>` findings. */
+  wildcardActions: string[];
+  /** The resources it reports as `Resource::<arn>`, kept in SERIALIZED form. */
+  wildcardResources: string[];
+}
+
+/**
+ * The wildcard detector, written the way the header's measurement-trap paragraph says it
+ * has to be: Allow statements only, actions and resources both, and the resource tested in
+ * its SERIALIZED form because after the per-service split most of these ARNs are `Fn::Join`
+ * structures whose literal tail is the wildcard.
+ *
+ * This mirrors cdk-nag's `analyzePolicy` (rules/iam/IAMNoWildcardPermissions) rather than
+ * calling it: that module is not exported from the package root, and reaching into
+ * `cdk-nag/lib/...` would make these tests depend on an internal path. Checked against the
+ * real thing rather than assumed to match -- see the header.
+ */
+function iam5SuppressedPolicies(stack: string): SuppressedPolicy[] {
+  const template = JSON.parse(templateText(stack));
+  const out: SuppressedPolicy[] = [];
+  for (const entry of suppressionEntries(stack)) {
+    if (entry.id !== 'AwsSolutions-IAM5' || entry.type !== 'AWS::IAM::Policy') continue;
+    const statements: any[] =
+      template.Resources[entry.logicalId].Properties?.PolicyDocument?.Statement ?? [];
+    const granted: string[] = [];
+    const wildcardResources: string[] = [];
+    for (const statement of statements) {
+      if (statement.Effect !== 'Allow') continue;
+      const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];
+      for (const action of actions) {
+        if (typeof action === 'string') granted.push(action);
+      }
+      const resources = Array.isArray(statement.Resource)
+        ? statement.Resource
+        : [statement.Resource];
+      for (const resource of resources) {
+        const serialized = JSON.stringify(resource ?? null);
+        if (serialized.includes('*')) wildcardResources.push(serialized);
       }
     }
-    // Non-vacuity. With no wildcard-action policy in the app the loop above asserts
-    // nothing, and the KmsAccess and S3Access policies are the population it exists
-    // for -- 12 of them at the time of writing.
-    expect(checked).toBeGreaterThanOrEqual(12);
+    out.push({
+      where: `${stack}/${entry.logicalId}`,
+      reason: entry.reason,
+      grantedActions: granted,
+      wildcardActions: granted.filter((action) => action.includes('*')),
+      wildcardResources,
+    });
+  }
+  return out;
+}
+
+const ALL_SUPPRESSED_POLICIES = (): SuppressedPolicy[] =>
+  ALL_STACKS.flatMap((stack) => iam5SuppressedPolicies(stack));
+
+/**
+ * The sentence a reason uses to say its policy is clean.
+ *
+ * A phrase rather than a flag because the reason is the artifact that ships: an adopter
+ * reading the template gets the claim, and the test gets the same string. Deliberately not
+ * a substring of `so no resource here is wildcarded` in the KMS reason, which is a narrower
+ * claim about one half.
+ */
+const NO_WILDCARD_CLAIM = 'holds no wildcard';
+
+/**
+ * Resource-wildcard SHAPES a reason can claim, and the evidence each claim requires in the
+ * policy's own serialized wildcard resources.
+ *
+ * This is the one assertion here that couples to prose, and it is worth the coupling
+ * because it is the direct detector for the defect that started this: a reason describing
+ * a per-build log stream, a report group and S3 object keys, attached to a policy whose
+ * only wildcard was a bare `Resource: "*"`. Both spellings of each phrase are matched, so
+ * rewording between `log stream` and `log-stream` does not silently switch the check off.
+ */
+const RESOURCE_WILDCARD_CLAIMS: { claim: RegExp; evidence: string; shape: string }[] = [
+  { claim: /report[ -]group/, evidence: 'report-group/', shape: 'a report-group ARN wildcard' },
+  { claim: /log[ -]stream/, evidence: ':*', shape: 'a log-stream ":*" wildcard' },
+  { claim: /object[ -]key/, evidence: '/*', shape: 'an object-key "/*" wildcard' },
+  { claim: /Resource "\*"/, evidence: '"*"', shape: 'a bare Resource "*"' },
+];
+
+describe('every shipped reason is true of the policy it lands on', () => {
+  // WHY THIS BLOCK EXISTS. Three helpers in lib/ash-nag-suppressions.ts used to hold one
+  // reason that was the UNION of every wildcard shape anywhere on a role, applied to each
+  // of that role's policies. Every such reason was true at role scope and mostly false at
+  // each site, and nothing could tell: the suppression still matched, cdk-nag still
+  // reported Suppressed, and the compliance report carries the reason without checking it
+  // against the resource. These four assertions are what checks it.
+  //
+  // ALL FOUR ARE DERIVED FROM EACH POLICY'S OWN COMMITTED DOCUMENT, not from a list of
+  // expected reasons. A list would have to be updated alongside any reason change, which
+  // is the same edit -- so it would agree with whatever was written and assert nothing.
+  //
+  // MEASURED AS NON-VACUOUS AGAINST THE UNION REASONS THEY REPLACED, by running all four
+  // over the templates as committed at 8b0ae485: 19 failures on the first, 12 on the
+  // second, 171 on the third, 159 on the fourth. That is the control for "these can
+  // fail"; the counts are the population each one covers, not a target.
+
+  test('every wildcard action a policy grants is named in its reason', () => {
+    // AwsSolutions-IAM5 raises a finding per wildcard ACTION as well as per wildcard
+    // RESOURCE. `[Action::kms:GenerateDataKey*]` and `[Action::kms:ReEncrypt*]` are the
+    // ONLY two findings on every `KmsAccess` policy the per-service split produces, and
+    // the union reason enumerated four resource wildcards and stopped -- so eleven
+    // KmsAccess policies across five stacks suppressed two findings their justification
+    // never mentioned. A suppression without evidence for the thing suppressed is exactly
+    // what IAM5 exists to force.
+    //
+    // EVERY one of them, not one of them, which is what this used to ask for. Naming one
+    // of five s3 action wildcards satisfied the weaker form while leaving four
+    // unexplained, and both S3Access shapes in this app were doing exactly that.
+    //
+    // WHAT BREAKS THIS: shortening a reason back to a resource-only enumeration, or adding
+    // a grant whose action family is wildcarded to a role whose reason does not name it.
+    //
+    // Collected rather than asserted per policy, so one run names every offending resource
+    // instead of stopping at the first. Against the union reasons that is the difference
+    // between reporting 1 of 19 and reporting all 19.
+    const wrong: string[] = [];
+    let checked = 0;
+    for (const policy of ALL_SUPPRESSED_POLICIES()) {
+      if (policy.wildcardActions.length === 0) continue;
+      checked++;
+      const unnamed = policy.wildcardActions
+        .filter((action) => !policy.reason.includes(action))
+        .sort();
+      if (unnamed.length > 0) {
+        wrong.push(`${policy.where}: reason does not name ${unnamed.join(', ')}`);
+      }
+    }
+    expect(wrong).toEqual([]);
+    // Non-vacuity, and a floor is the right direction here unlike the throw count in
+    // ash-nag-gate.test.ts: this counts how much of the app the assertion covers, so
+    // growth is more coverage and only a drop means the loop stopped measuring. 19 is
+    // the KmsAccess and S3Access population at the time of writing.
+    expect(checked).toBeGreaterThanOrEqual(19);
+  });
+
+  test('no reason claims a policy holds no wildcard unless it holds none', () => {
+    // Both directions, because they are different defects. A reason claiming the policy is
+    // clean when it is not is a wildcard suppressed with no justification at all -- and it
+    // is the failure mode the wildcard-presence dispatch in
+    // `suppressPipelineActionRoleWildcards` would produce if a statement were added to one
+    // of those roles after the suppression is applied, which is why that helper's comment
+    // points here. A policy that IS clean and does not say so is the other half: those are
+    // the 17 entries no rule consults, kept deliberately, and what makes keeping them
+    // honest is that they describe themselves rather than describing wildcards they lack.
+    //
+    // WHAT BREAKS THIS: granting a wildcard inside `SsmAccess`, `SecretsmanagerAccess`,
+    // `PipelineRole/StsAccess` or a CodePipeline action role; or writing a new per-policy
+    // reason for a clean policy without the claim in it.
+    const wrong: string[] = [];
+    let checked = 0;
+    for (const policy of ALL_SUPPRESSED_POLICIES()) {
+      checked++;
+      const clean = policy.wildcardActions.length === 0 && policy.wildcardResources.length === 0;
+      const claimsClean = policy.reason.includes(NO_WILDCARD_CLAIM);
+      if (claimsClean && !clean) {
+        wrong.push(
+          `${policy.where}: claims "${NO_WILDCARD_CLAIM}" but holds ` +
+            `${policy.wildcardActions.length} wildcard actions and ` +
+            `${policy.wildcardResources.length} wildcard resources`,
+        );
+      }
+      if (clean && !claimsClean) {
+        wrong.push(`${policy.where}: holds no wildcard, and its reason does not say so`);
+      }
+    }
+    expect(wrong).toEqual([]);
+    expect(checked).toBeGreaterThanOrEqual(77);
+  });
+
+  test('no reason names an IAM action its policy does not grant', () => {
+    // The sharpest of the four and the cheapest: pull every `service:Action` token out of
+    // the reason and require the policy to grant it. On the union reasons this fired 171
+    // times -- the `LogsAccess` reason named `ecr:GetAuthorizationToken`,
+    // `kms:GenerateDataKey*` and `s3:GetObject*`, none of which that policy grants, and
+    // the AgentCore runtime role's three policies each named the other two's actions.
+    //
+    // The pattern requires an uppercase letter after the colon, which is the IAM action
+    // convention and is what keeps `cloudwatch:namespace` -- a condition key, legitimately
+    // named in the CloudwatchAccess reason -- from being read as an action.
+    //
+    // WHAT BREAKS THIS: reusing a reason on a second policy whose service differs, which
+    // is the union defect in its general form.
+    const wrong: string[] = [];
+    let checked = 0;
+    for (const policy of ALL_SUPPRESSED_POLICIES()) {
+      const named = new Set(policy.reason.match(/\b[a-z][a-z0-9-]{1,20}:[A-Z][A-Za-z0-9]*\*?/g));
+      for (const action of [...named].sort()) {
+        checked++;
+        if (!policy.grantedActions.includes(action)) {
+          wrong.push(`${policy.where}: names ${action}, which this policy does not grant`);
+        }
+      }
+    }
+    expect(wrong).toEqual([]);
+    // Lower than the 205 the union reasons produced, because a per-policy reason names
+    // fewer actions. It is the count of claims made, so a reason that named no action at
+    // all would be caught only by the assertion above.
+    expect(checked).toBeGreaterThanOrEqual(100);
+  });
+
+  test('no reason claims a resource-wildcard shape its policy lacks', () => {
+    // The resource half of the assertion above, and the one that would have caught the
+    // AshFargate task execution role directly: its reason described a log stream, a report
+    // group and object keys, and its only wildcard resource was `"*"`.
+    //
+    // WHAT BREAKS THIS: attaching a reason to the wrong resource, which is what happened,
+    // or keeping a shape clause after the grant behind it was rescoped.
+    const wrong: string[] = [];
+    let checked = 0;
+    for (const policy of ALL_SUPPRESSED_POLICIES()) {
+      for (const { claim, evidence, shape } of RESOURCE_WILDCARD_CLAIMS) {
+        if (!claim.test(policy.reason)) continue;
+        checked++;
+        if (!policy.wildcardResources.some((resource) => resource.includes(evidence))) {
+          wrong.push(
+            `${policy.where}: claims ${shape}, but none of its ` +
+              `${policy.wildcardResources.length} wildcard resources contains '${evidence}'`,
+          );
+        }
+      }
+    }
+    expect(wrong).toEqual([]);
+    expect(checked).toBeGreaterThanOrEqual(48);
   });
 });
 
