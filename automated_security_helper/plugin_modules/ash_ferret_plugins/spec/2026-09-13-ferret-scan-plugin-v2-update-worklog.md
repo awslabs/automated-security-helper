@@ -208,4 +208,4 @@ docs) was never touched by the branch and still reflected the pre-update plugin.
 - Available Checks expanded 11→19 (with the "use `--help checks`, don't hardcode" note) and
   added the `API_KEY_OR_SECRET` false-positive note + suppression recipe.
 - Verification: 0 self-findings on the page; no stale version strings remain; validation 9/9.
-- Commit: _(recorded on next push)_
+- Commit: `af5c92ee`
