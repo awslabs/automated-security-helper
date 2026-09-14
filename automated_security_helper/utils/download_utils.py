@@ -433,7 +433,18 @@ def _extract_single_member(
                     _stage(source)
 
         if platform.system() != "Windows":
-            os.chmod(staging, 0o755)
+            # 0o755 rather than something tighter, and this is deliberate. A scanner
+            # binary has to be executable by whoever runs the scan, which is not
+            # always whoever installed it: ASH's image installs into ASH_BIN_PATH as
+            # root (Dockerfile:253) and again as the non-root user (:328), with that
+            # directory on PATH for both. 0o700 would leave the root-installed copy
+            # unexecutable for the user the image actually runs as.
+            #
+            # This is also exactly what the previous code produced. make_executable
+            # ORs 0o111 onto the existing mode, and a freshly created file under the
+            # default umask is 0o644, so the result was already 0o755 -- setting it
+            # explicitly removes the umask dependence without widening anything.
+            os.chmod(staging, 0o755)  # nosec B103 - an executable must be executable; see above
         os.replace(staging, target)
     except BaseException:
         staging.unlink(missing_ok=True)
