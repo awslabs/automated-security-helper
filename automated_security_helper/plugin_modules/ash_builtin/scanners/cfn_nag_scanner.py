@@ -1,6 +1,8 @@
 """Module containing the Checkov security scanner implementation."""
 
 import logging
+import os
+import platform
 from pathlib import Path
 from typing import Annotated, ClassVar, List, Literal
 
@@ -124,10 +126,27 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         missing: List[str] = []
         if find_executable("gem") is None:
             missing.append("RubyGems (`gem`) is not on PATH")
-        if not any(find_executable(cc) for cc in ("cc", "gcc", "clang")):
+
+        if platform.system() == "Windows":
+            # Windows is checked on RI_DEVKIT rather than on a compiler being present,
+            # and the difference is not pedantic. A first attempt probed for
+            # cc/gcc/clang; windows-latest has a gcc on PATH (MinGW arrives with other
+            # tooling in that image), so the probe passed, the gem install ran, and it
+            # still died with "Failed to build gem native extension" -- because Ruby's
+            # mkmf needs a toolchain matching its own ABI, x64-mingw-ucrt, not whatever
+            # gcc happens to be reachable. RI_DEVKIT is the variable RubyInstaller's
+            # devkit and ruby/setup-ruby both export, so it is the marker that actually
+            # tracks buildability here.
+            if not os.environ.get("RI_DEVKIT"):
+                missing.append(
+                    "no Ruby DevKit (RI_DEVKIT is unset), and cfn-nag's `psych` "
+                    "dependency publishes no precompiled gem for this Ruby ABI, so it "
+                    "has to build from source"
+                )
+        elif not any(find_executable(cc) for cc in ("cc", "gcc", "clang")):
             missing.append(
                 "no C compiler (cc, gcc or clang) is on PATH, and cfn-nag's `psych` "
-                "dependency has no precompiled gem for this platform"
+                "dependency has to build from source"
             )
         return missing
 

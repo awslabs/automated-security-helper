@@ -72,6 +72,29 @@ def test_no_gem_means_no_install_command(context):
     assert _commands(context, gem=None, compiler="/usr/bin/cc") == []
 
 
+def test_windows_without_a_devkit_declares_nothing(context, monkeypatch):
+    """On Windows the marker is RI_DEVKIT, not a compiler on PATH.
+
+    Measured, and it corrected a first attempt. Probing for cc/gcc/clang passed on
+    windows-latest -- that image has a gcc reachable -- so the gem install ran anyway
+    and still died with "Failed to build gem native extension", because Ruby's mkmf
+    needs a toolchain matching its own x64-mingw-ucrt ABI rather than any gcc.
+    RI_DEVKIT is what RubyInstaller's devkit and ruby/setup-ruby export, so it is the
+    variable that actually tracks whether a gem can be built.
+    """
+    monkeypatch.setattr(
+        "automated_security_helper.plugin_modules.ash_builtin.scanners."
+        "cfn_nag_scanner.platform.system",
+        lambda: "Windows",
+    )
+    monkeypatch.delenv("RI_DEVKIT", raising=False)
+    # A compiler IS reachable, which is exactly the windows-latest situation.
+    assert _commands(context, gem="C:/Ruby/bin/gem", compiler="C:/mingw/bin/gcc") == []
+
+    monkeypatch.setenv("RI_DEVKIT", "C:/Ruby/msys64")
+    assert len(_commands(context, gem="C:/Ruby/bin/gem", compiler=None)) == 1
+
+
 def test_no_compiler_means_no_install_command(context):
     """RubyGems alone is not enough: the closure needs a native build.
 
