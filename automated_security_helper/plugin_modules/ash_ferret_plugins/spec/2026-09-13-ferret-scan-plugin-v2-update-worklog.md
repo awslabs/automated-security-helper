@@ -231,3 +231,17 @@ Two optional/cosmetic items deliberately **left unchanged** (user decision, 2026
   range — correct as an illustration; unrelated base module, left alone.
 
 No commit beyond this log entry.
+
+### WL-14 — Maintainer clarification on disabled_types scope (2026-09-14)
+ferret-scan maintainers confirmed the `disabled_types`-is-IP-only behaviour is
+**intentional scope, not a defect** (documented in `docs/configuration.md` +
+`COVERAGE_DISCLOSURE.md`); the silent-ignore is a **known limitation** (validator config
+sections are schema-opaque, so unrecognized keys can't be warned about today).
+- Reframed DEVELOPMENT.md "Why the obvious fix is NOT viable" to credit the intentional
+  design + known limitation + cite `COVERAGE_DISCLOSURE.md`, and note that generalizing
+  `disabled_types` to `secrets` is a legitimate upstream feature request.
+- Added the same clarification to analysis §9.5 (our assumption was reasonable but wrong;
+  the keep-and-suppress policy is unaffected).
+- No code/behaviour change; the plugin policy is unchanged. An upstream feature request
+  against `awslabs/ferret-scan` remains an option (not yet filed).
+- Commit: _(recorded on next push)_

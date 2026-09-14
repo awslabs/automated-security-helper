@@ -570,7 +570,17 @@ validator** — every other validator, `secrets` included, silently ignores it. 
 stated in ferret-scan's own docs (`docs/configuration.md`: *"A `disabled_types` block
 under a validator that does not read it — every validator except `intellectual_property`
 — is correctly silent"*) and in the source (`internal/validators/secrets/validator.go`,
-whose help says *"No additional configuration is required"*). It was also confirmed
+whose help says *"No additional configuration is required"*).
+
+Per the ferret-scan maintainers this is **intentional, not a defect**: `disabled_types` was
+scoped to the IP validator on purpose (see `docs/configuration.md` and
+`COVERAGE_DISCLOSURE.md`, which states *"Only the intellectual-property validator honours
+`disabled_types`; the key is inert elsewhere"*) and was never generalized. The *silent*
+part — a `disabled_types` under `secrets` neither works nor warns — is a **known
+limitation**: validator config sections are schema-opaque, so ferret-scan cannot today warn
+about unrecognized keys inside them. Generalizing `disabled_types` to the `secrets`
+validator is a reasonable **upstream feature request** (file against `awslabs/ferret-scan`);
+until it lands, the config knob genuinely does not exist. It was also confirmed
 empirically against v2.4.5:
 
 ```

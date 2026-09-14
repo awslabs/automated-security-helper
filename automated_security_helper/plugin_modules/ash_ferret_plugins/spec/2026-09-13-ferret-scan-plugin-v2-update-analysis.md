@@ -324,6 +324,15 @@ its diff *removes* work we must keep. Classification:
 `validators.secrets.disabled_types: [API_KEY_OR_SECRET]`. **This is false for ferret-scan
 v2.4.5.**
 
+**Maintainer clarification (2026-09-14):** this is **intentional scope, not a ferret
+defect**. `disabled_types` is an IP-validator-only option by design (documented in
+`docs/configuration.md` and `COVERAGE_DISCLOSURE.md`) and was never generalized to other
+validators. The *silent* ignore is a **known limitation** — validator config sections are
+schema-opaque, so ferret-scan cannot currently warn about unrecognized keys inside them.
+Our assumption was reasonable but wrong; generalizing `disabled_types` to `secrets` is a
+legitimate **upstream feature request** to file against `awslabs/ferret-scan`. Until then
+the keep-and-suppress policy below stands.
+
 **Evidence (tested against the installed binary):**
 - `disabled_types` is honored **only by the `intellectual_property` validator**. Source:
   `internal/validators/intellectualproperty/disabled_subtypes.go` and
