@@ -487,10 +487,12 @@ global_settings:
     # in total. Twelve of the thirteen carry no wildcard but ecr:GetAuthorizationToken.
     #
     # deploy/cdk/lib/ash-nag-suppressions.ts already makes this argument for cdk-nag's
-    # AwsSolutions-IAM5 in suppressCodeBuildRoleWildcards, item (3): IAM defines
-    # ecr:GetAuthorizationToken with no resource ARN, so "*" is the only value the
-    # action accepts. Reused here because it genuinely applies; the two rules read the
-    # same statements.
+    # AwsSolutions-IAM5, in the RESOURCE half of suppressCodeBuildRoleWildcards' reason:
+    # IAM defines ecr:GetAuthorizationToken with no resource ARN, so "*" is the only
+    # value the action accepts. Reused here because it genuinely applies; the two rules
+    # read the same statements. (That reason used to be a numbered list and this comment
+    # cited "item (3)"; it was rewritten to cover wildcard ACTIONS as well as wildcard
+    # RESOURCES, so the clause is named rather than numbered now.)
     - rule_id: CFN_NAG_W12
       path: deploy/cdk/templates/AshAgentCore.template.json
       reason: >-

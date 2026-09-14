@@ -64,10 +64,10 @@ import {
 } from './ash-config';
 import { AshImageBuild } from './ash-image-build';
 import {
-  suppressCodeBuildRoleWildcards,
   suppressParameterizedIngressRule,
   suppressSecretRotation,
   suppressTaskDefinitionEnvironment,
+  suppressTaskExecutionRoleWildcard,
 } from './ash-nag-suppressions';
 import { AshRuntimeConfig } from './ash-runtime-config';
 
@@ -622,7 +622,10 @@ export class AshFargateStack extends Stack {
      * explained instead; synth still exits 0 because they are warnings.
      */
 
-    suppressCodeBuildRoleWildcards(taskDefinition.executionRole!);
+    // Not `suppressCodeBuildRoleWildcards`, which is what this used to call: that
+    // reason names a per-build log stream and a report group, and an ECS task
+    // execution role has neither. Its one wildcard is the ECR authorization token.
+    suppressTaskExecutionRoleWildcard(taskDefinition.executionRole!);
 
     new CfnOutput(this, 'McpEndpoint', {
       description:

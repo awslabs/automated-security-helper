@@ -408,7 +408,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Inherent to CodeBuild and ECR, not a widening of scope. The wildcards are: (1) the per-build log-stream suffix on this project's own log group; (2) the per-report suffix on its own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets this stack creates. None of them reach a resource outside this stack.",
+       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -468,7 +468,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Inherent to CodeBuild and ECR, not a widening of scope. The wildcards are: (1) the per-build log-stream suffix on this project's own log group; (2) the per-report suffix on its own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets this stack creates. None of them reach a resource outside this stack.",
+       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -509,7 +509,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Inherent to CodeBuild and ECR, not a widening of scope. The wildcards are: (1) the per-build log-stream suffix on this project's own log group; (2) the per-report suffix on its own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets this stack creates. None of them reach a resource outside this stack.",
+       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -558,7 +558,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Inherent to CodeBuild and ECR, not a widening of scope. The wildcards are: (1) the per-build log-stream suffix on this project's own log group; (2) the per-report suffix on its own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets this stack creates. None of them reach a resource outside this stack.",
+       "reason": "Every wildcard on this role has one of two shapes, both written by CDK grant helpers. RESOURCE, none nameable at deploy time: the per-build log stream in this project's own log group, the per-report suffix on its own report group, object keys in buckets this stack creates, and ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all. ACTION: API-family suffixes like kms:GenerateDataKey* and s3:GetObject*, widening the verb set on an already-scoped resource, not its reach. Nothing here leaves this stack.",
        "id": "AwsSolutions-IAM5"
       }
      ]
