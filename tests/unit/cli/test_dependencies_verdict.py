@@ -16,9 +16,9 @@ command's return value is discarded, so the previous implementation could print
 caller cannot observe is not a verdict.
 """
 
-from typer.testing import CliRunner
 import pytest
 import typer
+from typer.testing import CliRunner
 
 from automated_security_helper.cli.dependencies import (
     EXIT_BAD_SELECTION,

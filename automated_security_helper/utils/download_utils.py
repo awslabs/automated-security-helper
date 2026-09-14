@@ -380,7 +380,7 @@ def install_pinned_tool(
     from automated_security_helper.utils.tool_downloads import get_tool_asset
 
     asset = get_tool_asset(tool, target_platform, arch)
-    bin_dir = Path(destination) if destination is not None else _current_bin_path()
+    bin_dir = Path(destination) if destination is not None else current_bin_path()
     bin_dir.mkdir(parents=True, exist_ok=True)
     target = bin_dir.joinpath(asset.install_as)
 
@@ -422,7 +422,7 @@ def install_pinned_tool(
     return target
 
 
-def _current_bin_path() -> Path:
+def current_bin_path() -> Path:
     """Resolve ASH_BIN_PATH at call time rather than at import time.
 
     ``core.constants.ASH_BIN_PATH`` is computed when that module is first imported.
@@ -447,7 +447,7 @@ def create_pinned_tool_install_command(
     commands, the CLI runs them and counts them.
     """
     if destination is None:
-        destination = str(_current_bin_path()).replace("\\", "/")
+        destination = str(current_bin_path()).replace("\\", "/")
 
     script = (
         "import sys; from pathlib import Path; "
@@ -483,7 +483,7 @@ def create_url_download_command(
     # installed into the default directory while the installer reported the
     # requested one, and the post-install sweep then found nothing there.
     if destination is None:
-        destination = str(_current_bin_path()).replace(
+        destination = str(current_bin_path()).replace(
             "\\", "/"
         )  # Ensure forward slashes for cross-platform compatibility
 

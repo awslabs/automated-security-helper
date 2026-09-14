@@ -24,11 +24,11 @@ from unittest.mock import patch
 
 import pytest
 
-import automated_security_helper.utils.tool_downloads as tool_downloads
 from automated_security_helper.core.exceptions import (
     ToolDownloadIntegrityError,
     ToolNotProvisionableError,
 )
+from automated_security_helper.utils import tool_downloads
 from automated_security_helper.utils.download_utils import (
     _extract_single_member,
     install_pinned_tool,
@@ -37,9 +37,9 @@ from automated_security_helper.utils.download_utils import (
     verify_sha256,
 )
 from automated_security_helper.utils.tool_downloads import (
-    TOOL_VERSIONS,
     _ASSET_TABLES,
     _DIGESTS,
+    TOOL_VERSIONS,
     downloadable_tools,
     get_tool_asset,
     supported_platforms,
@@ -134,9 +134,12 @@ class TestDigestVerification:
         payload, _real_digest = fake_grype_release
         bin_dir = tmp_path / "bin"
 
-        with _pin(_grype_asset_filename(), "0" * 64), _serve(payload):
-            with pytest.raises(ToolDownloadIntegrityError, match="Refusing to install"):
-                install_pinned_tool("grype", "linux", "amd64", bin_dir)
+        with (
+            _pin(_grype_asset_filename(), "0" * 64),
+            _serve(payload),
+            pytest.raises(ToolDownloadIntegrityError, match="Refusing to install"),
+        ):
+            install_pinned_tool("grype", "linux", "amd64", bin_dir)
 
         assert not (bin_dir / "grype").exists(), (
             "a rejected download must leave nothing installed"

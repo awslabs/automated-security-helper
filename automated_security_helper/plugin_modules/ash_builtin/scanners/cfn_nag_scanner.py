@@ -33,6 +33,7 @@ from automated_security_helper.utils.cfn_template_model import get_model_from_te
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.download_utils import current_bin_path
 from automated_security_helper.utils.normalizers import get_normalized_filename
 from automated_security_helper.utils.tool_downloads import CFN_NAG_GEM_VERSION
 
@@ -117,6 +118,18 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         install command at all, so it stayed absent and the installer said
         everything succeeded.
         """
+        # --user-install and --bindir together, and both are load-bearing.
+        #
+        # --user-install because a plain `gem install` writes to the interpreter's
+        # GEM_HOME, which on a stock Linux runner is root-owned; without it the
+        # install needs sudo and fails without it.
+        #
+        # --bindir because the binstub otherwise lands in whichever bin directory
+        # that Ruby installation happens to use, and ASH looks on PATH and in
+        # ASH_BIN_PATH -- not in a user gem bin. Pointing it at ASH_BIN_PATH makes
+        # cfn-nag findable without depending on how the host arranges its Ruby.
+        # Verified that a relocated binstub still activates the gem from the user
+        # directory, since Gem.path includes it by default.
         command = CustomCommand(
             args=[
                 "gem",
@@ -125,6 +138,9 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                 "-v",
                 CFN_NAG_GEM_VERSION,
                 "--no-document",
+                "--user-install",
+                "--bindir",
+                str(current_bin_path()),
             ],
             shell=False,
         )

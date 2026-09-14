@@ -25,6 +25,7 @@ from automated_security_helper.core.constants import (
     ASH_WORK_DIR_NAME,
 )
 from automated_security_helper.plugins import ash_plugin_manager
+from automated_security_helper.plugins.loader import load_plugins
 from automated_security_helper.utils.log import get_logger
 from automated_security_helper.utils.subprocess_utils import (
     clear_find_executable_cache,
@@ -233,6 +234,27 @@ def install_dependencies(
         config_path=config,
         source_dir=source_dir,
         config_overrides=config_overrides,
+    )
+
+    # Import the plugin modules the config names before enumerating anything.
+    #
+    # `--config` previously resolved the config's *values* and stopped there. The
+    # scanners a config adds through `ash_plugin_modules` were never imported, so
+    # their plugin classes never registered, so
+    # `ash dependencies install --config .ash/.ash_community_plugins.yaml` installed
+    # dependencies for the built-in set and reported success -- and trivy, snyk and
+    # ferret had to be installed by hand in CI before the scan.
+    #
+    # load_plugins is what the scan path already uses for this. Calling it here means
+    # a config that adds scanners also adds their dependencies, and `--tool
+    # trivy-repo` resolves instead of being rejected as an unknown name.
+    load_plugins(
+        PluginContext(
+            source_dir=source_dir,
+            output_dir=output_dir,
+            work_dir=work_dir,
+            config=resolved_config,
+        )
     )
 
     outcomes: List[PluginInstallOutcome] = []
@@ -447,11 +469,10 @@ def _report_and_exit(
             f"requested tool(s) still not on PATH: {', '.join(unsatisfied_requests)}"
         )
 
+    verified_names = f" -- {', '.join(verified)}" if verified else ""
     summary = [
-        f"[cyan]Commands run:[/cyan] {commands_attempted} "
-        f"({commands_failed} failed)",
-        f"[cyan]Tools verified on PATH:[/cyan] {len(verified)}"
-        + (f" -- {', '.join(verified)}" if verified else ""),
+        f"[cyan]Commands run:[/cyan] {commands_attempted} ({commands_failed} failed)",
+        f"[cyan]Tools verified on PATH:[/cyan] {len(verified)}{verified_names}",
     ]
     if unprovisionable:
         summary.append(

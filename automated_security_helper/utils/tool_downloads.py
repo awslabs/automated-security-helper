@@ -53,13 +53,12 @@ Known limitations
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
 
 from automated_security_helper.core.exceptions import ToolNotProvisionableError
 
 # Platform/architecture pair, in the vocabulary cli/dependencies.py already uses:
 # platform is one of linux/darwin/windows, arch is one of amd64/arm64.
-PlatformArch = Tuple[str, str]
+PlatformArch = tuple[str, str]
 
 
 @dataclass(frozen=True)
@@ -85,7 +84,7 @@ class ToolAsset:
 # Versions are deliberately the same pins the container image already builds with
 # (see the ARG lines in Dockerfile), so a scan run from a container, from nix and
 # from a bare `ash dependencies install` all execute the same tool versions.
-TOOL_VERSIONS: Dict[str, str] = {
+TOOL_VERSIONS: dict[str, str] = {
     "grype": "v0.111.0",
     "syft": "v1.42.4",
     "trivy": "v0.69.3",
@@ -101,7 +100,7 @@ CFN_NAG_GEM_VERSION = "0.8.10"
 # Asset filenames, per tool, exactly as published upstream.
 # ---------------------------------------------------------------------------
 
-_GRYPE_ASSETS: Dict[PlatformArch, str] = {
+_GRYPE_ASSETS: dict[PlatformArch, str] = {
     ("linux", "amd64"): "grype_0.111.0_linux_amd64.tar.gz",
     ("linux", "arm64"): "grype_0.111.0_linux_arm64.tar.gz",
     ("darwin", "amd64"): "grype_0.111.0_darwin_amd64.tar.gz",
@@ -110,7 +109,7 @@ _GRYPE_ASSETS: Dict[PlatformArch, str] = {
     # windows/arm64: upstream publishes no such asset for this release.
 }
 
-_SYFT_ASSETS: Dict[PlatformArch, str] = {
+_SYFT_ASSETS: dict[PlatformArch, str] = {
     ("linux", "amd64"): "syft_1.42.4_linux_amd64.tar.gz",
     ("linux", "arm64"): "syft_1.42.4_linux_arm64.tar.gz",
     ("darwin", "amd64"): "syft_1.42.4_darwin_amd64.tar.gz",
@@ -119,7 +118,7 @@ _SYFT_ASSETS: Dict[PlatformArch, str] = {
     ("windows", "arm64"): "syft_1.42.4_windows_arm64.zip",
 }
 
-_TRIVY_ASSETS: Dict[PlatformArch, str] = {
+_TRIVY_ASSETS: dict[PlatformArch, str] = {
     ("linux", "amd64"): "trivy_0.69.3_Linux-64bit.tar.gz",
     ("linux", "arm64"): "trivy_0.69.3_Linux-ARM64.tar.gz",
     ("darwin", "amd64"): "trivy_0.69.3_macOS-64bit.tar.gz",
@@ -139,7 +138,7 @@ _TRIVY_ASSETS: Dict[PlatformArch, str] = {
 #   https://github.com/aquasecurity/trivy/releases/download/v0.69.3/trivy_0.69.3_checksums.txt
 # ---------------------------------------------------------------------------
 
-_DIGESTS: Dict[str, str] = {
+_DIGESTS: dict[str, str] = {
     # grype v0.111.0
     "grype_0.111.0_linux_amd64.tar.gz": "18ed2048d7a233566b681121d4632364f5f25d72cca86acc4c7ac57210d78a87",
     "grype_0.111.0_linux_arm64.tar.gz": "1a8b9bd691ce274e44056e7572cdf8c6970bdf9ec694001f7b4b17962b121b43",
@@ -162,25 +161,25 @@ _DIGESTS: Dict[str, str] = {
 }
 
 
-_RELEASE_BASE_URLS: Dict[str, str] = {
+_RELEASE_BASE_URLS: dict[str, str] = {
     "grype": "https://github.com/anchore/grype/releases/download",
     "syft": "https://github.com/anchore/syft/releases/download",
     "trivy": "https://github.com/aquasecurity/trivy/releases/download",
 }
 
-_ASSET_TABLES: Dict[str, Dict[PlatformArch, str]] = {
+_ASSET_TABLES: dict[str, dict[PlatformArch, str]] = {
     "grype": _GRYPE_ASSETS,
     "syft": _SYFT_ASSETS,
     "trivy": _TRIVY_ASSETS,
 }
 
 
-def downloadable_tools() -> List[str]:
+def downloadable_tools() -> list[str]:
     """Tools this module can provision by verified release-asset download."""
     return sorted(_ASSET_TABLES)
 
 
-def supported_platforms(tool: str) -> List[PlatformArch]:
+def supported_platforms(tool: str) -> list[PlatformArch]:
     """The platform/arch pairs ``tool`` publishes an asset for.
 
     Raises:
