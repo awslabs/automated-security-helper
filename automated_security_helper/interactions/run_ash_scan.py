@@ -375,6 +375,131 @@ def incomplete_scanners(
     return listed
 
 
+def unevaluated_rules(results: Optional[AshAggregatedResults]) -> List[str]:
+    """Every rule a scanner reported, at run level, that it could not evaluate.
+
+    WHY THIS IS A SECOND FUNCTION RATHER THAN PART OF ``incomplete_scanners``
+    -----------------------------------------------------------------------
+    ``incomplete_scanners`` answers "which scanners lost whole targets", and it
+    answers it from the target counters. A rule that raised mid-evaluation loses
+    neither a scanner nor a target: the scanner ran, the target was read, most of
+    the rules reached a verdict, and one did not. Counting it as a lost target
+    would overstate in a way that is measurable rather than theoretical --
+    ``ScanResultsContainer.determine_status`` returns ERROR once
+    ``targets_failed >= targets_attempted``, so a rule that raises on every
+    template (which is the normal case for one that cannot resolve an intrinsic)
+    would report the scanner as having evaluated nothing, and the cdk-nag
+    scanner's own log line would read "No rules were evaluated" about a run that
+    evaluated all but one of them.
+
+    So the granularity is the rule, and the fact is read from where SARIF already
+    puts it.
+
+    WHAT IT READS, AND WHY THAT IS THE RIGHT CHANNEL
+    -----------------------------------------------
+    ``invocation.toolExecutionNotifications`` is, in the schema's own words, "A
+    list of runtime conditions detected by the tool during the analysis", and
+    ``notification.associatedRule`` is "A reference used to locate the rule
+    descriptor associated with this notification". A rule raising instead of
+    returning a verdict is a runtime condition, and the rule it happened to is
+    what to associate it with. The cdk-nag scanner already writes exactly that.
+
+    Reading it here rather than inventing a counter is what makes this gate
+    scanner-agnostic: any scanner -- or any externally-produced SARIF that ASH
+    ingests -- which reports an error-level runtime condition is reporting that
+    part of its analysis did not run, and that is the thing being gated on.
+
+    ONLY ``level == "error"``. ``warning`` is the field's default and a tool may
+    use it for conditions that cost no coverage, so gating on it would fail scans
+    for notes. The cdk-nag scanner sets ``error`` deliberately and says so.
+
+    ``.value`` RATHER THAN ``str()`` ON THE LEVEL. ``Level`` is a str-mixin enum,
+    so ``Enum.__str__`` still wins and ``str(Level.error)`` renders
+    ``"Level.error"``, which matches nothing. Comparing the raw member against
+    ``"error"`` works because of the str mixin, but only for a model built
+    in-process; a model round-tripped through JSON carries a plain string. Both
+    shapes are handled by taking ``.value`` when it is there.
+
+    Read from the in-memory model rather than re-reading ``reports/ash.sarif``.
+    Verified end to end against a real cdk-nag run: the notifications survive
+    ``sanitize_sarif_paths``, ``apply_suppressions_to_sarif``,
+    ``attach_scanner_details``, ``merge_sarif_report``, and a second scanner
+    merging into the same aggregate. Nothing in that chain rewrites them, which
+    is why no disk read is needed to see them.
+
+    SUPPRESSIONS ARE HONORED, AND THAT IS NOT A CONVENIENCE
+    ------------------------------------------------------
+    A notification carries no suppression of its own -- SARIF puts suppressions on
+    results -- so read naively this gate would be unsuppressable, and an operator
+    who has already reviewed a rule's failure and accepted not knowing its verdict
+    would have no way to say so. That is not hypothetical: this repository's own
+    ``.ash/.ash.yaml`` carries fifteen such entries under the heading "rules that
+    threw and never ran", each with a reviewed reason, and its own note calls
+    naming them "the only way to keep the exit code honest". A gate that ignored
+    them would fail ASH's own default scan with no escape hatch, which is a worse
+    defect than the one being fixed.
+
+    So a rule is reported only when at least one of its not-evaluated results is
+    unsuppressed. The results are what suppression applies to, and consulting them
+    is what lets the existing mechanism reach a fact recorded somewhere it cannot
+    be attached.
+
+    ``kind`` is the filter rather than the cdk-nag property bag, so this stays
+    generic to SARIF. Restricting to not-evaluated rows matters: one rule can throw
+    on one resource while reaching a verdict on another, and counting an ordinary
+    unsuppressed finding as evidence would report a rule whose only failure was
+    suppressed.
+
+    A rule with an error-level notification and NO matching result is reported.
+    Absence of a result is not evidence of suppression, and defaulting to silence
+    there would reintroduce the silent pass through the one shape nothing checks.
+
+    Returns:
+        Rule ids in sorted order, deduplicated, with the notification's message
+        substituted for a notification that names no rule so a condition is never
+        silently dropped for lacking an id. Empty when every rule was evaluated,
+        which is the case for every scanner that reports no such condition at all.
+    """
+    sarif = getattr(results, "sarif", None)
+    if sarif is None:
+        return []
+
+    reported: set[str] = set()
+    for run in getattr(sarif, "runs", None) or []:
+        # Per run, because a rule id is only unique within the tool that reported
+        # it and the aggregate holds one run per merged scanner.
+        unsuppressed: set[str] = set()
+        has_result: set[str] = set()
+        for result in getattr(run, "results", None) or []:
+            kind = getattr(result, "kind", None)
+            if getattr(kind, "value", kind) != "notApplicable":
+                continue
+            rule_id = str(getattr(result, "ruleId", "") or "")
+            has_result.add(rule_id)
+            if not getattr(result, "suppressions", None):
+                unsuppressed.add(rule_id)
+
+        for invocation in getattr(run, "invocations", None) or []:
+            for notification in (
+                getattr(invocation, "toolExecutionNotifications", None) or []
+            ):
+                level = getattr(notification, "level", None)
+                if getattr(level, "value", level) != "error":
+                    continue
+                associated = getattr(notification, "associatedRule", None)
+                rule_id = getattr(getattr(associated, "root", None), "id", None)
+                if rule_id:
+                    rule_id = str(rule_id)
+                    if rule_id in has_result and rule_id not in unsuppressed:
+                        continue
+                    reported.add(rule_id)
+                    continue
+                message = getattr(getattr(notification, "message", None), "root", None)
+                text = str(getattr(message, "text", "") or "").strip()
+                reported.add(text or "an unnamed rule")
+    return sorted(reported)
+
+
 def _resolve_fail_on_incomplete_scanners(
     results: Optional[AshAggregatedResults],
     opts: ScanOptions,
@@ -1230,6 +1355,56 @@ def _compute_exit_code(
                 ", ".join(f"{name} ({status})" for name, status in incomplete),
             )
             return 1
+
+    # A rule that raised instead of reaching a verdict, which no other gate can see.
+    #
+    # NOT behind fail_on_incomplete_scanners, and that is the whole point of it being
+    # here. This condition has no honest reading under which the scan was clean: the
+    # tool was asked to evaluate a rule, it tried, and it failed. That is different
+    # from the case the flag exists to keep quiet, which is an environment
+    # legitimately lacking a scanner's tool -- there the operator's setup explains the
+    # gap, so defaulting to silence is defensible. Nothing explains this one.
+    #
+    # It also has to sit ahead of the fail_on_findings early return, for the reason
+    # the block above states: an operator who turned findings-gating off said "do not
+    # fail me for what you find", not "do not tell me part of the scan never ran".
+    #
+    # 1 rather than 2, matching the gate above and `ash merge`'s coverage refusals.
+    # 2 means "clearing the listed findings clears the scan", which is exactly what
+    # is not true here -- the reported set is known to be missing whatever these rules
+    # would have said.
+    #
+    # WHY THIS IS NOT EXPRESSED AS A FINDING INSTEAD. It was the obvious alternative:
+    # give the result a gating severity and let the existing findings count carry it,
+    # which is also how this behaved before the not-evaluated work. SARIF forbids it.
+    # Section 3.27.10 defines `level` "none" as required whenever `kind` (3.27.9) is
+    # anything other than "fail", and "fail" asserts the rule WAS evaluated and the
+    # target did not satisfy it. So a severity-bearing result would have to claim a
+    # verdict that was never reached -- the report lying in the opposite direction.
+    # SARIF's channel for this is the run-level notification, which is what
+    # `unevaluated_rules` reads, so the gate reads the fact where the format puts it
+    # instead of restating it somewhere it can gate more conveniently.
+    #
+    # A rule that genuinely does not apply to a target is untouched, and not by a
+    # carve-out here. Such a rule produces no row in cdk-nag's validation report at
+    # all, so it reaches neither a result nor a notification; the only producer of
+    # the not-evaluated state is a rule that threw.
+    #
+    # THE ESCAPE HATCH IS THE EXISTING ONE. Suppressing the rule's not-evaluated
+    # results suppresses this gate too -- see `unevaluated_rules`, which will not
+    # report a rule whose every such result is suppressed. That is what makes the
+    # gate defaults-on without being unavoidable, and it is already how this
+    # repository's own config accepts the fifteen rules that throw on its
+    # deliberately parameterized templates.
+    unevaluated = unevaluated_rules(results)
+    if unevaluated:
+        logging.getLogger(__name__).error(
+            "Scan incomplete: %d rule(s) could not be evaluated, so this scan "
+            "reports nothing about compliance with them: %s",
+            len(unevaluated),
+            ", ".join(unevaluated),
+        )
+        return 1
 
     final_fail_on_findings: bool
     if opts.fail_on_findings is not None:

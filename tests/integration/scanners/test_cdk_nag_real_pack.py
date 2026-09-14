@@ -461,13 +461,264 @@ class TestRuleThatCouldNotBeEvaluated:
         # two channels are two views of one fact and must not disagree.
         from automated_security_helper.schemas.sarif_schema_model import Kind
 
-        unevaluated_rules = {
+        unevaluated_result_rules = {
             r.ruleId for r in (run.results or []) if r.kind == Kind.notApplicable
         }
-        assert notified_rules == unevaluated_rules, (
+        assert notified_rules == unevaluated_result_rules, (
             f"notifications name {sorted(notified_rules)} but the notApplicable results are "
-            f"{sorted(unevaluated_rules)}"
+            f"{sorted(unevaluated_result_rules)}"
         )
+
+    def test_a_rule_that_threw_does_not_produce_a_clean_exit_code(
+        self, test_plugin_context, unevaluatable_template: Path, tmp_path: Path
+    ):
+        """The whole chain, on a real cdk-nag: a rule raised, so the exit code is not 0.
+
+        The unit coverage in ``tests/unit/interactions/test_exit_code_unevaluated_rules.py``
+        builds the notification by hand. This test does not, and that is the point:
+        every link is real -- cdk-nag actually raises out of ``resolveIfPrimitive``,
+        the scanner actually writes the notification, the aggregation actually
+        carries it, and ``_compute_exit_code`` actually reads it. A hand-built
+        notification proves the gate reads the field; only this proves the field is
+        still populated by the time the gate looks, which is the half that a change
+        anywhere in sanitization, suppression or merging could silently break.
+
+        ``fail_on_findings=False`` so the assertion cannot be satisfied by the
+        genuine violation the same fixture also produces. Without that, this test
+        would pass on exit 2 from an ordinary finding and would say nothing at all
+        about a rule that threw.
+        """
+        _require_cdk_nag()
+        from automated_security_helper.interactions.run_ash_scan import (
+            ScanOptions,
+            _compute_exit_code,
+            unevaluated_rules,
+        )
+        from automated_security_helper.models.asharp_model import AshAggregatedResults
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
+            CdkNagScanner,
+            CdkNagScannerConfig,
+        )
+
+        source_dir = Path(test_plugin_context.source_dir)
+        source_dir.mkdir(parents=True, exist_ok=True)
+        (source_dir / "unevaluatable.template.json").write_text(
+            unevaluatable_template.read_text()
+        )
+
+        scanner = CdkNagScanner(
+            context=test_plugin_context, config=CdkNagScannerConfig()
+        )
+        report = scanner.scan(target=source_dir, target_type="source")
+        assert report is not False, "scanner refused to run"
+
+        # The counters the other gates read, asserted so this test also records WHY
+        # they cannot catch it: the template parsed and its report was readable, so
+        # nothing was counted as a failed target and --fail-on-incomplete-scanners
+        # has nothing to see.
+        assert scanner.targets_attempted == 1
+        assert scanner.targets_failed == 0
+
+        aggregated = AshAggregatedResults()
+        aggregated.sarif.merge_sarif_report(report)
+
+        assert unevaluated_rules(aggregated), (
+            "the aggregated model carries no unevaluated-rule condition, so the "
+            "notification did not survive aggregation"
+        )
+
+        opts = ScanOptions(
+            source_dir=source_dir,
+            output_dir=tmp_path / "exit-code-out",
+            fail_on_findings=False,
+        )
+        assert _compute_exit_code(aggregated, opts) == 1
+
+    def test_suppressing_the_thrown_rule_restores_a_clean_exit(
+        self, test_plugin_context, unevaluatable_template: Path, tmp_path: Path
+    ):
+        """The escape hatch, through the real suppression machinery.
+
+        The gate is on by default, so it needs a way for an operator to say
+        "reviewed, and I accept not knowing this rule's verdict". Suppression is
+        that way, and this test exists because whether it WORKS is not obvious from
+        reading either side: a notification carries no suppression of its own, and
+        ``apply_suppressions_to_sarif`` could reasonably have skipped a result at
+        ``level: none`` as already non-actionable. It does not, and this pins that.
+
+        Not a hypothetical requirement. This repository's own ``.ash/.ash.yaml``
+        accepts fifteen rules that throw on its deliberately parameterized
+        templates, each with a reviewed reason. Were the gate unsuppressable, ASH's
+        own default scan would fail with no way to clear it.
+
+        The unsuppressed case is asserted first, in the same test, so a suppression
+        that silenced nothing could not pass this by silencing a gate that was
+        already quiet.
+        """
+        _require_cdk_nag()
+        from automated_security_helper.interactions.run_ash_scan import (
+            ScanOptions,
+            _compute_exit_code,
+            unevaluated_rules,
+        )
+        from automated_security_helper.models.asharp_model import AshAggregatedResults
+        from automated_security_helper.models.core import AshSuppression
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
+            CdkNagScanner,
+            CdkNagScannerConfig,
+        )
+        from automated_security_helper.utils.sarif_utils import (
+            apply_suppressions_to_sarif,
+            sanitize_sarif_paths,
+        )
+
+        template_name = "unevaluatable.template.json"
+        source_dir = Path(test_plugin_context.source_dir)
+        source_dir.mkdir(parents=True, exist_ok=True)
+        (source_dir / template_name).write_text(unevaluatable_template.read_text())
+
+        def _aggregate_with(suppressions) -> AshAggregatedResults:
+            test_plugin_context.config.global_settings.suppressions = suppressions
+            scanner = CdkNagScanner(
+                context=test_plugin_context, config=CdkNagScannerConfig()
+            )
+            report = scanner.scan(target=source_dir, target_type="source")
+            assert report is not False, "scanner refused to run"
+            sanitized = sanitize_sarif_paths(report, test_plugin_context.source_dir)
+            sanitized = apply_suppressions_to_sarif(
+                sarif_report=sanitized,
+                plugin_context=test_plugin_context,
+                used_suppressions=set(),
+            )
+            aggregated = AshAggregatedResults()
+            aggregated.sarif.merge_sarif_report(sanitized)
+            return aggregated
+
+        opts = ScanOptions(
+            source_dir=source_dir,
+            output_dir=tmp_path / "exit-code-out",
+            fail_on_findings=False,
+        )
+
+        # Unsuppressed: the rules that threw are named and the scan is not clean.
+        unsuppressed = _aggregate_with([])
+        thrown = unevaluated_rules(unsuppressed)
+        assert thrown, (
+            "no rule reported as unevaluated, so there is nothing to suppress"
+        )
+        assert _compute_exit_code(unsuppressed, opts) == 1
+
+        # Suppressed by rule id and path, which is the form an operator writes.
+        #
+        # The path is a ``**/`` glob rather than the bare file name, and that is
+        # about the fixture rather than about the mechanism. ``ash_temp_path`` puts
+        # its directory under the repository's own ``tests/pytest-temp/<uuid>/``, and
+        # the sanitized result URI is the whole relative path from there --
+        # ``tests/pytest-temp/<uuid>/test_source_dir/unevaluatable.template.json`` --
+        # so a bare file name matches nothing and a literal path would hard-code a
+        # per-run uuid. A real operator writes the path as it appears in the report,
+        # which is what this repository's own config does.
+        suppressed = _aggregate_with(
+            [
+                AshSuppression(
+                    rule_id=rule,
+                    path=f"**/{template_name}",
+                    reason=(
+                        "Rule threw on an intrinsic; reviewed and accepted as "
+                        "unevaluated."
+                    ),
+                )
+                for rule in thrown
+            ]
+        )
+        still_reported = unevaluated_rules(suppressed)
+        suppression_counts = {
+            r.ruleId: (
+                len(r.suppressions or []),
+                [
+                    getattr(
+                        getattr(
+                            getattr(loc.physicalLocation, "root", loc.physicalLocation),
+                            "artifactLocation",
+                            None,
+                        ),
+                        "uri",
+                        None,
+                    )
+                    for loc in (r.locations or [])
+                ],
+            )
+            for r in suppressed.sarif.runs[0].results
+            if str(getattr(r.kind, "value", r.kind)) == "notApplicable"
+        }
+        assert still_reported == [], (
+            "a reviewed suppression did not silence the gate, so an operator has no "
+            f"way to accept a rule that cannot be evaluated. Suppressed rules: "
+            f"{thrown}. Still reported: {still_reported}. Suppressions landed on "
+            f"each notApplicable result: {suppression_counts}"
+        )
+        assert _compute_exit_code(suppressed, opts) == 0
+
+    def test_a_scan_where_every_rule_was_evaluated_still_exits_zero(
+        self, test_plugin_context, non_compliant_template: Path, tmp_path: Path
+    ):
+        """THE NEGATIVE CONTROL for the test above, and the one that matters most.
+
+        A deliberately non-compliant template with no intrinsic functions in
+        primitive positions: every rule reaches a verdict, several of them
+        unfavourable. That scan is complete, so the completeness gate must stay
+        silent and the exit code must come from the findings alone -- which is what
+        ``fail_on_findings=False`` isolates.
+
+        Without this, the test above would pass equally well against a gate that
+        fired on any cdk-nag run at all, and the fix would have turned every
+        CloudFormation scan into a failure.
+        """
+        _require_cdk_nag()
+        from automated_security_helper.interactions.run_ash_scan import (
+            ScanOptions,
+            _compute_exit_code,
+            unevaluated_rules,
+        )
+        from automated_security_helper.models.asharp_model import AshAggregatedResults
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
+            CdkNagScanner,
+            CdkNagScannerConfig,
+        )
+
+        source_dir = Path(test_plugin_context.source_dir)
+        source_dir.mkdir(parents=True, exist_ok=True)
+        (source_dir / "non_compliant.template.json").write_text(
+            non_compliant_template.read_text()
+        )
+
+        scanner = CdkNagScanner(
+            context=test_plugin_context, config=CdkNagScannerConfig()
+        )
+        report = scanner.scan(target=source_dir, target_type="source")
+        assert report is not False, "scanner refused to run"
+
+        # The fixture has to actually produce findings, or "no unevaluated rule"
+        # would be true of an empty report and this control would prove nothing.
+        assert report.runs[0].results, (
+            "the non-compliant fixture produced no findings at all, so it no longer "
+            "distinguishes a complete scan from an empty one"
+        )
+
+        aggregated = AshAggregatedResults()
+        aggregated.sarif.merge_sarif_report(report)
+
+        assert unevaluated_rules(aggregated) == [], (
+            "a template with no unresolvable primitives reported an unevaluated "
+            "rule, so the gate is firing on something other than a rule that threw"
+        )
+
+        opts = ScanOptions(
+            source_dir=source_dir,
+            output_dir=tmp_path / "exit-code-out",
+            fail_on_findings=False,
+        )
+        assert _compute_exit_code(aggregated, opts) == 0
 
 
 class TestTargetThatCouldNotBeParsed:

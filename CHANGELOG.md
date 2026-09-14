@@ -101,6 +101,63 @@
   read; the failure message names each scanner with the counts, whatever its
   status.
 
+- **A rule that could not be evaluated now fails the scan, under default config.**
+  This one changes the default exit code, so read it even if you pass no flags.
+
+  A cdk-nag rule that raises mid-validation is reported as
+  `kind: notApplicable` at `level: none` — see the reporting entry below for why
+  that is the correct SARIF — and ASH's ladder reads `none` as INFO, which the
+  default `MEDIUM` threshold does not count. Before that, the row arrived at
+  whatever severity the rule declared and a scan containing one exited non-zero.
+  Afterwards nothing gated it: `targets_failed` rises only when a validation report
+  cannot be read or the scan raises, so a rule that throws on a template whose
+  report still parses leaves the target counters clean and
+  `--fail-on-incomplete-scanners` sees nothing either. The remaining signals were a
+  warning log and a run-level notification, neither of which reaches an exit code.
+  Net, a scan whose only defect was systematic rule-evaluation failure reported a
+  clean exit 0.
+
+  `_compute_exit_code` now reads `invocation.toolExecutionNotifications` at
+  `level: error` — SARIF's own channel for "a runtime condition detected by the
+  tool during the analysis", which the cdk-nag scanner already writes one of per
+  rule that could not be evaluated — and **exits 1** when a scan carries any.
+
+  **1 and not 2, deliberately.** 2 tells a reviewer that clearing the listed
+  findings clears the scan, which is what is not true when a rule reached no
+  verdict. 1 is ASH's "error during execution" code and is what the completeness
+  gate and `ash merge`'s coverage refusals already use for the same reason: the
+  findings that were reported are real, but the set is known to be partial.
+
+  **This was not expressed as a finding, and could not be.** Giving the result a
+  gating severity was the obvious alternative and is what the pre-existing behavior
+  amounted to. SARIF section 3.27.10 requires `level` to be `none` whenever `kind`
+  (3.27.9) is anything other than `fail`, and `fail` asserts the rule *was*
+  evaluated and the target did not satisfy it. A severity-bearing result would
+  therefore have to claim a verdict that was never reached — the report untrue in
+  the opposite direction.
+
+  **A rule that genuinely does not apply is unaffected**, and not by a carve-out.
+  cdk-nag's validation report carries violations only, so a rule that does not
+  apply to a target produces no row at all and therefore no notification. The only
+  producer of the not-evaluated state is a rule that threw. A scan with no
+  CloudFormation in it is likewise untouched: nothing was evaluated, no rule raised,
+  and the scanner still reports `SKIPPED` at exit 0.
+
+  **To accept a rule that cannot be evaluated, suppress it.** A suppression on the
+  rule's not-evaluated results silences this gate — the gate reports a rule only
+  when at least one such result is unsuppressed — so the existing mechanism is the
+  escape hatch and no new flag was added. Suppressions are per finding: accepting
+  the failure on one resource does not accept it on another. This repository's own
+  `.ash/.ash.yaml` already carries fifteen such entries, under the heading "rules
+  that threw and never ran", for rules that raise on its deliberately
+  parameterized templates; measured on this tree, they keep its default scan at
+  exit 0.
+
+  Also worth knowing before treating this as cdk-nag-only: the gate reads SARIF
+  rather than a cdk-nag counter, so any scanner — or any externally ingested SARIF
+  — that reports an error-level runtime condition trips it. cdk-nag is the only
+  builtin that writes one today.
+
 ### Breaking changes
 
 - **A scanner that lost every target on any one tree now reports `ERROR`, on every
@@ -129,11 +186,17 @@
 
   **What is not affected**, because the distinction is the useful part:
 
-  - **The default exit code.** `_compute_exit_code` consults `incomplete_scanners`
-    only once `--fail-on-incomplete-scanners` resolves true, so a default run's
-    exit code is unchanged by either half of this release. A scanner rolling up to
-    `ERROR` does affect the exit code under that flag — but it did already, since
-    `ERROR` was always a status the flag selected on.
+  - **The default exit code, by either of the two changes described here.**
+    `_compute_exit_code` consults `incomplete_scanners` only once
+    `--fail-on-incomplete-scanners` resolves true, so neither lost-target change
+    moves a default run's exit code. A scanner rolling up to `ERROR` does affect
+    the exit code under that flag — but it did already, since `ERROR` was always a
+    status the flag selected on.
+
+    Read that scope literally rather than as a statement about the release. A
+    separate entry below — "a rule that could not be evaluated now fails the scan"
+    — *does* change the default exit code, through a different signal and for a
+    different reason. Nothing about lost targets is what moves it.
   - **`ash merge`'s shard verification.** `_completed` reads the raw
     `ScannerTargetStatusInfo.status` off `scanner_results`, not the derived rollup,
     so a partial-coverage scanner still counts as having run and no healthy shard
