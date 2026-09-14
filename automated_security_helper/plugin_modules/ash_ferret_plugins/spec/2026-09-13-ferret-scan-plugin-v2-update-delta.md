@@ -51,6 +51,29 @@ false-premise check was removed in C2), `ash config validate` valid, ferret self
 **PASSED / 0 actionable**. Each item above was committed and pushed individually; small
 audit-sync commits backfill the self-referential SHAs.
 
+## Net files changed vs `main` (full state of the branch)
+
+Every file the branch changes relative to `main`, mapped to the delta items that touched
+it. (Diffstat as of `7523ca4`; the three `spec/*.md` docs are the tracking artifacts
+themselves. Line counts are approximate and drift with later commits.)
+
+| File | ~Δ | Delta items |
+|------|----|-------------|
+| `automated_security_helper/plugin_modules/ash_ferret_plugins/ferret_scanner.py` | +159 | A1, A2, A4, A5, B1–B5, C1 |
+| `tests/unit/plugin_modules/ash_ferret_plugins/test_ferret_scanner.py` | +142 | A1, A2, A4, A5, B, C1 |
+| `automated_security_helper/plugin_modules/ash_ferret_plugins/DEVELOPMENT.md` | +206 | A1, A3, A5, A6, B, C1, C2, C3 |
+| `automated_security_helper/plugin_modules/ash_ferret_plugins/README.md` | +80 | A1, A2, A3, A5, A6, B, C2 |
+| `.ash/.ash_community_plugins.yaml` | +51 | A3, C1 |
+| `scripts/validate_ferret_plugin.py` | −/+50 | C2 (removed `CONFIG-OVERRIDE-EXCLUDES`) |
+| `docs/content/docs/plugins/community/ferret-scan-plugin.md` | +61 | C4 |
+| `automated_security_helper/plugin_modules/ash_ferret_plugins/spec/…-analysis.md` | +397 | tracking artifact (why) |
+| `automated_security_helper/plugin_modules/ash_ferret_plugins/spec/…-worklog.md` | +211 | tracking artifact (audit) |
+| `automated_security_helper/plugin_modules/ash_ferret_plugins/spec/…-delta.md` | +62 | tracking artifact (this file) |
+
+Total: **10 files, ~+1313 / −106**. All non-spec files above are shippable changes; the
+three `spec/*.md` files are documentation of the change itself. No source/config/doc file
+on the branch is unaccounted for by an A/B/C item.
+
 ## Design decisions recorded
 
 - **DD-1 (API_KEY_OR_SECRET) — REVISED:** the original plan (disable the generic type in
