@@ -158,31 +158,77 @@ def download_file(
     return dest_path
 
 
-def _replace_atomically(source: Path, target: Path) -> Path:
-    """Move ``source`` onto ``target`` via a staging file in the target's directory.
+def _open_staging(target: Path) -> "tuple[int, Path]":
+    """Create an unpredictably-named staging file beside ``target``.
 
-    Staging in the target directory keeps the final step a same-filesystem
-    ``os.replace``, which cannot follow a symlink at the target and cannot leave a
-    partially written file there. The staging file is opened O_CREAT|O_EXCL (plus
-    O_NOFOLLOW where available), so it cannot be a planted link either.
+    The name has to be unpredictable, not merely exclusive. An earlier version staged
+    at ``<target>.ash-partial`` with O_CREAT|O_EXCL|O_NOFOLLOW, which stops a symlink
+    being *planted* at that path but does nothing about ``rename``: in a 0777
+    directory with no sticky bit -- which is what ASH's image leaves ASH_BIN_PATH as
+    (Dockerfile:243) -- rename permission comes from the directory's write bit, not
+    the file's. So anyone with write access to the directory could rename their own
+    file over the staging path between the open and the ``os.replace``, and the
+    replace would then install their bytes.
+
+    ``mkstemp`` closes that by construction: O_EXCL against a name the attacker cannot
+    guess, created 0600, in the directory the final rename has to happen in so that
+    the rename stays same-filesystem and therefore atomic.
     """
     target.parent.mkdir(parents=True, exist_ok=True)
-    staging = target.with_name(target.name + ".ash-partial")
+    fd, name = tempfile.mkstemp(
+        dir=target.parent, prefix=f".{target.name}.", suffix=".ash-partial"
+    )
+    return fd, Path(name)
+
+
+def _finalize_staged(staging: Path, target: Path, expected_sha256: str) -> None:
+    """Put ``staging`` at ``target``, then verify the bytes that landed.
+
+    The re-hash after the rename is the part that matters, and it is deliberately
+    redundant with the unpredictable staging name. If a future change reintroduces a
+    guessable name -- or if some other race puts different bytes at the target -- this
+    catches it, because the receipt written afterwards records the digest of whatever
+    is at the target. Without this check that receipt would record the *attacker's*
+    digest, and ``_already_installed`` would then agree with it forever: the same
+    persistent-trust outcome that moving receipts out of the bin directory was meant
+    to close, reached through a different door.
+
+    On mismatch the target is removed. Leaving unverified bytes at an install path is
+    worse than leaving nothing there.
+    """
+    if platform.system() != "Windows":
+        # Set the final mode here rather than leaving make_executable to OR 0o111 onto
+        # the 0o600 mkstemp creates, which would produce 0o711 and quietly differ from
+        # the 0o755 the previous umask-dependent code produced. A scanner binary must
+        # be executable by whoever runs the scan, which is not always whoever
+        # installed it.
+        os.chmod(staging, 0o755)  # nosec B103 - an executable must be executable
+    os.replace(staging, target)
+    landed = sha256_file(target)
+    if landed != expected_sha256:
+        target.unlink(missing_ok=True)
+        raise ToolDownloadIntegrityError(
+            f"{target} does not match the bytes just written to it (expected "
+            f"{expected_sha256}, found {landed}). Something replaced the staging file "
+            "between writing and installing it; refusing to leave it in place."
+        )
+
+
+def _replace_atomically(source: Path, target: Path) -> Path:
+    """Move ``source`` onto ``target`` without ever following or trusting a link.
+
+    Staging in the target's directory keeps the final step a same-filesystem
+    ``os.replace``, which cannot follow a symlink at the target and cannot leave a
+    partially written file there.
+    """
+    fd, staging = _open_staging(target)
     try:
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-        staging.unlink(missing_ok=True)
-        fd = os.open(staging, flags, 0o700)
+        digest = hashlib.sha256()
         with os.fdopen(fd, "wb") as sink, open(source, "rb") as src:
-            shutil.copyfileobj(src, sink)
-        if platform.system() != "Windows":
-            # Set the final mode here rather than leaving make_executable to OR 0o111
-            # onto the 0o700 the staging file was created with, which produced 0o711
-            # and quietly differed from the 0o755 the archive path produces and from
-            # the 0o755 the previous umask-dependent code produced. Same reasoning as
-            # the archive path: a scanner binary must be executable by whoever runs
-            # the scan, which is not always whoever installed it.
-            os.chmod(staging, 0o755)  # nosec B103 - an executable must be executable
-        os.replace(staging, target)
+            for chunk in iter(lambda: src.read(_HASH_CHUNK_BYTES), b""):
+                digest.update(chunk)
+                sink.write(chunk)
+        _finalize_staged(staging, target, digest.hexdigest())
     except BaseException:
         staging.unlink(missing_ok=True)
         raise
@@ -261,20 +307,63 @@ def receipt_path(destination: Path, installed_as: str) -> Path:
     return receipt_root().joinpath(key, f"{installed_as}.json")
 
 
-def _is_world_or_group_writable(path: Path) -> bool:
-    """Whether ``path`` grants write to group or other.
+def _untrusted_reason(path: Path) -> Optional[str]:
+    """Why ``path`` cannot be trusted to hold a reference digest, or None if it can.
 
-    POSIX only. Windows does not express permissions in st_mode, so this reports
-    False there and the location check contributes nothing on that platform -- stated
-    plainly rather than implied, since a check that silently does nothing on one
-    platform is the kind of thing that gets trusted everywhere.
+    Two checks, because mode alone is not enough. A directory owned by someone else
+    can be replaced wholesale regardless of how tight its mode looks, so ownership is
+    checked as well as write bits.
+
+    POSIX only. Windows does not express permissions in st_mode, so this returns None
+    there and the whole location check contributes nothing on that platform. Stated
+    plainly rather than implied, because a check that silently does nothing on one
+    platform is exactly the kind that gets trusted everywhere.
     """
     if platform.system() == "Windows":
-        return False
+        return None
     try:
-        return bool(path.stat().st_mode & 0o022)
+        info = path.stat()
     except OSError:
-        return False
+        return None
+    if info.st_mode & 0o022:
+        return f"{path} is writable by group or other (mode {oct(info.st_mode & 0o777)})"
+    if info.st_uid != os.getuid():
+        return f"{path} is owned by uid {info.st_uid}, not {os.getuid()}"
+    return None
+
+
+def _receipt_trust_chain(path: Path) -> "list[Path]":
+    """The receipt file and every directory up to and including the receipt root.
+
+    Checking only the immediate parent was not enough: with the parents of the receipt
+    root left at the umask's default, a group member could rename the per-destination
+    key directory away and put a conforming 0700/0600 receipt in its place. Every level
+    ASH creates has to be as trustworthy as the file itself.
+    """
+    root = receipt_root()
+    chain = [path]
+    for parent in path.parents:
+        chain.append(parent)
+        if parent == root:
+            break
+    return chain
+
+
+def _private_dir(path: Path) -> None:
+    """Create ``path`` and each level below the home directory at 0o700.
+
+    ``Path.mkdir(parents=True, mode=0o700)`` does not do this. CPython applies the
+    mode to the final component only; the parents get 0o777 masked by the umask.
+    Measured under umask 002: ~/.ash and ~/.ash/install-receipts both came out 0o775
+    while only the leaf was 0o700. Unreachable inside ASH's container, where $HOME is
+    0750 or tighter, but perfectly reachable on a umask-002 developer host or runner.
+    """
+    home = Path.home()
+    levels = [path, *[p for p in path.parents if p != home and home in p.parents]]
+    for level in reversed(levels):
+        level.mkdir(exist_ok=True)
+        if platform.system() != "Windows":
+            os.chmod(level, 0o700)
 
 
 def read_receipt(destination: Path, installed_as: str) -> Optional[dict]:
@@ -292,12 +381,14 @@ def read_receipt(destination: Path, installed_as: str) -> Optional[dict]:
     path = receipt_path(destination, installed_as)
     if not path.is_file():
         return None
-    if _is_world_or_group_writable(path) or _is_world_or_group_writable(path.parent):
-        ASH_LOGGER.warning(
-            f"Ignoring install receipt at {path}: it or its directory is writable by "
-            "group or other, so it cannot be trusted to say what was installed"
-        )
-        return None
+    for level in _receipt_trust_chain(path):
+        reason = _untrusted_reason(level)
+        if reason is not None:
+            ASH_LOGGER.warning(
+                f"Ignoring install receipt at {path}: {reason}, so it cannot be "
+                "trusted to say what was installed"
+            )
+            return None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -333,12 +424,9 @@ def write_receipt(
     """
     path = receipt_path(destination, installed_as)
     try:
-        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        _private_dir(path.parent)
         path.write_text(json.dumps(receipt, indent=2, sort_keys=True), encoding="utf-8")
         if platform.system() != "Windows":
-            # mkdir's mode argument is masked by the umask and is ignored entirely
-            # when the directory already exists, so set both explicitly afterwards.
-            os.chmod(path.parent, 0o700)
             os.chmod(path, 0o600)
     except OSError as e:
         ASH_LOGGER.warning(
@@ -512,17 +600,17 @@ def _extract_single_member(
         ToolDownloadIntegrityError: if zero or more than one member matches.
     """
     suffixes = "".join(archive_path.suffixes[-2:]).lower()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    staging = target.with_name(target.name + ".ash-partial")
+    fd, staging = _open_staging(target)
+    written = hashlib.sha256()
+    staged = False
 
     def _stage(source) -> None:
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
-        # Remove a staging file left by an interrupted run rather than opening
-        # without O_EXCL, which would give up the "cannot be a symlink" property.
-        staging.unlink(missing_ok=True)
-        fd = os.open(staging, flags, 0o700)
+        nonlocal staged
         with os.fdopen(fd, "wb") as sink:
-            shutil.copyfileobj(source, sink)
+            for chunk in iter(lambda: source.read(_HASH_CHUNK_BYTES), b""):
+                written.update(chunk)
+                sink.write(chunk)
+        staged = True
 
     try:
         if suffixes.endswith(".zip"):
@@ -555,21 +643,15 @@ def _extract_single_member(
                 with extracted as source:
                     _stage(source)
 
-        if platform.system() != "Windows":
-            # 0o755 rather than something tighter, and this is deliberate. A scanner
-            # binary has to be executable by whoever runs the scan, which is not
-            # always whoever installed it: ASH's image installs into ASH_BIN_PATH as
-            # root (Dockerfile:253) and again as the non-root user (:328), with that
-            # directory on PATH for both. 0o700 would leave the root-installed copy
-            # unexecutable for the user the image actually runs as.
-            #
-            # This is also exactly what the previous code produced. make_executable
-            # ORs 0o111 onto the existing mode, and a freshly created file under the
-            # default umask is 0o644, so the result was already 0o755 -- setting it
-            # explicitly removes the umask dependence without widening anything.
-            os.chmod(staging, 0o755)  # nosec B103 - an executable must be executable; see above
-        os.replace(staging, target)
+        # 0o755, and the digest of what was written, are both handled here. See
+        # _finalize_staged: the post-rename re-hash is what stops a race on the
+        # staging path from getting an attacker's bytes recorded in the receipt as
+        # though ASH had installed them.
+        _finalize_staged(staging, target, written.hexdigest())
     except BaseException:
+        if not staged:
+            # The fd was never handed to fdopen, so nothing closed it.
+            os.close(fd)
         staging.unlink(missing_ok=True)
         raise
     return target

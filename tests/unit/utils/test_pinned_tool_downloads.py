@@ -28,6 +28,7 @@ import errno
 import hashlib
 import io
 import json
+import os
 import platform
 import tarfile
 import zipfile
@@ -124,6 +125,28 @@ def _pin(tool_asset_filename: str, digest: str):
 
 def _grype_asset_filename() -> str:
     return _ASSET_TABLES["grype"][("linux", "amd64")]
+
+
+def _plant_bin_dir_receipt(bin_dir: Path, binary_bytes: bytes, pinned: str) -> Path:
+    """Write a well-formed receipt where receipts used to live, inside the bin dir.
+
+    Everything about it is valid except its location, so a code path that reads from
+    the bin directory would accept it.
+    """
+    planted = bin_dir / ".ash-install-receipts" / "grype.json"
+    planted.parent.mkdir(parents=True, exist_ok=True)
+    planted.write_text(
+        json.dumps(
+            {
+                "url": get_tool_asset("grype", "linux", "amd64").url,
+                "sha256": pinned,
+                "installed_sha256": hashlib.sha256(binary_bytes).hexdigest(),
+                "installed_as": "grype",
+            }
+        ),
+        encoding="utf-8",
+    )
+    return planted
 
 
 class TestDigestVerification:
@@ -341,24 +364,49 @@ class TestIdempotence:
         # vouches for it -- the exact move the old layout allowed.
         substitute = b"#!/bin/sh\nexit 0\n"
         installed.write_bytes(substitute)
-        planted = bin_dir / ".ash-install-receipts" / "grype.json"
-        planted.parent.mkdir(parents=True, exist_ok=True)
-        planted.write_text(
-            json.dumps(
-                {
-                    "url": get_tool_asset("grype", "linux", "amd64").url,
-                    "sha256": real_digest,
-                    "installed_sha256": hashlib.sha256(substitute).hexdigest(),
-                    "installed_as": "grype",
-                }
-            ),
-            encoding="utf-8",
-        )
+        _plant_bin_dir_receipt(bin_dir, substitute, real_digest)
 
         with _pin(_grype_asset_filename(), real_digest), _serve(payload) as served:
             install_pinned_tool("grype", "linux", "amd64", bin_dir)
         assert served.called, "a planted receipt was allowed to vouch for a substitute"
         assert installed.read_bytes() == PAYLOAD
+
+    def test_no_receipt_is_written_under_the_bin_directory(
+        self, tmp_path, monkeypatch, fake_grype_release
+    ):
+        """The location property, asserted structurally -- which is the only way.
+
+        A behavioral probe cannot isolate it, and it is worth writing down why rather
+        than leaving a test whose name promises more than it delivers. Under a
+        regression that puts receipts back in the bin directory, "the bin directory"
+        and "the protected location" are the *same path*, so any sequence of planting
+        and removing touches one file and no observable distinguishes the two. An
+        earlier attempt here removed the protected receipt after planting one, which
+        under that regression deleted the plant as well -- so it reinstalled either way
+        and proved nothing.
+
+        What does distinguish them is whether a receipt appears under the bin directory
+        at all. That is checked here on its own, and the combined test above carries the
+        same assertions; pointing receipt_path back at the bin directory fails both.
+        """
+        payload, real_digest = fake_grype_release
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
+        bin_dir = tmp_path / "bin"
+
+        with _pin(_grype_asset_filename(), real_digest), _serve(payload):
+            install_pinned_tool("grype", "linux", "amd64", bin_dir)
+
+        assert read_receipt(bin_dir, "grype") is not None, "no receipt was written"
+        assert receipt_root() in receipt_path(bin_dir, "grype").parents
+        assert bin_dir not in receipt_path(bin_dir, "grype").parents
+        for name in (RECEIPT_DIR_NAME, ".ash-install-receipts"):
+            assert not (bin_dir / name).exists(), (
+                f"a receipt directory was created at {bin_dir / name}; the bin "
+                "directory is world-writable in ASH's image and cannot hold a trust "
+                "anchor"
+            )
 
     @pytest.mark.skipif(
         platform.system() == "Windows", reason="POSIX mode bits only"
@@ -599,6 +647,154 @@ class TestUnarchivedDownloadPath:
         assert victim.stat().st_mode & 0o111 == 0, (
             "make_executable followed the link and made its target executable"
         )
+
+
+class TestStagingCannotBeRacedOrGuessed:
+    """The staging path is both unguessable and re-verified after the rename.
+
+    O_CREAT|O_EXCL|O_NOFOLLOW at a predictable name stops a symlink being *planted*
+    there, and stops nothing about ``rename``. In a 0777 directory with no sticky bit
+    -- which is what ASH's image leaves ASH_BIN_PATH as (Dockerfile:243) -- rename
+    permission comes from the directory's write bit, not the file's, so anyone with
+    write access to that directory could rename their own file over the staging path
+    between the open and the replace. The receipt written afterwards would then record
+    *their* digest, and `_already_installed` would agree with it forever: the same
+    persistent-trust outcome that moving receipts out of the bin directory closed,
+    reached through a different door.
+    """
+
+    def test_the_staging_name_is_not_predictable(self, tmp_path):
+        """Two installs of the same target must not reuse one staging name.
+
+        A guessable name is the precondition for the race, so it is asserted directly
+        rather than only through its consequence.
+        """
+        names = []
+        real_replace = os.replace
+
+        def capture(src, dst):
+            names.append(Path(src).name)
+            return real_replace(src, dst)
+
+        bin_dir = tmp_path / "bin"
+        for _ in range(2):
+            with _serve(PAYLOAD), patch("os.replace", side_effect=capture):
+                install_binary_from_url(
+                    "https://example.invalid/opengrep", bin_dir, "opengrep", force=True
+                )
+
+        assert len(names) == 2
+        assert names[0] != names[1], f"staging name was reused: {names[0]}"
+        assert "opengrep.ash-partial" not in names, (
+            "staging used the old predictable name"
+        )
+
+    def test_bytes_swapped_before_the_rename_are_refused(self, tmp_path):
+        """Simulate winning the race, and the install must refuse the result.
+
+        os.replace is wrapped so that the staged file is overwritten with other bytes
+        immediately before it is moved into place -- which is exactly what an attacker
+        who renames over the staging path achieves. The post-rename re-hash is the only
+        thing that can catch this, and without it the receipt would record the swapped
+        bytes as ASH's own.
+        """
+        bin_dir = tmp_path / "bin"
+        real_replace = os.replace
+
+        def swap_then_replace(src, dst):
+            Path(src).write_bytes(b"attacker payload")
+            return real_replace(src, dst)
+
+        with (
+            _serve(PAYLOAD),
+            patch("os.replace", side_effect=swap_then_replace),
+            pytest.raises(ToolDownloadIntegrityError, match="does not match the bytes"),
+        ):
+            install_binary_from_url(
+                "https://example.invalid/opengrep", bin_dir, "opengrep"
+            )
+
+        assert not (bin_dir / "opengrep").exists(), (
+            "swapped bytes were left at the install path"
+        )
+
+    def test_the_archive_path_refuses_a_swap_too(self, tmp_path, fake_grype_release):
+        """Both install paths stage, so both need the check."""
+        payload, real_digest = fake_grype_release
+        bin_dir = tmp_path / "bin"
+        real_replace = os.replace
+
+        def swap_then_replace(src, dst):
+            Path(src).write_bytes(b"attacker payload")
+            return real_replace(src, dst)
+
+        with (
+            _pin(_grype_asset_filename(), real_digest),
+            _serve(payload),
+            patch("os.replace", side_effect=swap_then_replace),
+            pytest.raises(ToolDownloadIntegrityError, match="does not match the bytes"),
+        ):
+            install_pinned_tool("grype", "linux", "amd64", bin_dir)
+
+        assert not (bin_dir / "grype").exists()
+
+
+@pytest.mark.skipif(platform.system() == "Windows", reason="POSIX mode bits only")
+class TestReceiptDirectoryPermissions:
+    """Every level ASH creates has to be as trustworthy as the receipt itself."""
+
+    def test_every_created_level_is_private_under_a_loose_umask(
+        self, tmp_path, monkeypatch, fake_grype_release
+    ):
+        """`mkdir(parents=True, mode=0o700)` does not do this.
+
+        CPython applies the mode to the final component only; parents get 0o777 masked
+        by the umask. Measured under umask 002: ~/.ash and ~/.ash/install-receipts both
+        came out 0o775 while only the leaf was 0o700 -- which lets a group member
+        rename the key directory away and plant a conforming 0700/0600 receipt.
+        """
+        payload, real_digest = fake_grype_release
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
+        old_umask = os.umask(0o002)
+        try:
+            with _pin(_grype_asset_filename(), real_digest), _serve(payload):
+                install_pinned_tool("grype", "linux", "amd64", tmp_path / "bin")
+        finally:
+            os.umask(old_umask)
+
+        path = receipt_path(tmp_path / "bin", "grype")
+        assert path.is_file()
+        for level in [path.parent, receipt_root(), receipt_root().parent]:
+            mode = level.stat().st_mode & 0o777
+            assert mode & 0o022 == 0, f"{level} is {oct(mode)}, writable beyond owner"
+
+    def test_a_loose_ancestor_invalidates_the_receipt(
+        self, tmp_path, monkeypatch, fake_grype_release
+    ):
+        """Checking the file and its immediate parent was not enough.
+
+        The key directory can be renamed away by anyone who can write its parent, so a
+        loose grandparent is as good as a loose parent.
+        """
+        payload, real_digest = fake_grype_release
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
+        bin_dir = tmp_path / "bin"
+
+        with _pin(_grype_asset_filename(), real_digest), _serve(payload):
+            install_pinned_tool("grype", "linux", "amd64", bin_dir)
+        assert read_receipt(bin_dir, "grype") is not None
+
+        # Loosen the grandparent, leaving the receipt and its own directory tight.
+        receipt_root().chmod(0o777)
+        assert read_receipt(bin_dir, "grype") is None
+
+        with _pin(_grype_asset_filename(), real_digest), _serve(payload) as served:
+            install_pinned_tool("grype", "linux", "amd64", bin_dir)
+        assert served.called
 
 
 class TestAssetResolution:

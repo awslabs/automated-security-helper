@@ -30,10 +30,9 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scann
     CfnNagScanner,
 )
 
-GEM_PROBE = (
-    "automated_security_helper.plugin_modules.ash_builtin.scanners."
-    "cfn_nag_scanner.find_executable"
-)
+_SCANNER = "automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scanner"
+GEM_PROBE = f"{_SCANNER}.find_executable"
+PLATFORM_PROBE = f"{_SCANNER}.platform.system"
 
 
 @pytest.fixture
@@ -47,8 +46,19 @@ def context(tmp_path: Path) -> PluginContext:
     )
 
 
-def _commands(context, *, gem=None, compiler=None):
-    """Build a scanner with `gem` and a C compiler each present or absent."""
+def _commands(context, *, gem=None, compiler=None, system="Linux"):
+    """Build a scanner with `gem` and a C compiler each present or absent.
+
+    ``system`` is pinned rather than inherited, and that is load-bearing rather than
+    tidiness. The gate branches on the host platform: Windows keys on RI_DEVKIT and
+    ignores the compiler entirely. Without this patch these tests asserted the POSIX
+    branch while running on whatever the runner happened to be -- and `unit-test` runs
+    on windows-latest across four Python versions. Measured with platform.system()
+    forced to Windows and RI_DEVKIT unset: test_gem_present_declares_the_pinned_install
+    failed with `assert 0 == 1` and test_the_pinned_version_... raised IndexError. With
+    RI_DEVKIT set instead, test_no_compiler_means_no_install_command fails. At least
+    one fails either way, so the break did not depend on the runner's environment.
+    """
 
     def probe(command):
         if command == "gem":
@@ -57,7 +67,7 @@ def _commands(context, *, gem=None, compiler=None):
             return compiler
         return f"/usr/bin/{command}"
 
-    with patch(GEM_PROBE, side_effect=probe):
+    with patch(GEM_PROBE, side_effect=probe), patch(PLATFORM_PROBE, return_value=system):
         scanner = CfnNagScanner(context=context)
     return scanner.get_installation_commands("linux", "amd64")
 
@@ -82,17 +92,27 @@ def test_windows_without_a_devkit_declares_nothing(context, monkeypatch):
     RI_DEVKIT is what RubyInstaller's devkit and ruby/setup-ruby export, so it is the
     variable that actually tracks whether a gem can be built.
     """
-    monkeypatch.setattr(
-        "automated_security_helper.plugin_modules.ash_builtin.scanners."
-        "cfn_nag_scanner.platform.system",
-        lambda: "Windows",
-    )
     monkeypatch.delenv("RI_DEVKIT", raising=False)
     # A compiler IS reachable, which is exactly the windows-latest situation.
-    assert _commands(context, gem="C:/Ruby/bin/gem", compiler="C:/mingw/bin/gcc") == []
+    assert (
+        _commands(
+            context,
+            gem="C:/Ruby/bin/gem",
+            compiler="C:/mingw/bin/gcc",
+            system="Windows",
+        )
+        == []
+    )
 
     monkeypatch.setenv("RI_DEVKIT", "C:/Ruby/msys64")
-    assert len(_commands(context, gem="C:/Ruby/bin/gem", compiler=None)) == 1
+    assert (
+        len(
+            _commands(
+                context, gem="C:/Ruby/bin/gem", compiler=None, system="Windows"
+            )
+        )
+        == 1
+    )
 
 
 def test_no_compiler_means_no_install_command(context):
