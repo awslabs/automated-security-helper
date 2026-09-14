@@ -202,6 +202,11 @@ scanners:
 | `enable_preprocessors` | bool | `true` | Enable text extraction from documents |
 | `finding_limit` | int | `0` | Max findings ferret-scan emits (`--limit`). `0` = unlimited. ASH defaults to `0` because ferret-scan's own default of `200` silently truncates large scans. |
 | `fail_on_incomplete` | bool | `false` | Pass `--fail-on-incomplete` so ferret-scan exits 3 when a file could not be fully scanned (findings may be missing). ASH still returns the partial SARIF and records the invocation as unsuccessful/incomplete. |
+| `respect_gitignore` | bool | `false` | Pass `--respect-gitignore` to honor `.gitignore`. Off by default — `.gitignore` often hides high-value files (`.env`, `*.pem`) a sensitive-data scan should see. |
+| `disable_ip_types` | string | `null` | Comma-separated `INTELLECTUAL_PROPERTY` sub-types to skip (`--disable-ip-types`): `copyright,patent,trademark,trade_secret,internal_url`. |
+| `explain` | bool | `false` | Pass `--explain` for an offline per-finding rationale + verdict + drafted suppression reason. No data leaves the host. |
+| `validator_budget` | string | `null` | Per-validator time budget (`--validator-budget`), e.g. `SSN=500ms,all=2m`. Over-budget validators stop and mark the scan incomplete. |
+| `max_live_bytes` | string | `null` | Cap on extracted content held in memory (`--max-live-bytes`), e.g. `256MB`/`1GB`. Bounds peak memory on constrained hosts. |
 | `tool_version` | string | `null` | Version constraint for ferret-scan (e.g., `>=1.0.0,<2.0.0`) |
 | `skip_version_check` | bool | `false` | Skip version compatibility check (use with caution) |
 

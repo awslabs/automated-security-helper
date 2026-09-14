@@ -311,6 +311,44 @@ class TestFerretScannerConfigProcessing:
         assert 3 in scanner.success_exit_codes
         assert 0 in scanner.success_exit_codes
 
+    def test_track_b_options_default_off(
+        self, mock_plugin_context, default_ferret_config
+    ):
+        """None of the Track B opt-in flags are emitted by default."""
+        scanner = FerretScanScanner(
+            context=mock_plugin_context, config=default_ferret_config
+        )
+        scanner._process_config_options()
+        keys = {a.key for a in scanner.args.extra_args}
+        for flag in (
+            "--respect-gitignore",
+            "--disable-ip-types",
+            "--explain",
+            "--validator-budget",
+            "--max-live-bytes",
+        ):
+            assert flag not in keys
+
+    def test_track_b_options_emitted_when_set(self, mock_plugin_context):
+        """Each Track B option maps to its ferret-scan flag with the right value."""
+        config = FerretScannerConfig(
+            options=FerretScannerConfigOptions(
+                respect_gitignore=True,
+                disable_ip_types="copyright,trade_secret",
+                explain=True,
+                validator_budget="all=2m",
+                max_live_bytes="256MB",
+            )
+        )
+        scanner = FerretScanScanner(context=mock_plugin_context, config=config)
+        scanner._process_config_options()
+        args = {a.key: a.value for a in scanner.args.extra_args}
+        assert "--respect-gitignore" in args and args["--respect-gitignore"] is None
+        assert args.get("--disable-ip-types") == "copyright,trade_secret"
+        assert "--explain" in args and args["--explain"] is None
+        assert args.get("--validator-budget") == "all=2m"
+        assert args.get("--max-live-bytes") == "256MB"
+
     def test_process_config_options_custom(
         self, mock_plugin_context, custom_ferret_config
     ):

@@ -287,6 +287,56 @@ class FerretScannerConfigOptions(ScannerOptionsBase):
         ),
     ] = False
 
+    # --- Track B: additional ferret-scan v2.x capabilities (all opt-in) ---
+
+    respect_gitignore: Annotated[
+        bool,
+        Field(
+            description="Pass '--respect-gitignore' so ferret-scan honours .gitignore "
+            "when scanning. Off by default: .gitignore commonly hides files with high "
+            "secret-scanning value (.env, *.pem, credentials/), so honouring it can "
+            "suppress exactly what a sensitive-data scan should see."
+        ),
+    ] = False
+
+    disable_ip_types: Annotated[
+        str | None,
+        Field(
+            description="Comma-separated INTELLECTUAL_PROPERTY sub-types to skip, passed "
+            "as '--disable-ip-types': copyright, patent, trademark, trade_secret, "
+            "internal_url. Useful for codebases with a standard copyright header on every "
+            "file. Only affects the INTELLECTUAL_PROPERTY check."
+        ),
+    ] = None
+
+    explain: Annotated[
+        bool,
+        Field(
+            description="Pass '--explain' so ferret-scan annotates each finding with a "
+            "plain-language rationale, a verdict (likely real/test/uncertain), and a "
+            "drafted suppression reason. Fully offline — no data leaves the host."
+        ),
+    ] = False
+
+    validator_budget: Annotated[
+        str | None,
+        Field(
+            description="Per-validator time budget passed as '--validator-budget', e.g. "
+            "'SSN=500ms,IP_ADDRESS=2m' or 'all=2m'. Over-budget validators are stopped "
+            "and the scan is marked incomplete (see fail_on_incomplete). Default: no budget."
+        ),
+    ] = None
+
+    max_live_bytes: Annotated[
+        str | None,
+        Field(
+            description="Cap on total extracted content held in memory across "
+            "concurrently scanned files, passed as '--max-live-bytes', e.g. '256MB' or "
+            "'1GB' (units: B, KB, MB, GB; bare number = bytes). Bounds peak memory on "
+            "constrained hosts. Default: no cap."
+        ),
+    ] = None
+
     # Ferret-scan's own log level controls (independent of ASH logging)
     ferret_debug: Annotated[
         bool,
@@ -692,6 +742,30 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
         if options.fail_on_incomplete:
             self.args.extra_args.append(
                 ToolExtraArg(key="--fail-on-incomplete", value=None)
+            )
+
+        # Track B opt-in capabilities
+        if options.respect_gitignore:
+            self.args.extra_args.append(
+                ToolExtraArg(key="--respect-gitignore", value=None)
+            )
+
+        if options.disable_ip_types:
+            self.args.extra_args.append(
+                ToolExtraArg(key="--disable-ip-types", value=options.disable_ip_types)
+            )
+
+        if options.explain:
+            self.args.extra_args.append(ToolExtraArg(key="--explain", value=None))
+
+        if options.validator_budget:
+            self.args.extra_args.append(
+                ToolExtraArg(key="--validator-budget", value=options.validator_budget)
+            )
+
+        if options.max_live_bytes:
+            self.args.extra_args.append(
+                ToolExtraArg(key="--max-live-bytes", value=options.max_live_bytes)
             )
 
         # Ferret-scan's own debug/verbose (independent of ASH logging)

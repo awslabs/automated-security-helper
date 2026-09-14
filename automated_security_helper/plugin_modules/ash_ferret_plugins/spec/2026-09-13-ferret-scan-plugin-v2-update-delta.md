@@ -26,18 +26,19 @@ This is the running list of concrete changes shipped in this update. Status lege
 
 | ID | Change | Type | Status | Commit |
 |----|--------|------|--------|--------|
-| B1 | `respect_gitignore` → `--respect-gitignore` (carried from old branch) | feature | ☐ | |
-| B2 | `disable_ip_types` → `--disable-ip-types` (carried from old branch) | feature | ☐ | |
-| B3 | `explain` → `--explain` (offline per-finding rationale) | feature | ☐ | |
-| B4 | `validator_budget` → `--validator-budget` | feature | ☐ | |
-| B5 | `max_live_bytes` → `--max-live-bytes` | feature | ☐ | |
-| B6 | Document new detectors in README Available Checks (BANK_ACCOUNT, OTP, DOB, DRIVERS_LICENSE, MEDICAL_ID, VIN, CLOUD_RESOURCES, PHYSICAL_ADDRESS) | docs | ☐ | |
+| B1 | `respect_gitignore` → `--respect-gitignore` (carried from old branch) | feature | ☑ | (this commit) |
+| B2 | `disable_ip_types` → `--disable-ip-types` (carried from old branch) | feature | ☑ | (this commit) |
+| B3 | `explain` → `--explain` (offline per-finding rationale) | feature | ☑ | (this commit) |
+| B4 | `validator_budget` → `--validator-budget` | feature | ☑ | (this commit) |
+| B5 | `max_live_bytes` → `--max-live-bytes` | feature | ☑ | (this commit) |
+| B6 | Document new detectors in README Available Checks | docs | ☑ | f55ef54 (done in A6) |
 
 ## Status summary (2026-09-13)
 
 **Track A: COMPLETE (6 of 6).** A1, A2, A3, A4, A5, A6 all delivered, each pushed with the
-ferret unit suite green (77 tests) and the pre-push validation script passing (10/10).
-**Track B not started.**
+ferret unit suite green and the pre-push validation script passing (10/10).
+**Track B: COMPLETE (6 of 6).** B1–B5 add opt-in plugin options for the new v2.4.5 flags;
+B6 (documenting the new detectors) was folded into A6. 79 unit tests green.
 
 ## Design decisions recorded
 

@@ -142,4 +142,17 @@ verification run, result, and the pushed commit SHA.
 - Paraphrased the proof block so it does not quote the triggering line (which would make
   DEVELOPMENT.md itself a finding — the documented gotcha).
 - Verified: 0 self-findings on the edited docs; 77 unit tests; validation 10/10.
+- Commit: `2341ce6`
+
+### WL-9 — Track B: surface v2.4.5 flags as opt-in options (2026-09-14)
+- Pre-checked each flag against the installed binary: `--explain`, `--validator-budget`,
+  `--max-live-bytes`, `--respect-gitignore`, `--disable-ip-types` all accepted and produce
+  valid SARIF.
+- `ferret_scanner.py`: added 5 opt-in options — `respect_gitignore` (bool),
+  `disable_ip_types` (str), `explain` (bool), `validator_budget` (str), `max_live_bytes`
+  (str), all default off/None; `_process_config_options` emits the matching flags when set.
+- Tests: `test_track_b_options_default_off`, `test_track_b_options_emitted_when_set` (79 total).
+- Docs: README + DEVELOPMENT option tables. B6 (new-detector docs) was already delivered in
+  A6, so no separate change.
+- Verification: **79 passed**; validation **10/10**; ruff unchanged (21).
 - Commit: _(recorded on next push)_
