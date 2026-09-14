@@ -177,4 +177,4 @@ Addressed a code review of the branch:
   flag it as load-bearing.
 - Verification: **79 passed**; validation **10/10**; ruff unchanged (21); `ash scan
   --scanners ferret-scan` still **PASSED, 0 actionable**; `ash config validate` valid.
-- Commit: _(recorded on next push)_
+- Commit: `5a62dec`
