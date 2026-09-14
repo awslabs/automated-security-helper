@@ -305,6 +305,90 @@ class TestEmptyArgvIsSkipped:
         assert "no install commands were run" in result.output
 
 
+class TestToolSelectionScopesFailures:
+    """A --tool run must not fail for an unrelated plugin that would not construct.
+
+    The discovery loop records a failure for every plugin whose constructor raises,
+    and that happens before the --tool filter. Folding those into the verdict
+    unconditionally meant
+    `ash dependencies install --config .ash/.ash_community_plugins.yaml --tool
+    trivy-repo` -- the command this change adds to CI -- exited 1 whenever any other
+    community plugin failed to import, and named that other plugin in the panel.
+    """
+
+    def _invoke(self, tmp_path, monkeypatch, args):
+        monkeypatch.setenv("ASH_BIN_PATH", str(tmp_path / "bin"))
+        good = MagicMock()
+        good.config = SimpleNamespace(name="good-scanner")
+        good.command = "good-scanner"
+        good.get_installation_commands.return_value = [["echo", "install"]]
+
+        class Broken:
+            def __init__(self, **_kwargs):
+                raise RuntimeError("this plugin will not construct")
+
+        monkeypatch.setattr(
+            "automated_security_helper.cli.dependencies.load_plugins",
+            lambda *_a, **_k: {},
+        )
+        monkeypatch.setattr(
+            "automated_security_helper.cli.dependencies.ash_plugin_manager",
+            SimpleNamespace(
+                plugin_modules=lambda kind: [lambda **_kw: good, Broken]
+                if kind == "scanner"
+                else []
+            ),
+        )
+        monkeypatch.setattr(
+            "automated_security_helper.cli.dependencies.run_command",
+            lambda cmd, shell=False: 0,
+        )
+        monkeypatch.setattr(
+            "automated_security_helper.cli.dependencies.find_executable",
+            lambda cmd: f"/usr/bin/{cmd}",
+        )
+        return runner.invoke(
+            dependencies_app,
+            ["--plugin-type", "scanner", "--bin-path", str(tmp_path / "bin"), *args],
+        )
+
+    def test_a_targeted_run_ignores_an_unrelated_broken_plugin(
+        self, tmp_path, monkeypatch
+    ):
+        result = self._invoke(tmp_path, monkeypatch, ["--tool", "good-scanner"])
+        assert result.exit_code == EXIT_OK, result.output
+        # The load problem is still surfaced -- suppressing it would hide a plugin
+        # that cannot run -- but it is not this run's verdict.
+        assert "Installation Incomplete" not in result.output
+        assert "could not be loaded" in result.output
+
+    def test_an_unnarrowed_run_still_fails_on_a_broken_plugin(
+        self, tmp_path, monkeypatch
+    ):
+        """The other half: without --tool, the run answers for every plugin.
+
+        Without this, scoping the failure set could have been implemented by dropping
+        construction failures altogether, which would hide a plugin that cannot load.
+        """
+        result = self._invoke(tmp_path, monkeypatch, [])
+        assert result.exit_code == EXIT_INSTALL_FAILED
+        assert "Broken" in result.output
+
+    def test_an_unknown_tool_says_some_plugins_failed_to_load(
+        self, tmp_path, monkeypatch
+    ):
+        """A name missing because its plugin would not load is not a typo.
+
+        The declared name of a plugin that never constructed is unknowable, so this
+        does not claim a match -- it says plugins failed to load and names their
+        classes, so the reader is not sent hunting for a spelling mistake.
+        """
+        result = self._invoke(tmp_path, monkeypatch, ["--tool", "not-a-real-tool"])
+        assert result.exit_code == EXIT_BAD_SELECTION
+        assert "failed to load" in result.output
+        assert "Broken" in result.output
+
+
 class TestToolSelection:
     """Invoked through the CLI, isolated so it cannot leak into other tests.
 

@@ -19,10 +19,11 @@ from automated_security_helper.base.plugin_base import CustomCommand
 from automated_security_helper.core.constants import ASH_BIN_PATH
 from automated_security_helper.core.exceptions import ToolDownloadIntegrityError
 
-# Where install receipts live, relative to the bin directory a tool is installed
-# into. A receipt records which pinned asset produced the installed file, which is
-# what makes a second install a no-op instead of a second download.
-RECEIPT_DIR_NAME = ".ash-install-receipts"
+# Name of the directory holding install receipts. See receipt_root() for why it is
+# NOT under the bin directory a tool is installed into: a receipt records the digest
+# an installed binary is checked against, so it is a trust anchor, and the bin
+# directory is world-writable in ASH's own image.
+RECEIPT_DIR_NAME = "install-receipts"
 
 # Read the download in chunks rather than into one buffer. syft's linux asset is
 # ~30MB and trivy's is larger; holding a whole release archive in memory to hash
@@ -138,23 +139,80 @@ def download_file(
             f"Downloaded {url} without a pinned SHA256; integrity was not verified"
         )
 
-    # Move the temporary file to the destination
+    # Move the verified bytes into place without ever following a symlink at the
+    # destination.
+    #
+    # `shutil.move` was not safe enough here. It is `os.rename` -- which is
+    # symlink-safe -- only while source and destination share a filesystem. On EXDEV
+    # it falls back through copy2 to copyfile, which does `open(dst, "wb")` and
+    # follows a link at the destination. The source is a NamedTemporaryFile in
+    # TMPDIR and the destination is ASH_BIN_PATH, so a relocated TMPDIR or a
+    # `--tmpfs /tmp` container puts that fallback on the normal path rather than an
+    # exotic one. This matters most for opengrep, which reaches here through
+    # create_url_download_command, passes no digest, and therefore re-downloads on
+    # every single install.
     dest_path = destination.joinpath(rename_to)
-    shutil.move(temp_file.name, dest_path)
+    _replace_atomically(Path(temp_file.name), dest_path)
 
     ASH_LOGGER.info(f"Downloaded {url} to {dest_path}")
     return dest_path
 
 
+def _replace_atomically(source: Path, target: Path) -> Path:
+    """Move ``source`` onto ``target`` via a staging file in the target's directory.
+
+    Staging in the target directory keeps the final step a same-filesystem
+    ``os.replace``, which cannot follow a symlink at the target and cannot leave a
+    partially written file there. The staging file is opened O_CREAT|O_EXCL (plus
+    O_NOFOLLOW where available), so it cannot be a planted link either.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    staging = target.with_name(target.name + ".ash-partial")
+    try:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        staging.unlink(missing_ok=True)
+        fd = os.open(staging, flags, 0o700)
+        with os.fdopen(fd, "wb") as sink, open(source, "rb") as src:
+            shutil.copyfileobj(src, sink)
+        if platform.system() != "Windows":
+            # Set the final mode here rather than leaving make_executable to OR 0o111
+            # onto the 0o700 the staging file was created with, which produced 0o711
+            # and quietly differed from the 0o755 the archive path produces and from
+            # the 0o755 the previous umask-dependent code produced. Same reasoning as
+            # the archive path: a scanner binary must be executable by whoever runs
+            # the scan, which is not always whoever installed it.
+            os.chmod(staging, 0o755)  # nosec B103 - an executable must be executable
+        os.replace(staging, target)
+    except BaseException:
+        staging.unlink(missing_ok=True)
+        raise
+    finally:
+        source.unlink(missing_ok=True)
+    return target
+
+
 def make_executable(file_path: Path) -> None:
-    """Make a file executable.
+    """Make a file executable, refusing to act through a symlink.
 
     Args:
         file_path: Path to the file to make executable
+
+    ``Path.chmod`` and ``Path.stat`` both follow symlinks, so a link planted at the
+    install location would have had its *target* made executable -- turning an
+    arbitrary file chosen by whoever planted the link into an executable one. The
+    install paths now stage and rename so a link should never be here, and refusing
+    outright rather than dereferencing means a bug that reintroduces one is loud.
     """
-    if platform.system() != "Windows":
-        ASH_LOGGER.info(f"Making {file_path} executable")
-        file_path.chmod(file_path.stat().st_mode | 0o111)  # Add execute permission
+    if platform.system() == "Windows":
+        return
+    if file_path.is_symlink():
+        ASH_LOGGER.warning(
+            f"Refusing to change the mode of {file_path}: it is a symlink, and "
+            "following it would make its target executable instead"
+        )
+        return
+    ASH_LOGGER.info(f"Making {file_path} executable")
+    file_path.chmod(file_path.stat().st_mode | 0o111)  # Add execute permission
 
 
 def unquarantine_macos_binary(file_path: Path) -> None:
@@ -171,20 +229,74 @@ def unquarantine_macos_binary(file_path: Path) -> None:
             ASH_LOGGER.warning(f"Failed to unquarantine {file_path}: {e}")
 
 
+def receipt_root() -> Path:
+    """Directory holding install receipts, deliberately NOT inside any bin directory.
+
+    Receipts used to live in ``<bin dir>/.ash-install-receipts``, and that made the
+    whole re-hash check worthless. A receipt records the digest an installed binary
+    is compared against, so it is a trust anchor -- and ASH's own image runs
+    ``chmod -R 777 ${ASH_BIN_PATH}`` (Dockerfile:243) with no sticky bit. Anything
+    able to replace the binary could equally unlink the receipts directory, recreate
+    it, and write a receipt naming its substitute's digest. ``_already_installed``
+    would then agree with itself and skip forever, exactly as it did before the
+    re-hash existed.
+
+    Keyed by a hash of the resolved destination, because the same tool can be
+    installed into several bin directories and each needs its own record.
+
+    ``$HOME`` rather than the bin directory: the container sets the non-root home to
+    0750 and leaves root's at its default, so neither is world-writable, and
+    ``read_receipt`` refuses a receipt in a group- or other-writable location anyway.
+    """
+    return Path.home().joinpath(".ash", RECEIPT_DIR_NAME)
+
+
 def receipt_path(destination: Path, installed_as: str) -> Path:
-    """Path of the install receipt for ``installed_as`` under ``destination``."""
-    return destination.joinpath(RECEIPT_DIR_NAME, f"{installed_as}.json")
+    """Path of the install receipt for ``installed_as`` installed into ``destination``."""
+    try:
+        key_source = str(Path(destination).resolve())
+    except OSError:  # pragma: no cover - resolve() on an unreadable parent
+        key_source = str(destination)
+    key = hashlib.sha256(key_source.encode("utf-8")).hexdigest()[:16]
+    return receipt_root().joinpath(key, f"{installed_as}.json")
+
+
+def _is_world_or_group_writable(path: Path) -> bool:
+    """Whether ``path`` grants write to group or other.
+
+    POSIX only. Windows does not express permissions in st_mode, so this reports
+    False there and the location check contributes nothing on that platform -- stated
+    plainly rather than implied, since a check that silently does nothing on one
+    platform is the kind of thing that gets trusted everywhere.
+    """
+    if platform.system() == "Windows":
+        return False
+    try:
+        return bool(path.stat().st_mode & 0o022)
+    except OSError:
+        return False
 
 
 def read_receipt(destination: Path, installed_as: str) -> Optional[dict]:
-    """Read an install receipt, or None if absent or unreadable.
+    """Read an install receipt, or None if absent, unreadable or untrustworthy.
 
     An unreadable receipt is treated as absent rather than fatal: the recovery is
     to reinstall, and refusing to install because a cache marker is corrupt would
     be worse than the corruption.
+
+    A receipt whose file or containing directory is writable by group or other is
+    also treated as absent. Anyone who can rewrite it chooses the digest an installed
+    scanner is checked against, which makes it worth nothing -- and re-downloading is
+    the cheap, safe answer.
     """
     path = receipt_path(destination, installed_as)
     if not path.is_file():
+        return None
+    if _is_world_or_group_writable(path) or _is_world_or_group_writable(path.parent):
+        ASH_LOGGER.warning(
+            f"Ignoring install receipt at {path}: it or its directory is writable by "
+            "group or other, so it cannot be trusted to say what was installed"
+        )
         return None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -212,11 +324,22 @@ def write_receipt(
     install as a failure, which is the same class of wrong answer -- in the other
     direction -- as the silent success this change exists to remove. The cost of a
     missing receipt is one redundant download next time, and it is logged.
+
+    The directory is created 0o700 and the file written 0o600, so ``read_receipt``'s
+    location check passes for receipts ASH wrote and fails for a receipt someone else
+    left group- or other-writable. Modes are set explicitly rather than left to the
+    umask, since a permissive umask would otherwise produce a receipt this code then
+    declines to trust.
     """
     path = receipt_path(destination, installed_as)
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         path.write_text(json.dumps(receipt, indent=2, sort_keys=True), encoding="utf-8")
+        if platform.system() != "Windows":
+            # mkdir's mode argument is masked by the umask and is ignored entirely
+            # when the directory already exists, so set both explicitly afterwards.
+            os.chmod(path.parent, 0o700)
+            os.chmod(path, 0o600)
     except OSError as e:
         ASH_LOGGER.warning(
             f"Installed {installed_as} but could not write its install receipt to "

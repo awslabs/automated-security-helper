@@ -18,7 +18,7 @@ global_settings:
       reason: "False positive — hatch build config paths contain strings that match secret patterns"
     - path: automated_security_helper/utils/tool_downloads.py
       rule_id: API_KEY_OR_SECRET
-      line_start: 141
+      line_start: 151
       line_end: 171
       reason: >-
         False positive — every string in this range is a published SHA256 release

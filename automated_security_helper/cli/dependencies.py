@@ -264,6 +264,7 @@ def install_dependencies(
     )
 
     outcomes: List[PluginInstallOutcome] = []
+    construction_failures: List[PluginInstallOutcome] = []
     discovered: List[tuple] = []
     for plugin_type in plugin_types:
         plugin_module_input = (
@@ -293,11 +294,22 @@ def install_dependencies(
                 )
                 discovered.append((plugin_type, plugin_name, plugin_instance))
             except Exception as e:
+                # Reported as a warning here and weighed by the verdict later, because
+                # whether it is fatal depends on the run: a --tool run answers only for
+                # what it was asked about, so an unrelated plugin that will not
+                # construct is information rather than this run's failure.
                 print(
-                    f"[bold red]Error installing dependencies for plugin "
-                    f"{plugin_class.__name__}: {str(e)}[/bold red]",
+                    f"[bold yellow]Plugin {plugin_class.__name__} could not be "
+                    f"loaded: {str(e)}[/bold yellow]",
                 )
-                outcomes.append(
+                # Held aside rather than added to `outcomes` directly. `outcomes` is
+                # what the verdict is computed from, and a plugin that failed to
+                # construct is unrelated to a `--tool` request for a different one --
+                # so folding it in unconditionally made
+                # `ash dependencies install --tool trivy-repo` exit 1 because some
+                # other community plugin would not import, and name that other plugin
+                # in the failure panel.
+                construction_failures.append(
                     PluginInstallOutcome(
                         name=plugin_class.__name__,
                         plugin_type=plugin_type,
@@ -313,10 +325,24 @@ def install_dependencies(
         available = sorted({name for _, name, _ in discovered})
         unknown = [t for t in tools if t not in available]
         if unknown:
+            # A plugin that failed to construct has no config, so its declared name is
+            # unknowable here -- only its class name is. Rather than claim a match that
+            # cannot be established, say that some plugins failed to load, so a
+            # requested name missing for that reason is not misreported as a typo.
+            broken_note = (
+                ""
+                if not construction_failures
+                else (
+                    "\n[yellow]Note:[/yellow] "
+                    + f"{len(construction_failures)} plugin(s) failed to load and are "
+                    "absent from that list: "
+                    + ", ".join(sorted(o.name for o in construction_failures))
+                )
+            )
             console.print(
                 Panel(
                     f"[bold red]Unknown tool(s): {', '.join(sorted(unknown))}[/bold red]\n"
-                    f"[cyan]Available:[/cyan] {', '.join(available)}",
+                    f"[cyan]Available:[/cyan] {', '.join(available)}{broken_note}",
                     title="Nothing installed",
                     expand=False,
                 )
@@ -324,6 +350,9 @@ def install_dependencies(
             raise typer.Exit(EXIT_BAD_SELECTION)
         selected = [entry for entry in discovered if entry[1] in tools]
     else:
+        # Only a run that was not narrowed to specific tools answers for every
+        # plugin, so construction failures count against the verdict only here.
+        outcomes.extend(construction_failures)
         selected = discovered
 
     for plugin_type, plugin_name, plugin_instance in selected:

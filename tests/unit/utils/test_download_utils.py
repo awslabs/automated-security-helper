@@ -1,5 +1,6 @@
 """Unit tests for download_utils.py."""
 
+import io
 import pytest
 import sys
 from pathlib import Path
@@ -16,38 +17,37 @@ from automated_security_helper.utils.download_utils import (
 
 
 @patch("automated_security_helper.utils.download_utils.urllib.request.urlopen")
-@patch("automated_security_helper.utils.download_utils.shutil.copyfileobj")
-@patch("automated_security_helper.utils.download_utils.shutil.move")
-@patch("automated_security_helper.utils.download_utils.tempfile.NamedTemporaryFile")
-@patch("pathlib.Path.mkdir")
-def test_download_file(
-    mock_mkdir, mock_temp_file, mock_move, mock_copyfileobj, mock_urlopen, ash_temp_path
-):
-    """Test download_file function."""
-    # Setup mocks
-    mock_temp = MagicMock()
-    mock_temp.name = f"{ash_temp_path}/tempfile"
-    mock_temp_file.return_value.__enter__.return_value = mock_temp
+def test_download_file(mock_urlopen, tmp_path):
+    """Test download_file function.
 
-    mock_response = MagicMock()
-    mock_urlopen.return_value.__enter__.return_value = mock_response
+    Driven against a real directory rather than a mocked ``shutil.move`` onto
+    ``/test/destination``. The move is no longer a single ``shutil.move`` call: it
+    stages a file in the destination directory and ``os.replace``s it into position,
+    so that a symlink planted at the destination is replaced rather than written
+    through. A test that asserted on the ``shutil.move`` call could only ever check
+    that one implementation was still in use, and it broke the moment that changed --
+    while telling us nothing about whether the bytes arrived.
+    """
+    payload = b"hello from a fake release asset"
 
-    # Create test destination
-    dest = Path("/test/destination")
+    class _Response(io.BytesIO):
+        def __enter__(self):
+            return self
 
-    # Call function
+        def __exit__(self, *_exc):
+            self.close()
+            return False
+
+    mock_urlopen.return_value = _Response(payload)
+
+    dest = tmp_path / "destination"
     result = download_file("https://example.com/file.txt", dest)
 
-    # Verify mocks were called correctly
-    mock_mkdir.assert_called_once_with(parents=True, exist_ok=True)
     mock_urlopen.assert_called_once_with("https://example.com/file.txt")
-    mock_copyfileobj.assert_called_once_with(mock_response, mock_temp)
-    mock_move.assert_called_once_with(
-        f"{ash_temp_path}/tempfile", dest.joinpath("file.txt")
-    )
-
-    # Verify result
     assert result == dest.joinpath("file.txt")
+    assert result.read_bytes() == payload
+    # No staging file is left behind on the happy path.
+    assert not result.with_name("file.txt.ash-partial").exists()
 
 
 @patch("automated_security_helper.utils.download_utils.urllib.request.urlopen")

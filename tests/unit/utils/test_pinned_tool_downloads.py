@@ -13,10 +13,21 @@ Nothing here touches the network. Each test builds a real archive on disk and
 serves its bytes through a patched ``urlopen``, so the tar and zip handling, the
 hashing and the receipt logic are all exercised against real bytes rather than
 against mocks that agree with the implementation by construction.
+
+One thing these tests deliberately cannot check, stated so nobody reads a green run
+as covering it: **whether each pinned asset's ``member_name`` matches the executable
+inside the real archive.** Every fixture here is built with the same member name the
+code then looks for, so the two agree by construction. A wrong ``member_name`` for
+any of the 16 pinned assets -- a vendor renaming its binary, or a typo in the table --
+would pass this file and fail only against a real download. The controls for that are
+``_extract_single_member``'s refusal to guess when zero members match, and CI, which
+performs the real downloads on four platforms.
 """
 
+import errno
 import hashlib
 import io
+import json
 import platform
 import tarfile
 import zipfile
@@ -35,8 +46,10 @@ from automated_security_helper.utils.download_utils import (
     _extract_single_member,
     install_binary_from_url,
     install_pinned_tool,
+    make_executable,
     read_receipt,
     receipt_path,
+    receipt_root,
     sha256_file,
     verify_sha256,
 )
@@ -290,15 +303,104 @@ class TestIdempotence:
             install_binary_from_url(url, bin_dir, "opengrep")
         assert served.called, "an unverified download was cached"
 
-    def test_a_receipt_that_is_not_an_object_is_ignored(self, tmp_path):
+    def test_a_tampered_receipt_does_not_vouch_for_a_tampered_binary(
+        self, tmp_path, monkeypatch, fake_grype_release
+    ):
+        """Replace the binary AND rewrite the receipt to match. Still reinstalls.
+
+        This is the assertion the first version of the re-hash fix was missing.
+        Re-hashing the binary only helps if the digest it is compared against is out
+        of reach of whoever replaced it -- and receipts originally lived in
+        `<bin dir>/.ash-install-receipts`, inside the directory ASH's own image
+        chmods 777. Anything able to swap the binary could rewrite its receipt too,
+        so `_already_installed` agreed with itself and skipped forever. The earlier
+        test passed because it only touched the binary.
+
+        Receipts now live outside any bin directory, and read_receipt refuses one in a
+        group- or other-writable location. This test simulates the attacker winning
+        anyway -- it writes a matching receipt by hand -- and asserts the install still
+        re-downloads, because the receipt it finds is the one in the protected
+        location rather than the planted one.
+        """
+        payload, real_digest = fake_grype_release
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
+        bin_dir = tmp_path / "bin"
+
+        with _pin(_grype_asset_filename(), real_digest), _serve(payload):
+            installed = install_pinned_tool("grype", "linux", "amd64", bin_dir)
+
+        # The receipt must not be anywhere under the bin directory.
+        assert receipt_root() not in bin_dir.parents
+        assert not (bin_dir / RECEIPT_DIR_NAME).exists()
+        assert not (bin_dir / ".ash-install-receipts").exists()
+
+        # Substitute the binary, then plant a receipt inside the bin directory that
+        # vouches for it -- the exact move the old layout allowed.
+        substitute = b"#!/bin/sh\nexit 0\n"
+        installed.write_bytes(substitute)
+        planted = bin_dir / ".ash-install-receipts" / "grype.json"
+        planted.parent.mkdir(parents=True, exist_ok=True)
+        planted.write_text(
+            json.dumps(
+                {
+                    "url": get_tool_asset("grype", "linux", "amd64").url,
+                    "sha256": real_digest,
+                    "installed_sha256": hashlib.sha256(substitute).hexdigest(),
+                    "installed_as": "grype",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with _pin(_grype_asset_filename(), real_digest), _serve(payload) as served:
+            install_pinned_tool("grype", "linux", "amd64", bin_dir)
+        assert served.called, "a planted receipt was allowed to vouch for a substitute"
+        assert installed.read_bytes() == PAYLOAD
+
+    @pytest.mark.skipif(
+        platform.system() == "Windows", reason="POSIX mode bits only"
+    )
+    def test_a_group_writable_receipt_is_not_trusted(
+        self, tmp_path, monkeypatch, fake_grype_release
+    ):
+        """A receipt anyone can rewrite is worth nothing, so it is not read.
+
+        Covers the case where the receipt is in the right place but the directory's
+        mode has been loosened -- by a blanket `chmod -R` in an image build, say.
+        """
+        payload, real_digest = fake_grype_release
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
+        bin_dir = tmp_path / "bin"
+
+        with _pin(_grype_asset_filename(), real_digest), _serve(payload):
+            install_pinned_tool("grype", "linux", "amd64", bin_dir)
+        assert read_receipt(bin_dir, "grype") is not None
+
+        receipt_path(bin_dir, "grype").parent.chmod(0o777)
+        assert read_receipt(bin_dir, "grype") is None
+
+        with _pin(_grype_asset_filename(), real_digest), _serve(payload) as served:
+            install_pinned_tool("grype", "linux", "amd64", bin_dir)
+        assert served.called
+
+    def test_a_receipt_that_is_not_an_object_is_ignored(self, tmp_path, monkeypatch):
         """read_receipt promises None for anything it cannot read.
 
         `[]` is valid JSON and has no .get(), so returning it crashed the caller
         with AttributeError instead of triggering a reinstall.
         """
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
         bin_dir = tmp_path / "bin"
-        (bin_dir / RECEIPT_DIR_NAME).mkdir(parents=True)
-        receipt_path(bin_dir, "grype").write_text("[]", encoding="utf-8")
+        path = receipt_path(bin_dir, "grype")
+        path.parent.mkdir(parents=True, mode=0o700)
+        path.write_text("[]", encoding="utf-8")
         assert read_receipt(bin_dir, "grype") is None
 
     def test_binary_without_receipt_reinstalls(self, tmp_path, fake_grype_release):
@@ -426,6 +528,79 @@ class TestArchiveExtraction:
         assert not target.with_name("grype.ash-partial").exists()
 
 
+class TestUnarchivedDownloadPath:
+    """download_file / install_binary_from_url -- the opengrep path.
+
+    A separate code path from the archive extraction, and the one that runs
+    unconditionally: opengrep passes no pinned digest, so idempotence never applies
+    and every install re-downloads. It needed the same symlink treatment and did not
+    have it.
+    """
+
+    @pytest.mark.skipif(
+        platform.system() == "Windows",
+        reason="symlink creation needs elevation on Windows",
+    )
+    def test_a_symlink_at_the_destination_is_replaced_not_written_through(
+        self, tmp_path
+    ):
+        """`shutil.move` was not sufficient here, and proving that needs EXDEV.
+
+        shutil.move is os.rename, which is symlink-safe -- but only while source and
+        destination share a filesystem. On EXDEV it falls back through copy2 to
+        copyfile, which does `open(dst, "wb")` and follows a link. The source is a
+        NamedTemporaryFile in TMPDIR and the destination is ASH_BIN_PATH, so a
+        relocated TMPDIR or a `--tmpfs /tmp` container puts that fallback on the
+        ordinary path rather than an exotic one.
+
+        os.rename is made to raise EXDEV for the duration, because without it this
+        test proves nothing: on a machine where TMPDIR and the destination share a
+        filesystem -- which is the common case, and was the case here -- the old
+        shutil.move code passes this test. Measured: with os.rename left alone, the
+        mutation restoring shutil.move left the whole file green.
+
+        The patch targets os.rename specifically and not os.replace, which is what the
+        fixed code calls, so the fix stays exercised while the old path is forced down
+        its unsafe branch.
+        """
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        victim = tmp_path / "victim.txt"
+        victim.write_bytes(b"do not touch me")
+        (bin_dir / "opengrep").symlink_to(victim)
+
+        def _cross_device(*_args, **_kwargs):
+            raise OSError(errno.EXDEV, "Invalid cross-device link")
+
+        with _serve(PAYLOAD), patch("os.rename", side_effect=_cross_device):
+            install_binary_from_url(
+                "https://example.invalid/opengrep", bin_dir, "opengrep"
+            )
+
+        assert victim.read_bytes() == b"do not touch me", (
+            "the symlink target was written through"
+        )
+        assert not (bin_dir / "opengrep").is_symlink()
+        assert (bin_dir / "opengrep").read_bytes() == PAYLOAD
+
+    @pytest.mark.skipif(
+        platform.system() == "Windows", reason="POSIX mode bits only"
+    )
+    def test_make_executable_refuses_to_act_through_a_symlink(self, tmp_path):
+        """Path.chmod follows links, so it would have made the target executable."""
+        victim = tmp_path / "victim.txt"
+        victim.write_bytes(b"data")
+        victim.chmod(0o600)
+        link = tmp_path / "link"
+        link.symlink_to(victim)
+
+        make_executable(link)
+
+        assert victim.stat().st_mode & 0o111 == 0, (
+            "make_executable followed the link and made its target executable"
+        )
+
+
 class TestAssetResolution:
     def test_downloadable_tools(self):
         assert downloadable_tools() == ["grype", "syft", "trivy"]
@@ -495,6 +670,46 @@ class TestAssetResolution:
                     f"{tool} is pinned to {version} but asset {filename} does not "
                     "carry that version"
                 )
+
+    def test_the_ferret_suppression_range_still_bounds_the_digest_table(self):
+        """The community config suppresses API_KEY_OR_SECRET over a line range.
+
+        A range wider than the table swallows a real secret written into the
+        surrounding prose; a range narrower than it lets the 16 false positives back
+        in. Either way the config and the file have to agree, and nothing else checks
+        that they do -- the first version of the range covered ten lines of comment
+        above the table.
+        """
+        import yaml
+
+        repo_root = Path(__file__).parents[3]
+        source = (
+            repo_root / "automated_security_helper" / "utils" / "tool_downloads.py"
+        ).read_text(encoding="utf-8").splitlines()
+        # 1-based, matching how the suppression and every editor count lines.
+        opens = next(
+            i + 1 for i, line in enumerate(source) if line.startswith("_DIGESTS")
+        )
+        closes = next(i + 1 for i, line in enumerate(source[opens:], opens) if line == "}")
+
+        config = yaml.safe_load(
+            (repo_root / ".ash" / ".ash_community_plugins.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+        entries = [
+            s
+            for s in config["global_settings"]["suppressions"]
+            if s.get("path", "").endswith("utils/tool_downloads.py")
+        ]
+        assert len(entries) == 1, "expected exactly one suppression for tool_downloads"
+        entry = entries[0]
+        assert entry["line_start"] == opens, (
+            f"suppression starts at {entry['line_start']} but _DIGESTS opens at {opens}"
+        )
+        assert entry["line_end"] == closes, (
+            f"suppression ends at {entry['line_end']} but _DIGESTS closes at {closes}"
+        )
 
     def test_digests_are_well_formed_sha256(self):
         for filename, digest in _DIGESTS.items():

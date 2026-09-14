@@ -102,25 +102,35 @@ runs:
     # where a usable Ruby exists. This is the python-local legs' problem alone: the
     # container legs get cfn-nag from the image and are unaffected.
     #
-    # Needed even though every hosted runner ships a Ruby, for two different
-    # reasons on two different platforms:
+    # Needed even though the hosted runners ship a Ruby, because the preinstalled
+    # interpreter's GEM_HOME is root-owned on Linux. ASH passes --user-install so it
+    # does not need sudo, but a runner-managed Ruby avoids depending on that detail
+    # of the image.
     #
-    #   * On Linux the preinstalled interpreter's GEM_HOME is root-owned. ASH passes
-    #     --user-install so it does not need sudo, but a runner-managed Ruby avoids
-    #     depending on that detail of the image.
-    #   * On Windows the preinstalled Ruby has no build toolchain. cfn-nag pulls in
-    #     cfn-model, which requires `psych ~> 3`, and no psych 3.x release publishes
-    #     a precompiled gem for that runner's ABI -- checked against the RubyGems
-    #     API: 3.1.0 is the newest 3.x with any Windows binary and it is tagged
-    #     x64-mingw32, while Ruby 3.1+ needs x64-mingw-ucrt. So psych must build
-    #     from source, and that needs the MSYS2 devkit this action installs.
+    # Deliberately NOT run on Windows, and this is a measured decision rather than a
+    # guess. Running it there broke the job in a way that had nothing to do with
+    # Ruby: setup-ruby prepends its MSYS2 directories to PATH, so every later
+    # `shell: bash` step resolved to
+    # C:\hostedtoolcache\windows\Ruby\3.3.12\x64\msys64\usr\bin\bash.EXE instead of
+    # Git Bash, and the pre-existing "Validate ASH config files" step -- untouched by
+    # this change -- then exited 2 in 176ms. The fix for cfn-nag cannot be allowed to
+    # change the shell every other step runs in.
     #
-    # If cfn-nag still cannot install on windows-latest with a devkit present, that
-    # is a real per-platform constraint rather than something to paper over, and
-    # this step is what makes the answer observable instead of inferred.
+    # What that leaves unresolved, stated plainly rather than hidden: cfn-nag pulls
+    # in cfn-model, which requires `psych ~> 3`, and no psych 3.x release publishes a
+    # precompiled gem for that runner's ABI. Checked against the RubyGems API: 3.1.0
+    # is the newest 3.x carrying any Windows binary and it is tagged x64-mingw32,
+    # while Ruby 3.1+ needs x64-mingw-ucrt. psych must therefore build from source,
+    # which needs a toolchain that cannot be added here without the PATH side effect
+    # above. So cfn-nag is genuinely not provisionable on windows-latest today, and
+    # the scanner reports itself that way rather than failing the installer.
+    # Pinned to a commit, not to `v1`. `v1` on this action is a moving major tag, and
+    # this repository gates on full-SHA pins for third-party actions
+    # (.github/scripts/assert-actions-pinned.mjs, COMMIT_SHA = /^[0-9a-fA-F]{40}$/).
+    # This SHA is v1.321.0, which is what `v1` resolved to when this was added.
     - name: Set up Ruby for cfn-nag
-      if: inputs.method == 'python-local'
-      uses: ruby/setup-ruby@v1
+      if: inputs.method == 'python-local' && runner.os != 'Windows'
+      uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
       with:
         ruby-version: "3.3"
 
