@@ -139,9 +139,14 @@ def test_install_binary_from_url(
             "https://example.com/file", Path("/test/destination"), "renamed_file"
         )
 
-        # Verify mocks were called correctly
+        # Verify mocks were called correctly. expected_sha256 is threaded through
+        # explicitly; None here because this caller passes no pinned digest, and the
+        # download logs that it went unverified rather than passing silently.
         mock_download_file.assert_called_once_with(
-            "https://example.com/file", Path("/test/destination"), "renamed_file"
+            "https://example.com/file",
+            Path("/test/destination"),
+            "renamed_file",
+            expected_sha256=None,
         )
         mock_make_executable.assert_called_once_with(Path("/test/destination/file"))
         mock_unquarantine.assert_called_once_with(Path("/test/destination/file"))

@@ -174,11 +174,28 @@ def read_receipt(destination: Path, installed_as: str) -> Optional[dict]:
         return None
 
 
-def write_receipt(destination: Path, installed_as: str, receipt: dict) -> Path:
-    """Write an install receipt recording which pinned asset was installed."""
+def write_receipt(
+    destination: Path, installed_as: str, receipt: dict
+) -> Optional[Path]:
+    """Write an install receipt recording which pinned asset was installed.
+
+    Best-effort on purpose. The receipt is a cache that makes the *next* install a
+    no-op; the tool itself is already in place by the time this runs. Failing the
+    install because a marker file could not be written would report a successful
+    install as a failure, which is the same class of wrong answer -- in the other
+    direction -- as the silent success this change exists to remove. The cost of a
+    missing receipt is one redundant download next time, and it is logged.
+    """
     path = receipt_path(destination, installed_as)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(receipt, indent=2, sort_keys=True), encoding="utf-8")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(receipt, indent=2, sort_keys=True), encoding="utf-8")
+    except OSError as e:
+        ASH_LOGGER.warning(
+            f"Installed {installed_as} but could not write its install receipt to "
+            f"{path}: {e}. The next install will re-download it."
+        )
+        return None
     return path
 
 
@@ -458,9 +475,15 @@ def create_url_download_command(
     Returns:
         CustomCommand object
     """
-    # Use the provided destination or get the current ASH_BIN_PATH
+    # Use the provided destination or get the current ASH_BIN_PATH.
+    #
+    # Resolved from the environment rather than from the imported constant. The
+    # constant is fixed when core.constants is first imported, which happens before
+    # `ash dependencies install --bin-path X` exports ASH_BIN_PATH -- so opengrep
+    # installed into the default directory while the installer reported the
+    # requested one, and the post-install sweep then found nothing there.
     if destination is None:
-        destination = str(ASH_BIN_PATH).replace(
+        destination = str(_current_bin_path()).replace(
             "\\", "/"
         )  # Ensure forward slashes for cross-platform compatibility
 
