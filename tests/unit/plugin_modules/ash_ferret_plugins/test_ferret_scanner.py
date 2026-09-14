@@ -306,10 +306,11 @@ class TestFerretScannerConfigProcessing:
         assert arg.value is None
 
     def test_incomplete_exit_code_is_accepted(self, mock_plugin_context):
-        """Exit 3 (--fail-on-incomplete, partial coverage) is a non-fatal accepted code."""
+        """Exit 0 (normal) and 3 (--fail-on-incomplete) are accepted; 1 (error) is not."""
         scanner = FerretScanScanner(context=mock_plugin_context)
         assert 3 in scanner.success_exit_codes
         assert 0 in scanner.success_exit_codes
+        assert 1 not in scanner.success_exit_codes
 
     def test_track_b_options_default_off(
         self, mock_plugin_context, default_ferret_config

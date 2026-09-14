@@ -14,7 +14,7 @@ verification run, result, and the pushed commit SHA.
 
 - `ferret-scan` installed: **v2.4.5** (commit 71b171e, go1.27.1, linux/amd64), via mise shim.
 - `uv`, `python3` available.
-- Authoritative `--checks` list from `ferret-scan --help checks` (20 checks + `all`):
+- Authoritative `--checks` list from `ferret-scan --help checks` (19 checks + `all`):
   `BANK_ACCOUNT, CLOUD_RESOURCES, CREDIT_CARD, DATE_OF_BIRTH, DRIVERS_LICENSE, EMAIL,
   INTELLECTUAL_PROPERTY, IP_ADDRESS, MEDICAL_ID, METADATA, OTP, PASSPORT, PERSON_NAME,
   PHONE, PHYSICAL_ADDRESS, SECRETS, SOCIAL_MEDIA, SSN, VIN`.
@@ -156,3 +156,25 @@ verification run, result, and the pushed commit SHA.
   A6, so no separate change.
 - Verification: **79 passed**; validation **10/10**; ruff unchanged (21).
 - Commit: `151661a`
+
+### WL-10 — Review fixes (2026-09-14)
+Addressed a code review of the branch:
+- **Defect 1 (real):** DEVELOPMENT.md had the entire `### Suppression Strategy` heading +
+  paragraph duplicated verbatim (an artifact of the A3/WL-8 edit). Collapsed to one copy.
+- **Defect 2 (audit):** delta had a duplicated A5 row mis-attributed to `1d34b4f→` (which
+  is actually the "API_KEY_OR_SECRET cannot be disabled via config" docs commit). Removed
+  the duplicate; A5 = `12f28c0`.
+- **Defect 3 (cosmetic):** analysis prose drift — `20 checks`→`19`, removed `KEYWORD_MATCH`
+  (it is an internal validator, not a `--checks` value), `77 green`→`79`. Same 20→19 fix in
+  this work log's baseline. Shipped README/tests were already correct.
+- **DP1 (hardening):** narrowed the `API_KEY_OR_SECRET` test suppression from `tests/**` to
+  the one real FP file `tests/unit/cli/mcp/test_sessions.py`, so a real credential added to
+  another test later is not silently suppressed.
+- **DP3 (correctness):** `success_exit_codes` narrowed `{0,1,3}`→`{0,3}`. ferret-scan uses
+  `os.Exit(1)` for genuine errors (many call sites), so 1 must surface as a failure.
+- **DP2 (documented):** left the community-only suppression placement (verified correct —
+  ferret isn't enabled in `.ash.yaml`) but strengthened the DEVELOPMENT "Exception" note to
+  flag it as load-bearing.
+- Verification: **79 passed**; validation **10/10**; ruff unchanged (21); `ash scan
+  --scanners ferret-scan` still **PASSED, 0 actionable**; `ash config validate` valid.
+- Commit: _(recorded on next push)_

@@ -454,9 +454,11 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
     # ferret-scan exits 0 on a normal scan (even with findings) and 3 when
     # --fail-on-incomplete is set and a file could not be fully scanned. Exit 3 is a
     # deliberate integrity signal that still ships valid (partial) SARIF, so it is an
-    # accepted, non-fatal outcome rather than a scanner failure. (1 is kept from the
-    # base default for parity with other scanners.)
-    success_exit_codes: ClassVar[set[int]] = {0, 1, 3}
+    # accepted, non-fatal outcome. Exit 1 is NOT accepted: ferret-scan uses os.Exit(1)
+    # for genuine error conditions (bad args, unreadable config, internal failure), so
+    # treating it as success would mask a real failure. We therefore override the base
+    # default of {0, 1} to {0, 3} rather than adding to it.
+    success_exit_codes: ClassVar[set[int]] = {0, 3}
 
     def model_post_init(self, context):
         if self.config is None:

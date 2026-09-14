@@ -77,9 +77,11 @@ into one comma-separated `--exclude`, and a pre-push validation script
 ### 4.1 New detector / check types (all work today via `--checks`)
 `BANK_ACCOUNT`, `OTP` (two-factor), `DATE_OF_BIRTH`, `PHYSICAL_ADDRESS`/`ADDRESS`,
 `DRIVERS_LICENSE`, `MEDICAL_ID` (PHI), `VIN`, `CLOUD_RESOURCES` (AWS ARNs, Azure/GCP/
-OCI/IBM/Alibaba IDs), `KEYWORD_MATCH`, plus AWS secret-access-key coverage inside
-`SECRETS`. **The plugin's `checks` field is a free-form string passed straight to
-`--checks`, so these already function** — but the README/docs advertise only 11 of
+OCI/IBM/Alibaba IDs), plus AWS secret-access-key coverage inside
+`SECRETS`. (`KEYWORD_MATCH` is an internal validator, not a selectable `--checks` value —
+it does not appear in `ferret-scan --help checks`.) **The plugin's `checks` field is a
+free-form string passed straight to `--checks`, so these already function** — but the
+README/docs advertise only 11 of
 ~21 available checks. Authoritative list is `ferret-scan --help checks` (do NOT
 hardcode).
 
@@ -205,7 +207,7 @@ GenAI block-list entry is needed. `extract_text` maps to `--preprocess-only`/`-p
    (`--disable-ip-types`), `validator_budget` (`--validator-budget`), `max_live_bytes`
    (`--max-live-bytes`), `respect_gitignore` (`--respect-gitignore`).
 6. Document the new detectors (`BANK_ACCOUNT, OTP, DATE_OF_BIRTH, PHYSICAL_ADDRESS,
-   DRIVERS_LICENSE, MEDICAL_ID, VIN, CLOUD_RESOURCES, KEYWORD_MATCH`) in README's
+   DRIVERS_LICENSE, MEDICAL_ID, VIN, CLOUD_RESOURCES`) in README's
    Available Checks section.
 7. Handle exit code 3 (`--fail-on-incomplete`) sensibly in the return contract if
    adopted (currently `executionSuccessful = exit_code == 0`).
@@ -269,7 +271,7 @@ GenAI block-list entry is needed. `extract_text` maps to `--preprocess-only`/`-p
 ### 9.2 Posture updates (verified against the installed binary)
 - ferret-scan **v2.4.5 is installed** in this environment; all findings below were
   confirmed against `ferret-scan --help` / `--help checks`, not just the docs.
-- **Authoritative check list = 20 checks** (see work log). README documents 11 — the gap
+- **Authoritative check list = 19 checks** (see work log). README documents 11 — the gap
   is real; A6/B6 will reconcile it. Never hardcode the list (upstream `upstream-asks.md`
   explicitly warns integrators about doc drift).
 - `--limit` default **200** confirmed (`0` = unlimited) → A2 is a genuine correctness fix.
@@ -361,5 +363,5 @@ and rely on suppressions/excludes** (not the post-filter). Implemented as A3:
   stays ENABLED") and README.md (user-facing note + suppression recipe).
 - **Verified end-to-end:** `ash scan --scanners ferret-scan --config
   .ash/.ash_community_plugins.yaml` → ferret-scan **PASSED, 0 actionable** (8 findings, all
-  suppressed). Unit tests 77 green; `validate_ferret_plugin.py` 10/10; the new doc/reason
+  suppressed). Unit tests 79 green; `validate_ferret_plugin.py` 10/10; the new doc/reason
   text produces 0 self-findings; `ash config validate` passes.

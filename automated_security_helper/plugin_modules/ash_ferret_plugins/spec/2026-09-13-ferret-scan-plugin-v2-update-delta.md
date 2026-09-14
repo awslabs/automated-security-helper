@@ -19,7 +19,6 @@ This is the running list of concrete changes shipped in this update. Status lege
 | A3 | Keep `API_KEY_OR_SECRET` enabled; suppress the 6 v2.4.5 FPs in the community config + document the policy | fix | ☑ | 35c5dbe |
 | A4 | Adopt `--fail-on-incomplete` (new `fail_on_incomplete` option) + exit-code-3 handling | feature | ☑ | 2b0458c |
 | A5 | Block-list additions: `preprocess_only`, `pre_commit_mode`, `list_profiles`; always `--quiet` | fix | ☑ | 12f28c0 |
-| A5 | Block-list additions: `preprocess_only`, `pre_commit_mode`, `list_profiles`; always `--quiet` | fix | ☑ | 1d34b4f→ |
 | A6 | Doc corrections: `--exclude` glob+substring semantics, empty-result `null`→`[]`, full check list, remove dead GenAI references | docs | ☑ | f55ef54 |
 
 ## Track B — Feature surfacing (after Track A)

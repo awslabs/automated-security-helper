@@ -47,11 +47,13 @@ global_settings:
         False positive. The flagged local's name contains the word "secret"
         (manage-auth-secret), but its value is a boolean computed from whether an
         optional input was supplied, not a credential.
-    - path: tests/**
+    - path: tests/unit/cli/mcp/test_sessions.py
       rule_id: API_KEY_OR_SECRET
       reason: >-
-        False positive. Test code assigns locals named for session objects, which
-        match the secret-keyword heuristic; these are fixtures, not real credentials.
+        False positive. This file assigns locals named for session objects, which match
+        the secret-keyword heuristic; these are fixtures, not real credentials. Scoped to
+        this file (rather than tests/**) so a genuinely hardcoded credential added to some
+        other test later is not silently suppressed.
     - path: automated_security_helper/plugin_modules/ash_ferret_plugins/DEVELOPMENT.md
       rule_id: SECRET-SECRET-KEYWORD
       line_start: 501
