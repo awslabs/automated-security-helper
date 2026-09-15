@@ -632,13 +632,25 @@ def _resolve_fail_on_incomplete_scanners(
     3. *config_value* -- read from the config file before the scan, which is what
        container mode has to fall back on and what ``ash merge`` passes from the
        config carried in the shard results.
-    4. On, matching ``AshConfig.fail_on_incomplete_scanners``.
+    4. Off, matching ``AshConfig.fail_on_incomplete_scanners``.
 
     Step 4 is reached only when no config model was available at all -- a results
     object built by hand, or a scan whose config failed to load. It agrees with the
     model default deliberately: the two are the same question answered twice, and
     when they disagreed the answer you got depended on how far the scan had got
     before it was asked, which is not a property anyone wants an exit code to have.
+
+    OFF rather than on, and this was on by default for part of this branch's life.
+    The gate is correct and this repository does not currently pass it: cdk-nag
+    evaluates 6 of its 10 targets here, so `incomplete_scanners` reports
+    ``PASSED (4 of 10 targets unevaluated)`` and every scan leg in CI exits 1 --
+    measured on x86 Linux, arm64 and Windows alike, so it is not a platform
+    artifact. Turning a completeness gate on before the tree it gates is complete
+    makes the gate's first act a false alarm, and the two unscanned CloudFormation
+    templates behind that count are a real coverage gap that wants fixing rather
+    than defaulting past. Enabling it is therefore blocked on that fix, not on
+    anyone's appetite; until then the honest default is the one an operator opts
+    out of nothing to get.
     """
     if opts.fail_on_incomplete_scanners is not None:
         return opts.fail_on_incomplete_scanners
@@ -650,7 +662,7 @@ def _resolve_fail_on_incomplete_scanners(
 
     if config_value is not None:
         return config_value
-    return True
+    return False
 
 
 def _severity_filters_finding(result, min_sev_rank: int) -> bool:

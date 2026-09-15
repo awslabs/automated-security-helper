@@ -678,13 +678,28 @@ class TestCompletenessParityWithComputeExitCode:
         return model
 
     def _standalone_exit_code(self, tmp_path, scanner_statuses):
+        """``_compute_exit_code`` with the completeness gate explicitly ON.
+
+        Explicit rather than defaulted, and that is what makes the parity assertions
+        below mean anything. ``incomplete_scanners_for_project`` reports the
+        incomplete set unconditionally, while ``_compute_exit_code`` only acts on it
+        when ``fail_on_incomplete_scanners`` resolves true -- which is off by
+        default, since this repository cannot yet pass its own gate. Leaving it
+        defaulted compares a gated verdict against an ungated list, so the two
+        derivations disagree on the flag rather than on the scanners, and the
+        invariant this class exists for goes untested in the direction that matters.
+        """
         from automated_security_helper.interactions.run_ash_scan import (
             ScanOptions,
             _compute_exit_code,
         )
 
         model = self._model(scanner_statuses)
-        opts = ScanOptions(source_dir=tmp_path, output_dir=tmp_path)
+        opts = ScanOptions(
+            source_dir=tmp_path,
+            output_dir=tmp_path,
+            fail_on_incomplete_scanners=True,
+        )
         return _compute_exit_code(model, opts, None)
 
     @pytest.mark.parametrize("status", ["MISSING", "ERROR"])

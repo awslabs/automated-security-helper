@@ -102,51 +102,59 @@ class TestIncompleteScannersTripTheGate:
             f"indistinguishable from a clean run"
         )
 
-    def test_the_default_fails_a_scan_with_an_incomplete_scanner(self, tmp_path):
-        """The regression test. Nothing is passed, so this is the default's answer.
+    def test_the_default_is_off_and_the_opt_in_is_what_gates(self, tmp_path):
+        """The default's answer, and the same input's answer when the flag is passed.
 
-        This is the assertion that was inverted, and the inversion is the whole
-        defect. The gate shipped opt-in, on the argument that turning it on by
-        default would redden CI in every environment lacking a scanner's tool.
-        That is true and it is not a reason: those runs were already not measuring
-        what they claimed to measure, and a green check run is how nobody found
-        out. Measured on the pull request that prompted this, on GREEN check runs:
-        ``scan (python-local, windows-latest)`` had four of ten scanners MISSING
-        (cfn-nag, grype, semgrep, syft), each at under a millisecond, and the three
-        ubuntu/macos python-local cells had three each. In the cells where semgrep
-        did run it reported 82 findings. The green Windows cell was not clean, it
-        was unmeasured.
+        THE FINDING THAT ARGUES FOR TURNING THIS ON, kept because it is the reason
+        the flag exists and it is still true. Measured on the pull request that
+        prompted this work, on GREEN check runs: ``scan (python-local,
+        windows-latest)`` had four of ten scanners MISSING (cfn-nag, grype, semgrep,
+        syft), each at under a millisecond, and the three ubuntu/macos python-local
+        cells had three each. In the cells where semgrep did run it reported 82
+        findings. The green Windows cell was not clean, it was unmeasured.
 
-        Nothing is passed for ``fail_on_incomplete_scanners`` here, on the command
-        line or in a config, so what this pins is precisely the value an operator
-        who never heard of the flag gets. ``results`` is a MagicMock, whose
-        ``ash_config`` attribute auto-creates to another MagicMock rather than a
-        bool, so ``_resolve_fail_on_incomplete_scanners`` falls through its config
-        steps to the final default -- which is the one this test is about.
+        WHY THE DEFAULT IS NEVERTHELESS OFF, and this is a measurement rather than a
+        retreat. The default was flipped on for part of this branch's life and had to
+        be flipped back: this repository does not pass its own gate. cdk-nag
+        evaluates 6 of its 10 targets here, so ``incomplete_scanners`` reports
+        ``PASSED (4 of 10 targets unevaluated)`` and every ``scan`` leg exits 1 --
+        reproduced on x86 Linux locally as well as on arm64 and Windows in CI, so it
+        is not a platform artifact. Two of those four are real CloudFormation
+        templates going unscanned. A completeness gate whose first act is to fail
+        every scan of its own repository teaches operators to pass
+        ``--no-fail-on-incomplete-scanners``, which is worse than shipping it opt-in.
+        Enabling it is blocked on that coverage fix, which lives in
+        ``cdk_nag_wrapper.py``.
 
-        Discrimination check, run before this was committed: against the
-        pre-change tree this test fails with ``assert 0 == 1``, because the default
-        was off and both an ERROR and a MISSING scanner produced exit 0. Every
-        other test in this file passes under either version, which is why this one
-        is the regression test and they are not.
+        BOTH DIRECTIONS IN ONE TEST, deliberately. Asserting only the default would
+        leave a passing test that says nothing about whether the gate works, and
+        that is precisely how this flag could be quietly broken while the suite
+        stayed green: nothing else here drives the *default* path. ``results`` is a
+        MagicMock whose ``ash_config`` auto-creates to another MagicMock rather than
+        a bool, so ``_resolve_fail_on_incomplete_scanners`` falls through to its
+        final literal -- the step this covers.
         """
-        opts = _opts(tmp_path)
         results = MagicMock()
         results.sarif = None
+        metrics = [
+            _metric("cdk-nag", ScannerStatus.MISSING.value),
+            _metric("grype", ScannerStatus.ERROR.value),
+        ]
 
-        with patch(
-            f"{_MODULE}.get_unified_scanner_metrics",
-            return_value=[
-                _metric("cdk-nag", ScannerStatus.MISSING.value),
-                _metric("grype", ScannerStatus.ERROR.value),
-            ],
-        ):
-            code = _compute_exit_code(results, opts)
+        with patch(f"{_MODULE}.get_unified_scanner_metrics", return_value=metrics):
+            defaulted = _compute_exit_code(results, _opts(tmp_path))
+            opted_in = _compute_exit_code(
+                results, _opts(tmp_path, fail_on_incomplete_scanners=True)
+            )
 
-        assert code == 1, (
-            "with no flag and no config, a scan carrying a MISSING and an ERROR "
-            "scanner must not exit 0 -- that code is indistinguishable from a scan "
-            "where all ten ran and found nothing"
+        assert defaulted == 0, (
+            "the gate is opt-in until this repository can pass it; a default of 1 "
+            "here makes every scan leg red on every platform"
+        )
+        assert opted_in == 1, (
+            "and the gate must still work when asked for -- a MISSING and an ERROR "
+            "scanner is exactly what it exists to catch, and without this assertion "
+            "the test above would pass against a gate that had stopped functioning"
         )
 
     def test_the_default_comes_from_the_config_model_not_just_the_fallback(
@@ -156,12 +164,12 @@ class TestIncompleteScannersTripTheGate:
 
         Separate from the test above because the two exercise different steps of
         ``_resolve_fail_on_incomplete_scanners`` and only one of them is the path a
-        real scan takes. A real run has a resolved config on ``results``, so it
-        stops at the ``isinstance(..., bool)`` step and never reaches the final
-        fallback; a hand-built results object reaches the fallback. Both had to be
-        flipped, and a test that only covered one would let the other keep the old
-        answer -- with the symptom that whether you got a correct exit code
-        depended on how far config resolution had got.
+        real scan takes. A real run has a resolved config on ``results``, so it stops
+        at the ``isinstance(..., bool)`` step and never reaches the final fallback; a
+        hand-built results object reaches the fallback. Both carry the same value
+        deliberately, and a test covering only one would let the other drift -- with
+        the symptom that whether you got a gated exit code depended on how far config
+        resolution had got before it was asked.
         """
         from automated_security_helper.config.ash_config import AshConfig
 
@@ -176,7 +184,10 @@ class TestIncompleteScannersTripTheGate:
         ):
             code = _compute_exit_code(results, opts)
 
-        assert code == 1
+        assert code == 0, (
+            "a real AshConfig carries the model default, which is off; this is the "
+            "step a real scan takes and it must agree with the fallback above"
+        )
 
     def test_skipped_scanners_never_trip_the_gate(self, tmp_path):
         """SKIPPED is "not selected", which is how a shard excludes its siblings.
@@ -1077,17 +1088,18 @@ class TestConfigFileResolution:
         (source / ".ash.yaml").write_text("project_name: gate-test\n", encoding="utf-8")
 
         opts = ScanOptions(source_dir=source, output_dir=tmp_path / "out")
-        assert _resolve_config_fail_on_incomplete_scanners(opts) is True
+        assert _resolve_config_fail_on_incomplete_scanners(opts) is False
 
     def test_reads_an_explicit_false_from_the_config_file(self, tmp_path):
-        """An operator who wrote ``false`` gets ``false``, not the default.
+        """An operator who wrote ``false`` gets ``false`` from the file, not the default.
 
-        Worth its own test now that the default is True: without it, a bug that
-        made this function ignore the file and return the model default would be
-        invisible -- ``test_absent_field_resolves_to_the_models_default`` would
-        still pass, and so would every other test here. The opt-out is the only
-        way an environment that has decided a partial scan is acceptable can say
-        so, so it has to be the one thing that cannot silently stop working.
+        Weaker than it was while the default was True, because it now agrees with
+        the default and so cannot distinguish "read the file" from "returned the
+        fallback". Kept rather than deleted: its sibling
+        ``test_reads_fail_on_incomplete_scanners_from_config_file`` supplies the
+        discriminating direction by asserting ``true`` is read back, and the pair
+        together still pin that the file is consulted at all. If the default is ever
+        turned on again, this one regains its independent value with no edit.
         """
         from automated_security_helper.interactions.run_ash_scan import (
             _resolve_config_fail_on_incomplete_scanners,
@@ -1117,10 +1129,22 @@ class TestConfigFileResolution:
 class TestConfigModelAndValidator:
     """The field has to exist on the model and be accepted by ``ash config``."""
 
-    def test_config_field_defaults_to_true(self):
+    def test_config_field_defaults_to_false_until_the_tree_passes_the_gate(self):
+        """Off by default, and the reason is a measurement rather than caution.
+
+        This asserted True for part of this branch's life. The gate is correct and
+        this repository does not pass it: cdk-nag evaluates 6 of its 10 targets
+        here, so ``incomplete_scanners`` reports
+        ``PASSED (4 of 10 targets unevaluated)`` and every scan leg exits 1 --
+        reproduced on x86 Linux locally as well as on arm64 and Windows in CI, so it
+        is not a platform artifact. Two of those four are real CloudFormation
+        templates going unscanned, which is a coverage gap to fix rather than to
+        default past. Enabling this is blocked on that fix; see
+        ``_resolve_fail_on_incomplete_scanners``.
+        """
         from automated_security_helper.config.ash_config import AshConfig
 
-        assert AshConfig(project_name="x").fail_on_incomplete_scanners is True
+        assert AshConfig(project_name="x").fail_on_incomplete_scanners is False
 
     def test_the_model_default_and_the_resolver_fallback_agree(self, tmp_path):
         """Two answers to one question must not be able to disagree.

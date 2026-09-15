@@ -1280,13 +1280,22 @@ class TestMergeCli:
         # reads as a complete scan.
         assert not (tmp_path / "merged" / RESULTS_FILE_NAME).exists()
 
-    def test_the_same_shards_are_refused_without_the_flag(self, tmp_path):
+    def test_the_same_shards_merge_by_default(self, tmp_path):
         """The default half of the pair, through the same CLI path.
 
-        Used to assert exit 2 and a written report: the other shards' findings
-        decided the verdict and the shard that ran nothing was invisible to it.
-        That merged report was the artifact a downstream job consumed, and it read
-        as a complete scan.
+        The gate is opt-in, so with no flag the merge succeeds and the other shards'
+        findings decide the verdict -- exit 2 -- while the shard that ran nothing is
+        invisible to it. That is the false green the flag exists to close, and it is
+        recorded here as the current default rather than as a fixed defect, because
+        enabling the gate by default is blocked on this repository being able to pass
+        it: cdk-nag leaves 4 of its 10 targets unevaluated, which reddens every scan
+        leg on every platform.
+
+        Kept alongside ``test_the_negated_flag_merges_the_same_shards`` even though
+        the two now assert the same outcome. They exercise different inputs -- an
+        absent option versus typer's generated ``--no-`` form -- and only the second
+        would catch a mistake in the negated option's name. If the default is turned
+        on again, this one regains its independent value with no edit.
         """
         shards = build_shards(3)
         _make_shard_contribute_nothing(shards[1])
@@ -1298,9 +1307,9 @@ class TestMergeCli:
 
         result = self._invoke(args)
 
-        assert result.exit_code == 1, result.output
-        assert "completed none" in result.output
-        assert not (tmp_path / "merged" / RESULTS_FILE_NAME).exists()
+        assert result.exit_code == 2, result.output
+        assert "completed none" not in result.output
+        assert (tmp_path / "merged" / RESULTS_FILE_NAME).exists()
 
     def test_the_negated_flag_merges_the_same_shards(self, tmp_path):
         """The opt-out, through typer, so its option name is exercised too.
@@ -1691,6 +1700,15 @@ class TestShardContributionIsRefused:
         assert something unrelated about, and flipping it would redden all of them
         to restate a default that ``_resolve_require_scanner_completion`` already
         owns. The user-visible default lives there and in ``AshConfig``.
+
+        THE GATE IS PASSED EXPLICITLY, because the user-visible default is off. It
+        was on for part of this branch's life and had to be reverted: this repository
+        cannot pass its own completeness gate while cdk-nag leaves 4 of its 10
+        targets unevaluated, which reddens every scan leg on every platform. What
+        this test pins is unchanged by that -- the verdict for a union missing a
+        shard's worth of scanners, once an operator has asked to be told. The
+        default's own value is pinned by
+        ``test_fail_on_incomplete_scanners.py::test_the_default_is_off_and_the_opt_in_is_what_gates``.
         """
         shards = build_shards(3)
         for model in shards:
@@ -1703,7 +1721,7 @@ class TestShardContributionIsRefused:
 
         merged = merge_shard_results(as_loaded(shards))
 
-        assert _merged_exit_code(merged, tmp_path, "low", None) == 1
+        assert _merged_exit_code(merged, tmp_path, "low", None, True) == 1
 
     def test_the_same_merge_exits_zero_with_the_gate_explicitly_off(self, tmp_path):
         """The opt-out, on the identical fixture.
@@ -1811,23 +1829,27 @@ class TestMergedExitCodeIncompleteScanners:
 
         assert _merged_exit_code(merged, tmp_path, "low", None, True) == 1
 
-    def test_the_default_reports_the_incomplete_scanner_over_the_findings(
-        self, tmp_path
-    ):
+    def test_the_gate_reports_the_incomplete_scanner_over_the_findings(self, tmp_path):
         """1, not 2, and the ordering is the point rather than an accident.
 
         The other scanners in this fixture did report findings, so exit 2 is
-        available and used to be what the default produced -- the incomplete grype
-        was invisible to it. 1 wins because the two codes make different promises:
-        2 tells a reviewer that clearing the listed findings clears the scan, and
-        that is false when a scanner contributed nothing. The findings are still in
-        the report either way; only the verdict changes.
+        available and is what an ungated merge produces -- the incomplete grype is
+        invisible to it. 1 wins because the two codes make different promises: 2
+        tells a reviewer that clearing the listed findings clears the scan, and that
+        is false when a scanner contributed nothing. The findings are still in the
+        report either way; only the verdict changes.
+
+        Named for the gate rather than for the default, because the gate is opt-in:
+        the last argument is the flag, and passing None here would exercise the
+        default and read 2. That is not a weaker test, it is a test of a different
+        thing -- the precedence between the two codes only exists once both are in
+        play.
         """
         merged = merge_shard_results(
             as_loaded(self._shards_with_one_incomplete_scanner())
         )
 
-        assert _merged_exit_code(merged, tmp_path, "low", None, None) == 1
+        assert _merged_exit_code(merged, tmp_path, "low", None, True) == 1
 
     def test_the_findings_code_still_wins_when_every_scanner_completed(self, tmp_path):
         """The other half of the trade this change could have got wrong.

@@ -49,10 +49,16 @@ ash_plugin_modules: []
 
 ### Failing on an incomplete scan
 
-`fail_on_incomplete_scanners` is a top-level key, and it is on by default. ASH
-exits 1 when a scanner you selected did not complete — status `ERROR` (it ran and
-failed) or `MISSING` (its dependencies were unavailable, so it never ran) — and
-prints which ones.
+`fail_on_incomplete_scanners` is a top-level key, and it is off by default. Set it
+to `true` and ASH exits 1 when a scanner you selected did not complete — status
+`ERROR` (it ran and failed) or `MISSING` (its dependencies were unavailable, so it
+never ran) — and prints which ones.
+
+It is off rather than on because a repository has to be able to pass it before it
+can be enabled, and turning it on for a tree that cannot teaches everyone to pass
+`--no-fail-on-incomplete-scanners`, which is worse than leaving it opt-in. Enable it
+once your own scans complete cleanly; `ash scan --fail-on-incomplete-scanners` is
+the cheapest way to find out whether they do.
 
 `SKIPPED` scanners are ones you did not select and never trip it, which is what
 keeps a sharded scan working: each shard excludes the scanners its siblings own,

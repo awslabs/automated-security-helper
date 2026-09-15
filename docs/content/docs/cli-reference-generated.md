@@ -27,7 +27,7 @@ Runs an ASH scan against the source-dir, outputting results to the output-dir.
 | `--inspect` | bool | False |  | Enable inspection of SARIF fields after running. This adds the inspect phase to the execution. |
 | `--use-existing` | bool | False |  | Use an existing ash_aggregated_results.json file in the output-dir. If True, the scan phase will be skipped and reports will be generated from this file. |
 | `--version` | bool | False |  | Prints version number |
-| `--mode` | enum(precommit, container, local) | `RunMode.local` | ASH_MODE | Execution mode preset. 'precommit' enables python-based plugins only and simplified output. 'container' runs non-Python plugins in a container. 'local' (default) runs everything in the local Python process. |
+| `--mode` | enum(precommit, container, local, nix) | `RunMode.local` | ASH_MODE | Execution mode preset. 'precommit' enables python-based plugins only and simplified output. 'container' runs non-Python plugins in a container. 'local' (default) runs everything in the local Python process. |
 | `--python-based-scanners-only/--all-enabled-scanners`, `--python-based-plugins-only/--all-enabled-plugins` | bool | False |  | Exclude execution of any plugins or tools that have depencies external to Python. |
 | `--show-summary` | bool | True |  | Show metrics table and results summary |
 | `--quiet` | bool | False |  | Hide all log output |
@@ -37,7 +37,7 @@ Runs an ASH scan against the source-dir, outputting results to the output-dir.
 | `-d` | bool | False |  | Enable debug logging |
 | `--color` | bool | True |  | Enable/disable colorized output |
 | `--fail-on-findings` | bool |  |  | Enable/disable throwing non-successful exit codes if any actionable findings are found. Defaults to unset, which prefers the configuration value. If this is set directly, it takes precedence over the configuration value. |
-| `--fail-on-incomplete-scanners` | bool |  |  | Exit 1 when a selected scanner did not complete -- ERROR (ran and failed) or MISSING (dependencies unavailable, so it never ran). Without this, a run where nothing ran exits 0, the same code as a clean scan, because no scanner produced any finding. SKIPPED scanners are ones you did not select and never trip it, so --scanners and --exclude-scanners both narrow what is gated. Independent of --fail-on-findings, and takes precedence over it when both would fail: a partial scan's findings are real but its clean bill of health is not. Defaults to unset, which prefers the configuration value and then on. Pass --no-fail-on-incomplete-scanners to accept a partial scan's exit code. |
+| `--fail-on-incomplete-scanners` | bool |  |  | Exit 1 when a selected scanner did not complete -- ERROR (ran and failed) or MISSING (dependencies unavailable, so it never ran). Without this, a run where nothing ran exits 0, the same code as a clean scan, because no scanner produced any finding. SKIPPED scanners are ones you did not select and never trip it, so --scanners and --exclude-scanners both narrow what is gated. Independent of --fail-on-findings, and takes precedence over it when both would fail: a partial scan's findings are real but its clean bill of health is not. Defaults to unset, which prefers the configuration value and then off, because this repository's own cdk-nag leaves 4 of 10 targets unevaluated and would fail the gate on every platform. Pass --fail-on-incomplete-scanners to enable it. |
 | `--simple` | bool | False |  | Simplified output mode with minimal logging |
 | `--ignore-suppressions` | bool | False |  | Ignore all suppression rules and report all findings regardless of suppression status. |
 | `--min-severity` | str | `low` |  | Minimum severity to trigger non-zero exit code (critical, high, medium, low, none). 'critical' and 'high' are equivalent because SARIF does not distinguish them. Findings below this threshold are still reported but don't affect the exit code. |
@@ -266,6 +266,10 @@ Cancel a running scan and clean up its resources.
 
 Check if ASH is properly installed and ready to use.
 
+### `clear_source`
+
+Delete this session's delivered source tree and workspace.
+
 ### `diff_scan_results`
 
 Compare two ash_aggregated_results.json files and return a structured diff.
@@ -333,6 +337,10 @@ Get a lightweight summary of scan results without detailed findings.
 
 List all active and recent scans with their current status.
 
+### `list_profiles`
+
+List the config profiles the operator registered at server startup.
+
 ### `monitor_scan_progress`
 
 Monitor scan progress and report updates via the MCP context.
@@ -340,6 +348,17 @@ Monitor scan progress and report updates via the MCP context.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `scan_id` | str | *required* | The scan ID returned by run_ash_scan. |
+
+### `resolve_ash_workspace`
+
+Resolve a VS Code workspace file into a scan plan without scanning anything.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `workspace_file` | str | *required* | Absolute path to the .code-workspace file. |
+| `workspace_config` | str |  | Optional path to a workspace policy file. Must exist if |
+| `allow_missing_projects` | bool | False | Mark project directories that are absent or |
+| `config_overrides` | list |  | Optional list of `key=value` config overrides, applied to |
 
 ### `run_ash_scan`
 
@@ -351,6 +370,53 @@ Start a security scan and return immediately.
 | `severity_threshold` | str | `MEDIUM` | Minimum severity threshold (LOW, MEDIUM, HIGH, CRITICAL) |
 | `config_path` | str |  | Optional path to ASH configuration file |
 | `clean_output` | bool | True | Whether to clean up existing output files before starting the scan |
+
+### `run_ash_workspace_scan`
+
+Scan every project in a VS Code workspace and return the per-project verdict.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `workspace_file` | str | *required* | Absolute path to the .code-workspace file. |
+| `workspace_config` | str |  | Optional path to a workspace policy file. |
+| `allow_missing_projects` | bool | False | Skip absent or unreadable project directories |
+| `config_overrides` | list |  | Optional list of `key=value` config overrides. |
+| `output_dir` | str |  | Where to write the workspace output tree. Defaults to |
+| `scanners` | list |  | Restrict every project to these scanner names. |
+| `excluded_scanners` | list |  | Exclude these scanners from every project. Takes |
+| `offline` | bool | False | Run without network access. |
+| `clean_output` | bool | True | Remove each project's previous aggregated-results file first. |
+
+### `set_source_git`
+
+Clone a repository into this session's workspace and make it the scan target.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `url` | str | *required* | Remote URL to clone (https or ssh). Rejected if it begins with '-' |
+| `ref` | str |  | Optional branch, tag, or commit. Defaults to the remote's default branch. |
+| `ssh_key_id` | str |  | Opaque identifier for a key the operator registered on the |
+| `depth` | int | 1 | Shallow-clone depth. Defaults to 1. |
+
+### `set_source_zip_chunk`
+
+Upload one base64 chunk of a zipped source tree.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `upload_id` | str | *required* | Identifier you choose, scoping this one upload. |
+| `sequence` | int | *required* | Zero-based ordinal of this chunk. |
+| `data_b64` | str | *required* | Base64-encoded chunk payload. |
+| `last` | bool | *required* | True on the final chunk. |
+
+### `set_source_zip_finalize`
+
+Verify an uploaded zip and extract it as this session's scan target.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `upload_id` | str | *required* | The identifier used for the preceding chunk calls. |
+| `expected_sha256` | str | *required* | Hex sha256 of the complete zip. |
 
 ### `suggest_suppression`
 

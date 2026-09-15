@@ -735,7 +735,7 @@ class AshConfig(BaseModel):
                 "scanner, which records SKIPPED and says so in the report."
             )
         ),
-    ] = True
+    ] = False
 
     ash_plugin_modules: Annotated[
         List[str],

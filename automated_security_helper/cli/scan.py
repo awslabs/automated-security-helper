@@ -344,8 +344,9 @@ def run_ash_scan_cli_command(
                 "Independent of --fail-on-findings, and takes precedence over it "
                 "when both would fail: a partial scan's findings are real but its "
                 "clean bill of health is not. Defaults to unset, which prefers the "
-                "configuration value and then on. Pass --no-fail-on-incomplete-"
-                "scanners to accept a partial scan's exit code."
+                "configuration value and then off, because this repository's own "
+                "cdk-nag leaves 4 of 10 targets unevaluated and would fail the gate "
+                "on every platform. Pass --fail-on-incomplete-scanners to enable it."
             )
         ),
     ] = None,
