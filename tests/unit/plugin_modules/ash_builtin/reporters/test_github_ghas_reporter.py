@@ -206,6 +206,80 @@ class TestReportStructure:
         assert emitted == rule_ids, "result order and membership must be preserved"
 
 
+class TestInvocationsDoNotReachGitHub:
+    """Error-level tool notifications must not be uploaded to Code Scanning.
+
+    cdk-nag's scanner now writes one ``toolExecutionNotifications`` entry per rule that raised
+    instead of returning a verdict, at ``level: error``, and those survive into the aggregated
+    ``ash.sarif`` -- measured on this repository, 11 of them where there were previously none.
+    ``github/codeql-action/upload-sarif`` renders an error-level notification as an analysis
+    error, so if they reached this report every ASH scan of a CDK repository would report
+    failures in Code Scanning that are not findings.
+
+    They do not, and this pins why rather than trusting it. ``report()`` reads ``model.sarif``
+    to harvest rules and results and then assembles a FRESH run dict carrying only
+    ``tool.driver`` and ``results``. It does not copy the run, so there is nowhere for an
+    invocation to arrive from. Measured against a real scan: ``ash.ghas.sarif`` has no
+    ``invocations`` key while ``ash.sarif`` alongside it has eleven notifications.
+
+    The guard is worth having because the containment is incidental. Nothing in ``report()``
+    names invocations or explains that omitting them is load-bearing, so a future refactor that
+    started from the source run and pruned it -- a natural way to write this -- would begin
+    uploading them with no test objecting. ASH's own workflow uploads ``ash.ghas.sarif``, so this
+    report is the boundary.
+    """
+
+    def test_error_level_tool_notifications_are_not_forwarded(self, reporter):
+        from automated_security_helper.schemas.sarif_schema_model import (
+            Invocation,
+            Message1,
+            Notification,
+            ReportingDescriptorReference,
+            ReportingDescriptorReference3,
+        )
+
+        run = Run(
+            tool=Tool(driver=ToolComponent(name="ASH", rules=[_rule("R1")])),
+            results=[_result("R1")],
+            invocations=[
+                Invocation(
+                    executionSuccessful=True,
+                    toolExecutionNotifications=[
+                        Notification(
+                            level=Level.error,
+                            message=Message(
+                                root=Message1(
+                                    text="Rule AwsSolutions-IAM5 could not be evaluated"
+                                )
+                            ),
+                            associatedRule=ReportingDescriptorReference(
+                                root=ReportingDescriptorReference3(
+                                    id="AwsSolutions-IAM5"
+                                )
+                            ),
+                        )
+                    ],
+                )
+            ],
+        )
+
+        model = _model(run)
+        assert model.sarif.runs[0].invocations[0].toolExecutionNotifications, (
+            "the input must actually carry an error notification, or this test passes "
+            "against a reporter that forwards everything"
+        )
+
+        doc = json.loads(reporter.report(model))
+
+        assert "invocations" not in doc["runs"][0], (
+            "an error-level tool notification reached the report uploaded to GitHub Code "
+            "Scanning, where it renders as an analysis error rather than a finding"
+        )
+        # The findings themselves still have to arrive, so the assertion above cannot be
+        # satisfied by a reporter that emitted nothing at all.
+        assert [r["ruleId"] for r in doc["runs"][0]["results"]] == ["R1"]
+
+
 class TestEmptyAndErrorPaths:
     def test_no_sarif_returns_empty_report(self, reporter):
         model = AshAggregatedResults()
