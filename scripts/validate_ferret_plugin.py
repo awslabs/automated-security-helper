@@ -573,49 +573,15 @@ def check_ferret_not_in_ash_yaml():
 
 
 # ----------------------------------------------------------------------------
-# 9. use_default_config should be false when custom exclude_patterns are set
+# 9. (removed 2026-09-14) CONFIG-OVERRIDE-EXCLUDES — the premise was false.
+#    It required use_default_config:false whenever exclude_patterns were set, on
+#    the belief that the bundled ferret-config.yaml overrides CLI --exclude.
+#    Verified against ferret-scan v2.4.5 that the OPPOSITE holds: CLI --exclude
+#    and --recursive both win over the bundled config's defaults, so ASH's
+#    exclude_patterns / global_ignore_paths are honoured regardless of
+#    use_default_config. Check removed rather than kept enforcing false advice.
+#    See ash_ferret_plugins/DEVELOPMENT.md §10.
 # ----------------------------------------------------------------------------
-
-
-@check(
-    "CONFIG-OVERRIDE-EXCLUDES: use_default_config should be false when exclude_patterns are set"
-)
-def check_config_override_excludes():
-    config_file = PROJECT_ROOT / ".ash" / ".ash_community_plugins.yaml"
-    if not config_file.exists():
-        return
-    lines = config_file.read_text(encoding="utf-8").splitlines()
-    in_ferret = False
-    in_options = False
-    has_excludes = False
-    has_use_default_false = False
-    ferret_start = 0
-    for i, line in enumerate(lines, 1):
-        stripped = line.strip()
-        # Detect ferret-scan scanner section
-        if stripped == "ferret-scan:" and in_ferret is False:
-            in_ferret = True
-            ferret_start = i
-            continue
-        # Detect next scanner section (end of ferret block)
-        if in_ferret and re.match(r"^  \S", line) and "options:" not in line:
-            break
-        if in_ferret and "options:" in line:
-            in_options = True
-        if in_options:
-            if "exclude_patterns" in line:
-                has_excludes = True
-            if "use_default_config" in line and "false" in line.lower():
-                has_use_default_false = True
-
-    if has_excludes and not has_use_default_false:
-        fail(
-            "CONFIG-OVERRIDE-EXCLUDES",
-            config_file.relative_to(PROJECT_ROOT),
-            ferret_start,
-            "exclude_patterns are set but use_default_config is not false. "
-            "The bundled config file will override CLI --exclude args.",
-        )
 
 
 # ----------------------------------------------------------------------------

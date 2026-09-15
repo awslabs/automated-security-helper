@@ -45,16 +45,16 @@ DEFAULT_FERRET_CONFIG = Path(__file__).parent / "ferret-config.yaml"
 # ============================================================================
 
 # Minimum supported ferret-scan version (inclusive)
-MIN_SUPPORTED_VERSION = "0.1.0"
+MIN_SUPPORTED_VERSION = "2.4.5"
 
 # Maximum supported ferret-scan version (exclusive - versions >= this may have breaking changes)
-MAX_SUPPORTED_VERSION = "2.0.0"
+MAX_SUPPORTED_VERSION = "2.5.0"
 
 # Default version constraint for installation (if using uv tool)
-DEFAULT_VERSION_CONSTRAINT = ">=0.1.0,<2.0.0"
+DEFAULT_VERSION_CONSTRAINT = ">=2.4.5,<2.5.0"
 
 # Recommended version for best compatibility
-RECOMMENDED_VERSION = "1.0.0"
+RECOMMENDED_VERSION = "2.4.5"
 
 # ============================================================================
 # UNSUPPORTED OPTIONS DOCUMENTATION
@@ -114,6 +114,10 @@ UNSUPPORTED_FERRET_OPTIONS = {
     # Debug/verbose - use ferret_debug/ferret_verbose instead
     "debug": "Use 'ferret_debug: true' instead. Bare 'debug' is blocked to avoid confusion with ASH's --debug flag.",
     "verbose": "Use 'ferret_verbose: true' instead. Bare 'verbose' is blocked to avoid confusion with ASH's --verbose flag.",
+    # Utility modes - produce no SARIF scan results
+    "preprocess_only": "Preprocess-only mode outputs extracted text and exits without scanning, so it produces no SARIF results. Use the ferret-scan CLI directly for text extraction.",
+    "pre_commit_mode": "Pre-commit mode is not applicable in ASH integration. ASH manages output formatting and exit codes centrally. Use ASH's own pre-commit hook instead.",
+    "list_profiles": "List-profiles mode only prints available profiles and exits; it produces no scan results. Run 'ferret-scan --list-profiles' directly.",
 }
 
 
@@ -199,9 +203,12 @@ class FerretScannerConfigOptions(ScannerOptionsBase):
     checks: Annotated[
         str,
         Field(
-            description="Specific checks to run, comma-separated: CREDIT_CARD, EMAIL, "
-            "INTELLECTUAL_PROPERTY, IP_ADDRESS, METADATA, PASSPORT, PERSON_NAME, "
-            "PHONE, SECRETS, SOCIAL_MEDIA, SSN, or 'all'"
+            description="Specific checks to run, comma-separated. As of ferret-scan "
+            "v2.4.5: BANK_ACCOUNT, CLOUD_RESOURCES, CREDIT_CARD, DATE_OF_BIRTH, "
+            "DRIVERS_LICENSE, EMAIL, INTELLECTUAL_PROPERTY, IP_ADDRESS, MEDICAL_ID, "
+            "METADATA, OTP, PASSPORT, PERSON_NAME, PHONE, PHYSICAL_ADDRESS, SECRETS, "
+            "SOCIAL_MEDIA, SSN, VIN, or 'all'. The authoritative list for the installed "
+            "version is 'ferret-scan --help checks'."
         ),
     ] = "all"
 
@@ -256,6 +263,79 @@ class FerretScannerConfigOptions(ScannerOptionsBase):
             "This allows scanning content within binary document formats."
         ),
     ] = True
+
+    finding_limit: Annotated[
+        int,
+        Field(
+            description="Maximum number of findings ferret-scan will emit, passed as "
+            "'--limit'. ferret-scan defaults to 200, which silently truncates results "
+            "on large scans; ASH defaults this to 0 (unlimited) so no findings are "
+            "dropped from the SARIF report. Set a positive integer to cap output.",
+            ge=0,
+        ),
+    ] = 0
+
+    fail_on_incomplete: Annotated[
+        bool,
+        Field(
+            description="Pass '--fail-on-incomplete' so ferret-scan exits 3 when a file "
+            "could not be fully scanned (coverage cut short by a timeout/budget, or the "
+            "file could not be opened). Findings may be missing in that case. The plugin "
+            "still returns the (partial) SARIF; exit 3 is recorded as an unsuccessful, "
+            "incomplete invocation rather than a hard error. Off by default to match "
+            "ferret-scan, which otherwise only warns on stderr."
+        ),
+    ] = False
+
+    # --- Track B: additional ferret-scan v2.x capabilities (all opt-in) ---
+
+    respect_gitignore: Annotated[
+        bool,
+        Field(
+            description="Pass '--respect-gitignore' so ferret-scan honours .gitignore "
+            "when scanning. Off by default: .gitignore commonly hides files with high "
+            "secret-scanning value (.env, *.pem, credentials/), so honouring it can "
+            "suppress exactly what a sensitive-data scan should see."
+        ),
+    ] = False
+
+    disable_ip_types: Annotated[
+        str | None,
+        Field(
+            description="Comma-separated INTELLECTUAL_PROPERTY sub-types to skip, passed "
+            "as '--disable-ip-types': copyright, patent, trademark, trade_secret, "
+            "internal_url. Useful for codebases with a standard copyright header on every "
+            "file. Only affects the INTELLECTUAL_PROPERTY check."
+        ),
+    ] = None
+
+    explain: Annotated[
+        bool,
+        Field(
+            description="Pass '--explain' so ferret-scan annotates each finding with a "
+            "plain-language rationale, a verdict (likely real/test/uncertain), and a "
+            "drafted suppression reason. Fully offline — no data leaves the host."
+        ),
+    ] = False
+
+    validator_budget: Annotated[
+        str | None,
+        Field(
+            description="Per-validator time budget passed as '--validator-budget', e.g. "
+            "'SSN=500ms,IP_ADDRESS=2m' or 'all=2m'. Over-budget validators are stopped "
+            "and the scan is marked incomplete (see fail_on_incomplete). Default: no budget."
+        ),
+    ] = None
+
+    max_live_bytes: Annotated[
+        str | None,
+        Field(
+            description="Cap on total extracted content held in memory across "
+            "concurrently scanned files, passed as '--max-live-bytes', e.g. '256MB' or "
+            "'1GB' (units: B, KB, MB, GB; bare number = bytes). Bounds peak memory on "
+            "constrained hosts. Default: no cap."
+        ),
+    ] = None
 
     # Ferret-scan's own log level controls (independent of ASH logging)
     ferret_debug: Annotated[
@@ -370,6 +450,15 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
     )
 
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+
+    # ferret-scan exits 0 on a normal scan (even with findings) and 3 when
+    # --fail-on-incomplete is set and a file could not be fully scanned. Exit 3 is a
+    # deliberate integrity signal that still ships valid (partial) SARIF, so it is an
+    # accepted, non-fatal outcome. Exit 1 is NOT accepted: ferret-scan uses os.Exit(1)
+    # for genuine error conditions (bad args, unreadable config, internal failure), so
+    # treating it as success would mask a real failure. We therefore override the base
+    # default of {0, 1} to {0, 3} rather than adding to it.
+    success_exit_codes: ClassVar[set[int]] = {0, 3}
 
     def model_post_init(self, context):
         if self.config is None:
@@ -643,6 +732,44 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
                 ToolExtraArg(key="--enable-preprocessors", value=None)
             )
 
+        # Finding limit. ferret-scan defaults to 200 (silent truncation); ASH always
+        # passes an explicit --limit so the SARIF report is not quietly capped. 0 =
+        # unlimited (the plugin default).
+        self.args.extra_args.append(
+            ToolExtraArg(key="--limit", value=str(options.finding_limit))
+        )
+
+        # Fail-on-incomplete: make ferret-scan exit 3 when a file could not be fully
+        # scanned, so partial coverage is surfaced rather than only warned on stderr.
+        if options.fail_on_incomplete:
+            self.args.extra_args.append(
+                ToolExtraArg(key="--fail-on-incomplete", value=None)
+            )
+
+        # Track B opt-in capabilities
+        if options.respect_gitignore:
+            self.args.extra_args.append(
+                ToolExtraArg(key="--respect-gitignore", value=None)
+            )
+
+        if options.disable_ip_types:
+            self.args.extra_args.append(
+                ToolExtraArg(key="--disable-ip-types", value=options.disable_ip_types)
+            )
+
+        if options.explain:
+            self.args.extra_args.append(ToolExtraArg(key="--explain", value=None))
+
+        if options.validator_budget:
+            self.args.extra_args.append(
+                ToolExtraArg(key="--validator-budget", value=options.validator_budget)
+            )
+
+        if options.max_live_bytes:
+            self.args.extra_args.append(
+                ToolExtraArg(key="--max-live-bytes", value=options.max_live_bytes)
+            )
+
         # Ferret-scan's own debug/verbose (independent of ASH logging)
         if options.ferret_debug:
             self.args.extra_args.append(ToolExtraArg(key="--debug", value=None))
@@ -652,6 +779,10 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
 
         # Always disable color in ferret-scan output (ASH handles formatting)
         self.args.extra_args.append(ToolExtraArg(key="--no-color", value=None))
+
+        # Always suppress ferret-scan's progress output. ASH captures stderr and renders
+        # its own progress; ferret-scan's progress lines are noise in the captured log.
+        self.args.extra_args.append(ToolExtraArg(key="--quiet", value=None))
 
         return super()._process_config_options()
 
@@ -875,6 +1006,20 @@ class FerretScanScanner(ScannerPluginBase[FerretScannerConfig]):
             )
 
             self._post_scan(target=target, target_type=target_type)
+
+            # --fail-on-incomplete makes ferret-scan exit 3 when coverage was cut short.
+            # The SARIF is still valid (partial); surface it as a warning so missing
+            # findings are not silent.
+            if self.exit_code == 3:
+                self._plugin_log(
+                    "ferret-scan reported incomplete coverage (exit 3, "
+                    "--fail-on-incomplete): some files were not fully scanned and "
+                    "findings may be missing. See the SARIF toolExecutionNotifications "
+                    "for the affected files.",
+                    target_type=target_type,
+                    level=logging.WARNING,
+                    append_to_stream="stderr",
+                )
 
             # Read SARIF output from file
             if not results_file.exists():

@@ -70,7 +70,12 @@
     {
       "path": ".github/scripts/assert-coverage-scope.mjs",
       "kind": "no-harness",
-      "reason": "The denominator-pinning script, same disposition as assert-coverage-completeness.mjs above: run by `node` from a workflow step, in a tree with no JS harness in any ancestor directory. These two are the only tracked JS/TS files under .github/, so this pair completes that subtree rather than starting a list that will grow with each workflow helper."
+      "reason": "The denominator-pinning script, same disposition as assert-coverage-completeness.mjs above: run by `node` from a workflow step, in a tree with no JS harness in any ancestor directory. Every tracked JS/TS file under .github/ is a gate script of this kind -- this one, assert-coverage-completeness.mjs above and assert-actions-pinned.mjs below -- so the subtree is fully accounted for, and the list grows only when another workflow helper is added."
+    },
+    {
+      "path": ".github/scripts/assert-actions-pinned.mjs",
+      "kind": "no-harness",
+      "reason": "A CI gate invoked as `node .github/scripts/...` from ash-actions-pinned.yml. Neither .github/scripts nor .github holds a package.json, tsconfig, jest or vitest config, so no JS harness exists to measure it. It is not untested: the gate is exercised by mutation in CI's own terms -- reverting a pinned ref to a tag makes it exit 1 -- and its failure paths are the reason the pull request that added it was reviewable."
     }
   ]
 }

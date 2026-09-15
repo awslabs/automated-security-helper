@@ -148,10 +148,10 @@ The plugin validates ferret-scan version compatibility during dependency validat
 
 ```python
 # Version constants (update when ferret-scan releases breaking changes)
-MIN_SUPPORTED_VERSION = "0.1.0"
-MAX_SUPPORTED_VERSION = "2.0.0"
-DEFAULT_VERSION_CONSTRAINT = ">=0.1.0,<2.0.0"
-RECOMMENDED_VERSION = "1.0.0"
+MIN_SUPPORTED_VERSION = "2.4.5"
+MAX_SUPPORTED_VERSION = "2.5.0"
+DEFAULT_VERSION_CONSTRAINT = ">=2.4.5,<2.5.0"
+RECOMMENDED_VERSION = "2.4.5"
 ```
 
 **Behavior**:
@@ -202,6 +202,7 @@ def validate_no_unsupported_options(cls, data: Any) -> Any:
 |---------|-----------------|
 | Output format | Always SARIF (hardcoded via `--format sarif`) |
 | Color output | Always `--no-color` (ASH handles formatting) |
+| Progress output | Always `--quiet` (ASH captures stderr and renders its own progress) |
 
 ### Managed by ASH Framework (not plugin-controlled)
 
@@ -223,9 +224,16 @@ def validate_no_unsupported_options(cls, data: Any) -> Any:
 | `exclude_patterns` | Patterns to exclude from scanning | `[]` |
 | `show_match` | Display matched text in findings | `false` |
 | `enable_preprocessors` | Extract text from documents | `true` |
+| `finding_limit` | Max findings emitted via `--limit` (`0` = unlimited; guards against ferret-scan's 200 default silently truncating) | `0` |
+| `fail_on_incomplete` | Pass `--fail-on-incomplete` → ferret-scan exits 3 on partial coverage (accepted as non-fatal; SARIF still returned) | `false` |
+| `respect_gitignore` | Pass `--respect-gitignore` (off by default; .gitignore hides high-value secret files) | `false` |
+| `disable_ip_types` | Comma-separated INTELLECTUAL_PROPERTY sub-types to skip via `--disable-ip-types` | `None` |
+| `explain` | Pass `--explain` for an offline per-finding rationale/verdict/suppression-reason | `false` |
+| `validator_budget` | Per-validator time budget via `--validator-budget` (e.g. `all=2m`) | `None` |
+| `max_live_bytes` | Memory cap on extracted content via `--max-live-bytes` (e.g. `256MB`) | `None` |
 | `ferret_debug` | Enable ferret-scan's own debug logging (preprocessing/validation flow) | `false` |
 | `ferret_verbose` | Enable ferret-scan's own verbose output (detailed finding info) | `false` |
-| `tool_version` | Version constraint for installation | `">=0.1.0,<2.0.0"` |
+| `tool_version` | Version constraint for installation | `">=2.4.5,<2.5.0"` |
 | `skip_version_check` | Bypass version validation | `false` |
 
 Note: Bare `debug` and `verbose` are blocked to avoid confusion with ASH's `--debug`/`--verbose` flags. Use the `ferret_` prefixed versions instead.
@@ -295,7 +303,8 @@ def test_unsupported_option_new_option_raises_error(self):
 | Web server | `web`, `port` | Not applicable for batch scanning |
 | Redaction | `enable_redaction`, `redaction_*`, `memory_scrub` | Post-processing, not scanning |
 | Suppressions | `generate_suppressions`, `show_suppressed`, `suppressions_file` | ASH manages centrally |
-| Utility modes | `extract_text` | Not a scanning mode |
+| Utility modes | `extract_text`, `preprocess_only`, `list_profiles` | Produce no SARIF scan results |
+| Pre-commit | `pre_commit_mode` | ASH manages output/exit codes; use ASH's own pre-commit hook |
 | Logging | `debug`, `verbose` | Use `ferret_debug`/`ferret_verbose` instead (avoids confusion with ASH flags) |
 
 ## Testing
@@ -468,7 +477,11 @@ For example: `.ash/ash_output/scanners/ferret-scan/source/ferret-scan.sarif`
 
 ### 6. Edge Case: Empty and Missing Target Directories
 
-**Empty directory**: The plugin invokes ferret-scan, which produces a SARIF file with `results: null`. ASH completes with 0 actionable findings. No crash, no error — graceful skip.
+**Empty directory**: The plugin skips the invocation entirely (the `scan()` empty/missing
+guard returns `True` before ferret-scan is called). If ferret-scan *is* invoked on a tree
+with no findings, current versions (v2.3.1+) emit `results: []` (an empty array, not the
+older `null`); `SarifReport.model_validate` accepts both. ASH completes with 0 actionable
+findings. No crash, no error — graceful skip.
 
 **Missing directory**: ASH itself throws `FileNotFoundError` before any plugin is invoked (the framework calls `os.chdir(source_dir)` in `run_ash_scan.py`). This is an ASH-level issue, not a plugin concern. The plugin's own `scan()` method also guards against this by returning `True` (skip) for non-existent paths, but that code path is never reached when running through `ash scan`.
 
@@ -480,19 +493,50 @@ The `validate_no_unsupported_options` validator runs in `mode="before"`, meaning
 
 The `_process_config_options()` method appends to `self.args.extra_args`. To prevent accumulation when called multiple times, the method clears `self.args.extra_args = []` at the start of each invocation. This was added to handle the case where `_resolve_arguments` calls `_process_config_options`, and the base class `model_post_init` also calls it.
 
-### 9. Exclude Patterns: Simple Names, Not Globs
+### 9. Exclude Patterns: Glob (no `**`) + Substring, Not "Simple Names"
 
-Ferret-scan's `--exclude` flag uses simple directory/file name matching, not glob
-patterns. Use `.venv` instead of `.venv/**`. The plugin joins all exclude patterns
-into a single comma-separated `--exclude` value (e.g., `--exclude .venv,.git,*.pyc`).
+Correction (verified against ferret-scan v2.4.5, `isExcluded` in `cmd/main.go`): the
+earlier claim that `--exclude` uses "simple names, not globs" is wrong. Each pattern is
+tested several ways — Go `filepath.Match` glob against the full path **and** the
+basename (`*`, `?`, `[abc]` supported; `**` globstar is **not**), a plain
+`strings.Contains` substring match against the full path, and a `dir/`-segment match.
+So `*.pyc` works as a glob, and a bare `.venv` excludes any path containing "`.venv`".
+The practical guidance is unchanged — use `.venv`, not `.venv/**` (globstar is
+unsupported) — but note the substring branch means a short token like `test` or `build`
+can over-exclude any path containing it. The plugin joins all patterns into a single
+comma-separated `--exclude` value (e.g., `--exclude .venv,.git,*.pyc`).
 
-### 10. Bundled Config File Overrides CLI `--exclude`
+### 10. CLI Args Override the Bundled Config's Defaults (`--exclude`, `--recursive`)
 
-When the bundled `ferret-config.yaml` is loaded via `--config`, ferret-scan's config
-file settings can override CLI arguments including `--exclude`. This means exclude
-patterns set via ASH plugin options may be silently ignored if `use_default_config`
-is `true` (the default). Set `use_default_config: false` in the ASH config to ensure
-CLI arguments take full effect.
+Correction (verified against ferret-scan v2.4.5): an earlier version of this note claimed
+the bundled `ferret-config.yaml`, when loaded via `--config`, overrides CLI arguments so
+ASH's `--exclude` "may be silently ignored" unless `use_default_config: false`. **That is
+backwards.** ferret-scan's CLI flags take precedence over the config file's `defaults`:
+
+```
+# bundled --config + --exclude skipdir   → skipdir IS excluded (CLI --exclude wins)
+# bundled --config + --recursive          → nested files ARE found, even though the
+#                                            bundled config's defaults set recursive:false
+```
+
+So ASH's `exclude_patterns` (and the `global_ignore_paths` the plugin folds into
+`--exclude`) are **honoured regardless of `use_default_config`** — a security-relevant
+guarantee: ignore paths are respected. Setting `use_default_config: false` is **not**
+required for excludes to work.
+
+What `use_default_config` actually controls is whether the bundled config's *validator and
+profile configuration* (IP `internal_urls`, social-media patterns, the named profiles) is
+loaded at all. Choose `false` when you want only ferret-scan's built-in defaults plus your
+explicit ASH options (as `.ash_community_plugins.yaml` does); choose `true` (the default)
+to pick up the bundled validator patterns. Either way, CLI `--exclude`/`--recursive` win.
+
+Caveat: this reasoning applies to the *bundled* config, whose `defaults` block declares no
+`exclude_patterns` of its own. A hand-written config file that itself sets excludes could
+still contribute additional exclusions on top of the CLI value — CLI precedence means the
+CLI value is applied, not that a config-defined exclude is discarded.
+
+(The pre-push validation script's former `CONFIG-OVERRIDE-EXCLUDES` check enforced the old,
+false premise and was removed on 2026-09-14 — see `scripts/validate_ferret_plugin.py` §9.)
 
 ### 11. `SECRET-SECRET-KEYWORD` Triggers on Variable Names, Not Values
 
@@ -509,12 +553,116 @@ suppression with line number to both `.ash/.ash.yaml` and `.ash/.ash_community_p
 
 ## False Positive Suppression and CI
 
+### Design decision: API_KEY_OR_SECRET stays ENABLED, false positives are suppressed
+
+**Context.** ferret-scan v2.3.3 added unquoted keyword-assignment detection to the
+`SECRETS` validator. An ordinary identifier whose *name* is a secret keyword
+(`session`, `token`, `secret`, `password`, `api_key`, …) placed next to an assignment
+is now reported as `API_KEY_OR_SECRET`, at HIGH confidence, regardless of the value.
+Generated Pydantic/OCSF models (a login/session object field), MCP session locals,
+Terraform locals whose name contains "secret", and test fixtures all trip it. This is
+the detector that reddened PRs when CI floated to a newer binary.
+
+**Why the obvious fix ("just disable the generic type in the bundled config") is NOT
+viable.** ferret-scan provides **no configuration knob to disable a `SECRETS` sub-type**.
+`validators.<name>.disabled_types` is honoured **only by the `intellectual_property`
+validator** — every other validator, `secrets` included, silently ignores it. This is
+stated in ferret-scan's own docs (`docs/configuration.md`: *"A `disabled_types` block
+under a validator that does not read it — every validator except `intellectual_property`
+— is correctly silent"*) and in the source (`internal/validators/secrets/validator.go`,
+whose help says *"No additional configuration is required"*).
+
+Per the ferret-scan maintainers this is **intentional, not a defect**: `disabled_types` was
+scoped to the IP validator on purpose (see `docs/configuration.md` and
+`COVERAGE_DISCLOSURE.md`, which states *"Only the intellectual-property validator honours
+`disabled_types`; the key is inert elsewhere"*) and was never generalized. The *silent*
+part — a `disabled_types` under `secrets` neither works nor warns — is a **known
+limitation**: validator config sections are schema-opaque, so ferret-scan cannot today warn
+about unrecognized keys inside them. Generalizing `disabled_types` to the `secrets`
+validator is a reasonable **upstream feature request** (file against `awslabs/ferret-scan`);
+until it lands, the config knob genuinely does not exist. It was also confirmed
+empirically against v2.4.5:
+
+```
+# a Pydantic-style file with a field named for a session object, typed and
+# assigned (the exact line is omitted here on purpose — see the "do not quote"
+# gotcha below; writing it verbatim would make THIS doc a finding)
+$ ferret-scan --file sample.py --checks SECRETS --format sarif
+  → 4 API_KEY_OR_SECRET findings (the session-field line scores 93 = HIGH)
+
+# same scan, with a config that tries to "disable" the type under the
+# secrets validator (disabled_types):
+$ ferret-scan --file sample.py --checks SECRETS --config disable.yaml --format sarif
+  → STILL 4 findings — the block is silently ignored
+```
+
+So there is no bundled-config (or any tool-level) setting that removes just this type.
+Dropping `SECRETS` from `checks` entirely would work but throws out all *real* secret
+detection (AWS keys, GitHub tokens, entropy hits), which is unacceptable.
+
+**Alternatives considered.**
+
+| Option | Verdict | Why |
+|--------|---------|-----|
+| **1. Disable the generic type in the bundled `ferret-config.yaml`** (`validators.secrets.disabled_types`) | ❌ Not viable | The knob does not exist for `secrets` — silently ignored (proof above). This was the originally-requested approach; it cannot be implemented. |
+| **2. Plugin-level post-filter** — drop `API_KEY_OR_SECRET` results from the SARIF in the plugin, default-on | ❌ Rejected | Works, but silently discards a whole finding type for *every* consumer of the plugin, including real generic-secret hits an entropy/keyword match would otherwise catch. Too blunt, and hides signal in the plugin where users can't see the filtering. |
+| **3. Keep the detector enabled; suppress/exclude the false positives** | ✅ Chosen | Real secrets are still detected. False positives are handled with ASH's existing, visible, per-path suppression + `exclude_patterns` mechanism — the same one already used for the CycloneDX schema and `pyproject.toml`. Each suppression carries a reason and shows up in `ash config validate` / the unused-suppressions report. |
+
+**The policy (chosen 2026-09-13).** Keep `API_KEY_OR_SECRET` **enabled** and manage its
+false positives with ASH's own controls:
+
+1. **`exclude_patterns`** in the ferret scanner block for whole directories that only
+   ever produce noise (build output, vendored trees).
+2. **Path-scoped suppressions** (`rule_id: API_KEY_OR_SECRET`) in
+   `.ash/.ash_community_plugins.yaml` for specific FP files/globs.
+
+**How the suppression behaves.** ASH applies `global_settings.suppressions` during result
+*aggregation*, after ferret-scan runs. ferret-scan still emits the finding into its own
+scanner SARIF (`.ash/ash_output/scanners/ferret-scan/source/ferret-scan.sarif`), and ASH
+then marks any finding whose `(path, rule_id)` matches a suppression as **suppressed** so
+it does not count as actionable and does not fail the scan. A suppressed finding is
+therefore *recorded, not hidden* — it stays visible in the report as suppressed, with its
+reason, which is the property option 2 (a silent plugin filter) would have lost.
+
+**Current false-positive inventory (ferret-scan v2.4.5, `SECRETS` at HIGH confidence).**
+All six are the same shape — a `session`/`secret` keyword adjacent to an assignment,
+matched on the *name*, never a real credential:
+
+| File | Why it is a false positive |
+|------|----------------------------|
+| `automated_security_helper/schemas/ocsf/ocsf_vulnerability_finding.py` (2 fields) | Generated by datamodel-codegen; typed model fields for a login/session object. Any real fix belongs on the source JSON schema. |
+| `automated_security_helper/cli/mcp/sessions.py` | A local variable named for an MCP session object; the value is a constructed object. |
+| `deploy/terraform/modules/fargate/main.tf` | A local whose name contains "secret" (`manage-auth-secret`); its value is a boolean computed from whether an optional input was supplied. |
+| `tests/unit/cli/mcp/test_sessions.py` (2 locals) | Test locals named for session objects. Suppressed by this exact path (not `tests/**`) so a real hardcoded credential added to another test later is not silently hidden. |
+
+**Gotcha — do not quote the offending line in a suppression reason.** The suppression
+`reason` text lives in `.ash/.ash_community_plugins.yaml`, a file ferret-scan also scans
+(`.ash/` is not excluded). Writing the `keyword` + assignment shape verbatim makes the
+reason itself a new `API_KEY_OR_SECRET` finding. Paraphrase instead (e.g. "a login/session
+object field") — the existing entries do this deliberately.
+
+**Verification (must stay true).** With the suppressions in place:
+`ash scan --scanners ferret-scan --config .ash/.ash_community_plugins.yaml` reports
+ferret-scan **PASSED with 0 actionable findings** (8 total: 2 PASSPORT + 6
+API_KEY_OR_SECRET, all suppressed). If a future ferret-scan version changes which lines
+trip the detector, re-run that scan, read the new hits, and add/adjust suppressions —
+do not switch to disabling the check.
+
+**If ferret-scan later adds a real disable knob** (e.g. a `secrets.disabled_types` that is
+actually read), revisit this: prefer disabling the generic type at the tool level over
+maintaining a suppression list. Until then, suppressions/excludes are the only working
+mechanism.
+
 ### Suppression Strategy
 
 ASH supports suppressions in the config file under `global_settings.suppressions`.
 Ferret-scan suppressions must be added to **both** `.ash/.ash.yaml` and
 `.ash/.ash_community_plugins.yaml` — the PR scan workflow uses `.ash.yaml`
 while the community validation workflow uses `.ash_community_plugins.yaml`.
+(Exception: ferret-scan is only *enabled* in `.ash_community_plugins.yaml`, so
+ferret-specific rules like `API_KEY_OR_SECRET` only need to live there. This is
+**load-bearing**: if anyone enables ferret-scan in `.ash/.ash.yaml`, the ferret
+suppressions above must be copied there too, or PR scans will go red with no coverage.)
 
 Suppressions with `line_start`/`line_end` fields are the preferred approach for
 documentation examples that intentionally contain triggering patterns. For test
@@ -593,12 +741,12 @@ The script checks for:
 | `SECRET-SECRET-KEYWORD` | Variable names like `API_KEY`, `PASSWORD`, `TOKEN` that trigger secret detection regardless of value |
 | `HARDCODED-PII` | Credit card numbers or SSNs as string literals in source |
 | `HEX-HIGH-ENTROPY-STRING` | Long hex strings (32+ chars) that trigger entropy detectors |
-| `EXCLUDE-GLOB-SYNTAX` | Exclude patterns using `**/` glob syntax instead of simple names (ferret-scan doesn't support globs) |
+| `EXCLUDE-GLOB-SYNTAX` | Exclude patterns using `**/` globstar syntax (ferret-scan's `filepath.Match` supports `*`/`?`/`[..]` but not `**`) |
 | `TEST-COUNT` | Ensures the unit test count hasn't regressed below 67 |
 | `WINDOWS-PATH` | `str(Path)` instead of `Path.as_posix()` in CLI argument building — backslashes break ferret-scan on Windows |
 | `EXCLUDE-MULTIPLE-ARGS` | Looping over exclude patterns to append individual `--exclude` args instead of joining into one comma-separated value |
 | `FERRET-IN-ASH-YAML` | ferret-scan registered in `.ash.yaml` instead of `.ash_community_plugins.yaml` (it's a community plugin) |
-| `CONFIG-OVERRIDE-EXCLUDES` | `exclude_patterns` set but `use_default_config` not `false` — the bundled config will silently override CLI excludes |
+| `CONFIG-OVERRIDE-EXCLUDES` | *(removed 2026-09-14 — false premise; ferret-scan CLI args override the bundled config's defaults, so excludes are honoured regardless of `use_default_config`. See gotcha §10.)* |
 | `SUPPRESSION-COVERAGE` | SECRET-SECRET-KEYWORD hits in ferret plugin files must have matching suppressions with `line_start`/`line_end` in `.ash_community_plugins.yaml` |
 
 These checks mirror what CI's `--ignore-suppressions` scan will flag. Passing this
@@ -835,7 +983,7 @@ rm /tmp/test-ash-config.yaml
 ```bash
 mkdir -p /tmp/empty-test-dir
 uv run ash scan --source-dir /tmp/empty-test-dir --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins --no-aggregated-results 2>&1
-# Expected: ferret-scan completes with 0 findings, SARIF has results: null, no crash
+# Expected: ferret-scan completes with 0 findings, SARIF has results: [] (empty array), no crash
 rmdir /tmp/empty-test-dir
 ```
 
@@ -1005,6 +1153,22 @@ Ad-hoc dicts like `{"findings": [], "errors": [...]}` without `"status": "failed
 will be treated as a successful scan with zero findings by `scan_phase.py`. Use
 `return` (None) instead — the framework correctly marks the container as failed.
 
+### Exit codes and `--fail-on-incomplete`
+
+ferret-scan exits `0` on a normal scan (even when it finds sensitive data) and `3`
+when `--fail-on-incomplete` is set (`fail_on_incomplete: true`) and a file could not be
+fully scanned — coverage cut short by a timeout/budget, or the file could not be opened.
+
+- `_run_subprocess` runs with `check=False`, so a non-zero exit never raises; `scan()`
+  reads the SARIF file regardless of exit code.
+- The scanner overrides `success_exit_codes = {0, 3}` so exit 3 is an **accepted,
+  non-fatal** outcome — the (partial) SARIF is still returned. The invocation records
+  `executionSuccessful=False` and `exitCode=3`, and the plugin logs a WARNING naming the
+  incomplete coverage. Exit 3 is *not* a scanner failure; it is a deliberate integrity
+  signal that findings may be missing. Exit `1` is deliberately **excluded** (unlike the
+  base default `{0, 1}`): ferret-scan uses `os.Exit(1)` for genuine errors, so it must
+  surface as a failure rather than be treated as success.
+
 ## ASH Integration Registration
 
 When adding this plugin to an ASH installation (or contributing it upstream), three
@@ -1043,13 +1207,15 @@ scanners:
 ```
 
 > **Why `use_default_config: false`**: The bundled `ferret-config.yaml` is a
-> comprehensive reference config. When loaded via `--config`, ferret-scan's config
-> file settings can override CLI arguments like `--exclude`. Disabling it gives
-> full control to the ASH plugin options above.
+> comprehensive reference config. Setting `false` means the scan uses only ferret-scan's
+> built-in defaults plus the explicit ASH options above, rather than loading the bundled
+> validator/profile patterns. (It is **not** needed for excludes — CLI `--exclude` and
+> `--recursive` win over the config's defaults regardless; see gotcha §10.)
 
 > **Why simple directory names in `exclude_patterns`**: Ferret-scan's `--exclude`
-> flag uses simple name matching, not glob patterns. Use `.venv` instead of
-> `.venv/**`. Patterns are joined into a single comma-separated `--exclude` value.
+> matches with `filepath.Match` glob plus a substring fallback; the `**` globstar is
+> not supported, so use `.venv` rather than `.venv/**`. Patterns are joined into a
+> single comma-separated `--exclude` value.
 
 ### 2. Update CI workflow (`.github/workflows/ash-repo-scan-validation.yml`)
 
