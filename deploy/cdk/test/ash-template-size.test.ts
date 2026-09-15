@@ -134,10 +134,20 @@
  * entry counts appear in this branch's intermediate states; 129 is the number a
  * reviewer sees.
  *
- * The classification is cdk-nag's own per-(rule, resource) verdict, captured by
- * wrapping the six `INagLogger` callbacks on `AnnotationLogger.prototype`, and NOT a
- * reading of which rule looks applicable. That distinction is load-bearing: when a
- * rule THROWS on a resource cdk-nag emits SUPPRESSED_ERROR and writes no SUPPRESSED
+ * The classification is cdk-nag's own per-(rule, resource) verdict and NOT a reading of
+ * which rule looks applicable. It was captured by a throwaway harness that wrapped the six
+ * `INagLogger` callbacks on `AnnotationLogger.prototype` -- prototype patching rather than
+ * the `additionalLoggers` prop, because cdk-nag's module exports are non-configurable jsii
+ * getters and the export therefore cannot be replaced. NOTHING IN THIS REPOSITORY DOES
+ * THAT. The two committed blocks that record verdicts are both in
+ * test/ash-nag-gate.test.ts, and both implement `INagLogger` and register through
+ * `additionalLoggers` -- a prop the pack's constructor takes, so no export has to be
+ * replaced; the four assertions below record nothing at all and read the committed templates
+ * instead. Written down because taking this sentence for a description of the committed
+ * tests would send the next reader patching a prototype for no reason.
+ *
+ * That per-(rule, resource) distinction is load-bearing: when a rule THROWS on a resource
+ * cdk-nag emits SUPPRESSED_ERROR and writes no SUPPRESSED
  * row, so `AshAgentCore/RuntimeRole/LogsAccess` -- where IAM5 throws -- looks unused
  * to anything counting only SUPPRESSED. Dropping its entry on that reading turns a
  * SUPPRESSED_ERROR into an ERROR. Verified by running exactly that as a negative
