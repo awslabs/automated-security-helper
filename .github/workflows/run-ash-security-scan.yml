@@ -53,8 +53,40 @@ on:
         required: false
         default: true
         type: boolean
+      # BEHAVIOR CHANGE -- read this before upgrading if you call this workflow.
+      #
+      # This input has always defaulted to true, but until now it had no visible
+      # effect: the publish step was gated on a permission probe that called a REST
+      # route which does not exist, so the probe was false on every run and no
+      # `ASH Scan JUnit Test Report` check run was ever created for anyone. That
+      # gate is gone and the step now runs.
+      #
+      # What that means for a downstream caller: the action derives the check run's
+      # conclusion from the JUnit failure count, and ASH's JUnit report encodes
+      # every ACTIONABLE FINDING as a test failure. So a repository with even one
+      # actionable finding goes from "no check at all" to a RED
+      # `ASH Scan JUnit Test Report` check, without any change of its own.
+      #
+      # The step and the job both stay green -- `fail_on_failure` is left at its
+      # default of false -- so this does not by itself fail a build. But the check
+      # run is red, it appears in the pull request's checks list, and it counts
+      # toward the commit's combined status. If a branch protection rule requires
+      # this check by name, it will now block; it could not have been required
+      # before, because it never existed.
+      #
+      # Two ways to respond, both supported:
+      #   * Leave it on and treat the red check as the finding report it is. The
+      #     annotations land inline on the offending lines, which is the whole
+      #     point of publishing the report.
+      #   * Set `collect-junit-xml-report: false` to opt out entirely. The results
+      #     are still in the job summary and in the `ash_output` artifact.
       collect-junit-xml-report:
-        description: "Whether to collect the ash.junit.xml report using the mikepenz/action-junit-report@v6 GitHub Action"
+        description: >-
+          Whether to publish the ash.junit.xml report as a check run using
+          mikepenz/action-junit-report. Note that ASH encodes actionable findings
+          as JUnit test failures, so a scan with actionable findings publishes a
+          RED "ASH Scan JUnit Test Report" check (the job itself stays green).
+          Set to false to opt out.
         required: false
         default: true
         type: boolean
@@ -113,15 +145,15 @@ jobs:
       COLUMNS: 140
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           enable-cache: true
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ inputs.python-version }}
 
@@ -139,7 +171,7 @@ jobs:
 
       - name: Cache the grype vulnerability database
         if: inputs.install-grype
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           # grype's db.cache-dir default; equivalently GRYPE_DB_CACHE_DIR.
           path: ~/.cache/grype/db
@@ -153,7 +185,7 @@ jobs:
 
       - name: Cache the OpenGrep binary
         if: inputs.install-opengrep
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.opengrep/cli/latest
           key: opengrep-${{ runner.os }}-${{ steps.cachekeys.outputs.week }}
@@ -239,7 +271,7 @@ jobs:
       # for "same-repo PR". It is scoped to pull_request so merge_group and
       # workflow_dispatch behaviour is unchanged.
       - name: Post ASH MarkdownReporter output as PR comment
-        uses: mshick/add-pr-comment@v3
+        uses: mshick/add-pr-comment@ec328af66588ab8f77cdeb2c264f14aba45bbf59 # v3.12.0
         if: >-
           inputs.post-pr-comment
           && github.repository_owner == inputs.repository-owner
@@ -250,7 +282,8 @@ jobs:
           message-path: ${{ inputs.output-dir }}/reports/ash.summary.md
 
       # Say so rather than leaving a contributor wondering why the bot went
-      # quiet. Mirrors the ::warning:: the checks-permission probe below emits.
+      # quiet. The junit publish step below is skipped on the same condition and
+      # carries the same notice, for the same reason.
       - name: Note that the PR comment was skipped for a fork
         if: >-
           inputs.post-pr-comment
@@ -262,7 +295,7 @@ jobs:
           echo "::notice::Scan results were not posted as a PR comment: GITHUB_TOKEN is read-only for fork pull requests. The full report is in this job's summary and in the ash_output artifact."
 
       - name: Collect ASH output artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: success() || failure()
         with:
           name: ash_output
@@ -270,34 +303,80 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
-      - name: Verify checks write permission
-        if: inputs.collect-junit-xml-report && (success() || failure())
-        id: check-perms
-        run: |
-          # Attempt a minimal GitHub API call that requires checks:write
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-            -H "Authorization: Bearer ${{ github.token }}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${{ github.repository }}/check-runs?per_page=1")
-          if [ "$HTTP_CODE" = "403" ] || [ "$HTTP_CODE" = "404" ]; then
-            echo "::warning::JUnit report publishing requires 'checks: write' permission. Add 'permissions: checks: write' to your workflow."
-            echo "has_permission=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_permission=true" >> "$GITHUB_OUTPUT"
-          fi
-
+      # THE CHECKS-PERMISSION PROBE THAT USED TO GATE THIS STEP IS GONE
+      #
+      # It called GET /repos/{owner}/{repo}/check-runs and read 403 or 404 as "no
+      # permission". That route does not exist: the REST API lists check runs per
+      # ref or per check suite, never per repository. So it returned 404 on every
+      # run for everyone, `has_permission` was always false, and the gate below was
+      # never once true -- this call site has never published a junit report at all.
+      # Measured with one fully authorized token: the bare route 404s, while
+      # /repos/{owner}/{repo}/commits/{sha}/check-runs returns 200.
+      #
+      # Repointing it at the per-ref route was rejected. A GET cannot establish
+      # WRITE access, so the probe could never do the job its name claimed. It would
+      # return 200 for a fork's read-only token and let the step run on to a 403
+      # regardless, which is the noise the probe existed to avoid.
+      #
+      # The condition it was reaching for is "is this a fork pull request", and this
+      # file already carries the exact test for that on the PR-comment step above.
+      # Reusing it removes an API call, a step and a status-code inference.
+      #
+      # Residual case, deliberately left to the action: a same-repo caller that
+      # never granted `checks: write`. The action fails soft and names the real
+      # cause, "Resource not accessible by integration", which is better diagnostics
+      # than a warning guessed from an HTTP status.
+      #
+      # Because the probe was always false, removing it means this step publishes a
+      # check run where previously none existed -- and the action's conclusion comes
+      # from the JUnit failure count, which for ASH is the actionable finding count.
+      # A caller with findings therefore sees a red `ASH Scan JUnit Test Report`
+      # check for the first time. That is intended, and the trade-off plus the
+      # opt-out are written out at the `collect-junit-xml-report` input above.
       - name: Publish JUnit Test Report
-        uses: mikepenz/action-junit-report@v6
-        if: inputs.collect-junit-xml-report && (success() || failure()) && steps.check-perms.outputs.has_permission == 'true'
+        uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6.5.0
+        if: >-
+          inputs.collect-junit-xml-report
+          && (github.event_name != 'pull_request'
+              || github.event.pull_request.head.repo.full_name == github.repository)
+          && (success() || failure())
+        # No `update_check: true`, for the reason spelled out in
+        # .github/actions/run-unit-tests/action.yml: it took the action's update path,
+        # which resolves an existing check run by `job_name` (default `github.job`, a
+        # YAML key) while GitHub names check runs by display name. The lookup matched
+        # nothing and the action reads `check_runs[0].id` unguarded, so the step threw
+        # a TypeError, swallowed it, reported success, and published no annotations.
         with:
-          report_paths: "**/ash.junit.xml"
+          # An explicit path, not `**/ash.junit.xml`. The report lands in
+          # `.ash/ash_output/reports/` by default, and `**` does not descend into
+          # hidden directories unless the globber is told to, so the pattern never
+          # matched the file it was written for: the step reported "No test results
+          # found!" and created an empty check. This was invisible while the broken
+          # permission probe above skipped the step entirely.
+          #
+          # The explicit form also honors a caller that overrides output-dir, which
+          # the glob only ever did by accident, and it matches how the PR comment and
+          # SARIF upload in this same job already address their own report files.
+          report_paths: ${{ inputs.output-dir }}/reports/ash.junit.xml
           include_passed: true
-          update_check: true
           check_name: ASH Scan JUnit Test Report
           summary: Skipped means passing, suppressed, or ignored findings that are considered non-actionable.
 
+      # Same reason as the PR-comment notice above: an absent junit check should say
+      # why rather than just not appear. This is the case the deleted probe was
+      # trying to serve, expressed as the condition that actually holds.
+      - name: Note that the JUnit report was skipped for a fork
+        if: >-
+          inputs.collect-junit-xml-report
+          && github.event_name == 'pull_request'
+          && github.event.pull_request.head.repo.full_name != github.repository
+          && (success() || failure())
+        shell: bash
+        run: |
+          echo "::notice::The JUnit test report was not published as a check: GITHUB_TOKEN is read-only for fork pull requests, so check runs cannot be created. The results are in this job's summary and in the ash_output artifact."
+
       - name: Upload ASH SARIF file
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
         if: inputs.collect-sarif-report && github.event_name != 'merge_group' && (success() || failure())
         with:
           sarif_file: ${{ inputs.output-dir }}/reports/ash.ghas.sarif

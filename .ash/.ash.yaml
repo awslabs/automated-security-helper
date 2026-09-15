@@ -71,7 +71,7 @@ global_settings:
         Same as test_mcp_sse_host_binding.py: asserts the streamable-http app is
         built with the host AgentCore requires. The address is the value under
         test.
-    # B105 — three files, four findings, all of them bandit's keyword heuristic
+    # B105 — four files, five findings, all of them bandit's keyword heuristic
     # firing on a variable NAME while the value is harmless. Verified by reading
     # each line rather than by assuming, because "hardcoded password" in a public
     # security tool is worth being sure about.
@@ -98,6 +98,13 @@ global_settings:
         "hdr-${not-expanded}-`not-run`-a1b2c3", built from shell metacharacters
         precisely to prove the entrypoint's heredoc quoting neither expands nor
         executes them; its own value spells out the expected outcome.
+    - rule_id: B105
+      path: tests/unit/plugin_modules/ash_builtin/test_bandit_scanner_behavior.py
+      reason: >-
+        `secret = "abcdefghijklmnop"` is a fixture fed into a synthesized B105
+        message to prove ASH's own SARIF post-processor masks the password body to
+        asterisks — the test at line 722 asserts the literal never survives into the
+        output. The heuristic flags the fixture that exists to verify the heuristic.
     # B108 — one finding. Same shape as the codecommit-gate entry above: the
     # hardcoded /tmp is a path INSIDE the build container, where it is correct.
     - rule_id: B108
@@ -168,6 +175,21 @@ global_settings:
     - rule_id: B404
       path: tests/unit/test_ash_bash_entrypoint_build_failure.py
       reason: "Runs the bash entrypoint to assert it fails as intended."
+    - rule_id: B404
+      path: tests/unit/interactions/test_run_ash_container_entrypoint_coverage.py
+      reason: "Imports subprocess.CalledProcessError to drive the entrypoint's error-handling coverage; no subprocess is spawned by the test."
+    - rule_id: B404
+      path: tests/unit/interactions/test_run_ash_container_helpers_coverage.py
+      reason: "Imports subprocess.CalledProcessError to drive the helpers' error-handling coverage; no subprocess is spawned by the test."
+    - rule_id: B404
+      path: tests/unit/interactions/test_run_ash_nix.py
+      reason: "Imports subprocess to build CompletedProcess fixtures for a patched subprocess.run in the nix run path; nothing is executed."
+    - rule_id: B404
+      path: tests/unit/plugin_modules/ash_builtin/converters/test_jupyter_converter.py
+      reason: "Imports subprocess to build CompletedProcess fixtures standing in for a patched `jupyter nbconvert` call; nothing is executed."
+    - rule_id: B404
+      path: tests/unit/utils/test_get_scan_set_coverage.py
+      reason: "Imports subprocess to build CompletedProcess and raise TimeoutExpired against a patched git call; nothing is executed."
     - rule_id: B603
       path: ash-agent-plugins/agentic-coding/transpiler/tools/generate_models.py
       reason: "List argv, shell=False, which-resolved argv[0]; see the block comment above."
