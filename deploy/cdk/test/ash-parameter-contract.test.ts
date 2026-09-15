@@ -96,12 +96,26 @@ describe('parameter names are the contract', () => {
     // closes that gap directly.
     for (const [id, template] of Object.entries(ALL)) {
       const declared = Object.keys(template.toJSON().Parameters ?? {});
-      expect(declared).not.toContain(ASH_PARAMETER_NAMES.vpcSubnetIds);
-      expect(declared).not.toContain(ASH_PARAMETER_NAMES.certificateArn);
-      // Positive control: without this, the two assertions above would also pass
-      // for a template that declared no parameters at all.
-      expect(declared).toContain(ASH_PARAMETER_NAMES.kmsKeyArn);
-      expect(id).toBeTruthy();
+      // Compared as one object carrying the stack id, so a failure NAMES the stack.
+      // Bare `toContain` assertions report only the parameter list, and this is a
+      // plain loop rather than a test.each, so nothing else identifies which of the
+      // five stacks produced the failure. A separate `expect(id).toBeTruthy()`
+      // cannot supply the name either: an Object.entries key is always a non-empty
+      // string, so that assertion can never fail and never prints anything.
+      //
+      // `kmsKeyArn` is the positive control. Without it the two reserved-name
+      // assertions would also hold for a template that declared no parameters at all.
+      expect({
+        stack: id,
+        vpcSubnetIds: declared.includes(ASH_PARAMETER_NAMES.vpcSubnetIds),
+        certificateArn: declared.includes(ASH_PARAMETER_NAMES.certificateArn),
+        kmsKeyArn: declared.includes(ASH_PARAMETER_NAMES.kmsKeyArn),
+      }).toEqual({
+        stack: id,
+        vpcSubnetIds: false,
+        certificateArn: false,
+        kmsKeyArn: true,
+      });
     }
   });
 
