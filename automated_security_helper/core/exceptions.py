@@ -28,6 +28,30 @@ class WorkspacePatternError(ASHValidationError):
     pass
 
 
+class ScannerSelectionError(ASHValidationError):
+    """Exception raised when ``--scanners`` names no scanner that exists.
+
+    The same failure mode :class:`ShardSelectionError` guards against, reached by a
+    different route: a scan that ran nothing and reported itself as a clean one.
+    Selection is matched against a scanner's configured name by string equality, so
+    ``--scanners detect_secrets`` -- underscore, where the registered name is
+    ``detect-secrets`` -- matched nothing, every scanner was recorded SKIPPED, and
+    the run produced zero findings and exit 0.
+
+    SKIPPED cannot be what gives that away. It is how sharding and
+    ``--exclude-scanners`` record work a run was never meant to do, so the
+    completeness gate has to tolerate it; that is what leaves an unresolvable
+    allowlist with no existing gate to fall foul of.
+
+    Raised only when *nothing* the operator asked for resolved. A partly
+    unresolvable allowlist warns and continues: those runs still scan and report
+    what did resolve, and a CI matrix can produce that shape legitimately when its
+    runners load different plugin modules.
+    """
+
+    pass
+
+
 class ShardSelectionError(ASHValidationError):
     """Exception raised when ``--shard-index``/``--shard-count`` cannot be used as given.
 

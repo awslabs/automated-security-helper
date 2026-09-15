@@ -778,6 +778,31 @@ class TestFixtureHandling:
         assert "--output-dir" in command
         assert command[command.index("--output-dir") + 1] == str(tmp_path / "out")
 
+    def test_scan_command_names_every_gate_scanner_and_nothing_else(self, tmp_path):
+        """The scanner set is declared on the command line, not left implicit.
+
+        These runners do not have the other tools -- the workflow's own comment
+        says only bandit and checkov are available on the Windows one -- and
+        ``fail_on_incomplete_scanners`` defaults on, so an unnarrowed run reports
+        the absent scanners MISSING and exits 1, which is not in
+        ``TOLERATED_EXIT_CODES``. Naming the set is what keeps this gate asserting
+        something about the two scanners it has instead of failing on eight it was
+        never given.
+
+        Asserted as a set equality rather than a containment check, because the
+        failure worth catching is a scanner quietly *added* back to the run: it
+        would go MISSING on the runner and redden the gate for a reason that has
+        nothing to do with what the gate measures.
+        """
+        command = gate.build_scan_command(tmp_path / "src", tmp_path / "out")
+        selected = [
+            command[index + 1]
+            for index, token in enumerate(command)
+            if token == "--scanners"
+        ]
+        assert sorted(selected) == sorted(gate.GATE_SCANNERS)
+        assert len(selected) == len(set(selected)), "a scanner is named twice"
+
 
 class TestOutputIsAscii:
     """Windows consoles default to cp1252 and cannot encode box-drawing or emoji."""

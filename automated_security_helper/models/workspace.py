@@ -114,6 +114,22 @@ payload and through every reporter, which is where an unknown belongs.
 configuration", so promoting findings past it would buy nothing, and 3 names one
 misconfigured project -- a more specific diagnosis, actionable by one person.
 
+``INTERNAL_ERROR`` has two inputs, not one. A project that failed outright is
+one; a project that completed with a scanner at ERROR or MISSING is the other,
+carried on ``WorkspaceProjectResult.scan_incomplete``. They share a code because
+they are the same kind of news -- neither says whether the code is clean -- and
+because collapsing "we could not run it" into 0 is what let a workspace report a
+project clean while ``ash --source-dir P`` on the same project exited 1.
+
+That the two modes disagree about where the unknown sits is deliberate on both
+sides. Single-project mode checks completeness FIRST and returns 1 even when
+there are findings, because a reviewer told "2, clear these and you are done" is
+being misled when a scanner contributed nothing. Workspace mode cannot copy
+that: with N projects it can hold an incomplete project and a project with real
+findings at the same time, and leading with the unknown would let one project's
+absent tool suppress another project's certainty. A single-project scan has no
+second project to suppress, which is why it can afford the stricter order.
+
 ``WORKSPACE_ERROR`` (4) does not appear in that ordering because it is not a
 verdict over projects. It is returned when nothing was attempted at all, and
 raised as ``WorkspaceDefinitionError`` before execution starts in every other
@@ -354,6 +370,34 @@ class WorkspaceProjectResult(BaseModel):
             description="Final status per scanner name, for this project alone.",
         ),
     ]
+    incomplete_scanners: Annotated[
+        List[str],
+        Field(
+            default_factory=list,
+            description=(
+                "Scanners this project was asked to run that did not complete -- "
+                "ERROR or MISSING. Populated whether or not the completeness gate "
+                "is on, because an operator who turned the gate off has accepted "
+                "the risk and has not asked to be told the scan was complete. Read "
+                "through the unified metrics rather than off `scanners`, so a "
+                "scanner the operator excluded on a host that also lacks its tool "
+                "reads SKIPPED here rather than MISSING."
+            ),
+        ),
+    ]
+    scan_incomplete: Annotated[
+        bool,
+        Field(
+            False,
+            description=(
+                "Whether the incomplete scanners above fail this project. Stored "
+                "rather than derived from the list for the same reason "
+                "exceeds_threshold is: fail_on_incomplete_scanners can be off, in "
+                "which case a project has scanners that did not run and still "
+                "passes."
+            ),
+        ),
+    ] = False
     ceiling_unreachable_findings: Annotated[
         Dict[str, int],
         Field(
@@ -579,6 +623,26 @@ def workspace_exit_code(
         # certainty. The failure stays disclosed in the payload and in every
         # reporter, which is where an unknown belongs.
         return WorkspaceExitCode.ACTIONABLE_FINDINGS
-    if failed:
+    if failed or any(entry.scan_incomplete for entry in completed):
+        # A project that completed with a scanner at ERROR or MISSING belongs
+        # here for the same reason a project that failed outright does: neither
+        # tells us whether the code is clean. Single-project mode reaches 1 by
+        # the same route -- see the completeness pass in _compute_exit_code,
+        # which runs before the threshold count and returns 1 -- so `ash
+        # --source-dir P` and P inside a workspace now agree that an unrun
+        # scanner is not a pass.
+        #
+        # Placed HERE, below ACTIONABLE_FINDINGS, and not above it. Single-project
+        # mode answers 1 when both hold; workspace mode answers 2, and that
+        # difference is deliberate rather than an oversight in one of them. See
+        # "Precedence" in the module docstring: with N projects a workspace can
+        # hold both outcomes at once, so promoting the unknown would let one
+        # project's absent tool suppress another project's real findings. A
+        # single-project scan has no second project to suppress, which is why it
+        # can afford to lead with the unknown.
+        #
+        # WORKSPACE_ERROR (4) is unreachable from here by construction: this
+        # branch requires a completed or failed project, and 4 is the
+        # nothing-was-attempted answer.
         return WorkspaceExitCode.INTERNAL_ERROR
     return WorkspaceExitCode.SUCCESS

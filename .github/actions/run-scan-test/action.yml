@@ -434,3 +434,55 @@ runs:
         else
           echo "SUCCESS: All GitLab SAST reports passed schema validation"
         fi
+
+    # The completeness half of the scanner guard, and it is NOT the ERROR counter used by
+    # the five method-gated steps above. `count_scanner_errors.py` fails a cell when a
+    # scanner reported ERROR; this fails it when a scanner did not COMPLETE, which is a
+    # different set. Neither subsumes the other, which is why both are kept:
+    #
+    #   * MISSING is invisible to an ERROR count. A scanner whose dependency was absent
+    #     never ran, so it reports no error at all. That is the defect this step exists
+    #     for -- measured on pull request #546 at head 7d3759d3, four GREEN check runs
+    #     each carried three or four MISSING scanners at under a millisecond each, and in
+    #     the cells where those scanners did run one of them reported 82 findings.
+    #   * An unrecognised status is invisible for the same reason. This step allowlists
+    #     PASSED, FAILED and SKIPPED and fails on anything else, so a results file from a
+    #     different ASH version cannot pass a gate whose job is to notice that a scanner
+    #     did not run.
+    #   * Every scanner being SKIPPED reads as clean to a findings count and to an ERROR
+    #     count alike. This step fails it, because a run that selected nothing has shown
+    #     the target to be neither clean nor dirty.
+    #
+    # AND WHAT THE ERROR COUNTER HAS THAT THIS DOES NOT, so nobody folds one into the
+    # other without reading both: it inspects the nested `source` and `converted`
+    # sub-records of a `ScannerStatusInfo` entry, whose top-level `status` defaults to
+    # PASSED, and it normalizes a stringified enum. This step reads the top-level
+    # `status` only. Consolidating the two is worth doing and is not a merge's business.
+    #
+    # Deliberately not `if:`-gated on method, unlike the five above. Every method writes
+    # the same aggregated results file to the same path -- the one "Verify scan completed"
+    # already asserts exists -- so the guard is method-independent, and an unconditional
+    # step cannot be skipped by a method that stops matching a condition.
+    #
+    # Last on purpose. It is the only step here that fails on a *complete* scan artifact,
+    # so putting it after the existence, artifact-upload and schema steps means a
+    # completeness failure never skips one of their diagnostics. The artifact upload is
+    # `success() || failure()`, so the output survives this step's verdict either way.
+    #
+    # Runs even when the scan step failed, which the five above do not. A scan that exits
+    # non-zero is exactly when knowing which scanners did not complete is worth the most,
+    # and ASH's own exit code now covers the same condition, so this is a second reader of
+    # the same field rather than the only one.
+    - name: Validate all selected scanners completed
+      if: ${{ !cancelled() }}
+      shell: bash
+      run: |
+        # python3 on the Linux and macOS runners, python under Git Bash on the
+        # Windows one. Probed rather than assumed, because this is the only bash
+        # step in this action that runs on all three.
+        if command -v python3 >/dev/null 2>&1; then
+          PY=python3
+        else
+          PY=python
+        fi
+        "$PY" .github/scripts/assert_scanners_completed.py

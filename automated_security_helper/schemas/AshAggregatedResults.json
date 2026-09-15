@@ -1327,8 +1327,8 @@
           "type": "boolean"
         },
         "fail_on_incomplete_scanners": {
-          "default": false,
-          "description": "Whether to exit with a non-zero code when a selected scanner did not complete -- status ERROR (ran and failed) or MISSING (dependencies unavailable, never ran). SKIPPED scanners are not selected and never trip this. Independent of fail_on_findings: one answers 'was anything found', this one answers 'did what I asked for actually run'. Defaults to False so that environments legitimately lacking a scanner's tool keep their current exit codes.",
+          "default": true,
+          "description": "Whether to exit with a non-zero code when a selected scanner did not complete -- status ERROR (ran and failed) or MISSING (dependencies unavailable, never ran). SKIPPED scanners are not selected and never trip this. Independent of fail_on_findings: one answers 'was anything found', this one answers 'did what I asked for actually run'. Defaults to True: a scan that could not run what it was asked to run has not established that the target is clean, and reporting success for it is the wrong answer rather than a lenient one. Set it to False only for an environment that has decided, explicitly, that a partial scan is acceptable -- and note that an unavailable tool is better handled by excluding its scanner, which records SKIPPED and says so in the report.",
           "title": "Fail On Incomplete Scanners",
           "type": "boolean"
         },
@@ -13543,6 +13543,7 @@
             "actionable": 0,
             "duration": 0.0,
             "end": null,
+            "error": 0,
             "failed": 0,
             "missing": 0,
             "passed": 0,
@@ -17861,6 +17862,11 @@
           "default": null,
           "title": "End"
         },
+        "error": {
+          "default": 0,
+          "title": "Error",
+          "type": "integer"
+        },
         "failed": {
           "default": 0,
           "title": "Failed",
@@ -21341,6 +21347,14 @@
           "title": "Finding Count",
           "type": "integer"
         },
+        "incomplete_scanners": {
+          "description": "Scanners this project was asked to run that did not complete -- ERROR or MISSING. Populated whether or not the completeness gate is on, because an operator who turned the gate off has accepted the risk and has not asked to be told the scan was complete. Read through the unified metrics rather than off `scanners`, so a scanner the operator excluded on a host that also lacks its tool reads SKIPPED here rather than MISSING.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Incomplete Scanners",
+          "type": "array"
+        },
         "invalid_config": {
           "default": false,
           "description": "Whether the failure was this project's own configuration. Separated from a general failure because it selects exit code 3 rather than 1, and those route to different people.",
@@ -21378,6 +21392,12 @@
           "default": null,
           "description": "Index of this project's run in the aggregated SARIF, so a consumer can extract one project by selecting a run. Null when the project contributed no run.",
           "title": "Sarif Run Index"
+        },
+        "scan_incomplete": {
+          "default": false,
+          "description": "Whether the incomplete scanners above fail this project. Stored rather than derived from the list for the same reason exceeds_threshold is: fail_on_incomplete_scanners can be off, in which case a project has scanners that did not run and still passes.",
+          "title": "Scan Incomplete",
+          "type": "boolean"
         },
         "scanners": {
           "additionalProperties": {

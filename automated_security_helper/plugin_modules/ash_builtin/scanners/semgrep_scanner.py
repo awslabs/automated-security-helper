@@ -143,10 +143,34 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
             return self.config.options.tool_version
         return ">=1.125.0,<2.0.0"
 
-    def validate_plugin_dependencies(self) -> bool:
+    def unsupported_platform_reason(self) -> str | None:
+        """Windows, permanently: semgrep publishes no Windows build.
+
+        Stated here rather than only inside ``validate_plugin_dependencies`` so ScanPhase
+        can tell this apart from a dependency that is merely absent. It used to be only
+        the ``return False`` below, which ScanPhase read as MISSING -- so every Windows
+        leg recorded a scanner that cannot exist there as one that should have run.
+        SKIPPED is the honest classification and the completeness gate tolerates it.
+
+        The same fact also sets ``SemgrepScannerConfig.enabled`` to False on Windows by
+        default, and that is not this method's substitute: a config default is
+        overridable, and this repository's own ``.ash/.ash.yaml`` does override it with
+        ``semgrep: enabled: true``, which is how the MISSING classification was reached
+        at all. An operator asking for semgrep on Windows should get a clear SKIPPED with
+        a reason, not a silent config default and not a failed gate.
+        """
         if platform.system().lower() == "windows":
+            return "semgrep publishes no Windows build"
+        return None
+
+    def validate_plugin_dependencies(self) -> bool:
+        unsupported = self.unsupported_platform_reason()
+        if unsupported is not None:
+            # Still False, because the answer to "can this run here" is still no. What
+            # changed is that ScanPhase now asks the question above first, so this return
+            # no longer has to carry two different meanings.
             self._plugin_log(
-                "Semgrep is not supported on Windows and will be skipped",
+                f"Semgrep will be skipped: {unsupported}",
                 level=logging.INFO,
             )
             return False

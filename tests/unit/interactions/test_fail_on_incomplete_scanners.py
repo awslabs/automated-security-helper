@@ -39,6 +39,7 @@ would leave the defect in place while every other test still passed.
 
 from __future__ import annotations
 
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -101,11 +102,33 @@ class TestIncompleteScannersTripTheGate:
             f"indistinguishable from a clean run"
         )
 
-    def test_default_leaves_incomplete_scanners_at_exit_zero(self, tmp_path):
-        """Default off. Flipping it would redden every CI run that lacks a tool.
+    def test_the_default_fails_a_scan_with_an_incomplete_scanner(self, tmp_path):
+        """The regression test. Nothing is passed, so this is the default's answer.
 
-        Four of this tree's ten default scanners are MISSING on a stock
-        workstation, so the default has to stay as it was.
+        This is the assertion that was inverted, and the inversion is the whole
+        defect. The gate shipped opt-in, on the argument that turning it on by
+        default would redden CI in every environment lacking a scanner's tool.
+        That is true and it is not a reason: those runs were already not measuring
+        what they claimed to measure, and a green check run is how nobody found
+        out. Measured on the pull request that prompted this, on GREEN check runs:
+        ``scan (python-local, windows-latest)`` had four of ten scanners MISSING
+        (cfn-nag, grype, semgrep, syft), each at under a millisecond, and the three
+        ubuntu/macos python-local cells had three each. In the cells where semgrep
+        did run it reported 82 findings. The green Windows cell was not clean, it
+        was unmeasured.
+
+        Nothing is passed for ``fail_on_incomplete_scanners`` here, on the command
+        line or in a config, so what this pins is precisely the value an operator
+        who never heard of the flag gets. ``results`` is a MagicMock, whose
+        ``ash_config`` attribute auto-creates to another MagicMock rather than a
+        bool, so ``_resolve_fail_on_incomplete_scanners`` falls through its config
+        steps to the final default -- which is the one this test is about.
+
+        Discrimination check, run before this was committed: against the
+        pre-change tree this test fails with ``assert 0 == 1``, because the default
+        was off and both an ERROR and a MISSING scanner produced exit 0. Every
+        other test in this file passes under either version, which is why this one
+        is the regression test and they are not.
         """
         opts = _opts(tmp_path)
         results = MagicMock()
@@ -120,7 +143,40 @@ class TestIncompleteScannersTripTheGate:
         ):
             code = _compute_exit_code(results, opts)
 
-        assert code == 0
+        assert code == 1, (
+            "with no flag and no config, a scan carrying a MISSING and an ERROR "
+            "scanner must not exit 0 -- that code is indistinguishable from a scan "
+            "where all ten ran and found nothing"
+        )
+
+    def test_the_default_comes_from_the_config_model_not_just_the_fallback(
+        self, tmp_path
+    ):
+        """The same default, reached through a real AshConfig rather than a mock.
+
+        Separate from the test above because the two exercise different steps of
+        ``_resolve_fail_on_incomplete_scanners`` and only one of them is the path a
+        real scan takes. A real run has a resolved config on ``results``, so it
+        stops at the ``isinstance(..., bool)`` step and never reaches the final
+        fallback; a hand-built results object reaches the fallback. Both had to be
+        flipped, and a test that only covered one would let the other keep the old
+        answer -- with the symptom that whether you got a correct exit code
+        depended on how far config resolution had got.
+        """
+        from automated_security_helper.config.ash_config import AshConfig
+
+        opts = _opts(tmp_path)
+        results = MagicMock()
+        results.sarif = None
+        results.ash_config = AshConfig(project_name="gate-default-test")
+
+        with patch(
+            f"{_MODULE}.get_unified_scanner_metrics",
+            return_value=[_metric("syft", ScannerStatus.MISSING.value)],
+        ):
+            code = _compute_exit_code(results, opts)
+
+        assert code == 1
 
     def test_skipped_scanners_never_trip_the_gate(self, tmp_path):
         """SKIPPED is "not selected", which is how a shard excludes its siblings.
@@ -161,6 +217,367 @@ class TestIncompleteScannersTripTheGate:
             code = _compute_exit_code(results, opts)
 
         assert code == 0
+
+
+class TestAScanThatRanNothingIsNotACleanScan:
+    """The set-level assertion, which the per-scanner pass above cannot make.
+
+    Why this class exists
+    ---------------------
+    SKIPPED is on the completeness allowlist and has to stay there -- it is how
+    sharding and ``--exclude-scanners`` record work a run was never meant to do -- so
+    every assertion in ``TestIncompleteScannersTripTheGate`` is satisfied by a results
+    file in which *every* scanner is SKIPPED. That file has measured nothing.
+
+    Reachable from one word, with no sharding and no unusual config. Measured on this
+    tree, whose own ``.ash/.ash.yaml`` sets ``semgrep: enabled: true``:
+    ``ash scan --scanners semgrep`` on Windows resolves semgrep against the registered
+    names, so ``ScannerSelectionError`` does not fire; semgrep declares the platform
+    unsupported and lands on SKIPPED; the other nine are not selected and land there
+    too; findings are 0; ``_compute_exit_code`` returned 0. The same results file makes
+    ``.github/scripts/assert_scanners_completed.py`` exit 1, which is how CI caught it
+    and a user running ``ash scan`` did not.
+
+    Driven through ``_compute_exit_code``, deliberately. The all-SKIPPED case was
+    already pinned once, by ``test_the_gate_still_fails_when_every_scanner_is_skipped``
+    in ``tests/unit/core/phases/test_scanner_platform_support.py`` -- but that test
+    drives the CI *script*, so it passed throughout the window in which ASH's own exit
+    code answered 0. A suite can pin a condition on the wrong implementation and read
+    as covering it.
+
+    Both directions, for the reason the rest of this file gives: an assertion that only
+    covers the failing direction degrades into "always fail" without a single test
+    noticing. Hence a PASSED scanner beside nine SKIPPED ones, a FAILED one beside nine,
+    the shard carve-out, and the empty-set boundary.
+    """
+
+    def test_every_scanner_skipped_exits_one(self, tmp_path):
+        """The regression. Ten SKIPPED is a run that selected nothing."""
+        opts = _opts(tmp_path, fail_on_incomplete_scanners=True)
+        results = MagicMock()
+        results.sarif = None
+
+        with patch(
+            f"{_MODULE}.get_unified_scanner_metrics",
+            return_value=[
+                _metric(f"scanner-{index}", ScannerStatus.SKIPPED.value)
+                for index in range(10)
+            ],
+        ):
+            code = _compute_exit_code(results, opts)
+
+        assert code == 1, (
+            "every scanner SKIPPED means nothing ran, so zero findings is not "
+            "evidence of a clean tree; exit 0 here is indistinguishable from a scan "
+            "in which all ten ran and found nothing"
+        )
+
+    def test_the_measured_windows_semgrep_shape_exits_one(self, tmp_path):
+        """The reported defect in its exact shape, not an approximation.
+
+        ``--scanners semgrep`` on Windows: semgrep is selected, declares the platform
+        unsupported and is recorded SKIPPED with ``excluded=True``; the nine scanners
+        the allowlist left out are recorded SKIPPED as well. Every entry is on the
+        completeness allowlist and the findings count is 0.
+        """
+        opts = _opts(tmp_path, fail_on_incomplete_scanners=True)
+        results = MagicMock()
+        results.sarif = None
+
+        with patch(
+            f"{_MODULE}.get_unified_scanner_metrics",
+            return_value=[
+                _metric(name, ScannerStatus.SKIPPED.value)
+                for name in (
+                    "bandit",
+                    "cdk-nag",
+                    "cfn-nag",
+                    "checkov",
+                    "detect-secrets",
+                    "grype",
+                    "npm-audit",
+                    "opengrep",
+                    "semgrep",
+                    "syft",
+                )
+            ],
+        ):
+            code = _compute_exit_code(results, opts)
+
+        assert code == 1
+
+    def test_one_scanner_that_ran_beside_nine_skipped_exits_zero(self, tmp_path):
+        """The control that stops the fix from becoming "always fail".
+
+        This is the shape ``--scanners bandit`` produces on every platform, and the
+        shape HEAD's parent commit exists to keep green: semgrep SKIPPED on Windows
+        beside scanners that did run. One PASSED entry is enough -- the assertion is
+        about the set having measured *something*, not about how much.
+        """
+        opts = _opts(tmp_path, fail_on_incomplete_scanners=True)
+        results = MagicMock()
+        results.sarif = None
+
+        with patch(
+            f"{_MODULE}.get_unified_scanner_metrics",
+            return_value=[_metric("bandit", ScannerStatus.PASSED.value)]
+            + [
+                _metric(f"scanner-{index}", ScannerStatus.SKIPPED.value)
+                for index in range(9)
+            ],
+        ):
+            code = _compute_exit_code(results, opts)
+
+        assert code == 0, (
+            "a scan with one scanner that ran and nine deliberately not selected has "
+            "measured something; failing it would redden every --scanners run"
+        )
+
+    def test_a_failed_scanner_counts_as_having_run(self, tmp_path):
+        """FAILED is a verdict, so the findings verdict must still be reached.
+
+        Separate from the PASSED case because the two are reached through different
+        members of the ran-set, and a set that named only PASSED would send a run whose
+        one scanner found something to exit 1 -- reporting "nothing ran" about the
+        scanner that did the finding.
+        """
+        opts = _opts(tmp_path, fail_on_incomplete_scanners=True)
+        results = MagicMock()
+        results.sarif = None
+
+        with patch(
+            f"{_MODULE}.get_unified_scanner_metrics",
+            return_value=[_metric("bandit", ScannerStatus.FAILED.value, actionable=4)]
+            + [
+                _metric(f"scanner-{index}", ScannerStatus.SKIPPED.value)
+                for index in range(9)
+            ],
+        ):
+            code = _compute_exit_code(results, opts)
+
+        assert code == 2, (
+            "FAILED means the scanner ran and reported findings, so the verdict is the "
+            "findings one; 1 would say the scan did not run"
+        )
+
+    @pytest.mark.parametrize(
+        "shard_index,shard_count",
+        [(3, 4), (0, 1), (9, 10)],
+    )
+    def test_one_shard_of_a_split_may_legitimately_run_nothing(
+        self, tmp_path, shard_index, shard_count
+    ):
+        """A shard can own nothing, so an all-SKIPPED shard is not an offender.
+
+        ``core.sharding`` allows a shard count above the scanner count so a pipeline
+        can parameterise it without knowing how many scanners exist: "the surplus
+        shards leave... They run, produce a valid empty report, and merge correctly." A
+        shard that owns one platform-declined scanner is the same shape. Failing either
+        would make an over-large shard count a pipeline that cannot go green.
+
+        The union is not excused. ``cli.merge._merged_exit_code`` builds its
+        ``ScanOptions`` with no shard fields, so the merged model is held to this
+        assertion; a matrix in which no shard ran anything exits 1 at the merge.
+        """
+        opts = _opts(
+            tmp_path,
+            fail_on_incomplete_scanners=True,
+            shard_index=shard_index,
+            shard_count=shard_count,
+        )
+        results = MagicMock()
+        results.sarif = None
+
+        with patch(
+            f"{_MODULE}.get_unified_scanner_metrics",
+            return_value=[
+                _metric(f"scanner-{index}", ScannerStatus.SKIPPED.value)
+                for index in range(10)
+            ],
+        ):
+            code = _compute_exit_code(results, opts)
+
+        assert code == 0, (
+            "a shard that owns no runnable scanner has to exit 0, or a shard count "
+            "above the scanner count can never merge"
+        )
+
+    def test_the_same_shape_without_shard_options_still_exits_one(self, tmp_path):
+        """The control for the carve-out above: it is the options, not the statuses.
+
+        Identical metrics, no shard options. Without this, a carve-out that swallowed
+        every all-SKIPPED run would satisfy the parametrized test above.
+        """
+        opts = _opts(tmp_path, fail_on_incomplete_scanners=True)
+        results = MagicMock()
+        results.sarif = None
+
+        with patch(
+            f"{_MODULE}.get_unified_scanner_metrics",
+            return_value=[
+                _metric(f"scanner-{index}", ScannerStatus.SKIPPED.value)
+                for index in range(10)
+            ],
+        ):
+            code = _compute_exit_code(results, opts)
+
+        assert code == 1
+
+    def test_the_operator_opt_out_still_wins(self, tmp_path):
+        """``--no-fail-on-incomplete-scanners`` covers this check too.
+
+        Deliberate, and it is what keeps the two knobs answering one question once.
+        ``test_cli_false_overrides_config_true`` already pins that a run whose only
+        scanner is MISSING exits 0 with the gate off -- that run measured nothing just
+        as thoroughly as an all-SKIPPED one. A check placed outside the gate would
+        answer the same question two different ways depending on which status the
+        scanners that did not run happened to land on.
+
+        The gate defaults on, so the defect above still fails by default.
+        """
+        opts = _opts(tmp_path, fail_on_incomplete_scanners=False)
+        results = MagicMock()
+        results.sarif = None
+
+        with patch(
+            f"{_MODULE}.get_unified_scanner_metrics",
+            return_value=[
+                _metric(f"scanner-{index}", ScannerStatus.SKIPPED.value)
+                for index in range(10)
+            ],
+        ):
+            code = _compute_exit_code(results, opts)
+
+        assert code == 0
+
+    def test_no_scanners_at_all_is_a_different_assertion_and_is_not_made_here(
+        self, tmp_path
+    ):
+        """The scope boundary, asserted rather than left implicit.
+
+        An empty scanner set is reachable from a legitimate invocation --
+        ``ash scan --phases convert`` records no scanner at all -- so treating "no
+        entries" as "nothing ran" would turn a phase-limited run into an error. The CI
+        boundary refuses an empty ``scanner_results`` explicitly and unconditionally
+        (see ``assert_scanners_completed.py``), which is where a results file claiming
+        to be a scan is judged.
+
+        Pinned so that widening this check to cover the empty case is a deliberate
+        change with a test to update, rather than something that happens by accident
+        to ``--phases convert``.
+        """
+        opts = _opts(tmp_path, fail_on_incomplete_scanners=True)
+        results = MagicMock()
+        results.sarif = None
+
+        with patch(f"{_MODULE}.get_unified_scanner_metrics", return_value=[]):
+            code = _compute_exit_code(results, opts)
+
+        assert code == 0
+
+    def test_an_incomplete_scanner_is_reported_as_incomplete_not_as_nothing_ran(
+        self, tmp_path
+    ):
+        """Both conditions hold at once; the per-scanner one has to be the one reported.
+
+        Nine SKIPPED beside one MISSING satisfies "no scanner reached a verdict" as
+        well, and the two messages send an operator to different places: one names the
+        scanner to install, the other says the selection matched nothing. Ordering is
+        what decides it, so it is pinned rather than left to the order the code happens
+        to be in.
+        """
+        opts = _opts(tmp_path, fail_on_incomplete_scanners=True)
+        results = MagicMock()
+        results.sarif = None
+
+        with patch(
+            f"{_MODULE}.get_unified_scanner_metrics",
+            return_value=[_metric("cdk-nag", ScannerStatus.MISSING.value)]
+            + [
+                _metric(f"scanner-{index}", ScannerStatus.SKIPPED.value)
+                for index in range(9)
+            ],
+        ):
+            with patch.object(
+                logging.getLogger("automated_security_helper.interactions.run_ash_scan"),
+                "error",
+            ) as logged:
+                code = _compute_exit_code(results, opts)
+
+        assert code == 1
+        messages = [str(call.args[0]) for call in logged.call_args_list]
+        assert any("Scan incomplete" in message for message in messages), messages
+        assert not any("ran no scanners" in message for message in messages), messages
+
+
+class TestTheRanStatusSet:
+    """The set itself, held against the enum and against its CI counterpart."""
+
+    def test_ran_is_narrower_than_complete_and_excludes_skipped(self):
+        from automated_security_helper.interactions.run_ash_scan import (
+            _COMPLETE_SCANNER_STATUSES,
+            _RAN_SCANNER_STATUSES,
+        )
+
+        assert _RAN_SCANNER_STATUSES == {"PASSED", "FAILED"}
+        assert _RAN_SCANNER_STATUSES < _COMPLETE_SCANNER_STATUSES
+        assert ScannerStatus.SKIPPED.value not in _RAN_SCANNER_STATUSES, (
+            "SKIPPED on the ran-set would make this check unable to fire at all, "
+            "which is the mutation that leaves the defect in place"
+        )
+
+    def test_no_scanner_ran_answers_the_set_not_the_entries(self):
+        """Directly, because every exit-code test above reaches it through two gates."""
+        from automated_security_helper.interactions.run_ash_scan import no_scanner_ran
+
+        assert no_scanner_ran([("a", "SKIPPED"), ("b", "SKIPPED")]) is True
+        assert no_scanner_ran([("a", "SKIPPED"), ("b", "PASSED")]) is False
+        assert no_scanner_ran([("a", "FAILED")]) is False
+        assert no_scanner_ran([]) is False, (
+            "an empty set is a different assertion; see the boundary test above"
+        )
+        assert no_scanner_ran([("a", "ERROR")]) is True, (
+            "an ERROR scanner reached no verdict. It is already caught one entry at a "
+            "time, and counting it as having run would make ASH exit 0 on a file the "
+            "CI gate exits 1 on"
+        )
+
+    def test_scanner_statuses_is_the_single_read_the_two_checks_share(self):
+        """One pass over the metrics, so the two questions cannot read different state."""
+        from automated_security_helper.interactions.run_ash_scan import (
+            incomplete_scanners,
+            scanner_statuses,
+        )
+
+        results = MagicMock()
+        with patch(
+            f"{_MODULE}.get_unified_scanner_metrics",
+            return_value=[
+                _metric("bandit", ScannerStatus.PASSED.value),
+                _metric("cdk-nag", ScannerStatus.MISSING.value),
+                _metric("semgrep", ScannerStatus.SKIPPED.value),
+            ],
+        ) as metrics:
+            observed = scanner_statuses(results)
+
+        assert observed == [
+            ("bandit", "PASSED"),
+            ("cdk-nag", "MISSING"),
+            ("semgrep", "SKIPPED"),
+        ]
+        assert metrics.call_count == 1
+
+        with patch(
+            f"{_MODULE}.get_unified_scanner_metrics",
+            return_value=[
+                _metric("bandit", ScannerStatus.PASSED.value),
+                _metric("cdk-nag", ScannerStatus.MISSING.value),
+                _metric("semgrep", ScannerStatus.SKIPPED.value),
+            ],
+        ):
+            assert incomplete_scanners(results) == [("cdk-nag", "MISSING")]
+
+        assert scanner_statuses(None) == []
 
 
 class TestIndependenceFromFailOnFindings:
@@ -428,26 +845,99 @@ class TestReadsTheAuthoritativeSignals:
             "counter reads clean; ERROR appears in none of them"
         )
 
-    def test_error_is_reachable_at_all_which_summary_stats_cannot_express(self):
-        """ERROR has no counter in ``SummaryStats``, so the gate cannot use one.
+    def test_summary_stats_now_counts_error_and_the_gate_still_ignores_it(self):
+        """The revisit this test's earlier form asked for, answered both ways.
 
-        ``SummaryStats`` carries passed/failed/missing/skipped and no error field.
-        A gate keyed literally on ``summary_stats.missing`` would therefore be
-        blind to a scanner that ran and failed; reading the per-scanner status
-        covers both halves of the fault set.
+        It used to assert ``"error" not in SummaryStats.model_fields`` with the
+        note "if SummaryStats grows an error counter, revisit whether the gate
+        should read it". It has grown one, so here is the answer: the counter is
+        worth having and the gate still must not read it.
+
+        Worth having, because a scanner that ran and failed appeared in none of
+        passed/failed/missing/skipped, so the counters summed to less than the
+        scanner count on exactly the runs where that mattered, and anything
+        deriving a verdict from those totals -- a dashboard, a CI gate, a reviewer
+        skimming the report -- read a tally that silently excluded the worst
+        outcomes. The five counters now partition the set, which this asserts by
+        arithmetic rather than by naming fields.
+
+        And still not read by the gate, because a count cannot name the scanner.
+        The failure message has to say *which* scanner did not complete or it sends
+        an operator to the wrong place, and ``incomplete_scanners`` reading
+        per-scanner status is what supplies the name. A count would also reintroduce
+        the coupling this whole file exists to break: two readers of the same state,
+        one of which can be right while the other is wrong.
+
+        How the partition is asserted, and how it used to be
+        ---------------------------------------------------
+        This checked ``sum(...) == 10`` over five integers the test itself had just
+        passed to the constructor, which verifies that pydantic stores integers.
+        Deleting ``error=error_count`` from ``core/unified_metrics.py`` left it
+        passing, so the one claim it appeared to make -- that the five counters
+        account for every scanner -- was not being made at all.
+
+        Replaced by two assertions that read something the test did not choose: that
+        every ``ScannerStatus`` member has a counter named after it, and that a real
+        pass through ``populate_metrics_from_unified_source`` over one scanner in each
+        of the five statuses produces counters that sum to the scanner count.
         """
-        from automated_security_helper.models.asharp_model import SummaryStats
-
-        assert "error" not in SummaryStats.model_fields, (
-            "if SummaryStats grows an error counter, revisit whether the gate "
-            "should read it"
+        # AshConfig is imported for its side effect as well: importing it is what
+        # calls AshAggregatedResults.model_rebuild(), without which constructing one
+        # raises PydanticUserError.
+        from automated_security_helper.config.ash_config import AshConfig  # noqa: F401
+        from automated_security_helper.core.unified_metrics import (
+            ScannerMetrics,
+            populate_metrics_from_unified_source,
         )
+        from automated_security_helper.models.asharp_model import (
+            AshAggregatedResults,
+            SummaryStats,
+        )
+
+        # Derived from the enum rather than listed, so a member added to
+        # ScannerStatus without a counter to match fails here.
+        assert {member.value.lower() for member in ScannerStatus} <= set(
+            SummaryStats.model_fields
+        ), (
+            "every ScannerStatus member needs a counter of its own; ERROR had none, "
+            "so the other four summed to fewer than the scanners in the run on "
+            "exactly the runs where the difference mattered, and every total read clean"
+        )
+
+        # One scanner in each of the five statuses, counted by the real function.
+        metrics = [
+            ScannerMetrics(scanner_name=member.value.lower(), status=member.value)
+            for member in ScannerStatus
+        ]
+        model = AshAggregatedResults()
+        with patch(
+            "automated_security_helper.core.unified_metrics.get_unified_scanner_metrics",
+            return_value=metrics,
+        ):
+            populated = populate_metrics_from_unified_source(aggregated_results=model)
+
+        stats = populated.metadata.summary_stats
+        buckets = [member.value.lower() for member in ScannerStatus]
+        assert sum(getattr(stats, bucket) for bucket in buckets) == len(
+            populated.scanner_results
+        ), (
+            "the five counters must account for every scanner in the run; when one "
+            f"status has no counter the total silently excludes it: {stats!r}"
+        )
+        # Each status contributed exactly one scanner, so each counter must read 1.
+        # Without this the sum could be reached by one counter absorbing another's
+        # scanners.
+        assert {bucket: getattr(stats, bucket) for bucket in buckets} == {
+            bucket: 1 for bucket in buckets
+        }
+
         model = self._model_with("grype", ScannerStatus.ERROR, "PASSED")
 
         from automated_security_helper.interactions.run_ash_scan import (
             incomplete_scanners,
         )
 
+        # Named, not counted. This is the property a counter cannot provide.
         assert incomplete_scanners(model) == [("grype", "ERROR")]
 
 
@@ -489,6 +979,76 @@ class TestIncompleteScannerReport:
         assert incomplete_scanners(None) == []
 
 
+class TestStatusClassificationFailsClosed:
+    """A status this version does not recognise is not evidence a scanner ran.
+
+    The classification used to be a denylist -- ``status in {ERROR, MISSING}`` --
+    which makes every status the list does not name count as complete. That is the
+    wrong default for a completeness check, and it is reachable rather than
+    hypothetical: ``ash merge`` reads shard results written by whatever ASH produced
+    them, so a mixed-version fan-out can hand this code a status string that is not
+    in this version's enum. A denylist reports that shard as complete.
+
+    Inverted to an allowlist of the three statuses that mean the scanner's outcome is
+    known. Anything else is incomplete, so an unrecognised status fails loudly
+    instead of passing quietly.
+    """
+
+    def test_an_unrecognised_status_is_reported_incomplete(self):
+        from automated_security_helper.interactions.run_ash_scan import (
+            incomplete_scanners,
+        )
+
+        results = MagicMock()
+        with patch(
+            f"{_MODULE}.get_unified_scanner_metrics",
+            return_value=[
+                _metric("bandit", ScannerStatus.PASSED.value),
+                _metric("semgrep", "PARTIALLY_COMPLETED"),
+            ],
+        ):
+            listed = incomplete_scanners(results)
+
+        assert listed == [("semgrep", "PARTIALLY_COMPLETED")], (
+            "a status from another ASH version has to be treated as incomplete; "
+            "counting it as complete is how a partial scan reads as a whole one"
+        )
+
+    def test_the_two_status_sets_partition_the_enum(self):
+        """Neither set may drift from the enum, in either direction.
+
+        The complete set is spelled out and the incomplete set is derived as its
+        complement, so a member added to ``ScannerStatus`` becomes incomplete by
+        construction -- fail-closed -- rather than defaulting to complete. This
+        asserts the two facts that makes rest on: they are disjoint, and together
+        they cover every member.
+        """
+        from automated_security_helper.interactions.run_ash_scan import (
+            _COMPLETE_SCANNER_STATUSES,
+            _INCOMPLETE_SCANNER_STATUSES,
+        )
+
+        every = {member.value for member in ScannerStatus}
+        assert _COMPLETE_SCANNER_STATUSES | _INCOMPLETE_SCANNER_STATUSES == every
+        assert not (_COMPLETE_SCANNER_STATUSES & _INCOMPLETE_SCANNER_STATUSES)
+
+    def test_skipped_is_on_the_complete_side(self):
+        """The one classification that is a decision rather than a definition.
+
+        SKIPPED means the scanner was not selected, and that is how sharding divides
+        work: each shard of an n-way split records the other shards' scanners as
+        SKIPPED. Treating it as incomplete would fail every shard of a healthy
+        sharded scan. Pinned separately from the partition above, which would still
+        hold with SKIPPED on either side.
+        """
+        from automated_security_helper.interactions.run_ash_scan import (
+            _COMPLETE_SCANNER_STATUSES,
+        )
+
+        assert ScannerStatus.SKIPPED.value in _COMPLETE_SCANNER_STATUSES
+        assert _COMPLETE_SCANNER_STATUSES == {"PASSED", "FAILED", "SKIPPED"}
+
+
 class TestConfigFileResolution:
     """The YAML field has to be readable without building the orchestrator."""
 
@@ -517,6 +1077,30 @@ class TestConfigFileResolution:
         (source / ".ash.yaml").write_text("project_name: gate-test\n", encoding="utf-8")
 
         opts = ScanOptions(source_dir=source, output_dir=tmp_path / "out")
+        assert _resolve_config_fail_on_incomplete_scanners(opts) is True
+
+    def test_reads_an_explicit_false_from_the_config_file(self, tmp_path):
+        """An operator who wrote ``false`` gets ``false``, not the default.
+
+        Worth its own test now that the default is True: without it, a bug that
+        made this function ignore the file and return the model default would be
+        invisible -- ``test_absent_field_resolves_to_the_models_default`` would
+        still pass, and so would every other test here. The opt-out is the only
+        way an environment that has decided a partial scan is acceptable can say
+        so, so it has to be the one thing that cannot silently stop working.
+        """
+        from automated_security_helper.interactions.run_ash_scan import (
+            _resolve_config_fail_on_incomplete_scanners,
+        )
+
+        source = tmp_path / "src"
+        source.mkdir()
+        (source / ".ash.yaml").write_text(
+            "project_name: gate-test\nfail_on_incomplete_scanners: false\n",
+            encoding="utf-8",
+        )
+
+        opts = ScanOptions(source_dir=source, output_dir=tmp_path / "out")
         assert _resolve_config_fail_on_incomplete_scanners(opts) is False
 
     def test_no_config_file_resolves_to_none(self, tmp_path):
@@ -533,10 +1117,34 @@ class TestConfigFileResolution:
 class TestConfigModelAndValidator:
     """The field has to exist on the model and be accepted by ``ash config``."""
 
-    def test_config_field_defaults_to_false(self):
+    def test_config_field_defaults_to_true(self):
         from automated_security_helper.config.ash_config import AshConfig
 
-        assert AshConfig(project_name="x").fail_on_incomplete_scanners is False
+        assert AshConfig(project_name="x").fail_on_incomplete_scanners is True
+
+    def test_the_model_default_and_the_resolver_fallback_agree(self, tmp_path):
+        """Two answers to one question must not be able to disagree.
+
+        ``_resolve_fail_on_incomplete_scanners`` ends in a literal rather than
+        reading the model, so the model default and that literal are two
+        independent copies of the same decision. When they disagreed, which one you
+        got depended on whether a config model had been built by the time the exit
+        code was computed -- so the same scan could be gated or not gated depending
+        on how it was invoked. This test is what makes changing one of them without
+        the other a failure rather than a subtle inconsistency.
+        """
+        from automated_security_helper.config.ash_config import AshConfig
+        from automated_security_helper.interactions.run_ash_scan import (
+            _resolve_fail_on_incomplete_scanners,
+        )
+
+        # No opts value, no config value, and a results object carrying nothing
+        # bool-shaped, so resolution reaches the final fallback literal.
+        bare = MagicMock()
+        bare.ash_config = None
+        fallback = _resolve_fail_on_incomplete_scanners(bare, _opts(tmp_path), None)
+
+        assert fallback is AshConfig(project_name="x").fail_on_incomplete_scanners
 
     def test_validator_accepts_the_new_top_level_field(self):
         from automated_security_helper.config.config_validator import ConfigValidator

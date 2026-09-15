@@ -174,6 +174,32 @@ STATUS_SKIPPED = "SKIPPED"
 # set ever grows, re-check that assumption.
 TOLERATED_EXIT_CODES = (0, 2)
 
+#: The scanners this gate runs, named rather than left at the default ten.
+#:
+#: What this gate asserts is that a scan of a directory outside the repository
+#: reads that directory rather than the process working directory. Any scanner that
+#: produces attributable findings proves it; ten do not prove it ten times.
+#:
+#: The set is named because the runners do not have the other tools. This
+#: workflow's own comment records it: "On the Windows runner only bandit and
+#: checkov are available at all". Left unnarrowed, cfn-nag, grype, syft and the
+#: rest report MISSING, and since ``fail_on_incomplete_scanners`` defaults on --
+#: a scan that could not run what it was asked to run is not a pass -- ``ash scan``
+#: exits 1, which is not in TOLERATED_EXIT_CODES. Naming the set is the difference
+#: between this gate asserting something about two scanners it has and asserting
+#: nothing while appearing to cover ten.
+#:
+#: An allowlist rather than excluding the absent tools by name, matching
+#: ``verify_multi_project_attribution.GATE_SCANNERS``: a scanner added later would
+#: silently join the run through a denylist and would have to be named here to join
+#: it through this one.
+#:
+#: Adding 1 to TOLERATED_EXIT_CODES was the alternative and is wrong: it would
+#: tolerate exactly the state -- scanners that never ran -- that this gate exists
+#: to catch, and ``check_some_scanner_ran`` only fires when *every* scanner is
+#: missing, so a run down to one working scanner would still pass.
+GATE_SCANNERS: Tuple[str, ...] = ("bandit", "checkov")
+
 # The job that runs this script sets timeout-minutes: 25 (1500s). The default here
 # must stay below that budget, or GitHub cancels the job first and the operator gets
 # no summary table, no rule evidence and no log tail -- only a cancellation notice.
@@ -676,8 +702,22 @@ def check_expected_rules_present(
     histogram. A rule that matches bandit's pattern but is attributed to another
     scanner does not satisfy bandit -- that is the whole point of keying by scanner.
 
-    Skips any producer whose scanner is MISSING, SKIPPED or excluded: the tool is
-    not installed on this runner and requirement (e) says that must not fail.
+    Skips any producer whose scanner is MISSING, SKIPPED or excluded, because a rule
+    assertion about a scanner that did not run tells you about the runner rather than
+    about the product.
+
+    That is a statement about *this check* only, and the previous wording -- "requirement
+    (e) says that must not fail" -- overstated it twice. There is no requirement (e)
+    anywhere in this repository, so the citation resolved to nothing; and the gate as a
+    whole does fail when one of the scanners it selected is MISSING. It fails in
+    ``check_exit_code``: ``GATE_SCANNERS`` narrows the run to bandit and checkov, so a
+    MISSING one of those makes ``ash scan`` exit 1, and 1 is deliberately absent from
+    ``TOLERATED_EXIT_CODES`` -- see the note there, which rejects adding it because that
+    would tolerate exactly the state this gate exists to catch.
+
+    Both behaviours are intended together. This gate asserts findings from two named
+    scanners; if one of them never ran it cannot do its job, so the job failing is the
+    correct outcome and this function simply is not the place that reports it.
     """
     by_name = {state.name: state for state in states}
     violations: List[str] = []
@@ -990,8 +1030,11 @@ def build_scan_command(source_dir: Path, output_dir: Path) -> List[str]:
 
     ``--phases scan`` is enough to write the aggregated results file, and skipping
     the report phase keeps the gate fast.
+
+    ``--scanners`` narrows the run to :data:`GATE_SCANNERS`; see that constant for
+    why the set is named rather than left at all ten.
     """
-    return [
+    command = [
         sys.executable,
         "-m",
         "automated_security_helper.cli.main",
@@ -1005,6 +1048,9 @@ def build_scan_command(source_dir: Path, output_dir: Path) -> List[str]:
         "--no-progress",
         "--simple",
     ]
+    for scanner in GATE_SCANNERS:
+        command += ["--scanners", scanner]
+    return command
 
 
 def run_scan(

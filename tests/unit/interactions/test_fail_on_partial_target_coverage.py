@@ -228,13 +228,30 @@ class TestPartialCoverageTripsTheGate:
 
 
 class TestDefaultPathIsUntouched:
-    """This change moves existing opt-in users from 0 to 1. It must move nobody else."""
+    """The blast radius of partial coverage: it must reach nobody who opted out.
 
-    def test_partial_coverage_without_the_flag_exits_zero(self, tmp_path):
-        """Same input as the tripping case, flag absent, exit 0.
+    This class was written when ``fail_on_incomplete_scanners`` defaulted to False, and
+    it read the default as the thing that kept the gate off. That is no longer what the
+    default says: a sibling change on this branch flipped it to True, on the measured
+    argument that runs with scanners silently absent were "already not measuring what
+    they claimed to measure, and a green check run is how nobody found out". The two
+    changes are independent and both intended, so the guard is re-expressed against the
+    opt-out rather than against the default -- see
+    ``test_flag_explicitly_false_exits_zero`` below, which is the assertion that now
+    carries "must move nobody else", and which passed unchanged across the merge.
+    """
 
-        The gate is opt-in and stays opt-in. A repository whose cdk-nag loses 4
-        of 10 targets keeps exiting 0 unless it asked to be told.
+    def test_partial_coverage_trips_the_gate_by_default(self, tmp_path):
+        """Same input as the tripping case, no flag passed, exit 1.
+
+        The inverse of what this asserted before, and the change is in the default
+        rather than in anything this module owns: nothing is passed here, so the
+        verdict comes from ``AshConfig.fail_on_incomplete_scanners``, which is now
+        True. Kept as a test of the DEFAULT specifically -- distinct from
+        ``test_the_flag_trips_on_partial_coverage``, which passes the flag -- because
+        the two travel different paths through
+        ``_resolve_fail_on_incomplete_scanners`` and only this one pins what an
+        operator who never heard of the flag gets.
         """
         code = _exit_code(
             tmp_path,
@@ -248,7 +265,10 @@ class TestDefaultPathIsUntouched:
             ],
         )
 
-        assert code == 0
+        assert code == 1, (
+            "with no flag and no config, a scanner that lost 4 of its 10 targets must "
+            "not exit 0; that code is indistinguishable from a scan that read all ten"
+        )
 
     def test_flag_explicitly_false_exits_zero(self, tmp_path):
         """``--no-fail-on-incomplete-scanners`` is honoured, not merely the default."""
@@ -700,14 +720,20 @@ class TestTheGateReadsTheRealRollup:
 
         assert incomplete_scanners(_rollup_model(reports)) == []
 
-    def test_the_default_exit_code_is_unchanged_through_the_real_rollup(self, tmp_path):
+    def test_the_opt_out_exit_code_is_unchanged_through_the_real_rollup(self, tmp_path):
         """The blast-radius guard, measured end to end rather than on injected rows.
 
         ``_compute_exit_code`` reaches ``incomplete_scanners`` only once
         ``_resolve_fail_on_incomplete_scanners`` returns true, so a partial-coverage run
-        that did not ask for the gate exits exactly as it did before. Asserted with the
-        real rollup so that a future change routing coverage into the default path is
-        caught here and not in somebody's pipeline.
+        by an operator who turned the gate off exits exactly as it did before. Asserted
+        with the real rollup so that a future change routing coverage past the flag
+        entirely is caught here and not in somebody's pipeline.
+
+        Keyed on the explicit opt-out rather than on the absent flag, which is what it
+        used to use. A sibling change on this branch flipped the default to on, so
+        "no flag passed" no longer selects the ungated path -- all three cases are
+        asserted here so the flip is visible in one place: off is 0, on is 1, and the
+        default now agrees with on.
         """
         model = _rollup_model({"cdk-nag": {"source": _target_report("PASSED", 10, 4)}})
 
@@ -715,10 +741,18 @@ class TestTheGateReadsTheRealRollup:
             "the fixture must be genuinely partial or this asserts nothing"
         )
 
-        opts = _opts(tmp_path, fail_on_findings=False)
-        assert _compute_exit_code(model, opts) == 0
+        opted_out = _opts(
+            tmp_path, fail_on_findings=False, fail_on_incomplete_scanners=False
+        )
+        assert _compute_exit_code(model, opted_out) == 0
 
         opted_in = _opts(
             tmp_path, fail_on_findings=False, fail_on_incomplete_scanners=True
         )
         assert _compute_exit_code(model, opted_in) == 1
+
+        defaulted = _opts(tmp_path, fail_on_findings=False)
+        assert _compute_exit_code(model, defaulted) == 1, (
+            "the default is now on, so it has to agree with the opted-in case; if this "
+            "reads 0 the default was flipped back without this file being revisited"
+        )

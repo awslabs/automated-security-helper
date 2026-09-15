@@ -30,6 +30,7 @@ from automated_security_helper.core.enums import (
 )
 from automated_security_helper.core.exceptions import (
     ASHConfigValidationError,
+    ScannerSelectionError,
     WorkspaceDefinitionError,
 )
 from automated_security_helper.core.progress import ExecutionPhaseType
@@ -172,24 +173,121 @@ _SARIF_LEVEL_TO_SEVERITY = {"error": "high", "warning": "medium", "note": "low"}
 # ---------------------------------------------------------------------------
 # Scanner completeness
 #
-# The two statuses that mean "this scanner was selected and did not complete".
-# Derived from ScannerStatus rather than spelled as literals so a member added to
-# the enum surfaces here as a decision to make instead of silently defaulting to
-# "complete".
+# The statuses whose outcome is known. This is the allowlist, and the incomplete set
+# below is its complement, so the default for anything not named here is "incomplete"
+# rather than "complete".
 #
-# SKIPPED is deliberately absent, and the distinction is load-bearing rather than
-# a nicety. SKIPPED means the scanner was not selected, and that is the mechanism
+# That direction is the point. The classification used to be a two-member denylist,
+# which meant every status it did not name -- including one this version has never
+# heard of -- counted as complete. Reachable rather than hypothetical: `ash merge`
+# reads results files written by whatever ASH produced each shard, so a fan-out whose
+# runners are mid-upgrade can hand this code a status string that is not in this
+# enum, and a denylist reports that shard as a scanner that ran. An allowlist fails
+# loudly on it instead.
+#
+# It also makes the derivation real. The comment here used to claim that a member
+# added to ScannerStatus "surfaces here as a decision to make", which was not true of
+# a hand-listed pair -- adding a member changed nothing and the new status defaulted
+# to complete. As a complement it is true by construction: a new member is incomplete
+# until someone deliberately adds it below.
+#
+# PASSED and FAILED both mean the scanner ran; FAILED already carries its verdict
+# through the finding count.
+#
+# SKIPPED is the one entry here that is a decision rather than a definition, and it is
+# load-bearing. SKIPPED means the scanner was not selected, and that is the mechanism
 # sharding uses to divide work: core.sharding.exclusions_for_shard excludes every
-# scanner the other shards own, so each shard of an n-way split records n-1
-# scanner sets as SKIPPED. Treating SKIPPED as incomplete would fail every shard
-# of a perfectly healthy sharded scan. Operator-level --exclude-scanners lands in
-# the same place, and an excluded scanner is one the operator said not to run.
+# scanner the other shards own, so each shard of an n-way split records n-1 scanner
+# sets as SKIPPED. Treating SKIPPED as incomplete would fail every shard of a
+# perfectly healthy sharded scan. Operator-level --exclude-scanners lands in the same
+# place, and an excluded scanner is one the operator said not to run.
 #
-# PASSED and FAILED both mean the scanner ran to completion; FAILED already
-# carries its verdict through the finding count.
-_INCOMPLETE_SCANNER_STATUSES = frozenset(
-    {ScannerStatus.ERROR.value, ScannerStatus.MISSING.value}
+# What SKIPPED cannot do is speak for a whole run. Every scanner being SKIPPED means
+# the run selected nothing, which is caught where the selection is made -- see
+# ScanPhase's allowlist resolution and .github/scripts/assert_scanners_completed.py --
+# because a shard legitimately owns nothing when it is handed a count above the
+# scanner count, and that merge still has to succeed.
+_COMPLETE_SCANNER_STATUSES = frozenset(
+    {
+        ScannerStatus.PASSED.value,
+        ScannerStatus.FAILED.value,
+        ScannerStatus.SKIPPED.value,
+    }
 )
+
+#: Every remaining ScannerStatus member: today ERROR (ran and failed) and MISSING
+#: (selected, dependencies unavailable, never ran).
+_INCOMPLETE_SCANNER_STATUSES = frozenset(
+    {member.value for member in ScannerStatus}
+) - _COMPLETE_SCANNER_STATUSES
+
+# The statuses that mean "this scanner executed and reached a verdict".
+#
+# Not the complement of anything. It is deliberately narrower than
+# _COMPLETE_SCANNER_STATUSES, which tolerates SKIPPED one entry at a time because
+# SKIPPED means "not selected" -- and a per-entry tolerance cannot answer whether the
+# *set* measured anything. Every entry being SKIPPED passes the per-scanner pass while
+# the run has shown the target to be neither clean nor dirty.
+#
+# Spelled identically to RAN_STATUSES in .github/scripts/assert_scanners_completed.py,
+# which is the whole point: that script's docstring claims it and ASH's exit code read
+# the same field and so cannot disagree, and until this set existed here they could --
+# the script asserted the set-level condition and _compute_exit_code did not.
+#
+# ERROR is excluded even though an ERROR scanner did technically run, which is where
+# this differs from ScannerState.ran in scripts/verify_external_target_scan.py. An
+# ERROR scanner reached no verdict, and excluding it is what keeps this in step with
+# the CI script: there, any ERROR entry already fails the per-scanner pass, so
+# counting it as "ran" here would make ASH exit 0 on a results file the script exits 1
+# on -- exactly the disagreement this set exists to remove.
+_RAN_SCANNER_STATUSES = frozenset(
+    {
+        ScannerStatus.PASSED.value,
+        ScannerStatus.FAILED.value,
+    }
+)
+
+
+def scanner_statuses(
+    results: Optional[AshAggregatedResults],
+) -> List[tuple[str, str]]:
+    """(name, status) for every scanner in *results*, in scanner-name order.
+
+    What :func:`no_scanner_ran` reads, and read through
+    ``get_unified_scanner_metrics`` for the same reason
+    :func:`incomplete_scanners` does: that function is what every reporter and the
+    metrics table already use, so the set-level gate answers from the statuses the
+    operator was shown rather than from a second, independently-derived read of
+    ``results.scanner_results``.
+
+    Deliberately just the pairs. An earlier form of this shared one pass with
+    ``incomplete_scanners`` by filtering these pairs, which stopped being possible
+    when that function grew a second arm reading the per-metric target counters --
+    a shortfall is not visible in a (name, status) pair. Keeping this narrow is
+    what makes the two gates independently correct; the cost is one extra pass over
+    the metrics, which ``_compute_exit_code`` already takes for the findings count.
+    """
+    if results is None:
+        return []
+    return [
+        (metric.scanner_name, metric.status)
+        for metric in get_unified_scanner_metrics(asharp_model=results)
+    ]
+
+
+def no_scanner_ran(observed: List[tuple[str, str]]) -> bool:
+    """True when *observed* is non-empty and none of its scanners reached a verdict.
+
+    Non-empty is load-bearing and is not the same assertion. An empty scanner set
+    means the scan phase recorded nothing, which is reachable from a legitimate
+    ``--phases convert`` run and is refused at the CI boundary instead (see
+    ``assert_scanners_completed.py``, which fails a results file reporting no
+    scanners at all). Folding the two together here would turn a phase-limited run
+    into an error.
+    """
+    if not observed:
+        return False
+    return not any(status in _RAN_SCANNER_STATUSES for _, status in observed)
 
 
 def _partial_coverage(metric) -> tuple[int, int] | None:
@@ -320,16 +418,25 @@ def incomplete_scanners(
     is what the summary table prints, so the gate fails on exactly the numbers the
     operator was shown rather than on a second, independently-derived count.
 
-    Known limitation, measured rather than assumed. An allowlist narrowing --
-    ``--scanners bandit`` -- does not mark the unselected scanners as excluded, so
-    a scanner whose tool is absent still reports MISSING and will trip this gate
-    even though the operator did not ask for it. An explicit
-    ``--exclude-scanners`` does mark them, landing them at SKIPPED, which does
-    not trip it. Combining this gate with an allowlist therefore wants
-    ``--exclude-scanners`` (or the tools installed). Filtering here against
-    ``opts.scanners`` was considered and rejected: it would make the exit code
-    disagree with the status the report prints for the same scanner, and it has
-    no counterpart in ``ash merge``, which has no scanner selection to consult.
+    An allowlist narrowing -- ``--scanners bandit`` -- does not trip this, because
+    the scanners it leaves out are recorded SKIPPED. That was not always true: the
+    scan phase used to validate a scanner's dependencies before checking whether it
+    had been selected, so on a host without cfn-nag, grype and syft a
+    ``--scanners bandit`` run reported those three MISSING while the six
+    tool-present scanners it left out reported SKIPPED. Which status an unselected
+    scanner got therefore depended on whether its tool happened to be installed.
+    See ``core/phases/scan_phase.py`` for the ordering that fixed it.
+
+    Filtering here against ``opts.scanners`` was the alternative and is rejected:
+    it would make the exit code disagree with the status the report prints for the
+    same scanner, and it has no counterpart in ``ash merge``, which has no scanner
+    selection to consult. Fixing the recorded status instead makes both agree.
+
+    Tested against ``_COMPLETE_SCANNER_STATUSES`` and not against
+    ``_INCOMPLETE_SCANNER_STATUSES``, though the two are complements over the enum.
+    ``metric.status`` is a plain string that may have come from a results file this
+    version did not write, and only the allowlist form treats a status outside the
+    enum entirely as incomplete rather than as a scanner that ran.
 
     Args:
         results: The aggregated results, or None when the scan produced none.
@@ -346,7 +453,16 @@ def incomplete_scanners(
 
     listed: list[tuple[str, str]] = []
     for metric in get_unified_scanner_metrics(asharp_model=results):
-        status_is_incomplete = metric.status in _INCOMPLETE_SCANNER_STATUSES
+        # Against the allowlist, not against _INCOMPLETE_SCANNER_STATUSES, and the
+        # two are not interchangeable here even though they partition the enum.
+        # `metric.status` is a plain string that may have come from a results file
+        # this version did not write -- `ash merge` reads shard results from
+        # whatever ASH produced each one -- and only the allowlist form treats a
+        # status outside the enum entirely as incomplete rather than as a scanner
+        # that ran. This arm arrived from one side of a merge spelled as
+        # `in _INCOMPLETE_SCANNER_STATUSES`, which is the denylist that inversion
+        # replaced; `TestStatusClassificationFailsClosed` is what catches it.
+        status_is_incomplete = metric.status not in _COMPLETE_SCANNER_STATUSES
         shortfall = _partial_coverage(metric)
 
         # No usable counters. The status is the only thing there is to report, so
@@ -516,8 +632,13 @@ def _resolve_fail_on_incomplete_scanners(
     3. *config_value* -- read from the config file before the scan, which is what
        container mode has to fall back on and what ``ash merge`` passes from the
        config carried in the shard results.
-    4. Off, so an environment that has always exited 0 with a missing tool keeps
-       doing so.
+    4. On, matching ``AshConfig.fail_on_incomplete_scanners``.
+
+    Step 4 is reached only when no config model was available at all -- a results
+    object built by hand, or a scan whose config failed to load. It agrees with the
+    model default deliberately: the two are the same question answered twice, and
+    when they disagreed the answer you got depended on how far the scan had got
+    before it was asked, which is not a property anyone wants an exit code to have.
     """
     if opts.fail_on_incomplete_scanners is not None:
         return opts.fail_on_incomplete_scanners
@@ -529,7 +650,7 @@ def _resolve_fail_on_incomplete_scanners(
 
     if config_value is not None:
         return config_value
-    return False
+    return True
 
 
 def _severity_filters_finding(result, min_sev_rank: int) -> bool:
@@ -1020,6 +1141,14 @@ def _run_local_mode(
     except ASHConfigValidationError as e:
         print(f"[bold red]ERROR (3) Invalid configuration: {e}[/bold red]")
         sys.exit(3)
+    except ScannerSelectionError as e:
+        # Ahead of the generic handler, and without logger.exception, because this is
+        # a mistyped argument rather than a fault: a traceback would bury the one
+        # line that says which name did not resolve and what the valid names are.
+        # Exit 1 rather than 3 -- exit 3 means the config file is invalid, and this
+        # operator's config is fine.
+        print(f"[bold red]ERROR (1) {e}[/bold red]")
+        sys.exit(1)
     except Exception as e:
         logger.exception(e)
         print(
@@ -1168,6 +1297,7 @@ def build_project_scan_settings(opts: ScanOptions) -> "ProjectScanSettings":
         ignore_suppressions=opts.ignore_suppressions,
         min_severity=opts.min_severity,
         fail_on_findings=opts.fail_on_findings,
+        fail_on_incomplete_scanners=opts.fail_on_incomplete_scanners,
         changed_files_only=opts.changed_files_only,
         base_ref=opts.base_ref,
         precommit=opts.mode == RunMode.precommit,
@@ -1308,7 +1438,7 @@ def _print_workspace_summary(
 # Two independent questions, in this order:
 #
 #   1. Did the scanners that were supposed to run actually run? Gated by
-#      fail_on_incomplete_scanners, default off, exit 1.
+#      fail_on_incomplete_scanners, default on, exit 1.
 #   2. Did they find anything actionable? Gated by fail_on_findings, default on,
 #      exit 2.
 #
@@ -1348,11 +1478,75 @@ def _compute_exit_code(
     if _resolve_fail_on_incomplete_scanners(
         results, opts, config_fail_on_incomplete_scanners
     ):
+        # Two reads of the metrics rather than one, and the second is not a
+        # duplicate of the first. `incomplete_scanners` no longer answers from status
+        # alone -- it also reports a scanner that ran and lost some of its targets,
+        # which needs the per-metric target counters -- so its result cannot be
+        # derived from a list of (name, status) pairs. An earlier form of this merge
+        # did exactly that, and it dropped the partial-coverage arm out of the exit
+        # code entirely while the file looked clean.
+        observed = scanner_statuses(results)
         incomplete = incomplete_scanners(results)
         if incomplete:
             logging.getLogger(__name__).error(
                 "Scan incomplete: %s",
                 ", ".join(f"{name} ({status})" for name, status in incomplete),
+            )
+            return 1
+
+        # Then the same question asked of the set rather than of each entry, and
+        # it is not implied by the pass above. SKIPPED has to be tolerated one
+        # entry at a time -- it is how sharding and --exclude-scanners record work
+        # a run was never meant to do -- so a results file in which *every* entry
+        # is SKIPPED clears the loop above having measured nothing.
+        #
+        # Reachable without any sharding and without any operator error beyond a
+        # single word. Measured on this tree with the repository's own
+        # .ash/.ash.yaml, which sets `semgrep: enabled: true`:
+        # `ash scan --scanners semgrep` on Windows resolves semgrep against the
+        # registered names, so ScannerSelectionError does not fire; semgrep then
+        # declares the platform unsupported and is recorded SKIPPED; the other nine
+        # are not selected and are SKIPPED too; findings are 0; exit 0. A scan that
+        # ran no scanner reported the tree clean.
+        #
+        # .github/scripts/assert_scanners_completed.py already asserted this and
+        # caught that case in CI, which is the reason it has to be here as well:
+        # its docstring states that reading the JSON status means "the guard and
+        # ASH's own exit code answer from the same field, so they cannot disagree",
+        # and on this exact input they did. An operator running `ash scan` got 0
+        # from the same results file the CI gate exits 1 on.
+        #
+        # Inside the fail_on_incomplete_scanners gate rather than beside it. The
+        # committed contract for --no-fail-on-incomplete-scanners is that a scan
+        # whose scanners did not run still exits 0 -- that is what
+        # test_cli_false_overrides_config_true pins, for a run whose only scanner
+        # is MISSING, which measured nothing just as thoroughly as an all-SKIPPED
+        # one. Making this one check unconditional would answer that same question
+        # two different ways depending on which status the non-running scanners
+        # happened to land on. The flag defaults on, so the case above still fails
+        # by default; an operator who turned the gate off has said they accept a
+        # scan that did not run.
+        #
+        # Skipped for one shard of a split scan, because a shard genuinely can own
+        # nothing: core.sharding documents that a shard count above the scanner
+        # count "leaves the surplus shards empty. They run, produce a valid empty
+        # report, and merge correctly", and a shard that owns one platform-declined
+        # scanner is the same shape. A shard also cannot see whether the union
+        # measured anything -- only the merge can, and it does: cli.merge's
+        # _verify_shard_contributions refuses a shard that owned scanners and
+        # completed none of them, and _merged_exit_code runs this same function
+        # over the merged model with no shard fields set, so the union is held to
+        # the assertion the individual shards are excused from.
+        one_shard_of_a_split = (
+            opts.shard_index is not None or opts.shard_count is not None
+        )
+        if not one_shard_of_a_split and no_scanner_ran(observed):
+            logging.getLogger(__name__).error(
+                "Scan ran no scanners: %s. Every scanner was skipped, so this run "
+                "has shown the target to be neither clean nor dirty -- most often a "
+                "--scanners name that matches no scanner on this platform, or an "
+                "allowlist wholly cancelled by --exclude-scanners.",
+                ", ".join(f"{name} ({status})" for name, status in observed),
             )
             return 1
 
