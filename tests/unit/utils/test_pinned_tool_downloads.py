@@ -41,7 +41,7 @@ from automated_security_helper.core.exceptions import (
     ToolDownloadIntegrityError,
     ToolNotProvisionableError,
 )
-from automated_security_helper.utils import tool_downloads
+from automated_security_helper.utils import download_utils, tool_downloads
 from automated_security_helper.utils.download_utils import (
     RECEIPT_DIR_NAME,
     _extract_single_member,
@@ -469,7 +469,12 @@ class TestArchiveExtraction:
         archive = tmp_path / "a.tar.gz"
         _make_tarball(archive, ["LICENSE", "grype"])
         target = tmp_path / "out" / "grype"
-        assert _extract_single_member(archive, "grype", target) == target
+        # The digest of the extracted member is returned, not the target path: it is
+        # what the install receipt records, and the caller must not re-derive it from
+        # the file afterwards. See _finalize_staged.
+        assert _extract_single_member(archive, "grype", target) == (
+            hashlib.sha256(PAYLOAD).hexdigest()
+        )
         assert target.read_bytes() == PAYLOAD
 
     def test_extracts_named_member_from_zip(self, tmp_path):
@@ -739,9 +744,222 @@ class TestStagingCannotBeRacedOrGuessed:
         assert not (bin_dir / "grype").exists()
 
 
+class TestTheVerifiedDigestIsTheOneRecorded:
+    """The digest checked against the pin is the digest written into the receipt.
+
+    Every stage used to re-derive a digest from bytes it had just read, so the receipt
+    recorded a fresh hash of the target taken *after* ``make_executable`` -- and on macOS
+    after ``unquarantine_macos_binary``, which spawns ``xattr`` as a subprocess. Anything
+    that replaced the target in that window got its own digest recorded as ASH's, and
+    ``_already_installed`` then re-hashed the file, agreed with the receipt, and skipped
+    the download on every later run. That is verbatim the outcome ``_finalize_staged``'s
+    docstring claims to have closed; its post-rename check was necessary and not
+    sufficient, because the result was thrown away before the receipt was written.
+
+    What these tests turn on, and the reason they are written this way: an assertion that
+    "the receipt matches the file on disk" passes before *and* after the fix, because
+    before the fix both are the substitute. The only thing that separates the two is
+    whether the receipt matches the digest that was actually **verified**.
+    """
+
+    @staticmethod
+    def _swap_during_the_window(substitute: bytes):
+        """Replace the installed file from inside the post-verification window.
+
+        Driven from ``make_executable``, which is a real call that sits in that window
+        rather than a seam invented for the test: both install paths call it after the
+        bytes have been verified at the target and before the receipt is written.
+        """
+        real_make_executable = download_utils.make_executable
+
+        def swap_then_chmod(file_path):
+            Path(file_path).write_bytes(substitute)
+            return real_make_executable(file_path)
+
+        return patch.object(download_utils, "make_executable", swap_then_chmod)
+
+    def test_the_archive_path_records_the_verified_digest(
+        self, tmp_path, monkeypatch, fake_grype_release
+    ):
+        payload, real_digest = fake_grype_release
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
+        bin_dir = tmp_path / "bin"
+        substitute = b"#!/bin/sh\nexit 0\n"
+
+        with (
+            _pin(_grype_asset_filename(), real_digest),
+            _serve(payload),
+            self._swap_during_the_window(substitute),
+        ):
+            install_pinned_tool("grype", "linux", "amd64", bin_dir)
+
+        receipt = read_receipt(bin_dir, "grype")
+        assert receipt["installed_sha256"] != hashlib.sha256(substitute).hexdigest(), (
+            "the receipt recorded the substituted binary's digest as ASH's own"
+        )
+        assert receipt["installed_sha256"] == hashlib.sha256(PAYLOAD).hexdigest(), (
+            "the receipt does not record the digest that was verified"
+        )
+
+    def test_a_binary_swapped_in_that_window_is_reinstalled_not_trusted(
+        self, tmp_path, monkeypatch, fake_grype_release
+    ):
+        """The outcome the receipt field only stands in for.
+
+        A receipt naming the substitute's digest makes ``_already_installed`` agree with
+        the substitute forever, in the one directory ASH's image makes world-writable.
+        """
+        payload, real_digest = fake_grype_release
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
+        bin_dir = tmp_path / "bin"
+
+        with (
+            _pin(_grype_asset_filename(), real_digest),
+            _serve(payload),
+            self._swap_during_the_window(b"#!/bin/sh\nexit 0\n"),
+        ):
+            installed = install_pinned_tool("grype", "linux", "amd64", bin_dir)
+
+        with _pin(_grype_asset_filename(), real_digest), _serve(payload) as served:
+            install_pinned_tool("grype", "linux", "amd64", bin_dir)
+
+        assert served.called, (
+            "a binary substituted before the receipt was written was trusted forever"
+        )
+        assert installed.read_bytes() == PAYLOAD
+
+    def test_the_unarchived_path_records_the_verified_digest_too(
+        self, tmp_path, monkeypatch
+    ):
+        """install_binary_from_url writes its own receipt, from its own call site.
+
+        Two separate lines re-hashed the target, so fixing one proves nothing about the
+        other. A pin is passed here -- unlike opengrep, which has none -- because without
+        one there is no verified digest for the receipt to disagree with.
+        """
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
+        bin_dir = tmp_path / "bin"
+        substitute = b"#!/bin/sh\nexit 0\n"
+
+        with _serve(PAYLOAD), self._swap_during_the_window(substitute):
+            install_binary_from_url(
+                "https://example.invalid/opengrep",
+                bin_dir,
+                "opengrep",
+                expected_sha256=hashlib.sha256(PAYLOAD).hexdigest(),
+            )
+
+        receipt = read_receipt(bin_dir, "opengrep")
+        assert receipt["installed_sha256"] != hashlib.sha256(substitute).hexdigest()
+        assert receipt["installed_sha256"] == hashlib.sha256(PAYLOAD).hexdigest()
+
+
+class TestTheInstallIsCheckedAgainstThePinNotAgainstItself:
+    """``_replace_atomically`` took no pinned digest, so it verified its own reading.
+
+    ``download_file`` verified the temporary file against the pin and discarded the
+    result; ``_replace_atomically`` then reopened that file, streamed it, and handed its
+    own ``hexdigest()`` to ``_finalize_staged`` as the expected value. Two separate reads
+    of a file in TMPDIR, checked against each other rather than against the pin.
+    ``verify_sha256`` reads the whole asset -- 30-100MB for syft and trivy -- so the
+    window is hundreds of milliseconds, and the sticky bit on /tmp does not constrain a
+    process running as the same user, which is what ASH has while it executes repository
+    code during a scan.
+    """
+
+    def test_an_asset_swapped_after_verification_is_refused(
+        self, tmp_path, fake_grype_release
+    ):
+        payload, real_digest = fake_grype_release
+        bin_dir = tmp_path / "bin"
+
+        # A second archive that is equally valid: same shape, same member, different
+        # bytes. Junk would be rejected by the extractor for an unrelated reason and the
+        # test would pass against the defect it is supposed to catch.
+        other = _make_tarball(tmp_path / "other.tar.gz", ["grype", "EXTRA"])
+        other_digest = hashlib.sha256(other).hexdigest()
+        assert other_digest != real_digest
+
+        real_verify = download_utils.verify_sha256
+
+        def verify_then_swap(file_path, expected_sha256, source):
+            actual = real_verify(file_path, expected_sha256, source)
+            Path(file_path).write_bytes(other)
+            return actual
+
+        with (
+            _pin(_grype_asset_filename(), real_digest),
+            _serve(payload),
+            patch.object(download_utils, "verify_sha256", verify_then_swap),
+            pytest.raises(
+                ToolDownloadIntegrityError, match="does not match the bytes"
+            ) as raised,
+        ):
+            install_pinned_tool("grype", "linux", "amd64", bin_dir)
+
+        # The pin is what it was compared against. Under the defect the expected value
+        # was other_digest -- the swapped bytes agreeing with themselves -- so naming
+        # both values is what distinguishes a real check from a self-consistent one.
+        assert real_digest in str(raised.value)
+        assert other_digest in str(raised.value)
+        assert not (bin_dir / "grype").exists()
+        assert read_receipt(bin_dir, "grype") is None
+
+
+class TestUnrecognizedArchives:
+    """An asset that is not the archive its name implies is refused as such.
+
+    Dispatch is on the last two suffixes, so anything not ending ``.zip`` fell through to
+    ``tarfile.open(..., "r:*")`` and surfaced ``tarfile.ReadError`` -- outside the
+    ``ToolDownloadIntegrityError`` contract the rest of this module honors and three of
+    its docstrings promise. Nothing in ASH catches either type today, so what this buys
+    is a diagnosable message and a contract that holds, not a changed decision.
+    """
+
+    def test_an_asset_that_is_no_archive_at_all_raises_the_typed_error(self, tmp_path):
+        asset = tmp_path / "grype_1.2.3_linux_amd64"
+        asset.write_bytes(b"\x7fELF and nothing archive-shaped after it")
+        target = tmp_path / "bin" / "grype"
+
+        with pytest.raises(
+            ToolDownloadIntegrityError, match="not a readable zip or tar archive"
+        ):
+            _extract_single_member(asset, "grype", target)
+
+        assert not target.exists()
+        assert not list(target.parent.glob("*.ash-partial")), (
+            "a rejected archive left a staging file behind"
+        )
+
+    def test_a_corrupt_zip_raises_the_typed_error(self, tmp_path):
+        """The zip branch raises BadZipFile, not ReadError, so it needs its own arm."""
+        asset = tmp_path / "syft_1.2.3_windows_amd64.zip"
+        asset.write_bytes(b"PK\x03\x04 truncated before anything useful")
+        target = tmp_path / "bin" / "syft.exe"
+
+        with pytest.raises(
+            ToolDownloadIntegrityError, match="not a readable zip or tar archive"
+        ):
+            _extract_single_member(asset, "syft.exe", target)
+
+        assert not target.exists()
+        assert not list(target.parent.glob("*.ash-partial"))
+
+
 @pytest.mark.skipif(platform.system() == "Windows", reason="POSIX mode bits only")
 class TestReceiptDirectoryPermissions:
-    """Every level ASH creates has to be as trustworthy as the receipt itself."""
+    """Every level ASH creates *for receipts* is as trustworthy as the receipt itself.
+
+    The receipt store is the subtree from ``receipt_root()`` down. Its parent, ``~/.ash``,
+    is ASH's general per-user directory -- and the parent of the default ASH_BIN_PATH,
+    ``~/.ash/bin`` -- so it is out of scope here for reasons ``_private_dir`` spells out.
+    """
 
     def test_every_created_level_is_private_under_a_loose_umask(
         self, tmp_path, monkeypatch, fake_grype_release
@@ -749,9 +967,9 @@ class TestReceiptDirectoryPermissions:
         """`mkdir(parents=True, mode=0o700)` does not do this.
 
         CPython applies the mode to the final component only; parents get 0o777 masked
-        by the umask. Measured under umask 002: ~/.ash and ~/.ash/install-receipts both
-        came out 0o775 while only the leaf was 0o700 -- which lets a group member
-        rename the key directory away and plant a conforming 0700/0600 receipt.
+        by the umask. Measured under umask 002: ~/.ash/install-receipts came out 0o775
+        while only the leaf was 0o700 -- which lets a group member rename the key
+        directory away and plant a conforming 0700/0600 receipt.
         """
         payload, real_digest = fake_grype_release
         home = tmp_path / "home"
@@ -766,9 +984,63 @@ class TestReceiptDirectoryPermissions:
 
         path = receipt_path(tmp_path / "bin", "grype")
         assert path.is_file()
-        for level in [path.parent, receipt_root(), receipt_root().parent]:
+        for level in [path.parent, receipt_root()]:
             mode = level.stat().st_mode & 0o777
             assert mode & 0o022 == 0, f"{level} is {oct(mode)}, writable beyond owner"
+
+        # And ~/.ash is left exactly as the umask made it. Asserted rather than left
+        # implicit: narrowing a directory the receipt store does not own is what made a
+        # foreign-owned ~/.ash disable idempotence, and _receipt_trust_chain does not
+        # extend up here anyway.
+        assert receipt_root().parent.stat().st_mode & 0o777 == 0o775
+
+    def test_the_receipt_survives_a_chmod_failure_outside_the_receipt_store(
+        self, tmp_path, monkeypatch, fake_grype_release
+    ):
+        """A permission problem on ~/.ash must not cost the receipt.
+
+        ~/.ash is shared with the default bin directory and with anything else ASH keeps
+        per-user. If it already exists owned by root -- from an earlier `sudo ash` run --
+        then chmodding it raises PermissionError, `write_receipt` swallows that because
+        receipts are best-effort by design, and install idempotence is off permanently
+        behind one warning, for a reason that has nothing to do with receipts.
+
+        os.chmod is made to fail for that one path, because reproducing a foreign owner
+        needs a second uid and a test cannot have one. Everything else still chmods for
+        real, so the modes the previous test asserts stay exercised.
+        """
+        payload, real_digest = fake_grype_release
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
+        bin_dir = tmp_path / "bin"
+        shared = receipt_root().parent
+        shared.mkdir(parents=True, exist_ok=True)
+        real_chmod = os.chmod
+
+        def refuse_shared(path, mode, *args, **kwargs):
+            if Path(path) == shared:
+                raise PermissionError(errno.EPERM, "Operation not permitted", str(path))
+            return real_chmod(path, mode, *args, **kwargs)
+
+        with (
+            _pin(_grype_asset_filename(), real_digest),
+            _serve(payload),
+            patch("os.chmod", side_effect=refuse_shared),
+        ):
+            install_pinned_tool("grype", "linux", "amd64", bin_dir)
+
+        assert read_receipt(bin_dir, "grype") is not None, (
+            "a chmod failure on ~/.ash lost the receipt, so idempotence is off for good"
+        )
+
+        # The consequence, not just the artifact: the next install skips the download.
+        exploding = patch(
+            "automated_security_helper.utils.download_utils.download_file",
+            side_effect=AssertionError("re-downloaded an already-installed tool"),
+        )
+        with _pin(_grype_asset_filename(), real_digest), exploding:
+            install_pinned_tool("grype", "linux", "amd64", bin_dir)
 
     def test_a_loose_ancestor_invalidates_the_receipt(
         self, tmp_path, monkeypatch, fake_grype_release

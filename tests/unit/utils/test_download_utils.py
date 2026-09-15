@@ -122,15 +122,23 @@ def test_unquarantine_macos_binary_non_macos(mock_run_command):
         mock_run_command.assert_not_called()
 
 
-@patch("automated_security_helper.utils.download_utils.download_file")
+@patch("automated_security_helper.utils.download_utils._download_verified")
 @patch("automated_security_helper.utils.download_utils.make_executable")
 @patch("automated_security_helper.utils.download_utils.unquarantine_macos_binary")
 def test_install_binary_from_url(
-    mock_unquarantine, mock_make_executable, mock_download_file
+    mock_unquarantine, mock_make_executable, mock_download_verified
 ):
-    """Test install_binary_from_url function."""
+    """Test install_binary_from_url function.
+
+    Driven through ``_download_verified`` rather than ``download_file``, because the
+    receipt has to record the digest that was verified as the bytes landed. Re-hashing
+    the installed file here instead would read it back after ``make_executable`` and,
+    on macOS, after ``unquarantine_macos_binary`` has spawned ``xattr`` -- see
+    ``_finalize_staged``. ``download_file`` still returns a plain path for callers
+    outside this module.
+    """
     # Setup mocks
-    mock_download_file.return_value = Path("/test/destination/file")
+    mock_download_verified.return_value = (Path("/test/destination/file"), "d" * 64)
 
     # Mock platform.system for platform-specific behavior
     with patch("platform.system", return_value="Darwin"):
@@ -142,7 +150,7 @@ def test_install_binary_from_url(
         # Verify mocks were called correctly. expected_sha256 is threaded through
         # explicitly; None here because this caller passes no pinned digest, and the
         # download logs that it went unverified rather than passing silently.
-        mock_download_file.assert_called_once_with(
+        mock_download_verified.assert_called_once_with(
             "https://example.com/file",
             Path("/test/destination"),
             "renamed_file",

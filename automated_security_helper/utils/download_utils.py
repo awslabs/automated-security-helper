@@ -40,25 +40,6 @@ def sha256_file(file_path: Path) -> str:
     return digest.hexdigest()
 
 
-def _digest_or_none(file_path: Path) -> Optional[str]:
-    """Hash a just-installed file, or return None if it cannot be read.
-
-    Used only to fill the ``installed_sha256`` field of a receipt. Hashing a file
-    that is already in place must not be able to fail the install that put it there,
-    and the degradation is in the safe direction: a receipt with no
-    ``installed_sha256`` is treated by ``_already_installed`` as not installed, so
-    the next run re-downloads rather than trusting bytes it cannot check.
-    """
-    try:
-        return sha256_file(file_path)
-    except OSError as e:
-        ASH_LOGGER.warning(
-            f"Could not hash {file_path} after installing it ({e}); the next install "
-            "will re-download rather than trust it"
-        )
-        return None
-
-
 def verify_sha256(file_path: Path, expected_sha256: str, source: str) -> str:
     """Verify a file against an expected SHA256, raising if it does not match.
 
@@ -107,6 +88,23 @@ def download_file(
     Raises:
         ToolDownloadIntegrityError: if expected_sha256 is given and does not match
     """
+    return _download_verified(url, destination, rename_to, expected_sha256)[0]
+
+
+def _download_verified(
+    url: str,
+    destination: Path,
+    rename_to: Optional[str] = None,
+    expected_sha256: Optional[str] = None,
+) -> "tuple[Path, str]":
+    """``download_file``, and also the digest of the bytes that landed.
+
+    Exists so a caller writing an install receipt never has to re-derive the digest of
+    what it installed. See ``_finalize_staged``: a hash taken afterwards describes
+    whatever is at the path by then, which is the thing the post-rename check exists to
+    reject. ``download_file`` keeps its plain ``Path`` return, because it is a public
+    helper and a scanner plugin may be calling it.
+    """
     # Create the destination directory if it doesn't exist
     destination.mkdir(parents=True, exist_ok=True)
 
@@ -151,11 +149,17 @@ def download_file(
     # exotic one. This matters most for opengrep, which reaches here through
     # create_url_download_command, passes no digest, and therefore re-downloads on
     # every single install.
+    #
+    # The pin goes with it. The bytes verified above and the bytes copied below are two
+    # separate reads of a file in TMPDIR, so the copy has to be checked against the pin
+    # rather than against itself -- see _replace_atomically.
     dest_path = destination.joinpath(rename_to)
-    _replace_atomically(Path(temp_file.name), dest_path)
+    landed = _replace_atomically(
+        Path(temp_file.name), dest_path, expected_sha256=expected_sha256
+    )
 
     ASH_LOGGER.info(f"Downloaded {url} to {dest_path}")
-    return dest_path
+    return dest_path, landed
 
 
 def _open_staging(target: Path) -> "tuple[int, Path]":
@@ -181,17 +185,27 @@ def _open_staging(target: Path) -> "tuple[int, Path]":
     return fd, Path(name)
 
 
-def _finalize_staged(staging: Path, target: Path, expected_sha256: str) -> None:
-    """Put ``staging`` at ``target``, then verify the bytes that landed.
+def _finalize_staged(staging: Path, target: Path, expected_sha256: str) -> str:
+    """Put ``staging`` at ``target``, verify what landed, and return its digest.
 
     The re-hash after the rename is the part that matters, and it is deliberately
     redundant with the unpredictable staging name. If a future change reintroduces a
     guessable name -- or if some other race puts different bytes at the target -- this
-    catches it, because the receipt written afterwards records the digest of whatever
-    is at the target. Without this check that receipt would record the *attacker's*
-    digest, and ``_already_installed`` would then agree with it forever: the same
-    persistent-trust outcome that moving receipts out of the bin directory was meant
-    to close, reached through a different door.
+    catches it.
+
+    Returning that digest is the other half of the same property, and without it the
+    check above is necessary but not sufficient. The caller has to record a digest in
+    the install receipt, and re-deriving it from the target afterwards hands back
+    exactly what this check exists to reject: ``make_executable`` runs between here and
+    the receipt write, on macOS ``unquarantine_macos_binary`` spawns ``xattr`` as a
+    subprocess as well, and ASH's own image leaves the install directory
+    ``chmod -R 777`` with no sticky bit (Dockerfile:243) under a threat model where ASH
+    executes repository code during a scan -- cdk-nag synthesizes CDK apps, npm-audit
+    runs a package manager. A receipt built from a fresh hash of the target records
+    whatever is there by then, and ``_already_installed`` re-hashes, agrees, and skips
+    the download on every later run: the persistent-trust outcome that moving receipts
+    out of the bin directory was meant to close, reached through a different door. The
+    digest verified here is the only one worth writing down.
 
     On mismatch the target is removed. Leaving unverified bytes at an install path is
     worse than leaving nothing there.
@@ -208,33 +222,59 @@ def _finalize_staged(staging: Path, target: Path, expected_sha256: str) -> None:
     if landed != expected_sha256:
         target.unlink(missing_ok=True)
         raise ToolDownloadIntegrityError(
-            f"{target} does not match the bytes just written to it (expected "
-            f"{expected_sha256}, found {landed}). Something replaced the staging file "
-            "between writing and installing it; refusing to leave it in place."
+            f"{target} does not match the bytes it was verified against (expected "
+            f"{expected_sha256}, found {landed}). Something replaced the file between "
+            "verifying it and installing it; refusing to leave it in place."
         )
+    return landed
 
 
-def _replace_atomically(source: Path, target: Path) -> Path:
+def _replace_atomically(
+    source: Path, target: Path, expected_sha256: Optional[str] = None
+) -> str:
     """Move ``source`` onto ``target`` without ever following or trusting a link.
 
     Staging in the target's directory keeps the final step a same-filesystem
     ``os.replace``, which cannot follow a symlink at the target and cannot leave a
     partially written file there.
+
+    ``expected_sha256`` is the pinned digest ``source`` was already verified against,
+    and threading it in rather than defaulting to what this function reads is the
+    difference between checking the install and checking it against itself. Verifying
+    the source and copying it are two separate reads of a file in TMPDIR:
+    ``verify_sha256`` streams the whole thing, which is 30-100MB for syft and trivy, so
+    the window is hundreds of milliseconds. The sticky bit on /tmp stops another *user*
+    unlinking or renaming that file; it stops nothing done by another process running as
+    this one, which is what ASH has during a scan, since it executes repository code.
+    Compare the copy against itself and a source replaced in that window installs
+    cleanly with a self-consistent digest and a receipt that matches it -- while the
+    bytes never matched the pin.
+
+    With no pin there is nothing better to compare against than the bytes the copy read,
+    so that is what is used. opengrep is the one tool in that state: it arrives through
+    ``create_url_download_command``, which passes no digest.
+
+    Returns:
+        The digest of the bytes now at ``target``.
     """
     fd, staging = _open_staging(target)
     try:
-        digest = hashlib.sha256()
+        copied = hashlib.sha256()
         with os.fdopen(fd, "wb") as sink, open(source, "rb") as src:
             for chunk in iter(lambda: src.read(_HASH_CHUNK_BYTES), b""):
-                digest.update(chunk)
+                copied.update(chunk)
                 sink.write(chunk)
-        _finalize_staged(staging, target, digest.hexdigest())
+        expected = (
+            expected_sha256.lower()
+            if expected_sha256 is not None
+            else copied.hexdigest()
+        )
+        return _finalize_staged(staging, target, expected)
     except BaseException:
         staging.unlink(missing_ok=True)
         raise
     finally:
         source.unlink(missing_ok=True)
-    return target
 
 
 def make_executable(file_path: Path) -> None:
@@ -350,16 +390,35 @@ def _receipt_trust_chain(path: Path) -> "list[Path]":
 
 
 def _private_dir(path: Path) -> None:
-    """Create ``path`` and each level below the home directory at 0o700.
+    """Create ``path`` and each level down from the receipt root at 0o700.
 
     ``Path.mkdir(parents=True, mode=0o700)`` does not do this. CPython applies the
     mode to the final component only; the parents get 0o777 masked by the umask.
-    Measured under umask 002: ~/.ash and ~/.ash/install-receipts both came out 0o775
-    while only the leaf was 0o700. Unreachable inside ASH's container, where $HOME is
-    0750 or tighter, but perfectly reachable on a umask-002 developer host or runner.
+    Measured under umask 002: ~/.ash/install-receipts came out 0o775 while only the leaf
+    was 0o700. Unreachable inside ASH's container, where $HOME is 0750 or tighter, but
+    perfectly reachable on a umask-002 developer host or runner.
+
+    It stops at ``receipt_root()`` rather than walking up to $HOME, and that boundary is
+    deliberate. ``receipt_root()``'s parent is ``~/.ash``, which is ASH's general
+    per-user directory and the parent of the *default* ASH_BIN_PATH -- ``~/.ash/bin``,
+    see ``core.constants`` -- not part of the receipt store. Tightening it from here cost
+    two things. Writing a receipt would narrow a directory this code does not own, and
+    other accounts need to traverse it to reach an installed toolchain. Worse, if
+    ``~/.ash`` already exists owned by someone else -- root, from an earlier ``sudo``
+    run -- ``os.chmod`` raises PermissionError, ``write_receipt`` swallows it because
+    receipts are best-effort by design, and install idempotence is then off permanently
+    behind a single warning, for a reason that has nothing to do with the receipts.
+
+    Nothing is given up by stopping here. ``_receipt_trust_chain`` already ends at the
+    receipt root, and ``_untrusted_reason`` rejects a receipt root owned by another uid
+    -- so a directory an attacker substitutes for it is theirs, and is refused. A loose
+    ``~/.ash`` therefore costs a redundant download, not a bad trust decision.
     """
-    home = Path.home()
-    levels = [path, *[p for p in path.parents if p != home and home in p.parents]]
+    root = receipt_root()
+    # Above the root, create without touching modes: those levels are shared with the
+    # rest of ~/.ash and are not part of the trust chain.
+    root.parent.mkdir(parents=True, exist_ok=True)
+    levels = [path, *[p for p in path.parents if p == root or root in p.parents]]
     for level in reversed(levels):
         level.mkdir(exist_ok=True)
         if platform.system() != "Windows":
@@ -536,8 +595,10 @@ def install_binary_from_url(
         ASH_LOGGER.info(f"{installed_as} already installed from {url}, skipping download")
         return target
 
-    # Download the file
-    binary_path = download_file(url, destination, rename_to, expected_sha256=expected_sha256)
+    # Download the file, keeping the digest that was verified as the bytes landed.
+    binary_path, installed_digest = _download_verified(
+        url, destination, rename_to, expected_sha256=expected_sha256
+    )
 
     # Make it executable
     make_executable(binary_path)
@@ -552,7 +613,11 @@ def install_binary_from_url(
         {
             "url": url,
             "sha256": expected_sha256.lower() if expected_sha256 else None,
-            "installed_sha256": _digest_or_none(binary_path),
+            # The digest verified when the bytes landed, never a fresh hash of the file
+            # taken here. make_executable has run by this point, and on macOS so has
+            # unquarantine_macos_binary's xattr subprocess; see _finalize_staged for
+            # what re-hashing after that window records instead.
+            "installed_sha256": installed_digest,
             "installed_as": installed_as,
         },
     )
@@ -560,9 +625,34 @@ def install_binary_from_url(
     return binary_path
 
 
-def _extract_single_member(
-    archive_path: Path, member_name: str, target: Path
-) -> Path:
+def _unreadable_archive(
+    archive_path: Path, cause: Exception
+) -> ToolDownloadIntegrityError:
+    """The typed error for an asset that is not the archive its name implies.
+
+    Dispatch below is on the last two suffixes, and anything that is not ``.zip`` falls
+    through to ``tarfile.open(..., "r:*")``. An asset with no recognizable archive
+    extension -- a vendor publishing a bare executable, or changing an extension between
+    releases -- therefore surfaced ``tarfile.ReadError``, which is outside the
+    ``ToolDownloadIntegrityError`` contract every other rejection in this module honors
+    and that three docstrings here promise.
+
+    What that costs, stated at its real size rather than inflated: nothing in ASH catches
+    either type today, so both reach the installer subprocess as a non-zero exit. The
+    difference is a diagnosable message instead of a traceback out of the tarfile module,
+    and a contract a caller can actually rely on if one ever does catch it.
+
+    The zip branch needs the same treatment for ``zipfile.BadZipFile``, which is a
+    different exception on a different code path -- fixing one arm would have left the
+    other raising an untyped error.
+    """
+    return ToolDownloadIntegrityError(
+        f"{archive_path.name} is not a readable zip or tar archive ({cause}); "
+        "refusing to install from it"
+    )
+
+
+def _extract_single_member(archive_path: Path, member_name: str, target: Path) -> str:
     """Extract the one archive member named ``member_name`` to ``target``.
 
     ``member_name`` is matched against each entry's *basename*, and the archive is
@@ -596,8 +686,17 @@ def _extract_single_member(
     The mode is set explicitly on the staging file rather than left to
     ``make_executable``'s read-modify-write of whatever the umask produced.
 
+    Returns:
+        The SHA256 of the extracted member, verified after it landed at ``target``.
+        Returned rather than left for the caller to recompute, because the caller records
+        it in the install receipt and the pinned digest cannot stand in for it: the pin
+        covers the release *archive* and says nothing about the executable inside. See
+        ``_finalize_staged`` for why re-hashing ``target`` afterwards is a different
+        value.
+
     Raises:
-        ToolDownloadIntegrityError: if zero or more than one member matches.
+        ToolDownloadIntegrityError: if zero or more than one member matches, or if the
+            asset is not a readable zip or tar archive.
     """
     suffixes = "".join(archive_path.suffixes[-2:]).lower()
     fd, staging = _open_staging(target)
@@ -613,48 +712,55 @@ def _extract_single_member(
         staged = True
 
     try:
-        if suffixes.endswith(".zip"):
-            with zipfile.ZipFile(archive_path) as archive:
-                # ZipFile normalizes separators to "/" on read, so splitting on "/"
-                # is correct for archives built on Windows too.
-                matches = [
-                    info
-                    for info in archive.infolist()
-                    if not info.is_dir()
-                    and info.filename.split("/")[-1] == member_name
-                ]
-                _require_one_match(matches, member_name, archive_path)
-                with archive.open(matches[0]) as source:
-                    _stage(source)
-        else:
-            with tarfile.open(archive_path, "r:*") as archive:
-                matches = [
-                    member
-                    for member in archive.getmembers()
-                    if member.isfile() and member.name.split("/")[-1] == member_name
-                ]
-                _require_one_match(matches, member_name, archive_path)
-                extracted = archive.extractfile(matches[0])
-                if extracted is None:  # pragma: no cover - isfile() excludes this
-                    raise ToolDownloadIntegrityError(
-                        f"Archive member {member_name} in {archive_path} is not "
-                        "readable"
-                    )
-                with extracted as source:
-                    _stage(source)
+        # The inner handler converts only the two archive-format errors, and only
+        # around the archive handling. It deliberately does not catch OSError: a
+        # disk-full while staging is not "this asset is not an archive", and saying so
+        # would be a wrong diagnosis rather than a missing one.
+        try:
+            if suffixes.endswith(".zip"):
+                with zipfile.ZipFile(archive_path) as archive:
+                    # ZipFile normalizes separators to "/" on read, so splitting on "/"
+                    # is correct for archives built on Windows too.
+                    matches = [
+                        info
+                        for info in archive.infolist()
+                        if not info.is_dir()
+                        and info.filename.split("/")[-1] == member_name
+                    ]
+                    _require_one_match(matches, member_name, archive_path)
+                    with archive.open(matches[0]) as source:
+                        _stage(source)
+            else:
+                with tarfile.open(archive_path, "r:*") as archive:
+                    matches = [
+                        member
+                        for member in archive.getmembers()
+                        if member.isfile() and member.name.split("/")[-1] == member_name
+                    ]
+                    _require_one_match(matches, member_name, archive_path)
+                    extracted = archive.extractfile(matches[0])
+                    if extracted is None:  # pragma: no cover - isfile() excludes this
+                        raise ToolDownloadIntegrityError(
+                            f"Archive member {member_name} in {archive_path} is not "
+                            "readable"
+                        )
+                    with extracted as source:
+                        _stage(source)
+        except (tarfile.ReadError, zipfile.BadZipFile) as e:
+            raise _unreadable_archive(archive_path, e) from e
 
         # 0o755, and the digest of what was written, are both handled here. See
         # _finalize_staged: the post-rename re-hash is what stops a race on the
         # staging path from getting an attacker's bytes recorded in the receipt as
-        # though ASH had installed them.
-        _finalize_staged(staging, target, written.hexdigest())
+        # though ASH had installed them, and returning that digest is what stops the
+        # caller re-deriving it from the target after the fact.
+        return _finalize_staged(staging, target, written.hexdigest())
     except BaseException:
         if not staged:
             # The fd was never handed to fdopen, so nothing closed it.
             os.close(fd)
         staging.unlink(missing_ok=True)
         raise
-    return target
 
 
 def _require_one_match(matches: list, member_name: str, archive_path: Path) -> None:
@@ -722,7 +828,7 @@ def install_pinned_tool(
             rename_to=asset.url.split("/")[-1],
             expected_sha256=asset.sha256,
         )
-        _extract_single_member(archive, asset.member_name, target)
+        installed_digest = _extract_single_member(archive, asset.member_name, target)
 
     # _extract_single_member already set the mode on the staged file before renaming
     # it into place; this covers the Windows branch, where it does not.
@@ -741,7 +847,12 @@ def install_pinned_tool(
             # The digest of the *extracted executable*, which is what a later run
             # re-hashes. asset.sha256 covers the archive and says nothing about the
             # file that will actually be executed.
-            "installed_sha256": _digest_or_none(target),
+            #
+            # Taken from the extraction, which verified it as the bytes landed, rather
+            # than by hashing the target here -- make_executable and, on macOS,
+            # unquarantine_macos_binary's xattr subprocess have run in between, in a
+            # directory ASH's image makes world-writable. See _finalize_staged.
+            "installed_sha256": installed_digest,
             "installed_as": asset.install_as,
         },
     )
