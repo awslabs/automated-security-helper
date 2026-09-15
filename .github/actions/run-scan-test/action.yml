@@ -107,23 +107,13 @@ runs:
     # does not need sudo, but a runner-managed Ruby avoids depending on that detail
     # of the image.
     #
-    # Deliberately NOT run on Windows, and this is a measured decision rather than a
-    # guess. Running it there broke the job in a way that had nothing to do with
-    # Ruby: setup-ruby prepends its MSYS2 directories to PATH, so every later
-    # `shell: bash` step resolved to
+    # Windows gets its own copy of this step further down rather than sharing this
+    # one, and the reason is position rather than configuration. setup-ruby prepends
+    # its MSYS2 directories to PATH, so every later `shell: bash` step resolves to
     # C:\hostedtoolcache\windows\Ruby\3.3.12\x64\msys64\usr\bin\bash.EXE instead of
-    # Git Bash, and the pre-existing "Validate ASH config files" step -- untouched by
-    # this change -- then exited 2 in 176ms. The fix for cfn-nag cannot be allowed to
-    # change the shell every other step runs in.
-    #
-    # What that leaves unresolved, stated plainly rather than hidden: cfn-nag pulls
-    # in cfn-model, which requires `psych ~> 3`, and no psych 3.x release publishes a
-    # precompiled gem for that runner's ABI. Checked against the RubyGems API: 3.1.0
-    # is the newest 3.x carrying any Windows binary and it is tagged x64-mingw32,
-    # while Ruby 3.1+ needs x64-mingw-ucrt. psych must therefore build from source,
-    # which needs a toolchain that cannot be added here without the PATH side effect
-    # above. So cfn-nag is genuinely not provisionable on windows-latest today, and
-    # the scanner reports itself that way rather than failing the installer.
+    # Git Bash. Run from here, that put MSYS2 bash ahead of the pre-existing
+    # "Validate ASH config files" step, which then exited 2 in 176ms. The Windows
+    # copy sits after that step instead. See the comment on it for the rest.
     # Pinned to a commit, not to `v1`. `v1` on this action is a moving major tag, and
     # this repository gates on full-SHA pins for third-party actions
     # (.github/scripts/assert-actions-pinned.mjs, COMMIT_SHA = /^[0-9a-fA-F]{40}$/).
@@ -240,6 +230,45 @@ runs:
           ash config validate --config .ash/.ash.yaml
         fi
 
+    # The Windows half of "Set up Ruby for cfn-nag" above, deliberately placed here
+    # rather than next to it. setup-ruby prepends its MSYS2 directories to PATH, and
+    # the runner resolves `shell: bash` through PATH -- actions/runner
+    # src/Runner.Worker/Handlers/ScriptHandler.cs calls
+    # WhichUtil.Which("bash", ..., prependPath) -- so running this any earlier makes
+    # MSYS2 bash the shell for "Validate ASH config files" just above, which exited 2
+    # in 176ms when that happened. Everything between here and the precedence restore
+    # below is `shell: pwsh`, which does not care which bash is first.
+    #
+    # What the toolchain is actually for, and it is not a missing libyaml. cfn-nag
+    # pins cfn-model 0.6.6, which requires `psych ~> 3`; psych 3.3.4 has a C
+    # extension, and no psych 3.x publishes a precompiled gem for this ABI (3.1.0 is
+    # the newest 3.x with any Windows binary and it is tagged x64-mingw32, while Ruby
+    # 3.1+ needs x64-mingw-ucrt). psych vendors libyaml under ext/psych/yaml and its
+    # extconf.rb falls back to that bundled copy, which is exactly what happened on
+    # 18e5cba9: "checking for yaml.h... yes", "creating Makefile". The build then
+    # died one step later, in make:
+    #
+    #   make: *** No rule to make target
+    #   '/C/hostedtoolcache/windows/Ruby/3.3.12/x64/include/ruby-3.3.0/ruby.h',
+    #   needed by 'api.o'.  Stop.
+    #
+    # That is an MSYS-translated path handed to a make from a different tree -- Git's
+    # sh rewrote C:/... to /C/..., and the make that consumed it did not share that
+    # mount table. So the requirement is one coherent MSYS2 environment, not an extra
+    # package. setup-ruby's default `windows-toolchain` produces exactly that: it
+    # unpacks the ucrt64 gcc bundle and runs `ridk enable`, leaving sh, make and gcc
+    # all from the same tree. `ridk enable` is also what exports RI_DEVKIT
+    # (rubyinstaller2, lib/ruby_installer/build/msys2_installation.rb), which is the
+    # variable cfn_nag_scanner.py's prerequisite check reads -- so this step is what
+    # lets that check pass rather than decline.
+    #
+    # Same full-SHA pin as the step above, for the same reason.
+    - name: Set up Ruby and MSYS2 toolchain for cfn-nag (Windows)
+      if: inputs.method == 'python-local' && runner.os == 'Windows'
+      uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
+      with:
+        ruby-version: "3.3"
+
     # Python Container scan
     - name: Validate ASH using Python + Container
       if: inputs.method == 'python-container'
@@ -311,6 +340,24 @@ runs:
           Write-Host "SUCCESS: No plugin execution errors found"
           exit 0
         }
+
+    # Hand PATH precedence back to Git Bash now that psych is built. MSYS2 has to be
+    # first while the gem compiles and must not still be first for the `shell: bash`
+    # steps below it -- "Revoke the Actions cache credentials from the job
+    # environment" and "Validate GitLab SAST Report Schema Compliance" both run on
+    # this leg and both expect Git Bash.
+    #
+    # Re-adding the directory is enough to move it, rather than merely duplicating
+    # it. GITHUB_PATH lines accumulate in a list that the runner reverses before
+    # joining, so the last entry added ends up first
+    # (actions/runner src/Runner.Worker/Handlers/Handler.cs,
+    # PrependPath.Reverse<string>()), and each line is removed from the list before
+    # being appended (src/Runner.Worker/FileCommandManager.cs, RemoveAll then Add),
+    # so an entry already present is promoted instead of repeated.
+    - name: Restore Git Bash precedence after the Ruby toolchain (Windows)
+      if: inputs.method == 'python-local' && runner.os == 'Windows'
+      shell: pwsh
+      run: Add-Content -Path $env:GITHUB_PATH -Value 'C:\Program Files\Git\bin'
 
     # Python Local scan (Unix)
     - name: Validate ASH using Python Local (Unix)

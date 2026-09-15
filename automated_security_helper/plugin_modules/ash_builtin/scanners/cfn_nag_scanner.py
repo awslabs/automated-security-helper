@@ -118,10 +118,30 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         unprovisionable on this platform -- named in the installer's output, next to
         npm-audit -- which is a constraint rather than a malfunction.
 
-        The compiler probe covers all platforms rather than just Windows, because the
-        requirement is not Windows-specific: a Linux image without a toolchain fails
-        the same way. The hosted Linux and macOS runners have `cc`, which is why
-        cfn-nag installs and runs there.
+        The two platforms are probed differently because the requirement differs.
+        On POSIX, `cc`/`gcc`/`clang` on PATH is the requirement, and the hosted Linux
+        and macOS runners have it, which is why cfn-nag installs and runs there.
+
+        Windows is probed on RI_DEVKIT instead, because on Windows a compiler being
+        present does not predict the build succeeding. Measured on 18e5cba9: extconf
+        found psych's vendored libyaml and wrote a Makefile ("checking for yaml.h...
+        yes", "creating Makefile"), and make then failed with
+
+            No rule to make target
+            '/C/hostedtoolcache/windows/Ruby/3.3.12/x64/include/ruby-3.3.0/ruby.h'
+
+        -- an MSYS-translated path handed to a make from a different tree. What the
+        build needs is one coherent MSYS2 environment where sh, make and gcc all come
+        from the same install, and RI_DEVKIT is the marker for that: `ridk enable`
+        sets it (rubyinstaller2, lib/ruby_installer/build/msys2_installation.rb) as
+        part of activating that environment. Probing for a compiler instead is worse
+        than not probing, because it passes on a stray gcc and licenses the attempt.
+
+        The CI leg supplies that environment with `ruby/setup-ruby`, whose default
+        `windows-toolchain` unpacks the ucrt64 gcc bundle and runs `ridk enable`; see
+        .github/actions/run-scan-test/action.yml. A Windows machine without it still
+        reports cfn-nag as unprovisionable rather than failing every other scanner's
+        install, which is the intended behavior and not a platform exclusion.
         """
         missing: List[str] = []
         if find_executable("gem") is None:
