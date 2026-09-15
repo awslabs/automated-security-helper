@@ -188,10 +188,23 @@ def _open_staging(target: Path) -> "tuple[int, Path]":
 def _finalize_staged(staging: Path, target: Path, expected_sha256: str) -> str:
     """Put ``staging`` at ``target``, verify what landed, and return its digest.
 
-    The re-hash after the rename is the part that matters, and it is deliberately
-    redundant with the unpredictable staging name. If a future change reintroduces a
-    guessable name -- or if some other race puts different bytes at the target -- this
-    catches it.
+    Two checks, covering two different intervals, and neither makes the other
+    redundant.
+
+    The first runs before the rename, so bytes that do not match never reach the
+    install path at all. Without it this function renamed first and detected
+    afterwards, which left rejected bytes sitting at the install path -- executable,
+    because the mode is set on the staging file before the rename -- for however long
+    hashing them took. That is roughly 200ms on a 100MB asset, not a microsecond, and
+    it contradicted the rule stated at the bottom of this docstring. It costs one extra
+    read of the staged file per install.
+
+    The second runs after the rename, and it is deliberately redundant with the
+    unpredictable staging name rather than with the check above. It covers what the
+    first cannot: staging replaced in the gap between hashing it and renaming it, or
+    the target replaced in the gap between the rename and the hash. If a future change
+    reintroduces a guessable staging name -- or some other race puts different bytes at
+    the target -- this is what catches it.
 
     Returning that digest is the other half of the same property, and without it the
     check above is necessary but not sufficient. The caller has to record a digest in
@@ -207,9 +220,18 @@ def _finalize_staged(staging: Path, target: Path, expected_sha256: str) -> str:
     out of the bin directory was meant to close, reached through a different door. The
     digest verified here is the only one worth writing down.
 
-    On mismatch the target is removed. Leaving unverified bytes at an install path is
-    worse than leaving nothing there.
+    On mismatch after the rename the target is removed. Leaving unverified bytes at an
+    install path is worse than leaving nothing there.
     """
+    staged = sha256_file(staging)
+    if staged != expected_sha256:
+        # Not unlinked here: both callers already remove the staging file on any
+        # exception, and one of them also has an fd to close.
+        raise ToolDownloadIntegrityError(
+            f"The file staged for {target} does not match the digest it was verified "
+            f"against (expected {expected_sha256}, found {staged}). Something replaced "
+            "it before installing it; refusing to put it at the install path."
+        )
     if platform.system() != "Windows":
         # Set the final mode here rather than leaving make_executable to OR 0o111 onto
         # the 0o600 mkstemp creates, which would produce 0o711 and quietly differ from

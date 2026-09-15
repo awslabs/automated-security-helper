@@ -45,6 +45,7 @@ from automated_security_helper.utils import download_utils, tool_downloads
 from automated_security_helper.utils.download_utils import (
     RECEIPT_DIR_NAME,
     _extract_single_member,
+    _finalize_staged,
     install_binary_from_url,
     install_pinned_tool,
     make_executable,
@@ -694,6 +695,48 @@ class TestStagingCannotBeRacedOrGuessed:
             "staging used the old predictable name"
         )
 
+    def test_a_staged_file_that_does_not_match_never_reaches_the_install_path(
+        self, tmp_path
+    ):
+        """The pre-rename check, asserted by the thing it prevents.
+
+        Before it, `_finalize_staged` renamed first and detected afterwards, so rejected
+        bytes sat at the install path -- executable, since the mode is set on the staging
+        file before the rename -- for as long as hashing them took. Roughly 200ms on a
+        100MB asset, and this module's own rule is that unverified bytes at an install
+        path are worse than nothing there.
+
+        `target.exists()` cannot tell the two apart: the post-rename arm unlinks the
+        target, so it is absent either way and the assertion would pass against the
+        defect. Whether `os.replace` was ever called is what separates them, so that is
+        what is asserted.
+
+        Driven by calling `_finalize_staged` directly. A staged file whose contents do
+        not match the expected digest *is* the precondition, so it needs no patching to
+        arrange -- and the two swap tests below still cover the post-rename arm, which is
+        how both checks stay separately exercised.
+        """
+        staging = tmp_path / "staged.bin"
+        staging.write_bytes(b"attacker payload")
+        target = tmp_path / "bin" / "grype"
+        target.parent.mkdir(parents=True)
+
+        real_replace = os.replace
+        renames = []
+
+        def counting(src, dst):
+            renames.append((str(src), str(dst)))
+            return real_replace(src, dst)
+
+        with (
+            patch("os.replace", side_effect=counting),
+            pytest.raises(ToolDownloadIntegrityError, match="before installing it"),
+        ):
+            _finalize_staged(staging, target, hashlib.sha256(PAYLOAD).hexdigest())
+
+        assert renames == [], "unverified bytes were renamed onto the install path"
+        assert not target.exists()
+
     def test_bytes_swapped_before_the_rename_are_refused(self, tmp_path):
         """Simulate winning the race, and the install must refuse the result.
 
@@ -893,12 +936,17 @@ class TestTheInstallIsCheckedAgainstThePinNotAgainstItself:
             Path(file_path).write_bytes(other)
             return actual
 
+        # The pre-rename arm is the one that fires, deterministically: the copy writes
+        # the swapped bytes into the staging file, and they are hashed and compared to
+        # the pin before anything is renamed. So the swapped archive never reaches the
+        # install path at all, rather than landing there and being removed again.
         with (
             _pin(_grype_asset_filename(), real_digest),
             _serve(payload),
             patch.object(download_utils, "verify_sha256", verify_then_swap),
             pytest.raises(
-                ToolDownloadIntegrityError, match="does not match the bytes"
+                ToolDownloadIntegrityError,
+                match="does not match the digest it was verified against",
             ) as raised,
         ):
             install_pinned_tool("grype", "linux", "amd64", bin_dir)
