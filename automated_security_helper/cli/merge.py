@@ -1249,9 +1249,15 @@ def _print_merge_summary(
 
         incomplete = incomplete_scanners(merged)
         if incomplete:
+            # "did not complete" reads as "never ran", which is only one of the two
+            # cases this list now carries: a scanner that evaluated some of its
+            # targets and not others also lands here, with its counts in the status
+            # string. Distinct from _completed() above, which still asks the
+            # narrower did-it-run-at-all question that shard refusal depends on.
             print(
                 f"[bold red]ERROR (1) Exiting because {len(incomplete)} scanner(s) "
-                f"in the merged scan did not complete[/bold red]"
+                f"in the merged scan did not evaluate everything they were given"
+                f"[/bold red]"
             )
             for name, status in incomplete:
                 print(f"  [red]{name}: {status}[/red]")

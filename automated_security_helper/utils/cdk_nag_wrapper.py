@@ -93,6 +93,45 @@ def _build_nag_pack(pack_name: str):
     return pack_type(verbose=True)
 
 
+# The compliance state for a rule that reached no verdict, as opposed to one that reached the
+# verdict "non-compliant". A third value alongside "Non-Compliant" and "Suppressed" rather than
+# a boolean flag, because ``compliance`` is what :func:`_level_and_kind` dispatches on and what
+# the scanner reads back out of the SARIF property bag -- a parallel flag would have to be
+# threaded through both and could disagree with the field beside it.
+#
+# Exported so a test can assert against this constant rather than a repeated string literal.
+NOT_EVALUATED = "Not-Evaluated"
+
+# How cdk-nag 3.0.2 spells "this rule raised instead of returning a verdict".
+#
+# There is no structural marker to key on. ``applyRule`` wraps each rule in a try/catch and, on
+# an exception, calls the SAME ``addViolation`` a real violation goes through -- passing the
+# exception message as a third argument, which ``addViolation`` turns into this description
+# prefix. The severity stays whatever the rule declared, so a rule that never ran arrived as
+# ``severity: "error"`` and rendered CRITICAL.
+#
+# The prefix, not the whole string: ``addViolation`` appends the exception text when the pack was
+# built with ``verbose`` and a fixed hint about intrinsic functions otherwise, so the two forms
+# share only this much. ASH passes ``verbose=True`` in :func:`_build_nag_pack`, and matching the
+# prefix means that stops being load-bearing -- if it ever flips, detection keeps working
+# instead of silently reverting to reporting these as critical findings.
+_UNEVALUATED_DESCRIPTION_PREFIX = "Rule threw an error during validation."
+
+
+def _compliance_for_violation(description: str) -> str:
+    """Whether this report row is a violation or a rule that never produced one.
+
+    Kept as a named function rather than an inline ``startswith`` so the one place that decides
+    this is greppable, and so the marker constant has exactly one reader.
+    """
+    if description.startswith(_UNEVALUATED_DESCRIPTION_PREFIX):
+        return NOT_EVALUATED
+    # The validation report carries violations only, so for everything else "Non-Compliant" is
+    # the sole possible value and ``include_compliant_checks`` has nothing to include -- see the
+    # note in :func:`_violations_from_validation_report`.
+    return "Non-Compliant"
+
+
 class _NagFinding:
     """One cdk-nag violation, exposing the field names the downstream mapping reads.
 
@@ -100,9 +139,17 @@ class _NagFinding:
     ``resource_id``, ``compliance``, ``exception_reason``, ``rule_level``, ``rule_info``) so
     the SARIF construction below is untouched by the v3 migration. ``NagReportLine`` itself is
     not used because v3 no longer ships the file-report schema it belonged to.
+
+    ``pack`` is the one field with no 2.x counterpart, and it exists because v3's report is not
+    cdk-nag's. See :func:`_violations_from_validation_report`: the file is CDK's shared
+    policy-validation report, every registered plugin writes into it, and from aws-cdk-lib
+    2.262.0 the CDK registers one of its own. So the plugin that produced a finding is no longer
+    implied by the file it came out of, and carrying it here is what lets it stay attributable
+    after the caller flattens the per-pack mapping into a single result list.
     """
 
     __slots__ = (
+        "pack",
         "rule_id",
         "resource_id",
         "compliance",
@@ -119,6 +166,7 @@ class _NagFinding:
         exception_reason: str,
         rule_level: str,
         rule_info: str,
+        pack: str = "",
     ) -> None:
         self.rule_id = rule_id
         self.resource_id = resource_id
@@ -126,6 +174,7 @@ class _NagFinding:
         self.exception_reason = exception_reason
         self.rule_level = rule_level
         self.rule_info = rule_info
+        self.pack = pack
 
     def as_dict(self) -> Dict[str, str]:
         """The raw finding record, attached to the SARIF result's property bag.
@@ -134,6 +183,7 @@ class _NagFinding:
         ``result.properties.model_extra["cdk_nag_finding"]`` and indexes it by these keys.
         """
         return {
+            "pack": self.pack,
             "rule_id": self.rule_id,
             "resource_id": self.resource_id,
             "compliance": self.compliance,
@@ -173,7 +223,38 @@ def _level_and_kind(
     scanner reads ``compliance`` back out of the SARIF property bag, and a report format that
     restores suppression records would need the mapping intact. They are, today, unreachable
     from the report path -- see the note in :func:`_violations_from_validation_report`.
+
+    THE NOT-EVALUATED ROW, AND WHY notApplicable RATHER THAN open
+    ------------------------------------------------------------
+    SARIF 2.1.0 defines two kinds that could plausibly carry "this rule produced no verdict",
+    and the distinction between them is the whole question. Quoting the OASIS Standard
+    incorporating Approved Errata 01, section 3.27.9:
+
+      "notApplicable" : The rule specified by ruleId was not evaluated, because it does not
+      apply to the analysis target.
+
+      "open" : The specified rule was evaluated, and the tool concluded that there was
+      insufficient information to decide whether a problem exists.
+
+    ``open`` opens with "was evaluated", and its NOTE 1 scopes the value to proof-based tools
+    that completed an analysis and could not prove either direction. cdk-nag's rule did not
+    complete -- it raised partway through ``resolveIfPrimitive`` -- so "was not evaluated" is
+    the accurate half. Section 3.27.9's own example for ``notApplicable`` is a result whose
+    message reads "<target> was not evaluated for rule <id> because <reason>", which is the
+    shape this path produces.
+
+    ``Level.none`` is then required rather than chosen. Section 3.27.10 defines it as "The
+    concept of 'severity' does not apply to this result because the kind property (3.27.9) has
+    a value other than 'fail'". ASH's ladder maps ``none`` to INFO, so a rule that did not run
+    stops being counted as a critical finding as a consequence of getting the SARIF right --
+    not as a separate adjustment that could be changed independently and drift apart from it.
+
+    Checked before the ``Non-Compliant`` row on purpose: a not-evaluated row arrives carrying
+    whatever severity the rule declared, which for a cdk-nag error-level rule is ``"Error"``,
+    so falling through to the row below would render it ``fail``/``error`` exactly as before.
     """
+    if compliance == NOT_EVALUATED:
+        return Level.none, Kind.notApplicable
     if compliance == "Non-Compliant":
         if rule_level == "Error":
             return Level.error, Kind.fail
@@ -181,6 +262,26 @@ def _level_and_kind(
     if compliance == "Suppressed" and exception_reason != "N/A":
         return Level.none, Kind.review
     return Level.none, Kind.informational
+
+
+def _result_message_text(finding: "_NagFinding", target: str) -> str:
+    """The human-readable message for one SARIF result.
+
+    A not-evaluated finding gets a message that leads with the fact, because ``kind`` is the
+    machine-readable half and plenty of report surfaces render only the message. The wording
+    follows the example SARIF 2.1.0 section 3.27.9 gives for ``notApplicable`` -- name the
+    target, name the rule, then give the reason -- rather than inventing a phrasing.
+
+    Everything else keeps the previous text verbatim, including the "Exception Reason" line for
+    a value that is almost always ``N/A``. Changing that would move the message on every
+    ordinary finding, which is a report-output change with no defect behind it.
+    """
+    if finding.compliance == NOT_EVALUATED:
+        return (
+            f"'{target}' was NOT evaluated for rule {finding.rule_id}, so this result says "
+            f"nothing about whether the template complies with it.\n\n{finding.rule_info}"
+        )
+    return f"{finding.rule_info}\n\nException Reason: {finding.exception_reason}"
 
 
 def _rule_id_parts(rule_id: str) -> tuple[str, str | None]:
@@ -501,6 +602,15 @@ def _violations_from_validation_report(
             rule_id = violation.get("ruleName") or ""
             rule_info = violation.get("description") or ""
             rule_level = _normalize_rule_level(violation.get("severity", ""))
+            # Decided once per violation rather than per construct: every construct under one
+            # violation shares the description, so the state cannot differ between them.
+            compliance = _compliance_for_violation(rule_info)
+            if compliance == NOT_EVALUATED:
+                ASH_LOGGER.warning(
+                    f"cdk-nag rule '{rule_id}' from pack '{pack_name}' could not be "
+                    f"evaluated against this template, so it reports NOTHING about the "
+                    f"template's compliance with it: {rule_info}"
+                )
             # One violation can cite several constructs; each becomes its own finding so the
             # SARIF result points at a single resource, as it did under 2.x.
             for construct in violation.get("violatingConstructs", []) or []:
@@ -511,13 +621,18 @@ def _violations_from_validation_report(
                     _NagFinding(
                         rule_id=rule_id,
                         resource_id=construct_path,
-                        # The validation report carries violations only. "Non-Compliant" is
-                        # therefore the sole possible value, and include_compliant_checks has
-                        # nothing to include -- see the note in the docstring.
-                        compliance="Non-Compliant",
+                        compliance=compliance,
                         exception_reason="N/A",
                         rule_level=rule_level,
                         rule_info=rule_info,
+                        # The plugin that produced this finding, kept per-row rather than
+                        # relying on the mapping key. The caller iterates
+                        # ``results.items()``, binds the key to a loop variable and extends
+                        # one flat list with the values, so the key does not survive into
+                        # SARIF -- and after aws-cdk-lib 2.262.0 the key is the only thing
+                        # that distinguishes a cdk-nag rule from a CloudFormation Validate
+                        # one.
+                        pack=pack_name,
                     )
                 )
 
@@ -852,7 +967,7 @@ def run_cdk_nag_against_cfn_template(
                         kind=kind,
                         message=Message(
                             root=Message1(
-                                text=f"{line.rule_info}\n\nException Reason: {line.exception_reason}"
+                                text=_result_message_text(line, cfn_file_rel_path)
                             )
                         ),
                         analysisTarget=ArtifactLocation(
