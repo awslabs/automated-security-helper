@@ -62,10 +62,17 @@ name: TypeScript CI
 
 # PATH-FILTERED ON PURPOSE, AND THE FILTER IS LOAD-BEARING
 #
-# `deploy/` does not exist on the default branch yet -- it arrives with the pull
-# request that adds the CDK app. Without these filters this workflow would run on
-# every pull request and fail the presence check below on all of them, because
-# there would be no package to test.
+# `deploy/` did not exist on the default branch when these filters were written --
+# it arrived with the pull request that adds the CDK app. Without them this
+# workflow would have run on every pull request and failed the presence check
+# below on all of them, because there would have been no package to test.
+#
+# That precondition has since changed: deploy/cdk and deploy/cdk-constructs are
+# both on the default branch now, so the presence check no longer depends on the
+# filter to avoid firing. The filters are kept because they still scope the job to
+# changes that can affect it, not because the packages might be missing. What the
+# change does unblock is the self-referencing filter discussed below, and the
+# unfiltered merge_group leg added alongside these triggers.
 #
 # The alternative -- letting the presence check skip quietly when the directory is
 # absent -- was rejected. A job that reports success because it found nothing to
@@ -107,6 +114,33 @@ on:
     paths:
       - "deploy/cdk/**"
       - "deploy/cdk-constructs/**"
+  # THE MERGE QUEUE LEG, AND WHY IT CARRIES NO paths FILTER
+  #
+  # This repository runs a merge queue -- ash-unified-ci.yml declares merge_group
+  # -- and merge_group is a distinct event from both push and pull_request. A
+  # workflow that omits it never runs on a queue entry, so once it is a required
+  # check the queue waits on a verdict that never arrives. A required check that
+  # cannot report does not fail the merge, it blocks it silently.
+  #
+  # merge_group takes no paths filter. GitHub scopes paths and paths-ignore to
+  # push, pull_request and pull_request_target -- the workflow-syntax heading is
+  # literally on.<push|pull_request|pull_request_target>.<paths|paths-ignore> --
+  # and the merge_group reference documents only types. So this leg cannot
+  # reproduce the filter above and runs on every queue entry, including entries
+  # that touch nothing under deploy/.
+  #
+  # That asymmetry is accepted rather than worked around. It costs a jest run on
+  # unrelated entries, and it buys the case a per-entry filter cannot see: a queue
+  # entry is a merge of several pull requests, so the change that breaks the build
+  # may have touched none of the filtered paths. Filtering here, were it possible,
+  # would reintroduce the hole this trigger closes.
+  #
+  # This leg is only safe to leave unfiltered because deploy/cdk and
+  # deploy/cdk-constructs are now on the default branch. While they were not, an
+  # unfiltered leg would have failed "Confirm the package is present" on every
+  # queue entry, trading a silent block for a hard one.
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch: {}
 
 permissions:
@@ -154,7 +188,7 @@ jobs:
             require: "--require src/buildspec-cli.ts --require src/index.ts"
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Fails rather than skips when the package is absent. A job that quietly
       # succeeds because it found nothing to test is worse than no job: it
@@ -199,7 +233,7 @@ jobs:
 
       - name: Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ts-coverage-${{ matrix.package }}
           path: deploy/${{ matrix.package }}/coverage/
@@ -222,7 +256,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # --package must name the same packages as the matrix above. The check
       # itself fails when a deploy/<pkg>/package.json exists that this list does

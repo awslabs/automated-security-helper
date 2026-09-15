@@ -7,7 +7,7 @@ runs:
     - name: "nix: install"
       # Pinned to a published tag rather than a floating major, matching how the other
       # workflows in this repository pin actions.
-      uses: cachix/install-nix-action@v31.11.1
+      uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
       with:
         # Both features are disabled by default on a stock install, and every flake
         # operation fails with "experimental Nix feature 'nix-command' is disabled"
