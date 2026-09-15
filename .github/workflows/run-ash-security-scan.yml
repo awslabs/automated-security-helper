@@ -247,14 +247,40 @@ jobs:
             curl -sSfL "${ASH_ASSETS_URL}/Gemfile.lock" -o "${GEMFILE}.lock"
           fi
           echo "Installing cfn-nag from ${GEMFILE}"
-          sudo BUNDLE_GEMFILE="${GEMFILE}" bundle install --jobs=4
+          # Resolved to an absolute path FIRST, then handed to sudo, because
+          # `sudo bundle` does not find it. sudo replaces PATH with the
+          # `secure_path` from /etc/sudoers, and on the GitHub ubuntu images Ruby
+          # is not under any of the directories that lists -- so `sudo bundle`
+          # fails with "sudo: bundle: command not found" while a bare `bundle`
+          # works. Measured on this workflow at run 35014148270: the step failed
+          # there, the scan then produced no output directory at all, and the job
+          # ended on "Path does not exist: .ash/ash_output/reports/ash.ghas.sarif"
+          # -- a failure four steps downstream of its cause.
+          #
+          # `command -v` runs as the runner user, so it uses the PATH where Ruby
+          # actually is; sudo then invokes that exact file. The alternative,
+          # `sudo env "PATH=$PATH" bundle`, works too but re-exports the whole
+          # PATH into a root shell, which is a larger change than this needs.
+          # Resolved with an explicit failure message rather than bare `command
+          # -v` under `set -e`. The original error proves only that SUDO could
+          # not find bundle; it does not prove the runner user can. If a future
+          # image drops Ruby entirely this step has to say so, because the
+          # downstream symptom is cfn-nag reporting MISSING, which is the silent
+          # pass this whole branch exists to remove.
+          BUNDLE_BIN="$(command -v bundle || true)"
+          GEM_CMD="$(command -v gem || true)"
+          if [ -z "${BUNDLE_BIN}" ] || [ -z "${GEM_CMD}" ]; then
+            echo "::error::Ruby is not on PATH for the runner user (bundle='${BUNDLE_BIN}' gem='${GEM_CMD}'), so cfn-nag cannot be installed and would be reported MISSING. This image no longer ships ruby-full; add a ruby/setup-ruby step." >&2
+            exit 1
+          fi
+          sudo BUNDLE_GEMFILE="${GEMFILE}" "${BUNDLE_BIN}" install --jobs=4
 
           # ASH runs `cfn_nag_scan` as a plain subprocess, so the binstub has to
           # be reachable by name. Read the directory from rubygems rather than
           # assuming one: if it were wrong, the scan would not fail here -- it
           # would report cfn-nag MISSING, which is the exact silent-pass this
           # branch exists to remove.
-          GEM_BIN="$(sudo gem environment | awk -F': ' '/EXECUTABLE DIRECTORY/ {print $2; exit}')"
+          GEM_BIN="$(sudo "${GEM_CMD}" environment | awk -F': ' '/EXECUTABLE DIRECTORY/ {print $2; exit}')"
           echo "${GEM_BIN}" >> "${GITHUB_PATH}"
           PATH="${GEM_BIN}:${PATH}" command -v cfn_nag_scan
 
