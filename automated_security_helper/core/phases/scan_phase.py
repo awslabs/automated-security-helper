@@ -524,6 +524,61 @@ class ScanPhase(EnginePhase):
                             )
                             continue
 
+                        # A scanner that declares this PLATFORM unsupported is SKIPPED,
+                        # not MISSING, and this has to be asked before the dependency
+                        # check because that check answers with one boolean and cannot
+                        # carry the distinction.
+                        #
+                        # MISSING means "this scanner was supposed to run and did not",
+                        # which fails the completeness gate and tells an operator to
+                        # install something. Neither is true of a tool that has no build
+                        # for this platform. Measured on semgrep on windows-latest: it
+                        # logged "Semgrep is not supported on Windows and will be
+                        # skipped", was recorded MISSING, and its installer status was
+                        # INSTALLED with a real path -- so nothing was unprovisioned and
+                        # no install would have helped. Every Windows leg failed the gate
+                        # for it.
+                        #
+                        # AFTER the selection check above, deliberately. A scanner that
+                        # was not selected for this run should be reported that way; the
+                        # platform is only the reason when the operator did ask for it.
+                        #
+                        # BOTH THE `getattr` AND THE `isinstance` ARE LOAD-BEARING, and
+                        # each was measured rather than added defensively.
+                        #
+                        # `getattr`: a scanner plugin is not required to inherit
+                        # ScannerPluginBase, so a plugin written before this hook existed
+                        # does not have it. Calling it unguarded raises AttributeError,
+                        # which the loop's own except-and-continue then swallows -- so the
+                        # scanner is dropped from the run silently, which is precisely the
+                        # class of failure the completeness gate exists to end. Measured
+                        # against two suites in test_scan_phase_validation_paths.py, whose
+                        # plugin doubles are plain classes: both went quiet rather than
+                        # loud. An out-of-tree scanner would have done the same on upgrade.
+                        # Absent means "declares nothing", which is the base class default.
+                        #
+                        # `isinstance`: the hook is annotated `str | None`, and requiring a
+                        # real non-empty str is what stops a plugin double from tripping
+                        # this branch -- a bare MagicMock returns a truthy Mock from any
+                        # method, which would route every mock-backed scanner in the suite
+                        # to SKIPPED and quietly turn the gate into "tolerate everything".
+                        declare_unsupported = getattr(
+                            plugin_instance, "unsupported_platform_reason", None
+                        )
+                        unsupported_reason = (
+                            declare_unsupported()
+                            if callable(declare_unsupported)
+                            else None
+                        )
+                        if isinstance(unsupported_reason, str) and unsupported_reason:
+                            aggregated_results = self._record_scanner_not_selected(
+                                display_name,
+                                f"platform not supported: {unsupported_reason}",
+                                aggregated_results,
+                                excluded_scanner_names,
+                            )
+                            continue
+
                         # Check dependencies early
                         ASH_LOGGER.debug(f"Validating dependencies for: {display_name}")
                         plugin_instance.dependencies_satisfied = (
