@@ -57,6 +57,7 @@ The following ferret-scan CLI options are **NOT supported** and will raise an er
 | `enable_redaction`, `redaction_*`, `memory_scrub` | Post-processing, not scanning |
 | `generate_suppressions`, `show_suppressed`, `suppressions_file` | ASH manages suppressions |
 | `extract_text` | Utility mode, not scanning |
+| `preprocess_only`, `pre_commit_mode`, `list_profiles` | Utility/pre-commit modes — produce no SARIF scan results |
 
 ## Prerequisites
 
@@ -64,11 +65,11 @@ The following ferret-scan CLI options are **NOT supported** and will raise an er
 
 This plugin is tested and compatible with specific ferret-scan versions. Using versions outside the supported range may result in unexpected behavior.
 
-**Supported Versions:** 0.1.0 to 2.0.0 (exclusive)
+**Supported Versions:** 2.4.5 to 2.5.0 (exclusive)
 
 | Plugin Version | ferret-scan Version | Notes |
 |---------------|---------------------|-------|
-| Current | 0.1.0 - 2.0.0 (exclusive) | Initial release with full feature support |
+| Current | 2.4.5 - 2.5.0 (exclusive) | Pinned conservatively to the tested current line |
 
 ### Install Ferret Scan
 
@@ -84,7 +85,7 @@ the newest release, which may sit outside the range in the table above — that 
 how a release published partway through a CI run once failed every open pull
 request without a source change.
 ```bash
-pip install 'ferret-scan>=0.1.0,<2.0.0'
+pip install 'ferret-scan>=2.4.5,<2.5.0'
 ```
 
 **Build from Source**:
@@ -207,9 +208,16 @@ scanners:
 | `exclude_patterns` | list | `[]` | Glob patterns to exclude |
 | `show_match` | bool | `false` | ⚠️ Display matched text in findings (see security warning below) |
 | `enable_preprocessors` | bool | `true` | Enable text extraction from documents (PDF, Office) |
+| `finding_limit` | int | `0` | Max findings ferret-scan emits (`--limit`). `0` = unlimited. ASH defaults to `0` because ferret-scan's own default of `200` silently truncates large scans. |
+| `fail_on_incomplete` | bool | `false` | Pass `--fail-on-incomplete` so ferret-scan exits 3 when a file could not be fully scanned; ASH still returns the partial SARIF and records the invocation as unsuccessful/incomplete. |
+| `respect_gitignore` | bool | `false` | Pass `--respect-gitignore` to honor `.gitignore`. Off by default — `.gitignore` often hides high-value files (`.env`, `*.pem`) a sensitive-data scan should see. |
+| `disable_ip_types` | string | `null` | Comma-separated `INTELLECTUAL_PROPERTY` sub-types to skip (`--disable-ip-types`): `copyright,patent,trademark,trade_secret,internal_url`. |
+| `explain` | bool | `false` | Pass `--explain` for an offline per-finding rationale + verdict + drafted suppression reason. No data leaves the host. |
+| `validator_budget` | string | `null` | Per-validator time budget (`--validator-budget`), e.g. `SSN=500ms,all=2m`. Over-budget validators stop and mark the scan incomplete. |
+| `max_live_bytes` | string | `null` | Cap on extracted content held in memory (`--max-live-bytes`), e.g. `256MB`/`1GB`. Bounds peak memory on constrained hosts. |
 | `ferret_debug` | bool | `false` | Enable ferret-scan's own debug logging (preprocessing/validation flow) |
 | `ferret_verbose` | bool | `false` | Enable ferret-scan's own verbose output (detailed finding info) |
-| `tool_version` | string | `null` | Version constraint for ferret-scan (e.g., `>=1.0.0,<2.0.0`, `==1.2.0`) |
+| `tool_version` | string | `null` | Version constraint for ferret-scan (e.g., `>=2.4.5,<2.5.0`, `==2.4.5`) |
 | `skip_version_check` | bool | `false` | Skip version compatibility check (use with caution) |
 
 ### Options NOT Supported (Will Raise Error)
@@ -225,6 +233,9 @@ The following options are **not supported** because they conflict with ASH conve
 | `enable_redaction`, `redaction_output_dir`, `redaction_strategy`, `redaction_audit_log`, `memory_scrub` | "Redaction is not supported in ASH integration" |
 | `generate_suppressions`, `show_suppressed`, `suppressions_file` | "ASH manages suppressions centrally" |
 | `extract_text` | "Text extraction mode is not supported" |
+| `preprocess_only` | "Outputs extracted text and exits — produces no SARIF results" |
+| `pre_commit_mode` | "ASH manages output formatting and exit codes; use ASH's own pre-commit hook" |
+| `list_profiles` | "Only prints available profiles and exits — produces no scan results" |
 
 ### Security Warning: show_match Option
 
@@ -238,17 +249,51 @@ The following options are **not supported** because they conflict with ASH conve
 
 ### Available Checks
 
+The authoritative list for your installed version is `ferret-scan --help checks` — do not
+hardcode it, as ferret-scan adds detectors between releases. As of v2.4.5:
+
+- `BANK_ACCOUNT` - Bank account / IBAN / routing numbers
+- `CLOUD_RESOURCES` - Cloud resource identifiers (AWS ARNs, Azure/GCP/OCI/IBM/Alibaba IDs)
 - `CREDIT_CARD` - Credit card numbers (Visa, MasterCard, Amex, etc.)
+- `DATE_OF_BIRTH` - Dates of birth
+- `DRIVERS_LICENSE` - Driver's license numbers (state formats)
 - `EMAIL` - Email addresses
-- `INTELLECTUAL_PROPERTY` - Patents, trademarks, copyrights
+- `INTELLECTUAL_PROPERTY` - Patents, trademarks, copyrights (internal-URL detection requires config)
 - `IP_ADDRESS` - IPv4 and IPv6 addresses
-- `METADATA` - Document and image metadata
+- `MEDICAL_ID` - Medical / health identifiers (PHI)
+- `METADATA` - Document, image, audio, and video metadata
+- `OTP` - One-time-passcode / two-factor secrets
 - `PASSPORT` - Passport numbers (multi-country)
 - `PERSON_NAME` - Person names
 - `PHONE` - Phone numbers
+- `PHYSICAL_ADDRESS` - Physical / postal addresses
 - `SECRETS` - API keys, tokens, passwords
 - `SOCIAL_MEDIA` - Social media profiles
 - `SSN` - Social Security Numbers
+- `VIN` - Vehicle Identification Numbers
+
+#### Note: `API_KEY_OR_SECRET` false positives (SECRETS check)
+
+The `SECRETS` check includes a generic `API_KEY_OR_SECRET` detector that matches on the
+*name* of an assignment when the name is a secret keyword (`session`, `token`, `secret`,
+`password`, `api_key`, …) — **regardless of the value**. So typed code and config such as a
+`session` field on a generated model, a `session` local, or a Terraform local named
+`manage_auth_secret` can be flagged at HIGH confidence even though no credential is present.
+
+This detector **cannot be disabled in ferret-scan's config** (the tool honors
+`disabled_types` only for the `INTELLECTUAL_PROPERTY` check, not `SECRETS`). The plugin
+keeps it enabled so real secrets are still found, and expects you to manage false positives
+with ASH's own controls — a path-scoped suppression:
+
+```yaml
+global_settings:
+  suppressions:
+    - path: path/to/generated_or_test_file.py
+      rule_id: API_KEY_OR_SECRET
+      reason: "False positive — variable/field name matches the secret-keyword heuristic, not a credential"
+```
+
+or the plugin's `exclude_patterns`, or scoping the `checks` option to omit `SECRETS`.
 
 ### Advanced Configuration
 
@@ -282,7 +327,7 @@ scanners:
   ferret-scan:
     enabled: true
     options:
-      tool_version: "==1.2.0"  # Exact version
+      tool_version: "==2.4.5"  # Exact version
 ```
 
 Or use a version range:
@@ -292,7 +337,7 @@ scanners:
   ferret-scan:
     enabled: true
     options:
-      tool_version: ">=1.0.0,<1.5.0"  # Compatible range
+      tool_version: ">=2.4.5,<2.5.0"  # Compatible range
 ```
 
 To bypass version checks (not recommended for production):
