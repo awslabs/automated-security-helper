@@ -278,42 +278,110 @@ jobs:
             curl -sSfL "${ASH_ASSETS_URL}/Gemfile.lock" -o "${GEMFILE}.lock"
           fi
           echo "Installing cfn-nag from ${GEMFILE}"
-          # Resolved to an absolute path FIRST, then handed to sudo, because
-          # `sudo bundle` does not find it. sudo replaces PATH with the
-          # `secure_path` from /etc/sudoers, and on the GitHub ubuntu images Ruby
-          # is not under any of the directories that lists -- so `sudo bundle`
-          # fails with "sudo: bundle: command not found" while a bare `bundle`
-          # works. Measured on this workflow at run 35014148270: the step failed
-          # there, the scan then produced no output directory at all, and the job
-          # ended on "Path does not exist: .ash/ash_output/reports/ash.ghas.sarif"
-          # -- a failure four steps downstream of its cause.
+          # Every tool is resolved with `command -v` as the runner user rather than
+          # assumed on PATH. The failure this names -- Ruby absent for the runner
+          # user -- is otherwise invisible until the scan reports cfn-nag MISSING,
+          # which is the silent pass this whole branch exists to remove. It fired
+          # for real on job 104850467087, when ubuntu-latest stopped shipping apt's
+          # `ruby-full` and left `gem` at /usr/bin/gem with no `bundle` at all.
           #
-          # `command -v` runs as the runner user, so it uses the PATH where Ruby
-          # actually is; sudo then invokes that exact file. The alternative,
-          # `sudo env "PATH=$PATH" bundle`, works too but re-exports the whole
-          # PATH into a root shell, which is a larger change than this needs.
-          # Resolved with an explicit failure message rather than bare `command
-          # -v` under `set -e`. The original error proves only that SUDO could
-          # not find bundle; it does not prove the runner user can. If a future
-          # image drops Ruby entirely this step has to say so, because the
-          # downstream symptom is cfn-nag reporting MISSING, which is the silent
-          # pass this whole branch exists to remove.
+          # All three are checked even though only `bundle` is invoked directly:
+          # `gem` backs the environment dump below, and `ruby` is what the generated
+          # binstub's `#!/usr/bin/env ruby` shebang resolves at scan time. Naming a
+          # missing interpreter here beats discovering it when the wrapper will not
+          # start.
           BUNDLE_BIN="$(command -v bundle || true)"
           GEM_CMD="$(command -v gem || true)"
-          if [ -z "${BUNDLE_BIN}" ] || [ -z "${GEM_CMD}" ]; then
-            echo "::error::Ruby is not on PATH for the runner user (bundle='${BUNDLE_BIN}' gem='${GEM_CMD}'), so cfn-nag cannot be installed and would be reported MISSING. This image no longer ships ruby-full; add a ruby/setup-ruby step." >&2
+          RUBY_CMD="$(command -v ruby || true)"
+          if [ -z "${BUNDLE_BIN}" ] || [ -z "${GEM_CMD}" ] || [ -z "${RUBY_CMD}" ]; then
+            echo "::error::Ruby is not on PATH for the runner user (bundle='${BUNDLE_BIN}' gem='${GEM_CMD}' ruby='${RUBY_CMD}'), so cfn-nag cannot be installed and would be reported MISSING. This image no longer ships ruby-full; add a ruby/setup-ruby step." >&2
             exit 1
           fi
-          sudo BUNDLE_GEMFILE="${GEMFILE}" "${BUNDLE_BIN}" install --jobs=4
 
-          # ASH runs `cfn_nag_scan` as a plain subprocess, so the binstub has to
-          # be reachable by name. Read the directory from rubygems rather than
-          # assuming one: if it were wrong, the scan would not fail here -- it
-          # would report cfn-nag MISSING, which is the exact silent-pass this
-          # branch exists to remove.
-          GEM_BIN="$(sudo "${GEM_CMD}" environment | awk -F': ' '/EXECUTABLE DIRECTORY/ {print $2; exit}')"
-          echo "${GEM_BIN}" >> "${GITHUB_PATH}"
-          PATH="${GEM_BIN}:${PATH}" command -v cfn_nag_scan
+          # No sudo. Bundler itself objects to it -- job 104955423586 printed "Don't
+          # run Bundler as root" twice -- and it bought nothing here: the root-owned
+          # GEM_HOME that made it necessary belonged to the image's apt Ruby, which is
+          # gone. ruby/setup-ruby installs under /opt/hostedtoolcache/Ruby/<v>/x64,
+          # owned by the runner user, so the install and everything after it run as
+          # one user and cannot answer from different gem environments.
+          #
+          # Exported rather than prefixed, so `bundle binstubs` below and the failure
+          # diagnostics resolve the same Gemfile.
+          export BUNDLE_GEMFILE="${GEMFILE}"
+          "${BUNDLE_BIN}" install --jobs=4
+
+          # `bundle install` does not put gem executables on PATH, and that -- not
+          # sudo, and not the directory this used to guess -- is why the previous form
+          # failed. It read the gem executable directory out of `gem environment` and
+          # checked there for a wrapper bundler never writes.
+          #
+          # Measured locally against this exact Gemfile: `bundle install` reports
+          # "Bundle complete! 1 Gemfile dependency, 22 gems now installed" and exits
+          # 0, and the resulting Gem.bindir holds `bundle` and `bundler` and nothing
+          # else -- no cfn_nag_scan, though the cfn-nag gemspec declares cfn_nag,
+          # cfn_nag_rules, cfn_nag_scan and spcm_scan as executables. Bundler expects
+          # `bundle exec` to supply the context instead. On job 104955423586 that is
+          # exactly what the log shows: cfn-nag 0.8.10 installed, then `command -v`
+          # found nothing 0.165s later and skipped `Run ASH`.
+          #
+          # ASH invokes `cfn_nag_scan` as a plain subprocess, so `bundle exec` is not
+          # available to it. `bundle binstubs` generates the wrappers explicitly,
+          # which makes their existence a product of this step rather than an
+          # inference about where RubyGems might have put one.
+          #
+          # Under RUNNER_TEMP rather than beside the Gemfile on purpose. When ASH
+          # scans itself the Gemfile is inside GITHUB_WORKSPACE, and writing four Ruby
+          # scripts there would add them to the tree the very next step scans. The
+          # generated wrapper bakes an absolute-ized BUNDLE_GEMFILE computed from its
+          # own directory, so it does not need to sit next to the Gemfile; verified by
+          # running one from `/` with a PATH holding nothing but the binstub directory
+          # and the system defaults.
+          #
+          # This does not make the Gemfile's directory untouched: bundler records
+          # settings next to it either way, so `.bundle/config` appears there with
+          # BUNDLE_JOBS from the install above and BUNDLE_BIN from `--path`. That file
+          # predates this change and is one small YAML; what is kept out of the
+          # scanned tree is the executable content.
+          #
+          # --force so a warm RUNNER_TEMP regenerates against the bundle just
+          # installed instead of leaving a stale wrapper in place; without it bundler
+          # prints "Skipped ... since they already exist" and exits 0.
+          BINSTUB_DIR="${RUNNER_TEMP}/ash-cfn-nag-bin"
+          "${BUNDLE_BIN}" binstubs cfn-nag --force --path "${BINSTUB_DIR}"
+
+          # Printed unconditionally, not folded into a failure branch. When this step
+          # failed, the log carried the error and nothing about where it had looked,
+          # so the cause could not be read off the record at all.
+          echo "--- binstub directory ${BINSTUB_DIR} ---"
+          ls -la "${BINSTUB_DIR}" || echo "(cannot list '${BINSTUB_DIR}')"
+          echo "--- gem environment ---"
+          "${GEM_CMD}" environment
+
+          echo "${BINSTUB_DIR}" >> "${GITHUB_PATH}"
+
+          # Two assertions, and both stay assertions. Downgrading either to a warning
+          # would be worse than deleting it: the downstream symptom is cfn-nag
+          # reported MISSING and a green scan of a tree nothing looked at.
+          #
+          # First, that the name resolves.
+          if ! CFN_NAG_SCAN="$(PATH="${BINSTUB_DIR}:${PATH}" command -v cfn_nag_scan)"; then
+            echo "::error::cfn-nag installed but cfn_nag_scan is not on PATH. Looked in '${BINSTUB_DIR}'. ASH invokes it by bare name, so it would report cfn-nag MISSING and pass a tree it never scanned." >&2
+            "${BUNDLE_BIN}" info cfn-nag || true
+            exit 1
+          fi
+          echo "cfn_nag_scan resolves to ${CFN_NAG_SCAN}"
+
+          # Second, that it RUNS. Resolving only proves a file is there; a bundler
+          # binstub still has to find its Gemfile and activate the bundle at startup,
+          # and if it cannot it fails at scan time instead -- where the symptom is
+          # again cfn-nag MISSING. `--help` exits 0 and prints the version, so it
+          # exercises the whole path without needing a template.
+          if ! PATH="${BINSTUB_DIR}:${PATH}" cfn_nag_scan --help >/dev/null 2>&1; then
+            echo "::error::cfn_nag_scan is on PATH at '${CFN_NAG_SCAN}' but will not run. Output follows." >&2
+            PATH="${BINSTUB_DIR}:${PATH}" cfn_nag_scan --help || true
+            exit 1
+          fi
+          echo "cfn_nag_scan --help exits 0, so the wrapper runs and its bundle activates"
 
       - name: Run ASH
         id: ash
