@@ -783,11 +783,12 @@ class TestFixtureHandling:
 
         These runners do not have the other tools -- the workflow's own comment
         says only bandit and checkov are available on the Windows one -- and
-        ``fail_on_incomplete_scanners`` defaults on, so an unnarrowed run reports
-        the absent scanners MISSING and exits 1, which is not in
-        ``TOLERATED_EXIT_CODES``. Naming the set is what keeps this gate asserting
-        something about the two scanners it has instead of failing on eight it was
-        never given.
+        an unnarrowed run reports the absent scanners MISSING. Because
+        ``fail_on_incomplete_scanners`` defaults to False that does not raise the
+        exit code, so such a run lands inside ``TOLERATED_EXIT_CODES`` having
+        exercised two scanners while appearing to cover ten. Naming the set is what
+        keeps this gate asserting something about the two scanners it has instead of
+        passing quietly on eight it was never given.
 
         Asserted as a set equality rather than a containment check, because the
         failure worth catching is a scanner quietly *added* back to the run: it

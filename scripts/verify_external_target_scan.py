@@ -183,11 +183,16 @@ TOLERATED_EXIT_CODES = (0, 2)
 #: The set is named because the runners do not have the other tools. This
 #: workflow's own comment records it: "On the Windows runner only bandit and
 #: checkov are available at all". Left unnarrowed, cfn-nag, grype, syft and the
-#: rest report MISSING, and since ``fail_on_incomplete_scanners`` defaults on --
-#: a scan that could not run what it was asked to run is not a pass -- ``ash scan``
-#: exits 1, which is not in TOLERATED_EXIT_CODES. Naming the set is the difference
-#: between this gate asserting something about two scanners it has and asserting
-#: nothing while appearing to cover ten.
+#: rest report MISSING. On its own that does not fail the run today, because
+#: ``fail_on_incomplete_scanners`` defaults to False and ``ash scan`` exits 0 on a
+#: results file full of MISSING -- and that is the reason to name the set rather
+#: than a reason not to. An unnarrowed run would land inside
+#: TOLERATED_EXIT_CODES having exercised two scanners while appearing to cover ten,
+#: and ``check_some_scanner_ran`` would not catch it either, since it only fires
+#: when *every* scanner is missing. Naming the set is the difference between this
+#: gate asserting something about the two scanners it has and asserting nothing.
+#: It also keeps the gate correct if that default is ever flipped, where an
+#: unnarrowed run would exit 1 instead of passing quietly.
 #:
 #: An allowlist rather than excluding the absent tools by name, matching
 #: ``verify_multi_project_attribution.GATE_SCANNERS``: a scanner added later would

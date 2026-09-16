@@ -55,10 +55,24 @@ existed the two did disagree -- on a Windows run of this repository's own config
 ``ash scan --scanners semgrep`` recorded ten SKIPPED and exited 0 while this script
 exited 1 on the same file.
 
-One difference remains and it is deliberate: ASH gates both checks behind
-``fail_on_incomplete_scanners`` (default on), which this script has no equivalent of,
-so an operator who passes ``--no-fail-on-incomplete-scanners`` gets 0 from ASH and 1
-from here. That is the flag doing what it says rather than a drift between the two.
+One difference remains, and it is why this script carries the gate rather than sharing
+it: ASH puts both checks behind ``fail_on_incomplete_scanners``, which defaults to
+False, while this script has no equivalent and always fails. Both arms in
+``run_ash_scan._compute_exit_code`` sit inside that flag's ``if``, so with it off
+neither the per-scanner check nor the no-scanner-ran check runs at all. On a default
+run the two therefore disagree in the direction that matters: ``ash scan`` exits 0 on
+a results file carrying MISSING scanners, and this script exits 1 on that same file.
+
+So in CI this script is the only thing gating on incompleteness. ASH's own exit code
+does not, by default. That is worth saying outright, because the paragraph above --
+that the guard and the exit code "answer from the same field, so they cannot
+disagree" -- is a claim about the field they read, not about the verdict they return.
+
+The default is False deliberately, and is not an oversight to correct here. This
+repository cannot pass its own completeness gate yet: cfn-nag, grype and syft are not
+provisioned on every leg, so flipping the default would fail every job rather than the
+ones with a real gap. An operator who opts in with ``--fail-on-incomplete-scanners``
+gets 1 from both, which is the flag converging the two rather than drifting them.
 """
 
 from __future__ import annotations

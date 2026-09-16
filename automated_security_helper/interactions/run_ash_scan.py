@@ -1450,7 +1450,10 @@ def _print_workspace_summary(
 # Two independent questions, in this order:
 #
 #   1. Did the scanners that were supposed to run actually run? Gated by
-#      fail_on_incomplete_scanners, default on, exit 1.
+#      fail_on_incomplete_scanners, default OFF, exit 1. Off by default because this
+#      repository cannot pass the gate until cfn-nag, grype and syft are provisioned
+#      on every leg, so CI relies on .github/scripts/assert_scanners_completed.py,
+#      which has no such flag, for the same assertion.
 #   2. Did they find anything actionable? Gated by fail_on_findings, default on,
 #      exit 2.
 #
@@ -1535,9 +1538,12 @@ def _compute_exit_code(
         # is MISSING, which measured nothing just as thoroughly as an all-SKIPPED
         # one. Making this one check unconditional would answer that same question
         # two different ways depending on which status the non-running scanners
-        # happened to land on. The flag defaults on, so the case above still fails
-        # by default; an operator who turned the gate off has said they accept a
-        # scan that did not run.
+        # happened to land on. The flag defaults OFF, so the case above exits 0
+        # unless a config or an operator opts in -- which is precisely why
+        # .github/scripts/assert_scanners_completed.py asserts it unconditionally,
+        # and why that script rather than this function is what holds the line in
+        # CI. An operator who leaves the gate off, or turns it off, has said they
+        # accept a scan that did not run.
         #
         # Skipped for one shard of a split scan, because a shard genuinely can own
         # nothing: core.sharding documents that a shard count above the scanner

@@ -529,16 +529,19 @@ class TestParityWithComputeExitCode:
         verdict no real scan can reach, and the test would then be pinning
         nothing.
 
-        ``scanner_results`` is populated for the same reason, and it had to be
-        added once the completeness gate became the default. Measured: with
-        ``scanner_results`` left empty, ``get_unified_scanner_metrics`` still
-        derives one entry per ``properties.scanner_name`` in the SARIF, and
+        ``scanner_results`` is populated for the same reason, and it was added when
+        the completeness gate was introduced. Measured: with ``scanner_results``
+        left empty, ``get_unified_scanner_metrics`` still derives one entry per
+        ``properties.scanner_name`` in the SARIF, and
         ``ScannerStatisticsCalculator`` gives a scanner it has no
         ``scanner_results`` record for the status **ERROR** -- findings attributed
         to a scanner the report has no evidence ran. That is fail-closed and right,
-        but it made every case here exit 1 on completeness before the threshold
-        count was ever consulted, so all 36 parity assertions were comparing
-        ``False`` against the aggregator and pinning nothing about thresholds.
+        but wherever the gate is enabled it made every case here exit 1 on
+        completeness before the threshold count was ever consulted, so all 36
+        parity assertions were comparing ``False`` against the aggregator and
+        pinning nothing about thresholds. ``fail_on_incomplete_scanners`` defaults
+        to False, so populating the entries is what keeps this fixture independent
+        of that default rather than reliant on it.
 
         A real scan always writes a ``scanner_results`` entry for every scanner --
         measured at 10 of 10 on a local run, including the three that were MISSING

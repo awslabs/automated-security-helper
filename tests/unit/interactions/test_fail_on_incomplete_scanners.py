@@ -444,7 +444,9 @@ class TestAScanThatRanNothingIsNotACleanScan:
         answer the same question two different ways depending on which status the
         scanners that did not run happened to land on.
 
-        The gate defaults on, so the defect above still fails by default.
+        The gate defaults to False, so the defect above is what an unconfigured run
+        does rather than an opt-out corner case. ``assert_scanners_completed.py`` has
+        no equivalent flag and is what catches it in CI.
         """
         opts = _opts(tmp_path, fail_on_incomplete_scanners=False)
         results = MagicMock()
