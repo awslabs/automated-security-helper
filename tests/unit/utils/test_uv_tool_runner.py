@@ -1,14 +1,20 @@
 """Tests for utils/uv_tool_runner.py — covers UVToolRunner class methods."""
 
+import re
 import subprocess  # nosec B404
+import threading
+import time
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 import pytest
 
+from automated_security_helper.utils import uv_tool_runner
 from automated_security_helper.utils.uv_tool_runner import (
     UVToolRunner,
     UVToolRunnerError,
     UVToolRetryConfig,
+    _install_retry_delay,
     _reset_uv_tool_runner_caches,
     find_executable,
     find_uv_or_none,
@@ -291,6 +297,806 @@ class TestInstallToolWithVersion:
                 )
                 install_cmd = mock_run.call_args_list[-1][0][0]
                 assert "bandit[sarif,toml]" in install_cmd
+
+
+def _always_fails_with_reset(attempt_number):
+    """Every attempt dies the way a flaky index does: non-zero exit, no output."""
+    return subprocess.CalledProcessError(
+        1, ["uv", "tool", "install"], "", "Connection reset by peer"
+    )
+
+
+@contextmanager
+def _install_harness(runner, outcome_for_attempt):
+    """Reduce ``install_tool_with_version`` to just its own install subprocess.
+
+    ``is_tool_installed`` is stubbed out rather than driven through
+    ``subprocess.run`` deliberately: these tests read a *count*, and a count that
+    silently also included the ``uv tool list`` probe could not be read.
+
+    ``outcome_for_attempt(n)`` is called with the 1-based attempt number and
+    returns either a ``CompletedProcess``-alike to return or an exception
+    instance to raise.
+    """
+    installs: list = []
+    sleeps: list = []
+
+    def _run(cmd, *args, **kwargs):
+        installs.append(cmd)
+        outcome = outcome_for_attempt(len(installs))
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    runner._uv_available_cache = True
+    with (
+        patch.object(runner, "is_tool_installed", return_value=False),
+        patch(
+            "automated_security_helper.utils.subprocess_utils.find_executable",
+            return_value=None,
+        ),
+        patch(
+            "automated_security_helper.core.constants.is_offline_mode",
+            return_value=False,
+        ),
+        patch(
+            "automated_security_helper.utils.uv_tool_runner.subprocess.run",
+            side_effect=_run,
+        ),
+        patch(
+            "automated_security_helper.utils.uv_tool_runner.time.sleep",
+            side_effect=sleeps.append,
+        ),
+    ):
+        yield installs, sleeps
+
+
+class TestInstallRetriesActuallyHappen:
+    """Regression tests for ``retry_config`` being honoured at all.
+
+    ``install_tool_with_version`` used to accept ``retry_config`` and ignore it.
+    There was no retry loop in the function, so a caller asking for
+    ``max_retries=3`` got exactly one attempt -- and BanditScanner asks for
+    exactly that on every cold install.
+
+    Why it survived review is the part worth pinning. Every observable anyone
+    checked sits *upstream* of the missing code:
+    ``UVToolMixin._install_uv_tool`` logs "[INSTALLATION_CONFIG] Using custom
+    retry configuration / max_retries=3, base_delay=1.0s" before it calls in;
+    ``test_bandit_scanner_behavior`` asserts the config dict was passed with the
+    installer stubbed out; ``test_uv_tool_mixin.test_with_custom_retry_config``
+    mocks the runner wholesale; and ``TestUVToolRetryConfig`` above reads the
+    dataclass's own fields back to itself. All four still pass with the retry
+    entirely absent. They were not vacuous -- they just watched something the
+    defect does not move.
+
+    So these assert the two things it does move: how many installs are attempted,
+    and what ``time.sleep`` is handed between them. Jitter is off wherever an
+    exact interval is asserted, so the schedule is arithmetic rather than a
+    range. Nothing here measures wall clock, which would flake low on a fast
+    machine and high on a loaded one.
+    """
+
+    def test_a_retry_config_buys_one_attempt_per_configured_retry(self, runner):
+        config = UVToolRetryConfig(max_retries=3, base_delay=0.0, jitter=False)
+        with (
+            _install_harness(runner, _always_fails_with_reset) as (installs, _),
+            pytest.raises(UVToolRunnerError),
+        ):
+            runner.install_tool_with_version("bandit", retry_config=config)
+        assert len(installs) == 4, (
+            "expected 1 initial attempt plus 3 retries; a 1 here means "
+            "retry_config is being accepted and dropped again"
+        )
+
+    def test_no_retry_config_still_means_exactly_one_attempt(self, runner):
+        """Callers that never asked for retries must be left alone."""
+        with (
+            _install_harness(runner, _always_fails_with_reset) as (installs, sleeps),
+            pytest.raises(UVToolRunnerError),
+        ):
+            runner.install_tool_with_version("bandit")
+        assert len(installs) == 1
+        assert sleeps == []
+
+    def test_a_none_config_never_reaches_the_delay_computation(self, runner):
+        """The delay helper takes a non-optional config, so it must not be called
+        with ``None`` -- and that call site runs only on the retry path.
+
+        This is the invariant behind ``retry_config is not None`` in the sleep
+        guard. It holds today because ``attempts`` is 1 whenever ``retry_config``
+        is falsy, so ``attempt + 1 < attempts`` is already False. The reason to
+        pin it rather than trust it: a break would surface as an AttributeError
+        thrown from *inside* the retry path, which only executes after an install
+        has already failed. Every test that installs successfully, and every test
+        that fails without a retry config, would stay green.
+
+        Asserting it by making the delay helper explode is deliberate -- it fails
+        if the guard is ever loosened, rather than merely checking a count that
+        happens to match.
+        """
+        sentinel = AssertionError("_install_retry_delay called with no retry_config")
+
+        with (
+            patch(
+                "automated_security_helper.utils.uv_tool_runner._install_retry_delay",
+                side_effect=sentinel,
+            ),
+            _install_harness(runner, _always_fails_with_reset) as (installs, sleeps),
+            pytest.raises(UVToolRunnerError),
+        ):
+            runner.install_tool_with_version("bandit", retry_config=None)
+
+        assert len(installs) == 1
+        assert sleeps == []
+
+    def test_the_interval_grows_and_is_exactly_the_configured_schedule(self, runner):
+        config = UVToolRetryConfig(
+            max_retries=3,
+            base_delay=1.0,
+            exponential_base=2.0,
+            max_delay=60.0,
+            jitter=False,
+        )
+        with (
+            _install_harness(runner, _always_fails_with_reset) as (_, sleeps),
+            pytest.raises(UVToolRunnerError),
+        ):
+            runner.install_tool_with_version("bandit", retry_config=config)
+        assert sleeps == [1.0, 2.0, 4.0], (
+            "the interval must grow between attempts. A flat list is a "
+            "fixed-interval retry wearing the name backoff; an empty list is no "
+            "backoff at all, which fires every retry back-to-back at whatever "
+            "the retry was supposed to be gentle with"
+        )
+
+    def test_the_interval_stops_growing_at_max_delay(self, runner):
+        config = UVToolRetryConfig(
+            max_retries=4,
+            base_delay=10.0,
+            exponential_base=2.0,
+            max_delay=25.0,
+            jitter=False,
+        )
+        with (
+            _install_harness(runner, _always_fails_with_reset) as (_, sleeps),
+            pytest.raises(UVToolRunnerError),
+        ):
+            runner.install_tool_with_version("bandit", retry_config=config)
+        assert sleeps == [10.0, 20.0, 25.0, 25.0]
+
+    def test_nothing_is_slept_after_the_final_attempt(self, runner):
+        """A wait after the last try buys nothing and only delays the error."""
+        config = UVToolRetryConfig(max_retries=2, base_delay=1.0, jitter=False)
+        with (
+            _install_harness(runner, _always_fails_with_reset) as (installs, sleeps),
+            pytest.raises(UVToolRunnerError),
+        ):
+            runner.install_tool_with_version("bandit", retry_config=config)
+        assert len(installs) == 3
+        assert len(sleeps) == len(installs) - 1
+
+    def test_a_transient_failure_is_recovered_by_the_retry(self, runner):
+        """Fails once on the network then succeeds: the case the config exists for."""
+
+        def _fails_once(attempt_number):
+            if attempt_number == 1:
+                return subprocess.CalledProcessError(
+                    1, ["uv", "tool", "install"], "", "Recv failure"
+                )
+            return MagicMock(returncode=0)
+
+        config = UVToolRetryConfig(max_retries=3, base_delay=1.0, jitter=False)
+        with _install_harness(runner, _fails_once) as (installs, sleeps):
+            assert (
+                runner.install_tool_with_version("bandit", retry_config=config) is True
+            )
+        assert len(installs) == 2, "the second attempt is what made this succeed"
+        assert sleeps == [1.0], "exactly one wait, taken between the two attempts"
+
+    def test_a_timeout_is_not_retried(self, runner):
+        """Deliberate: the attempt already spent the whole timeout budget.
+
+        Retrying would multiply wall clock by the attempt count, so three 300s
+        timeouts would be fifteen minutes of a scan phase spent waiting on a tool
+        that is not coming.
+        """
+
+        def _times_out(attempt_number):
+            return subprocess.TimeoutExpired("uv", 300)
+
+        config = UVToolRetryConfig(max_retries=3, base_delay=1.0, jitter=False)
+        with (
+            _install_harness(runner, _times_out) as (installs, sleeps),
+            pytest.raises(UVToolRunnerError, match="timed out"),
+        ):
+            runner.install_tool_with_version("bandit", timeout=300, retry_config=config)
+        assert len(installs) == 1
+        assert sleeps == []
+
+    def test_jitter_stays_inside_the_growing_envelope(self, runner):
+        """With jitter on the exact values vary, but the growth must survive it."""
+        config = UVToolRetryConfig(
+            max_retries=3,
+            base_delay=10.0,
+            exponential_base=2.0,
+            max_delay=600.0,
+            jitter=True,
+        )
+        with (
+            _install_harness(runner, _always_fails_with_reset) as (_, sleeps),
+            pytest.raises(UVToolRunnerError),
+        ):
+            runner.install_tool_with_version("bandit", retry_config=config)
+        # Jitter adds at most 1.0s, and each step doubles a >=10s base, so the
+        # envelopes cannot overlap and the sequence must still be increasing.
+        assert sleeps == sorted(sleeps), sleeps
+        assert 10.0 <= sleeps[0] < 11.0, sleeps
+        assert 20.0 <= sleeps[1] < 21.0, sleeps
+        assert 40.0 <= sleeps[2] < 41.0, sleeps
+
+
+class TestRetryDelayIsAlwaysSleepable:
+    """``time.sleep`` raises ValueError on a negative argument.
+
+    ``UVToolRetryConfig`` is assembled in ``UVToolMixin._install_uv_tool`` from a
+    plain dict via ``.get(key, default)`` with no validation, so a nonsensical
+    value reaches the arithmetic instead of being rejected at the boundary. A
+    negative interval would surface as a ValueError thrown from inside the
+    install path, which a caller cannot tell apart from the install itself having
+    failed.
+    """
+
+    def test_a_negative_max_delay_cannot_produce_a_negative_interval(self):
+        config = UVToolRetryConfig(base_delay=1.0, max_delay=-30.0, jitter=False)
+        intervals = [_install_retry_delay(config, n) for n in range(4)]
+        assert all(interval >= 0.0 for interval in intervals), intervals
+
+    def test_a_negative_base_delay_cannot_produce_a_negative_interval(self):
+        config = UVToolRetryConfig(base_delay=-5.0, jitter=False)
+        intervals = [_install_retry_delay(config, n) for n in range(4)]
+        assert all(interval >= 0.0 for interval in intervals), intervals
+
+    def test_the_cap_is_never_normalized_below_the_floor(self):
+        """A max_delay under base_delay would cap every interval below its start."""
+        config = UVToolRetryConfig(base_delay=10.0, max_delay=1.0)
+        assert config.max_delay >= config.base_delay
+
+    def test_a_sub_unit_exponential_base_cannot_shrink_the_backoff(self):
+        config = UVToolRetryConfig(base_delay=1.0, exponential_base=0.5, jitter=False)
+        intervals = [_install_retry_delay(config, n) for n in range(4)]
+        assert intervals == sorted(intervals), intervals
+
+    def test_negative_max_retries_becomes_a_single_attempt(self):
+        """``1 + max_retries`` must not be able to produce an empty range."""
+        assert UVToolRetryConfig(max_retries=-4).max_retries == 0
+
+    def test_a_field_mutated_after_construction_still_cannot_go_negative(self):
+        """The one case ``__post_init__`` cannot reach, so the only case that
+        distinguishes the two overlapping guards.
+
+        Every other test in this class is satisfied by the normalization in
+        ``__post_init__`` alone -- deleting the ``max(0.0, ...)`` clamp inside
+        ``_install_retry_delay`` leaves them all green, which would make the
+        clamp an untested guard whose removal nothing notices.
+        ``UVToolRetryConfig`` is a plain mutable dataclass, so assigning to a
+        field after construction bypasses normalization entirely. That is what
+        this pins, and it fails if the clamp is removed.
+        """
+        config = UVToolRetryConfig(base_delay=1.0, jitter=False)
+        config.max_delay = -30.0
+
+        intervals = [_install_retry_delay(config, n) for n in range(3)]
+        assert intervals == [0.0, 0.0, 0.0], intervals
+
+
+class TestTheAttemptCountCannotFallBelowOne:
+    """``1 + max_retries`` must never collapse ``range(attempts)`` to empty.
+
+    With ``attempts <= 0`` the loop body never executes, so ``last_error`` is
+    never assigned and the function ends at ``raise UVToolRunnerError(None)`` --
+    an install that never happened, reported as a failure carrying no message.
+    ``str()`` of that exception is the literal "None".
+
+    This is latent rather than live: ``__post_init__`` clamps ``max_retries`` to
+    ``>= 0`` and ``UVToolMixin._install_uv_tool`` is the only constructor. It is
+    guarded anyway, for the reason ``_install_retry_delay``'s own docstring gives
+    for its own doubled clamp -- ``UVToolRetryConfig`` is a plain *mutable*
+    dataclass, so assigning to a field after construction re-opens the hole
+    normalization closed. That argument is already applied to the sleep value;
+    the attempt count is where the consequence is worse, because a bad sleep
+    value raises something a reader can name and an empty attempt range produces
+    an error that names nothing.
+
+    ``with-retry.sh`` in this same branch guards the identical case with
+    ``if [ "$max" -lt 1 ]``, and its comment gives the identical reason: "All 0
+    attempts failed" is a failure indistinguishable from the command having been
+    run and failed.
+    """
+
+    def test_a_negative_retry_count_still_runs_one_attempt(self, runner):
+        config = UVToolRetryConfig(max_retries=0, base_delay=0.0, jitter=False)
+        config.max_retries = -1
+
+        with (
+            _install_harness(runner, _always_fails_with_reset) as (installs, sleeps),
+            pytest.raises(UVToolRunnerError) as excinfo,
+        ):
+            runner.install_tool_with_version("bandit", retry_config=config)
+
+        assert len(installs) == 1, (
+            "a negative retry count made range(attempts) empty, so uv was never "
+            "invoked at all and the error raised below described nothing"
+        )
+        assert sleeps == [], "one attempt has no gap after it to wait in"
+        assert str(excinfo.value) != "None", (
+            "UVToolRunnerError(None) stringifies to the literal 'None': a "
+            "failure report with no failure in it"
+        )
+        assert "Connection reset by peer" in str(excinfo.value)
+
+    @pytest.mark.parametrize("max_retries", [-1, -4, -100])
+    def test_the_error_always_names_the_failure_that_happened(
+        self, runner, max_retries
+    ):
+        config = UVToolRetryConfig(max_retries=0, base_delay=0.0, jitter=False)
+        config.max_retries = max_retries
+
+        with (
+            _install_harness(runner, _always_fails_with_reset) as (installs, _),
+            pytest.raises(UVToolRunnerError, match="exit code 1"),
+        ):
+            runner.install_tool_with_version("bandit", retry_config=config)
+        assert len(installs) == 1
+
+    def test_a_zero_retry_count_is_unchanged(self, runner):
+        """Positive control: the already-correct boundary must not move.
+
+        ``max_retries=0`` is the value ``__post_init__`` normalizes a negative to,
+        and it already meant one attempt. A clamp that shifted this to two would
+        double every install's work while passing the tests above.
+        """
+        config = UVToolRetryConfig(max_retries=0, base_delay=0.0, jitter=False)
+
+        with (
+            _install_harness(runner, _always_fails_with_reset) as (installs, sleeps),
+            pytest.raises(UVToolRunnerError, match="exit code 1"),
+        ):
+            runner.install_tool_with_version("bandit", retry_config=config)
+        assert len(installs) == 1
+        assert sleeps == []
+
+    def test_a_positive_retry_count_is_unchanged(self, runner):
+        """Positive control: ``max(1, ...)`` must not cap a real retry policy."""
+        config = UVToolRetryConfig(max_retries=3, base_delay=0.0, jitter=False)
+
+        with (
+            _install_harness(runner, _always_fails_with_reset) as (installs, _),
+            pytest.raises(UVToolRunnerError),
+        ):
+            runner.install_tool_with_version("bandit", retry_config=config)
+        assert len(installs) == 4
+
+
+class _ScaledClock:
+    """Stand-in for the module's ``time`` where one real second reads as ``scale``.
+
+    The monitor measures elapsed with ``time.time()`` and compares it against
+    ``timeout``, and the smallest ``timeout`` that starts a monitor at all is 61
+    seconds. Observing what the monitor does *after* an attempt's timeout has
+    passed therefore costs a real minute per attempt. Scaling the clock the
+    monitor reads buys that observation in seconds without touching any threshold
+    in the code under test: nothing here raises a timeout or lowers a bound to
+    make an assertion pass, and ``time()`` stays monotonic. Every other attribute
+    proxies to the real module, so the retry backoff's ``time.sleep`` is
+    unaffected.
+    """
+
+    def __init__(self, scale: float):
+        self._scale = scale
+        self._origin = time.time()
+
+    def time(self) -> float:
+        return self._origin + (time.time() - self._origin) * self._scale
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+
+def _elapsed_from(message: str) -> float:
+    """Pull the N out of "Installation in progress... (Ns elapsed)"."""
+    match = re.search(r"\(?(?:attempt \d+/\d+, )?(\d+)s elapsed\)", message)
+    assert match is not None, f"unparseable progress message: {message!r}"
+    return float(match.group(1))
+
+
+class TestTheProgressMonitorCoversTheWholeRetriedRun:
+    """The monitor's contract assumed one attempt; the retry loop gave it several.
+
+    It was started once, before the loop, and self-terminated at
+    ``elapsed > timeout`` measured from before the first attempt. Once
+    ``retry_config`` made the install run up to ``attempts * timeout`` plus
+    backoff -- roughly fifteen minutes for BanditScanner's ``max_retries=3`` at
+    the default 300s timeout -- callbacks stopped at 300 seconds and the caller
+    heard nothing for the remaining ten-plus minutes while the work continued.
+
+    Two things compounded it. The elapsed figure emitted before that point
+    described the first attempt, not the attempt in flight, so a caller reading
+    "410s elapsed" was being told about a budget nothing enforces; ``timeout`` is
+    what ``subprocess.run`` applies to a single attempt. And the line
+    ``if progress_thread: progress_thread = None``, under a comment reading "Stop
+    progress monitoring", dropped a reference and stopped nothing -- the thread is
+    a daemon polling a fixed sleep, so it kept calling back for up to ``timeout``
+    after the install had already returned.
+
+    Nothing in the suite could see any of this: no test anywhere passed a
+    ``progress_callback``, and no production caller passes one either, so the
+    monitor was reachable only through the parameter and exercised by nothing.
+
+    The chosen shape is one monitor per attempt: elapsed is anchored to the
+    attempt in flight, and the stop is an Event the loop sets in a ``finally``.
+    The alternative -- one monitor given the whole budget -- would have to invent
+    that budget, since ``attempts * timeout + sum(jittered backoffs)`` is not a
+    limit anything applies and varies run to run.
+    """
+
+    @staticmethod
+    def _blocking_outcomes(first_block: float, second_block: float, windows: list):
+        """Two attempts that occupy real time: the first fails, the second succeeds.
+
+        ``threading.Event().wait`` rather than ``time.sleep`` deliberately -- the
+        install harness patches the module's ``time.sleep`` to record intervals,
+        so a sleep here would return instantly and occupy no time at all.
+        """
+
+        def outcome(attempt_number):
+            entered = time.time()
+            block = first_block if attempt_number == 1 else second_block
+            threading.Event().wait(block)
+            windows.append((attempt_number, entered, time.time()))
+            if attempt_number == 1:
+                return subprocess.CalledProcessError(
+                    1, ["uv", "tool", "install"], "", "Connection reset by peer"
+                )
+            return MagicMock(returncode=0)
+
+        return outcome
+
+    def test_callbacks_continue_past_the_first_attempts_timeout(self, runner):
+        """A 120s timeout, two attempts, and a clock running 100x.
+
+        Attempt 1 occupies 2.0 real seconds, which the monitor reads as 200 --
+        past its 120-second horizon. Attempt 2 then runs for another 0.6 real
+        seconds. The caller must still be hearing from the install during it.
+        """
+        scale = 100.0
+        timeout = 120
+        windows: list = []
+        records: list = []
+        config = UVToolRetryConfig(
+            max_retries=1, base_delay=0.0, max_delay=0.0, jitter=False
+        )
+
+        with (
+            patch.object(uv_tool_runner, "time", _ScaledClock(scale)),
+            patch.object(uv_tool_runner, "_PROGRESS_UPDATE_INTERVAL_SECONDS", 0.05),
+            _install_harness(runner, self._blocking_outcomes(2.0, 0.6, windows)) as (
+                installs,
+                _,
+            ),
+        ):
+            assert (
+                runner.install_tool_with_version(
+                    "bandit",
+                    timeout=timeout,
+                    retry_config=config,
+                    progress_callback=lambda m: records.append((time.time(), m)),
+                )
+                is True
+            )
+
+        assert len(installs) == 2, "the test needs both attempts to have run"
+        assert len(windows) == 2
+        second_attempt_started = windows[1][1]
+        during_second = [m for t, m in records if t >= second_attempt_started]
+
+        assert during_second, (
+            f"the install ran for {windows[1][2] - windows[0][1]:.1f} real seconds "
+            f"across two attempts and the caller heard nothing during the second. "
+            f"The monitor self-terminated at elapsed > {timeout} measured from "
+            f"before attempt 1, so it went silent while the work continued -- "
+            f"{len(records)} callbacks, all of them in attempt 1"
+        )
+
+    def test_the_elapsed_figure_describes_the_attempt_in_flight(self, runner):
+        """Anchored to the running attempt, not to the first one.
+
+        The strict form: every figure reported during attempt 2 must match the
+        time since attempt 2 began. Anchored to attempt 1 instead, each figure
+        would be inflated by the whole of attempt 1 -- 200 scaled seconds here,
+        which also puts every one of them past the 120-second timeout the caller
+        is implicitly measuring against.
+        """
+        scale = 100.0
+        timeout = 120
+        windows: list = []
+        records: list = []
+        config = UVToolRetryConfig(
+            max_retries=1, base_delay=0.0, max_delay=0.0, jitter=False
+        )
+
+        with (
+            patch.object(uv_tool_runner, "time", _ScaledClock(scale)),
+            patch.object(uv_tool_runner, "_PROGRESS_UPDATE_INTERVAL_SECONDS", 0.05),
+            _install_harness(runner, self._blocking_outcomes(2.0, 0.6, windows)) as (
+                installs,
+                _,
+            ),
+        ):
+            runner.install_tool_with_version(
+                "bandit",
+                timeout=timeout,
+                retry_config=config,
+                progress_callback=lambda m: records.append((time.time(), m)),
+            )
+
+        assert len(installs) == 2
+        second_started = windows[1][1]
+        during_second = [
+            (t, _elapsed_from(m)) for t, m in records if t >= second_started
+        ]
+        assert during_second, "no callbacks during attempt 2; see the test above"
+
+        for at, reported in during_second:
+            expected = (at - second_started) * scale
+            assert reported <= expected + 3 * scale, (
+                f"reported {reported}s elapsed {at - second_started:.2f} real "
+                f"seconds into attempt 2, which is ~{expected:.0f} scaled "
+                f"seconds. A figure this far ahead is anchored to attempt 1"
+            )
+            assert reported < timeout, (
+                f"reported {reported}s elapsed against a {timeout}s per-attempt "
+                f"timeout: the number describes a budget nothing enforces"
+            )
+
+    def test_the_monitor_stops_when_the_install_does(self, runner):
+        """The comment reading "Stop progress monitoring" has to actually stop it.
+
+        The old line set ``progress_thread = None``, which drops a reference. The
+        thread is a daemon polling a fixed interval, so it kept calling back for
+        up to ``timeout`` after the install had returned -- into a callback whose
+        owner has every reason to have torn down whatever it writes to.
+        """
+        records: list = []
+        config = UVToolRetryConfig(
+            max_retries=1, base_delay=0.0, max_delay=0.0, jitter=False
+        )
+
+        with (
+            patch.object(uv_tool_runner, "_PROGRESS_UPDATE_INTERVAL_SECONDS", 0.02),
+            _install_harness(runner, lambda n: MagicMock(returncode=0)) as (
+                installs,
+                _,
+            ),
+        ):
+            assert (
+                runner.install_tool_with_version(
+                    "bandit",
+                    timeout=120,
+                    retry_config=config,
+                    progress_callback=records.append,
+                )
+                is True
+            )
+            after_return = len(records)
+            threading.Event().wait(0.5)
+            arrived_late = len(records) - after_return
+
+        assert len(installs) == 1
+        assert arrived_late == 0, (
+            f"{arrived_late} callbacks arrived in the half second after the "
+            f"install returned, so the monitor outlived the work it was "
+            f"reporting on"
+        )
+
+    def test_a_failed_attempt_stops_its_own_monitor(self, runner):
+        """The gap between attempts is not work, so nothing should report on it.
+
+        This is the half the old code could not have got right: it dropped the
+        thread reference only on the *success* path, so after a failed attempt the
+        monitor kept reporting elapsed time against an attempt that had already
+        ended, right through the backoff and into the next one.
+
+        Counted by *arrival order* rather than by timestamp, and this matters. The
+        first form of this test bracketed the backoff with two ``time.time()``
+        reads and asked which callback timestamps fell between them. That compares
+        clock readings taken on two different threads and needs the wall clock to
+        order them, which no clock promises: ``time.time()`` is not monotonic, and
+        where its resolution is coarse two reads microseconds apart return the
+        same value, which the inclusive bounds then counted as inside the gap.
+
+        It failed on exactly one CI cell, windows-latest/py3.11, reporting one
+        callback in a 0.41s gap. One is the tell. The monitor's cadence here is
+        0.02s, measured at 5 callbacks per 0.1s attempt, so a monitor genuinely
+        still running through that gap would have delivered about twenty, not one
+        -- and quantizing this test's own timestamps to 15.625ms, Windows' timer
+        granularity, puts a callback in the gap on 30 runs out of 30 with the code
+        unchanged and behaving correctly. So the count was measuring the clock.
+
+        A monotonically increasing arrival index has no such problem: the gap's
+        endpoints are the callback count before and after the backoff, taken under
+        the same lock the callback appends under, so "did anything arrive during
+        the gap" is answered by a happens-before relation instead of by two
+        clocks. The second assertion then reads the *content*, which is what the
+        property is actually about -- a message naming attempt 1 must not arrive
+        once attempt 1 is over -- and holds at any runner speed.
+        """
+        records: list = []
+        gap_marks: list = []
+        lock = threading.Lock()
+        config = UVToolRetryConfig(
+            max_retries=1, base_delay=0.4, max_delay=0.4, jitter=False
+        )
+
+        def _record(message):
+            with lock:
+                records.append(message)
+
+        def _outcomes(attempt_number):
+            threading.Event().wait(0.1)
+            if attempt_number == 1:
+                return subprocess.CalledProcessError(
+                    1, ["uv", "tool", "install"], "", "Connection reset by peer"
+                )
+            return MagicMock(returncode=0)
+
+        def _sleep_really(seconds):
+            """Take the backoff for real, and mark the arrival index around it.
+
+            The window between the two attempts is bounded by this sleep, not by
+            anything inside the fake install: the monitor is stopped and joined in
+            the loop's ``finally``, which runs before the backoff starts, and the
+            next attempt's monitor starts after it ends. So any callback that
+            arrives between these two marks came from a monitor outliving its own
+            attempt, and no grace period is needed to say so.
+
+            The 0.4s backoff and the 0.02s monitor cadence are far enough apart to
+            tell apart by size, which matters because the pre-fix monitor polls
+            with this same ``time.sleep``.
+            """
+            if seconds > 0.1:
+                with lock:
+                    gap_marks.append(len(records))
+                threading.Event().wait(seconds)
+                with lock:
+                    gap_marks.append(len(records))
+            else:
+                threading.Event().wait(seconds)
+
+        with (
+            _install_harness(runner, _outcomes) as (installs, _),
+            patch.object(uv_tool_runner, "_PROGRESS_UPDATE_INTERVAL_SECONDS", 0.02),
+            # Entered after the harness so this wins: the harness records the
+            # interval instead of taking it, and this test needs a real gap
+            # between the two attempts to look for callbacks inside.
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.time.sleep",
+                side_effect=_sleep_really,
+            ),
+        ):
+            runner.install_tool_with_version(
+                "bandit",
+                timeout=120,
+                retry_config=config,
+                progress_callback=_record,
+            )
+
+        assert len(installs) == 2
+        assert len(gap_marks) == 2, (
+            f"expected exactly one backoff between attempts: {gap_marks}"
+        )
+        assert any("attempt 1/2" in m for m in records), (
+            "attempt 1 itself must still have been reported on, or the two "
+            "assertions below are satisfied by a monitor that never ran"
+        )
+
+        arrived_during_backoff = gap_marks[1] - gap_marks[0]
+        assert arrived_during_backoff == 0, (
+            f"{arrived_during_backoff} callbacks arrived during the backoff "
+            f"between the two attempts, so attempt 1's monitor was still running "
+            f"through it and reporting elapsed time against an attempt that had "
+            f"already failed. At the 0.02s cadence a monitor that ran the whole "
+            f"0.4s gap delivers about twenty"
+        )
+        reported_after_attempt_one = [
+            m for m in records[gap_marks[0] :] if "attempt 1/2" in m
+        ]
+        assert reported_after_attempt_one == [], (
+            f"attempt 1 had already failed, and {len(reported_after_attempt_one)} "
+            f"callbacks still named it: {reported_after_attempt_one}. This is the "
+            f"property the count above approximates, asserted on the message "
+            f"instead of on a wall-clock window"
+        )
+
+    def test_a_short_timeout_still_starts_no_monitor(self, runner):
+        """Positive control on the gate: 60 seconds or less means no monitor.
+
+        The threshold is unchanged; a restructure that started monitoring for
+        every install would flood short callers that never saw a callback before.
+        """
+        records: list = []
+
+        with (
+            patch.object(uv_tool_runner, "_PROGRESS_UPDATE_INTERVAL_SECONDS", 0.02),
+            _install_harness(runner, lambda n: MagicMock(returncode=0)) as (
+                installs,
+                _,
+            ),
+        ):
+            runner.install_tool_with_version(
+                "bandit", timeout=60, progress_callback=records.append
+            )
+            threading.Event().wait(0.2)
+
+        assert len(installs) == 1
+        assert records == []
+
+    def test_the_message_is_unchanged_when_there_is_only_one_attempt(self, runner):
+        """No retry policy means no attempt numbering, byte for byte as before.
+
+        Callers that never asked for retries are the only ones that ever saw this
+        string, so it must not grow a counter that always reads 1/1.
+        """
+        records: list = []
+
+        def _slow_success(attempt_number):
+            threading.Event().wait(0.1)
+            return MagicMock(returncode=0)
+
+        with (
+            patch.object(uv_tool_runner, "_PROGRESS_UPDATE_INTERVAL_SECONDS", 0.02),
+            _install_harness(runner, _slow_success) as (installs, _),
+        ):
+            runner.install_tool_with_version(
+                "bandit", timeout=120, progress_callback=records.append
+            )
+
+        assert len(installs) == 1
+        assert records, "a 120s timeout with a callback must be monitored"
+        assert all(
+            re.fullmatch(r"Installation in progress\.\.\. \(\d+s elapsed\)", m)
+            for m in records
+        ), records
+
+    def test_a_retried_install_names_the_attempt_in_its_message(self, runner):
+        """With a retry policy the figure needs an anchor the caller can read."""
+        records: list = []
+        config = UVToolRetryConfig(
+            max_retries=1, base_delay=0.0, max_delay=0.0, jitter=False
+        )
+
+        def _fails_then_succeeds(attempt_number):
+            threading.Event().wait(0.1)
+            if attempt_number == 1:
+                return subprocess.CalledProcessError(
+                    1, ["uv", "tool", "install"], "", "Connection reset by peer"
+                )
+            return MagicMock(returncode=0)
+
+        with (
+            patch.object(uv_tool_runner, "_PROGRESS_UPDATE_INTERVAL_SECONDS", 0.02),
+            _install_harness(runner, _fails_then_succeeds) as (installs, _),
+        ):
+            runner.install_tool_with_version(
+                "bandit",
+                timeout=120,
+                retry_config=config,
+                progress_callback=records.append,
+            )
+
+        assert len(installs) == 2
+        assert any("attempt 1/2" in m for m in records), records
+        assert any("attempt 2/2" in m for m in records), records
 
 
 class TestGetUvToolRunner:

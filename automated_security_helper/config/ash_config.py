@@ -1103,4 +1103,11 @@ ConverterConfigSegment.model_rebuild()
 ScannerConfigSegment.model_rebuild()
 ReporterConfigSegment.model_rebuild()
 PluginContext.model_rebuild()
+# Load-bearing, and not obviously so: AshAggregatedResults.ash_config is annotated
+# Optional["AshConfig"] as a string, and this is the line that resolves it for any
+# process that imports this module -- AshConfig is in scope here, which is all
+# model_rebuild() needs. models/asharp_model.py resolves it a second way, on first
+# use, for the import orders that never reach this line. Either mechanism alone
+# suffices, so this one looks like dead duplication; deleting it narrows the fix to
+# one mechanism and puts model_json_schema() back at the mercy of import order.
 AshAggregatedResults.model_rebuild()
