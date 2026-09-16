@@ -63,7 +63,9 @@ def _make_result(
     )
 
 
-def _make_run(results: list[Result] | None = None, tool_name: str = "test-scanner") -> Run:
+def _make_run(
+    results: list[Result] | None = None, tool_name: str = "test-scanner"
+) -> Run:
     """Build a minimal SARIF Run."""
     return Run(
         tool=Tool(driver=ToolComponent(name=tool_name)),
@@ -114,6 +116,79 @@ def _get_reporter(tmp_path, config=None):
 def _parse_xml(xml_string: str) -> ET.Element:
     """Parse XML string and return root element."""
     return ET.fromstring(xml_string)  # nosec B314
+
+
+# ---------------------------------------------------------------------------
+# The qualifying-level table, transcribed once
+#
+# Transcribed verbatim from _THRESHOLD_QUALIFYING_LEVELS in
+# run_ash_scan._compute_exit_code. It is a function-local dict there, so it
+# cannot be imported, and transcribing it is the point: it is an oracle written
+# from the exit code's behaviour, so if the reporter and the exit code ever
+# disagree about a level again, the matrices below catch it.
+#
+# It lives HERE, in the module both threshold test files already import their
+# helpers from, because it previously existed as two independent transcriptions
+# -- one per test file -- against that third copy inside _compute_exit_code.
+# Three copies of one table is the drift utils/severity_ladder.py exists to end,
+# and two of the three were in tests that would have had to disagree silently
+# before anyone noticed. TestQualifyingLevelsMatchTheLadder ties this remaining
+# transcription to the ladder itself, so an oracle that drifts from the
+# implementation fails rather than quietly grading against the wrong answer.
+# ---------------------------------------------------------------------------
+
+THRESHOLD_QUALIFYING_LEVELS = {
+    "ALL": {"error", "warning", "note", "none"},
+    "LOW": {"error", "warning", "note"},
+    "MEDIUM": {"error", "warning"},
+    "HIGH": {"error"},
+    "CRITICAL": {"error"},
+}
+
+ALL_SARIF_LEVELS = ("error", "warning", "note", "none")
+
+
+def _outcome(testcase) -> str:
+    """Reduce a testcase to 'actionable', 'below-threshold' or 'silent'."""
+    if testcase.find("skipped") is not None:
+        return "below-threshold"
+    if testcase.find("error") is not None:
+        return "actionable"
+    return "silent"
+
+
+class TestQualifyingLevelsMatchTheLadder:
+    """The transcribed oracle must agree with the ladder it grades against.
+
+    Without this, the table above is only an assertion about what someone
+    believed the exit code did. With it, a change to the ladder that makes the
+    reporter and the exit code disagree fails here, naming the cell, instead of
+    silently regrading every matrix cell against a stale expectation.
+    """
+
+    def test_table_is_exactly_what_the_ladder_derives(self):
+        from automated_security_helper.utils.severity_ladder import (
+            SEVERITY_THRESHOLDS,
+            sarif_level_fails_threshold,
+        )
+
+        derived = {
+            threshold: {
+                level
+                for level in ALL_SARIF_LEVELS
+                if sarif_level_fails_threshold(level, threshold)
+            }
+            for threshold in SEVERITY_THRESHOLDS
+        }
+        assert derived == THRESHOLD_QUALIFYING_LEVELS
+
+    def test_the_table_covers_every_threshold_the_ladder_knows(self):
+        """A threshold added to the ladder must not silently skip the matrices."""
+        from automated_security_helper.utils.severity_ladder import (
+            SEVERITY_THRESHOLDS,
+        )
+
+        assert set(THRESHOLD_QUALIFYING_LEVELS) == set(SEVERITY_THRESHOLDS)
 
 
 # ---------------------------------------------------------------------------
@@ -276,20 +351,109 @@ class TestSeverityMapping:
         # kind=="fail" hits first branch -> type_="error"
         assert error.get("type") == "error"
 
-    def test_note_level_with_open_kind_produces_no_error(self, tmp_path):
-        """A finding with level='note' and kind='open' has no error element."""
+    def test_note_level_is_skipped_below_threshold_whatever_the_kind(self, tmp_path):
+        """A `note` finding is below the configured MEDIUM threshold, so it skips.
+
+        RENAMED, and this is the interesting kind of rename: the old name was
+        test_note_level_with_open_kind_produces_no_error, and it kept passing
+        across the threshold-source fix while pinning something else entirely.
+        That is worse than breaking, because a green test whose name no longer
+        describes its subject reads as coverage that is not there.
+
+        Before the fix the reporter could not obtain a threshold, so
+        `is_actionable` stayed True and control reached the level/kind cascade.
+        With level `note` and kind forced to `open`, no branch there matched, and
+        the testcase came out bare -- a silent pass. The old assertions,
+        `error is None` and `failure is None`, were satisfied by that emptiness,
+        and the old comment said so: "Neither error nor warning condition is
+        met."
+
+        Now the gate resolves MEDIUM from the config, `note` maps to LOW, and the
+        finding is skipped as below threshold. The cascade is never reached, so
+        the old comment is false. Both original assertions still hold -- there is
+        still no error and still no failure -- which is exactly why the rename is
+        necessary rather than optional.
+
+        The `skipped` assertion is added so this cannot drift quietly a second
+        time: if the outcome changes again, the test fails instead of passing for
+        a third reason. The silent-pass path the old name described is still
+        reachable and is covered by
+        test_actionable_finding_matching_no_level_branch_is_silent below.
+        """
         result = _make_result(level="note", scanner_name="scanner1")
         # Override kind so it does not match "fail" in the first condition
         result.kind = "open"
         model = _make_model(runs=[_make_run(results=[result])])
+        model.ash_config.global_settings.severity_threshold = "MEDIUM"
         reporter = _get_reporter(tmp_path)
         output = reporter.report(model)
 
         root = _parse_xml(output)
         tc = root.find(".//testcase")
-        # Neither error nor warning condition is met
         assert tc.find("error") is None
         assert tc.find("failure") is None
+        skipped = tc.find("skipped")
+        assert skipped is not None, "expected a below-threshold skip, not a bare pass"
+        assert skipped.get("type") == "threshold"
+
+    def test_actionable_finding_matching_no_level_branch_is_reported(self, tmp_path):
+        """An actionable finding at `note` with kind `open` is an error, not a pass.
+
+        RE-POINTED. An earlier revision of this test asserted the opposite -- no
+        error, no failure, no skip -- because the level/kind cascade emitted only
+        for level `error`, kind `fail`, or level `warning`, and an actionable
+        finding matching none of those fell through with no result element. Its
+        docstring said it pinned that behaviour rather than endorsing it.
+
+        It is no longer pinned. A test case with no result element renders as a
+        PASS, so the reporter was deciding a finding was actionable and then
+        publishing it as a pass -- the one direction a security report must not
+        fail in. There is now a `kind`-gated arm emitting
+        `<error type="note">`, and this test asserts it.
+
+        Reaching the arm takes a threshold of ALL, under which `note` is
+        actionable; at MEDIUM the finding is skipped before the cascade runs. The
+        companion case -- a kind that asserts there is no finding, where the bare
+        passing test case is correct and is preserved -- is covered in
+        test_junitxml_config_threshold.py.
+        """
+        result = _make_result(level="note", scanner_name="scanner1")
+        result.kind = "open"
+        model = _make_model(runs=[_make_run(results=[result])])
+        model.ash_config.global_settings.severity_threshold = "ALL"
+        output = _get_reporter(tmp_path).report(model)
+
+        tc = _parse_xml(output).find(".//testcase")
+        error = tc.find("error")
+        assert error is not None, "an actionable finding must not render as a pass"
+        assert error.get("type") == "note"
+        assert tc.find("failure") is None
+        assert tc.find("skipped") is None
+
+    def test_below_threshold_false_does_not_force_a_finding_above_threshold(
+        self, tmp_path
+    ):
+        """`below_threshold=False` is not decisive; the configured gate still applies.
+
+        Only `True` short-circuits. `False` leaves is_actionable True, the gate
+        runs anyway, and the gate may override it -- so the property can force a
+        finding below threshold but cannot force one above it. Previously only the
+        `True` case was covered, which left the asymmetry undocumented by any
+        test and the comment describing it unverified.
+        """
+        result = _make_result(
+            level="note", scanner_name="scanner1", below_threshold=False
+        )
+        model = _make_model(runs=[_make_run(results=[result])])
+        model.ash_config.global_settings.severity_threshold = "MEDIUM"
+        output = _get_reporter(tmp_path).report(model)
+
+        tc = _parse_xml(output).find(".//testcase")
+        skipped = tc.find("skipped")
+        assert skipped is not None, (
+            "below_threshold=False must not exempt a note finding from a MEDIUM gate"
+        )
+        assert skipped.get("type") == "threshold"
 
     def test_below_threshold_produces_skipped(self, tmp_path):
         """A finding below severity threshold is marked as Skipped."""
@@ -491,7 +655,7 @@ class TestXmlOutputValidity:
     def test_special_characters_in_message_are_escaped(self, tmp_path):
         """XML special chars in messages don't break the output."""
         result = _make_result(
-            message_text='Use <foo> & "bar" for \'baz\'',
+            message_text="Use <foo> & \"bar\" for 'baz'",
             scanner_name="scanner1",
         )
         model = _make_model(runs=[_make_run(results=[result])])
