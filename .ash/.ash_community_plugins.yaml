@@ -63,6 +63,26 @@ global_settings:
         documentation, not a secret. Scoped to this file rather than tests/** so a
         genuinely hardcoded credential added to another test later is not silently
         suppressed.
+    # === ferret-scan API_KEY_OR_SECRET: pinned release checksums ===
+    # Separate from the block above and for a different reason. Those are identifiers
+    # whose NAMES match a secret keyword; this one is a table of values that genuinely
+    # look like high-entropy secrets because a SHA256 is high-entropy.
+    - path: automated_security_helper/utils/tool_downloads.py
+      rule_id: API_KEY_OR_SECRET
+      line_start: 151
+      line_end: 171
+      reason: >-
+        False positive — every string in this range is a published SHA256 release
+        checksum, transcribed from the vendor's own *_checksums.txt. A 64-character
+        hex string is what an entropy detector is built to find, so all 16 are
+        reported at 95% confidence, but a release checksum is public by construction
+        and is the opposite of a credential: it exists so anyone can compare against
+        it. detect-secrets is handled by an inline `# pragma: allowlist secret` on
+        each line; ferret-scan does not honour that marker, hence this entry.
+        Scoped to the digest table's line range rather than the whole file on
+        purpose. A range that drifts after a version bump fails loudly -- the
+        findings come back and the scan goes red -- whereas a whole-file suppression
+        would silently swallow a real secret added here later.
     - path: automated_security_helper/plugin_modules/ash_ferret_plugins/DEVELOPMENT.md
       rule_id: SECRET-SECRET-KEYWORD
       line_start: 501
