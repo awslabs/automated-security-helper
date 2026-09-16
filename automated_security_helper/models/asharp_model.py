@@ -4,6 +4,7 @@
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import threading
 from pydantic import AnyUrl, BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 from automated_security_helper.config.default_config import get_default_config
@@ -484,6 +485,50 @@ class AshAggregatedResults(BaseModel):
     # call it multiple times during rendering.
     _flat_cache: Optional[List[FlatVulnerability]] = PrivateAttr(default=None)
 
+    # Each of the three entry points below retries the AshConfig forward-reference
+    # rebuild before doing anything else, because the attempt made when this
+    # module is imported does not always get to run. _resolve_forward_refs at the
+    # bottom of this module explains when, and why the retry cannot be dropped in
+    # favour of Pydantic's own rebuild-on-first-access.
+    #
+    # These three are the entry points production reaches: six call sites
+    # deserialize through model_validate / model_validate_json, and
+    # base/engine_phase.py constructs. model_construct is deliberately not hooked,
+    # but note the cost of that: while the reference is unresolved Pydantic mocks
+    # __pydantic_serializer__ as well as the validator, so model_dump and
+    # model_dump_json are safe only because every instance today arrives through
+    # one of these three. One model_construct call, in a process where none of
+    # them has run yet, yields an instance whose model_dump_json raises.
+
+    def __init__(self, /, **data: Any) -> None:
+        _resolve_forward_refs()
+        super().__init__(**data)
+
+    # Keep __pydantic_custom_init__ False. _model_construction sets it from
+    # `not getattr(cls.__init__, '__pydantic_base_init__', False)`, so defining
+    # __init__ at all would otherwise flip it to True and bake custom_init=True
+    # into the core schema. pydantic-core then stops validating a mapping in place
+    # and instead materializes one and calls cls(**data), which turns every
+    # model_validate_json into parse, build objects, re-enter __init__, validate.
+    # That cost is invisible from the __init__ above, which is why this line is
+    # here rather than in a commit message. The claim it makes is true: the
+    # override adds a _resolve_forward_refs() call and delegates, so it is
+    # BaseModel.__init__ for every purpose Pydantic reads this flag for. Pydantic
+    # marks its own two pass-through inits the same way (main.py, root_model.py).
+    # Private attribute, so a Pydantic release could change what it means; the
+    # guard test's positive control is what would catch that.
+    __init__.__pydantic_base_init__ = True  # type: ignore[attr-defined]
+
+    @classmethod
+    def model_validate(cls, *args: Any, **kwargs: Any) -> "AshAggregatedResults":
+        _resolve_forward_refs()
+        return super().model_validate(*args, **kwargs)
+
+    @classmethod
+    def model_validate_json(cls, *args: Any, **kwargs: Any) -> "AshAggregatedResults":
+        _resolve_forward_refs()
+        return super().model_validate_json(*args, **kwargs)
+
     @field_validator("ash_config")
     @classmethod
     def validate_ash_config(cls, v: Any):
@@ -733,17 +778,96 @@ class AshAggregatedResults(BaseModel):
         return cls.from_json(json_data)
 
 
-# Resolve the AshConfig forward reference so model_validate_json works
-# regardless of import order (e.g. in isolated uvx environments).
-# Uses a deferred function to avoid circular imports since ash_config.py
-# imports from this module's package.
-def _resolve_forward_refs():
-    try:
-        from automated_security_helper.config.ash_config import AshConfig  # noqa: F401
+# Resolve the AshConfig forward reference so deserialization works regardless of
+# import order.
+#
+# ash_config is annotated Optional["AshConfig"] as a string, because AshConfig is
+# imported at the top of this module only under TYPE_CHECKING. Until a rebuild
+# resolves that string the model has no validator and no serializer at all, and
+# model_validate and model_validate_json raise PydanticUserError instead of
+# returning a model.
+#
+# This is called from two places and needs both:
+#
+#   * At import time, at the bottom of this module, which is all it used to be.
+#     That call cannot succeed when asharp_model is itself being imported from
+#     inside the ash_config import cycle: core.unified_metrics -> asharp_model ->
+#     config.ash_config -> converters.archive_converter -> ash_builtin.reporters
+#     -> reporters.html_reporter -> reporters.report_content_emitter, which
+#     imports get_unified_scanner_metrics back out of the still-initializing
+#     core.unified_metrics. Python then evicts the half-imported
+#     config.ash_config from sys.modules, and on that path nothing imports it
+#     again, so nothing left holds a resolvable AshConfig and the model stays
+#     unusable for the whole process. The one thing that would repair it is the
+#     AshAggregatedResults.model_rebuild() on the last line of
+#     config/ash_config.py, and it is unreachable here for the same reason.
+#
+#   * On first use, from __init__, model_validate and model_validate_json.
+#     The cycle only exists while the package is being imported, so by the time
+#     anything constructs or deserializes the model the same import succeeds.
+#     That retry is what recovers the failing order, and it is why those three
+#     overrides cannot be dropped in favour of the rebuild Pydantic attempts by
+#     itself when a mocked validator, serializer or core schema is first touched:
+#     on the failing path config.ash_config is not in sys.modules at all, so
+#     Pydantic's attempt has nothing to resolve the reference against. Removing
+#     the overrides puts the failing order straight back -- measured, not assumed.
+#
+# Resolving on first use is not a new idea here, it is the older one. Before
+# 9babca5f, interactions/run_ash_scan.py and cli/report.py each ran this rebuild
+# themselves, at call time, right before deserializing. That commit consolidated
+# both into the single import-time call below -- which is the one moment the
+# cycle can block it. The retry restores call-time resolution, in one place
+# instead of two.
+#
+# The import binds AshConfig into this module's globals before rebuilding.
+# model_rebuild() resolves the reference against the model's own module namespace
+# (pydantic._internal._namespace_utils.get_module_ns_of), so once the name is
+# there every later rebuild succeeds on its own, wherever it is called from.
+# Without the assignment AshConfig is reachable only as a local of this
+# function's frame, which is a namespace only a model_rebuild() called directly
+# from inside this function can see.
 
+# model_rebuild() is not thread-safe, and says so in its own source: it clears
+# __pydantic_complete__ and deletes the validator, serializer and core schema
+# before regenerating them. Two threads that both get past the flag can have the
+# second delete the validator the first just published, leaving a third -- which
+# saw the flag as True and skipped the rebuild -- to fail against the inherited
+# BaseModel validator with a misleading error, mid-scan and non-deterministically.
+# Scans are genuinely multi-threaded: workspace/execution.py submits one
+# orchestrator per project to a ThreadPoolExecutor, and core/orchestrator.py
+# deserializes while base/engine_phase.py constructs. Reentrant because importing
+# config.ash_config executes module bodies this module does not control, and one
+# of them constructing an AshAggregatedResults would re-enter on this thread.
+_forward_refs_lock = threading.RLock()
+_forward_refs_resolved = False
+
+
+def _resolve_forward_refs() -> None:
+    """Bind AshConfig into this module and rebuild AshAggregatedResults on it.
+
+    Cheap to call repeatedly, and a no-op while AshConfig is still unimportable.
+    """
+    global _forward_refs_resolved
+    if _forward_refs_resolved:
+        return
+
+    with _forward_refs_lock:
+        if _forward_refs_resolved:
+            return
+
+        try:
+            from automated_security_helper.config.ash_config import AshConfig
+        except ImportError:
+            # Mid-cycle, so AshConfig does not exist yet. Not logged: this is the
+            # expected state on the import path described above, and the retry on
+            # first use is what clears it.
+            return
+
+        globals()["AshConfig"] = AshConfig
         AshAggregatedResults.model_rebuild()
-    except ImportError:
-        pass  # Will be resolved when AshConfig is eventually imported
+        # Set after the rebuild, never before. A caller that saw the flag early
+        # would skip the rebuild and run against the still-mocked validator.
+        _forward_refs_resolved = True
 
 
 _resolve_forward_refs()
