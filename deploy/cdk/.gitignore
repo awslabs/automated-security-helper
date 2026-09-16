@@ -23,8 +23,9 @@ dist
 .cdk.staging
 *.tsbuildinfo
 
-# jest --coverage output. Twenty files, regenerated on every coverage run, and
-# nothing reads them from the repository -- CI reads the run's own output. Not
-# ignored before, so a coverage run left the tree dirty and any later `git status`
-# check had to know to look past it.
+# Test/coverage output. ash-typescript-ci.yml runs jest with --coverage here and
+# uploads this directory as an artifact, so running the documented command
+# locally produces it too. The sibling deploy/cdk-constructs/.gitignore already
+# covers this; without the rule here the run leaves an untracked coverage/
+# behind, which is easy to sweep into an unrelated commit.
 coverage/
