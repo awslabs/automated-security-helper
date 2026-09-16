@@ -281,6 +281,14 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         """
         if global_ignore_paths is None:
             global_ignore_paths = []
+
+        # Top of the method, above all five early returns, for the reason the same pair
+        # carries in cdk_nag_scanner: an initialization placed further down is inherited by
+        # whichever return sits above it, and the executor then reads stale attributes from
+        # the previous target.
+        self.targets_attempted = 0
+        self.targets_failed = 0
+
         tool_component = ToolComponent(
             name="cfn_nag",
             semanticVersion=self.tool_version,
@@ -384,8 +392,9 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                 )
                 return sarif_report
 
-            # Process each template file
-            failed_files = []
+            # Process each template file. The counters above replace a local failed_files
+            # list that was appended to on both failure paths and never read, so a run that
+            # failed on every template still produced an empty-but-successful report.
             sarif_tool = Tool(driver=tool_component)
             sarif_output_file = target_results_dir.joinpath("cfn_nag.sarif")
             sarif_output_file.parent.mkdir(exist_ok=True, parents=True)
@@ -423,6 +432,10 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                         level=logging.TRACE,
                     )
                     continue
+                # Counted here rather than at the top of the loop: the two continues above
+                # are non-CloudFormation files, which are an expected skip rather than a
+                # scanner failure.
+                self.targets_attempted += 1
                 normalized_filename = get_normalized_filename(str_to_normalize=cfn_file)
                 results_file_dir = target_results_dir.joinpath(normalized_filename)
                 results_file_dir.mkdir(exist_ok=True, parents=True)
@@ -439,11 +452,15 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                 try:
                     stdout = proc_resp.get("stdout", "")
                     if not stdout or not stdout.strip():
-                        ASH_LOGGER.debug(
-                            f"CFN Nag returned no stdout for {cfn_file} "
+                        reason = (
+                            "cfn_nag returned no stdout "
                             f"(exit code {proc_resp.get('returncode', '?')})"
                         )
-                        failed_files.append((cfn_file, "empty stdout"))
+                        # error, not debug: no rule was evaluated against this template, and
+                        # at debug level that was invisible on a default run.
+                        ASH_LOGGER.error(f"CFN Nag returned no stdout for {cfn_file}")
+                        self.targets_failed += 1
+                        self.errors.append(f"{cfn_file}: {reason}")
                         continue
                     file_sarif = SarifReport.model_validate_json(json_data=stdout)
                     if sarif_report is None and file_sarif is not None:
@@ -463,8 +480,19 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                     ASH_LOGGER.warning(
                         f"Failed to parse CFN Nag results as SARIF: {str(e)}"
                     )
-                    failed_files.append((cfn_file, str(e)))
+                    self.targets_failed += 1
+                    self.errors.append(f"{cfn_file}: {type(e).__name__}: {e}")
                     continue
+
+            # Every template failed. This is the one line that separates "your templates are
+            # compliant" from "cfn_nag never evaluated a rule"; the reports are otherwise
+            # identical. The zero case stays a success, because a run with no CloudFormation
+            # in it completed fine and carries that fact as a SKIPPED status instead.
+            if self.targets_attempted > 0 and self.targets_failed >= self.targets_attempted:
+                ASH_LOGGER.error(
+                    f"cfn_nag failed on all {self.targets_attempted} template(s) in "
+                    f"{target}. No rules were evaluated, so this result is NOT a clean scan."
+                )
 
             self._post_scan(
                 target=target,

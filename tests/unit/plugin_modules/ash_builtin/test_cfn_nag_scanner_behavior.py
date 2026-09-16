@@ -28,7 +28,7 @@ from pydantic import ValidationError
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.default_config import get_default_config
-from automated_security_helper.core.enums import ScannerToolType
+from automated_security_helper.core.enums import ScannerStatus, ScannerToolType
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scanner import (
     CfnNagScanner,
@@ -588,3 +588,112 @@ def test_source_target_type_scans_the_source_tree(
         f"a work_dir template leaked into a source scan; scanned={scanned}"
     )
     assert [r.ruleId for r in report.runs[0].results] == ["F38"]
+
+
+# ---------------------------------------------------------------------------
+# Failed targets
+#
+# cfn_nag failing on a template produces the same empty report as a template with
+# nothing wrong in it. The only thing that separates them is the target counters the
+# executor reads off the plugin, so these assert the counters rather than the report.
+# ---------------------------------------------------------------------------
+
+
+def _status_for(scanner_plugin):
+    """Run the two executor lines that copy the counters, then compute status."""
+    from automated_security_helper.core.phases.scanner_executor import (
+        _non_negative_int_attr,
+        _target_count_attr,
+    )
+    from automated_security_helper.models.scan_results_container import (
+        ScanResultsContainer,
+    )
+
+    container = ScanResultsContainer(scanner_name="cfn-nag")
+    container.targets_attempted = _target_count_attr(
+        scanner_plugin, "targets_attempted"
+    )
+    container.targets_failed = _non_negative_int_attr(scanner_plugin, "targets_failed")
+    return container.determine_status("MEDIUM"), container
+
+
+def test_empty_stdout_is_recorded_as_a_failed_target(
+    scanner, deps_available, subprocess_double, caplog
+):
+    """cfn_nag producing nothing must not resolve to a passing scan."""
+    (scanner.context.work_dir / "role.yaml").write_text(CFN_TEMPLATE)
+    subprocess_double.return_value = {"stdout": "   ", "stderr": "", "returncode": 1}
+
+    with caplog.at_level(logging.ERROR):
+        scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert scanner.targets_attempted == 1
+    assert scanner.targets_failed == 1
+    assert any("role.yaml" in err for err in scanner.errors), scanner.errors
+    assert any("NOT a clean scan" in record.message for record in caplog.records), (
+        f"a run that evaluated no rule must say so; got {[r.message for r in caplog.records]}"
+    )
+
+    status, container = _status_for(scanner)
+    assert not container.scan_succeeded
+    assert status == ScannerStatus.ERROR
+
+
+def test_unparseable_stdout_is_recorded_as_a_failed_target(
+    scanner, deps_available, subprocess_double
+):
+    """Output that is not SARIF leaves the template unevaluated, same as no output."""
+    (scanner.context.work_dir / "role.yaml").write_text(CFN_TEMPLATE)
+    subprocess_double.return_value = {
+        "stdout": "Fatal error: could not load rule directory",
+        "stderr": "",
+        "returncode": 1,
+    }
+
+    scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert (scanner.targets_attempted, scanner.targets_failed) == (1, 1)
+    assert _status_for(scanner)[0] == ScannerStatus.ERROR
+
+
+def test_a_template_that_scanned_is_not_counted_as_failed(
+    scanner, deps_available, subprocess_double
+):
+    """Positive control: the same path with usable output records no failure."""
+    (scanner.context.work_dir / "role.yaml").write_text(CFN_TEMPLATE)
+    subprocess_double.side_effect = stdout_sequence(cfn_nag_sarif(rule_id="F38"))
+
+    report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert [r.ruleId for r in report.runs[0].results] == ["F38"]
+    assert (scanner.targets_attempted, scanner.targets_failed) == (1, 0)
+    assert _status_for(scanner)[1].scan_succeeded
+
+
+def test_one_failure_among_two_templates_is_not_a_failed_scan(
+    scanner, deps_available, subprocess_double
+):
+    """A partial failure is counted, but the run as a whole still succeeded."""
+    (scanner.context.work_dir / "role.yaml").write_text(CFN_TEMPLATE)
+    (scanner.context.work_dir / "queue.yaml").write_text(SECOND_CFN_TEMPLATE)
+    subprocess_double.side_effect = stdout_sequence(
+        "not json at all", cfn_nag_sarif(rule_id="W48", uri="queue.yaml")
+    )
+
+    scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert (scanner.targets_attempted, scanner.targets_failed) == (2, 1)
+    assert _status_for(scanner)[1].scan_succeeded
+
+
+def test_non_cloudformation_yaml_is_not_counted_as_a_target(
+    scanner, deps_available, subprocess_double
+):
+    """A YAML file that is not a template is a skip, not an attempt or a failure."""
+    (scanner.context.work_dir / "compose.yaml").write_text(NON_CFN_YAML)
+
+    scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    subprocess_double.assert_not_called()
+    assert (scanner.targets_attempted, scanner.targets_failed) == (0, 0)
+    assert _status_for(scanner)[1].scan_succeeded
