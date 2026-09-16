@@ -146,8 +146,16 @@ def report_command(
     load_plugins(plugin_context=plugin_context)
 
     # Load the results file
+    #
+    # encoding is explicit because text-mode open() without it uses the process's
+    # locale encoding, which on Windows is cp1252. ASH writes this file as UTF-8, and
+    # findings routinely carry bytes cp1252 cannot decode -- a snippet from a
+    # non-ASCII source file, a tool's smart quotes. Measured on
+    # `scan (python-local, windows-latest)`: `ash report --format text` died with
+    # "'charmap' codec can't decode byte 0x9d", so on Windows this command could not
+    # render a report for any scan whose results were not pure cp1252.
     try:
-        with open(results_file, "r") as f:
+        with open(results_file, "r", encoding="utf-8") as f:
             model = AshAggregatedResults.model_validate_json(f.read())
     except Exception as e:
         print(f"[red]Error loading results file: {e}[/red]")
