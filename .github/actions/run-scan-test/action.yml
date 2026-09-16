@@ -404,7 +404,34 @@ runs:
         # report line containing lower-case "error" inflated the count on top of
         # the legend-line offset the other legs carried.
         & ash report --format text 2>&1 | Write-Host
-        $null = $LASTEXITCODE
+        $ReportExit = $LASTEXITCODE
+        # This exit code used to be discarded outright (`$null = $LASTEXITCODE`),
+        # and that was an exception this leg alone made. The container, Unix and
+        # bash legs run the same `ash report` under `shell: bash`, which the runner
+        # invokes as `bash --noprofile --norc -eo pipefail {0}` -- so `-e` aborts
+        # those steps when the report command fails. `shell: pwsh` is
+        # `pwsh -command ". '{0}'"`, which does not abort on a native non-zero
+        # exit; it only sets $LASTEXITCODE. Discarding it therefore made a report
+        # failure fatal on three legs and invisible on the fourth.
+        #
+        # Why that matters here rather than being cosmetic: `ash report` failing
+        # means ASH could not load the very results file the counter below is
+        # about to reach a verdict from. Measured on run 35137617199 --
+        # `Error loading results file: 'charmap' codec can't decode byte 0x9d`,
+        # from cli/report.py, whose open() had no explicit encoding and so used
+        # Windows' cp1252 -- followed on the next line by a verdict. The verdict
+        # happened to be right that time, because count_scanner_errors.py does its
+        # own read and passes encoding="utf-8". But the step printed a load failure
+        # and a conclusion together with nothing distinguishing them, which is the
+        # shape the counter's own module docstring exists to argue against.
+        #
+        # So: fail loudly, with a message that says this step could not evaluate,
+        # and say it *before* the counter runs so the two outcomes cannot be
+        # confused in the log.
+        if ($ReportExit -ne 0) {
+          Write-Host "::error::'ash report --format text' exited $ReportExit, so ASH could not load .ash/ash_output/ash_aggregated_results.json. This step cannot evaluate whether a plugin errored -- the result below, whatever it says, is not evidence either way. Fix the report failure printed above first."
+          exit $ReportExit
+        }
         # setup-python puts `python` on PATH everywhere and `python3` only on
         # Unix, so resolve rather than assuming either.
         $Python = if (Get-Command python3 -ErrorAction SilentlyContinue) { "python3" } else { "python" }
