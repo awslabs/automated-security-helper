@@ -254,7 +254,27 @@ class CloudWatchLogsReporter(ReporterPluginBase[CloudWatchLogsReporterConfig]):
                 append_to_stream="stderr",
             )
 
-    @retry_with_backoff()
     def _put_log_events_with_retry(self, cwlogs_client, **kwargs):
-        """Put log events with retry logic."""
-        return cwlogs_client.put_log_events(**kwargs)
+        """Put log events, retrying on the schedule this reporter was configured with.
+
+        The decorator used to be applied to this method directly, with no
+        arguments -- valid, since every parameter has a default, but evaluated
+        when the class body runs, where there is no ``self`` to read config from.
+        So this call used max_retries=3 while ``_create_log_stream_with_retry``
+        thirty lines above honored ``self.config.options.max_retries``. One file
+        disagreeing with itself about whether a documented option means anything.
+
+        Deferring the decorator to call time via a closure, exactly as
+        ``_create_log_stream_with_retry`` does, makes both paths obey the same
+        configuration. The method name and signature are unchanged.
+        """
+
+        @retry_with_backoff(
+            max_retries=self.config.options.max_retries,
+            base_delay=self.config.options.base_delay,
+            max_delay=self.config.options.max_delay,
+        )
+        def put_log_events():
+            return cwlogs_client.put_log_events(**kwargs)
+
+        return put_log_events()
