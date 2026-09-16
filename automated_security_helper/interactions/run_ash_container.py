@@ -2,13 +2,16 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import logging
 import os
+import platform
 import re
 import shlex
 import shutil
 from subprocess import (
     CalledProcessError,
-)  # nosec B404 - Using the exception class to evaluate subprocess invocations
+    SubprocessError,
+)  # nosec B404 - Using the exception classes to evaluate subprocess invocations
 import sys
 import time
 from datetime import datetime
@@ -43,6 +46,9 @@ _SAFE_REVISION_PATTERN = re.compile(r"^[A-Za-z0-9._\-/]+$")
 
 # Discovery order for OCI runners (first found wins)
 _OCI_RUNNER_CANDIDATES = ["finch", "docker", "nerdctl", "podman"]
+
+# Memoizes the buildx capability probe, keyed by resolved runner path.
+_BUILDX_SUPPORT_CACHE: dict[str, bool] = {}
 
 
 def _validate_ash_revision(revision: str) -> bool:
@@ -341,10 +347,46 @@ def _find_dockerfile(resolved_revision: str | None) -> Path:
     return dockerfile_path
 
 
+def _runner_supports_buildx(resolved_oci_runner: str) -> bool:
+    """Whether the runner actually provides ``buildx``, probed once per path.
+
+    The filename does not establish the capability. podman ships a
+    ``podman-docker`` package whose ``/usr/bin/docker`` is a shim that execs
+    podman, and ``_OCI_RUNNER_CANDIDATES`` reaches ``docker`` before ``podman``, so
+    on such a host every name-based check passes for something that has no buildx
+    at all. Asking the binary is the only thing that separates the two.
+    """
+    if resolved_oci_runner in _BUILDX_SUPPORT_CACHE:
+        return _BUILDX_SUPPORT_CACHE[resolved_oci_runner]
+
+    supported = False
+    try:
+        result = subprocess_utils.run_command(
+            [resolved_oci_runner, "buildx", "version"],
+            capture_output=True,
+            check=False,
+            log_level=logging.DEBUG,
+            timeout=30,
+        )
+        supported = result.returncode == 0
+    except (OSError, SubprocessError) as e:
+        # run_command with check=False already converts a timeout or a missing
+        # binary into a non-zero CompletedProcess, so this is belt and braces.
+        ASH_LOGGER.debug(f"buildx probe for {resolved_oci_runner} failed: {e}")
+
+    if not supported:
+        ASH_LOGGER.debug(
+            f"{resolved_oci_runner} does not provide buildx -- skipping layer cache"
+        )
+    _BUILDX_SUPPORT_CACHE[resolved_oci_runner] = supported
+    return supported
+
+
 def _gha_layer_cache_args(
     resolved_oci_runner: str,
     build_target: str,
     force: bool,
+    offline: bool,
 ) -> List[str]:
     """Return buildx flags that read and write image layers via the GitHub Actions cache.
 
@@ -355,6 +397,7 @@ def _gha_layer_cache_args(
 
     - docker only. ``type=gha`` is a buildx cache backend. podman and finch expose
       only registry-backed caches, so there is nothing equivalent to offer them.
+    - And docker in fact, not just in name. See ``_runner_supports_buildx``.
     - Only inside a GitHub Actions run. The exporter authenticates with
       ACTIONS_RUNTIME_TOKEN and talks to ACTIONS_CACHE_URL (protocol v1) or
       ACTIONS_RESULTS_URL (v2). Note that Actions does not place these in the
@@ -368,7 +411,13 @@ def _gha_layer_cache_args(
     the run's token. Distributing an image is a separate ``--push`` operation that
     this does not perform.
     """
-    if resolved_oci_runner != "docker":
+    # Compare the final path component, not the whole string. The runner arrives
+    # here already resolved: _resolve_oci_runner returns find_executable's output,
+    # which is a full path such as /usr/bin/docker, and carries a .exe suffix on
+    # Windows. ``stem`` reduces every one of those shapes -- and a bare name -- to
+    # ``docker``, while still declining neighbors like /usr/bin/docker-compose
+    # that a substring test would wrongly accept.
+    if Path(resolved_oci_runner).stem != "docker":
         return []
     if force:
         return []
@@ -380,15 +429,37 @@ def _gha_layer_cache_args(
         os.environ.get("ACTIONS_CACHE_URL") or os.environ.get("ACTIONS_RESULTS_URL")
     ):
         return []
+    # Last, because it is the only guard that shells out. By here the environment
+    # has already said we are inside Actions, so this runs about once per build.
+    if not _runner_supports_buildx(resolved_oci_runner):
+        return []
 
-    # One scope per build target. Builds sharing a scope overwrite each other's
-    # cache, so `ci` and `non-root` must not collide.
-    scope = f"ash-{build_target}"
+    # One scope per distinct set of layers. Note that build_target cannot be the
+    # discriminator: it is forced to "ci" whenever CI is set, and this point is
+    # only reachable with ACTIONS_RUNTIME_TOKEN set, so it is always "ci" here. It
+    # stays in the key anyway for callers that do vary it. What actually differs
+    # between the cache-enabled cells is the CPU architecture -- buildkit requests
+    # a different manifest per arch, so those entries can never be shared -- and
+    # OFFLINE, which the Dockerfile consumes near the top and which therefore
+    # invalidates nearly every layer below it. Without both, the cells overwrite
+    # one another and buildkit keeps only whichever finished last.
+    scope = (
+        f"ash-{build_target}-{platform.machine()}-{'offline' if offline else 'online'}"
+    )
     return [
         "--cache-from",
         f"type=gha,scope={scope}",
+        # mode=min rather than mode=max. The Actions cache is capped at 10 GB per
+        # repository and evicts by least-recent access across every workflow, so
+        # exporting each intermediate stage of a multi-GB scanner image, once per
+        # scope, risks evicting the setup-uv cache that the unit-test matrix
+        # restores -- a failure that would surface in an unrelated job.
+        #
+        # ignore-error keeps a cache-service outage from failing the build. A
+        # transient 400 from this export step took three scan cells down, while
+        # the import above degraded to a plain cache miss on its own.
         "--cache-to",
-        f"type=gha,mode=max,scope={scope}",
+        f"type=gha,mode=min,ignore-error=true,scope={scope}",
     ]
 
 
@@ -421,7 +492,9 @@ def _build_image(
     # Layer caching needs buildx: type=gha is not supported by the default docker
     # driver. buildx also leaves the local image store untouched unless asked, so
     # --load is required or the image would not exist for the subsequent run.
-    cache_args = _gha_layer_cache_args(resolved_oci_runner, build_target, force)
+    cache_args = _gha_layer_cache_args(
+        resolved_oci_runner, build_target, force, offline
+    )
     if cache_args:
         build_cmd = [
             *oci_command_prefix,
