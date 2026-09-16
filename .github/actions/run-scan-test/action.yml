@@ -98,6 +98,32 @@ runs:
       shell: bash
       run: mkdir -p .ash/ash_output
 
+    # cfn-nag is a Ruby gem, so `ash dependencies install` can only provision it
+    # where a usable Ruby exists. This is the python-local legs' problem alone: the
+    # container legs get cfn-nag from the image and are unaffected.
+    #
+    # Needed even though the hosted runners ship a Ruby, because the preinstalled
+    # interpreter's GEM_HOME is root-owned on Linux. ASH passes --user-install so it
+    # does not need sudo, but a runner-managed Ruby avoids depending on that detail
+    # of the image.
+    #
+    # Windows gets its own copy of this step further down rather than sharing this
+    # one, and the reason is position rather than configuration. setup-ruby prepends
+    # its MSYS2 directories to PATH, so every later `shell: bash` step resolves to
+    # C:\hostedtoolcache\windows\Ruby\3.3.12\x64\msys64\usr\bin\bash.EXE instead of
+    # Git Bash. Run from here, that put MSYS2 bash ahead of the pre-existing
+    # "Validate ASH config files" step, which then exited 2 in 176ms. The Windows
+    # copy sits after that step instead. See the comment on it for the rest.
+    # Pinned to a commit, not to `v1`. `v1` on this action is a moving major tag, and
+    # this repository gates on full-SHA pins for third-party actions
+    # (.github/scripts/assert-actions-pinned.mjs, COMMIT_SHA = /^[0-9a-fA-F]{40}$/).
+    # This SHA is v1.321.0, which is what `v1` resolved to when this was added.
+    - name: Set up Ruby for cfn-nag
+      if: inputs.method == 'python-local' && runner.os != 'Windows'
+      uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
+      with:
+        ruby-version: "3.3"
+
     # Community plugin tools
     - name: Install Community Plugin Tools
       if: inputs.config-file == 'community'
@@ -130,28 +156,20 @@ runs:
         retry npm install -g snyk
         snyk version
 
-        if [[ "$RUNNER_OS" == "Linux" ]]; then
-          # -o pipefail on the inner shell, not just this one: pipefail is a
-          # shell option and does not cross a `bash -c` boundary. Without it
-          # `sh` exits 0 on the empty stdin curl leaves behind when it fails,
-          # retry() sees success, and the missing binary surfaces later.
-          retry bash -o pipefail -c 'curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin'
-          trivy version
-        elif [[ "$RUNNER_OS" == "macOS" ]]; then
-          retry brew install trivy
-          trivy version
-        elif [[ "$RUNNER_OS" == "Windows" ]]; then
-          retry curl -sfL -o trivy.zip "https://get.trivy.dev/trivy?type=zip&os=windows&arch=amd64"
-          mkdir -p /tmp/trivy-install
-          mv trivy.zip /tmp/trivy-install/
-          cd /tmp/trivy-install
-          unzip trivy.zip
-          mkdir -p /c/tools
-          mv trivy.exe /c/tools/
-          echo "C:\tools" >> $GITHUB_PATH
-          export PATH="/c/tools:$PATH"
-          trivy version
-        fi
+        # trivy is installed further down by `ash dependencies install --tool
+        # trivy-repo`, against a version and SHA256 pinned in the repository.
+        #
+        # What was here before: three per-platform installs -- `curl … | sh` on
+        # Linux, `brew install trivy` on macOS, and an unzip-and-move on Windows.
+        # None of them pinned a version, so the three legs could run three different
+        # trivy builds, and the Linux one piped a remote script into a shell inside a
+        # supply-chain scanner's own CI. The unpinned `brew install` is also why the
+        # macOS leg could pick up a trivy newer than any the scanner was tested
+        # against.
+        #
+        # snyk and ferret-scan stay here: neither has an ASH install path, snyk
+        # arrives through npm, and ferret-scan through pip against the constraint its
+        # own plugin declares.
 
         # `pip install ferret-scan` resolves to whatever is newest, which is not
         # a version anyone chose. ferret-scan 2.3.3 was published at
@@ -175,6 +193,32 @@ runs:
         retry pip install "ferret-scan${FERRET_CONSTRAINT}"
         ferret-scan --version
 
+    # trivy is the one community-plugin tool ASH can provision itself, so it is
+    # installed through ASH against a pinned version and SHA256 rather than by the
+    # three unpinned per-platform installs this replaces.
+    #
+    # --config is required and not decorative: trivy-repo arrives through
+    # `ash_plugin_modules` in the community config, and without that flag the
+    # installer only sees the built-in scanners and rejects `--tool trivy-repo` as an
+    # unknown name.
+    #
+    # Scoped to --tool trivy-repo rather than installing the whole community set,
+    # because snyk arrives through npm and ferret-scan through pip against the
+    # constraint its own plugin declares; both are handled in the step above and
+    # neither belongs in a binary download path.
+    - name: Install trivy through ASH for the community plugin legs
+      if: inputs.config-file == 'community' && inputs.method == 'python-local'
+      shell: bash
+      run: |
+        # No `trivy --version` follow-up on purpose. ASH installs into ASH_BIN_PATH,
+        # which is not on the shell PATH, and ASH finds it there rather than through
+        # PATH. The installer's own post-install sweep already resolves the binary
+        # and exits non-zero if it cannot -- a PATH-dependent version check here
+        # would fail for a working install and pass for none.
+        ash dependencies install \
+          --config .ash/.ash_community_plugins.yaml \
+          --tool trivy-repo
+
     # Validate config
     - name: Validate ASH config files
       if: contains(inputs.method, 'python')
@@ -185,6 +229,99 @@ runs:
         else
           ash config validate --config .ash/.ash.yaml
         fi
+
+    # The Windows half of "Set up Ruby for cfn-nag" above, deliberately placed here
+    # rather than next to it. setup-ruby prepends its MSYS2 directories to PATH, and
+    # the runner resolves `shell: bash` through PATH -- actions/runner
+    # src/Runner.Worker/Handlers/ScriptHandler.cs calls
+    # WhichUtil.Which("bash", ..., prependPath) -- so running this any earlier makes
+    # MSYS2 bash the shell for "Validate ASH config files" just above, which exited 2
+    # in 176ms when that happened. Everything between here and the precedence restore
+    # below is `shell: pwsh`, which does not care which bash is first.
+    #
+    # What the toolchain is actually for, and it is not a missing libyaml. cfn-nag
+    # pins cfn-model 0.6.6, which requires `psych ~> 3`; psych 3.3.4 has a C
+    # extension, and no psych 3.x publishes a precompiled gem for this ABI (3.1.0 is
+    # the newest 3.x with any Windows binary and it is tagged x64-mingw32, while Ruby
+    # 3.1+ needs x64-mingw-ucrt). psych vendors libyaml under ext/psych/yaml and its
+    # extconf.rb falls back to that bundled copy, which is exactly what happened on
+    # 18e5cba9: "checking for yaml.h... yes", "creating Makefile". The build then
+    # died one step later, in make:
+    #
+    #   make: *** No rule to make target
+    #   '/C/hostedtoolcache/windows/Ruby/3.3.12/x64/include/ruby-3.3.0/ruby.h',
+    #   needed by 'api.o'.  Stop.
+    #
+    # That is an MSYS-translated path handed to a make from a different tree -- Git's
+    # sh rewrote C:/... to /C/..., and the make that consumed it did not share that
+    # mount table. So the requirement is one coherent MSYS2 environment, not an extra
+    # package. setup-ruby's default `windows-toolchain` produces exactly that: it
+    # unpacks the ucrt64 gcc bundle and runs `ridk enable`, leaving sh, make and gcc
+    # all from the same tree. `ridk enable` is also what exports RI_DEVKIT
+    # (rubyinstaller2, lib/ruby_installer/build/msys2_installation.rb), which is the
+    # variable cfn_nag_scanner.py's prerequisite check reads -- so this step is what
+    # lets that check pass rather than decline.
+    #
+    # Same full-SHA pin as the step above, for the same reason.
+    - name: Set up Ruby and MSYS2 toolchain for cfn-nag (Windows)
+      if: inputs.method == 'python-local' && runner.os == 'Windows'
+      uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
+      with:
+        ruby-version: "3.3"
+
+    # The step above prepends MSYS2's usr/bin, and that directory contains an
+    # executable named `ash` -- the Almquist shell. So does Git for Windows'
+    # usr/bin, since Git for Windows is MSYS2-derived. Nothing above reads `ash`,
+    # which is why the comment on setup-ruby says everything between it and the
+    # precedence restore below "does not care which bash is first": that is true
+    # of bash and blind to ash, and the two Windows steps below invoke `ash`
+    # five and one times respectively.
+    #
+    # Untreated, all six resolve to a shell. `ash --version` and `ash --help`
+    # become "Illegal option --", `ash dependencies install` and `ash config get`
+    # become "cannot open dependencies" / "cannot open config", and the step ends
+    # in about half a second having run no scanner at all. Nothing writes
+    # .ash/ash_output, so the artifact upload finds no files and "Verify scan
+    # completed" is SKIPPED rather than failed -- the visible symptom is a
+    # missing artifact four steps later, not a shadowed binary.
+    #
+    # Why this promotes ASH's own scripts directory and not Git Bash's bin.
+    # Promoting Git Bash cannot fix this: its bin ships no `ash`, so MSYS2 would
+    # still win, and its usr/bin ships an Almquist shell of its own, so winning
+    # would change which wrong `ash` runs. It would also be actively harmful
+    # here -- `ash dependencies install` on line 319 is what triggers cfn-nag's
+    # gem install, and that compiles psych's C extension (cfn_nag_scanner.py
+    # gates it on RI_DEVKIT for exactly this reason). Putting Git's sh ahead of
+    # MSYS2's during that compile is the 18e5cba9 failure described above: an
+    # MSYS-translated path handed to a make from a different mount table.
+    #
+    # Re-adding ASH's scripts directory promotes it without removing MSYS2, so
+    # sh, make and gcc still all come from the one coherent tree psych needs,
+    # and the Git Bash restore below stays where it is for the `shell: bash`
+    # steps that follow it. GITHUB_PATH promotes rather than duplicates an entry
+    # already present; see that step's comment for the runner source.
+    - name: Put ASH's entry point ahead of the MSYS2 toolchain (Windows)
+      if: inputs.method == 'python-local' && runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        # Asked of Python rather than hardcoded. `pip install .` writes console
+        # scripts to the user scheme when the interpreter's directory is not
+        # writable and to the system scheme when it is, and which applies is a
+        # property of the runner image -- setup-ash hardcodes the user scheme
+        # path, so this deliberately checks both and does not assume that one.
+        $candidates = @(
+          (python -c "import sysconfig; print(sysconfig.get_path('scripts'))"),
+          (python -c "import sysconfig; print(sysconfig.get_path('scripts', scheme='nt_user'))")
+        ) | Where-Object { $_ } | Select-Object -Unique
+        $found = @($candidates | Where-Object { Test-Path (Join-Path $_ 'ash.exe') })
+        if ($found.Count -eq 0) {
+          Write-Host "::error::No ash.exe in any Python scripts directory, so ASH's entry point cannot be put ahead of MSYS2's Almquist shell. Looked in: $($candidates -join ' ; ')"
+          exit 1
+        }
+        foreach ($dir in $found) {
+          Write-Host "Promoting $dir ahead of the MSYS2 toolchain"
+          Add-Content -Path $env:GITHUB_PATH -Value $dir
+        }
 
     # Python Container scan
     - name: Validate ASH using Python + Container
@@ -231,6 +368,22 @@ runs:
         SNYK_TOKEN: ${{ inputs.snyk-token }}
       run: |
         Write-Host "Testing ASH using Python (Local) on ${{ inputs.os }} (${{ inputs.platform }}) with config: ${{ inputs.config-file }}"
+        # Assert that 'ash' is ASH before using it six times. MSYS2 and Git for
+        # Windows each ship an Almquist shell of the same name, and when one
+        # shadows the scanner every invocation below fails as "Illegal option --"
+        # or "cannot open <subcommand>" -- errors that name neither PATH nor the
+        # shell, and which left this step red while looking like a missing
+        # artifact. One line here says what actually resolved.
+        $AshPath = (Get-Command ash -ErrorAction SilentlyContinue).Source
+        if (-not $AshPath) {
+          Write-Host "::error::'ash' is not on PATH at all, so ASH was never installed or its scripts directory was never added."
+          exit 1
+        }
+        if ($AshPath -notmatch '\\Scripts\\ash\.exe$') {
+          Write-Host "::error::The name ash resolved to $AshPath, which is not the ASH entry point -- an ash.exe under a Python Scripts directory was expected. MSYS2 and Git for Windows both ship an Almquist shell named ash; one of them is shadowing the scanner, so the invocations below would run a shell instead."
+          exit 1
+        }
+        Write-Host "ash resolves to $AshPath"
         ash --version
         ash --help
         ash dependencies install
@@ -258,6 +411,24 @@ runs:
         & $Python "${{ github.action_path }}/count_scanner_errors.py" `
           .ash/ash_output/ash_aggregated_results.json
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    # Hand PATH precedence back to Git Bash now that psych is built. MSYS2 has to be
+    # first while the gem compiles and must not still be first for the `shell: bash`
+    # steps below it -- "Revoke the Actions cache credentials from the job
+    # environment" and "Validate GitLab SAST Report Schema Compliance" both run on
+    # this leg and both expect Git Bash.
+    #
+    # Re-adding the directory is enough to move it, rather than merely duplicating
+    # it. GITHUB_PATH lines accumulate in a list that the runner reverses before
+    # joining, so the last entry added ends up first
+    # (actions/runner src/Runner.Worker/Handlers/Handler.cs,
+    # PrependPath.Reverse<string>()), and each line is removed from the list before
+    # being appended (src/Runner.Worker/FileCommandManager.cs, RemoveAll then Add),
+    # so an entry already present is promoted instead of repeated.
+    - name: Restore Git Bash precedence after the Ruby toolchain (Windows)
+      if: inputs.method == 'python-local' && runner.os == 'Windows'
+      shell: pwsh
+      run: Add-Content -Path $env:GITHUB_PATH -Value 'C:\Program Files\Git\bin'
 
     # Python Local scan (Unix)
     - name: Validate ASH using Python Local (Unix)

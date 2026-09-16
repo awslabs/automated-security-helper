@@ -22,7 +22,9 @@ from automated_security_helper.base.scanner_plugin import (
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.core.exceptions import ScannerError
 from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
-from automated_security_helper.utils.get_shortest_name import get_shortest_name
+from automated_security_helper.utils.download_utils import (
+    pinned_tool_install_commands,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -105,23 +107,14 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
 
     @model_validator(mode="after")
     def setup_custom_install_commands(self) -> "SyftScanner":
-        """Set up custom installation commands for Syft."""
-        # Get version and linux_type from config
-        # Linux
-        if "linux" not in self.custom_install_commands:
-            self.custom_install_commands["linux"] = {}
-        self.custom_install_commands["linux"]["amd64"] = []
-        self.custom_install_commands["linux"]["arm64"] = []
-        # macOS
-        if "darwin" not in self.custom_install_commands:
-            self.custom_install_commands["darwin"] = {}
-        self.custom_install_commands["darwin"]["amd64"] = []
-        self.custom_install_commands["darwin"]["arm64"] = []
-        # Windows
-        if "windows" not in self.custom_install_commands:
-            self.custom_install_commands["windows"] = {}
-        self.custom_install_commands["windows"]["amd64"] = []
+        """Set up custom installation commands for Syft.
 
+        Every platform previously mapped to an empty list, so the table looked
+        populated while ``get_installation_commands`` returned nothing. syft had no
+        install path at all: on a machine without it the scan ran without syft,
+        reported syft as not having run, and still exited 0.
+        """
+        self.custom_install_commands.update(pinned_tool_install_commands("syft"))
         return self
 
     def _process_config_options(self):
@@ -136,12 +129,30 @@ class SyftScanner(ScannerPluginBase[SyftScannerConfig]):
             if item is not None
         ]
 
+        # Resolve config candidates against source_dir, not the process working
+        # directory, and hand syft an absolute path. Same fix, same reason, as
+        # checkov_scanner._process_config_options.
+        #
+        # The subprocess runs with cwd=context.source_dir (see
+        # PluginBase._run_subprocess), so probing with a bare Path(...).exists()
+        # asked a different question than the one syft would answer: it tested the
+        # directory ASH happens to be invoked from, then passed the match through
+        # get_shortest_name, which relativises against the process cwd.
+        #
+        # Latent here rather than observed, because this repository has no
+        # .syft.yaml for the probe to find. It is the same defect grype hit -- and
+        # fixing grype while leaving the identical probe here is how the bug comes
+        # back the first time anyone adds a syft config.
+        source_dir = Path(self.context.source_dir)
         for conf_path in possible_config_paths:
-            if Path(conf_path).exists():
+            candidate = Path(conf_path)
+            if not candidate.is_absolute():
+                candidate = source_dir / candidate
+            if candidate.exists():
                 self.args.extra_args.append(
                     ToolExtraArg(
                         key="--config",
-                        value=get_shortest_name(input=conf_path),
+                        value=candidate.resolve().as_posix(),
                     )
                 )
                 break
