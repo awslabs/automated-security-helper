@@ -123,7 +123,7 @@ jobs:
       constructs: ${{ steps.paths.outputs.constructs }}
       terraform: ${{ steps.paths.outputs.terraform }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Detect which generated trees are present
         id: paths
@@ -253,7 +253,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # setup-node's npm cache fails with "Some specified paths were not
       # resolved" when the lockfile is missing, which reads like a CI problem
@@ -271,7 +271,7 @@ jobs:
           fi
           echo "deploy/cdk/package-lock.json present"
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -403,7 +403,7 @@ jobs:
       # in ash-unified-ci.yml use.
       - name: Collect the synthesized assembly
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cdk-synth-assembly
           path: |
@@ -431,7 +431,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # setup-node's npm cache fails with "Some specified paths were not
       # resolved" when the lockfile is missing, which reads like a CI problem
@@ -449,7 +449,7 @@ jobs:
           fi
           echo "deploy/cdk-constructs/package-lock.json present"
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -642,9 +642,9 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: hashicorp/setup-terraform@v4
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: "1.14.4"
           terraform_wrapper: false
@@ -933,7 +933,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # setup-node's npm cache fails with "Some specified paths were not
       # resolved" when the lockfile is missing, which reads like a CI problem
@@ -949,7 +949,7 @@ jobs:
           fi
           echo "deploy/cdk/package-lock.json present"
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -1324,7 +1324,7 @@ jobs:
       # verdict, so they matter more here than the validation report does.
       - name: Collect the cdk-nag reports
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cdk-nag-reports
           path: |

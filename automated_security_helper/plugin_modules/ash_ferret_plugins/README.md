@@ -30,7 +30,7 @@ ash dependencies install --config .ash/.ash_community_plugins.yaml
 # Or install by hand. Use the constraint, not a bare `pip install ferret-scan`:
 # the latter resolves to whatever is newest, which is how a release published
 # mid-CI-run once turned every open pull request red.
-pip install 'ferret-scan>=0.1.0,<2.0.0'
+pip install 'ferret-scan>=2.4.5,<2.5.0'
 
 # Or build from source
 git clone https://github.com/awslabs/ferret-scan.git
@@ -113,6 +113,9 @@ The following ferret-scan CLI options are **NOT supported** in the ASH plugin an
 | `enable_redaction`, `redaction_*`, `memory_scrub` | Redaction is post-processing, not scanning. |
 | `generate_suppressions`, `show_suppressed`, `suppressions_file` | ASH manages suppressions centrally. |
 | `extract_text` | Text extraction mode is a utility, not scanning. |
+| `preprocess_only` | Outputs extracted text and exits — produces no SARIF results. |
+| `pre_commit_mode` | ASH manages output formatting and exit codes centrally; use ASH's own pre-commit hook. |
+| `list_profiles` | Only prints available profiles and exits — produces no scan results. |
 
 ### Security Warning: show_match Option
 
@@ -123,6 +126,34 @@ The following ferret-scan CLI options are **NOT supported** in the ASH plugin an
 - **Compliance violations**: Logging actual PII/PCI data may violate data protection regulations (GDPR, PCI-DSS, HIPAA)
 
 **Recommendation**: Keep `show_match: false` (the default) in production environments. Only enable it temporarily for debugging in isolated, secure environments where log files are properly protected and purged.
+
+### Note: `API_KEY_OR_SECRET` false positives (SECRETS check)
+
+ferret-scan's `SECRETS` check includes a generic `API_KEY_OR_SECRET` detector that
+matches on the *name* of an assignment when the name is a secret keyword (`session`,
+`token`, `secret`, `password`, `api_key`, …) — **regardless of the value**. So typed
+code and config such as a `session` field on a generated model, a `session` local, or a
+Terraform local named `manage_auth_secret` can be flagged at HIGH confidence even though
+no credential is present.
+
+This detector **cannot be turned off in ferret-scan's config** — the tool only supports
+`disabled_types` for the `INTELLECTUAL_PROPERTY` check, not `SECRETS`. The plugin
+therefore keeps the detector enabled (so real secrets are still found) and expects you to
+manage false positives with ASH's own controls:
+
+- **Suppress** the false positives with a path-scoped ASH suppression:
+  ```yaml
+  global_settings:
+    suppressions:
+      - path: path/to/generated_or_test_file.py
+        rule_id: API_KEY_OR_SECRET
+        reason: "False positive — variable/field name matches the secret-keyword heuristic, not a credential"
+  ```
+- Or **exclude** whole noise directories via the plugin's `exclude_patterns`.
+- Or scope the `checks` option to omit `SECRETS` if you do not need secret detection.
+
+See `DEVELOPMENT.md` → "Design decision: API_KEY_OR_SECRET stays ENABLED" for the full
+rationale.
 
 ## Configuration
 
@@ -144,14 +175,19 @@ scanners:
 ```
 
 > **Note on `use_default_config`**: The bundled `ferret-config.yaml` is a comprehensive
-> reference config. When loaded via `--config`, ferret-scan's config file settings can
-> override CLI arguments like `--exclude`. Set `use_default_config: false` if you want
-> full control via ASH plugin options. Alternatively, keep it enabled and use `profile`
-> to select a specific scanning profile from the bundled config.
+> reference config. `use_default_config` controls whether its validator/profile settings
+> (IP `internal_urls`, social-media patterns, named profiles) are loaded — it does **not**
+> affect excludes: ferret-scan's CLI flags take precedence over the config file's defaults,
+> so ASH's `exclude_patterns` and `--recursive` are honoured either way (verified against
+> v2.4.5). Set `false` to rely only on ferret-scan's built-in defaults plus your explicit
+> ASH options; keep it `true` (or use `profile`) to pick up the bundled validator patterns.
 
-> **Note on `exclude_patterns`**: Ferret-scan uses simple directory/file name matching
-> for excludes, not glob patterns. Use `.venv` instead of `.venv/**`. Patterns are
-> passed as a comma-separated `--exclude` value to the ferret-scan CLI.
+> **Note on `exclude_patterns`**: Ferret-scan's `--exclude` matches each pattern with
+> Go's `filepath.Match` glob (`*`, `?`, `[abc]` — `**` globstar is **not** supported)
+> **and** as a plain substring of the full path. So `.venv` excludes any path containing
+> "`.venv`", and `*.log` matches log files; use `.venv` rather than `.venv/**`. Because of
+> the substring branch, a short bare token (e.g. `test`) can over-exclude any path
+> containing it. Patterns are passed as a single comma-separated `--exclude` value.
 
 ### Configuration Options
 
@@ -166,6 +202,13 @@ scanners:
 | `exclude_patterns` | list | `[]` | Patterns to exclude from scanning (directory names or file patterns, e.g., `.venv`, `*.log`) |
 | `show_match` | bool | `false` | ⚠️ Display matched text in findings (see security warning above) |
 | `enable_preprocessors` | bool | `true` | Enable text extraction from documents |
+| `finding_limit` | int | `0` | Max findings ferret-scan emits (`--limit`). `0` = unlimited. ASH defaults to `0` because ferret-scan's own default of `200` silently truncates large scans. |
+| `fail_on_incomplete` | bool | `false` | Pass `--fail-on-incomplete` so ferret-scan exits 3 when a file could not be fully scanned (findings may be missing). ASH still returns the partial SARIF and records the invocation as unsuccessful/incomplete. |
+| `respect_gitignore` | bool | `false` | Pass `--respect-gitignore` to honor `.gitignore`. Off by default — `.gitignore` often hides high-value files (`.env`, `*.pem`) a sensitive-data scan should see. |
+| `disable_ip_types` | string | `null` | Comma-separated `INTELLECTUAL_PROPERTY` sub-types to skip (`--disable-ip-types`): `copyright,patent,trademark,trade_secret,internal_url`. |
+| `explain` | bool | `false` | Pass `--explain` for an offline per-finding rationale + verdict + drafted suppression reason. No data leaves the host. |
+| `validator_budget` | string | `null` | Per-validator time budget (`--validator-budget`), e.g. `SSN=500ms,all=2m`. Over-budget validators stop and mark the scan incomplete. |
+| `max_live_bytes` | string | `null` | Cap on extracted content held in memory (`--max-live-bytes`), e.g. `256MB`/`1GB`. Bounds peak memory on constrained hosts. |
 | `tool_version` | string | `null` | Version constraint for ferret-scan (e.g., `>=1.0.0,<2.0.0`) |
 | `skip_version_check` | bool | `false` | Skip version compatibility check (use with caution) |
 
@@ -241,7 +284,7 @@ scanners:
   ferret-scan:
     enabled: true
     options:
-      tool_version: "==1.2.0"  # Exact version
+      tool_version: "==2.4.5"  # Exact version
 ```
 
 Or use a version range:
@@ -251,7 +294,7 @@ scanners:
   ferret-scan:
     enabled: true
     options:
-      tool_version: ">=1.0.0,<1.5.0"  # Compatible range
+      tool_version: ">=2.4.5,<2.5.0"  # Compatible range
 ```
 
 To bypass version checks (not recommended for production):
@@ -266,17 +309,28 @@ scanners:
 
 ### Available Checks
 
+The authoritative list for your installed version is `ferret-scan --help checks` — do not
+hardcode it, as ferret-scan adds detectors between releases. As of v2.4.5 the checks are:
+
+- `BANK_ACCOUNT` - Bank account / IBAN / routing numbers
+- `CLOUD_RESOURCES` - Cloud resource identifiers (AWS ARNs, Azure/GCP/OCI/IBM/Alibaba IDs)
 - `CREDIT_CARD` - Credit card numbers
+- `DATE_OF_BIRTH` - Dates of birth
+- `DRIVERS_LICENSE` - Driver's license numbers (state formats)
 - `EMAIL` - Email addresses
-- `INTELLECTUAL_PROPERTY` - Patents, trademarks, copyrights
+- `INTELLECTUAL_PROPERTY` - Patents, trademarks, copyrights (internal-URL detection requires config)
 - `IP_ADDRESS` - IPv4 and IPv6 addresses
-- `METADATA` - Document and image metadata
+- `MEDICAL_ID` - Medical / health identifiers (PHI)
+- `METADATA` - Document, image, audio, and video metadata
+- `OTP` - One-time-passcode / two-factor secrets
 - `PASSPORT` - Passport numbers
 - `PERSON_NAME` - Person names
 - `PHONE` - Phone numbers
+- `PHYSICAL_ADDRESS` - Physical / postal addresses
 - `SECRETS` - API keys, tokens, passwords
 - `SOCIAL_MEDIA` - Social media profiles
 - `SSN` - Social Security Numbers
+- `VIN` - Vehicle Identification Numbers
 
 ### Available Profiles (in default config)
 

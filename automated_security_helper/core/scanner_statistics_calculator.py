@@ -31,6 +31,7 @@ from typing import Dict, Any, Optional, Tuple
 
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
+from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     ScannerSeverityCount,
@@ -592,6 +593,45 @@ class ScannerStatisticsCalculator:
         return excluded, dependencies_missing, error
 
     @staticmethod
+    def any_target_errored(
+        asharp_model: AshAggregatedResults, scanner_name: str
+    ) -> bool:
+        """True when ANY target this scanner reported under came back ERROR.
+
+        ``ScanPhase`` gives each scanner one task carrying both the source tree and the
+        converted tree, and ``ScanResultProcessor`` writes one serialized container per target
+        under ``additional_reports[scanner][target_type]``. ERROR is what
+        ``ScanResultsContainer.determine_status`` returns when a tracking scanner failed every
+        target it attempted -- so an ERROR here means no rule was evaluated against that tree.
+
+        ``get_scanner_status_info`` used to derive its ``error`` flag from the ``"source"``
+        report alone. A cdk-nag that passed on the source tree and errored on the converted one
+        therefore rolled up to PASSED: the ERROR container was written to disk, serialized into
+        the aggregated results, and never read. Nothing downstream could recover the fact,
+        because ``error`` is the flag every rolled-up status keys on.
+
+        "Any", not "all", and the asymmetry with the severity gate is the point. A finding count
+        of zero is ambiguous, so the guards in ``determine_status`` are careful about which
+        zero they are looking at. An ERROR is not ambiguous: one target that evaluated nothing
+        is a hole in the scan whether or not its sibling was fine, and a report that averages
+        it away against a passing sibling is asserting coverage it does not have.
+
+        Modelled on ``scanner_evaluated_nothing``, which already reads across every target for
+        the same structural reason. That function existed with that quantifier and this one did
+        not, and the gap between them is exactly where the defect lived.
+        """
+        reports = asharp_model.additional_reports.get(scanner_name)
+        if not isinstance(reports, dict):
+            return False
+
+        for target_report in reports.values():
+            if not isinstance(target_report, dict):
+                continue
+            if target_report.get("status") == ScannerStatus.ERROR.value:
+                return True
+        return False
+
+    @staticmethod
     def scanner_evaluated_nothing(
         asharp_model: AshAggregatedResults, scanner_name: str
     ) -> bool:
@@ -662,6 +702,15 @@ class ScannerStatisticsCalculator:
         genuinely different fact, and it is answered by ``scanner_evaluated_nothing`` rather than
         folded into ``excluded`` here -- see ``_status_info_from_report`` for what folding it in
         used to cost.
+
+        ``error`` is the one of the three read across every target rather than off a single
+        report, and that asymmetry is deliberate. A scanner is switched off, or its tool is
+        absent, for the whole run -- those are facts about configuration, and the scanner-level
+        report states them correctly. Whether a rule was evaluated is a fact about one tree, and
+        a scanner gets two. See ``any_target_errored`` for what reading only the source report
+        cost. Widening ``excluded`` the same way would be actively wrong: one target carrying an
+        unrecognized status makes ``_status_info_from_report`` return ``excluded=True`` for
+        backward compatibility, which would then claim the operator had switched the scanner off.
         """
         excluded = False
         dependencies_missing = False
@@ -703,6 +752,14 @@ class ScannerStatisticsCalculator:
         else:
             # If the scanner is not found in the dictionary, check for errors
             error = True
+
+        # ORed in after the branches above rather than replacing them. Those branches also
+        # produce ``excluded`` and ``dependencies_missing``, which stay scanner-level, and the
+        # first branch reads a report keyed ``"None"`` -- a scanner that never reached a target
+        # at all -- which ``any_target_errored`` covers as well since it walks every key.
+        error = error or ScannerStatisticsCalculator.any_target_errored(
+            asharp_model, scanner_name
+        )
 
         return excluded, dependencies_missing, error
 

@@ -149,6 +149,28 @@ class TestFerretScanScannerUnsupportedOptions:
         assert "Unsupported option 'extract_text'" in str(exc_info.value)
         assert "Text extraction mode is not supported" in str(exc_info.value)
 
+    def test_unsupported_option_preprocess_only_raises_error(self):
+        """Test that using 'preprocess_only' option raises an error."""
+        with pytest.raises(ValueError) as exc_info:
+            FerretScannerConfigOptions(preprocess_only=True)
+
+        assert "Unsupported option 'preprocess_only'" in str(exc_info.value)
+        assert "no SARIF results" in str(exc_info.value)
+
+    def test_unsupported_option_pre_commit_mode_raises_error(self):
+        """Test that using 'pre_commit_mode' option raises an error."""
+        with pytest.raises(ValueError) as exc_info:
+            FerretScannerConfigOptions(pre_commit_mode=True)
+
+        assert "Unsupported option 'pre_commit_mode'" in str(exc_info.value)
+
+    def test_unsupported_option_list_profiles_raises_error(self):
+        """Test that using 'list_profiles' option raises an error."""
+        with pytest.raises(ValueError) as exc_info:
+            FerretScannerConfigOptions(list_profiles=True)
+
+        assert "Unsupported option 'list_profiles'" in str(exc_info.value)
+
     def test_all_unsupported_options_documented(self):
         """Test that all unsupported options have documentation."""
         for option, message in UNSUPPORTED_FERRET_OPTIONS.items():
@@ -222,6 +244,111 @@ class TestFerretScannerConfigProcessing:
         # Should NOT have checks arg (default is "all")
         checks_arg = next((arg for arg in extra_args if arg.key == "--checks"), None)
         assert checks_arg is None
+
+    def test_finding_limit_default_is_unlimited(
+        self, mock_plugin_context, default_ferret_config
+    ):
+        """By default the plugin passes --limit 0 so ferret-scan's 200-cap never
+        silently truncates the SARIF report."""
+        scanner = FerretScanScanner(
+            context=mock_plugin_context, config=default_ferret_config
+        )
+        scanner._process_config_options()
+
+        limit_arg = next(
+            (arg for arg in scanner.args.extra_args if arg.key == "--limit"), None
+        )
+        assert limit_arg is not None
+        assert limit_arg.value == "0"
+
+    def test_finding_limit_custom_value(self, mock_plugin_context):
+        """A positive finding_limit is passed through as --limit <n>."""
+        config = FerretScannerConfig(
+            options=FerretScannerConfigOptions(finding_limit=500)
+        )
+        scanner = FerretScanScanner(context=mock_plugin_context, config=config)
+        scanner._process_config_options()
+
+        limit_arg = next(
+            (arg for arg in scanner.args.extra_args if arg.key == "--limit"), None
+        )
+        assert limit_arg is not None
+        assert limit_arg.value == "500"
+
+    def test_fail_on_incomplete_default_off(
+        self, mock_plugin_context, default_ferret_config
+    ):
+        """By default the plugin does not pass --fail-on-incomplete."""
+        scanner = FerretScanScanner(
+            context=mock_plugin_context, config=default_ferret_config
+        )
+        scanner._process_config_options()
+
+        arg = next(
+            (a for a in scanner.args.extra_args if a.key == "--fail-on-incomplete"),
+            None,
+        )
+        assert arg is None
+
+    def test_fail_on_incomplete_when_enabled(self, mock_plugin_context):
+        """fail_on_incomplete=True adds the --fail-on-incomplete flag."""
+        config = FerretScannerConfig(
+            options=FerretScannerConfigOptions(fail_on_incomplete=True)
+        )
+        scanner = FerretScanScanner(context=mock_plugin_context, config=config)
+        scanner._process_config_options()
+
+        arg = next(
+            (a for a in scanner.args.extra_args if a.key == "--fail-on-incomplete"),
+            None,
+        )
+        assert arg is not None
+        assert arg.value is None
+
+    def test_incomplete_exit_code_is_accepted(self, mock_plugin_context):
+        """Exit 0 (normal) and 3 (--fail-on-incomplete) are accepted; 1 (error) is not."""
+        scanner = FerretScanScanner(context=mock_plugin_context)
+        assert 3 in scanner.success_exit_codes
+        assert 0 in scanner.success_exit_codes
+        assert 1 not in scanner.success_exit_codes
+
+    def test_track_b_options_default_off(
+        self, mock_plugin_context, default_ferret_config
+    ):
+        """None of the Track B opt-in flags are emitted by default."""
+        scanner = FerretScanScanner(
+            context=mock_plugin_context, config=default_ferret_config
+        )
+        scanner._process_config_options()
+        keys = {a.key for a in scanner.args.extra_args}
+        for flag in (
+            "--respect-gitignore",
+            "--disable-ip-types",
+            "--explain",
+            "--validator-budget",
+            "--max-live-bytes",
+        ):
+            assert flag not in keys
+
+    def test_track_b_options_emitted_when_set(self, mock_plugin_context):
+        """Each Track B option maps to its ferret-scan flag with the right value."""
+        config = FerretScannerConfig(
+            options=FerretScannerConfigOptions(
+                respect_gitignore=True,
+                disable_ip_types="copyright,trade_secret",
+                explain=True,
+                validator_budget="all=2m",
+                max_live_bytes="256MB",
+            )
+        )
+        scanner = FerretScanScanner(context=mock_plugin_context, config=config)
+        scanner._process_config_options()
+        args = {a.key: a.value for a in scanner.args.extra_args}
+        assert "--respect-gitignore" in args and args["--respect-gitignore"] is None
+        assert args.get("--disable-ip-types") == "copyright,trade_secret"
+        assert "--explain" in args and args["--explain"] is None
+        assert args.get("--validator-budget") == "all=2m"
+        assert args.get("--max-live-bytes") == "256MB"
 
     def test_process_config_options_custom(
         self, mock_plugin_context, custom_ferret_config
@@ -961,8 +1088,10 @@ class TestFerretScanScannerVersionSupport:
 
         The plugin declared a supported range and installed nothing, so callers
         ran `pip install ferret-scan` and got whatever was newest. On
-        2026-08-20 that was 2.3.3 -- past MAX_SUPPORTED_VERSION -- and its new
-        API_KEY_OR_SECRET detector failed the self-scan on two false positives.
+        2026-08-20 that was 2.3.3, whose new API_KEY_OR_SECRET detector failed
+        the self-scan on two false positives. The plugin now pins conservatively
+        to the tested current line (>=2.4.5,<2.5.0), so both the CI-breaking
+        2.3.3 and any future 2.5.x are excluded until explicitly tested.
         """
         from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
             DEFAULT_VERSION_CONSTRAINT,
@@ -977,11 +1106,12 @@ class TestFerretScanScannerVersionSupport:
         specs = [c[-1] for c in install_cmds if c[-1].startswith("ferret-scan")]
         assert specs == [f"ferret-scan{DEFAULT_VERSION_CONSTRAINT}"]
 
-        # The point of the constraint is excluding the version that broke CI.
+        # The point of the constraint is excluding the version that broke CI
+        # while admitting the version we actually test against.
         packaging_requirements = pytest.importorskip("packaging.requirements")
         specifier = packaging_requirements.Requirement(specs[0]).specifier
         assert "2.3.3" not in specifier
-        assert "1.10.0" in specifier
+        assert "2.4.5" in specifier
 
     def test_installation_command_honours_a_user_pin(self, mock_plugin_context):
         """An explicit tool_version must win over the plugin default."""
@@ -1066,11 +1196,11 @@ class TestFerretScanScannerVersionSupport:
 
         scanner = FerretScanScanner(context=mock_plugin_context)
 
-        with patch.object(scanner, "_get_installed_version", return_value="1.0.0"):
+        with patch.object(scanner, "_get_installed_version", return_value="2.4.5"):
             is_compatible, version, warning = scanner._check_version_compatibility()
 
             assert is_compatible is True
-            assert version == "1.0.0"
+            assert version == "2.4.5"
             assert warning is None
 
     @patch(

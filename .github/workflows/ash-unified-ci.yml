@@ -100,11 +100,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           enable-cache: true
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
       - name: Install ASH
@@ -157,7 +157,7 @@ jobs:
           - { os: windows-latest, arch: x86_64 }
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-ash
         with:
           python-version: ${{ matrix.python-version }}
@@ -225,7 +225,7 @@ jobs:
           - { os: windows-latest, method: python-local, platform: windows/amd64, config-file: community, oci-runner: "" }
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-ash
         with:
           python-version: "3.12"
@@ -290,7 +290,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-ash
         with:
           python-version: "3.12"
@@ -326,7 +326,7 @@ jobs:
       # red run leaves real evidence instead of a pointer into a deleted runner.
       - name: Collect the kept fixture and scan output
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: external-target-scan-evidence-${{ matrix.os }}
           path: ${{ runner.temp }}/ash-external-target-*
@@ -372,7 +372,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-ash
         with:
           python-version: "3.12"
@@ -398,7 +398,7 @@ jobs:
         run: python scripts/verify_multi_project_attribution.py --timeout 1200
       - name: Collect the kept workspace and scan output
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: multi-project-attribution-evidence-${{ matrix.os }}
           path: ${{ runner.temp }}/ash-multi-project-*
@@ -448,7 +448,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-ash
         with:
           python-version: "3.12"
@@ -471,7 +471,7 @@ jobs:
       # rather than only the summary line that failed the step.
       - name: Collect the suite report
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: moto-server-suite-report
           path: test-results/moto-server-suite.junit.xml
@@ -564,10 +564,10 @@ jobs:
           - { os: windows-latest, python-version: "3.11", method: uvx }
           - { os: windows-latest, python-version: "3.13", method: uvx }
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Python setup (skip for uvx which bundles its own)
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         if: matrix.method != 'uvx'
         with:
           python-version: ${{ matrix.python-version }}

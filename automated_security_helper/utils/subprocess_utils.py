@@ -1,6 +1,7 @@
 """Centralized subprocess execution utilities for ASH."""
 
 import logging
+import os
 import platform
 import shutil
 import subprocess  # nosec B404 - suprocess module required for the nature of this package to orchestrate SAST/SCA/IAC/SBOM scanners
@@ -21,6 +22,22 @@ def clear_find_executable_cache() -> None:
     discover the newly available binary.
     """
     _find_executable_cache.clear()
+
+
+def _bin_path() -> Path:
+    """The ASH bin directory, resolved when asked rather than at import time.
+
+    ``core.constants.ASH_BIN_PATH`` is computed the first time that module is
+    imported. ``ash dependencies install --bin-path X`` sets ASH_BIN_PATH in the
+    environment after that has already happened, so a lookup against the constant
+    searched the default directory and reported a tool ASH had just installed into
+    X as absent.
+
+    The module-level constant remains the fallback, so tests that patch
+    ``subprocess_utils.ASH_BIN_PATH`` keep working.
+    """
+    from_env = os.environ.get("ASH_BIN_PATH")
+    return Path(from_env) if from_env else ASH_BIN_PATH
 
 
 def find_executable(command: str) -> Optional[str]:
@@ -52,7 +69,7 @@ def find_executable(command: str) -> Optional[str]:
             possibles = [
                 item
                 for item in [
-                    ASH_BIN_PATH.joinpath(cmd),
+                    _bin_path().joinpath(cmd),
                     (
                         Path("/usr/local/bin").joinpath(cmd)
                         if platform.system().lower() != "windows"
