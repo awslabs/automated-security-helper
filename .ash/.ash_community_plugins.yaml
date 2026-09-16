@@ -54,6 +54,15 @@ global_settings:
         the secret-keyword heuristic; these are fixtures, not real credentials. Scoped to
         this file (rather than tests/**) so a genuinely hardcoded credential added to some
         other test later is not silently suppressed.
+    - path: tests/unit/test_artifact_contents_gate.py
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. The match is a backtick-quoted module filename sitting in a
+        test docstring that explains the vendored-scanner classifier; the keyword
+        heuristic misreads an ordinary identifier in prose as a credential. It is
+        documentation, not a secret. Scoped to this file rather than tests/** so a
+        genuinely hardcoded credential added to another test later is not silently
+        suppressed.
     # === ferret-scan API_KEY_OR_SECRET: pinned release checksums ===
     # Separate from the block above and for a different reason. Those are identifiers
     # whose NAMES match a secret keyword; this one is a table of values that genuinely
