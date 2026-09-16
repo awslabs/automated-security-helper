@@ -40,6 +40,59 @@ def _bin_path() -> Path:
     return Path(from_env) if from_env else ASH_BIN_PATH
 
 
+def _executable_candidate_names(command: str) -> List[str]:
+    """The filenames to try for ``command``, in the order to try them.
+
+    On POSIX this is the command itself and nothing else, so the search there is
+    what it was before this function existed.
+
+    Windows needs more, because the file carrying a tool's name is often not the
+    file Windows can execute. ``CreateProcess`` runs PE images and nothing else:
+    handed a text file with a shebang it fails with ``[WinError 193] %1 is not a
+    valid Win32 application``. Package managers therefore write a wrapper Windows
+    *can* run beside the script, and expect the wrapper to be what gets invoked.
+
+    Why these three suffixes, in this order:
+
+    * ``.exe`` first. A real PE image should always beat a wrapper.
+    * ``.bat`` next, for RubyGems, which writes exactly this and only this.
+      ``Gem::Installer#generate_windows_script`` builds
+      ``formatted_program_filename(filename) + ".bat"`` (rubygems/installer.rb)
+      and is called from ``generate_bin_script`` immediately after the
+      extensionless binstub is written -- so on Windows a gem's bindir holds both
+      ``cfn_nag_scan`` and ``cfn_nag_scan.bat``, and only the second one runs.
+      Read from the installer source rather than recalled, because guessing
+      between ``.bat`` and ``.cmd`` here is the whole bug.
+    * ``.cmd`` last of the three, for npm, whose shims are ``npm.cmd`` and
+      ``node_modules/.bin/*.cmd``. ``npm_audit_scanner`` resolves ``npm`` through
+      this same function, so it had the same defect for the same reason.
+
+    The bare name stays in the list, last, as a fallback rather than a preference.
+    ``shutil.which`` on Windows can legitimately resolve a name that already
+    carries a non-PATHEXT extension, and a directory probe can find a file Windows
+    happens to be able to run; dropping the bare name would turn both into "not
+    found". Putting it last is what fixes cfn-nag: the extensionless binstub does
+    exist in ASH's bin directory, so a search that reaches it first returns the one
+    file that cannot be executed, which is what ``[WinError 193]`` was.
+
+    Ordering is also now fixed rather than incidental. The previous list was built
+    through ``set()``, so on Windows whether the bare name or ``.exe`` was tried
+    first depended on set iteration order -- fine while both lookups failed
+    identically, not fine once one of the candidates is the wrong file rather than
+    a missing one.
+
+    A command already ending in one of the suffixes is returned unchanged;
+    appending ``.exe`` to ``foo.bat`` only adds a lookup that cannot hit.
+    """
+    if platform.system().lower() != "windows":
+        return [command]
+
+    suffixes = (".exe", ".bat", ".cmd")
+    if command.lower().endswith(suffixes):
+        return [command]
+    return [f"{command}{suffix}" for suffix in suffixes] + [command]
+
+
 def find_executable(command: str) -> Optional[str]:
     """Find the full path to an executable.
 
@@ -52,15 +105,7 @@ def find_executable(command: str) -> Optional[str]:
     if command in _find_executable_cache:
         return _find_executable_cache[command]
 
-    commands = list(
-        set(
-            [
-                command,
-                f"{command}.exe" if platform.system().lower() == "windows" else command,
-            ]
-        )
-    )
-    for cmd in commands:
+    for cmd in _executable_candidate_names(command):
         try:
             found = shutil.which(cmd)
             if found:
