@@ -796,10 +796,17 @@ class TestFixtureHandling:
         nothing to do with what the gate measures.
         """
         command = gate.build_scan_command(tmp_path / "src", tmp_path / "out")
+        # Named `flag` rather than `token`: bandit's B105 keyword list contains
+        # "token", so `token == "--scanners"` was reported as a hardcoded password.
+        # The finding is a false positive -- the string is a CLI flag -- but it is
+        # cheaper to not trip the heuristic than to carry a suppression explaining
+        # that a loop variable was misnamed. The other four B105 entries in
+        # .ash/.ash.yaml are suppressed because their values genuinely have to be
+        # those strings; this one did not.
         selected = [
             command[index + 1]
-            for index, token in enumerate(command)
-            if token == "--scanners"
+            for index, flag in enumerate(command)
+            if flag == "--scanners"
         ]
         assert sorted(selected) == sorted(gate.GATE_SCANNERS)
         assert len(selected) == len(set(selected)), "a scanner is named twice"
