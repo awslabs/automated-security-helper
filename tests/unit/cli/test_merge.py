@@ -1407,6 +1407,64 @@ class TestShardContributionIsRefused:
         with pytest.raises(ShardCoverageError, match=r"completed none"):
             merge_shard_results(as_loaded(shards), require_scanner_completion=True)
 
+    def test_a_shard_that_lost_only_some_targets_is_still_merged(self):
+        """Partial coverage loss must NOT be read as "this shard completed nothing".
+
+        Two checks both mean "incomplete" and are not the same question:
+
+        * ``_completed`` / ``_verify_shard_contributions`` ask whether a shard's
+          scanner ran **at all**. A scanner that read 8 of its 10 targets ran, so
+          the shard contributed and the merge must proceed.
+        * ``incomplete_scanners`` asks whether everything the scanner was given
+          was evaluated. It answers no here, and that is what the opt-in exit-code
+          gate acts on.
+
+        What each assertion is worth, stated honestly because the two differ:
+
+        The merge-proceeds half is a regression guard, and an earlier version of
+        this docstring undersold it on a false premise. It said the protection was
+        *structural* because ``ScannerTargetStatusInfo`` declares no target
+        counters. The model sets ``extra="allow"``, so counters written into
+        ``scanner_results`` land in ``model_extra`` and ``getattr(entry,
+        "targets_failed", 0)`` returns 4 rather than the default -- measured, not
+        reasoned. Nothing structural stops ``_completed`` from reading coverage.
+        What stops it is that it reads the status and only the status, which is a
+        behavior, and ``test_partial_coverage_still_counts_as_having_run`` in
+        ``tests/unit/interactions/test_fail_on_partial_target_coverage.py`` holds
+        that behavior against a mutation that consults the counters.
+
+        The gate-still-sees-it half is falsifiable and is what earns this test its
+        place. It is the only coverage this repository has that the target counters
+        survive a **merge** -- they live in ``additional_reports``, which the merge
+        recombines from n shards -- and reach the exit-code gate on the merged
+        product. Verified by mutation: removing the coverage arm from
+        ``incomplete_scanners`` fails it. It doubles as the control against a
+        fixture with no partial coverage in it, which would make the first half a
+        test of nothing.
+        """
+        shards = build_shards(3)
+        owned = list(read_shard_assignment(shards[1]).assigned_scanners)
+        assert owned, "fixture must give shard 1 scanners to lose targets on"
+        for scanner in owned:
+            # Lost some, not all: determine_status leaves the status alone, which
+            # is precisely the state that used to be invisible to both checks.
+            shards[1].additional_reports[scanner]["source"]["targets_attempted"] = 10
+            shards[1].additional_reports[scanner]["source"]["targets_failed"] = 4
+
+        merged = merge_shard_results(as_loaded(shards), require_scanner_completion=True)
+
+        from automated_security_helper.interactions.run_ash_scan import (
+            incomplete_scanners,
+        )
+
+        listed = dict(incomplete_scanners(merged))
+        for scanner in owned:
+            assert scanner in listed, (
+                f"{scanner} lost 4 of 10 targets, so the fixture is genuinely "
+                f"partial and this test is not vacuous; the exit-code gate has to "
+                f"see it even though shard verification correctly did not"
+            )
+
     def test_a_scanner_absent_from_its_owners_results_is_refused(self):
         # The case a status-based check structurally cannot see: the owning shard
         # recorded no entry at all, so there is no status to inspect. Reproduced
