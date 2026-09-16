@@ -223,10 +223,41 @@ jobs:
           ln -sf "$INSTALL_DIR/opengrep_manylinux_x86" "$INSTALL_DIR/opengrep"
           echo "$INSTALL_DIR" >> $GITHUB_PATH
 
-      # No ruby/setup-ruby step. ubuntu-latest installs Ruby from apt's
-      # `ruby-full`, which depends on `ruby-dev`, and the image also carries
-      # gcc, make and libyaml-dev -- which is everything the two native gems in
-      # this lock (bigdecimal and psych 3.x) need in order to build.
+      # This used to say there was no need for a ruby/setup-ruby step, because
+      # ubuntu-latest installed Ruby from apt's `ruby-full`. That stopped being true.
+      # Measured on job 104850467087: the guard in the step below found `gem` at
+      # /usr/bin/gem and no `bundle` at all, failed at step 11, and took `Run ASH`
+      # with it as a skipped step. That is the guard doing its job -- the earlier
+      # failure proved only that `sudo` could not find `bundle`, not that the runner
+      # user could, and this run settled the second question.
+      #
+      # A runner-managed Ruby also puts GEM_HOME somewhere the runner owns rather
+      # than root, so it does not depend on that detail of the image either way.
+      #
+      # Pinned to a commit rather than to `v1`, which is a moving major tag on this
+      # action: .github/scripts/assert-actions-pinned.mjs requires 40 hex characters
+      # plus a trailing version comment, the latter because Dependabot reads that
+      # comment to learn which release a sha is. This sha is v1.321.0.
+      #
+      # No `bundler-cache: true`. That input has the action run `bundle install`
+      # itself against BUNDLE_GEMFILE, and this Gemfile is neither at the repository
+      # root nor reliably present: the step below resolves it to
+      # automated_security_helper/assets/Gemfile or else curls the pin into
+      # RUNNER_TEMP, then installs under sudo with BUNDLE_GEMFILE set explicitly.
+      # Caching an install other than the one that actually runs is worse than not
+      # caching. Bundler itself comes from this action by default, and the guard
+      # below checks for it rather than assuming it.
+      #
+      # If `bundle install` starts failing here rather than the guard, suspect the
+      # native gems before the Ruby: this lock builds bigdecimal and psych 3.x, and
+      # psych 3.x links system libyaml, which apt's `ruby-dev` used to pull in. gcc
+      # and make are still on the image; libyaml-dev is the one to check first.
+      - name: Set up Ruby for cfn-nag
+        if: inputs.install-cfn-nag
+        uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
+        with:
+          ruby-version: "3.3"
+
       - name: Install cfn-nag
         if: inputs.install-cfn-nag
         env:
