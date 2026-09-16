@@ -88,6 +88,43 @@ class ShardCoverageError(ASHValidationError):
     pass
 
 
+class ToolDownloadIntegrityError(ASHValidationError):
+    """Exception raised when a downloaded tool's bytes do not match its pinned digest.
+
+    Raised before the download is moved into place, so a failed verification
+    leaves nothing installed rather than installing the bad bytes and reporting
+    the mismatch afterwards.
+
+    The failure this exists to prevent is specific: without it, a scanner binary
+    that had been substituted upstream, truncated by a proxy, or served from a
+    cache poisoned in transit would be installed, found on PATH, and then trusted
+    to produce the findings a security decision is made from. A digest field that
+    is recorded but never compared is not a check, so this is raised on every
+    mismatch and never downgraded to a warning.
+    """
+
+    pass
+
+
+class ToolNotProvisionableError(ASHValidationError):
+    """Exception raised when a tool cannot be installed on the current platform.
+
+    Covers three distinct cases, all refused rather than approximated:
+
+    * the tool has no install path in ASH at all,
+    * the tool has one but publishes no asset for this platform/architecture,
+    * the pinned version and the pinned digests disagree, which is what a
+      half-applied version bump looks like.
+
+    Substituting a nearby architecture would install an executable that fails at
+    exec time, and that surfaces in a scan report as an execution failure rather
+    than as a bad install -- the diagnosis lands on the wrong thing. An absent
+    asset is a real constraint and is reported as one.
+    """
+
+    pass
+
+
 class WorkspaceDefinitionError(ASHValidationError):
     """Exception raised when a workspace definition cannot be used as given.
 

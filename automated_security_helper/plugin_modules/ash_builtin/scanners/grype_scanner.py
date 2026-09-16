@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Annotated, ClassVar, List, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
@@ -26,7 +26,9 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Tool,
     ToolComponent,
 )
-from automated_security_helper.utils.get_shortest_name import get_shortest_name
+from automated_security_helper.utils.download_utils import (
+    pinned_tool_install_commands,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.subprocess_utils import find_executable
 
@@ -82,6 +84,19 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             extra_args=[],
         )
         super().model_post_init(context)
+
+    @model_validator(mode="after")
+    def setup_custom_install_commands(self) -> "GrypeScanner":
+        """Set up custom installation commands for grype.
+
+        grype had no install path inside ASH at all before this. It was one of
+        three scanners (with syft and trivy) that could only arrive from the
+        container image, a package manager or the nix toolchain -- so a
+        ``python-local`` run on a machine without it scanned without it, reported
+        the scanner as not having run, and still exited 0.
+        """
+        self.custom_install_commands.update(pinned_tool_install_commands("grype"))
+        return self
 
     def validate_plugin_dependencies(self) -> bool:
         """Validate the scanner configuration and requirements.
@@ -139,12 +154,29 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             if item is not None
         ]
 
+        # Resolve config candidates against source_dir, not the process working
+        # directory, and hand grype an absolute path. Same fix, same reason, as
+        # checkov_scanner._process_config_options.
+        #
+        # The subprocess runs with cwd=context.source_dir (see
+        # PluginBase._run_subprocess), so probing with a bare Path(...).exists()
+        # asked a different question than the one grype would answer: it tested the
+        # directory ASH happens to be invoked from. Scanning ASH's own checkout,
+        # the probe matched the tracked ".ash/.grype.yaml" and passed it through
+        # get_shortest_name, which relativises against the process cwd. grype then
+        # exited 1 in under 100ms with "invalid application config: file does not
+        # exist: .ash/.grype.yaml", producing no SARIF -- so the scanner reported
+        # EXECUTION FAILED with zero findings while grype itself was fine.
+        source_dir = Path(self.context.source_dir)
         for conf_path in possible_config_paths:
-            if Path(conf_path).exists():
+            candidate = Path(conf_path)
+            if not candidate.is_absolute():
+                candidate = source_dir / candidate
+            if candidate.exists():
                 self.args.extra_args.append(
                     ToolExtraArg(
                         key="--config",
-                        value=get_shortest_name(input=conf_path),
+                        value=candidate.resolve().as_posix(),
                     )
                 )
                 break
