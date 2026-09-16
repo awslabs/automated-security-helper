@@ -1422,10 +1422,10 @@ class TestRequireScannerCompletionResolution:
         accepts -- results it cannot attribute to any configuration -- so defaulting
         to permissive here would give it the most trusting treatment.
         """
-        from automated_security_helper.config.ash_config import AshConfig
         from automated_security_helper.cli.merge import (
             _resolve_require_scanner_completion,
         )
+        from automated_security_helper.config.ash_config import AshConfig
 
         shards = build_shards(3)
         for shard in shards:
@@ -1496,10 +1496,10 @@ class TestRequireScannerCompletionResolution:
         """
         from unittest.mock import MagicMock
 
-        from automated_security_helper.config.ash_config import AshConfig
         from automated_security_helper.cli.merge import (
             _resolve_require_scanner_completion,
         )
+        from automated_security_helper.config.ash_config import AshConfig
 
         shards = build_shards(2)
         for shard in shards:

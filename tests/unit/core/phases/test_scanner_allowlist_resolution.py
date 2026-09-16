@@ -55,7 +55,6 @@ from automated_security_helper.core.phases.scan_phase import ScanPhase
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.scanner_validation import ScannerValidationManager
 
-
 #: Named with a hyphen because the real registered names use hyphens and the typo
 #: this file exists for is an underscore. A fixture whose names had no punctuation
 #: could not tell the two apart.
@@ -285,9 +284,8 @@ class TestTheRefusalReachesTheOperator:
             side_effect=ScannerSelectionError(
                 "None of the requested scanners exist: detect_secrets."
             ),
-        ):
-            with pytest.raises(SystemExit) as excinfo:
-                mod._run_local_mode(opts, MagicMock())
+        ), pytest.raises(SystemExit) as excinfo:
+            mod._run_local_mode(opts, MagicMock())
 
         assert excinfo.value.code == 1, (
             "1 rather than 3: exit 3 means the config file is invalid, and an operator "

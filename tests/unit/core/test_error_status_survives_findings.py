@@ -38,6 +38,8 @@ status is not authoritative about the finding count; it *is* authoritative about
 whether the scanner crashed. So the flag derivation is what has to read it.
 """
 
+import pytest
+
 from automated_security_helper.config.ash_config import AshConfig  # noqa: F401
 from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.core.scanner_statistics_calculator import (
@@ -65,8 +67,6 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Tool,
     ToolComponent,
 )
-
-import pytest
 
 
 def _sarif_for(scanner: str, count: int) -> SarifReport:
