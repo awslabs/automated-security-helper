@@ -59,6 +59,102 @@ def non_compliant_template(tmp_path: Path) -> Path:
     return path
 
 
+# A template that trips the CDK's OWN validation plugin as well as a nag pack. From
+# aws-cdk-lib 2.262.0 the CDK registers CloudFormationValidatePlugin unconditionally, so its
+# findings arrive in the same validation-report.json as cdk-nag's -- and a placeholder KMS key
+# identifier is the cheapest way to make it produce one (rule F3017). The bucket is also
+# non-compliant for AwsSolutions, which is load-bearing: both packs must appear in one report
+# or the test cannot show the two being told apart.
+FOREIGN_PLUGIN_TEMPLATE = {
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "Fixture that trips both a nag pack and the CDK's own validation plugin",
+    "Resources": {
+        "PlaceholderKeyBucket": {
+            "Type": "AWS::S3::Bucket",
+            "Properties": {
+                "BucketName": "ash-cdk-nag-foreign-plugin-fixture",
+                "BucketEncryption": {
+                    "ServerSideEncryptionConfiguration": [
+                        {
+                            "ServerSideEncryptionByDefault": {
+                                "SSEAlgorithm": "aws:kms",
+                                "KMSMasterKeyID": "my-kms-key",
+                            }
+                        }
+                    ]
+                },
+            },
+        }
+    },
+}
+
+# A template on which a nag rule RAISES rather than returning a verdict.
+#
+# cdk-nag rules read primitive properties through NagRules.resolveIfPrimitive, which throws
+# "the rule could not be validated" when the value resolves to a non-primitive -- which is what
+# a Ref to a CloudFormation Parameter resolves to. applyRule catches that and records it through
+# the same addViolation a real violation uses, so the report cannot be told apart structurally.
+#
+# Two resources rather than one because two different rules have to be exercised: EC2Volume's
+# Encrypted trips AwsSolutions-EC26 and the security group description trips AwsSolutions-EC27.
+# Measured against cdk-nag 3.0.2, both come back at severity "error".
+UNEVALUATABLE_TEMPLATE = {
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "Fixture whose primitive properties resolve to intrinsic functions",
+    "Parameters": {
+        "SgDescription": {"Type": "String", "Default": "fixture security group"},
+        "VolumeEncrypted": {"Type": "String", "Default": "true"},
+    },
+    "Resources": {
+        "IntrinsicSecurityGroup": {
+            "Type": "AWS::EC2::SecurityGroup",
+            "Properties": {"GroupDescription": {"Ref": "SgDescription"}},
+        },
+        "IntrinsicVolume": {
+            "Type": "AWS::EC2::Volume",
+            "Properties": {
+                "AvailabilityZone": "us-east-1a",
+                "Size": 8,
+                "Encrypted": {"Ref": "VolumeEncrypted"},
+            },
+        },
+    },
+}
+
+
+@pytest.fixture()
+def foreign_plugin_template(tmp_path: Path) -> Path:
+    path = tmp_path / "foreign_plugin.template.json"
+    path.write_text(json.dumps(FOREIGN_PLUGIN_TEMPLATE, indent=2))
+    return path
+
+
+# The two shapes ASH's own repository feeds cdk-nag today. Both are read by the YAML/JSON
+# loader, and neither can survive it: an unknown tag has no constructor, and JSON with comments
+# is not a flow mapping.
+UNPARSEABLE_TARGETS = {
+    "mkdocs.yml": (
+        "site_name: Fixture\n"
+        "markdown_extensions:\n"
+        "  - pymdownx.emoji:\n"
+        "      emoji_index: !!python/name:material.extensions.emoji.twemoji\n"
+    ),
+    "tsconfig.json": (
+        "{\n"
+        "  // a comment makes this not plain JSON\n"
+        '  "compilerOptions": {"strict": true}\n'
+        "}\n"
+    ),
+}
+
+
+@pytest.fixture()
+def unevaluatable_template(tmp_path: Path) -> Path:
+    path = tmp_path / "unevaluatable.template.json"
+    path.write_text(json.dumps(UNEVALUATABLE_TEMPLATE, indent=2))
+    return path
+
+
 class TestRealNagPack:
     def test_pack_constructs_against_installed_cdk_nag(self):
         """The wrapper's own construction call must work on the installed major.
@@ -144,3 +240,575 @@ class TestRealNagPack:
             "wrapper returned a populated response for a non-CloudFormation input; an "
             "empty-but-successful result is what makes a total failure look clean"
         )
+
+
+class TestReportAttribution:
+    """Which tool produced a finding, measured against the real report rather than a fixture.
+
+    ``validation-report.json`` belongs to CDK, not to cdk-nag: it is the shared policy-validation
+    report, every registered ``IPolicyValidationPlugin`` writes into it, and from aws-cdk-lib
+    2.262.0 the CDK registers ``CloudFormationValidatePlugin`` on every app whether or not the
+    caller asked for it. So "the report came out of a cdk-nag run" stopped implying "cdk-nag
+    produced these rules", and the equivalent unit tests in
+    ``tests/unit/utils/test_cdk_nag_report_fidelity.py`` assert against a hand-written report
+    that could drift away from what the installed libraries actually emit. This class is what
+    stops that drift.
+    """
+
+    def test_a_cdk_plugin_that_is_not_a_nag_pack_is_named_as_its_own_pack(
+        self, foreign_plugin_template: Path, tmp_path: Path
+    ):
+        """The CDK's built-in plugin must be attributed to itself, not to cdk-nag.
+
+        The pack assertion is on the finding record. The per-pack mapping key is also correct
+        and is not sufficient on its own: the scanner binds that key to a loop variable, logs
+        it, and extends one flat result list, so it does not reach SARIF.
+        """
+        _require_cdk_nag()
+        from automated_security_helper.utils.cdk_nag_wrapper import (
+            run_cdk_nag_against_cfn_template,
+        )
+
+        response = run_cdk_nag_against_cfn_template(
+            template_path=foreign_plugin_template,
+            nag_packs=["AwsSolutionsChecks"],
+            outdir=tmp_path / "cdk-out-foreign",
+        )
+
+        assert response is not None and response.failure is None
+        packs = set(response.results)
+        assert "CloudFormation Validate" in packs, (
+            "the CDK's own validation plugin did not report; this fixture no longer "
+            f"exercises the defect. Packs present: {sorted(packs)}"
+        )
+        assert "AwsSolutions" in packs, (
+            f"the nag pack did not report, so nothing is being told apart. Packs: {sorted(packs)}"
+        )
+
+        for pack_name, findings in response.results.items():
+            assert findings, f"pack {pack_name!r} reported no findings"
+            for finding in findings:
+                record = (finding.properties.model_extra or {})["cdk_nag_finding"]
+                assert record["pack"] == pack_name, (
+                    f"{finding.ruleId} came from {pack_name!r} but records its pack as "
+                    f"{record['pack']!r}"
+                )
+
+        # The rule that made this defect visible in the first place, named so the fixture
+        # cannot quietly stop producing it.
+        foreign_rule_ids = {
+            f.ruleId for f in response.results["CloudFormation Validate"]
+        }
+        assert "F3017" in foreign_rule_ids, (
+            f"expected the placeholder-KMS-key rule F3017, got {sorted(foreign_rule_ids)}"
+        )
+
+    def test_the_scanner_documents_a_foreign_rule_against_the_right_guide(
+        self, test_plugin_context, foreign_plugin_template: Path
+    ):
+        """The rule descriptor a consumer reads, built by the real scanner.
+
+        ``helpUri`` was cdk-nag's RULES.md for every rule in the report, including the CDK's
+        own. Following it for ``F3017`` reaches a page that neither documents the rule nor
+        describes how to acknowledge it. The exact destination is named rather than "not the
+        cdk-nag URL", which would also be satisfied by an empty value.
+
+        This is the only test in this class that goes through ``CdkNagScanner.scan`` rather than
+        the wrapper, and it is what covers the reporting half: the rule descriptor is assembled
+        by the scanner, from a per-pack mapping it has already flattened.
+        """
+        _require_cdk_nag()
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
+            CdkNagScanner,
+            CdkNagScannerConfig,
+        )
+
+        source_dir = Path(test_plugin_context.source_dir)
+        source_dir.mkdir(parents=True, exist_ok=True)
+        (source_dir / "foreign_plugin.template.json").write_text(
+            foreign_plugin_template.read_text()
+        )
+
+        scanner = CdkNagScanner(
+            context=test_plugin_context, config=CdkNagScannerConfig()
+        )
+        report = scanner.scan(target=source_dir, target_type="source")
+        assert report is not False, "scanner refused to run"
+
+        rules = {r.id: r for r in report.runs[0].tool.driver.rules or []}
+        assert "F3017" in rules, (
+            f"F3017 produced no rule descriptor; got {sorted(rules)}"
+        )
+
+        foreign = rules["F3017"]
+        assert foreign.properties.model_extra["pack"] == "CloudFormation Validate"
+        assert "pack::CloudFormation Validate" in foreign.properties.tags
+        assert (
+            str(foreign.helpUri)
+            == "https://docs.aws.amazon.com/cdk/v2/guide/policy-validation-synthesis.html"
+        )
+
+        # The control: a genuine cdk-nag rule from the same scan keeps pointing at cdk-nag.
+        nag_rule_ids = [rid for rid in rules if rid.startswith("AwsSolutions-")]
+        assert nag_rule_ids, f"no cdk-nag rule in the same report; got {sorted(rules)}"
+        nag_rule = rules[nag_rule_ids[0]]
+        assert nag_rule.properties.model_extra["pack"] == "AwsSolutions"
+        assert str(nag_rule.helpUri).startswith(
+            "https://github.com/cdklabs/cdk-nag/blob/main/RULES.md#"
+        )
+
+
+class TestRuleThatCouldNotBeEvaluated:
+    def test_an_unevaluated_rule_is_not_reported_as_a_violation(
+        self, unevaluatable_template: Path, tmp_path: Path
+    ):
+        """A rule that raised must render as notApplicable with no severity.
+
+        cdk-nag reports a rule that threw through the same ``addViolation`` as a real finding,
+        at whatever severity the rule declared -- ``"error"`` for these two, which ASH's ladder
+        reads as CRITICAL. So before this change a template referencing a parameter produced
+        critical security findings for rules that never ran.
+
+        Both directions are asserted from one report: the unevaluated rules must be
+        ``notApplicable``/``none``, and a genuine violation from the same run must still be
+        ``fail``/``error``.
+        """
+        _require_cdk_nag()
+        from automated_security_helper.schemas.sarif_schema_model import Kind, Level
+        from automated_security_helper.utils.cdk_nag_wrapper import (
+            NOT_EVALUATED,
+            run_cdk_nag_against_cfn_template,
+        )
+
+        response = run_cdk_nag_against_cfn_template(
+            template_path=unevaluatable_template,
+            nag_packs=["AwsSolutionsChecks"],
+            outdir=tmp_path / "cdk-out-unevaluatable",
+        )
+
+        assert response is not None and response.failure is None
+
+        unevaluated = [
+            finding
+            for findings in response.results.values()
+            for finding in findings
+            if (finding.properties.model_extra or {})["cdk_nag_finding"]["compliance"]
+            == NOT_EVALUATED
+        ]
+        assert unevaluated, (
+            "no rule reported as un-evaluated, so this fixture no longer reproduces the "
+            "defect. cdk-nag raises out of NagRules.resolveIfPrimitive when a primitive "
+            "property resolves to an intrinsic; check that the parameter Refs survived."
+        )
+
+        for finding in unevaluated:
+            assert finding.kind == Kind.notApplicable, (
+                f"{finding.ruleId} could not be evaluated but rendered kind={finding.kind}"
+            )
+            assert finding.level == Level.none, (
+                f"{finding.ruleId} could not be evaluated but carries level={finding.level}"
+            )
+            # The message is what most report surfaces show, so the fact has to be legible
+            # there too rather than only in the machine-readable kind.
+            assert "NOT evaluated" in finding.message.root.text
+
+    def test_the_scanner_reports_an_unevaluated_rule_as_a_run_level_condition(
+        self, test_plugin_context, unevaluatable_template: Path
+    ):
+        """End to end through the real scanner, asserting the SARIF invocation.
+
+        This is the only test here that exercises ``CdkNagScanner.scan`` rather than the
+        wrapper, and it is what covers the reporting half of the fix: the rule descriptor's
+        pack and help pointer, and the ``toolExecutionNotifications`` entry.
+
+        SARIF's own definitions are why the notification exists at all --
+        ``toolExecutionNotifications`` is "A list of runtime conditions detected by the tool
+        during the analysis" and ``notification.associatedRule`` is "A reference used to locate
+        the rule descriptor associated with this notification". A rule that raised mid-scan is
+        a runtime condition, and a coverage hole is a property of the run rather than of one
+        result.
+        """
+        _require_cdk_nag()
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
+            CdkNagScanner,
+            CdkNagScannerConfig,
+        )
+
+        source_dir = Path(test_plugin_context.source_dir)
+        source_dir.mkdir(parents=True, exist_ok=True)
+        (source_dir / "unevaluatable.template.json").write_text(
+            unevaluatable_template.read_text()
+        )
+
+        scanner = CdkNagScanner(
+            context=test_plugin_context, config=CdkNagScannerConfig()
+        )
+        report = scanner.scan(target=source_dir, target_type="source")
+
+        assert report is not False, "scanner refused to run"
+        run = report.runs[0]
+
+        notifications = run.invocations[0].toolExecutionNotifications or []
+        notified_rules = {
+            n.associatedRule.root.id for n in notifications if n.associatedRule
+        }
+        assert notified_rules, (
+            "the scan produced no toolExecutionNotifications, so a rule that did not run "
+            "leaves no trace at the run level"
+        )
+
+        # Every notified rule must correspond to a notApplicable result, and vice versa: the
+        # two channels are two views of one fact and must not disagree.
+        from automated_security_helper.schemas.sarif_schema_model import Kind
+
+        unevaluated_result_rules = {
+            r.ruleId for r in (run.results or []) if r.kind == Kind.notApplicable
+        }
+        assert notified_rules == unevaluated_result_rules, (
+            f"notifications name {sorted(notified_rules)} but the notApplicable results are "
+            f"{sorted(unevaluated_result_rules)}"
+        )
+
+    def test_a_rule_that_threw_does_not_produce_a_clean_exit_code(
+        self, test_plugin_context, unevaluatable_template: Path, tmp_path: Path
+    ):
+        """The whole chain, on a real cdk-nag: a rule raised, so the exit code is not 0.
+
+        The unit coverage in ``tests/unit/interactions/test_exit_code_unevaluated_rules.py``
+        builds the notification by hand. This test does not, and that is the point:
+        every link is real -- cdk-nag actually raises out of ``resolveIfPrimitive``,
+        the scanner actually writes the notification, the aggregation actually
+        carries it, and ``_compute_exit_code`` actually reads it. A hand-built
+        notification proves the gate reads the field; only this proves the field is
+        still populated by the time the gate looks, which is the half that a change
+        anywhere in sanitization, suppression or merging could silently break.
+
+        ``fail_on_findings=False`` so the assertion cannot be satisfied by the
+        genuine violation the same fixture also produces. Without that, this test
+        would pass on exit 2 from an ordinary finding and would say nothing at all
+        about a rule that threw.
+        """
+        _require_cdk_nag()
+        from automated_security_helper.interactions.run_ash_scan import (
+            ScanOptions,
+            _compute_exit_code,
+            unevaluated_rules,
+        )
+        from automated_security_helper.models.asharp_model import AshAggregatedResults
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
+            CdkNagScanner,
+            CdkNagScannerConfig,
+        )
+
+        source_dir = Path(test_plugin_context.source_dir)
+        source_dir.mkdir(parents=True, exist_ok=True)
+        (source_dir / "unevaluatable.template.json").write_text(
+            unevaluatable_template.read_text()
+        )
+
+        scanner = CdkNagScanner(
+            context=test_plugin_context, config=CdkNagScannerConfig()
+        )
+        report = scanner.scan(target=source_dir, target_type="source")
+        assert report is not False, "scanner refused to run"
+
+        # The counters the other gates read, asserted so this test also records WHY
+        # they cannot catch it: the template parsed and its report was readable, so
+        # nothing was counted as a failed target and --fail-on-incomplete-scanners
+        # has nothing to see.
+        assert scanner.targets_attempted == 1
+        assert scanner.targets_failed == 0
+
+        aggregated = AshAggregatedResults()
+        aggregated.sarif.merge_sarif_report(report)
+
+        assert unevaluated_rules(aggregated), (
+            "the aggregated model carries no unevaluated-rule condition, so the "
+            "notification did not survive aggregation"
+        )
+
+        opts = ScanOptions(
+            source_dir=source_dir,
+            output_dir=tmp_path / "exit-code-out",
+            fail_on_findings=False,
+        )
+        assert _compute_exit_code(aggregated, opts) == 1
+
+    def test_suppressing_the_thrown_rule_restores_a_clean_exit(
+        self, test_plugin_context, unevaluatable_template: Path, tmp_path: Path
+    ):
+        """The escape hatch, through the real suppression machinery.
+
+        The gate is on by default, so it needs a way for an operator to say
+        "reviewed, and I accept not knowing this rule's verdict". Suppression is
+        that way, and this test exists because whether it WORKS is not obvious from
+        reading either side: a notification carries no suppression of its own, and
+        ``apply_suppressions_to_sarif`` could reasonably have skipped a result at
+        ``level: none`` as already non-actionable. It does not, and this pins that.
+
+        Not a hypothetical requirement. This repository's own ``.ash/.ash.yaml``
+        accepts fifteen rules that throw on its deliberately parameterized
+        templates, each with a reviewed reason. Were the gate unsuppressable, ASH's
+        own default scan would fail with no way to clear it.
+
+        The unsuppressed case is asserted first, in the same test, so a suppression
+        that silenced nothing could not pass this by silencing a gate that was
+        already quiet.
+        """
+        _require_cdk_nag()
+        from automated_security_helper.interactions.run_ash_scan import (
+            ScanOptions,
+            _compute_exit_code,
+            unevaluated_rules,
+        )
+        from automated_security_helper.models.asharp_model import AshAggregatedResults
+        from automated_security_helper.models.core import AshSuppression
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
+            CdkNagScanner,
+            CdkNagScannerConfig,
+        )
+        from automated_security_helper.utils.sarif_utils import (
+            apply_suppressions_to_sarif,
+            sanitize_sarif_paths,
+        )
+
+        template_name = "unevaluatable.template.json"
+        source_dir = Path(test_plugin_context.source_dir)
+        source_dir.mkdir(parents=True, exist_ok=True)
+        (source_dir / template_name).write_text(unevaluatable_template.read_text())
+
+        def _aggregate_with(suppressions) -> AshAggregatedResults:
+            test_plugin_context.config.global_settings.suppressions = suppressions
+            scanner = CdkNagScanner(
+                context=test_plugin_context, config=CdkNagScannerConfig()
+            )
+            report = scanner.scan(target=source_dir, target_type="source")
+            assert report is not False, "scanner refused to run"
+            sanitized = sanitize_sarif_paths(report, test_plugin_context.source_dir)
+            sanitized = apply_suppressions_to_sarif(
+                sarif_report=sanitized,
+                plugin_context=test_plugin_context,
+                used_suppressions=set(),
+            )
+            aggregated = AshAggregatedResults()
+            aggregated.sarif.merge_sarif_report(sanitized)
+            return aggregated
+
+        opts = ScanOptions(
+            source_dir=source_dir,
+            output_dir=tmp_path / "exit-code-out",
+            fail_on_findings=False,
+        )
+
+        # Unsuppressed: the rules that threw are named and the scan is not clean.
+        unsuppressed = _aggregate_with([])
+        thrown = unevaluated_rules(unsuppressed)
+        assert thrown, (
+            "no rule reported as unevaluated, so there is nothing to suppress"
+        )
+        assert _compute_exit_code(unsuppressed, opts) == 1
+
+        # Suppressed by rule id and path, which is the form an operator writes.
+        #
+        # The path is a ``**/`` glob rather than the bare file name, and that is
+        # about the fixture rather than about the mechanism. ``ash_temp_path`` puts
+        # its directory under the repository's own ``tests/pytest-temp/<uuid>/``, and
+        # the sanitized result URI is the whole relative path from there --
+        # ``tests/pytest-temp/<uuid>/test_source_dir/unevaluatable.template.json`` --
+        # so a bare file name matches nothing and a literal path would hard-code a
+        # per-run uuid. A real operator writes the path as it appears in the report,
+        # which is what this repository's own config does.
+        suppressed = _aggregate_with(
+            [
+                AshSuppression(
+                    rule_id=rule,
+                    path=f"**/{template_name}",
+                    reason=(
+                        "Rule threw on an intrinsic; reviewed and accepted as "
+                        "unevaluated."
+                    ),
+                )
+                for rule in thrown
+            ]
+        )
+        still_reported = unevaluated_rules(suppressed)
+        suppression_counts = {
+            r.ruleId: (
+                len(r.suppressions or []),
+                [
+                    getattr(
+                        getattr(
+                            getattr(loc.physicalLocation, "root", loc.physicalLocation),
+                            "artifactLocation",
+                            None,
+                        ),
+                        "uri",
+                        None,
+                    )
+                    for loc in (r.locations or [])
+                ],
+            )
+            for r in suppressed.sarif.runs[0].results
+            if str(getattr(r.kind, "value", r.kind)) == "notApplicable"
+        }
+        assert still_reported == [], (
+            "a reviewed suppression did not silence the gate, so an operator has no "
+            f"way to accept a rule that cannot be evaluated. Suppressed rules: "
+            f"{thrown}. Still reported: {still_reported}. Suppressions landed on "
+            f"each notApplicable result: {suppression_counts}"
+        )
+        assert _compute_exit_code(suppressed, opts) == 0
+
+    def test_a_scan_where_every_rule_was_evaluated_still_exits_zero(
+        self, test_plugin_context, non_compliant_template: Path, tmp_path: Path
+    ):
+        """THE NEGATIVE CONTROL for the test above, and the one that matters most.
+
+        A deliberately non-compliant template with no intrinsic functions in
+        primitive positions: every rule reaches a verdict, several of them
+        unfavourable. That scan is complete, so the completeness gate must stay
+        silent and the exit code must come from the findings alone -- which is what
+        ``fail_on_findings=False`` isolates.
+
+        Without this, the test above would pass equally well against a gate that
+        fired on any cdk-nag run at all, and the fix would have turned every
+        CloudFormation scan into a failure.
+        """
+        _require_cdk_nag()
+        from automated_security_helper.interactions.run_ash_scan import (
+            ScanOptions,
+            _compute_exit_code,
+            unevaluated_rules,
+        )
+        from automated_security_helper.models.asharp_model import AshAggregatedResults
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
+            CdkNagScanner,
+            CdkNagScannerConfig,
+        )
+
+        source_dir = Path(test_plugin_context.source_dir)
+        source_dir.mkdir(parents=True, exist_ok=True)
+        (source_dir / "non_compliant.template.json").write_text(
+            non_compliant_template.read_text()
+        )
+
+        scanner = CdkNagScanner(
+            context=test_plugin_context, config=CdkNagScannerConfig()
+        )
+        report = scanner.scan(target=source_dir, target_type="source")
+        assert report is not False, "scanner refused to run"
+
+        # The fixture has to actually produce findings, or "no unevaluated rule"
+        # would be true of an empty report and this control would prove nothing.
+        assert report.runs[0].results, (
+            "the non-compliant fixture produced no findings at all, so it no longer "
+            "distinguishes a complete scan from an empty one"
+        )
+
+        aggregated = AshAggregatedResults()
+        aggregated.sarif.merge_sarif_report(report)
+
+        assert unevaluated_rules(aggregated) == [], (
+            "a template with no unresolvable primitives reported an unevaluated "
+            "rule, so the gate is firing on something other than a rule that threw"
+        )
+
+        opts = ScanOptions(
+            source_dir=source_dir,
+            output_dir=tmp_path / "exit-code-out",
+            fail_on_findings=False,
+        )
+        assert _compute_exit_code(aggregated, opts) == 0
+
+
+class TestTargetThatCouldNotBeParsed:
+    """A file cdk-nag cannot parse must stay OUT of the findings channel.
+
+    WHY THIS EXISTS WITHOUT A FIX BESIDE IT
+    ---------------------------------------
+    ASH's own CI feeds cdk-nag files that are not CloudFormation at all -- ``mkdocs.yml`` and
+    ``deploy/cdk/tsconfig.json`` -- and the scan logs two parse failures next to a non-zero exit
+    citing "1 actionable findings". The obvious reading is that the two failures became the
+    finding. They did not: that run's summary table attributes the single actionable finding to
+    detect-secrets, at CRITICAL, with cdk-nag itself on ``Action 0 / PASSED``. Two unrelated
+    facts, printed near each other.
+
+    So there is nothing to fix here, and that is exactly why the property is worth pinning. It
+    is currently correct and nothing asserted it, which is the state a regression arrives in.
+    A future change that turned a target-level parse failure into a synthetic finding would
+    inflate the count and fail builds on repositories whose only problem is that a YAML file is
+    not a template.
+
+    WHAT THIS ASSERTS, AND WHAT IT REFUSES TO ASSERT
+    -----------------------------------------------
+    The count and the channel, never the wording. A test that watched the log message would pass
+    while the miscount survived, because the message is emitted before the finding would be
+    constructed. So: the number of results, the absence of any result attributed to the
+    unparseable files, and the presence of both failures in ``exitCodeDescription`` -- the error
+    channel the scanner actually reports them through.
+
+    WHAT IS DELIBERATELY NOT ASSERTED AS CORRECT
+    --------------------------------------------
+    ``executionSuccessful`` is True and ``exitCode`` is 0 on this run even though a third of the
+    targets were never evaluated, because ``determine_status`` only reports ERROR once
+    ``targets_failed >= targets_attempted``. Partial coverage loss being invisible in the
+    rolled-up status is a real and separate defect from the three this module covers; it is not
+    fixed here and this test does not pretend the value is right, it only records what it is.
+    """
+
+    def test_an_unparseable_target_is_an_error_not_a_finding(
+        self, test_plugin_context, non_compliant_template: Path
+    ):
+        _require_cdk_nag()
+        from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
+            CdkNagScanner,
+            CdkNagScannerConfig,
+        )
+
+        source_dir = Path(test_plugin_context.source_dir)
+        source_dir.mkdir(parents=True, exist_ok=True)
+        # A real template alongside them, so the scan has something it CAN evaluate. Without it
+        # every target fails, the scanner reports ERROR, and the test would be measuring the
+        # total-failure path instead of the partial one.
+        (source_dir / "template.json").write_text(non_compliant_template.read_text())
+        for name, body in UNPARSEABLE_TARGETS.items():
+            (source_dir / name).write_text(body)
+
+        scanner = CdkNagScanner(
+            context=test_plugin_context, config=CdkNagScannerConfig()
+        )
+        report = scanner.scan(target=source_dir, target_type="source")
+        assert report is not False, "scanner refused to run"
+
+        assert scanner.targets_attempted == 3, (
+            f"expected all three files in the scan set, got {scanner.targets_attempted}"
+        )
+        assert scanner.targets_failed == len(UNPARSEABLE_TARGETS), (
+            f"expected {len(UNPARSEABLE_TARGETS)} parse failures, got {scanner.targets_failed}"
+        )
+
+        run = report.runs[0]
+        results = run.results or []
+        assert results, (
+            "the real template produced no findings, so this fixture is not exercising the "
+            "partial-failure path"
+        )
+        # The channel assertion. Named per file so a failure says which one leaked.
+        for name in UNPARSEABLE_TARGETS:
+            leaked = [
+                r.ruleId
+                for r in results
+                if name in str(getattr(r.analysisTarget, "uri", "") or "")
+            ]
+            assert not leaked, (
+                f"{name} could not be parsed yet produced findings {leaked}"
+            )
+
+        # And the error channel does carry them, which is the positive artifact: "not a finding"
+        # on its own would also be satisfied by the failure vanishing entirely.
+        description = run.invocations[0].exitCodeDescription or ""
+        for name in UNPARSEABLE_TARGETS:
+            assert name in description, (
+                f"{name} failed to parse but is absent from exitCodeDescription, so the "
+                f"failure is recorded nowhere a consumer can see it"
+            )

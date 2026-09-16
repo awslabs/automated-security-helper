@@ -44,6 +44,204 @@
 - [1.0.1-e-10Jan2023](#101-e-10jan2023)
 
 
+## Unreleased
+
+### Behavior changes
+
+- **`--fail-on-incomplete-scanners` now also fails a scan that lost only part of
+  its input.** The flag selected on scanner status, and a scanner that failed on
+  some of its targets keeps whatever status the severity gate gives it — `PASSED`
+  or `FAILED`, decided only by what the targets it *did* read contained — because
+  `determine_status` returns `ERROR` only once
+  `targets_failed >= targets_attempted`. Neither value says anything about the
+  targets that went unread, so the flag reported total coverage loss and stayed
+  silent on partial loss, which is the more common case and the one operators turn
+  it on to catch.
+
+  **If you already pass `--fail-on-incomplete-scanners`, a build that was green
+  will now exit 1 with no diff of your own.** Nothing about your code changed and
+  nothing newly broke: the flag was blind to partial loss, and the coverage it was
+  silently accepting is now reported. Expect to hit this in CI without warning the
+  first time you upgrade. It affects only runs that pass the flag (or set
+  `fail_on_incomplete_scanners: true`); the default path is unchanged.
+
+  Measured on this repository's own tree, so the scale is concrete rather than
+  hypothetical: cdk-nag **attempts 10 targets and cannot evaluate 4** of them, a
+  40% loss that nothing in the rendered output mentioned. ASH's own scan therefore
+  now exits 1 under the flag.
+
+  Note that cdk-nag's status here is `FAILED`, on 16 actionable findings at the
+  `MEDIUM` threshold, both before and after this change. The point is not that a
+  passing row hid a problem; it is that the shortfall was absent from the summary
+  table, from every report and from the exit code no matter which status the row
+  carried. A scanner reports a **complete** scan of its input whether it passed or
+  failed on the part it read.
+
+  That 40% is not entirely spurious, and it is worth knowing the split before
+  dismissing it. Two of the four are real CloudFormation templates that genuinely
+  went unscanned (`test-yaml.template.json` and
+  `cfn-and-python-test-yaml.template.json`). The other two — a `tsconfig.json` and
+  a `mkdocs.yml` — were never templates at all and reach cdk-nag through a
+  separate target-selection bug, not fixed here. So half the number is real lost
+  coverage and half is noise, which is precisely why the counts are reported
+  rather than folded into a single percentage.
+
+  A scanner that reports no target counts at all is unaffected — absent counters
+  mean the scanner does not track targets, not that it lost them, so the nine
+  scanners in that state cannot trip the gate.
+
+  Partial coverage loss does **not** change a scanner's status. That is a
+  deliberate limit on this entry and not a claim about the release: the separate
+  breaking change below does change statuses, with no flag to opt into. Read the
+  two together.
+
+  To restore the previous behavior, drop the flag (or set
+  `fail_on_incomplete_scanners: false`) to accept a partial scan. To keep the
+  flag and clear the failure, fix or exclude the targets the scanner could not
+  read; the failure message names each scanner with the counts, whatever its
+  status.
+
+- **A rule that could not be evaluated now fails the scan, under default config.**
+  This one changes the default exit code, so read it even if you pass no flags.
+
+  A cdk-nag rule that raises mid-validation is reported as
+  `kind: notApplicable` at `level: none` — see the reporting entry below for why
+  that is the correct SARIF — and ASH's ladder reads `none` as INFO, which the
+  default `MEDIUM` threshold does not count. Before that, the row arrived at
+  whatever severity the rule declared and a scan containing one exited non-zero.
+  Afterwards nothing gated it: `targets_failed` rises only when a validation report
+  cannot be read or the scan raises, so a rule that throws on a template whose
+  report still parses leaves the target counters clean and
+  `--fail-on-incomplete-scanners` sees nothing either. The remaining signals were a
+  warning log and a run-level notification, neither of which reaches an exit code.
+  Net, a scan whose only defect was systematic rule-evaluation failure reported a
+  clean exit 0.
+
+  `_compute_exit_code` now reads `invocation.toolExecutionNotifications` at
+  `level: error` — SARIF's own channel for "a runtime condition detected by the
+  tool during the analysis", which the cdk-nag scanner already writes one of per
+  rule that could not be evaluated — and **exits 1** when a scan carries any.
+
+  **1 and not 2, deliberately.** 2 tells a reviewer that clearing the listed
+  findings clears the scan, which is what is not true when a rule reached no
+  verdict. 1 is ASH's "error during execution" code and is what the completeness
+  gate and `ash merge`'s coverage refusals already use for the same reason: the
+  findings that were reported are real, but the set is known to be partial.
+
+  **This was not expressed as a finding, and could not be.** Giving the result a
+  gating severity was the obvious alternative and is what the pre-existing behavior
+  amounted to. SARIF section 3.27.10 requires `level` to be `none` whenever `kind`
+  (3.27.9) is anything other than `fail`, and `fail` asserts the rule *was*
+  evaluated and the target did not satisfy it. A severity-bearing result would
+  therefore have to claim a verdict that was never reached — the report untrue in
+  the opposite direction.
+
+  **A rule that genuinely does not apply is unaffected**, and not by a carve-out.
+  cdk-nag's validation report carries violations only, so a rule that does not
+  apply to a target produces no row at all and therefore no notification. The only
+  producer of the not-evaluated state is a rule that threw. A scan with no
+  CloudFormation in it is likewise untouched: nothing was evaluated, no rule raised,
+  and the scanner still reports `SKIPPED` at exit 0.
+
+  **To accept a rule that cannot be evaluated, suppress it.** A suppression on the
+  rule's not-evaluated results silences this gate — the gate reports a rule only
+  when at least one such result is unsuppressed — so the existing mechanism is the
+  escape hatch and no new flag was added. Suppressions are per finding: accepting
+  the failure on one resource does not accept it on another. This repository's own
+  `.ash/.ash.yaml` already carries fifteen such entries, under the heading "rules
+  that threw and never ran", for rules that raise on its deliberately
+  parameterized templates; measured on this tree, they keep its default scan at
+  exit 0.
+
+  Also worth knowing before treating this as cdk-nag-only: the gate reads SARIF
+  rather than a cdk-nag counter, so any scanner — or any externally ingested SARIF
+  — that reports an error-level runtime condition trips it. cdk-nag is the only
+  builtin that writes one today.
+
+### Breaking changes
+
+- **A scanner that lost every target on any one tree now reports `ERROR`, on every
+  scan, with nothing to opt into.** This is wider than the flag change above and
+  wants reading first.
+
+  `ScanPhase` gives each scanner one task carrying the source tree and, where the
+  convert phase produced one, the converted tree, and `ScanResultProcessor` writes
+  one serialized container per target. `determine_status` already returned `ERROR` for a tree
+  whose every attempted target failed, but `get_scanner_status_info` never
+  consulted it: it read the scanner-level `"None"` report, else the
+  `scanner_results` entry, else the `"source"` report. In a real run the
+  `scanner_results` branch wins, so a per-target `ERROR` was written to disk,
+  serialized into the aggregated results, and never read by anything. A scanner
+  that passed on the source tree and evaluated nothing at all on the converted one
+  rolled up to `PASSED`.
+
+  It now rolls up to `ERROR`, and `error` is the first branch in both
+  `get_scanner_status` and `get_unified_scanner_metrics`. So for an affected
+  scanner:
+
+  - the console summary table's status column changes;
+  - the markdown, text and HTML reports change with it;
+  - `ash.flat.json`'s `passed` flips from `true` to `false`, which is the field a
+    machine consumer gates on.
+
+  **What is not affected**, because the distinction is the useful part:
+
+  - **The default exit code, by either of the two changes described here.**
+    `_compute_exit_code` consults `incomplete_scanners` only once
+    `--fail-on-incomplete-scanners` resolves true, so neither lost-target change
+    moves a default run's exit code. A scanner rolling up to `ERROR` does affect
+    the exit code under that flag — but it did already, since `ERROR` was always a
+    status the flag selected on.
+
+    Read that scope literally rather than as a statement about the release. A
+    separate entry below — "a rule that could not be evaluated now fails the scan"
+    — *does* change the default exit code, through a different signal and for a
+    different reason. Nothing about lost targets is what moves it.
+  - **`ash merge`'s shard verification.** `_completed` reads the raw
+    `ScannerTargetStatusInfo.status` off `scanner_results`, not the derived rollup,
+    so a partial-coverage scanner still counts as having run and no healthy shard
+    is refused.
+
+  Measured on this repository, this change alters nothing: cdk-nag's only target
+  report is the source tree, it carries `PASSED`, and the scanner rolls up to
+  `FAILED` on its findings both before and after. A repository is affected only
+  when some tree lost *all* of its targets, which is why the flag change above is
+  the one ASH's own scan feels.
+
+  There is no flag. To keep a previously-green pipeline green you must fix or
+  exclude the targets the scanner could not read on the affected tree, or exclude
+  the scanner. Reverting to the previous behavior means accepting a report that
+  states coverage it does not have.
+
+### Reporting changes
+
+- **Reports now say how much of its input each scanner evaluated.** Additive, but
+  it does change bytes, so it is listed rather than left to be discovered:
+
+  - `ScannerMetrics` gained `targets_attempted` and `targets_failed`, and
+    `ash.flat.json` carries both. `targets_attempted` is `null` — not `0` — for a
+    scanner that does not track per-target outcomes, so a consumer can tell "made
+    no claim" from "attempted none".
+  - The console table and the markdown report gained an "Incomplete coverage"
+    section, emitted only when there is something to report. Measured on this
+    repository, `ash.summary.md` gained `### Incomplete coverage` naming cdk-nag's
+    6 of 10.
+  - cdk-nag's SARIF gained `runs[].invocations[].toolExecutionNotifications`, one
+    per rule that raised instead of returning a verdict, at `level: error`.
+    Measured on this repository: 11 notifications where there were previously
+    none. These do **not** reach GitHub Advanced Security — the `github-ghas`
+    reporter assembles a fresh run carrying only `tool.driver` and `results`, so
+    `ash.ghas.sarif` has no `invocations` key at all. A pipeline that uploads
+    `ash.sarif` itself rather than `ash.ghas.sarif` will surface them.
+  - A cdk-nag rule that could not be evaluated is now `kind: notApplicable` at
+    `level: none`, which ASH maps to INFO. It was previously reported as a finding
+    at the rule's declared severity. Measured on this repository, the aggregated
+    SARIF holds the same 453 results before and after, of which 15 move to
+    `notApplicable`/`none` — 10 that were `error`/`fail` and 5 that were
+    `warning`/`informational`. The actionable counts do not move here because those
+    15 were already suppressed; on a tree where they are not, the scanner's
+    high-severity count drops by however many of its rules raised.
+
 ## v3.7.0 (2026-08-27)
 
 ### Feat
