@@ -52,8 +52,43 @@ tests cannot see that, and passing them is not evidence the gem built.
 The window between the setup-ruby step and the precedence restore must contain no
 ``shell: bash`` step, because any such step would get MSYS2 bash. That invariant is
 asserted directly rather than left to review.
+
+The second name MSYS2 shadows, and why bash was only half the problem
+--------------------------------------------------------------------
+The arrangement above was reasoned about entirely in terms of ``bash``, on the
+stated grounds that everything inside the window is ``shell: pwsh`` and therefore
+"does not care which bash is first". True of bash, and it missed that MSYS2's
+``usr/bin`` also contains an executable named ``ash`` -- the Almquist shell -- and
+that the two pwsh steps inside the window invoke ``ash`` six times between them.
+Git for Windows ships the same shell, being MSYS2-derived, so promoting Git Bash
+is not a fix either.
+
+Measured on ``scan (python-local, windows-latest)`` at 1c492f28, and identically
+on the ``- Community Plugins`` cell, which is itself the evidence that the cause
+is environmental rather than config-specific::
+
+    .../msys64/usr/bin/ash: 0: Illegal option --          <- ash --version
+    .../msys64/usr/bin/ash: 0: Illegal option --          <- ash --help
+    .../msys64/usr/bin/ash: 0: cannot open dependencies   <- ash dependencies install
+    .../msys64/usr/bin/ash: 0: cannot open config         <- ash config get
+    .../msys64/usr/bin/ash: 0: Illegal option --          <- ash --mode local ...
+
+Five invocations, five errors, in order, and the step ended in 543ms having run no
+scanner. The reason it read as something else entirely: nothing wrote
+``.ash/ash_output``, so the artifact upload found no files and "Verify scan
+completed" was SKIPPED rather than failed. The visible symptom was a missing
+artifact four steps downstream, not a shadowed binary.
+
+``setup-ash`` puts ASH's console scripts on ``PATH`` via ``GITHUB_PATH`` before
+this action runs, and setup-ruby adds MSYS2 later; since the runner reverses the
+accumulated list, later wins. So the fix is to re-add ASH's scripts directory
+after setup-ruby, which promotes it above MSYS2 without evicting MSYS2 -- sh, make
+and gcc keep coming from the one coherent tree psych needs. Promoting Git Bash
+there instead would break the gem build for the 18e5cba9 reason, which is what
+``test_git_bash_precedence_is_restored_after_the_windows_scan`` already forbids.
 """
 
+import re
 from pathlib import Path
 
 import pytest
@@ -67,6 +102,12 @@ WINDOWS_TOOLCHAIN_STEP = "Set up Ruby and MSYS2 toolchain for cfn-nag (Windows)"
 RESTORE_STEP = "Restore Git Bash precedence after the Ruby toolchain (Windows)"
 CONFIG_VALIDATE_STEP = "Validate ASH config files"
 WINDOWS_SCAN_STEP = "Validate ASH using Python Local (Windows)"
+PROMOTE_STEP = "Put ASH's entry point ahead of the MSYS2 toolchain (Windows)"
+
+# A command invocation of `ash`, anchored at the start of a line so that a path
+# argument such as `--config .ash/.ash_community_plugins.yaml` is not counted, and
+# allowing pwsh's call operator so `& ash report` is.
+ASH_INVOCATION = re.compile(r"^\s*(?:&\s*)?ash\s", re.MULTILINE)
 
 
 @pytest.fixture(scope="module")
@@ -179,6 +220,138 @@ def test_no_bash_step_sits_inside_the_msys2_window(steps):
         f"these steps run between {WINDOWS_TOOLCHAIN_STEP!r} and {RESTORE_STEP!r} "
         f"with `shell: bash` on the python-local leg, so they would get MSYS2 "
         f"bash: {offenders}"
+    )
+
+
+def _runs_on_windows_python_local(step: dict) -> bool:
+    """Whether this step can execute on the ``windows-latest`` python-local leg.
+
+    Narrower than ``_runs_on_python_local``: it also drops steps pinned to
+    non-Windows runners. Anything whose condition is not recognized is treated as
+    in scope, so a new condition fails safe rather than being excused.
+    """
+    if not _runs_on_python_local(step):
+        return False
+    return "runner.os != 'Windows'" not in str(step.get("if", ""))
+
+
+def test_ash_entry_point_is_promoted_inside_the_msys2_window(steps):
+    """The promote step has to sit after setup-ruby and before anything reads ``ash``.
+
+    Before setup-ruby it would be pointless -- MSYS2 is not on ``PATH`` yet, so
+    there is nothing to outrank, and setup-ruby would then add MSYS2 after it and
+    win. After the scan step it is too late, which is the state that produced the
+    five-error log in this module's docstring.
+    """
+    promote = _index(steps, PROMOTE_STEP)
+    assert _index(steps, WINDOWS_TOOLCHAIN_STEP) < promote, (
+        f"{PROMOTE_STEP!r} runs before setup-ruby, so it promotes ASH's scripts "
+        "directory and setup-ruby then puts MSYS2 ahead of it again. GITHUB_PATH "
+        "entries are reversed before joining, so the last one added wins."
+    )
+    assert promote < _index(steps, WINDOWS_SCAN_STEP), (
+        f"{PROMOTE_STEP!r} runs after {WINDOWS_SCAN_STEP!r}, so every `ash` in "
+        "that step resolves to MSYS2's Almquist shell and the scan does nothing."
+    )
+
+
+def test_every_windows_ash_invocation_follows_the_promotion(steps):
+    """The general invariant, rather than naming the two steps that exist today.
+
+    A new pwsh step that calls ``ash`` and is added above the promotion would
+    reintroduce this silently, and naming today's two steps would not catch it.
+    """
+    promote = _index(steps, PROMOTE_STEP)
+    offenders = [
+        step.get("name")
+        for i, step in enumerate(steps)
+        if i < promote
+        and i > _index(steps, WINDOWS_TOOLCHAIN_STEP)
+        and _runs_on_windows_python_local(step)
+        and ASH_INVOCATION.search(str(step.get("run", "")))
+    ]
+    assert not offenders, (
+        f"these steps invoke `ash` between {WINDOWS_TOOLCHAIN_STEP!r} and "
+        f"{PROMOTE_STEP!r}, where MSYS2's Almquist shell outranks it: {offenders}"
+    )
+    # Control: the steps this is protecting must actually be found by the same
+    # detector, or the test above would pass by matching nothing at all. Both
+    # in-window pwsh steps call `ash`, so the count is two.
+    callers = [
+        step.get("name")
+        for step in steps[promote + 1 : _index(steps, RESTORE_STEP)]
+        if _runs_on_windows_python_local(step)
+        and ASH_INVOCATION.search(str(step.get("run", "")))
+    ]
+    assert len(callers) == 2, (
+        "expected the two in-window pwsh steps that call `ash` to be detected, "
+        f"found {callers}. If this is zero the detector stopped matching and the "
+        "assertion above is vacuous."
+    )
+
+
+def test_the_promotion_does_not_hand_precedence_to_git_bash(steps):
+    """Promoting Git Bash here is the plausible wrong fix, and it is two bugs.
+
+    It does not work -- Git's ``bin`` ships no ``ash``, so MSYS2 still wins, and
+    Git's ``usr/bin`` ships the same Almquist shell, so winning would only change
+    which wrong ``ash`` ran. And it breaks the gem build, because
+    ``ash dependencies install`` inside the next step compiles psych's C extension
+    and needs MSYS2's sh rather than Git's. That is the 18e5cba9 failure.
+    """
+    body = steps[_index(steps, PROMOTE_STEP)]["run"]
+    assert "Git" not in body, (
+        f"{PROMOTE_STEP!r} mentions Git, so it is likely promoting Git Bash. That "
+        "leaves MSYS2's `ash` first and puts Git's sh ahead of MSYS2's for the "
+        "psych compile in the next step."
+    )
+    assert "GITHUB_PATH" in body, (
+        f"{PROMOTE_STEP!r} no longer writes GITHUB_PATH, so it changes no PATH "
+        "for the steps that follow it and the promotion silently does nothing."
+    )
+
+
+def test_the_promotion_fails_loudly_when_it_cannot_find_the_entry_point(steps):
+    """A promotion that finds nothing must not pass quietly.
+
+    Its whole job is to put one directory first. If no candidate contains
+    ``ash.exe`` then the assumption behind the step is wrong, and continuing would
+    hand the next step the same shadowed shell with nothing said about why.
+    """
+    body = steps[_index(steps, PROMOTE_STEP)]["run"]
+    assert "::error::" in body and "exit 1" in body, (
+        f"{PROMOTE_STEP!r} does not fail with an ::error:: annotation when it "
+        "finds no ash.exe, so a wrong assumption about where pip installs console "
+        "scripts would surface as the same five confusing shell errors."
+    )
+
+
+def test_the_windows_scan_asserts_that_ash_is_ash(steps):
+    """The guard that names the cause, since the failure otherwise misdirects.
+
+    Untreated, this step fails as a run of "Illegal option --" and "cannot open"
+    errors, and the artifact it never writes is what a reader notices four steps
+    later. One resolved path in the log is the difference between that and a named
+    cause.
+    """
+    body = steps[_index(steps, WINDOWS_SCAN_STEP)]["run"]
+    assert "Get-Command ash" in body, (
+        f"{WINDOWS_SCAN_STEP!r} no longer resolves `ash` before using it, so a "
+        "shadowed binary is diagnosed from five downstream shell errors again."
+    )
+    assert "::error::" in body and "exit 1" in body, (
+        "the guard warns instead of failing, so a shadowed `ash` would still "
+        "produce an empty scan -- and an empty scan skips `Verify scan completed` "
+        "rather than failing it."
+    )
+    guard, _, remainder = body.partition("Get-Command ash")
+    assert not ASH_INVOCATION.search(guard), (
+        "an `ash` invocation precedes the guard, so the step would already have "
+        "run a shell before checking what `ash` is."
+    )
+    assert ASH_INVOCATION.search(remainder), (
+        "no `ash` invocation follows the guard, so the guard protects nothing and "
+        "this test would pass against a step that stopped scanning."
     )
 
 

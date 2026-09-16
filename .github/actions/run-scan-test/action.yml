@@ -269,6 +269,60 @@ runs:
       with:
         ruby-version: "3.3"
 
+    # The step above prepends MSYS2's usr/bin, and that directory contains an
+    # executable named `ash` -- the Almquist shell. So does Git for Windows'
+    # usr/bin, since Git for Windows is MSYS2-derived. Nothing above reads `ash`,
+    # which is why the comment on setup-ruby says everything between it and the
+    # precedence restore below "does not care which bash is first": that is true
+    # of bash and blind to ash, and the two Windows steps below invoke `ash`
+    # five and one times respectively.
+    #
+    # Untreated, all six resolve to a shell. `ash --version` and `ash --help`
+    # become "Illegal option --", `ash dependencies install` and `ash config get`
+    # become "cannot open dependencies" / "cannot open config", and the step ends
+    # in about half a second having run no scanner at all. Nothing writes
+    # .ash/ash_output, so the artifact upload finds no files and "Verify scan
+    # completed" is SKIPPED rather than failed -- the visible symptom is a
+    # missing artifact four steps later, not a shadowed binary.
+    #
+    # Why this promotes ASH's own scripts directory and not Git Bash's bin.
+    # Promoting Git Bash cannot fix this: its bin ships no `ash`, so MSYS2 would
+    # still win, and its usr/bin ships an Almquist shell of its own, so winning
+    # would change which wrong `ash` runs. It would also be actively harmful
+    # here -- `ash dependencies install` on line 319 is what triggers cfn-nag's
+    # gem install, and that compiles psych's C extension (cfn_nag_scanner.py
+    # gates it on RI_DEVKIT for exactly this reason). Putting Git's sh ahead of
+    # MSYS2's during that compile is the 18e5cba9 failure described above: an
+    # MSYS-translated path handed to a make from a different mount table.
+    #
+    # Re-adding ASH's scripts directory promotes it without removing MSYS2, so
+    # sh, make and gcc still all come from the one coherent tree psych needs,
+    # and the Git Bash restore below stays where it is for the `shell: bash`
+    # steps that follow it. GITHUB_PATH promotes rather than duplicates an entry
+    # already present; see that step's comment for the runner source.
+    - name: Put ASH's entry point ahead of the MSYS2 toolchain (Windows)
+      if: inputs.method == 'python-local' && runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        # Asked of Python rather than hardcoded. `pip install .` writes console
+        # scripts to the user scheme when the interpreter's directory is not
+        # writable and to the system scheme when it is, and which applies is a
+        # property of the runner image -- setup-ash hardcodes the user scheme
+        # path, so this deliberately checks both and does not assume that one.
+        $candidates = @(
+          (python -c "import sysconfig; print(sysconfig.get_path('scripts'))"),
+          (python -c "import sysconfig; print(sysconfig.get_path('scripts', scheme='nt_user'))")
+        ) | Where-Object { $_ } | Select-Object -Unique
+        $found = @($candidates | Where-Object { Test-Path (Join-Path $_ 'ash.exe') })
+        if ($found.Count -eq 0) {
+          Write-Host "::error::No ash.exe in any Python scripts directory, so ASH's entry point cannot be put ahead of MSYS2's Almquist shell. Looked in: $($candidates -join ' ; ')"
+          exit 1
+        }
+        foreach ($dir in $found) {
+          Write-Host "Promoting $dir ahead of the MSYS2 toolchain"
+          Add-Content -Path $env:GITHUB_PATH -Value $dir
+        }
+
     # Python Container scan
     - name: Validate ASH using Python + Container
       if: inputs.method == 'python-container'
@@ -314,6 +368,22 @@ runs:
         SNYK_TOKEN: ${{ inputs.snyk-token }}
       run: |
         Write-Host "Testing ASH using Python (Local) on ${{ inputs.os }} (${{ inputs.platform }}) with config: ${{ inputs.config-file }}"
+        # Assert that 'ash' is ASH before using it six times. MSYS2 and Git for
+        # Windows each ship an Almquist shell of the same name, and when one
+        # shadows the scanner every invocation below fails as "Illegal option --"
+        # or "cannot open <subcommand>" -- errors that name neither PATH nor the
+        # shell, and which left this step red while looking like a missing
+        # artifact. One line here says what actually resolved.
+        $AshPath = (Get-Command ash -ErrorAction SilentlyContinue).Source
+        if (-not $AshPath) {
+          Write-Host "::error::'ash' is not on PATH at all, so ASH was never installed or its scripts directory was never added."
+          exit 1
+        }
+        if ($AshPath -notmatch '\\Scripts\\ash\.exe$') {
+          Write-Host "::error::The name ash resolved to $AshPath, which is not the ASH entry point -- an ash.exe under a Python Scripts directory was expected. MSYS2 and Git for Windows both ship an Almquist shell named ash; one of them is shadowing the scanner, so the invocations below would run a shell instead."
+          exit 1
+        }
+        Write-Host "ash resolves to $AshPath"
         ash --version
         ash --help
         ash dependencies install
