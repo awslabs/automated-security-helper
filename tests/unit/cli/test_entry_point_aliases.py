@@ -12,21 +12,33 @@ shell as ``ash`` and it has already shadowed ASH's entry point.
 """
 
 import sys
-import tomllib
-from pathlib import Path
+from importlib.metadata import entry_points
 from unittest import mock
 
 import pytest
 
 from automated_security_helper.cli import main as cli_main
 
-PYPROJECT = Path(__file__).resolve().parents[3] / "pyproject.toml"
-
 
 @pytest.fixture
 def console_scripts():
-    with PYPROJECT.open("rb") as handle:
-        return tomllib.load(handle)["project"]["scripts"]
+    """The console scripts as actually installed, keyed by command name.
+
+    Read from installed metadata rather than parsed out of pyproject.toml. It is
+    the stronger assertion -- it covers what a user's PATH ends up with rather
+    than what the manifest declares -- and it avoids needing a TOML parser.
+    ``tomllib`` is stdlib only from 3.11 and this repo supports 3.10, where
+    ``import tomllib`` at module scope would fail every test here; the fallback
+    the other test modules use, ``tomli``, is not a declared dependency.
+    """
+    scripts = {ep.name: ep.value for ep in entry_points(group="console_scripts")}
+    missing = {"ash", "ashv3", "automated-security-helper"} - scripts.keys()
+    assert not missing, (
+        f"ASH's console scripts are not installed ({sorted(missing)} missing), so "
+        "these assertions would pass or fail on the state of the environment "
+        "rather than on the manifest. Install the package before running."
+    )
+    return scripts
 
 
 class TestConsoleScriptTargets:
