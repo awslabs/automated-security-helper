@@ -294,3 +294,87 @@ jobs:
           # artifact that a later phase would download and treat as a build.
           if-no-files-found: error
           retention-days: 14
+
+  # Native packages. These are the first jobs in the repository to use a `container:`
+  # key -- before this, no workflow had one, none had `services:`, and none ran a bare
+  # `docker run`, so building a .deb inside Debian and an .rpm inside Amazon Linux is a
+  # new capability rather than a reuse of an existing pattern.
+  #
+  # Testing inside a distro image PUBLISHES NOTHING. It pulls a public base image, builds
+  # a package in it and throws the container away, so it does not touch the project's
+  # position that ASH publishes no binary artifacts to public registries.
+  #
+  # Why a container rather than the ubuntu-latest host, which has dpkg-deb: building the
+  # package in the same image that tests it lets a missing dependency pass because the
+  # build host happened to provide it. The container starts with neither the interpreter
+  # nor pip, so the package's own Depends/Requires have to be right.
+  #
+  # Both jobs run the same script a developer runs locally, rather than reimplementing
+  # the steps in YAML. A verification that exists twice drifts, and the copy in CI is the
+  # one nobody runs by hand.
+  deb:
+    name: "native: deb (debian:bookworm)"
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    container: debian:bookworm
+    steps:
+      # Before checkout, because actions/checkout needs git in the image and
+      # debian:bookworm ships none. Without this it silently falls back to a REST API
+      # tarball, which works but leaves no git metadata -- and the failure mode when it
+      # does not work is an empty workspace rather than an error naming git.
+      - name: Install git for actions/checkout
+        run: |
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get -qq update >/dev/null
+          apt-get -qq install -y --no-install-recommends git ca-certificates >/dev/null
+          git --version
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # download-artifact has no v7. Its major versions are offset from
+      # upload-artifact's, so v8 is the current release and is the correct pair for the
+      # upload pinned at v7.0.1 above -- both are the v4-generation artifact backend.
+      # This looks like a mismatch and is not one.
+      - name: Download the wheel built and gated by the build job
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ash-package-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: dist
+
+      - name: Build the .deb, install it, and run a real scan
+        run: bash packaging/deb/verify-in-container.sh
+        env:
+          REPO: ${{ github.workspace }}
+
+  rpm:
+    name: "native: rpm (amazonlinux:2023)"
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    container: public.ecr.aws/amazonlinux/amazonlinux:2023
+    steps:
+      - name: Install git for actions/checkout
+        run: |
+          set -euo pipefail
+          dnf -q -y install git ca-certificates tar gzip >/dev/null
+          git --version
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download the wheel built and gated by the build job
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ash-package-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: dist
+
+      # This job is the reason the rpm's dependency list is correct. On the first run it
+      # failed with "python3 >= 3.10 is needed by ash", because Amazon Linux 2023's
+      # python3 is 3.9 -- a defect invisible to any amount of spec review and to a build
+      # on ubuntu-latest, where python3 is new enough.
+      - name: Build the .rpm, install it, and run a real scan
+        run: bash packaging/rpm/verify-in-container.sh
+        env:
+          REPO: ${{ github.workspace }}
+
