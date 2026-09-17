@@ -1,0 +1,123 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: JetBrains plugin CI
+# Builds the JetBrains plugin under editors/jetbrains/, runs its tests, gates its coverage,
+# and checks what the distribution zip contains.
+#
+# WHY THIS WORKFLOW EXISTS
+#
+# Nothing else under .github/ builds anything with Gradle, and nothing compiles Java. The
+# plugin's correctness therefore rested entirely on a developer's machine until this file, and
+# the parts of it most likely to be wrong are the parts a reviewer cannot see by reading:
+# whether the IDE distribution resolves, whether the tests run, and what ends up inside the
+# zip.
+#
+# WHY IT IS A SEPARATE WORKFLOW AND NOT A JOB IN ash-package.yml
+#
+# That workflow builds ASH's wheel and every native package downstream of it, and each of
+# those jobs starts by downloading the wheel artifact. This plugin has no such dependency: it
+# ships no ASH code and invokes whatever `ash` is on the user's PATH, so a job here would need
+# neither the wheel nor the build job it comes from. Putting it there would also make an
+# unrelated failure in the wheel gate block the plugin's only signal.
+#
+# ash-typescript-ci.yml is the closer neighbour by shape -- an editor-adjacent package with its
+# own toolchain and its own coverage gate -- and this file follows it rather than ash-package.yml.
+#
+# WHY THERE IS NO paths FILTER
+#
+# ash-typescript-ci.yml has one and explains at length why its own is load-bearing. The same
+# reasoning points the other way here. `merge_group` accepts no paths filter, so a gate filtered
+# on pull_request and unfiltered on merge_group runs in one place and not the other. And a
+# filter would be an assertion about what cannot affect this build; the coverage gate reads
+# `git ls-files` for its census, so a file added anywhere under editors/jetbrains changes the
+# verdict, and the plugin's own settings page quotes the entry-point contract that lives
+# elsewhere in the tree.
+#
+# The cost is stated plainly: this runs on every pull request, and the first run on a cold
+# cache resolves an IDE distribution of roughly a gigabyte from JetBrains' CDN.
+
+on:
+  pull_request:
+    branches:
+      - "**"
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  # One in-flight run per pull request; pushing again supersedes the previous run. Copied from
+  # ash-package.yml, including the reasoning: github.ref is refs/pull/<n>/merge on
+  # pull_request and the per-entry gh-readonly-queue branch on merge_group, so every queue
+  # entry lands in its own group and entries never serialize behind one another.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Only pull_request runs may be cancelled. A merge_group run must finish or the queue loses
+  # its verdict.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  plugin:
+    name: "editors: jetbrains (gradle:jdk21)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+
+    # A container, for the same reason the deb and rpm jobs in ash-package.yml use one, and
+    # NOT for its Gradle. The image is used for its toolset: a JDK 21, git, python3 and unzip,
+    # measured present in gradle:jdk21 (Ubuntu 26.04, Gradle 9.7.1). The build itself always
+    # goes through ./gradlew, which pins the Gradle version -- so the image's Gradle drifting
+    # cannot change what this job tests.
+    #
+    # The alternative was ubuntu-latest plus actions/setup-java. That would have introduced the
+    # first use of that action in this repository, which means a new SHA pin to look up and
+    # keep current, to obtain a JDK the container already has.
+    #
+    # Testing inside a container PUBLISHES NOTHING. It pulls a public base image, builds in it,
+    # and throws the container away.
+    container: gradle:jdk21
+
+    steps:
+      # Before checkout. actions/checkout needs git in the image; gradle:jdk21 ships it, and
+      # this step states the requirement rather than relying on the image's contents staying
+      # the same. Without git, checkout silently falls back to a REST API tarball, which leaves
+      # no git metadata -- and the coverage gate's census comes from `git ls-files`, so it would
+      # fail with a message about missing source files rather than about a missing repository.
+      - name: Confirm the image has git, and that this is a real clone
+        run: |
+          set -euo pipefail
+          git --version
+          python3 -V
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # actions/checkout leaves the workspace owned by a different user than the container runs
+      # as often enough that git refuses to read it. The coverage gate shells out to
+      # `git ls-files`, so an unreadable repository would surface as every source file being
+      # reported absent from the coverage report.
+      - name: Let git read the checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      # No `if:` anywhere in this job, and no Docker-based action in it. A Docker-based action's
+      # image is pulled in the job's PREPARE phase, BEFORE its `if:` is evaluated, so a
+      # conditional container step is an unconditional network dependency -- which has already
+      # cost this repository a CI failure that reported red having run zero tests.
+      - name: Build the plugin, run its tests, and check what it produced
+        run: bash editors/jetbrains/verify-in-container.sh
+
+      # Uploaded on failure only, and never as an input to anything. The IDE resolution and the
+      # test run are the two slow parts of a debugging cycle, and a failure here is otherwise a
+      # console tail with no report behind it.
+      - name: Upload the test and coverage reports when something failed
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: jetbrains-reports-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: |
+            editors/jetbrains/build/reports/
+            editors/jetbrains/build/test-results/
+          if-no-files-found: warn
+          retention-days: 7

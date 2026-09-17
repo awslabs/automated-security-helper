@@ -133,7 +133,19 @@ public final class AshAnnotationPlanner {
             start = lines.startOfLineOffset(finding.startLine());
             end = Math.max(lines.endOfLineOffset(endLine), start + 1);
         }
-        return new int[] {Math.min(start, lines.textLength()), Math.min(end, lines.textLength())};
+
+        start = Math.min(start, lines.textLength());
+        end = Math.min(end, lines.textLength());
+        if (end <= start) {
+            // The clamp above can undo the widening, and this branch is here because a test
+            // caught it doing so: an empty document has one line of length zero, so a finding
+            // on line 1 was widened to [0,1) and then clamped straight back to [0,0) -- a
+            // zero-width range, which counts as an annotation and draws nothing. Returning
+            // null instead means the finding is dropped rather than reported invisibly, which
+            // is the same choice made above for a line the document no longer has.
+            return null;
+        }
+        return new int[] {start, end};
     }
 
     /**

@@ -72,6 +72,22 @@ dependencies {
     // not this project's own output.
     testImplementation("org.junit.jupiter:junit-jupiter:6.1.3")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+
+    // JUnit 4, which no test in this project uses, and which the test JVM does not start
+    // without.
+    //
+    // The IntelliJ Platform Gradle plugin runs the `test` task inside the IDE's own runtime:
+    // it sets java.system.class.loader to com.intellij.util.lang.PathClassLoader, and that
+    // bootstrap references org.junit.rules.TestRule. Without this line the task fails before
+    // any test is collected, with "Could not start Gradle Test Executor 1" and a
+    // ClassNotFoundException for org/junit/rules/TestRule -- measured, not anticipated.
+    //
+    // The alternative was testFramework(TestFrameworkType.Platform), which brings the whole
+    // platform test framework and pulls JUnit 4 in transitively. It was not used because no
+    // test here needs a Project, a PsiFile or a fixture: the platform-facing classes are
+    // excluded from coverage with a line budget instead, and coverage-exclusions.json records
+    // why. Adding a fixture framework to satisfy a classloader would be the larger change.
+    testRuntimeOnly("junit:junit:4.13.2")
 }
 
 intellijPlatform {
@@ -95,23 +111,68 @@ intellijPlatform {
     // starting inside a container -- and when it fails it fails as a timeout in a task
     // whose name does not mention the IDE.
     buildSearchableOptions = false
+
+    // Off, and this one was forced by a measurement rather than chosen.
+    //
+    // instrumentCode rewrites the compiled bytecode after javac, adding runtime assertions
+    // for @NotNull annotations, and the test task then loads the REWRITTEN classes through
+    // composedJar. JaCoCo identifies a class by a hash of its bytecode: when the classes it
+    // was pointed at (build/classes/java/main) are not the classes the tests loaded, it does
+    // not error -- it reports 0.0%. The gate caught exactly that: "line coverage 0.00% is
+    // below the required 90.00%" with a 500-line denominator and 161 tests passing.
+    //
+    // That is the measurement trap this repository keeps hitting in different clothes, and a
+    // percentage-only gate would have been satisfied by it in the other direction just as
+    // easily. Turning instrumentation off makes the classes that were compiled, the classes
+    // that were measured, and the classes that ship one set of bytes.
+    //
+    // What is given up: the @NotNull runtime assertions. Nothing here relies on them -- the
+    // null cases that matter are handled explicitly and tested, in Json's accessors,
+    // AshExecutable.resolve and AshAnnotationPlanner.plan.
+    instrumentCode = false
 }
 
 jacoco {
     toolVersion = "0.8.13"
 }
 
-tasks.test {
+// THE SUITE RUNS IN A PLAIN JVM, NOT IN THE PLATFORM TEST RUNTIME
+//
+// `unitTest` exists because the `test` task the IntelliJ Platform Gradle plugin configures
+// reports ZERO COVERAGE for every class, silently.
+//
+// Measured, not guessed. That task runs with
+// -Djava.system.class.loader=com.intellij.util.lang.PathClassLoader and loads the plugin's
+// classes through it. Parsing build/jacoco/test.exec directly showed 344 classes recorded and
+// NONE of them ours, so the JaCoCo agent's transformer never saw our classes being defined.
+// The report was therefore a full 578-line denominator with 0 covered, while 161 tests passed.
+// The bytes were ruled out first: the class files in build/classes/java/main and in both built
+// jars are byte-identical, so this is not a class-id mismatch from instrumentation.
+//
+// That is the shape of measurement failure this repository keeps meeting -- a populated report
+// whose every value is zero reads as data. It only surfaced because assert-coverage.py gates
+// the number; a build that merely produced a report would have shipped a coverage figure of
+// nothing.
+//
+// The right fix is not to make JaCoCo work inside the IDE's classloader. It is that these
+// tests do not need the IDE at all: every class they exercise is plain Java with no IntelliJ
+// import, which is why the platform-facing classes are excluded from coverage with a line
+// budget instead. So the suite runs in an ordinary Gradle test JVM.
+val unitTest = tasks.register<Test>("unitTest") {
+    group = "verification"
+    description = "Runs the plugin's unit tests in a plain JVM, so JaCoCo can see them."
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
     useJUnitPlatform()
 
-    // A Gradle `test` task with no tests SUCCEEDS. An empty test source set, a bad
-    // include filter, or a JUnit platform that failed to find an engine all produce a
-    // green task and an empty report, which is the same silent pass a jest run reporting
-    // "0 total" produces. So count what ran and fail on zero.
+    // A Gradle test task with no tests SUCCEEDS. An empty test source set, a bad include
+    // filter, or a JUnit platform that failed to find an engine all produce a green task and
+    // an empty report, which is the same silent pass a jest run reporting "0 total" produces.
+    // So count what ran and fail on zero.
     //
-    // The count is taken from the task's own result object rather than by parsing the XML
-    // report, because the XML is written by a listener that a failure earlier in the task
-    // can skip.
+    // The count comes from the task's own result object. verify-in-container.sh re-derives it
+    // from the XML report afterwards, on purpose: the two disagreeing would itself be
+    // information.
     val executed = mutableListOf<Long>()
     addTestListener(object : TestListener {
         override fun beforeSuite(suite: TestDescriptor) {}
@@ -125,20 +186,27 @@ tasks.test {
     })
     doLast {
         val total = executed.sum()
-        logger.lifecycle("test: $total test(s) executed")
+        logger.lifecycle("unitTest: $total test(s) executed")
         if (total == 0L) {
             throw GradleException(
-                "the test task ran 0 tests and would otherwise have reported success. " +
+                "the unitTest task ran 0 tests and would otherwise have reported success. " +
                     "A suite that cannot fail passes; see the comment on this check.",
             )
         }
     }
+}
 
-    finalizedBy(tasks.jacocoTestReport)
+// Disabled, and left in place rather than deleted so the reason stays next to the thing.
+// The IntelliJ Platform Gradle plugin owns this task's configuration; running it as well
+// would run the same 161 tests a second time under the classloader that produces no coverage
+// data, which is a slower way to learn nothing.
+tasks.test {
+    enabled = false
 }
 
 tasks.jacocoTestReport {
-    dependsOn(tasks.test)
+    dependsOn(unitTest)
+    executionData(unitTest.get())
     reports {
         // XML is the one assert-coverage.py reads. HTML is for a human looking at a
         // failure. CSV is off: nothing consumes it.
@@ -189,13 +257,20 @@ val assertCoverage = tasks.register<Exec>("assertCoverage") {
         // when it does. Removing one lowers them and fails, which is the case worth
         // catching -- a narrowed classDirectories raises the percentage by measuring
         // less, and the percentage alone cannot tell that from better tests.
-        "--min-classes", "9",
-        "--min-lines", "300",
+        //
+        // Measured on the revision that added these: 21 gated classes (nested classes and
+        // records count separately in a JaCoCo report) over a 500-line denominator. The
+        // floors sit just below, close enough that losing one class fails and loose enough
+        // that a small refactor does not.
+        "--min-classes", "20",
+        "--min-lines", "470",
     )
 }
 
 tasks.check {
-    dependsOn(assertCoverage)
+    // unitTest explicitly, because tasks.test is disabled above and `check` would otherwise
+    // depend only on a task that does nothing.
+    dependsOn(unitTest, assertCoverage)
 }
 
 // Runs after the distribution zip exists rather than as part of it, because the check is
