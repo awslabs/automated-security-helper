@@ -117,6 +117,36 @@ gradle.properties turns it back off.
 Expect the first build to be slow. The IntelliJ Platform Gradle plugin resolves an IDE
 distribution of roughly a gigabyte from JetBrains' CDN before it can compile anything.
 
+The gates, and where each one lives
+-----------------------------------
+
+All four are Gradle tasks, so `./gradlew check buildPlugin` gates on a developer's machine
+exactly as CI does, and each has one place to relax rather than two.
+
+  assertTestsRan          Every compiled test suite ran and reported, none was skipped, and
+                          AnnotationCountTest is among them.
+  assertCoverage          Line and branch coverage, the denominator floors, and the exclusion
+                          list audit.
+  assertDistributionContents
+                          Every jar in the built zip was built here, no loose class files, and
+                          no foreign class inside our own jar.
+  verifyPluginProjectConfiguration and verifyPluginStructure
+                          The platform's own two checks, provided by the IntelliJ Platform
+                          Gradle plugin and not wired into `check` by it. They are the only
+                          things that read META-INF/plugin.xml the way the platform will, so
+                          nothing else here would notice a misspelled extension point or a
+                          since-build the platform rejects. The full verifyPlugin task -- the
+                          Plugin Verifier's compatibility run, which downloads an additional
+                          IDE per target -- is deliberately not wired in.
+  unitTest's own doLast   A zero test count, reported at the moment of the run.
+
+The last of those is not the gate, and the distinction was measured. With the test sources
+moved aside, Gradle reported "Task :unitTest NO-SOURCE" and BUILD SUCCESSFUL: a task Gradle
+skips as NO-SOURCE runs none of its own actions, so the in-task guard was never reached in the
+one case it existed for. assertTestsRan is a separate task that reads artifacts, so it fires
+whether or not the test task ran, and it also catches a committed include filter running a
+subset -- which reports green in every summary line.
+
 Coverage, and why the number is not the whole gate
 --------------------------------------------------
 

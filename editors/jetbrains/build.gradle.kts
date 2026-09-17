@@ -298,6 +298,19 @@ tasks.check {
     // depend only on a task that does nothing. assertTestsRan explicitly too, because it is
     // the only one of the three that can fail when unitTest is skipped as NO-SOURCE.
     dependsOn(unitTest, assertTestsRan, assertCoverage)
+
+    // The platform's own two checks, which the IntelliJ Platform Gradle plugin provides and
+    // does not wire into `check` itself. They are the only things that read META-INF/plugin.xml
+    // as the platform will: verifyPluginProjectConfiguration compares the descriptor against
+    // the resolved IDE and the Java toolchain, and verifyPluginStructure runs the Plugin
+    // Verifier's structural check over the built sandbox. Nothing else here would notice a
+    // misspelled extension point or a since-build the platform rejects.
+    //
+    // NOT the full verifyPlugin task, which is the Plugin Verifier's compatibility run: it
+    // downloads one additional IDE per target on top of the roughly one gigabyte already
+    // resolved, and it is a separate decision from having a gate at all.
+    dependsOn(tasks.named("verifyPluginProjectConfiguration"))
+    dependsOn(tasks.named("verifyPluginStructure"))
 }
 
 // Runs after the distribution zip exists rather than as part of it, because the check is

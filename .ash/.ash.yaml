@@ -60,26 +60,25 @@ global_settings:
         Same fixture and same reason as the .deb verification above -- AWS's
         published example key, planted so the .rpm verification asserts a finding
         instead of an exit code.
-    # === the JetBrains plugin's two fixtures, which are the same fixture twice ===
+    # === the JetBrains plugin's planted fixture ===
     #
-    # The plugin under editors/jetbrains/ plants the same value the three files above do,
-    # and it needs TWO paths rather than one because its assertion runs without ASH: the
-    # planted file is the document annotations are computed against, and the SARIF beside
-    # it is real `ash scan --scanners detect-secrets` output produced FROM that file, then
-    # rewritten to remove host paths and wall-clock timestamps and changed in no other way.
+    # The plugin under editors/jetbrains/ plants the same value the three files above do, for
+    # the same reason, and it needs exactly ONE entry.
     #
-    # Two paths and not a directory glob, and not `editors/**`. The rest of that tree is
-    # Java, Gradle and Python that has no business carrying a credential-shaped string, and
-    # a glob would stop saying so -- the same argument the three entries above make for
-    # naming files individually.
+    # That count was measured rather than reasoned about, and the first attempt got it wrong.
+    # A second entry was written for the committed SARIF fixture beside this file --
+    # editors/jetbrains/src/test/resources/sarif/ash-detect-secrets.sarif, real `ash scan`
+    # output over leak.py -- on the assumption that a report about a secret still reads as a
+    # secret. It does not. Scanning that file alone exits 0 with zero results, because ASH
+    # masks the value out of its own reports AND its message text names the secret's TYPE
+    # ("Secret of type 'AWS Access Key' detected") rather than the variable it was assigned
+    # to. The file contains neither the key nor the string AWS_SECRET_ACCESS_KEY. So the
+    # entry guarded nothing, which makes it the stale kind of suppression this file's
+    # per-path discipline exists to avoid, and it was removed.
     #
-    # Why the SARIF needs an entry at all, which is not obvious: ASH masks the secret's
-    # VALUE out of its own output, so the document holds no key. It still trips
-    # SECRET-SECRET-KEYWORD, because the message text and the region snippet both name
-    # AWS_SECRET_ACCESS_KEY. Scoped to SECRET-* rather than to that one rule id because the
-    # file is regenerated from a real scan: a future detect-secrets whose heuristics fired
-    # differently on the same document would redden CI on a routine refresh, with no
-    # credential involved either time.
+    # One exact path and not `editors/**`. The rest of that tree is Java, Gradle and Python
+    # with no business carrying a credential-shaped string, and a glob would stop saying so
+    # -- the same argument the three entries above make for naming files individually.
     - rule_id: "SECRET-*"
       path: editors/jetbrains/src/test/resources/fixtures/leak.py
       reason: >-
@@ -88,17 +87,10 @@ global_settings:
         completed. Measured: a clean ASH scan exits 0 with an empty SARIF, so the fixture
         is what makes the assertion mean anything, and removing it to quieten this scanner
         would make the test vacuous. editors/jetbrains/verify-in-container.sh greps for the
-        value and fails if it is gone, for that reason.
-    - rule_id: "SECRET-*"
-      path: editors/jetbrains/src/test/resources/sarif/ash-detect-secrets.sarif
-      reason: >-
-        Real `ash scan` output over the fixture above, committed so the plugin's SARIF
-        reader is tested against ASH's actual shape rather than against a hand-written
-        idea of it -- ASH's regions carry startLine and endLine and no columns, plus
-        charOffset -1 as a sentinel, and a reader written to the SARIF schema would have
-        mishandled exactly that. ASH masks the key's value out of its own reports, so what
-        remains is the AWS_SECRET_ACCESS_KEY name in the message text and the region
-        snippet.
+        value and fails if it is gone, for that reason. Three rules fire on it, the same
+        three the .deb and .rpm verifications trip: SECRET-AWS-ACCESS-KEY on the value,
+        SECRET-SECRET-KEYWORD on the name beside it, and
+        SECRET-BASE64-HIGH-ENTROPY-STRING on the value again.
     # Formula/ash.rb is the odd one, and the count is why it needs saying. 80
     # findings, 77 of them SECRET-HEX-HIGH-ENTROPY-STRING, one per `sha256` in the
     # generated `resource` block. Those are the published sdist digests PyPI
