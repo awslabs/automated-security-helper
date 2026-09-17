@@ -378,3 +378,109 @@ jobs:
         env:
           REPO: ${{ github.workspace }}
 
+  # The Homebrew tap, exercised rather than parsed.
+  #
+  # WHY THIS JOB IS HERE AND NOT IN ash-install-methods.yml
+  #
+  # That workflow is the closer neighbour by subject: it already has a `homebrew`
+  # matrix method and already filters on `Formula/**`. It is also the workflow whose
+  # triggers the comment at the top of this file explains are wrong for a gate --
+  # `branches: [main]` skips any pull request stacked on a non-main base, and there is
+  # no `merge_group` leg, so a queue entry never gets a verdict. Putting a real
+  # `brew install` there would put the most expensive check in the repository behind
+  # the least reliable trigger.
+  #
+  # WHY THE CHEAP CHECK STAYS WHERE IT IS
+  #
+  # `ruby -c Formula/ash.rb` remains in .github/actions/validate-install, unchanged,
+  # and runs on four operating systems. It is not redundant with this job, it is the
+  # fast signal: a syntax error is reported in seconds there, against a job here that
+  # takes tens of minutes and depends on PyPI being reachable and five Rust
+  # compilations succeeding. If a PyPI blip reddens this job, the formula still has a
+  # check that answered.
+  #
+  # It also cannot be upgraded in place. `brew audit` needs Homebrew on PATH, and per
+  # actions/runner-images' Ubuntu 24.04 image notes Homebrew is pre-installed at
+  # /home/linuxbrew but deliberately NOT added to PATH -- it needs
+  # `eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"` first. Two of that
+  # matrix's four homebrew cells are Linux, so adding a brew command there would fail
+  # on them for a reason unrelated to the formula.
+  #
+  # WHY macos-latest
+  #
+  # macOS is the platform essentially every Homebrew user installs ASH on, which makes
+  # it the real target environment rather than the convenient one -- the same standard
+  # the deb and rpm jobs above are held to, where the package is built inside the
+  # distro that will install it. Per actions/runner-images, `macos-latest` is macOS 26
+  # Arm64 and that image ships Homebrew 6.0.22, Ruby 3.4.10 and Rust 1.98.1. This is a
+  # public repository, so GitHub-hosted macOS minutes are free and cost is not the
+  # deciding factor; queue time is, and this job blocks nothing else.
+  #
+  # WHAT THIS JOB TESTS, WHICH IS NOT THIS BRANCH'S CODE
+  #
+  # The formula builds from the git tag on its `url` line, so `brew install` fetches
+  # that release rather than the checked-out branch. That is deliberate and it is the
+  # honest scope: what is under test is whether the resource block installs and whether
+  # the resulting ASH can scan. tests/unit/test_homebrew_formula_version.py keeps the
+  # tag equal to this repository's version, so the two agree as long as
+  # `[project.dependencies]` is not edited in the same change that bumps the version
+  # without regenerating the block.
+  #
+  # No version literal appears in this file on purpose. A number written here would be
+  # a fourth place that pins ASH's version and nothing rewrites, which is the failure
+  # the [tool.commitizen] version_files comment in pyproject.toml exists to describe.
+  homebrew:
+    name: "native: homebrew (macos-latest)"
+    runs-on: macos-latest
+    # 90 rather than the 25 the deb and rpm jobs use. --no-binary=:all: means every one
+    # of the 77 resources is compiled from its sdist, five of them Rust extensions
+    # (cryptography, pydantic-core, rpds-py, rtoml, orjson), and Homebrew has to build
+    # rust, openssl@3, pkgconf, python@3.12 and uv first if the image has no bottle
+    # cached for them.
+    timeout-minutes: 90
+    env:
+      HOMEBREW_NO_ANALYTICS: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Recorded, not assumed. If a future image drops Homebrew or moves it, this line
+      # says so in one place instead of the failure surfacing as `brew: command not
+      # found` inside a 90-minute step.
+      - name: Record the Homebrew and Ruby the image shipped
+        run: |
+          set -euo pipefail
+          brew --version
+          ruby --version
+
+      # The same check .github/actions/validate-install runs, repeated here only as a
+      # fast fail: a syntax error caught in two seconds beats one caught after Homebrew
+      # has installed a Rust toolchain.
+      - name: Formula parses
+        run: ruby -c Formula/ash.rb
+
+      # `--formula` disambiguates the path from a cask. `--build-from-source` is
+      # explicit rather than necessary -- a formula outside a tap has no bottle -- and
+      # it documents that every resource is compiled here.
+      - name: Install ASH from the formula
+        run: brew install --verbose --build-from-source --formula ./Formula/ash.rb
+
+      # The formula's own `test do` block: a real scan of a fixture planted with an AWS
+      # secret, asserting a non-zero SARIF result count. Asserting exit 0 would prove
+      # nothing, because an ASH scan that finds nothing also exits 0.
+      - name: Run the formula's test block
+        run: brew test --verbose --formula ./Formula/ash.rb
+
+      # Audit runs LAST, and the ordering is the point. It is the cheapest step here,
+      # so putting it first would be the obvious choice, but `--strict` enables cops
+      # that have nothing to do with the resource block and some of which only apply to
+      # homebrew/core. If audit were first and tripped one of those, it would hide the
+      # install and test evidence behind a style finding, and a maintainer would have no
+      # way to tell a real defect from a core-only rule without re-running by hand.
+      # Last, the log above it already shows whether the block installs.
+      #
+      # If a strict-only finding does fire, satisfy it. Dropping `--strict` would remove
+      # the check that catches a malformed resource block, which is the reason audit is
+      # in this job at all.
+      - name: Audit the formula against Homebrew's own rules
+        run: brew audit --strict --formula ./Formula/ash.rb
+
