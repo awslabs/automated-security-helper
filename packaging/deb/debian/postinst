@@ -1,0 +1,54 @@
+#!/bin/sh
+# Creates the venv and installs ASH's wheel into it.
+#
+# Deliberately NOT `set -e` at the top: a bare failure here leaves the package
+# "installed" with a broken venv and no explanation. Each step is checked and
+# reported instead, so the failure names what to do about it.
+set -u
+
+VENV=/usr/lib/ash/venv
+WHEELS=/usr/lib/ash/wheels
+
+case "$1" in
+  configure)
+    # Remove any venv from a previous version before rebuilding. An in-place
+    # `pip install --upgrade` into an existing venv leaves the old distribution's
+    # entry points behind when a release renames one, and ASH ships three.
+    rm -rf "$VENV"
+
+    if ! python3 -m venv "$VENV"; then
+      echo "ash: failed to create a virtualenv at $VENV." >&2
+      echo "ash: python3-venv is a declared dependency; if it is present, check" >&2
+      echo "ash: that $VENV is writable and not on a noexec mount." >&2
+      exit 1
+    fi
+
+    WHEEL=$(find "$WHEELS" -maxdepth 1 -name '*.whl' -print -quit 2>/dev/null || true)
+    if [ -z "$WHEEL" ]; then
+      echo "ash: no wheel found under $WHEELS -- the package is malformed." >&2
+      exit 1
+    fi
+
+    # The wheel is installed from the local path; its DEPENDENCIES come from the
+    # index. That split is the whole reason this package is not self-contained,
+    # and it is documented in README.Debian.
+    if ! "$VENV/bin/pip" install --quiet --disable-pip-version-check "$WHEEL"; then
+      echo "ash: failed to install $WHEEL into $VENV." >&2
+      echo "ash: this step needs a reachable Python package index to resolve ASH's" >&2
+      echo "ash: runtime dependencies. See /usr/share/doc/ash/README.Debian." >&2
+      exit 1
+    fi
+
+    # Assert the entry point exists rather than trusting pip's exit code. A wheel
+    # can install cleanly and still not produce a console script if its metadata
+    # is wrong, and the wrapper in /usr/bin/ash would then fail for every user.
+    if [ ! -x "$VENV/bin/ash" ]; then
+      echo "ash: $WHEEL installed but produced no 'ash' entry point." >&2
+      exit 1
+    fi
+    ;;
+  abort-upgrade|abort-remove|abort-deconfigure)
+    ;;
+esac
+
+exit 0

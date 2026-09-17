@@ -1,0 +1,20 @@
+Package: ash
+Version: @DEB_VERSION@
+Section: devel
+Priority: optional
+Architecture: all
+Depends: python3 (>= 3.10), python3-venv, python3-pip, ca-certificates
+Maintainer: AWS Labs <automated-security-helper@amazon.com>
+Homepage: https://github.com/awslabs/automated-security-helper
+Description: Automated Security Helper (ASH) security scan orchestrator
+ ASH runs a suite of security scanners over a source tree and aggregates their
+ findings into a single report, in SARIF and several other formats.
+ .
+ This package installs ASH itself. It does not bundle any scanner: the scanners
+ ASH drives are third-party tools, and shipping their source inside this package
+ is forbidden by the project's artifact-contents rule. Install them with
+ "ash dependencies install", optionally selecting individual tools with --tool.
+ .
+ The post-install step needs a reachable Python package index to resolve ASH's
+ runtime dependencies. On a host with no index, stage one first; see
+ /usr/share/doc/ash/README.Debian for why the package cannot carry them.

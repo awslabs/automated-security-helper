@@ -1,0 +1,40 @@
+ash for Debian and Ubuntu
+=========================
+
+Why this package needs a Python index at install time
+-----------------------------------------------------
+
+The package bundles ASH's own wheel and nothing else. Its post-install step creates
+a virtualenv under /usr/lib/ash/venv and installs that wheel into it, which resolves
+ASH's 27 runtime dependencies from whatever Python index the host is configured for.
+
+This is not an oversight, and bundling the dependency wheels would not be an
+improvement. One of those dependencies, detect-secrets, is itself a security scanner.
+The project forbids any published artifact from containing third-party scanner source,
+and a .deb carrying a detect_secrets wheel would contain exactly that. ASH's published
+wheel satisfies the rule only because it declares its dependencies rather than
+vendoring them, and this package inherits the guarantee only by doing the same.
+
+On a host with no reachable index, stage one before installing:
+
+  pip download automated-security-helper==<version> -d /srv/ash-wheels
+  # then, on the target, before apt-get install:
+  printf 'no-index = true\nfind-links = /srv/ash-wheels\n' >> /etc/pip.conf
+
+Scanners are not installed by this package
+------------------------------------------
+
+ASH drives third-party scanners; it does not contain them. After installing:
+
+  ash dependencies install              # everything ASH can provision
+  ash dependencies install --tool grype # or one at a time
+
+Files
+-----
+
+  /usr/lib/ash/wheels/   ASH's wheel, the package's only payload
+  /usr/lib/ash/venv/     created by postinst, removed by prerm
+  /usr/bin/ash           wrapper that execs the venv entry point
+
+The venv is built on the target rather than shipped, because a virtualenv records
+absolute paths and the interpreter ABI of the machine that created it.

@@ -1,0 +1,14 @@
+#!/bin/sh
+# Drops the venv on removal.
+#
+# dpkg tracks only files shipped in the .deb, and the venv was written by postinst,
+# so without this the package "removes" and leaves a few thousand files behind.
+set -u
+
+case "$1" in
+  remove|upgrade|deconfigure)
+    rm -rf /usr/lib/ash/venv
+    ;;
+esac
+
+exit 0
