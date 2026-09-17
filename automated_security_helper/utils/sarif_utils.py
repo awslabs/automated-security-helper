@@ -17,7 +17,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ToolComponent,
     PropertyBag,
 )
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP, escape_markup
 from automated_security_helper.schemas.sarif_schema_model import (
     Result,
     Suppression,
@@ -400,15 +400,22 @@ def _apply_config_suppression(
         result.suppressions = []
     if len(result.suppressions) >= 1:
         ASH_LOGGER.debug(
-            f"Suppressions already found for rule '{result.ruleId}' on location '{flat_finding.file_path}'. Only the first suppression will be applied to prevent SARIF ingestion issues."
+            f"Suppressions already found for rule '{result.ruleId}' on location '{flat_finding.file_path}'. Only the first suppression will be applied to prevent SARIF ingestion issues.",
+            extra=NO_MARKUP,
         )
         return True
 
     reason = (
         matching_suppression and matching_suppression.reason
     ) or "No reason provided"
+    # This message styles its own reason, so markup has to stay on for the record
+    # and each interpolated value is escaped instead. A rule id or a repository
+    # path can contain brackets, and an unescaped one either aborts the record or
+    # is silently swallowed as a style tag.
     ASH_LOGGER.verbose(
-        f"Suppressing rule '{result.ruleId}' on location '{flat_finding.file_path}' based on suppression rule: [yellow]{reason}[/yellow]"
+        f"Suppressing rule '{escape_markup(result.ruleId)}' on location "
+        f"'{escape_markup(flat_finding.file_path)}' based on suppression rule: "
+        f"[yellow]{escape_markup(reason)}[/yellow]"
     )
     result.suppressions.append(
         Suppression(
@@ -442,7 +449,9 @@ def _apply_inline_suppression(
             if not result.suppressions:
                 result.suppressions = []
             ASH_LOGGER.verbose(
-                f"Suppressing rule '{result.ruleId}' at line {result_line} in '{normalized_uri}' via inline comment: [yellow]{isup.reason}[/yellow]"
+                f"Suppressing rule '{escape_markup(result.ruleId)}' at line "
+                f"{result_line} in '{escape_markup(normalized_uri)}' via inline "
+                f"comment: [yellow]{escape_markup(isup.reason)}[/yellow]"
             )
             result.suppressions.append(
                 Suppression(
@@ -552,14 +561,18 @@ def apply_suppressions_to_sarif(
                         _output_dir_resolved
                     ) and not resolved_uri.is_relative_to(_work_dir_resolved):
                         ASH_LOGGER.verbose(
-                            f"Excluding result -- location is in output path and NOT in the work directory and should not have been included: '{uri}'"
+                            f"Excluding result -- location is in output path and NOT in the work directory and should not have been included: '{uri}'",
+                            extra=NO_MARKUP,
                         )
                         is_in_ignorable_path = True
                         continue
                     ignore_reason = _check_ignore_paths(uri, ignore_paths)
                     if ignore_reason is not None:
                         ASH_LOGGER.verbose(
-                            f"Ignoring finding on rule '{result.ruleId}' file location '{uri}' based on ignore_path match with global reason: [yellow]{ignore_reason}[/yellow]"
+                            f"Ignoring finding on rule '{escape_markup(result.ruleId)}' "
+                            f"file location '{escape_markup(uri)}' based on ignore_path "
+                            f"match with global reason: "
+                            f"[yellow]{escape_markup(ignore_reason)}[/yellow]"
                         )
                         is_in_ignorable_path = True
 

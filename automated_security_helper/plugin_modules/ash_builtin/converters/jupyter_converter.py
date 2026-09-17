@@ -20,7 +20,7 @@ from automated_security_helper.base.options import (
 from automated_security_helper.plugins.decorators import ash_converter_plugin
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.normalizers import get_normalized_filename
 from automated_security_helper.utils.suppression_matcher import file_path_matches as path_matches_pattern
 
@@ -219,7 +219,9 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
                     f"jupyter execution via UV failed with exit code {result.returncode}"
                 )
                 if result.stderr:
-                    ASH_LOGGER.debug(f"jupyter stderr: {result.stderr}")
+                    ASH_LOGGER.debug(
+                        f"jupyter stderr: {result.stderr}", extra=NO_MARKUP
+                    )
                 return False
 
         except UVToolRunnerError as e:
@@ -349,7 +351,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
             except subprocess.CalledProcessError as e:
                 ASH_LOGGER.error(f"Error converting {ipynb_file}: {e}")
                 if e.stderr:
-                    ASH_LOGGER.debug(f"nbconvert stderr: {e.stderr}")
+                    ASH_LOGGER.debug(f"nbconvert stderr: {e.stderr}", extra=NO_MARKUP)
             except Exception as e:
                 ASH_LOGGER.error(f"Unexpected error converting {ipynb_file}: {e}")
                 import traceback

@@ -89,6 +89,12 @@ class _RecordingLogger:
 
     Only the six levels run_ash_scan uses are defined, including the custom
     ``verbose`` level ASH adds. A call to any other level is an AttributeError.
+
+    Each method accepts and discards ``**kwargs`` because ``logging.Logger`` does
+    too, and production code passes ``extra=NO_MARKUP`` on the messages that carry
+    subprocess output. Recording only the message keeps the assertions unchanged;
+    rejecting the keyword would make this double stricter than the thing it
+    stands in for.
     """
 
     def __init__(self):
@@ -101,22 +107,22 @@ class _RecordingLogger:
             "exception": [],
         }
 
-    def verbose(self, message):
+    def verbose(self, message, **kwargs):
         self.records["verbose"].append(str(message))
 
-    def debug(self, message):
+    def debug(self, message, **kwargs):
         self.records["debug"].append(str(message))
 
-    def info(self, message):
+    def info(self, message, **kwargs):
         self.records["info"].append(str(message))
 
-    def warning(self, message):
+    def warning(self, message, **kwargs):
         self.records["warning"].append(str(message))
 
-    def error(self, message):
+    def error(self, message, **kwargs):
         self.records["error"].append(str(message))
 
-    def exception(self, message):
+    def exception(self, message, **kwargs):
         self.records["exception"].append(str(message))
 
     def all_messages(self) -> str:

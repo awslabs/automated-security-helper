@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union, Any, Literal
 
 from automated_security_helper.core.constants import ASH_BIN_PATH
-from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 
 
 _find_executable_cache: dict[str, str | None] = {}
@@ -124,13 +124,13 @@ def find_executable(command: str) -> Optional[str]:
                 if item is not None
             ]
             for poss in possibles:
-                ASH_LOGGER.debug(f"Checking for executable: {poss}")
+                ASH_LOGGER.debug(f"Checking for executable: {poss}", extra=NO_MARKUP)
                 if poss.exists():
                     result = poss.as_posix()
                     _find_executable_cache[command] = result
                     return result
         except Exception as e:
-            ASH_LOGGER.error(e)
+            ASH_LOGGER.error(e, extra=NO_MARKUP)
 
     _find_executable_cache[command] = None
     return None
@@ -180,7 +180,7 @@ def run_command(
 
     # Log the command being executed
     cmd_str = " ".join(args) if isinstance(args, list) else args
-    ASH_LOGGER.log(log_level, f"Running command: {cmd_str}")
+    ASH_LOGGER.log(log_level, f"Running command: {cmd_str}", extra=NO_MARKUP)
 
     # Set encoding for Windows compatibility
     if encoding is None and platform.system().lower() == "windows":
@@ -206,13 +206,16 @@ def run_command(
         else:
             ASH_LOGGER.warning(f"Command failed with return code {result.returncode}")
             if result.stderr:
-                ASH_LOGGER.debug(f"Command stderr: {result.stderr}")
+                ASH_LOGGER.debug(f"Command stderr: {result.stderr}", extra=NO_MARKUP)
 
         return result
     except subprocess.CalledProcessError as e:
-        ASH_LOGGER.error(f"Command failed with return code {e.returncode}: {cmd_str}")
+        ASH_LOGGER.error(
+            f"Command failed with return code {e.returncode}: {cmd_str}",
+            extra=NO_MARKUP,
+        )
         if e.stderr:
-            ASH_LOGGER.debug(f"Command stderr: {e.stderr}")
+            ASH_LOGGER.debug(f"Command stderr: {e.stderr}", extra=NO_MARKUP)
         if check:
             raise
         return subprocess.CompletedProcess(
@@ -222,7 +225,9 @@ def run_command(
             stderr=e.stderr or "",
         )
     except subprocess.TimeoutExpired as e:
-        ASH_LOGGER.error(f"Command timed out after {timeout} seconds: {cmd_str}")
+        ASH_LOGGER.error(
+            f"Command timed out after {timeout} seconds: {cmd_str}", extra=NO_MARKUP
+        )
         if check:
             raise
         return subprocess.CompletedProcess(
@@ -232,7 +237,7 @@ def run_command(
             stderr=e.stderr or f"Command timed out after {e.timeout}s",
         )
     except Exception as e:
-        ASH_LOGGER.error(f"Error running command {cmd_str}: {e}")
+        ASH_LOGGER.error(f"Error running command {cmd_str}: {e}", extra=NO_MARKUP)
         if check:
             raise
         # Create a CompletedProcess-like object with error info
@@ -285,7 +290,7 @@ def run_command_with_output_handling(
 
     # Log the command being executed
     cmd_str = " ".join(command) if isinstance(command, list) else command
-    ASH_LOGGER.verbose(f"Running: {cmd_str}")
+    ASH_LOGGER.verbose(f"Running: {cmd_str}", extra=NO_MARKUP)
 
     # Set encoding for Windows compatibility
     if encoding is None and platform.system().lower() == "windows":
@@ -359,7 +364,9 @@ def run_command_with_output_handling(
         # such. That branch returns returncode 1 for everything, which cannot be
         # told apart from a tool that simply exited 1.
         error_msg = f"Command timed out after {timeout}s: {cmd_str}"
-        ASH_LOGGER.error(error_msg)
+        # NO_MARKUP rather than escaping error_msg: it is also returned to the
+        # caller below and lands in the scanner's stderr, which must stay verbatim.
+        ASH_LOGGER.error(error_msg, extra=NO_MARKUP)
         partial = {}
         for stream_name in ("stdout", "stderr"):
             captured = getattr(e, stream_name, None)
@@ -378,7 +385,7 @@ def run_command_with_output_handling(
 
     except Exception as e:
         error_msg = f"Error running {cmd_str}: {e}"
-        ASH_LOGGER.error(error_msg)
+        ASH_LOGGER.error(error_msg, extra=NO_MARKUP)
         return {"error": str(e), "returncode": 1, "stderr": error_msg}
 
 
@@ -444,7 +451,7 @@ def run_command_stream_output(
 
     # Log the command being executed
     cmd_str = " ".join(args) if isinstance(args, list) else args
-    ASH_LOGGER.info(f"Running command: {cmd_str}")
+    ASH_LOGGER.info(f"Running command: {cmd_str}", extra=NO_MARKUP)
 
     # Set encoding for Windows compatibility
     if encoding is None and platform.system().lower() == "windows":
@@ -472,7 +479,7 @@ def run_command_stream_output(
             process.wait()
             return process.returncode
         except Exception as e:
-            ASH_LOGGER.error(f"Error running command {cmd_str}: {e}")
+            ASH_LOGGER.error(f"Error running command {cmd_str}: {e}", extra=NO_MARKUP)
             return 1
         finally:
             if process.poll() is None:
@@ -494,7 +501,7 @@ def get_host_uid() -> int:
         result = run_command(["id", "-u"], capture_output=True, text=True, check=True)
         return int(result.stdout.strip())
     except Exception as e:
-        ASH_LOGGER.error(f"Error getting host UID: {e}")
+        ASH_LOGGER.error(f"Error getting host UID: {e}", extra=NO_MARKUP)
         ASH_LOGGER.warning(
             "Falling back to default UID 1000 (command 'id -u' unavailable on this platform)"
         )
@@ -511,7 +518,7 @@ def get_host_gid() -> int:
         result = run_command(["id", "-g"], capture_output=True, text=True, check=True)
         return int(result.stdout.strip())
     except Exception as e:
-        ASH_LOGGER.error(f"Error getting host GID: {e}")
+        ASH_LOGGER.error(f"Error getting host GID: {e}", extra=NO_MARKUP)
         ASH_LOGGER.warning(
             "Falling back to default GID 1000 (command 'id -g' unavailable on this platform)"
         )
@@ -587,7 +594,7 @@ def create_process_with_pipes(
 
     # Log the command being executed
     cmd_str = " ".join(args) if isinstance(args, list) else args
-    ASH_LOGGER.verbose(f"Creating process with pipes: {cmd_str}")
+    ASH_LOGGER.verbose(f"Creating process with pipes: {cmd_str}", extra=NO_MARKUP)
 
     stderr = subprocess.STDOUT if stderr_to_stdout else subprocess.PIPE
 
@@ -609,5 +616,5 @@ def create_process_with_pipes(
         )
         return process
     except Exception as e:
-        ASH_LOGGER.error(f"Error creating process with pipes: {e}")
+        ASH_LOGGER.error(f"Error creating process with pipes: {e}", extra=NO_MARKUP)
         raise
