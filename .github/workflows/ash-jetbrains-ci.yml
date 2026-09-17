@@ -37,7 +37,34 @@ name: JetBrains plugin CI
 # The cost is stated plainly: this runs on every pull request, and the first run on a cold
 # cache resolves an IDE distribution of roughly a gigabyte from JetBrains' CDN.
 
+# WHY THERE IS A push TRIGGER DESPITE THE ABOVE
+#
+# `workflow_dispatch` alone does not make a new workflow reachable. GitHub resolves a
+# dispatch by filename against the DEFAULT branch, so a workflow that has never run
+# is unknown to the API and `gh workflow run ash-jetbrains-ci.yml --ref
+# v4-capabilities` answers `HTTP 404: workflow not found on the default branch`. That
+# is measured, not inferred: it is what happened on this branch, while
+# ash-vscode-extension.yml -- new in the same merge -- dispatched fine because its
+# push trigger had already run it once and registered it.
+#
+# So on a long-lived feature branch with no pull request open, this workflow had no
+# trigger it could fire on at all. The push filter below is narrow enough that it
+# costs nothing on unrelated pushes and wide enough to give the branch a signal.
+#
+# A paths filter IS used on push, unlike on pull_request, and the asymmetry is
+# deliberate rather than an oversight. The argument above against filtering is about
+# a gate's verdict: a filtered pull_request leg plus an unfiltered merge_group leg
+# gives two different answers to "did this pass". A push run is not a merge gate --
+# it is a branch signal - so no verdict depends on it and there is nothing for the
+# asymmetry to make inconsistent. What it avoids is resolving a gigabyte of IDE
+# distribution on every push to a branch that did not touch the plugin.
 on:
+  push:
+    branches:
+      - "**"
+    paths:
+      - "editors/jetbrains/**"
+      - ".github/workflows/ash-jetbrains-ci.yml"
   pull_request:
     branches:
       - "**"
@@ -86,7 +113,17 @@ jobs:
       # the same. Without git, checkout silently falls back to a REST API tarball, which leaves
       # no git metadata -- and the coverage gate's census comes from `git ls-files`, so it would
       # fail with a message about missing source files rather than about a missing repository.
+      # `shell: bash`, because inside a `container:` Actions runs a bare `run:` with
+      # `sh -e {0}`, and gradle:jdk21's /bin/sh is dash. This one happens to work
+      # without it -- that image's dash is new enough to accept `-o pipefail`, which
+      # dash gained in 0.5.12 -- but debian:bookworm's is not, and the same three
+      # lines in ash-package.yml's deb job died on their first line with
+      # "Illegal option -o pipefail" and failed the whole job. Depending on which
+      # dash a base image happens to ship is not worth the one line it takes to
+      # remove the dependency. Measured: /bin/sh is dash in this image, bash is
+      # present at /usr/bin/bash.
       - name: Confirm the image has git, and that this is a real clone
+        shell: bash
         run: |
           set -euo pipefail
           git --version

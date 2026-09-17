@@ -323,7 +323,22 @@ jobs:
       # debian:bookworm ships none. Without this it silently falls back to a REST API
       # tarball, which works but leaves no git metadata -- and the failure mode when it
       # does not work is an empty workspace rather than an error naming git.
+      #
+      # `shell: bash` is not decoration. Inside a `container:`, Actions runs a bare
+      # `run:` with `sh -e {0}`, and debian:bookworm's /bin/sh is dash, which has no
+      # `pipefail`. So this step died on its FIRST line with
+      #
+      #     /__w/_temp/....sh: 1: set: Illegal option -o pipefail
+      #     ##[error]Process completed with exit code 2.
+      #
+      # before apt-get ran at all, which failed the whole deb job. Measured in run
+      # 35257690850. It is invisible when the same script is run by hand, because an
+      # interactive shell is bash, and invisible in the rpm job next door, because
+      # amazonlinux:2023's /bin/sh IS bash -- that job got as far as its own unrelated
+      # failure. The asymmetry is the reason this survived: two jobs with the same
+      # three lines, and only one of them broken by them.
       - name: Install git for actions/checkout
+        shell: bash
         run: |
           set -euo pipefail
           export DEBIAN_FRONTEND=noninteractive
@@ -355,7 +370,14 @@ jobs:
     timeout-minutes: 25
     container: public.ecr.aws/amazonlinux/amazonlinux:2023
     steps:
+      # `shell: bash` for the same reason as the deb job above, though this image is
+      # the one where it currently makes no difference: amazonlinux:2023's /bin/sh IS
+      # bash, so `set -euo pipefail` works here as written. It is made explicit
+      # anyway, because "works" is resting on a property of the base image that
+      # nothing states and nothing checks, and the deb job is the demonstration of
+      # what happens when that property differs.
       - name: Install git for actions/checkout
+        shell: bash
         run: |
           set -euo pipefail
           dnf -q -y install git ca-certificates tar gzip >/dev/null
