@@ -225,6 +225,44 @@ version_files = [
     "docs/content/docs/cli-reference.md:automated-security-helper@",
     "docs/content/docs/mcp-performance-scalability.md:automated-security-helper@",
     "docs/content/docs/plugins/community/trivy-plugin.md:automated-security-helper.git@",
+    # The native Windows manifests. Each of these carries the package version as
+    # structured data a package manager reads, so a stale one installs an old ASH
+    # rather than failing -- the same shape as Formula/ash.rb above.
+    #
+    # On the anchors, which are load-bearing in a way the entries above are not.
+    # commitizen matches each regex per LINE and then replaces the current version
+    # within the lines that matched, so a pattern that matches one line too many
+    # rewrites a number that is not the package version:
+    #
+    #   ^PackageVersion   winget manifests also carry `ManifestVersion: 1.12.0`,
+    #                     the schema version. An unanchored `PackageVersion` does
+    #                     not match it, but `Version` would, and the schema version
+    #                     moving with ASH's releases would fail validation against
+    #                     a schema that does not exist. The `^` also keeps it off
+    #                     the two-space-indented keys inside the installer list.
+    #   <version>         the nuspec's own `<version>` element. Plain `version`
+    #                     would also match `<?xml version="1.0"` on line 1 and the
+    #                     `version="[3.10,3.14)"` Python dependency range, neither
+    #                     of which is ASH's version.
+    #   ^  InstallerUrl   needed as its own entry and easy to miss: the release
+    #                     asset URL embeds the version TWICE (`/v3.7.0/` and
+    #                     `-3.7.0-`) and lives on a line no PackageVersion pattern
+    #                     reaches. commitizen replaces every occurrence within a
+    #                     matching line, so one entry fixes both. Without it a bump
+    #                     leaves winget pointing at the previous release's asset.
+    #   ^\s+Version=      AppxManifest.xml's Identity/@Version. MSIX requires
+    #                     four-part `a.b.c.d`, and this works only because
+    #                     commitizen replaces the current version as a substring:
+    #                     `3.7.0` sits at the head of `3.7.0.0`. The indent anchor
+    #                     matters because `TargetDeviceFamily` also has a
+    #                     `Version=` attribute, which today merely happens not to
+    #                     contain the release version.
+    "packaging/chocolatey/ash.nuspec:<version>",
+    "packaging/winget/Amazon.AutomatedSecurityHelper.yaml:^PackageVersion",
+    "packaging/winget/Amazon.AutomatedSecurityHelper.installer.yaml:^PackageVersion",
+    "packaging/winget/Amazon.AutomatedSecurityHelper.installer.yaml:^  InstallerUrl",
+    "packaging/winget/Amazon.AutomatedSecurityHelper.locale.en-US.yaml:^PackageVersion",
+    'packaging/msix/AppxManifest.xml:^\s+Version=',
 ]
 # Rewriting _base/ is only half the chain: the 17 generated trees are still on
 # the old tag until the transpiler reruns, and `agentic-plugins check` byte-
