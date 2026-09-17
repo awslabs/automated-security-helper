@@ -59,55 +59,22 @@ fi
 echo "   OK: $WRAPPER_JAR is tracked ($(wc -c < "$WRAPPER_JAR") bytes)"
 
 echo "== 3. build, test, and gate coverage"
-# `check` pulls in test and assertCoverage; buildPlugin pulls in the distribution and, via
-# finalizedBy, assertDistributionContents. The test task fails on a zero test count, because
-# a Gradle test task with no tests SUCCEEDS -- the same silent pass as a jest run reporting
-# "0 total".
+# `check` pulls in unitTest, assertTestsRan and assertCoverage; buildPlugin pulls in the
+# distribution and, via finalizedBy, assertDistributionContents. Every gate is a Gradle task
+# rather than a step here, so `./gradlew check` gates on a developer's machine exactly as this
+# script does -- and so there is one place to relax each of them rather than two.
 ./gradlew --no-daemon --console=plain check buildPlugin
 
-echo "== 4. the test count and the annotation assertion, read from the report"
-# Read from the XML rather than trusted from the console. The console line comes from the
-# build script's own listener; this comes from the artifact, so the two disagreeing is
-# itself information.
-python3 - <<'PY'
-import pathlib
-import sys
-import xml.etree.ElementTree as ET
-
-results = sorted(pathlib.Path("build/test-results/test").glob("TEST-*.xml"))
-if not results:
-    print("   FAIL: no JUnit XML results. The suite did not run.")
-    raise SystemExit(1)
-
-tests = failures = errors = skipped = 0
-count_test_seen = False
-for path in results:
-    root = ET.parse(path).getroot()  # noqa: S314
-    tests += int(root.get("tests", "0"))
-    failures += int(root.get("failures", "0"))
-    errors += int(root.get("errors", "0"))
-    skipped += int(root.get("skipped", "0"))
-    if root.get("name", "").endswith("AnnotationCountTest"):
-        count_test_seen = True
-
-print(f"   {tests} test(s): {failures} failed, {errors} errored, {skipped} skipped")
-if tests == 0:
-    print("   FAIL: 0 tests. A suite that cannot fail passes.")
-    raise SystemExit(1)
-if failures or errors:
-    raise SystemExit(1)
-if skipped:
-    # A skipped test is a test that cannot fail. Nothing in this suite is conditional, so a
-    # skip means something changed.
-    print("   FAIL: a test was skipped, and nothing here is meant to be conditional.")
-    raise SystemExit(1)
-if not count_test_seen:
-    print("   FAIL: AnnotationCountTest did not run. That is the class that asserts a")
-    print("   NON-ZERO number of annotations from a planted secret, which is the only")
-    print("   assertion here that a silent scan cannot satisfy.")
-    raise SystemExit(1)
-print("   OK: AnnotationCountTest ran and passed")
-PY
+echo "== 4. the test count and the annotation assertion, printed from the report"
+# assertTestsRan already ran as part of `check`. Invoked again here, rather than
+# reimplemented, so the numbers appear in this script's own output: the claim "161 tests ran
+# and none was skipped" should be checkable by reading the log, not only by trusting an exit
+# code. Reimplementing it in this file is the mistake to avoid -- a verification that exists
+# twice drifts, and the copy nobody runs by hand is the one that rots.
+python3 assert-tests-ran.py \
+  --results build/test-results/unitTest \
+  --test-classes build/classes/java/test \
+  --require-suite io.github.awslabs.ash.jetbrains.AnnotationCountTest
 
 echo "== 5. the fixture still carries the planted secret"
 # Without it, AnnotationCountTest passes vacuously: the SARIF fixture would still have three

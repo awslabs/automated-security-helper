@@ -165,14 +165,16 @@ val unitTest = tasks.register<Test>("unitTest") {
     classpath = sourceSets["test"].runtimeClasspath
     useJUnitPlatform()
 
-    // A Gradle test task with no tests SUCCEEDS. An empty test source set, a bad include
-    // filter, or a JUnit platform that failed to find an engine all produce a green task and
-    // an empty report, which is the same silent pass a jest run reporting "0 total" produces.
-    // So count what ran and fail on zero.
+    // A Gradle test task with no tests SUCCEEDS, so this counts what ran and fails on zero.
     //
-    // The count comes from the task's own result object. verify-in-container.sh re-derives it
-    // from the XML report afterwards, on purpose: the two disagreeing would itself be
-    // information.
+    // It is NOT the gate, and the difference was measured rather than reasoned about. With the
+    // test sources moved aside, Gradle reported "Task :unitTest NO-SOURCE" and BUILD
+    // SUCCESSFUL: a task skipped as NO-SOURCE never runs its actions, so this block was never
+    // reached in the one case it was written for. assertTestsRan below is the gate, because it
+    // is a separate task that reads artifacts and therefore fires whether or not this task
+    // ran. What this block still buys is a clearer message, at the moment of the run, when the
+    // task does execute and finds nothing -- a bad include filter, or a JUnit platform that
+    // failed to find an engine.
     val executed = mutableListOf<Long>()
     addTestListener(object : TestListener {
         override fun beforeSuite(suite: TestDescriptor) {}
@@ -231,6 +233,28 @@ tasks.jacocoTestReport {
     // scope.
 }
 
+// The gate on the suite having run at all. Separate from the unitTest task on purpose: a task
+// Gradle skips as NO-SOURCE runs none of its own actions, so an in-task guard cannot fail in
+// the case that matters. This one reads the JUnit XML results and the compiled test classes
+// and compares them, which also closes the stale-results hole an XML-only check would leave,
+// and catches a committed include filter that runs a subset and reports green.
+val assertTestsRan = tasks.register<Exec>("assertTestsRan") {
+    group = "verification"
+    description = "Fails unless every compiled test suite ran and reported, with none skipped."
+    dependsOn(unitTest)
+    workingDir = layout.projectDirectory.asFile
+    commandLine(
+        "python3",
+        "assert-tests-ran.py",
+        "--results", "build/test-results/unitTest",
+        "--test-classes", "build/classes/java/test",
+        // The one class whose assertion a silent scan cannot satisfy. Named rather than left to
+        // the compiled-suite comparison, so that deleting the file fails with a message about
+        // this class rather than about a count.
+        "--require-suite", "io.github.awslabs.ash.jetbrains.AnnotationCountTest",
+    )
+}
+
 // The coverage gate. A Gradle task rather than a workflow-only step so that
 // `./gradlew check` gates locally exactly as CI does.
 //
@@ -270,7 +294,10 @@ val assertCoverage = tasks.register<Exec>("assertCoverage") {
 tasks.check {
     // unitTest explicitly, because tasks.test is disabled above and `check` would otherwise
     // depend only on a task that does nothing.
-    dependsOn(unitTest, assertCoverage)
+    // unitTest explicitly, because tasks.test is disabled above and `check` would otherwise
+    // depend only on a task that does nothing. assertTestsRan explicitly too, because it is
+    // the only one of the three that can fail when unitTest is skipped as NO-SOURCE.
+    dependsOn(unitTest, assertTestsRan, assertCoverage)
 }
 
 // Runs after the distribution zip exists rather than as part of it, because the check is
