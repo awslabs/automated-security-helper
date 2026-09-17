@@ -35,9 +35,12 @@ container image. Nothing about that is impermissible. What the boundary rules ou
 *us* publishing an artifact with someone else's code inside it, which is a question
 about the publisher, not about what the bytes can do.
 
-So the one change to avoid is quietly adding dependency wheels to the `.deb` or `.rpm`
-built here. That would turn a one-file check anyone can run into a per-dependency
-judgment nobody will re-run.
+So the one change to avoid is quietly adding dependency wheels to the `.deb`, `.rpm`,
+or Chocolatey package built here. That would turn a one-file check anyone can run into
+a per-dependency judgment nobody will re-run. Chocolatey is where that pressure is
+highest, because vendoring binaries into `tools/` is the format's own convention;
+`packaging/chocolatey/README.chocolatey` says so at the point where someone would be
+tempted.
 
 ## Layout
 
@@ -45,6 +48,7 @@ judgment nobody will re-run.
 |---|---|---|
 | `deb/` | Debian, Ubuntu | build + install + real scan in `debian:bookworm` |
 | `rpm/` | Amazon Linux, RHEL | build + install + real scan in `amazonlinux:2023` |
+| `chocolatey/` | Windows, via Chocolatey | nuspec vs NuGet's XSD anywhere; build + install + real scan on `windows-latest` |
 
 ## Install shape, common to both
 
