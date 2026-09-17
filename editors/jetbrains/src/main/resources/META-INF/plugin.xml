@@ -1,0 +1,78 @@
+<!--
+  Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+  SPDX-License-Identifier: Apache-2.0
+
+  The plugin descriptor.
+
+  A note on punctuation before anything else, because this file has already broken the build
+  once for it: XML forbids a double hyphen inside a comment, and the IntelliJ Platform Gradle
+  plugin's patchPluginXml task fails the whole build with
+  "org.jdom2.input.JDOMParseException: Error on line 12: The string is not permitted within
+  comments" rather than skipping the comment. The rest of this directory uses a double hyphen
+  the way prose uses a dash. Do not carry that habit into this file.
+  packaging/chocolatey/ash.nuspec carries the same warning for the same reason.
+
+  NO version AND NO idea-version ELEMENT HERE, ON PURPOSE
+
+  Both are written into this file by patchPluginXml, from `version` and
+  `pluginConfiguration.ideaVersion` in build.gradle.kts. Declaring them here as well would
+  mean two sources of truth for a number, and the one in this file would be the stale one,
+  because patchPluginXml replaces what it finds.
+
+  That also keeps this file out of pyproject.toml's [tool.commitizen] version_files, and
+  build.gradle.kts explains at length why the plugin version does not track ASH's at all.
+  Worth stating here too, because this is the file someone would reach for: commitizen
+  matches its patterns per LINE and replaces the current version within every matching line,
+  so a pattern aimed at a plugin version in this file would also rewrite the build number
+  range in the idea-version element, which is a completely unrelated number on a completely
+  unrelated schedule.
+
+  WHY THERE IS NO depends ON A LANGUAGE PLUGIN
+
+  The annotator is registered for every language below. ASH scans a repository and reports
+  findings in whatever it finds: Python, TypeScript, Terraform, CloudFormation YAML,
+  Dockerfiles, Ruby. Restricting the registration to one language would silently drop
+  findings in every other file type, and a JSON or YAML finding is among the most common
+  things ASH reports. com.intellij.modules.platform is the only dependency, which is what
+  makes this plugin installable in every JetBrains IDE rather than only in IDEA.
+-->
+<idea-plugin>
+    <id>io.github.awslabs.ash</id>
+    <name>ASH - Automated Security Helper</name>
+    <vendor url="https://github.com/awslabs">Amazon Web Services</vendor>
+
+    <description><![CDATA[
+    Runs the <code>ash</code> command line tool over the open project and shows what it
+    reports as editor annotations.
+    <br/><br/>
+    This plugin contains no scanners and no copy of ASH. It invokes whatever <code>ash</code>
+    is on your PATH, or the executable set in <b>Settings | Tools | ASH</b>, and reads the
+    SARIF that ASH already writes. Install ASH separately, then run
+    <code>ash dependencies install</code> to provision the scanners ASH can install itself.
+    <br/><br/>
+    On a host where another program answers to the name <code>ash</code>, and MSYS2 ships an
+    <code>ash</code> shell on Windows, set the executable to
+    <code>automated-security-helper</code>, which is ASH's unambiguous entry point.
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- Application level, because the path to a binary is a property of the machine. -->
+        <applicationService serviceImplementation="io.github.awslabs.ash.jetbrains.AshSettings"/>
+
+        <applicationConfigurable
+                parentId="tools"
+                instance="io.github.awslabs.ash.jetbrains.AshSettingsConfigurable"
+                id="io.github.awslabs.ash.settings"
+                displayName="ASH"/>
+
+        <!--
+          An empty language attribute means every language, including plain text and file
+          types no language plugin claims. See the note above on why this is not scoped.
+        -->
+        <externalAnnotator
+                language=""
+                implementationClass="io.github.awslabs.ash.jetbrains.AshExternalAnnotator"/>
+    </extensions>
+</idea-plugin>

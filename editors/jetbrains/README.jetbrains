@@ -1,0 +1,207 @@
+ASH for JetBrains IDEs
+======================
+
+What this plugin is, and what it deliberately is not
+----------------------------------------------------
+
+It runs the `ash` command line tool over the open project and turns what ASH reports into
+editor annotations. It contains no scanners, no copy of ASH, and no scanner content of any
+kind. It invokes whatever `ash` is on the user's PATH, or the executable named in
+Settings | Tools | ASH, and reads the SARIF that ASH already writes at
+`<output-dir>/reports/ash.sarif`.
+
+So there is nothing here to keep in step with an ASH release. That is the reason the plugin
+version is not in pyproject.toml's [tool.commitizen] version_files, and build.gradle.kts
+gives the full argument at the point where someone would add it.
+
+Why this lives under editors/ and not under packaging/
+------------------------------------------------------
+
+Everything in packaging/ installs ASH, and every one of those packages bundles exactly one
+wheel -- ASH's own -- which is the mechanical guard keeping them on the permitted side of
+the publishing boundary described in packaging/README.md. This installs nothing and bundles
+nothing. It is a consumer of ASH rather than a distribution of it, and it would be the only
+directory under packaging/ with no wheel to count.
+
+editors/<editor>/ also holds a second editor integration without either owning the other's
+tree.
+
+Zero runtime dependencies, and why that is a requirement rather than a preference
+---------------------------------------------------------------------------------
+
+A JetBrains plugin distribution zip bundles its RUNTIME classpath into `lib/`. A single
+`implementation` dependency therefore puts a third party's jar inside an artifact this
+project publishes as a release asset, silently, at package time. packaging/README.md draws
+that line: ASH's own code may ship in a published artifact, third-party code never may.
+
+So this plugin has no runtime dependencies at all. Two consequences worth knowing before
+changing anything:
+
+  * The SARIF reader carries its own JSON parser, written against nothing but the JDK
+    (Json.java). The IntelliJ Platform does bundle JSON libraries in its own lib/, and a
+    compileOnly dependency on one would also keep the zip clean; that was rejected because
+    which libraries the platform ships is not part of the plugin SDK's compatibility
+    contract. A plugin relying on it gets a NoClassDefFoundError on some future IDE, and for
+    a security tool that renders as zero findings.
+  * assert-plugin-zip-contents.py is the enforcement, and it is phrased as a list comparison
+    for the same reason the one-wheel rule is phrased as a count: "no third-party jars" needs
+    a decision per dependency, made by whoever reviewed the build file that day. "Every jar
+    in lib/ is named ash-jetbrains*" is checkable by reading the log.
+
+It also refuses loose .class files in the zip, and refuses a class outside this plugin's own
+package inside our own jar. The .deb and .rpm can only gain third-party code by gaining a
+.whl, so counting wheels is sufficient there. A plugin build could instead shade or shadow
+third-party classes into our jar, which leaves the jar count at one and the boundary crossed
+anyway -- the same extra check packaging/flatpak/build.sh needs for `.dist-info` directories.
+
+Build-time dependencies are a different question and are not the concern: the IntelliJ
+Platform Gradle plugin, Gradle, JaCoCo, JUnit, and the roughly one gigabyte IDE distribution
+resolved from JetBrains' CDN are all thrown away after the build.
+
+The `ash` name collision on Windows
+-----------------------------------
+
+`ash` is canonical and is what this plugin invokes by default. It is also the name of the
+Almquist shell, which MSYS2 ships on Windows and which has already shadowed ASH's entry
+point in this project's CI, producing `Illegal option --`. JetBrains IDEs run on Windows and
+this plugin spawns a process, so the collision reaches users here.
+
+It cannot be left to fail naturally, because of the SHAPE of the failure. A shell that does
+not understand `scan --source-dir ...` writes an error and exits, ASH writes no SARIF, and a
+plugin that only knew how to read SARIF would put zero annotations on the file. Zero
+annotations is what a clean file looks like. The wrong binary answering would therefore
+render as "ASH found nothing", most confidently in the case where a real secret was present.
+
+Three things address it:
+
+  * Every scan is preceded by `ash --version`, and the plugin refuses to proceed unless the
+    output contains `awslabs/automated-security-helper`. An exit code cannot distinguish ASH
+    from any other program that answers `--version`, so the test is a string in ASH's own
+    output. Measured: `ash --version` prints
+    `awslabs/automated-security-helper v3.7.0` and exits 0.
+  * The error names `automated-security-helper` as the fix. That entry point is kept
+    indefinitely by the project for exactly this reason, so recommending it is not
+    recommending something that may be removed. When the output looks like a shell rejecting
+    an option, the message says so and names MSYS2.
+  * The child's stdin is redirected from the null device. A shell invoked in a way it reads
+    as interactive READS STDIN: with stdin inherited from the IDE, that child would never
+    exit and never write anything, and the annotator would wait on a process that is waiting
+    on it. The 30-second probe deadline bounds anything that ignores EOF.
+
+`--version` and not `-v`: `-v` is `--verbose` in ASH and has been for all of v3, so a probe
+using it would start a verbose scan instead of printing a version. `ashv3` still works and
+warns once on stderr; it is deprecated, so nothing here suggests it, and AshExecutable
+recognizes it only so a user who typed it into the settings field can be told where the
+stderr line came from.
+
+Building and verifying
+----------------------
+
+There is no JDK requirement to state beyond 21, and there is no need to install one: the
+whole verification runs in a container.
+
+  docker run --rm -v "$PWD":/work -w /work/editors/jetbrains gradle:jdk21 \
+      ./verify-in-container.sh
+
+That is the same script .github/workflows/ash-jetbrains-ci.yml runs. A verification that
+exists twice drifts, and the copy in CI is the one nobody runs by hand, which is why the
+steps are in the script rather than in the workflow YAML.
+
+The image is used for its toolset -- a JDK 21, git, python3 -- and not for its Gradle: the
+build always goes through `./gradlew`, which pins the Gradle version. That pin is
+load-bearing. The wrapper was first generated at 8.14.3 and the IntelliJ Platform Gradle
+plugin refused to apply, with "IntelliJ Platform Gradle Plugin requires Gradle Gradle 9.0.0
+and higher". Gradle 9 also turns the configuration cache on by default, which is why
+gradle.properties turns it back off.
+
+Expect the first build to be slow. The IntelliJ Platform Gradle plugin resolves an IDE
+distribution of roughly a gigabyte from JetBrains' CDN before it can compile anything.
+
+The gates, and where each one lives
+-----------------------------------
+
+All four are Gradle tasks, so `./gradlew check buildPlugin` gates on a developer's machine
+exactly as CI does, and each has one place to relax rather than two.
+
+  assertTestsRan          Every compiled test suite ran and reported, none was skipped, and
+                          AnnotationCountTest is among them.
+  assertCoverage          Line and branch coverage, the denominator floors, and the exclusion
+                          list audit.
+  assertDistributionContents
+                          Every jar in the built zip was built here, no loose class files, and
+                          no foreign class inside our own jar.
+  verifyPluginProjectConfiguration and verifyPluginStructure
+                          The platform's own two checks, provided by the IntelliJ Platform
+                          Gradle plugin and not wired into `check` by it. They are the only
+                          things that read META-INF/plugin.xml the way the platform will, so
+                          nothing else here would notice a misspelled extension point or a
+                          since-build the platform rejects. The full verifyPlugin task -- the
+                          Plugin Verifier's compatibility run, which downloads an additional
+                          IDE per target -- is deliberately not wired in.
+  unitTest's own doLast   A zero test count, reported at the moment of the run.
+
+The last of those is not the gate, and the distinction was measured. With the test sources
+moved aside, Gradle reported "Task :unitTest NO-SOURCE" and BUILD SUCCESSFUL: a task Gradle
+skips as NO-SOURCE runs none of its own actions, so the in-task guard was never reached in the
+one case it existed for. assertTestsRan is a separate task that reads artifacts, so it fires
+whether or not the test task ran, and it also catches a committed include filter running a
+subset -- which reports green in every summary line.
+
+Coverage, and why the number is not the whole gate
+--------------------------------------------------
+
+The coverage standard this repository holds itself to names Python and TypeScript, each
+gated independently at 90% and never blended. This plugin is a third language and the
+standard did not mention it. assert-coverage.py applies the same 90% here, to line and
+branch separately, and prints it as this tree's own number. Nothing about it is combined
+with anyone else's figure.
+
+The header comment of .github/workflows/ash-typescript-ci.yml explains why a bare percentage
+is insufficient: a threshold can be satisfied by measuring less, and the shrink looks like a
+config tidy-up in review. The mechanism here differs from that workflow's because the tool
+differs, and copying the mechanism rather than the reasoning would have been worse than not
+checking. jest omits source no test imports from its report ENTIRELY, so an unmeasured file
+is invisible; that is the hole assert-coverage-completeness.mjs closes. JaCoCo enumerates
+compiled classes, so an untouched class appears at 0% and is visibly bad.
+
+The cheap way to game a JaCoCo gate is therefore not a narrowed crawler root but a widened
+exclusion pattern -- one line in coverage-exclusions.json, and the percentage rises with no
+test written. So that file is what the gate audits hardest: every excluded class must be
+named there with a reason, must still be tracked, must still match a class in the report,
+and must be under a declared line budget that is re-measured on every run. The budget is
+what stops an exclusion becoming a place to hide logic.
+
+Three classes are excluded, all of them IntelliJ Platform glue whose overrides need a
+PsiFile, an Editor, an AnnotationHolder or the platform's ApplicationManager. Each one is
+written so that every decision it could have made lives in a measured class instead; the
+budget is the mechanical check on that sentence.
+
+Known limitations
+-----------------
+
+A scan is a whole-project scan, not a single-file scan, because several of ASH's scanners are
+about relationships between files. On a large repository that is not something to run on
+every keystroke, and the annotator only proceeds for a file that is on disk.
+
+ASH's output goes to a directory under the JVM's temporary directory, named from a digest of
+the project's absolute path, and never into the project. ASH's own default is
+`.ash/ash_output` under the source directory, which is right for a command line and wrong
+here: the IDE indexes the project tree, so a scan's reports would become source the next scan
+reads and reports on, plus a burst of file-watcher events on every run. AshScanPlan refuses
+an output directory inside the source directory rather than trusting the caller.
+
+Findings with no line-bearing physical location are not shown. Some ASH scanners report about
+a repository or a dependency graph rather than about a place in a file, and an annotation is a
+range in a document. They are counted rather than discarded silently, so a run that shows
+nothing can be told apart from a clean file.
+
+A finding on a line the document no longer has is dropped rather than clamped. The user edits
+after the scan, and clamping to the last line would move a security warning onto unrelated
+code.
+
+Nothing here publishes
+----------------------
+
+There is no publishPlugin task, no token, no Marketplace submission, and no registry of any
+kind. The build resolves an IDE, compiles against it, and produces a zip under
+build/distributions. Getting that zip to users is a separate decision that has not been made.
