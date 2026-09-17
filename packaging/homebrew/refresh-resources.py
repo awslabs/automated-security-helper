@@ -255,6 +255,26 @@ def fetch_sdist(name: str, version: str) -> tuple[str, str, str]:
     because that is what `brew update-python-resources` writes, and a reviewer
     comparing this block against a homebrew-core formula should not have to
     reconcile two spellings of the same package.
+
+    With one correction to that, which `brew audit --strict` found and nothing
+    here could have: the SEPARATOR is normalized to a hyphen. PyPI reports
+    `info.name` as `pydantic_core` for the project whose canonical name is
+    `pydantic-core` -- measured, both `/pypi/pydantic-core/...` and
+    `/pypi/pydantic_core/...` answer with the underscore -- and the audit cop
+    normalizes before comparing, so it rejected the underscore with
+
+        Stable resource "pydantic_core": `resource` name should be
+        'pydantic-core' to match the PyPI package name
+
+    That was the only finding in 77 resources, and `brew install` and `brew test`
+    had already passed, so the formula worked and only its spelling was wrong.
+
+    Case is deliberately NOT touched. The same cop accepts `GitPython`, because
+    PEP 503 normalization is case-insensitive, so lowercasing would lose the
+    spelling a reviewer matches against homebrew-core for no gain. Separators are
+    safe to rewrite for the same reason the normalization exists: PEP 503 treats
+    `-`, `_` and `.` as equivalent, so no PyPI project can depend on which one
+    appears in its name.
     """
     url = PYPI_JSON.format(name=name, version=version)
     payload = _get_json(url)
@@ -283,7 +303,8 @@ def fetch_sdist(name: str, version: str) -> tuple[str, str, str]:
             f"PyPI reported no sha256 for {name} {version}. A resource without a "
             "hash is an unverified download; refusing to emit one."
         )
-    return payload["info"]["name"], chosen["url"], sha256
+    display = re.sub(r"[_.]+", "-", payload["info"]["name"])
+    return display, chosen["url"], sha256
 
 
 def _get_json(url: str) -> dict:
