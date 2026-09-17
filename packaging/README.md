@@ -45,8 +45,17 @@ judgment nobody will re-run.
 |---|---|---|
 | `deb/` | Debian, Ubuntu | build + install + real scan in `debian:bookworm` |
 | `rpm/` | Amazon Linux, RHEL | build + install + real scan in `amazonlinux:2023` |
+| `homebrew/` | Homebrew tap, for `Formula/ash.rb` at the repository root | `brew install` + `brew test` + `brew audit --strict` on `macos-latest` |
 
-## Install shape, common to both
+`homebrew/` is the odd one out and the rest of this file does not describe it. It builds
+no package and bundles no wheel: it holds the generator that keeps the formula's
+`resource` block in step with `pyproject.toml`, and Homebrew builds ASH from the git tag
+on the user's machine. The one-wheel rule above therefore has nothing to count there --
+what keeps the formula on the permitted side of the boundary is that a `resource` stanza
+is a URL and a sha256, so no dependency source enters the tree. Read
+`homebrew/README.md`.
+
+## Install shape, common to the deb and the rpm
 
 Both packages install the same way, so a bug in one is a bug in the other:
 
