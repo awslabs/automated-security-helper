@@ -132,12 +132,22 @@ was left alone rather than fixed silently under an unrelated commit.
 
 ## Remaining scope
 
-- **Flatpak, MSIX, Chocolatey, winget** manifests and validation actions. No longer
-  blocked on the entry-point decision — declare `ash`, `ashv3` and
-  `automated-security-helper`, matching `[project.scripts]`. Still outstanding because
-  none of `flatpak-builder`, `makeappx`, `choco` or `winget` was available on the machine
-  this branch was built on, so writing them without local evidence would have produced
-  CI-only code — the opposite of how the deb and rpm were done.
+- **Flatpak and MSIX** manifests and validation actions. No longer blocked on the
+  entry-point decision — declare `ash`, `ashv3` and `automated-security-helper`, matching
+  `[project.scripts]`. Still outstanding because neither `flatpak-builder` nor `makeappx`
+  was available on the machine this branch was built on, so writing them without local
+  evidence would have produced CI-only code — the opposite of how the deb and rpm were
+  done.
+- **Chocolatey and winget** are done, and the missing-toolchain objection above turned
+  out to be answerable rather than fatal. Neither `choco` nor `winget` is installable
+  here, but both formats publish machine-readable schemas, so
+  `packaging/chocolatey/validate-nuspec.sh` checks the nuspec against NuGet's XSD and
+  `packaging/winget/validate-manifests.py` checks the manifest set against Microsoft's
+  published JSON Schemas, both with negative controls that were observed failing before
+  they were trusted. `choco pack`, install, scan and uninstall run on `windows-latest`,
+  which ships Chocolatey preinstalled. The winget set installs the MSIX and is
+  deliberately not submission-ready while that MSIX is self-signed;
+  `packaging/winget/README.winget` says so rather than implying otherwise.
 - **Homebrew.** `Formula/ash.rb` calls `virtualenv_install_with_resources` with **zero
   `resource` stanzas**, so a real `brew install` would likely fail to vendor
   dependencies. CI only syntax-checks the formula, which is why this is invisible.
