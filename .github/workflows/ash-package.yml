@@ -378,3 +378,108 @@ jobs:
         env:
           REPO: ${{ github.workspace }}
 
+  # The MSIX. Unlike the two jobs above there is no container: a hosted Windows runner is
+  # both the build host and the test host, and that is a real weakness of this job rather
+  # than a choice. There is no Windows equivalent of "build it in the distro image so a
+  # missing dependency cannot be masked by the build host", so a dependency present on the
+  # runner and absent on a user's machine would pass here. The dependency that matters is a
+  # Python interpreter, and the launcher probes for one explicitly and reports its absence
+  # as an actionable message, which is the closest available substitute.
+  #
+  # windows-latest, and two facts about it that are worth writing down because they change
+  # what this job can prove:
+  #
+  #   * It is Windows Server 2025 (10.0.26100), and it ships exactly ONE Windows SDK,
+  #     10.0.26100.0. windows-2022 ships four. So nothing here may hardcode an SDK version,
+  #     and build.ps1 globs for the newest instead -- sorting by parsed version, because
+  #     sorting those directory names as strings puts 10.0.9.x above 10.0.26100.x.
+  #   * Microsoft's MSIX support matrix has columns for Windows Server 2019 and 2022 and
+  #     none for 2025, and windows.appExecutionAlias is documented as NOT supported on
+  #     Server 2019 with no statement either way for later releases. So whether typing
+  #     `ash` works on this runner is not something documentation answers.
+  #     verify-on-windows.ps1 therefore MEASURES alias availability and warns rather than
+  #     failing when they are absent, and falls back to the packaged executables so the
+  #     scan assertion still runs. If the deployment stack turns out to be unavailable on
+  #     Server 2025 entirely, windows-2022 is the documented-supported fallback label.
+  #
+  # No container: key and no Docker-based action anywhere in this job, deliberately. A
+  # Docker action's image is pulled in the job PREPARE phase, before its `if:` is
+  # evaluated, so a conditionally-run container step is an unconditional network
+  # dependency -- which has already cost this repository a CI failure that reported red
+  # having run zero tests.
+  msix:
+    name: "native: msix (windows-latest)"
+    needs: build
+    runs-on: windows-latest
+    # Longer than the 25 the deb and rpm jobs get. This one additionally downloads a managed
+    # CPython for uv, searches the SDK for two tools, compiles three launchers, and does a
+    # full pip install of ASH's 27 dependencies inside the first-run venv bootstrap.
+    timeout-minutes: 35
+    steps:
+      # No "install git first" step, unlike the deb and rpm jobs. Those run in distro images
+      # with no git, where actions/checkout silently falls back to a REST tarball. The
+      # Windows runner image ships git.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+
+      - name: Download the wheel built and gated by the build job
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ash-package-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: dist
+
+      # One script, the same one a developer runs. The alternative was reimplementing the
+      # steps in YAML, and the comment above the deb job says why that is wrong: a
+      # verification that exists twice drifts, and the copy in CI is the one nobody runs by
+      # hand.
+      #
+      # The two secrets are passed through `env:` and read as $env:NAME, not interpolated
+      # into the script body. That differs from the build job's artifact-path step above,
+      # which interpolates directly and explains at length why -- but that step handles two
+      # filenames produced by `uv build`, and these are secrets. A secret interpolated into
+      # a script body is a secret in the run log's command echo, and it defeats the
+      # masking. $env: and not $ because the shell here is pwsh, which expands $env:NAME and
+      # treats $NAME as a PowerShell variable that was never set.
+      #
+      # A SECRET IS NOT AVAILABLE TO A RUN TRIGGERED FROM A FORK, so on a fork PR both of
+      # these are the empty string. That is handled rather than tolerated: build.ps1 reads
+      # an empty certificate secret as "generate a throwaway self-signed one", which is the
+      # same path a developer with no certificate takes. The job does not fail, and it does
+      # not silently skip signing either. Which path ran is printed by build.ps1 as
+      # "signing certificate: supplied" or "generating a throwaway self-signed one".
+      #
+      # In practice, on this repository today, the self-signed path is the one CI exercises:
+      # neither secret is configured, so every run generates its own certificate. The
+      # supplied-certificate path is exercised the first time one is set, and the only
+      # difference between them is where the .pfx bytes came from.
+      - name: Build the .msix, install it, and run a real scan
+        shell: pwsh
+        env:
+          MSIX_SIGNING_PFX_BASE64: ${{ secrets.MSIX_SIGNING_PFX_BASE64 }}
+          MSIX_SIGNING_PFX_PASSWORD: ${{ secrets.MSIX_SIGNING_PFX_PASSWORD }}
+        run: |
+          ./packaging/msix/verify-on-windows.ps1 `
+            -PfxBase64 "$env:MSIX_SIGNING_PFX_BASE64" `
+            -PfxPassword "$env:MSIX_SIGNING_PFX_PASSWORD"
+
+      # Uploaded so the artifact can be inspected without a Windows machine, and because
+      # packaging/winget/ declares this filename as its installer against a templated
+      # release asset URL -- an upload here is the only place that filename is produced by
+      # the code that decides it rather than asserted in a manifest.
+      #
+      # Same run_attempt suffix as the build job's upload, for the same reason: artifact
+      # names are immutable within a run from upload-artifact v4 onward, so "Re-run all
+      # jobs" on a run that already uploaded would otherwise fail the upload and redden a
+      # tree that was green.
+      - name: Upload the built .msix
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ash-msix-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: build/msix/*.msix
+          if-no-files-found: error
+          retention-days: 14
+
