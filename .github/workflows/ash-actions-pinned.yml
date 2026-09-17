@@ -40,6 +40,17 @@ name: ASH - Action Pinning Check
 on:
   pull_request:
   merge_group:
+  # Added so this workflow's gates are reachable on a branch that has no pull
+  # request open. Both of them are static checks over files in the tree, so a
+  # dispatch run against a branch is exactly as meaningful as a pull_request run
+  # and costs one ubuntu-latest minute.
+  #
+  # It was added because the gap had a cost: the two jobs below could not be run
+  # against a long-lived feature branch at all, and a merge on that branch shipped
+  # a workflow with two empty jobs precisely because the check that would have
+  # caught it had no trigger it could fire on. A gate nobody can run is a gate
+  # nobody runs.
+  workflow_dispatch: {}
 
 permissions:
   contents: read
@@ -73,3 +84,40 @@ jobs:
       # red the moment it stopped being true.
       - name: Assert no action is referenced by a mutable tag or branch
         run: node .github/scripts/assert-actions-pinned.mjs
+
+      # A structural check on the workflows themselves, in this job because it
+      # needs the same thing the pinning gate needs -- the tree, and nothing else.
+      #
+      # It exists because a merge that added four packaging jobs to
+      # ash-package.yml left two of them with `steps:` and nothing under it, and
+      # nothing in the repository objected. `yaml.safe_load` reads an empty
+      # `steps:` as None and returns a document whose job names are all present,
+      # so both a parse check and a job-name listing came out clean. GitHub's own
+      # parser refused it -- HTTP 422, `Unexpected value ''` -- only when a
+      # workflow_dispatch was attempted, by which point it was pushed.
+      #
+      # The self-test runs FIRST and separately, for the same reason the
+      # artifact-contents gate's does: a structural matcher that silently stopped
+      # matching would clear every workflow forever, and that is the failure this
+      # check exists to rule out. It plants one fixture per rule and requires each
+      # to be rejected by name, plus a well-formed fixture that must be accepted.
+      #
+      # `uv run --no-project` rather than a bare `python3`: this job runs no
+      # setup-python, so `python3` would resolve to whatever the runner image
+      # happens to preinstall. The script imports only PyYAML and the standard
+      # library, and `--no-project` keeps it from syncing the whole project to run
+      # a check that needs none of it.
+      # v10.0.1, which is the sha 8 of the repository's 12 setup-uv references use;
+      # ash-package.yml still carries v7.6.0 on the other 4. Both are sha-pinned so
+      # the pinning gate above is satisfied either way -- this picks the majority
+      # and newer of the two rather than copying whichever file was read last.
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+
+      - name: Prove the workflow-structure check can fail
+        run: uv run --no-project --with pyyaml python .github/scripts/assert-workflows-well-formed.py --self-test
+
+      - name: Assert no workflow job has an empty body
+        run: uv run --no-project --with pyyaml python .github/scripts/assert-workflows-well-formed.py

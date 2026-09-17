@@ -378,6 +378,314 @@ jobs:
         env:
           REPO: ${{ github.workspace }}
 
+  # WHY THIS JOB HAS NO `container:` KEY WHEN THE TWO ABOVE DO
+  #
+  # flatpak-builder drives bwrap, and bwrap has to create a user namespace. Measured on
+  # a Docker 25.0 host before this job was written:
+  #
+  #   docker run fedora:41 bwrap --dev-bind / / --unshare-user-try /bin/true
+  #     -> bwrap: No permissions to creating new namespace, likely because the kernel
+  #        does not allow non-privileged user namespaces.       (exit 1)
+  #   docker run --privileged fedora:41 <same>                  (exit 0)
+  #
+  # A GitHub job `container:` is not privileged and there is no input to make it so, so
+  # the .deb and .rpm pattern cannot be copied here: the build would fail inside bwrap
+  # with a message about namespaces that says nothing about packaging. This job runs on
+  # the runner host instead, where the flatpak build sandbox is the isolation and no
+  # outer container is needed for it.
+  #
+  # That trades away the property the two jobs above are built around -- building in an
+  # image that starts with neither the interpreter nor pip, so the package's own declared
+  # dependencies have to be right. A Flatpak has no equivalent claim to test: its
+  # dependency is a runtime it names by exact branch, flatpak installs that runtime or
+  # fails, and the runtime is byte-identical everywhere. The host's own python3, pip and
+  # git are invisible to both the build sandbox and the app sandbox, so the runner image
+  # cannot mask a missing dependency the way debian:bookworm's preinstalled python would
+  # have.
+  #
+  # `sudo` on the verification step, for two reasons that are both about the missing
+  # container: the script installs flatpak-builder with apt-get, and it installs the
+  # runtime and the bundle into the system installation. Inside a job container the
+  # steps above already run as root.
+  #
+  # Not cached. The runtime is a 633 MB download, and a cache of it would restore a
+  # comparable number of bytes from a different CDN while adding a way for a job to test
+  # a runtime that is no longer what `flatpak install` would give a user. The
+  # verification's first step asserts bwrap works before anything else runs, so if the
+  # runner image ever stops permitting user namespaces this job says so in its first
+  # twenty lines rather than in a flatpak-builder trace.
+  #
+  # Testing here PUBLISHES NOTHING, exactly as for the .deb and .rpm: it pulls a public
+  # runtime from Flathub, builds a bundle, installs it locally and throws the machine
+  # away. NOTHING IS SUBMITTED TO FLATHUB by this job or by anything under
+  # packaging/flatpak/.
+  flatpak:
+    name: "native: flatpak (org.freedesktop.Sdk 24.08)"
+    needs: build
+    runs-on: ubuntu-latest
+    # Longer than the 25 minutes the .deb and .rpm jobs get: this one downloads a 633 MB
+    # runtime before it can build, and then its first `ash` invocation resolves ASH's 27
+    # runtime dependencies from a Python index, which the other two do at install time.
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download the wheel built and gated by the build job
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ash-package-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: dist
+
+      - name: Build the Flatpak, install it, and run a real scan
+        run: sudo --preserve-env=REPO bash packaging/flatpak/verify-in-container.sh
+        env:
+          REPO: ${{ github.workspace }}
+
+  # The MSIX. Unlike the two jobs above there is no container: a hosted Windows runner is
+  # both the build host and the test host, and that is a real weakness of this job rather
+  # than a choice. There is no Windows equivalent of "build it in the distro image so a
+  # missing dependency cannot be masked by the build host", so a dependency present on the
+  # runner and absent on a user's machine would pass here. The dependency that matters is a
+  # Python interpreter, and the launcher probes for one explicitly and reports its absence
+  # as an actionable message, which is the closest available substitute.
+  #
+  # windows-latest, and two facts about it that are worth writing down because they change
+  # what this job can prove:
+  #
+  #   * It is Windows Server 2025 (10.0.26100), and it ships exactly ONE Windows SDK,
+  #     10.0.26100.0. windows-2022 ships four. So nothing here may hardcode an SDK version,
+  #     and build.ps1 globs for the newest instead -- sorting by parsed version, because
+  #     sorting those directory names as strings puts 10.0.9.x above 10.0.26100.x.
+  #   * Microsoft's MSIX support matrix has columns for Windows Server 2019 and 2022 and
+  #     none for 2025, and windows.appExecutionAlias is documented as NOT supported on
+  #     Server 2019 with no statement either way for later releases. So whether typing
+  #     `ash` works on this runner is not something documentation answers.
+  #     verify-on-windows.ps1 therefore MEASURES alias availability and warns rather than
+  #     failing when they are absent, and falls back to the packaged executables so the
+  #     scan assertion still runs. If the deployment stack turns out to be unavailable on
+  #     Server 2025 entirely, windows-2022 is the documented-supported fallback label.
+  #
+  # No container: key and no Docker-based action anywhere in this job, deliberately. A
+  # Docker action's image is pulled in the job PREPARE phase, before its `if:` is
+  # evaluated, so a conditionally-run container step is an unconditional network
+  # dependency -- which has already cost this repository a CI failure that reported red
+  # having run zero tests.
+  msix:
+    name: "native: msix (windows-latest)"
+    needs: build
+    runs-on: windows-latest
+    # Longer than the 25 the deb and rpm jobs get. This one additionally downloads a managed
+    # CPython for uv, searches the SDK for two tools, compiles three launchers, and does a
+    # full pip install of ASH's 27 dependencies inside the first-run venv bootstrap.
+    timeout-minutes: 35
+    steps:
+      # No "install git first" step, unlike the deb and rpm jobs. Those run in distro images
+      # with no git, where actions/checkout silently falls back to a REST tarball. The
+      # Windows runner image ships git.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+
+      - name: Download the wheel built and gated by the build job
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ash-package-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: dist
+
+      # One script, the same one a developer runs. The alternative was reimplementing the
+      # steps in YAML, and the comment above the deb job says why that is wrong: a
+      # verification that exists twice drifts, and the copy in CI is the one nobody runs by
+      # hand.
+      #
+      # The two secrets are passed through `env:` and read as $env:NAME, not interpolated
+      # into the script body. That differs from the build job's artifact-path step above,
+      # which interpolates directly and explains at length why -- but that step handles two
+      # filenames produced by `uv build`, and these are secrets. A secret interpolated into
+      # a script body is a secret in the run log's command echo, and it defeats the
+      # masking. $env: and not $ because the shell here is pwsh, which expands $env:NAME and
+      # treats $NAME as a PowerShell variable that was never set.
+      #
+      # A SECRET IS NOT AVAILABLE TO A RUN TRIGGERED FROM A FORK, so on a fork PR both of
+      # these are the empty string. That is handled rather than tolerated: build.ps1 reads
+      # an empty certificate secret as "generate a throwaway self-signed one", which is the
+      # same path a developer with no certificate takes. The job does not fail, and it does
+      # not silently skip signing either. Which path ran is printed by build.ps1 as
+      # "signing certificate: supplied" or "generating a throwaway self-signed one".
+      #
+      # In practice, on this repository today, the self-signed path is the one CI exercises:
+      # neither secret is configured, so every run generates its own certificate. The
+      # supplied-certificate path is exercised the first time one is set, and the only
+      # difference between them is where the .pfx bytes came from.
+      - name: Build the .msix, install it, and run a real scan
+        shell: pwsh
+        env:
+          MSIX_SIGNING_PFX_BASE64: ${{ secrets.MSIX_SIGNING_PFX_BASE64 }}
+          MSIX_SIGNING_PFX_PASSWORD: ${{ secrets.MSIX_SIGNING_PFX_PASSWORD }}
+        run: |
+          ./packaging/msix/verify-on-windows.ps1 `
+            -PfxBase64 "$env:MSIX_SIGNING_PFX_BASE64" `
+            -PfxPassword "$env:MSIX_SIGNING_PFX_PASSWORD"
+
+      # Uploaded so the artifact can be inspected without a Windows machine, and because
+      # packaging/winget/ declares this filename as its installer against a templated
+      # release asset URL -- an upload here is the only place that filename is produced by
+      # the code that decides it rather than asserted in a manifest.
+      #
+      # Same run_attempt suffix as the build job's upload, for the same reason: artifact
+      # names are immutable within a run from upload-artifact v4 onward, so "Re-run all
+      # jobs" on a run that already uploaded would otherwise fail the upload and redden a
+      # tree that was green.
+      - name: Upload the built .msix
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ash-msix-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: build/msix/*.msix
+          if-no-files-found: error
+          retention-days: 14
+
+  # The Chocolatey nuspec, checked against NuGet's published XSD.
+  #
+  # One job per format, following deb and rpm, and not one shared "validate the
+  # manifests" job holding both this and the winget check. A shared job would be cheaper
+  # by about thirty seconds of runner time and would couple the two formats: dropping
+  # Chocolatey would delete the job the winget check lives in, so the two could not be
+  # landed or reverted independently.
+  #
+  # It does not need the build job. Nothing here reads the wheel: the script checks a
+  # metadata file against a published schema and cross-checks the version it declares
+  # against the nuspec itself. So this starts immediately instead of queueing behind a
+  # build whose output it would not open.
+  #
+  # The script rejects two deliberately broken copies of the nuspec before validating
+  # the real one, for the reason the "Prove the artifact-contents check can fail" step
+  # above gives: xmllint invoked without --schema parses the document and exits 0, so a
+  # validator that has never been observed failing may be checking nothing, and its
+  # passing output looks identical either way.
+  nuspec:
+    name: "schema: chocolatey nuspec (NuGet XSD)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # xmllint comes from libxml2-utils, which is NOT in the ubuntu-24.04 runner
+      # image's apt package list -- checked against
+      # images/ubuntu/Ubuntu2404-Readme.md in actions/runner-images, whose list runs
+      # from acl to zsync and contains no libxml2 package. validate-nuspec.sh fails
+      # with a named error if xmllint is missing rather than skipping the check, so
+      # dropping this step would redden the job rather than quietly pass it, but there
+      # is no reason to make anyone read that error.
+      - name: Install xmllint
+        run: |
+          set -euo pipefail
+          sudo apt-get -qq update >/dev/null
+          sudo apt-get -qq install -y --no-install-recommends libxml2-utils >/dev/null
+          xmllint --version
+
+      - name: Validate ash.nuspec against NuGet's published XSD
+        run: bash packaging/chocolatey/validate-nuspec.sh
+
+  # The Chocolatey package. Same principle as the deb and rpm jobs: build the package
+  # in the environment that will install it, then install it and make it do real work.
+  #
+  # windows-latest rather than a container, because Chocolatey is a Windows tool and
+  # Linux Docker cannot run a Windows image. The runner ships what this needs already:
+  # images/windows/Windows2025-VS2026-Readme.md in actions/runner-images lists
+  # "Chocolatey 2.7.4" and "Python 3.12.10", and the label table in that repository's
+  # README maps windows-latest to Windows Server 2025 with that image. So there is no
+  # bootstrap step, and `choco pack` is reachable here and nowhere else in this
+  # workflow.
+  #
+  # The one place this is weaker than the deb and rpm jobs, and it is a property of the
+  # runner rather than a choice: those two start from an image with no interpreter, so
+  # the package's own dependency declaration is what makes the install work. A
+  # windows-latest runner already has Python on PATH and cannot be stripped of it, so
+  # verify-on-windows.ps1 instead asserts that Chocolatey resolved and installed the
+  # declared python3 dependency. That catches a dependency nothing can satisfy, which
+  # is the failure the rpm job found on Amazon Linux, without claiming the host was
+  # bare.
+  #
+  # A plain `run:` step, like deb and rpm use. A Docker-based action would be worse
+  # than unnecessary here: its image is pulled in the job's prepare phase, before any
+  # `if:` on the step is evaluated, so a conditional container step is an unconditional
+  # network dependency.
+  chocolatey:
+    name: "native: chocolatey (windows-latest)"
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download the wheel built and gated by the build job
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ash-package-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: dist
+
+      # `shell: pwsh` is the default on windows-latest and is stated anyway, because
+      # the body is a PowerShell script invocation and the difference matters: pwsh
+      # does not glob for external commands and expands $env:VAR rather than $VAR. See
+      # the long note above the artifact-contents step for how that bit this workflow
+      # before. Nothing is globbed here; the path is literal and the wheel is found by
+      # the script itself.
+      #
+      # $Repo is interpolated directly rather than passed through env:, for the same
+      # reason the artifact-contents step interpolates its two paths: `env:` plus
+      # "$REPO" would reintroduce a shell dependency, since pwsh expands $env:REPO and
+      # not $REPO. github.workspace is not event payload, so it is not an injection
+      # surface.
+      - name: Build the Chocolatey package, install it, and run a real scan
+        shell: pwsh
+        run: ./packaging/chocolatey/verify-on-windows.ps1 -Repo "${{ github.workspace }}"
+
+  # The winget manifest set, checked against Microsoft's published JSON Schemas.
+  #
+  # This is the whole verification winget gets, and the reason it is a schema check and
+  # not `winget validate` is that the Windows Package Manager client is not on the
+  # runner images. images/windows/Windows2025-VS2026-Readme.md in actions/runner-images
+  # lists Chocolatey and does not mention winget anywhere. The schemas are a real check
+  # in its place: they carry every required field, pattern and enum the client enforces.
+  #
+  # Its own job rather than a step on the nuspec job above, so that the two Windows
+  # packaging formats can be landed and reverted independently of each other.
+  #
+  # No `needs: build` and no artifact download. The manifests describe the MSIX, not the
+  # wheel, so there is nothing in the build job's output for this to open; the version
+  # they declare is cross-checked against pyproject.toml instead.
+  #
+  # validate-manifests.py corrupts one field per manifest and requires each broken copy
+  # to be rejected before it validates the real ones, and requires the rejection message
+  # to name the field that was corrupted. Both halves are load-bearing. A JSON Schema
+  # check whose schema fetch returned an error page can exit 0, and a rejection caused by
+  # an unrelated error proves nothing about the constraint the control was written for.
+  winget:
+    name: "schema: winget manifests (published JSON Schemas)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+
+      # No --no-project and no `uv sync`. The script carries PEP 723 inline metadata
+      # naming the packages it needs, which uv reads and resolves into an ephemeral
+      # environment, so the project is never synced. Measured at 0.7 seconds warm,
+      # against roughly a minute for a project sync.
+      - name: Validate the winget manifests against Microsoft's published JSON Schemas
+        run: uv run packaging/winget/validate-manifests.py
   # The Homebrew tap, exercised rather than parsed.
   #
   # WHY THIS JOB IS HERE AND NOT IN ash-install-methods.yml
@@ -483,300 +791,4 @@ jobs:
       # in this job at all.
       - name: Audit the formula against Homebrew's own rules
         run: brew audit --strict --formula ./Formula/ash.rb
-
-  # WHY THIS JOB HAS NO `container:` KEY WHEN THE TWO ABOVE DO
-  #
-  # flatpak-builder drives bwrap, and bwrap has to create a user namespace. Measured on
-  # a Docker 25.0 host before this job was written:
-  #
-  #   docker run fedora:41 bwrap --dev-bind / / --unshare-user-try /bin/true
-  #     -> bwrap: No permissions to creating new namespace, likely because the kernel
-  #        does not allow non-privileged user namespaces.       (exit 1)
-  #   docker run --privileged fedora:41 <same>                  (exit 0)
-  #
-  # A GitHub job `container:` is not privileged and there is no input to make it so, so
-  # the .deb and .rpm pattern cannot be copied here: the build would fail inside bwrap
-  # with a message about namespaces that says nothing about packaging. This job runs on
-  # the runner host instead, where the flatpak build sandbox is the isolation and no
-  # outer container is needed for it.
-  #
-  # That trades away the property the two jobs above are built around -- building in an
-  # image that starts with neither the interpreter nor pip, so the package's own declared
-  # dependencies have to be right. A Flatpak has no equivalent claim to test: its
-  # dependency is a runtime it names by exact branch, flatpak installs that runtime or
-  # fails, and the runtime is byte-identical everywhere. The host's own python3, pip and
-  # git are invisible to both the build sandbox and the app sandbox, so the runner image
-  # cannot mask a missing dependency the way debian:bookworm's preinstalled python would
-  # have.
-  #
-  # `sudo` on the verification step, for two reasons that are both about the missing
-  # container: the script installs flatpak-builder with apt-get, and it installs the
-  # runtime and the bundle into the system installation. Inside a job container the
-  # steps above already run as root.
-  #
-  # Not cached. The runtime is a 633 MB download, and a cache of it would restore a
-  # comparable number of bytes from a different CDN while adding a way for a job to test
-  # a runtime that is no longer what `flatpak install` would give a user. The
-  # verification's first step asserts bwrap works before anything else runs, so if the
-  # runner image ever stops permitting user namespaces this job says so in its first
-  # twenty lines rather than in a flatpak-builder trace.
-  #
-  # Testing here PUBLISHES NOTHING, exactly as for the .deb and .rpm: it pulls a public
-  # runtime from Flathub, builds a bundle, installs it locally and throws the machine
-  # away. NOTHING IS SUBMITTED TO FLATHUB by this job or by anything under
-  # packaging/flatpak/.
-  flatpak:
-    name: "native: flatpak (org.freedesktop.Sdk 24.08)"
-    needs: build
-    runs-on: ubuntu-latest
-    # Longer than the 25 minutes the .deb and .rpm jobs get: this one downloads a 633 MB
-    # runtime before it can build, and then its first `ash` invocation resolves ASH's 27
-    # runtime dependencies from a Python index, which the other two do at install time.
-    timeout-minutes: 40
-
-  # The Chocolatey nuspec, checked against NuGet's published XSD.
-  #
-  # One job per format, following deb and rpm, and not one shared "validate the
-  # manifests" job holding both this and the winget check. A shared job would be cheaper
-  # by about thirty seconds of runner time and would couple the two formats: dropping
-  # Chocolatey would delete the job the winget check lives in, so the two could not be
-  # landed or reverted independently.
-  #
-  # It does not need the build job. Nothing here reads the wheel: the script checks a
-  # metadata file against a published schema and cross-checks the version it declares
-  # against the nuspec itself. So this starts immediately instead of queueing behind a
-  # build whose output it would not open.
-  #
-  # The script rejects two deliberately broken copies of the nuspec before validating
-  # the real one, for the reason the "Prove the artifact-contents check can fail" step
-  # above gives: xmllint invoked without --schema parses the document and exits 0, so a
-  # validator that has never been observed failing may be checking nothing, and its
-  # passing output looks identical either way.
-  nuspec:
-    name: "schema: chocolatey nuspec (NuGet XSD)"
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      # xmllint comes from libxml2-utils, which is NOT in the ubuntu-24.04 runner
-      # image's apt package list -- checked against
-      # images/ubuntu/Ubuntu2404-Readme.md in actions/runner-images, whose list runs
-      # from acl to zsync and contains no libxml2 package. validate-nuspec.sh fails
-      # with a named error if xmllint is missing rather than skipping the check, so
-      # dropping this step would redden the job rather than quietly pass it, but there
-      # is no reason to make anyone read that error.
-      - name: Install xmllint
-        run: |
-          set -euo pipefail
-          sudo apt-get -qq update >/dev/null
-          sudo apt-get -qq install -y --no-install-recommends libxml2-utils >/dev/null
-          xmllint --version
-
-      - name: Validate ash.nuspec against NuGet's published XSD
-        run: bash packaging/chocolatey/validate-nuspec.sh
-
-  # The Chocolatey package. Same principle as the deb and rpm jobs: build the package
-  # in the environment that will install it, then install it and make it do real work.
-  #
-  # windows-latest rather than a container, because Chocolatey is a Windows tool and
-  # Linux Docker cannot run a Windows image. The runner ships what this needs already:
-  # images/windows/Windows2025-VS2026-Readme.md in actions/runner-images lists
-  # "Chocolatey 2.7.4" and "Python 3.12.10", and the label table in that repository's
-  # README maps windows-latest to Windows Server 2025 with that image. So there is no
-  # bootstrap step, and `choco pack` is reachable here and nowhere else in this
-  # workflow.
-  #
-  # The one place this is weaker than the deb and rpm jobs, and it is a property of the
-  # runner rather than a choice: those two start from an image with no interpreter, so
-  # the package's own dependency declaration is what makes the install work. A
-  # windows-latest runner already has Python on PATH and cannot be stripped of it, so
-  # verify-on-windows.ps1 instead asserts that Chocolatey resolved and installed the
-  # declared python3 dependency. That catches a dependency nothing can satisfy, which
-  # is the failure the rpm job found on Amazon Linux, without claiming the host was
-  # bare.
-  #
-  # A plain `run:` step, like deb and rpm use. A Docker-based action would be worse
-  # than unnecessary here: its image is pulled in the job's prepare phase, before any
-  # `if:` on the step is evaluated, so a conditional container step is an unconditional
-  # network dependency.
-  chocolatey:
-    name: "native: chocolatey (windows-latest)"
-    needs: build
-    runs-on: windows-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Download the wheel built and gated by the build job
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: ash-package-${{ github.sha }}-attempt-${{ github.run_attempt }}
-          path: dist
-
-      - name: Build the Flatpak, install it, and run a real scan
-        run: sudo --preserve-env=REPO bash packaging/flatpak/verify-in-container.sh
-        env:
-          REPO: ${{ github.workspace }}
-
-
-      # `shell: pwsh` is the default on windows-latest and is stated anyway, because
-      # the body is a PowerShell script invocation and the difference matters: pwsh
-      # does not glob for external commands and expands $env:VAR rather than $VAR. See
-      # the long note above the artifact-contents step for how that bit this workflow
-      # before. Nothing is globbed here; the path is literal and the wheel is found by
-      # the script itself.
-      #
-      # $Repo is interpolated directly rather than passed through env:, for the same
-      # reason the artifact-contents step interpolates its two paths: `env:` plus
-      # "$REPO" would reintroduce a shell dependency, since pwsh expands $env:REPO and
-      # not $REPO. github.workspace is not event payload, so it is not an injection
-      # surface.
-      - name: Build the Chocolatey package, install it, and run a real scan
-        shell: pwsh
-        run: ./packaging/chocolatey/verify-on-windows.ps1 -Repo "${{ github.workspace }}"
-
-  # The winget manifest set, checked against Microsoft's published JSON Schemas.
-  #
-  # This is the whole verification winget gets, and the reason it is a schema check and
-  # not `winget validate` is that the Windows Package Manager client is not on the
-  # runner images. images/windows/Windows2025-VS2026-Readme.md in actions/runner-images
-  # lists Chocolatey and does not mention winget anywhere. The schemas are a real check
-  # in its place: they carry every required field, pattern and enum the client enforces.
-  #
-  # Its own job rather than a step on the nuspec job above, so that the two Windows
-  # packaging formats can be landed and reverted independently of each other.
-  #
-  # No `needs: build` and no artifact download. The manifests describe the MSIX, not the
-  # wheel, so there is nothing in the build job's output for this to open; the version
-  # they declare is cross-checked against pyproject.toml instead.
-  #
-  # validate-manifests.py corrupts one field per manifest and requires each broken copy
-  # to be rejected before it validates the real ones, and requires the rejection message
-  # to name the field that was corrupted. Both halves are load-bearing. A JSON Schema
-  # check whose schema fetch returned an error page can exit 0, and a rejection caused by
-  # an unrelated error proves nothing about the constraint the control was written for.
-  winget:
-    name: "schema: winget manifests (published JSON Schemas)"
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    steps:
-
-  # The MSIX. Unlike the two jobs above there is no container: a hosted Windows runner is
-  # both the build host and the test host, and that is a real weakness of this job rather
-  # than a choice. There is no Windows equivalent of "build it in the distro image so a
-  # missing dependency cannot be masked by the build host", so a dependency present on the
-  # runner and absent on a user's machine would pass here. The dependency that matters is a
-  # Python interpreter, and the launcher probes for one explicitly and reports its absence
-  # as an actionable message, which is the closest available substitute.
-  #
-  # windows-latest, and two facts about it that are worth writing down because they change
-  # what this job can prove:
-  #
-  #   * It is Windows Server 2025 (10.0.26100), and it ships exactly ONE Windows SDK,
-  #     10.0.26100.0. windows-2022 ships four. So nothing here may hardcode an SDK version,
-  #     and build.ps1 globs for the newest instead -- sorting by parsed version, because
-  #     sorting those directory names as strings puts 10.0.9.x above 10.0.26100.x.
-  #   * Microsoft's MSIX support matrix has columns for Windows Server 2019 and 2022 and
-  #     none for 2025, and windows.appExecutionAlias is documented as NOT supported on
-  #     Server 2019 with no statement either way for later releases. So whether typing
-  #     `ash` works on this runner is not something documentation answers.
-  #     verify-on-windows.ps1 therefore MEASURES alias availability and warns rather than
-  #     failing when they are absent, and falls back to the packaged executables so the
-  #     scan assertion still runs. If the deployment stack turns out to be unavailable on
-  #     Server 2025 entirely, windows-2022 is the documented-supported fallback label.
-  #
-  # No container: key and no Docker-based action anywhere in this job, deliberately. A
-  # Docker action's image is pulled in the job PREPARE phase, before its `if:` is
-  # evaluated, so a conditionally-run container step is an unconditional network
-  # dependency -- which has already cost this repository a CI failure that reported red
-  # having run zero tests.
-  msix:
-    name: "native: msix (windows-latest)"
-    needs: build
-    runs-on: windows-latest
-    # Longer than the 25 the deb and rpm jobs get. This one additionally downloads a managed
-    # CPython for uv, searches the SDK for two tools, compiles three launchers, and does a
-    # full pip install of ASH's 27 dependencies inside the first-run venv bootstrap.
-    timeout-minutes: 35
-    steps:
-      # No "install git first" step, unlike the deb and rpm jobs. Those run in distro images
-      # with no git, where actions/checkout silently falls back to a REST tarball. The
-      # Windows runner image ships git.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
-        with:
-          enable-cache: true
-
-      # No --no-project and no `uv sync`. The script carries PEP 723 inline metadata
-      # naming the packages it needs, which uv reads and resolves into an ephemeral
-      # environment, so the project is never synced. Measured at 0.7 seconds warm,
-      # against roughly a minute for a project sync.
-      - name: Validate the winget manifests against Microsoft's published JSON Schemas
-        run: uv run packaging/winget/validate-manifests.py
-
-      - name: Download the wheel built and gated by the build job
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: ash-package-${{ github.sha }}-attempt-${{ github.run_attempt }}
-          path: dist
-
-      # One script, the same one a developer runs. The alternative was reimplementing the
-      # steps in YAML, and the comment above the deb job says why that is wrong: a
-      # verification that exists twice drifts, and the copy in CI is the one nobody runs by
-      # hand.
-      #
-      # The two secrets are passed through `env:` and read as $env:NAME, not interpolated
-      # into the script body. That differs from the build job's artifact-path step above,
-      # which interpolates directly and explains at length why -- but that step handles two
-      # filenames produced by `uv build`, and these are secrets. A secret interpolated into
-      # a script body is a secret in the run log's command echo, and it defeats the
-      # masking. $env: and not $ because the shell here is pwsh, which expands $env:NAME and
-      # treats $NAME as a PowerShell variable that was never set.
-      #
-      # A SECRET IS NOT AVAILABLE TO A RUN TRIGGERED FROM A FORK, so on a fork PR both of
-      # these are the empty string. That is handled rather than tolerated: build.ps1 reads
-      # an empty certificate secret as "generate a throwaway self-signed one", which is the
-      # same path a developer with no certificate takes. The job does not fail, and it does
-      # not silently skip signing either. Which path ran is printed by build.ps1 as
-      # "signing certificate: supplied" or "generating a throwaway self-signed one".
-      #
-      # In practice, on this repository today, the self-signed path is the one CI exercises:
-      # neither secret is configured, so every run generates its own certificate. The
-      # supplied-certificate path is exercised the first time one is set, and the only
-      # difference between them is where the .pfx bytes came from.
-      - name: Build the .msix, install it, and run a real scan
-        shell: pwsh
-        env:
-          MSIX_SIGNING_PFX_BASE64: ${{ secrets.MSIX_SIGNING_PFX_BASE64 }}
-          MSIX_SIGNING_PFX_PASSWORD: ${{ secrets.MSIX_SIGNING_PFX_PASSWORD }}
-        run: |
-          ./packaging/msix/verify-on-windows.ps1 `
-            -PfxBase64 "$env:MSIX_SIGNING_PFX_BASE64" `
-            -PfxPassword "$env:MSIX_SIGNING_PFX_PASSWORD"
-
-      # Uploaded so the artifact can be inspected without a Windows machine, and because
-      # packaging/winget/ declares this filename as its installer against a templated
-      # release asset URL -- an upload here is the only place that filename is produced by
-      # the code that decides it rather than asserted in a manifest.
-      #
-      # Same run_attempt suffix as the build job's upload, for the same reason: artifact
-      # names are immutable within a run from upload-artifact v4 onward, so "Re-run all
-      # jobs" on a run that already uploaded would otherwise fail the upload and redden a
-      # tree that was green.
-      - name: Upload the built .msix
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: ash-msix-${{ github.sha }}-attempt-${{ github.run_attempt }}
-          path: build/msix/*.msix
-          if-no-files-found: error
-          retention-days: 14
 
