@@ -110,7 +110,11 @@ modules:
       # third-party distributions inside a published bundle. build.sh passes
       # --disable-download so that adding such a source fails the build instead of
       # fetching it, and no build-options grants the build sandbox network, so a
-      # build-time `pip install` of dependencies cannot succeed either.
+      # build-time `pip install` of dependencies cannot succeed either. That second
+      # half is measured, not assumed: adding `pip download requests` to the
+      # build-commands below fails with
+      #   Failed to resolve 'pypi.org' ([Errno -3] Temporary failure in name resolution)
+      # so this boundary is a mechanism rather than a review item.
       #
       # wheels/ is populated by build.sh with exactly one file: the wheel that already
       # passed .github/scripts/assert-artifact-contents.py.

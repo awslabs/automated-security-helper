@@ -165,24 +165,72 @@ conventional Python recipe is flatpak-pip-generator, which emits a sources list 
 URL and hash per dependency and a build step that pip-installs them into /app -- and a
 bundle carries whatever is in /app, so that would publish 27 third-party distributions.
 Two things make it fail rather than merely discourage it: build.sh passes
---disable-download, and no build-options grants the build sandbox network, so a
-build-time dependency install cannot reach an index even if someone adds one.
+--disable-download, and no build-options grants the build sandbox network. Measured, by
+adding a `pip download requests` to the manifest's build-commands:
+
+  Failed to resolve 'pypi.org' ([Errno -3] Temporary failure in name resolution)
+
+So a build-time dependency install cannot reach an index even if someone adds one.
 
 Building a self-contained offline bundle for your own hosts is fine, and the commands
 below are the supported way to do it. The line is about what the project publishes, not
 about what the bytes are allowed to do.
 
-On a host with no reachable index, stage one before the first run:
+On a host with no reachable index, stage a wheelhouse and point the first run at it:
 
   pip download automated-security-helper==<version> -d /srv/ash-wheels
-  # then, before the first ash invocation:
-  printf '[global]\nno-index = true\nfind-links = /srv/ash-wheels\n' > ~/.config/pip/pip.conf
 
-~/.config/pip/pip.conf and not /etc/pip.conf: the pip that runs is inside the sandbox,
-which sees the runtime's /etc rather than the host's. Per-user config is read from
-$XDG_CONFIG_HOME, which flatpak points at the app's own config directory, so the path
-above works from outside the sandbox because --filesystem=host makes ~/.config
-readable. /srv is reachable for the same reason; /tmp and /var are not.
+  PIP_NO_INDEX=1 PIP_FIND_LINKS=/srv/ash-wheels \
+    flatpak run io.github.awslabs.automated_security_helper --version
+
+Environment variables and not /etc/pip.conf. The pip that runs is inside the sandbox,
+which sees the runtime's /etc rather than the host's, so a host /etc/pip.conf is invisible
+to it. Variables do cross: `PIP_NO_INDEX=1 flatpak run ...` reaches the first-run
+bootstrap and stops it with "No matching distribution found for attrs<27.0.0,>=26.1",
+which is how the two commands above were checked.
+
+/srv is readable from the sandbox for the same reason a source tree is -- see the coverage
+list below. /tmp and /var are not, so a wheelhouse in either is invisible.
+
+For a setting that persists rather than being retyped, the pip config file the sandbox
+actually reads is under the app's own config directory. Taken from
+`pip config debug` run inside the sandbox, the user-level candidates are
+
+  ~/.pip/pip.conf
+  ~/.var/app/io.github.awslabs.automated_security_helper/config/pip/pip.conf
+
+and the second is the one flatpak points $XDG_CONFIG_HOME at:
+
+  mkdir -p ~/.var/app/io.github.awslabs.automated_security_helper/config/pip
+  printf '[global]\nno-index = true\nfind-links = /srv/ash-wheels\n' \
+    > ~/.var/app/io.github.awslabs.automated_security_helper/config/pip/pip.conf
+
+Note that ~/.config/pip/pip.conf -- the path that works for a normal pip -- is NOT read,
+because $XDG_CONFIG_HOME inside the sandbox is not ~/.config.
+
+What --filesystem=host actually covers, measured
+------------------------------------------------
+
+Writing a marker file on the host and reading it back from inside the sandbox:
+
+  /home    visible        /tmp   not visible
+  /srv     visible        /var   not visible
+  /opt     visible        /root  not visible
+  /mnt     visible
+
+A source tree under any of the visible paths scans normally. One under /var -- a CI
+workspace at /var/lib/<something>/workspace, for instance -- does not, and the symptom is
+a clean scan with no findings rather than an error. Grant it explicitly:
+
+  flatpak override --user --filesystem=/var/lib/jenkins \
+    io.github.awslabs.automated_security_helper
+
+A write to a path the sandbox cannot see does not fail. It lands in the sandbox's own
+throwaway filesystem, reads back correctly for the rest of that invocation, and is gone
+afterwards -- measured by writing a file under an ungranted $HOME, seeing `ls -l` report
+it, and finding it absent in the very next `flatpak run` and absent on the host. That is
+the shape to expect from every ungranted path, and the reason the coverage list above is
+worth checking against where your source and your output directory live.
 
 Scanners are not installed by this package
 ------------------------------------------
@@ -192,9 +240,25 @@ ASH drives third-party scanners; it does not contain them. After installing:
   flatpak run io.github.awslabs.automated_security_helper dependencies install
   flatpak run io.github.awslabs.automated_security_helper dependencies install --tool grype
 
-Those land in ~/.ash/bin on the host, the same place the .deb and .rpm put them,
-because --filesystem=host makes the real home directory writable. A machine with both
-ASH packages installed shares one set of scanner binaries.
+ASH installs those into $ASH_BIN_PATH, which defaults to ~/.ash/bin. For an ordinary user
+whose home is under /home that is a real host path, so the binaries land in the same place
+the .deb and .rpm put them and a machine with both packages shares one set.
+
+For root, whose home is /root, it is not: /root is outside --filesystem=host, so the
+install appears to succeed and the binaries are gone by the next invocation -- see the
+measured note at the end of the coverage section above. If you are running as root, or your
+home is anywhere the coverage list does not include, either grant it
+
+  flatpak override --user --filesystem=/root io.github.awslabs.automated_security_helper
+
+or send the binaries somewhere already reachable
+
+  ASH_BIN_PATH=/srv/ash-bin flatpak run \
+    io.github.awslabs.automated_security_helper dependencies install
+
+That second form rests on two things: environment variables set outside `flatpak run` do
+reach the app, and ASH reads $ASH_BIN_PATH in preference to the ~/.ash/bin default
+(automated_security_helper/core/constants.py:19-22).
 
 Why the runtime is org.freedesktop.Sdk and not org.freedesktop.Platform
 ----------------------------------------------------------------------

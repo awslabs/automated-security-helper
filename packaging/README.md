@@ -82,8 +82,9 @@ modules and `.dist-info` directories and no wheel at all — so `packaging/flatp
 counts wheels *and* fails on any `.dist-info` or `.egg-info` under the built app.
 
 Two things stop that happening by accident rather than by review: `build.sh` passes
-`--disable-download`, and the manifest grants the build sandbox no network, so a
-build-time dependency install cannot reach an index.
+`--disable-download`, and the manifest grants the build sandbox no network. The second was
+measured by putting a `pip download requests` in the manifest's build-commands, which fails
+with `Failed to resolve 'pypi.org' ([Errno -3] Temporary failure in name resolution)`.
 
 The Flatpak also cannot put `ash` on the host's PATH — flatpak exports the application ID
 — and it grants `--filesystem=host`, without which it would install and then be unable to
