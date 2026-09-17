@@ -68,7 +68,13 @@ def _mcp_wrapper(
     log_level: str = typer.Option("INFO", help="Log level"),
     verbose: bool = typer.Option(False, help="Verbose output"),
     debug: bool = typer.Option(False, help="Debug output"),
-    color: bool = typer.Option(True, help="Enable color output"),
+    # "  /-C" with its leading whitespace, matching the other commands: that is
+    # how click attaches a short form to the OFF side of a boolean flag. Written
+    # out here rather than inherited, because this wrapper declares its own
+    # params and delegates to mcp_command by keyword.
+    color: bool = typer.Option(
+        True, "--color/--no-color", "  /-C", help="Enable color output"
+    ),
     quiet: bool = typer.Option(False, help="Quiet output"),
     transport: str = typer.Option(
         "stdio",

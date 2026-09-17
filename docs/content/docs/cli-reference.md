@@ -15,16 +15,16 @@ These parameters are available across multiple ASH commands:
 | `--changed-files-only` | Limit the scan to files changed between the base branch and HEAD. | | `ASH_CHANGED_FILES_ONLY` | `scan` |
 | `--color` | Enable/disable colorized output | |  | `scan` |
 | `--compact-report` | Produce a shorter markdown report suitable for PR comments. | |  | `scan` |
-| `--container-gid` | GID to use for the container user | |  | `scan` |
-| `--container-uid` | UID to use for the container user | |  | `scan` |
+| `--container-gid`, `-g` | GID to use for the container user | |  | `scan`, `build-image` |
+| `--container-uid`, `-u` | UID to use for the container user | |  | `scan`, `build-image` |
 | `--custom-build-arg` | Custom build arguments to pass to the container build | |  | `scan` |
 | `--custom-containerfile` | Path to a custom container definition (e.g. | |  | `scan` |
 | `--fail-on-incomplete-scanners` / `--no-fail-on-incomplete-scanners` | Exit 1 when a selected scanner did not complete (`ERROR` or `MISSING`). Off by default; see [An incomplete scan is not a clean scan](#an-incomplete-scan-is-not-a-clean-scan). | | `--fail-on-incomplete-scanners` | `scan` |
 | `--formats` | The output formats to use (comma-separated). | |  | `scan` |
 | `--min-severity` | Minimum severity to trigger non-zero exit code (critical, high, medium, low, none). | |  | `scan` |
-| `--progress` | Show progress of each job live in the console. Defaults to True. | |  | `scan` |
-| `--python-based-plugins-only` | Exclude execution of any plugins or tools that have depencies external to Python. | |  | `scan` |
-| `--runner` | Use the specified OCI runner instead of docker to run the containerized tools | | `OCI_RUNNER` | `scan` |
+| `--progress`, `-p` / `--no-progress`, `-P` | Show progress of each job live in the console. Defaults to True. | |  | `scan` |
+| `--python-only` / `--full` | Exclude execution of any plugins or tools that have dependencies external to Python. Also spelled `--python-based-plugins-only` / `--all-enabled-plugins` and `--python-based-scanners-only` / `--all-enabled-scanners`. | |  | `scan` |
+| `--runner` | Use the specified OCI runner instead of docker to run the containerized tools. Also spelled `--oci`. | | `OCI_RUNNER` | `scan` |
 | `--show-summary` | Show metrics table and results summary | |  | `scan` |
 | `--simple` | Simplified output mode with minimal logging | |  | `scan` |
 | `--output-dir`         | Path to store scan results                                 | `.ash/ash_output` | `ASH_OUTPUT_DIR`     | `scan`, `report`                     |
@@ -35,7 +35,7 @@ These parameters are available across multiple ASH commands:
 | `--debug`, `-d`        | Enable debug logging                                       | `False`           | `ASH_DEBUG`          | All commands                         |
 | `--verbose`, `-v`      | Enable verbose logging                                     | `False`           | `ASH_VERBOSE`        | All commands                         |
 | `--quiet`, `-q`        | Suppress non-essential output                              | `False`           | `ASH_QUIET`          | All commands                         |
-| `--no-color`           | Disable colored output                                     | `False`           | `ASH_NO_COLOR`       | All commands                         |
+| `--no-color`, `-C`     | Disable colored output                                     | `False`           | `ASH_NO_COLOR`       | All commands                         |
 | `--oci-runner`, `-o`   | OCI runner to use                                          | `docker`          | `ASH_OCI_RUNNER`     | `scan` (container mode)              |
 | `--help`, `-h`         | Show help for the command and exit                         |                   |                      | All commands                         |
 
@@ -50,12 +50,19 @@ the flag that replaces them:
 |---|---|
 | `--ash-revision`, `-rev` | `--ash-revision-to-install` |
 
-Two differences are worth knowing if you are migrating an old invocation:
+Two short forms mean something different than they did, and in both cases the
+displaced meaning has its own capital letter rather than taking the lowercase one
+back:
 
 - `-v` is `--verbose`, not `--version`. The bash script used `-v` for the version;
-  the version flag here is `-V`.
-- `-c` is `--config` and takes a value. The bash script used `-c` for `--no-color`, so
-  an old `-c` will consume the next argument as a config path. Use `--no-color`.
+  the version flag is `-V`.
+- `-c` is `--config`, not `--no-color`, and it takes a value. Color is turned off
+  with `-C` or `--no-color`.
+
+The `-c` case is the one that bites, because it fails quietly rather than erroring:
+an old `-c` is still a valid flag, so it consumes the next argument as a config path
+instead of disabling color. `ash -c --verbose` looks for a config file named
+`--verbose`. Nothing warns about this, which is why it is written down here.
 
 `ash` is the command. `automated-security-helper` is an alias kept for hosts where a
 bare `ash` resolves to something else -- MSYS2 ships the Almquist shell under that

@@ -92,6 +92,27 @@ def _rejects(path, argv):
     return False
 
 
+def _all_commands():
+    """Every command in the app, including nested groups, as (name, command).
+
+    Walked from the built click tree rather than listed by hand, so a command
+    added later is covered without editing this file.
+    """
+    root = typer.main.get_command(app)
+
+    def walk(cmd, ctx, path=()):
+        yield (" ".join(path) or "(root)", cmd)
+        if hasattr(cmd, "list_commands"):
+            for name in cmd.list_commands(ctx):
+                sub = cmd.get_command(ctx, name)
+                if sub is None:
+                    continue
+                child = click.Context(sub, parent=ctx, info_name=name)
+                yield from walk(sub, child, path + (name,))
+
+    return list(walk(root, click.Context(root, info_name="ash")))
+
+
 def _spellings(path):
     """Every option spelling declared on a command.
 
@@ -196,6 +217,88 @@ class TestVersionShortForm:
         assert (
             runner.invoke(app, ["-V"]).output
             == runner.invoke(app, ["--version"]).output
+        )
+
+
+class TestNoColorShortForm:
+    """``-C``, not ``-c``: ``-c`` is ``--config`` and takes a value.
+
+    The deleted bash script used ``-c`` for ``--no-color``. Reclaiming it would
+    break every v3 caller passing ``-c <path>``, so the displaced meaning gets
+    its own capital short form -- the same resolution as ``-V`` for ``--version``.
+    """
+
+    def test_capital_C_disables_color(self):
+        assert _parse(ROOT, ["-C"])["color"] is False
+
+    def test_color_defaults_to_on(self):
+        """Control: without -C the same parse must come back True.
+
+        Asserting only that -C yields False would also pass if the default were
+        False and -C did nothing at all.
+        """
+        assert _parse(ROOT, [])["color"] is True
+
+    def test_both_long_forms_still_work(self):
+        assert _parse(ROOT, ["--no-color"])["color"] is False
+        assert _parse(ROOT, ["--color"])["color"] is True
+
+    def test_lowercase_c_is_still_config(self):
+        """``-c`` must keep taking a value and must not touch color."""
+        params = _parse(ROOT, ["-c", "some-config.yaml"])
+        assert params["config"] == "some-config.yaml"
+        assert params["color"] is True
+
+    def test_capital_C_composes_with_other_short_flags(self):
+        params = _parse(ROOT, ["-C", "-c", "some-config.yaml"])
+        assert params["color"] is False
+        assert params["config"] == "some-config.yaml"
+
+    def test_no_literal_slash_declaration_leaked(self):
+        """The leading whitespace in the ``"  /-C"`` decl is load-bearing.
+
+        Without it click does not read the decl as a short form for the OFF side
+        of the flag -- it registers a literal option named ``/-C``, and ``-C`` is
+        then rejected at runtime with "No such option". The failure is invisible
+        at the declaration site, so it is pinned here: a leaked decl shows up as
+        a ``/-C`` spelling on the command.
+        """
+        for path in (ROOT, SCAN, BUILD_IMAGE):
+            assert "/-C" not in _spellings(path)
+
+    def test_every_command_with_color_offers_the_short_form(self):
+        """Census, so a new command cannot quietly ship without it.
+
+        ``color`` is declared per command rather than inherited, so the flag is
+        wired in 14 places and a fifteenth is easy to add without ``-C``.
+        """
+        missing = []
+        for name, cmd in _all_commands():
+            spellings = set()
+            has_color = False
+            for param in cmd.params:
+                spellings.update(getattr(param, "opts", []) or [])
+                spellings.update(getattr(param, "secondary_opts", []) or [])
+                if getattr(param, "name", None) == "color":
+                    has_color = True
+            if has_color and "-C" not in spellings:
+                missing.append(name)
+        assert missing == [], f"commands with --no-color but no -C: {missing}"
+
+    def test_the_census_actually_found_commands(self):
+        """Control for the census above.
+
+        If ``_all_commands`` returned nothing, or no command had a ``color``
+        param, the census would pass by finding nothing to check.
+        """
+        with_color = [
+            name
+            for name, cmd in _all_commands()
+            if any(getattr(p, "name", None) == "color" for p in cmd.params)
+        ]
+        assert len(with_color) >= 14, (
+            f"expected at least 14 commands with a color param, found "
+            f"{len(with_color)}: {with_color}"
         )
 
 
