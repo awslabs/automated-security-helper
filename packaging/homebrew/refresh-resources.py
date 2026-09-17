@@ -83,7 +83,7 @@ import argparse
 import json
 import re
 import shutil
-import subprocess
+import subprocess  # nosec B404 - uv is invoked as a subprocess; it is the resolver this script delegates to
 import sys
 import time
 import urllib.error
@@ -193,7 +193,7 @@ def resolve_closure(python_version: str) -> dict[str, str]:
             "--no-annotate",
             "--quiet",
         ]
-        completed = subprocess.run(
+        completed = subprocess.run(  # nosec B603 - list-form argv, literal "uv" executable, every element built above
             command, capture_output=True, text=True, cwd=REPO_ROOT
         )
         if completed.returncode != 0:
@@ -287,13 +287,22 @@ def fetch_sdist(name: str, version: str) -> tuple[str, str, str]:
 
 
 def _get_json(url: str) -> dict:
+    # The scheme is checked rather than taken on trust, even though every caller
+    # passes the PYPI_JSON constant. urlopen honors file:// and ftp://, so an edit
+    # that made the index configurable would turn this into a local-file read with
+    # no visible change at the call site. Same reasoning, and same annotations, as
+    # automated_security_helper/utils/download_utils.py.
+    if not url.startswith("https://"):
+        raise RefreshError(f"refusing to fetch a URL that is not https: {url}")
+
     last_error: Exception | None = None
     for attempt in range(1, HTTP_ATTEMPTS + 1):
         try:
             request = urllib.request.Request(
                 url, headers={"Accept": "application/json"}
             )
-            with urllib.request.urlopen(  # noqa: S310 - constant https PyPI URL
+            # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+            with urllib.request.urlopen(  # nosec B310 - the https scheme is checked at the top of this function
                 request, timeout=HTTP_TIMEOUT_SECONDS
             ) as response:
                 return json.load(response)
