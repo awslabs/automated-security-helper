@@ -1,0 +1,26 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# winget version manifest. One of three files that together describe one version of
+# one package; see README.winget in this directory for what each carries and for the
+# reason this manifest set is schema-valid but NOT submission-ready.
+#
+# The filename is not free. winget requires <PackageIdentifier>.yaml for the version
+# manifest, <PackageIdentifier>.installer.yaml for the installer manifest, and
+# <PackageIdentifier>.locale.<locale>.yaml for each locale, with the default locale's
+# file named the same way as the others. Verified against a published set:
+# manifests/a/Amazon/Kiro/1.1.14/ in microsoft/winget-pkgs holds Amazon.Kiro.yaml,
+# Amazon.Kiro.installer.yaml, Amazon.Kiro.locale.en-US.yaml and
+# Amazon.Kiro.locale.zh-CN.yaml.
+#
+# The $schema comment below is not decoration. validate-manifests.py reads the version
+# out of it and requires it to equal ManifestVersion and to equal the schema it
+# actually fetched, so a file claiming one schema and validating against another fails
+# rather than passing quietly.
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.version.1.12.0.schema.json
+
+PackageIdentifier: Amazon.AutomatedSecurityHelper
+PackageVersion: 3.7.0
+DefaultLocale: en-US
+ManifestType: version
+ManifestVersion: 1.12.0
