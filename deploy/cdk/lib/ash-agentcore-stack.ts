@@ -150,7 +150,13 @@ import {
   ashOfflineMode, ashVersion, rebuildSchedule,
 } from './ash-config';
 import { AshImageBuild } from './ash-image-build';
-import { suppressSecretRotation, suppressUnevaluableRules } from './ash-nag-suppressions';
+import {
+  AGENTCORE_WILDCARD_POLICIES,
+  suppressAgentCoreRuntimeWildcards,
+  suppressSecretRotation,
+  suppressUnevaluableRules,
+} from './ash-nag-suppressions';
+import { AshSplitPolicyRole } from './ash-policy-split';
 import { AshRuntimeConfig } from './ash-runtime-config';
 
 export class AshAgentCoreStack extends Stack {
@@ -206,7 +212,27 @@ export class AshAgentCoreStack extends Stack {
      */
     const runtimeName = Fn.join('', Fn.split('-', Aws.STACK_NAME));
 
-    const role = new iam.Role(this, 'RuntimeRole', {
+    // AshSplitPolicyRole, not iam.Role: this role collects statements for six
+    // services and the single DefaultPolicy they used to share scored 29 against
+    // cfn-nag's W76 ceiling of 25. Splitting them per service changes no
+    // permission — see ash-policy-split.ts. The construct id is unchanged, so the
+    // role's logical id is too.
+    const role = new AshSplitPolicyRole(this, 'RuntimeRole', {
+      // Applied per policy as each is created, not once over the role: a
+      // suppression only reaches resources that already exist when it runs, and
+      // these policies come into being one grant at a time.
+      //
+      // Only the three policies that actually hold a "*" are suppressed. The split
+      // gives this role six, and the other three need nothing: SsmAccess and
+      // SecretsmanagerAccess name their resources exactly and IAM5 passes on both,
+      // while LogsAccess makes IAM5 throw and is handled below. Suppressing all six
+      // wrote three reasons no rule ever read -- see the note on
+      // AGENTCORE_WILDCARD_POLICIES for why naming the three does not rot.
+      onPolicyCreated: (policy) => {
+        if (AGENTCORE_WILDCARD_POLICIES.includes(policy.node.id)) {
+          suppressAgentCoreRuntimeWildcards(policy);
+        }
+      },
       description: 'Execution role AgentCore Runtime assumes to run the ASH MCP server.',
       // Trust policy verified against
       // https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-permissions.html
@@ -362,11 +388,36 @@ export class AshAgentCoreStack extends Stack {
      */
 
 
-    // Every ARN in this role is assembled from pseudo-parameters so the template
-    // stays account- and region-agnostic, which is exactly the shape cdk-nag's
-    // IAM5 evaluator cannot resolve. The wildcards themselves are justified at
-    // each addToPolicy call above.
-    suppressUnevaluableRules(role, ['AwsSolutions-IAM5']);
+    /*
+     * IAM5 throws on the logs policy, so the throw is what gets suppressed.
+     *
+     * `RuntimeLogResourcePolicy` above builds its resource with `Fn.join` over
+     * pseudo-parameters, which is the shape cdk-nag's IAM5 evaluator cannot resolve
+     * — it fails inside the rule with «items.map is not a function» rather than
+     * returning a verdict. Measured over all five stacks this is the only IAM5 throw
+     * in the app; every other policy on this role resolves and gets a real verdict.
+     *
+     * SO THIS IS APPLIED TO THAT ONE POLICY. It used to be applied to the role with
+     * `applyToChildren`, which put the same reason on the role and on all six of its
+     * policies: seven entries for one throw, six of them unreadable by anything.
+     *
+     * Found by construct id rather than by holding a reference because the policy is
+     * created lazily, by the first `logs:` statement to arrive -- see
+     * `policyGroupFor` in ash-policy-split.ts, which derives `LogsAccess` from the
+     * action's service prefix. If that policy stopped existing this would throw here
+     * at synth; if the throw moved to a different policy, ERROR-level IAM5 would
+     * report it. Neither failure is quiet, which is what makes naming it acceptable
+     * where an `appliesTo` string would not be.
+     */
+    const runtimeLogsPolicy = role.node.tryFindChild('LogsAccess');
+    if (runtimeLogsPolicy === undefined) {
+      throw new Error(
+        "RuntimeRole has no 'LogsAccess' policy to suppress AwsSolutions-IAM5's validation " +
+          'failure on. The logs statements above should have created it; check ' +
+          'policyGroupFor in ash-policy-split.ts.',
+      );
+    }
+    suppressUnevaluableRules(runtimeLogsPolicy, ['AwsSolutions-IAM5']);
 
     new CfnOutput(this, 'AgentRuntimeArn', {
       description: 'Invoke with bedrock-agentcore:InvokeAgentRuntime against this ARN.',

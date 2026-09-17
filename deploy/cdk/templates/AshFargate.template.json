@@ -347,24 +347,9 @@
      ],
      "Version": "2012-10-17"
     }
-   },
-   "Metadata": {
-    "cdk_nag": {
-     "rules_to_suppress": [
-      {
-       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
-       "id": "AwsSolutions-IAM5"
-      },
-      {
-       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
-       "id": "CdkNagValidationFailure",
-       "is_reason_encoded": true
-      }
-     ]
-    }
    }
   },
-  "ImageBuildRoleDefaultPolicy3DC330B3": {
+  "ImageBuildRoleLogsAccess5CAE3F32": {
    "Type": "AWS::IAM::Policy",
    "Properties": {
     "PolicyDocument": {
@@ -438,7 +423,33 @@
          ]
         }
        ]
-      },
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "ImageBuildRoleLogsAccess5CAE3F32",
+    "Roles": [
+     {
+      "Ref": "ImageBuildRole1BB51BF0"
+     }
+    ]
+   },
+   "Metadata": {
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "The only wildcard is the log-stream suffix \":*\" on this project's own CodeBuild log group. A build creates a stream per run, so the stream name is not knowable at deploy time and \":*\" on that one group is the narrowest grant that permits logging at all. No action in this policy is wildcarded.",
+       "id": "AwsSolutions-IAM5"
+      }
+     ]
+    }
+   }
+  },
+  "ImageBuildRoleCodebuildAccess4E36B96A": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": [
         "codebuild:BatchPutCodeCoverages",
@@ -472,7 +483,33 @@
          ]
         ]
        }
-      },
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "ImageBuildRoleCodebuildAccess4E36B96A",
+    "Roles": [
+     {
+      "Ref": "ImageBuildRole1BB51BF0"
+     }
+    ]
+   },
+   "Metadata": {
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "The only wildcard is the \"-*\" suffix on this project's own report-group ARN. CodeBuild derives a report group name per report and prefixes it with the project name, so the name is not knowable at deploy time and the prefix keeps the grant inside this project. No action in this policy is wildcarded.",
+       "id": "AwsSolutions-IAM5"
+      }
+     ]
+    }
+   }
+  },
+  "ImageBuildRoleKmsAccess6B467E84": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": [
         "kms:Decrypt",
@@ -487,7 +524,33 @@
          "Arn"
         ]
        }
-      },
+      }
+     ],
+     "Version": "2012-10-17"
+    },
+    "PolicyName": "ImageBuildRoleKmsAccess6B467E84",
+    "Roles": [
+     {
+      "Ref": "ImageBuildRole1BB51BF0"
+     }
+    ]
+   },
+   "Metadata": {
+    "cdk_nag": {
+     "rules_to_suppress": [
+      {
+       "reason": "The two wildcards are the action suffixes kms:GenerateDataKey* and kms:ReEncrypt*, which CDK's key grant writes to cover the WithoutPlaintext and From/To variants. They widen the verb set, not the reach: every statement in this policy names the one customer-managed key this stack creates, so no resource here is wildcarded.",
+       "id": "AwsSolutions-IAM5"
+      }
+     ]
+    }
+   }
+  },
+  "ImageBuildRoleEcrAccess0D916E99": {
+   "Type": "AWS::IAM::Policy",
+   "Properties": {
+    "PolicyDocument": {
+     "Statement": [
       {
        "Action": [
         "ecr:BatchCheckLayerAvailability",
@@ -514,7 +577,7 @@
      ],
      "Version": "2012-10-17"
     },
-    "PolicyName": "ImageBuildRoleDefaultPolicy3DC330B3",
+    "PolicyName": "ImageBuildRoleEcrAccess0D916E99",
     "Roles": [
      {
       "Ref": "ImageBuildRole1BB51BF0"
@@ -525,13 +588,8 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "reason": "The only wildcard is Resource \"*\" on ecr:GetAuthorizationToken, for which IAM defines no resource ARN at all, so \"*\" is the only value the policy will accept. Every other action in this policy is scoped to the one ECR repository this stack creates, and no action is wildcarded.",
        "id": "AwsSolutions-IAM5"
-      },
-      {
-       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
-       "id": "CdkNagValidationFailure",
-       "is_reason_encoded": true
       }
      ]
     }
@@ -686,21 +744,6 @@
      "Type": "NO_SOURCE"
     },
     "TimeoutInMinutes": 120
-   },
-   "Metadata": {
-    "cdk_nag": {
-     "rules_to_suppress": [
-      {
-       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
-       "id": "AwsSolutions-IAM5"
-      },
-      {
-       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
-       "id": "CdkNagValidationFailure",
-       "is_reason_encoded": true
-      }
-     ]
-    }
    }
   },
   "ImageBuildEventsRoleDF4F46F6": {
@@ -717,21 +760,6 @@
       }
      ],
      "Version": "2012-10-17"
-    }
-   },
-   "Metadata": {
-    "cdk_nag": {
-     "rules_to_suppress": [
-      {
-       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
-       "id": "AwsSolutions-IAM5"
-      },
-      {
-       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
-       "id": "CdkNagValidationFailure",
-       "is_reason_encoded": true
-      }
-     ]
     }
    }
   },
@@ -759,21 +787,6 @@
       "Ref": "ImageBuildEventsRoleDF4F46F6"
      }
     ]
-   },
-   "Metadata": {
-    "cdk_nag": {
-     "rules_to_suppress": [
-      {
-       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
-       "id": "AwsSolutions-IAM5"
-      },
-      {
-       "reason": "Y2RrLW5hZyBjYW5ub3QgZXZhbHVhdGUgdGhlc2UgcHJvcGVydGllcyBiZWNhdXNlIHRoZXkgcmVzb2x2ZSB0byBDbG91ZEZvcm1hdGlvbiBpbnRyaW5zaWNzIHJhdGhlciB0aGFuIGxpdGVyYWxzOiB0aGUgRUNSIGltYWdlIFVSSSBpcyBhbiBGbjo6Sm9pbiBvdmVyIHRoZSByZXBvc2l0b3J5IGF0dHJpYnV0ZXMsIGFuZCB0aGUgSUFNIHJlc291cmNlcyBhcmUgYnVpbHQgZnJvbSBwc2V1ZG8tcGFyYW1ldGVycyBzbyB0aGUgdGVtcGxhdGVzIHN0YXkgYWNjb3VudC0gYW5kIHJlZ2lvbi1hZ25vc3RpYy4gUnVsZXMgYWZmZWN0ZWQ6IEF3c1NvbHV0aW9ucy1DQjUuIFJlY29yZGVkIHJhdGhlciB0aGFuIHNpbGVudGx5IGlnbm9yZWQg4oCUIHRoZXNlIHJ1bGVzIGRpZCBub3QgcnVuLCBzbyB0aGV5IG5laXRoZXIgcGFzc2VkIG5vciBmYWlsZWQu",
-       "id": "CdkNagValidationFailure",
-       "is_reason_encoded": true
-      }
-     ]
-    }
    }
   },
   "ImageBootstrapStarterLogsFCF41B92": {
@@ -811,16 +824,6 @@
      "Version": "2012-10-17"
     },
     "Description": "Execution role for the image-build bootstrap. Deliberately not using AWSLambdaBasicExecutionRole: the only logging grant it needs is on one log group."
-   },
-   "Metadata": {
-    "cdk_nag": {
-     "rules_to_suppress": [
-      {
-       "reason": "The only wildcard is the log-stream suffix on the function's own log group. Lambda creates a stream per execution environment, so the stream name is not knowable at deploy time and \":*\" on that one group is the narrowest grant that permits logging at all.",
-       "id": "AwsSolutions-IAM5"
-      }
-     ]
-    }
    }
   },
   "ImageBootstrapStarterRoleDefaultPolicy10189EBF": {
@@ -1482,17 +1485,6 @@
      ],
      "Version": "2012-10-17"
     }
-   },
-   "Metadata": {
-    "cdk_nag": {
-     "rules_to_suppress": [
-      {
-       "reason": "Tm8gc2VjcmV0IGlzIGluIHRoaXMgZW52aXJvbm1lbnQgbWFwLiBJdCBjYXJyaWVzIGEgcG9ydCwgYSBtb3VudCBwYXRoLCB0d28gYm9vbGVhbnMsIGEgSG9zdCBhbGxvd2xpc3QsIGEgaGVhZGVyIE5BTUUsIGFuIFNTTSBwYXJhbWV0ZXIgTkFNRSBhbmQgYSBTZWNyZXRzIE1hbmFnZXIgQVJOLiBUaGUgc2VjcmV0IHZhbHVlIGl0c2VsZiBpcyBmZXRjaGVkIGluc2lkZSB0aGUgY29udGFpbmVyIGZyb20gdGhhdCBBUk4sIHNvIGl0IG5ldmVyIGVudGVycyB0aGUgdGFzayBkZWZpbml0aW9uIOKAlCB3aGljaCBpcyB3aGF0IHRoaXMgcnVsZSBpcyBhc2tpbmcgZm9yLiBBZ2VudENvcmUgb2ZmZXJzIG9ubHkgYSBwbGFpbnRleHQgZW52aXJvbm1lbnQgbWFwLCBzbyB0aGUgc2FtZSBpbmRpcmVjdGlvbiBpcyB1c2VkIGFjcm9zcyBib3RoIHRhcmdldHMgZm9yIG9uZSBjb2RlIHBhdGgu",
-       "id": "AwsSolutions-ECS2",
-       "is_reason_encoded": true
-      }
-     ]
-    }
    }
   },
   "TaskDefinitionTaskRoleDefaultPolicy282E8624": {
@@ -1551,17 +1543,6 @@
       "Ref": "TaskDefinitionTaskRoleFD40A61D"
      }
     ]
-   },
-   "Metadata": {
-    "cdk_nag": {
-     "rules_to_suppress": [
-      {
-       "reason": "Tm8gc2VjcmV0IGlzIGluIHRoaXMgZW52aXJvbm1lbnQgbWFwLiBJdCBjYXJyaWVzIGEgcG9ydCwgYSBtb3VudCBwYXRoLCB0d28gYm9vbGVhbnMsIGEgSG9zdCBhbGxvd2xpc3QsIGEgaGVhZGVyIE5BTUUsIGFuIFNTTSBwYXJhbWV0ZXIgTkFNRSBhbmQgYSBTZWNyZXRzIE1hbmFnZXIgQVJOLiBUaGUgc2VjcmV0IHZhbHVlIGl0c2VsZiBpcyBmZXRjaGVkIGluc2lkZSB0aGUgY29udGFpbmVyIGZyb20gdGhhdCBBUk4sIHNvIGl0IG5ldmVyIGVudGVycyB0aGUgdGFzayBkZWZpbml0aW9uIOKAlCB3aGljaCBpcyB3aGF0IHRoaXMgcnVsZSBpcyBhc2tpbmcgZm9yLiBBZ2VudENvcmUgb2ZmZXJzIG9ubHkgYSBwbGFpbnRleHQgZW52aXJvbm1lbnQgbWFwLCBzbyB0aGUgc2FtZSBpbmRpcmVjdGlvbiBpcyB1c2VkIGFjcm9zcyBib3RoIHRhcmdldHMgZm9yIG9uZSBjb2RlIHBhdGgu",
-       "id": "AwsSolutions-ECS2",
-       "is_reason_encoded": true
-      }
-     ]
-    }
    }
   },
   "TaskDefinitionB36D86D9": {
@@ -1750,9 +1731,8 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Tm8gc2VjcmV0IGlzIGluIHRoaXMgZW52aXJvbm1lbnQgbWFwLiBJdCBjYXJyaWVzIGEgcG9ydCwgYSBtb3VudCBwYXRoLCB0d28gYm9vbGVhbnMsIGEgSG9zdCBhbGxvd2xpc3QsIGEgaGVhZGVyIE5BTUUsIGFuIFNTTSBwYXJhbWV0ZXIgTkFNRSBhbmQgYSBTZWNyZXRzIE1hbmFnZXIgQVJOLiBUaGUgc2VjcmV0IHZhbHVlIGl0c2VsZiBpcyBmZXRjaGVkIGluc2lkZSB0aGUgY29udGFpbmVyIGZyb20gdGhhdCBBUk4sIHNvIGl0IG5ldmVyIGVudGVycyB0aGUgdGFzayBkZWZpbml0aW9uIOKAlCB3aGljaCBpcyB3aGF0IHRoaXMgcnVsZSBpcyBhc2tpbmcgZm9yLiBBZ2VudENvcmUgb2ZmZXJzIG9ubHkgYSBwbGFpbnRleHQgZW52aXJvbm1lbnQgbWFwLCBzbyB0aGUgc2FtZSBpbmRpcmVjdGlvbiBpcyB1c2VkIGFjcm9zcyBib3RoIHRhcmdldHMgZm9yIG9uZSBjb2RlIHBhdGgu",
-       "id": "AwsSolutions-ECS2",
-       "is_reason_encoded": true
+       "reason": "No secret is in this environment map. It carries a port, a mount path, two booleans, a Host allowlist, a header NAME, an SSM parameter NAME and a Secrets Manager ARN. The secret value itself is fetched inside the container from that ARN, so it never enters the task definition, which is what this rule is asking for. AgentCore offers only a plaintext environment map, so the same indirection is used across both targets for one code path.",
+       "id": "AwsSolutions-ECS2"
       }
      ]
     }
@@ -1772,21 +1752,6 @@
       }
      ],
      "Version": "2012-10-17"
-    }
-   },
-   "Metadata": {
-    "cdk_nag": {
-     "rules_to_suppress": [
-      {
-       "reason": "Tm8gc2VjcmV0IGlzIGluIHRoaXMgZW52aXJvbm1lbnQgbWFwLiBJdCBjYXJyaWVzIGEgcG9ydCwgYSBtb3VudCBwYXRoLCB0d28gYm9vbGVhbnMsIGEgSG9zdCBhbGxvd2xpc3QsIGEgaGVhZGVyIE5BTUUsIGFuIFNTTSBwYXJhbWV0ZXIgTkFNRSBhbmQgYSBTZWNyZXRzIE1hbmFnZXIgQVJOLiBUaGUgc2VjcmV0IHZhbHVlIGl0c2VsZiBpcyBmZXRjaGVkIGluc2lkZSB0aGUgY29udGFpbmVyIGZyb20gdGhhdCBBUk4sIHNvIGl0IG5ldmVyIGVudGVycyB0aGUgdGFzayBkZWZpbml0aW9uIOKAlCB3aGljaCBpcyB3aGF0IHRoaXMgcnVsZSBpcyBhc2tpbmcgZm9yLiBBZ2VudENvcmUgb2ZmZXJzIG9ubHkgYSBwbGFpbnRleHQgZW52aXJvbm1lbnQgbWFwLCBzbyB0aGUgc2FtZSBpbmRpcmVjdGlvbiBpcyB1c2VkIGFjcm9zcyBib3RoIHRhcmdldHMgZm9yIG9uZSBjb2RlIHBhdGgu",
-       "id": "AwsSolutions-ECS2",
-       "is_reason_encoded": true
-      },
-      {
-       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
-       "id": "AwsSolutions-IAM5"
-      }
-     ]
     }
    }
   },
@@ -1841,12 +1806,7 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "Tm8gc2VjcmV0IGlzIGluIHRoaXMgZW52aXJvbm1lbnQgbWFwLiBJdCBjYXJyaWVzIGEgcG9ydCwgYSBtb3VudCBwYXRoLCB0d28gYm9vbGVhbnMsIGEgSG9zdCBhbGxvd2xpc3QsIGEgaGVhZGVyIE5BTUUsIGFuIFNTTSBwYXJhbWV0ZXIgTkFNRSBhbmQgYSBTZWNyZXRzIE1hbmFnZXIgQVJOLiBUaGUgc2VjcmV0IHZhbHVlIGl0c2VsZiBpcyBmZXRjaGVkIGluc2lkZSB0aGUgY29udGFpbmVyIGZyb20gdGhhdCBBUk4sIHNvIGl0IG5ldmVyIGVudGVycyB0aGUgdGFzayBkZWZpbml0aW9uIOKAlCB3aGljaCBpcyB3aGF0IHRoaXMgcnVsZSBpcyBhc2tpbmcgZm9yLiBBZ2VudENvcmUgb2ZmZXJzIG9ubHkgYSBwbGFpbnRleHQgZW52aXJvbm1lbnQgbWFwLCBzbyB0aGUgc2FtZSBpbmRpcmVjdGlvbiBpcyB1c2VkIGFjcm9zcyBib3RoIHRhcmdldHMgZm9yIG9uZSBjb2RlIHBhdGgu",
-       "id": "AwsSolutions-ECS2",
-       "is_reason_encoded": true
-      },
-      {
-       "reason": "Inherent to CodeBuild and ECR, not a broadening of scope. The wildcards are: (1) the log-stream suffix on this project's own CloudWatch log group, which is created per build; (2) the per-report suffix on this project's own report group; (3) ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only valid value; (4) object-level access inside buckets created by this stack. None of them reach a resource outside this stack.",
+       "reason": "The only wildcard is ecr:GetAuthorizationToken, which IAM defines with no resource ARN, so \"*\" is the only value the policy will accept. The image pull and the log writes on this role are each scoped to one ARN this stack creates.",
        "id": "AwsSolutions-IAM5"
       }
      ]
@@ -2382,9 +2342,8 @@
     "cdk_nag": {
      "rules_to_suppress": [
       {
-       "reason": "QXdzU29sdXRpb25zLUVDMjMgY2Fubm90IGV2YWx1YXRlIENpZHJJcCBiZWNhdXNlIGl0IGlzIGFuIEZuOjpSZWYgdG8gdGhlIE1jcEluZ3Jlc3NDaWRyIHBhcmFtZXRlciwgc28gaXQgcmVzb2x2ZXMgdG8gYSBub24tcHJpbWl0aXZlLiBUaGUgcnVsZSBkaWQgbm90IHJ1biDigJQgaXQgbmVpdGhlciBwYXNzZWQgbm9yIGZhaWxlZC4gVGhlIHByb3BlcnR5IGl0IGNoZWNrcyBpcyBlbmZvcmNlZCBpbnN0ZWFkIGJ5IHRoYXQgcGFyYW1ldGVyJ3MgQWxsb3dlZFBhdHRlcm4sIHdoaWNoIHJlamVjdHMgYSAvMCBwcmVmaXgsIHNvIGFuIG9wZW4tdG8tdGhlLXdvcmxkIENJRFIgaXMgcmVmdXNlZCBhdCBwYXJhbWV0ZXIgdmFsaWRhdGlvbiByYXRoZXIgdGhhbiByZWFjaGluZyB0aGlzIHJlc291cmNlLiBHcmFudGluZyBtb3JlIGJyb2FkbHkgaXMgZG9uZSBkZWxpYmVyYXRlbHkgYWdhaW5zdCB0aGUgTWNwU2VjdXJpdHlHcm91cElkIG91dHB1dC4=",
-       "id": "CdkNagValidationFailure",
-       "is_reason_encoded": true
+       "reason": "AwsSolutions-EC23 cannot evaluate CidrIp because it is an Fn::Ref to the McpIngressCidr parameter, so it resolves to a non-primitive. The rule did not run: it neither passed nor failed. The property it checks is enforced instead by that parameter's AllowedPattern, which rejects a /0 prefix, so an open-to-the-world CIDR is refused at parameter validation rather than reaching this resource. Granting more broadly is done deliberately against the McpSecurityGroupId output.",
+       "id": "CdkNagValidationFailure"
       }
      ]
     }
