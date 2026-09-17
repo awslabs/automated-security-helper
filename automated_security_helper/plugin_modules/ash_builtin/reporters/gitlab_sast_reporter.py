@@ -21,6 +21,25 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from pydantic import Field
 from typing import Annotated
 
+# The GitLab security-report schema version this reporter's output conforms to, and
+# the single place that states it.
+#
+# It was an inline literal in the report dict, which left CI free to disagree with it:
+# the schema-compliance step in .github/actions/run-scan-test/action.yml fetched
+# sast-report-format.json from the schemas repo's `master`, so the gate validated
+# these reports against whatever GitLab had merged most recently. Measured 2026-09-17,
+# `master` was 15.2.5 and differed from 15.2.2 -- 1,030 bytes and a different digest.
+#
+# Today the drift is loosening rather than tightening: 15.2.5 adds CVSS 4.0 vectors
+# and raises code_flows.items.maxItems from 10 to 30, and this reporter emits neither
+# field, so nothing failed. A tightening change would have failed the gate for a
+# reason unrelated to ASH's code. Reading the version from here makes the gate check
+# the contract the report actually claims.
+#
+# Bumping it means checking the new schema against what build_sast_report emits,
+# because the version string is a claim about this file's output and not a preference.
+GITLAB_SAST_SCHEMA_VERSION = "15.2.2"
+
 
 class GitLabSASTReporterConfigOptions(ReporterOptionsBase):
     exclude_suppressed: Annotated[
@@ -332,7 +351,7 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
 
             # Create the final report structure matching the reference
             report_dict = {
-                "version": "15.2.2",
+                "version": GITLAB_SAST_SCHEMA_VERSION,
                 "vulnerabilities": vulnerabilities,
                 "scan": {
                     "analyzer": {
