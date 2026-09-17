@@ -76,6 +76,9 @@ internal static class AshLauncher
     // that placeholder as a working Python.
     private const string PythonOkToken = "ASH_PY_OK";
     private const string PythonOldToken = "ASH_PY_OLD";
+    // A third verdict, added because a floor-only check found 3.14 and the package then
+    // failed. See FindPython for the measurement.
+    private const string PythonNewToken = "ASH_PY_NEW";
 
     private static int Main()
     {
@@ -363,20 +366,63 @@ internal static class AshLauncher
         }
         else
         {
+            // Version-specific probes first, newest supported down to the floor, then the
+            // generic names as a fallback. This is the order packaging/chocolatey's
+            // chocolateyinstall.ps1 already uses, and it exists for the same reason: `py -3`
+            // and `python3` resolve to whatever is newest or first on PATH, which is not
+            // necessarily a version ASH is tested against.
+            candidates.Add(new PythonCandidate { Executable = "py", PrefixArguments = "-3.13 ", Description = "py -3.13" });
+            candidates.Add(new PythonCandidate { Executable = "py", PrefixArguments = "-3.12 ", Description = "py -3.12" });
+            candidates.Add(new PythonCandidate { Executable = "py", PrefixArguments = "-3.11 ", Description = "py -3.11" });
+            candidates.Add(new PythonCandidate { Executable = "py", PrefixArguments = "-3.10 ", Description = "py -3.10" });
             candidates.Add(new PythonCandidate { Executable = "py", PrefixArguments = "-3 ", Description = "py -3" });
             candidates.Add(new PythonCandidate { Executable = "python3", PrefixArguments = "", Description = "python3" });
             candidates.Add(new PythonCandidate { Executable = "python", PrefixArguments = "", Description = "python" });
         }
 
+        // The probe has a CEILING as well as a floor, and the ceiling is the whole reason
+        // this function was rewritten.
+        //
+        // It used to check `sys.version_info >= (3, 10)` and nothing else. On a
+        // windows-latest runner that selected Python 3.14.7 out of the hosted toolcache,
+        // the venv built and pip reported "Successfully installed
+        // automated-security-helper-3.7.0", and then `ash --version` exited 1 writing
+        // nothing to stdout or stderr. Measured in run 35279579798, and the launcher was
+        // ruled out as the cause: running the venv's own Scripts\ash.exe directly, with no
+        // launcher in the path, exits 1 the same way.
+        //
+        // The discriminator is the Chocolatey package, which passed on the same runner
+        // image in the same run with a real scan. Its nuspec declares
+        // `python3 [3.10,3.14)` and its install script rejects anything at or above 3.14.
+        // Same OS, same wheel, same day: bounded below 3.14 works, 3.14 does not.
+        //
+        // 3.14 is inside what pyproject.toml declares -- `requires-python = ">=3.10,<4"` --
+        // so this ceiling is narrower than ASH's stated support. That gap is real and is
+        // not this file's to close: ash-unified-ci.yml exercises 3.10 through 3.13 and
+        // nothing above, so the declared range has simply never been tested at its top
+        // end, and packaging/chocolatey/README.chocolatey already says so in as many
+        // words. Matching Chocolatey keeps the two Windows packages consistent and keeps
+        // this one inside the range the project actually tests. If the 3.14 defect is
+        // fixed, or requires-python is narrowed to match what CI runs, this bound and
+        // Chocolatey's move together.
         bool sawSomethingTooOld = false;
+        bool sawSomethingTooNew = false;
         foreach (PythonCandidate candidate in candidates)
         {
             string probe = candidate.PrefixArguments +
-                "-c \"import sys; sys.stdout.write('" + PythonOkToken +
-                "' if sys.version_info >= (3, 10) else '" + PythonOldToken + "')\"";
+                "-c \"import sys; sys.stdout.write('" + PythonNewToken +
+                "' if sys.version_info >= (3, 14) else ('" + PythonOkToken +
+                "' if sys.version_info >= (3, 10) else '" + PythonOldToken + "'))\"";
             string output;
             if (!TryCapture(candidate.Executable, probe, out output))
             {
+                continue;
+            }
+            // Checked before the OK token, because ASH_PY_OK is a substring of nothing here
+            // but the order still matters if these tokens are ever edited to share a prefix.
+            if (output.Contains(PythonNewToken))
+            {
+                sawSomethingTooNew = true;
                 continue;
             }
             if (output.Contains(PythonOkToken))
@@ -389,14 +435,32 @@ internal static class AshLauncher
             }
         }
 
-        throw new LauncherError(
-            sawSomethingTooOld
-                ? "found a Python interpreter, but every one tried is older than 3.10, which " +
-                  "is ASH's floor. Install a supported Python, or point " +
-                  PythonOverrideVariable + " at one."
-                : "found no Python interpreter. ASH's MSIX package carries ASH's wheel but " +
-                  "not an interpreter, so Python 3.10 or newer has to be on the machine. " +
-                  "Install it, or point " + PythonOverrideVariable + " at an existing one.");
+        string reason;
+        if (sawSomethingTooNew && !sawSomethingTooOld)
+        {
+            reason =
+                "found a Python interpreter, but every one tried is 3.14 or newer. ASH is " +
+                "exercised on 3.10 through 3.13 and its console script has been measured " +
+                "failing silently on 3.14 for Windows, so this package will not build a " +
+                "virtualenv against one. Install a Python in [3.10, 3.14), or point " +
+                PythonOverrideVariable + " at one. The override is not version-checked, so " +
+                "it can be used to try 3.14 deliberately.";
+        }
+        else if (sawSomethingTooOld || sawSomethingTooNew)
+        {
+            reason =
+                "found Python interpreters, but none in [3.10, 3.14). 3.10 is ASH's floor, " +
+                "and 3.14 is above what ASH is exercised on. Install a Python in that " +
+                "range, or point " + PythonOverrideVariable + " at one.";
+        }
+        else
+        {
+            reason =
+                "found no Python interpreter. ASH's MSIX package carries ASH's wheel but " +
+                "not an interpreter, so a Python in [3.10, 3.14) has to be on the machine. " +
+                "Install one, or point " + PythonOverrideVariable + " at an existing one.";
+        }
+        throw new LauncherError(reason);
     }
 
     // Starts the venv's console script and hands it the user's arguments untouched.

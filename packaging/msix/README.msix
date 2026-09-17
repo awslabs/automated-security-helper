@@ -24,11 +24,28 @@ On a machine with no reachable index, stage a wheelhouse first:
   setx PIP_NO_INDEX true
   setx PIP_FIND_LINKS C:\ash-wheels
 
-The package also does not carry a Python interpreter, so Python 3.10 or newer has to
-be on the machine. The launcher looks for `py -3`, then `python3`, then `python`, and
-checks each one's version rather than trusting that it ran, because on a machine with
-no Python installed a bare `python` resolves to the Microsoft Store placeholder that
-opens the Store instead of running anything. ASH_MSIX_PYTHON overrides the search.
+The package also does not carry a Python interpreter, so one in **[3.10, 3.14)** has to
+be on the machine. The launcher tries `py -3.13`, `-3.12`, `-3.11`, `-3.10` in that
+order and then falls back to `py -3`, `python3` and `python`, and checks each one's
+version rather than trusting that it ran, because on a machine with no Python installed
+a bare `python` resolves to the Microsoft Store placeholder that opens the Store
+instead of running anything. ASH_MSIX_PYTHON overrides the search and is not
+version-checked, so it can be pointed at 3.14 deliberately.
+
+The upper bound is narrower than ASH's own `requires-python`, which is `>=3.10,<4`, and
+the reason is measured rather than cautious. On a `windows-latest` runner the launcher's
+old `py -3` probe selected Python 3.14.7, the virtualenv built, pip reported
+`Successfully installed automated-security-helper-3.7.0`, and `ash --version` then
+exited 1 writing nothing to stdout or stderr. Running the virtualenv's own
+`Scripts\ash.exe` directly, with no launcher involved, failed the same way, so this is
+ASH on Windows under 3.14 rather than anything about this package.
+
+`ash-unified-ci.yml` exercises 3.10 through 3.13 and nothing above, so the top of the
+declared range has never been tested. `packaging/chocolatey` reached the same ceiling
+independently and by a different route -- its nuspec declares `python3 [3.10,3.14)` --
+and its job passed on the same runner image in the same run that this one failed on.
+Two Windows packages with the same bound is deliberate. If the 3.14 failure is fixed,
+or `requires-python` is narrowed to match what CI runs, both bounds move together.
 
 Why there is no install-time setup step
 --------------------------------------

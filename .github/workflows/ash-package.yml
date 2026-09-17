@@ -511,6 +511,21 @@ jobs:
         with:
           enable-cache: true
 
+      # An explicit interpreter, because leaving it to the runner selected one ASH does
+      # not work with. On the first two runs of this job the launcher's `py -3` probe
+      # picked Python 3.14.7 out of the hosted toolcache, and `ash --version` then exited
+      # 1 writing nothing at all -- including when the venv's own Scripts\ash.exe was run
+      # directly, so the launcher was not the cause. The Chocolatey job passed in the same
+      # run on the same image because its nuspec pins python3 to [3.10,3.14).
+      #
+      # 3.13 is the newest version ash-unified-ci.yml exercises. Pinning it here makes
+      # this job test the package rather than test which Python the image happens to
+      # prefer that week, and it is the same bound the launcher now enforces for a user.
+      - name: Use a Python this project is exercised on
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
       - name: Download the wheel built and gated by the build job
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
