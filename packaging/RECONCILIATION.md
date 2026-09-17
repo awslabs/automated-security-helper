@@ -24,6 +24,15 @@ The plan's Phases 1 and 2 are therefore closed, and most of Phase 6 with them.
 ## Done on this branch
 
 - Release wiring and Sigstore provenance in `ash-tag-on-merge.yml`.
+- MCPB release wiring, in the same job. `backends/mcpb/__init__.py` had declared a
+  release-stage `copy-archive` phase since the backend was written and nothing invoked
+  it — `agentic-plugins release` appeared nowhere in `.github/` — so the committed
+  `ash.mcpb` never left the repository. It is now staged, drift-checked, member-counted,
+  attested and attached beside the wheel and sdist. It is deliberately **not** passed to
+  `assert-artifact-contents.py`: that script requires exactly one top-level distribution
+  root and raises rather than reporting clean when it finds none, and measured against
+  the staged bundle it exits 2 on a correct archive. The member-count assertion is the
+  boundary control for that shape.
 - A Debian/Ubuntu package and an Amazon Linux/RHEL package, each verified by building,
   installing and running a real scan in its target distro image.
 - CI jobs that do the same on every pull request, the first `container:` jobs in the
@@ -207,8 +216,6 @@ transitive-only change is caught by `brew install` or `--check` and not by the t
   none of `flatpak-builder`, `makeappx`, `choco` or `winget` was available on the machine
   this branch was built on, so writing them without local evidence would have produced
   CI-only code — the opposite of how the deb and rpm were done.
-- **MCPB release wiring.** `backends/mcpb/__init__.py` declares `stage="release"` and
-  nothing consumes it.
 - **VS Code `.vsix` and the JetBrains plugin.**
 - **Provenance for the native packages.** The wheel and sdist are attested; the `.deb`
   and `.rpm` are built in CI but not attached to a release or attested.
