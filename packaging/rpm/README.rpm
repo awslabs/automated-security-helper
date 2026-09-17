@@ -38,6 +38,7 @@ Files
   /usr/lib/ash/wheels/   ASH's wheel, the package's only payload
   /usr/lib/ash/venv/     created by %post, removed by %postun on erase only
   /usr/bin/ash           wrapper that execs the venv entry point
+  /usr/share/doc/ash/    this file, which %post's failure message points at
 
 The venv is built on the target rather than shipped, because a virtualenv records
 absolute paths and the interpreter ABI of the machine that created it. %postun checks

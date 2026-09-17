@@ -100,6 +100,13 @@ MANIFEST
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
+#  ...but packaging/rpm/ash.spec is a tracked source file, not a PyInstaller artifact.
+#  This rule already cost the project the rpm spec once: it was written, verified
+#  against, and never landed, because `git add <dir>` skips ignored files silently
+#  instead of failing. packaging/rpm/build.sh then referenced a file no clean checkout
+#  had, and the rpm: CI job could not pass. Keep this negation next to the rule it
+#  narrows, so a future rpm spec does not disappear the same way.
+!packaging/rpm/ash.spec
 
 # Installer logs
 pip-log.txt
