@@ -20,9 +20,21 @@
 #
 # InstallerUrl points at the GitHub release asset path, with the tag and filename that
 # a release of this version would produce. set-release-metadata.py rewrites the
-# filename from the .msix it is handed, so a mismatch between this default and whatever
-# packaging/msix/ actually names its output corrects itself at release time rather than
-# shipping wrong.
+# filename from the .msix it is handed, so a drift between this value and whatever
+# packaging/msix/ names its output would correct itself at release time.
+#
+# That is a mitigation and it was treated as a licence to guess, which cost something.
+# This line first shipped as `automated_security_helper-3.7.0-x64.msix` -- underscores
+# where build.ps1 uses hyphens, plus an `-x64` it never adds -- because the two files
+# were written in parallel and neither read the other. Nothing objected: the manifest is
+# schema-valid either way, and validate-manifests.py checked the release TAG in the path
+# and not the filename at the end of it. "Corrects itself at release time" is only true
+# while set-release-metadata.py runs, and what it produces otherwise is a 404 in front of
+# a user running `winget install`.
+#
+# So the filename now matches packaging/msix/build.ps1, and validate-manifests.py DERIVES
+# the expected value from that script rather than restating it, which is what makes this
+# comment unnecessary to trust.
 #
 # WHAT IS OMITTED, AND WHY OMISSION IS THE RIGHT ANSWER
 #
@@ -65,7 +77,7 @@ Platform:
 MinimumOSVersion: 10.0.17763.0
 Installers:
 - Architecture: x64
-  InstallerUrl: https://github.com/awslabs/automated-security-helper/releases/download/v3.7.0/automated_security_helper-3.7.0-x64.msix
+  InstallerUrl: https://github.com/awslabs/automated-security-helper/releases/download/v3.7.0/automated-security-helper-3.7.0.msix
   InstallerSha256: '0000000000000000000000000000000000000000000000000000000000000000'
 ManifestType: installer
 ManifestVersion: 1.12.0

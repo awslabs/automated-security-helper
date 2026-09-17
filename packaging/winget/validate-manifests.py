@@ -358,6 +358,52 @@ def main() -> int:
         )
     print(f"   {url}")
 
+    # The check above passes on a URL whose FILENAME is wrong, and one was: this
+    # manifest shipped pointing at `automated_security_helper-3.7.0-x64.msix` while
+    # packaging/msix/build.ps1 writes `automated-security-helper-3.7.0.msix` --
+    # underscores for hyphens, plus an `-x64` the builder never adds. Two agents
+    # wrote the two files in parallel and the filename was a guess on this side.
+    #
+    # It survived because nothing compared the two files. The tag check above reads
+    # the path and not the leaf, and set-release-metadata.py rewrites the URL from
+    # the real artifact at release time, so the wrong value is inert *provided that
+    # script runs*. "Inert provided something else runs" is not a property worth
+    # relying on for a URL a package manager fetches, and a 404 at install time is
+    # the failure it produces.
+    #
+    # So the expected filename is DERIVED from the builder rather than restated
+    # here. build.ps1 forms it with a single string concatenation, which is stable
+    # enough to read with a regex and specific enough that a rename breaks the match
+    # rather than silently changing the answer -- if the line stops matching, this
+    # fails loudly instead of falling back to a literal that would then be the third
+    # place the filename lives.
+    print("== the installer filename is the one packaging/msix/build.ps1 writes")
+    build_ps1 = repo / "packaging" / "msix" / "build.ps1"
+    body = build_ps1.read_text(encoding="utf-8")
+    match = re.search(
+        r'''\$msix\s*=\s*Join-Path\s+\$OutputDirectory\s*\(\s*"([^"]+)"\s*\+\s*'''
+        r"""\$version\s*\+\s*"([^"]+)"\s*\)""",
+        body,
+    )
+    if match is None:
+        raise Failure(
+            f"could not read the .msix filename out of {build_ps1}.\n"
+            "    This check derives the expected filename from the builder rather "
+            "than restating it, so it fails when the builder's shape changes instead "
+            "of comparing against a stale literal. Re-read build.ps1 and update the "
+            "pattern in this function."
+        )
+    expected_name = f"{match.group(1)}{package_version}{match.group(2)}"
+    actual_name = url.rsplit("/", 1)[-1]
+    if actual_name != expected_name:
+        raise Failure(
+            f"InstallerUrl names {actual_name!r} but packaging/msix/build.ps1 writes "
+            f"{expected_name!r}.\n"
+            "    A winget manifest pointing at a filename the release does not carry "
+            "is a 404 at install time."
+        )
+    print(f"   {expected_name}, derived from build.ps1")
+
     print("== the digest is in the state this checkout expects")
     digest = str(installer["InstallerSha256"])
     if args.released:
