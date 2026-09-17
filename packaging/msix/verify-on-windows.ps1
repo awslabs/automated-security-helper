@@ -329,6 +329,45 @@ if ($ashExit -ne 0) {
         & $venvAsh --version
         Write-Host "     exit: $LASTEXITCODE"
     }
+
+    # Three probes that separate what is left, because the ones above have already ruled
+    # out the launcher (the venv's own ash.exe fails identically) and the interpreter
+    # version (this job pins 3.13 and it failed the same way as 3.14 did).
+    #
+    # What remains are two different faults with the same symptom, and each probe below
+    # only moves if one of them is true:
+    #
+    #   * A .exe console script in a venv that has been MOVED. This venv is built at
+    #     <venv>.staging-<pid> and renamed into place, and a venv is not relocatable: on
+    #     Windows the Scripts\*.exe shims embed the absolute path of the interpreter they
+    #     were written for. The Flatpak work on this branch hit exactly this and fixed it
+    #     by invoking the interpreter directly rather than trusting the shim. If
+    #     `python.exe -m` works while ash.exe does not, that is this, and the fix is the
+    #     same one.
+    #   * ASH itself failing on Windows. If even `import automated_security_helper` fails,
+    #     or the module entry point fails the same way as the shim, the packaging is
+    #     exonerated and the defect belongs to the CLI.
+    #
+    # Every probe captures its own exit code and does not stop the script, because the
+    # point is to collect all three readings in one run rather than to fail on the first.
+    $venvPython = Join-Path $venvScripts 'python.exe'
+    if (Test-Path $venvPython) {
+        Write-Host "   probe A -- the venv interpreter runs at all:"
+        & $venvPython -c "import sys; print(sys.version); print(sys.executable)"
+        Write-Host "     exit: $LASTEXITCODE"
+
+        Write-Host "   probe B -- ASH imports in that interpreter:"
+        & $venvPython -c "import automated_security_helper as m; print('import ok', m.__file__)"
+        Write-Host "     exit: $LASTEXITCODE"
+
+        # The same callable [project.scripts] binds `ash` to, reached without the .exe
+        # shim. This is the probe that distinguishes the two faults above.
+        Write-Host "   probe C -- the console-script callable, bypassing the .exe shim:"
+        & $venvPython -c "from automated_security_helper.cli.main import app; app(['--version'])"
+        Write-Host "     exit: $LASTEXITCODE"
+    } else {
+        Write-Host "   no python.exe in the venv's Scripts, so the venv itself is incomplete"
+    }
     Fail "ash --version exited $ashExit"
 }
 if (-not (Test-Path $venvAsh)) {
