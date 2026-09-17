@@ -378,3 +378,66 @@ jobs:
         env:
           REPO: ${{ github.workspace }}
 
+  # WHY THIS JOB HAS NO `container:` KEY WHEN THE TWO ABOVE DO
+  #
+  # flatpak-builder drives bwrap, and bwrap has to create a user namespace. Measured on
+  # a Docker 25.0 host before this job was written:
+  #
+  #   docker run fedora:41 bwrap --dev-bind / / --unshare-user-try /bin/true
+  #     -> bwrap: No permissions to creating new namespace, likely because the kernel
+  #        does not allow non-privileged user namespaces.       (exit 1)
+  #   docker run --privileged fedora:41 <same>                  (exit 0)
+  #
+  # A GitHub job `container:` is not privileged and there is no input to make it so, so
+  # the .deb and .rpm pattern cannot be copied here: the build would fail inside bwrap
+  # with a message about namespaces that says nothing about packaging. This job runs on
+  # the runner host instead, where the flatpak build sandbox is the isolation and no
+  # outer container is needed for it.
+  #
+  # That trades away the property the two jobs above are built around -- building in an
+  # image that starts with neither the interpreter nor pip, so the package's own declared
+  # dependencies have to be right. A Flatpak has no equivalent claim to test: its
+  # dependency is a runtime it names by exact branch, flatpak installs that runtime or
+  # fails, and the runtime is byte-identical everywhere. The host's own python3, pip and
+  # git are invisible to both the build sandbox and the app sandbox, so the runner image
+  # cannot mask a missing dependency the way debian:bookworm's preinstalled python would
+  # have.
+  #
+  # `sudo` on the verification step, for two reasons that are both about the missing
+  # container: the script installs flatpak-builder with apt-get, and it installs the
+  # runtime and the bundle into the system installation. Inside a job container the
+  # steps above already run as root.
+  #
+  # Not cached. The runtime is a 633 MB download, and a cache of it would restore a
+  # comparable number of bytes from a different CDN while adding a way for a job to test
+  # a runtime that is no longer what `flatpak install` would give a user. The
+  # verification's first step asserts bwrap works before anything else runs, so if the
+  # runner image ever stops permitting user namespaces this job says so in its first
+  # twenty lines rather than in a flatpak-builder trace.
+  #
+  # Testing here PUBLISHES NOTHING, exactly as for the .deb and .rpm: it pulls a public
+  # runtime from Flathub, builds a bundle, installs it locally and throws the machine
+  # away. NOTHING IS SUBMITTED TO FLATHUB by this job or by anything under
+  # packaging/flatpak/.
+  flatpak:
+    name: "native: flatpak (org.freedesktop.Sdk 24.08)"
+    needs: build
+    runs-on: ubuntu-latest
+    # Longer than the 25 minutes the .deb and .rpm jobs get: this one downloads a 633 MB
+    # runtime before it can build, and then its first `ash` invocation resolves ASH's 27
+    # runtime dependencies from a Python index, which the other two do at install time.
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download the wheel built and gated by the build job
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ash-package-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: dist
+
+      - name: Build the Flatpak, install it, and run a real scan
+        run: sudo --preserve-env=REPO bash packaging/flatpak/verify-in-container.sh
+        env:
+          REPO: ${{ github.workspace }}
+
