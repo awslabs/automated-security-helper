@@ -1,0 +1,221 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ASH as a Windows MSIX package.
+
+  A note on style before anything else: XML forbids a double hyphen inside a comment, so
+  the comments in this file use commas and parentheses where the rest of this repository
+  uses a dash. That is a well-formedness rule, not a preference, and xmllint reports it as
+  "Double hyphen within comment".
+
+  Two attribute values here are rewritten by packaging/msix/msix.py when it stages a
+  layout. The literals below are defaults a reader can check, not the values that ship:
+
+    Identity/@Version    stamped from the wheel filename, the way packaging/rpm/build.sh
+                         derives the rpm Version from the wheel it was handed.
+    Identity/@Publisher  stamped from the subject of the certificate the package is about
+                         to be signed with. Windows refuses to install a package whose
+                         Publisher does not match its signing certificate's subject
+                         exactly, so a hardcoded Publisher would have to be hand edited
+                         the day a real Authenticode certificate replaces the self signed
+                         one. Deriving it makes that swap a change of secret and nothing
+                         else. The literal below is the self signed default, spelled so
+                         nobody mistakes a development package for a signed release.
+
+  On IgnorableNamespaces, which this manifest deliberately does not declare. Microsoft's
+  own full trust package template omits it, and adding it here would be actively wrong.
+  IgnorableNamespaces tells an older Windows to ignore elements in the listed namespaces
+  instead of rejecting the package. The rescap namespace carries runFullTrust, the
+  declaration that makes this a mediumIL desktop app rather than an AppContainer app, so a
+  Windows that ignored it would install the package and then run ASH sandboxed: a working
+  install that cannot scan. TargetDeviceFamily/@MinVersion below is 10.0.19041, and every
+  namespace used here predates it (rescap 10240, uap 10586, uap5 16299, uap10 19041), so
+  no version of Windows can install this package without understanding all of it. Nothing
+  needs to be ignorable.
+
+  Element order is not free. The Package schema is a sequence, so Identity, Properties,
+  Resources, Dependencies, Capabilities, Applications is the order below because it is the
+  order in Microsoft's template. Reordering produces a manifest makeappx rejects.
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
+  xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities">
+
+  <!--
+    Version is MSIX quad notation, which ASH's three part semver does not fit. The mapping
+    is major.minor.patch.0 and the trailing zero is not padding: the Microsoft Store
+    reserves the fourth component and requires it to be 0 in a submitted package, and ASH
+    has no fourth component to put there. msix.py refuses to stage a wheel whose version is
+    not three numeric parts, rather than truncating a pre-release like 3.7.0rc1 into a quad
+    that would silently claim to be the final release.
+
+    ProcessorArchitecture is neutral because everything in the payload is: the wheel is
+    py3-none-any and the launchers are AnyCPU. One package installs on x64 and on arm64.
+  -->
+  <Identity
+    Name="AWSLabs.AutomatedSecurityHelper"
+    Version="3.7.0.0"
+    Publisher="CN=ASH Development (self-signed), O=ASH, C=US"
+    ProcessorArchitecture="neutral" />
+
+  <Properties>
+    <DisplayName>Automated Security Helper</DisplayName>
+    <PublisherDisplayName>awslabs</PublisherDisplayName>
+    <Description>Runs a suite of open source security scanners over a source tree.</Description>
+    <Logo>assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+
+  <!--
+    MinVersion 10.0.19041 is the floor for uap10:RuntimeBehavior and uap10:TrustLevel, which
+    is how a packaged Win32 app declares itself full trust on current Windows. The older
+    EntryPoint="Windows.FullTrustApplication" spelling reaches further back and was rejected
+    here: it and the uap10 pair are equivalent, and declaring both is an error if they ever
+    disagree. 19041 is Windows 10 2004, already past end of support, so choosing the modern
+    spelling excludes nothing anyone is running.
+  -->
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <!--
+    runFullTrust is what actually lets ASH read the tree it was pointed at. A packaged app
+    declared mediumIL runs with the invoking user's own token, so it sees the file system
+    the user sees.
+
+    broadFileSystemAccess is the second declaration and it is here on purpose, so read this
+    before deleting it as redundant.
+
+    ASH's default source directory is the process working directory
+    (automated_security_helper/cli/scan.py:634-635) and its default output directory is
+    `.ash/ash_output` INSIDE that tree (scan.py:636-640). So the directory ASH must read and
+    write is not a fixed location a manifest could name. It is wherever the user happened to
+    cd to, and it is different on every invocation. No narrower capability can express that.
+    documentsLibrary, picturesLibrary and removableStorage each name one fixed KnownFolder,
+    and two of them additionally require the manifest to declare specific file extensions; a
+    scanner that has to read every file in an arbitrary repository matches none of that. The
+    alternative Windows offers for arbitrary locations is a file picker plus FutureAccessList,
+    which is a GUI flow, unavailable to a command that was handed a path on its command line.
+
+    What declaring it costs, stated plainly. broadFileSystemAccess is a RESTRICTED
+    capability. Sideloading a package that declares one needs no approval, but submitting one
+    to the Microsoft Store requires justification on the submission form explaining why the
+    narrower APIs are insufficient, and that submission can be refused. It also becomes a
+    user visible toggle under Settings, Privacy, File system, which a user can switch off;
+    Windows terminates the app to apply the change.
+
+    The honest scope note, because it is the thing a future reader will get wrong.
+    broadFileSystemAccess is an AppContainer capability: it grants a sandboxed app the access
+    its user already has. A mediumIL app is already running as the user, so on this package it
+    grants nothing runFullTrust has not already granted. It is declared anyway for the reason
+    Microsoft gives for privacy sensitive capabilities on full trust packages, which is that
+    it puts ASH in the Settings, Privacy, File system list. A scanner that reads whole
+    repositories should be visible and revocable where a user looks for one, instead of
+    invisible because it happens to be full trust. Removing runFullTrust and keeping this one
+    would break the package. Removing this one and keeping runFullTrust would leave ASH
+    working and unlisted.
+
+    Restricted capabilities must precede any CustomCapability or DeviceCapability elements.
+    There are none of either here, so that ordering rule is satisfied trivially. It is noted
+    so it stays satisfied if one is ever added.
+  -->
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+    <rescap:Capability Name="broadFileSystemAccess" />
+  </Capabilities>
+
+  <!--
+    Three Applications, one per console script in [project.scripts], because MSIX documents
+    one app execution alias per Application and all three names have to be reachable.
+
+    The three names are not interchangeable, and the entry point contract is settled
+    elsewhere: `ash` is canonical, `ashv3` is deprecated and warns once on stderr, and
+    `automated-security-helper` is kept indefinitely and silent. The long name exists for
+    Windows in particular. MSYS2 ships the Almquist shell as `ash` and has already shadowed
+    ASH's entry point, producing an "Illegal option" error. pyproject.toml:161-164 records it.
+
+    Which makes the alias mechanism worth stating carefully. An app execution alias is itself
+    just a name on PATH, and Windows resolves a collision by invoking whichever app
+    registered the alias last. So installing this package does not guarantee that typing
+    `ash` reaches ASH: if an MSYS2 shell is earlier on PATH, or another package claimed the
+    alias more recently, it does not. That is not a defect in this manifest. It is the exact
+    condition the long name is the escape hatch for.
+
+    Each launcher is a separate executable rather than one executable with three aliases,
+    because a process launched through an alias cannot reliably tell which alias was typed.
+    Each launcher derives the venv console script to run from its OWN filename, which is
+    fixed inside the package, so `ashv3.exe` runs the venv's `ashv3.exe` and the deprecation
+    warning comes from the wheel rather than from a reimplementation of it here.
+
+    AppListEntry="none" on the two non canonical names keeps one Start menu entry instead of
+    three. It does not affect the execution alias, which is a separate extension.
+  -->
+  <Applications>
+    <Application
+      Id="Ash"
+      Executable="ash.exe"
+      uap10:RuntimeBehavior="packagedClassicApp"
+      uap10:TrustLevel="mediumIL">
+      <uap:VisualElements
+        DisplayName="Automated Security Helper"
+        Description="Runs a suite of open source security scanners over a source tree."
+        BackgroundColor="transparent"
+        Square150x150Logo="assets\Square150x150Logo.png"
+        Square44x44Logo="assets\Square44x44Logo.png" />
+      <Extensions>
+        <uap5:Extension Category="windows.appExecutionAlias">
+          <uap5:AppExecutionAlias>
+            <uap5:ExecutionAlias Alias="ash.exe" />
+          </uap5:AppExecutionAlias>
+        </uap5:Extension>
+      </Extensions>
+    </Application>
+
+    <Application
+      Id="Ashv3"
+      Executable="ashv3.exe"
+      uap10:RuntimeBehavior="packagedClassicApp"
+      uap10:TrustLevel="mediumIL">
+      <uap:VisualElements
+        DisplayName="Automated Security Helper (ashv3, deprecated)"
+        Description="Deprecated name for ash. Warns on stderr, then runs the same CLI."
+        BackgroundColor="transparent"
+        Square150x150Logo="assets\Square150x150Logo.png"
+        Square44x44Logo="assets\Square44x44Logo.png"
+        AppListEntry="none" />
+      <Extensions>
+        <uap5:Extension Category="windows.appExecutionAlias">
+          <uap5:AppExecutionAlias>
+            <uap5:ExecutionAlias Alias="ashv3.exe" />
+          </uap5:AppExecutionAlias>
+        </uap5:Extension>
+      </Extensions>
+    </Application>
+
+    <Application
+      Id="AutomatedSecurityHelper"
+      Executable="automated-security-helper.exe"
+      uap10:RuntimeBehavior="packagedClassicApp"
+      uap10:TrustLevel="mediumIL">
+      <uap:VisualElements
+        DisplayName="Automated Security Helper (long name)"
+        Description="Unambiguous name for hosts where a bare ash resolves to another program."
+        BackgroundColor="transparent"
+        Square150x150Logo="assets\Square150x150Logo.png"
+        Square44x44Logo="assets\Square44x44Logo.png"
+        AppListEntry="none" />
+      <Extensions>
+        <uap5:Extension Category="windows.appExecutionAlias">
+          <uap5:AppExecutionAlias>
+            <uap5:ExecutionAlias Alias="automated-security-helper.exe" />
+          </uap5:AppExecutionAlias>
+        </uap5:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+</Package>
