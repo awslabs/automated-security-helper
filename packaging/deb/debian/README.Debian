@@ -8,12 +8,15 @@ The package bundles ASH's own wheel and nothing else. Its post-install step crea
 a virtualenv under /usr/lib/ash/venv and installs that wheel into it, which resolves
 ASH's 27 runtime dependencies from whatever Python index the host is configured for.
 
-This is not an oversight, and bundling the dependency wheels would not be an
-improvement. One of those dependencies, detect-secrets, is itself a security scanner.
-The project forbids any published artifact from containing third-party scanner source,
-and a .deb carrying a detect_secrets wheel would contain exactly that. ASH's published
-wheel satisfies the rule only because it declares its dependencies rather than
-vendoring them, and this package inherits the guarantee only by doing the same.
+This is not an oversight. ASH's own code may ship in a package published by the
+project; third-party code may not. Carrying exactly one wheel is the guard that
+keeps this package on the right side of that line, because it can be checked by
+counting the files under /usr/lib/ash/wheels/ rather than by judging each
+dependency one at a time.
+
+Building a self-contained offline package for your own hosts is fine, and the
+commands below are the supported way to do it. The line is about what the project
+publishes, not about what the bytes are allowed to do.
 
 On a host with no reachable index, stage one before installing:
 

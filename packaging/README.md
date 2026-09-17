@@ -4,45 +4,40 @@ Builders for OS-native ASH packages. Every artifact here is published as a **Git
 Release asset only** — nothing in this directory submits to `microsoft/winget-pkgs`,
 `community.chocolatey.org`, or Flathub, and nothing publishes a container image.
 
-## The invariant these builders must not break
+## The boundary these builders must not cross
 
-No GitHub-published artifact may contain third-party scanner source or assets.
-`.github/scripts/assert-artifact-contents.py` enforces this on the wheel and sdist, and
+ASH's own code may ship in a published artifact. Third-party code never may.
+
+`.github/scripts/assert-artifact-contents.py` enforces that on the wheel and sdist, and
 its `--self-test` plants a payload per detector so it cannot pass vacuously.
 
-Native packages are downstream of that wheel, so they inherit the guarantee **only for
-as long as they bundle nothing else**. That is a real design constraint, not a
-formality, and it is why these packages resolve dependencies at install time.
+Native packages are downstream of that wheel and carry ASH's own wheel, so they sit on
+the permitted side of the boundary. Each one bundles exactly one wheel and resolves
+everything else from an index at install time.
 
-## Why these packages are not self-contained, and what that costs
+## Why each package carries exactly one wheel
 
-The obvious design for an air-gapped host is to bundle ASH's wheel together with its
-27 runtime dependency wheels and `pip install --no-index` them. **That is not
-permissible here.** `detect-secrets>=1.5,<2` is a runtime dependency in
-`pyproject.toml` *and* a denylisted scanner. The published wheel passes the contents
-gate only because it *declares* its dependencies in metadata rather than vendoring
-them; the moment a `.deb` carries a `detect_secrets` wheel, a GitHub-published artifact
-contains third-party scanner source.
+The "exactly one bundled wheel" rule is the guard that keeps these packages on the right
+side of the boundary. It is cheap to check and hard to get wrong by accident: count the
+files under `wheels/`, and if the answer is one, no third-party code shipped. A rule
+phrased as "no third-party wheels" would need a judgment call per dependency and would
+be enforced by whoever reviewed the build script that day.
 
-So each package bundles **ASH's own wheel and nothing else**, and its post-install step
-resolves dependencies from whatever index the host is configured for.
+Because dependencies come from an index, **these packages need a reachable Python index
+at install time.** On an air-gapped host, stage a wheelhouse first — both
+`packaging/deb/debian/README.Debian` and `packaging/rpm/README.rpm` give the exact
+commands — or point the host at an internal index mirror.
 
-The cost is explicit: **these packages need a reachable Python index at install time.**
-That is a genuine gap against the air-gapped audience native packaging is partly for,
-and there are only three ways to close it, none of which is a packaging change:
+A fully self-contained offline image is fine to build; it is simply built by whoever
+operates the host rather than published from here. Bundle ASH's wheel with its
+dependency wheels and `pip install --no-index` them, or bake the whole venv into a
+container image. Nothing about that is impermissible. What the boundary rules out is
+*us* publishing an artifact with someone else's code inside it, which is a question
+about the publisher, not about what the bytes can do.
 
-1. Move `detect-secrets` out of `[project] dependencies` and provision it like the other
-   scanners. This is the only option that yields a bundled, offline, rule-compliant
-   package, and it is a change to ASH's dependency surface rather than to packaging.
-2. Ship a separate wheelhouse tarball as its own release asset, which users stage
-   themselves. The scanner content then lives in an artifact the invariant forbids, so
-   this only works if the wheelhouse is explicitly carved out of the rule — an
-   operator decision, not one to assume.
-3. Point the host at an internal index mirror. Works today, but it is site
-   configuration rather than something the package can carry.
-
-Do not "fix" the gap by bundling dependency wheels. That trades a documented
-limitation for a silent violation of the one rule this directory exists to respect.
+So the one change to avoid is quietly adding dependency wheels to the `.deb` or `.rpm`
+built here. That would turn a one-file check anyone can run into a per-dependency
+judgment nobody will re-run.
 
 ## Layout
 
