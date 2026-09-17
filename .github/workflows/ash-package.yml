@@ -478,3 +478,43 @@ jobs:
         shell: pwsh
         run: ./packaging/chocolatey/verify-on-windows.ps1 -Repo "${{ github.workspace }}"
 
+  # The winget manifest set, checked against Microsoft's published JSON Schemas.
+  #
+  # This is the whole verification winget gets, and the reason it is a schema check and
+  # not `winget validate` is that the Windows Package Manager client is not on the
+  # runner images. images/windows/Windows2025-VS2026-Readme.md in actions/runner-images
+  # lists Chocolatey and does not mention winget anywhere. The schemas are a real check
+  # in its place: they carry every required field, pattern and enum the client enforces.
+  #
+  # Its own job rather than a step on the nuspec job above, so that the two Windows
+  # packaging formats can be landed and reverted independently of each other.
+  #
+  # No `needs: build` and no artifact download. The manifests describe the MSIX, not the
+  # wheel, so there is nothing in the build job's output for this to open; the version
+  # they declare is cross-checked against pyproject.toml instead.
+  #
+  # validate-manifests.py corrupts one field per manifest and requires each broken copy
+  # to be rejected before it validates the real ones, and requires the rejection message
+  # to name the field that was corrupted. Both halves are load-bearing. A JSON Schema
+  # check whose schema fetch returned an error page can exit 0, and a rejection caused by
+  # an unrelated error proves nothing about the constraint the control was written for.
+  winget:
+    name: "schema: winget manifests (published JSON Schemas)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+
+      # No --no-project and no `uv sync`. The script carries PEP 723 inline metadata
+      # naming the packages it needs, which uv reads and resolves into an ephemeral
+      # environment, so the project is never synced. Measured at 0.7 seconds warm,
+      # against roughly a minute for a project sync.
+      - name: Validate the winget manifests against Microsoft's published JSON Schemas
+        run: uv run packaging/winget/validate-manifests.py
