@@ -21,7 +21,6 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-CLI_SCAN_PY = REPO_ROOT / "automated_security_helper" / "cli" / "scan.py"
 MCP_SERVER_PY = REPO_ROOT / "automated_security_helper" / "cli" / "mcp_server.py"
 PYPROJECT_TOML = REPO_ROOT / "pyproject.toml"
 README_MD = REPO_ROOT / "README.md"
@@ -74,40 +73,106 @@ def collect_md_files() -> list[Path]:
 # ---------------------------------------------------------------------------
 
 
-def check_cli_flags() -> list[str]:
-    """Parse scan.py for CLI option names and verify they appear in cli-reference.md."""
-    failures: list[str] = []
-    source = read_text(CLI_SCAN_PY)
-    docs = read_text(CLI_REFERENCE_MD)
+def cli_option_spellings() -> set[str]:
+    """Every option spelling the top-level scan surface actually exposes.
 
-    # Extract explicit --flag-name strings from typer.Option() calls
-    # Match quoted strings that start with --
-    flag_pattern = re.compile(r'"(--[a-z][a-z0-9-]*)"')
-    flags_in_source: set[str] = set(flag_pattern.findall(source))
+    Introspects the built click command rather than regexing scan.py. The regex
+    it replaced had two blind spots that made this check pass while covering
+    nothing:
 
-    # Also derive flags from Python parameter names (snake_case -> --kebab-case)
-    # Match the parameter name preceding the Annotated[...typer.Option block
-    param_pattern = re.compile(
-        r"^\s+([a-z_][a-z0-9_]*):\s*Annotated\[\s*\n?\s*.*?,\s*\n?\s*typer\.Option\(",
-        re.MULTILINE,
-    )
-    for match in param_pattern.finditer(source):
-        param_name = match.group(1)
-        flag = "--" + param_name.replace("_", "-")
-        flags_in_source.add(flag)
+    - Its pattern was ``"(--[a-z][a-z0-9-]*)"``, so it only ever saw long flags.
+      Short forms -- ``-q``, ``-V``, ``-C``, ``-rev`` -- were invisible to it.
+    - It could not see a spelling that is not a literal in the source. A boolean
+      flag's negation is derived by typer from the parameter name, and the short
+      form for the OFF side is declared as ``"  /-C"``, which no regex looking
+      for a quoted flag will match.
 
-    # Flags that are internal/not user-facing or are short aliases only
-    skip_flags = {"--no-build", "--no-run", "--no-progress", "--no-color"}
+    Scope is deliberately the root callback plus ``scan``, which is what scan.py
+    defined and therefore what this check has always covered. Widening it to the
+    whole command tree would surface 12 further undocumented spellings under
+    ``config``, ``plugin`` and ``dependencies``; that is a real gap, but it is
+    pre-existing and belongs in its own change.
+    """
+    import click
+    import typer.main
 
-    docs_lower = docs.lower()
-    for flag in sorted(flags_in_source):
-        if flag in skip_flags:
+    from automated_security_helper.cli.main import app
+
+    root = typer.main.get_command(app)
+    ctx = click.Context(root, info_name="ash")
+    scan = root.get_command(ctx, "scan")
+
+    spellings: set[str] = set()
+    for command in (root, scan):
+        if command is None:
             continue
-        # Check if the flag appears in the docs (case-insensitive)
-        if flag.lower() not in docs_lower:
-            # Also try with backtick wrapping
-            if f"`{flag}`".lower() not in docs_lower:
-                failures.append(f"CLI flag {flag} found in source but missing from cli-reference.md")
+        for param in command.params:
+            spellings.update(getattr(param, "opts", []) or [])
+            spellings.update(getattr(param, "secondary_opts", []) or [])
+    return {s for s in spellings if s.startswith("-")}
+
+
+# Injected by the framework, not part of ASH's documented surface.
+FRAMEWORK_SPELLINGS = frozenset(
+    {"--help", "-h", "--install-completion", "--show-completion"}
+)
+
+# A count this check must not silently fall below. Without a floor, anything that
+# makes introspection return an empty set -- an import error swallowed upstream, a
+# renamed subcommand -- yields zero failures and reports PASS.
+MIN_EXPECTED_SPELLINGS = 60
+
+
+def flag_is_documented(flag: str, docs: str) -> bool:
+    """True when ``flag`` appears in ``docs`` as a whole token.
+
+    The substring test this replaced reported ``--ash-revision`` as documented
+    because ``--ash-revision-to-install`` was in the table. Any flag that is a
+    prefix of a longer one passed without being mentioned anywhere.
+    """
+    pattern = r"(?<![\w-])" + re.escape(flag) + r"(?![\w-])"
+    return re.search(pattern, docs) is not None
+
+
+def check_cli_flags(
+    spellings: set[str] | None = None, docs: str | None = None
+) -> list[str]:
+    """Verify every option spelling on the scan surface appears in cli-reference.md.
+
+    Both arguments exist so the negative control in
+    tests/unit/test_verify_docs_freshness_cli_flags.py can hand this a docs body
+    with a flag removed and confirm it actually fails. A gate with no such test
+    is indistinguishable from one that cannot fail.
+    """
+    failures: list[str] = []
+    if spellings is None:
+        spellings = cli_option_spellings()
+    if docs is None:
+        docs = read_text(CLI_REFERENCE_MD)
+
+    if len(spellings) < MIN_EXPECTED_SPELLINGS:
+        failures.append(
+            f"only {len(spellings)} CLI option spellings were found, expected at "
+            f"least {MIN_EXPECTED_SPELLINGS}. The check cannot be trusted -- treat "
+            f"this as a broken check rather than as clean docs."
+        )
+        return failures
+
+    for flag in sorted(spellings):
+        if flag in FRAMEWORK_SPELLINGS:
+            continue
+        if flag_is_documented(flag, docs):
+            continue
+        # A boolean flag's auto-derived negation is covered by its positive form:
+        # typer generates --no-X from --X, and the docs describe the pair. This
+        # replaces a hand-maintained skip list that had grown to hold --no-build,
+        # --no-run, --no-progress and --no-color -- the last of which is why the
+        # -c/--no-color divergence went unflagged for so long.
+        if flag.startswith("--no-") and flag_is_documented("--" + flag[5:], docs):
+            continue
+        failures.append(
+            f"CLI flag {flag} is exposed by the CLI but missing from cli-reference.md"
+        )
 
     return failures
 
