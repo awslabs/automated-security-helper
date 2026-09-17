@@ -1,0 +1,135 @@
+ash for Windows, via Chocolatey
+===============================
+
+Why this package needs a Python index at install time
+-----------------------------------------------------
+
+The package bundles ASH's own wheel and nothing else. Its chocolateyinstall.ps1
+creates a virtualenv under %ProgramData%\ash\venv and installs that wheel into it,
+which resolves ASH's 27 runtime dependencies from whatever Python index the machine
+is configured for.
+
+This is not an oversight. ASH's own code may ship in a package published by the
+project; third-party code may not. Carrying exactly one wheel is the guard that
+keeps this package on the right side of that line, because it can be checked by
+counting the files under tools\wheels\ rather than by judging each dependency one
+at a time. That count is asserted in three places: build.ps1 before packing,
+chocolateyinstall.ps1 on the machine being installed to, and
+verify-on-windows.ps1 against the built .nupkg.
+
+Chocolatey's own convention pulls the other way. A great many packages vendor
+their binaries into tools\ and install from there with no network at all, and that
+is exactly the shape this package must not take. Nothing but ASH's wheel goes
+under tools\wheels\.
+
+Building a self-contained offline package for your own machines is fine, and the
+commands below are the supported way to do it. The line is about what the project
+publishes, not about what the bytes are allowed to do.
+
+On a machine with no reachable index, stage one before installing:
+
+  pip download automated-security-helper==<version> -d C:\ash-wheels
+  # then, before choco install, as Administrator:
+  mkdir %ProgramData%\pip
+  > %ProgramData%\pip\pip.ini echo [global]
+  >>%ProgramData%\pip\pip.ini echo no-index = true
+  >>%ProgramData%\pip\pip.ini echo find-links = C:\ash-wheels
+
+Three names on PATH, and why the long one exists
+------------------------------------------------
+
+The package installs a shim for every console script the wheel declares, which is
+currently three:
+
+  ash                        canonical, and the one to use.
+  ashv3                      deprecated. It works and warns once on stderr. The
+                             name pins a major version, so it reads wrong the
+                             moment v4 exists.
+  automated-security-helper  kept indefinitely and silent.
+
+The long name is not redundancy for its own sake, and Windows is the reason it
+exists. MSYS2 ships the Almquist shell as ash.exe. On a machine that has MSYS2,
+Git for Windows with the MSYS tools on PATH, or anything else that provides that
+name earlier in PATH than the Chocolatey bin directory, `ash scan` reaches the
+shell instead of this program and fails with `Illegal option --`. That has already
+happened in this project's CI. When it happens, use automated-security-helper;
+nothing else claims that name.
+
+Two flags worth knowing because they are easy to get backwards: -V is --version,
+and -v is --verbose. The bash entry point that ASH used to ship had -v for
+--version, which is why this is called out.
+
+Where things are installed
+--------------------------
+
+  <ChocolateyInstall>\lib\ash\tools\wheels\   ASH's wheel, the package's only
+                                              payload. Chocolatey manages it.
+  %ProgramData%\ash\venv\                     created by chocolateyinstall.ps1
+  %ProgramData%\ash\installed-shims.txt       the shim names, for the uninstaller
+  <ChocolateyInstall>\bin\ash.exe             a shim, plus one per console script
+
+The venv is built on the machine rather than shipped, because a virtualenv records
+absolute paths and the interpreter ABI of the machine that created it. It is
+deliberately NOT placed inside the Chocolatey package directory: after
+chocolateyinstall.ps1 returns, Chocolatey scans that directory for executables and
+shims each one it finds, so a venv there would put python.exe, pythonw.exe,
+pip.exe, and pip3.exe on every user's PATH ahead of whatever Python they chose.
+Suppressing that requires a .ignore file per executable, which is a filename list
+that has to track whatever the venv module and pip create.
+
+The uninstaller removes the venv, because pip created it after install and
+Chocolatey does not track files an install script wrote.
+
+The python3 dependency, and its upper bound
+-------------------------------------------
+
+The nuspec declares python3 in the range [3.10,3.14). The floor is ASH's own
+requires-python. The ceiling is there because ash-unified-ci.yml exercises 3.10
+through 3.13 and nothing above: without it, Chocolatey would satisfy the dependency
+with whatever python3 is newest on the day of install, and the first symptom would
+be pip failing to resolve a dependency that has no wheel for that interpreter,
+reported to the user as a broken ASH install rather than as an untested
+interpreter.
+
+chocolateyinstall.ps1 does not assume the dependency put the right interpreter
+first on PATH. A machine can carry an older Python from a previous install, from
+the Microsoft Store stub, or from a conda environment, and whichever is earliest
+on PATH wins. So it probes the py launcher for 3.13, 3.12, 3.11, and 3.10 in turn
+before falling back to `python` and `python3`, and takes the first that reports a
+version in range. The py launcher entries come first because they resolve through
+the registry rather than through PATH.
+
+Scanners are not installed by this package
+------------------------------------------
+
+ASH drives third-party scanners; it does not contain them. After installing:
+
+  ash dependencies install              # everything ASH can provision
+  ash dependencies install --tool grype # or one at a time
+
+This package is not published anywhere
+--------------------------------------
+
+Nothing in packaging/ submits to community.chocolatey.org. This directory exists so
+the package can be built and exercised; publishing it is a separate decision nobody
+has made. A submission would also need the Chocolatey-specific metadata the
+community repository requires (packageSourceUrl, docsUrl, bugTrackerUrl), which
+ash.nuspec deliberately omits because the NuGet XSD does not declare those
+elements and validate-nuspec.sh is the only check that runs without a Windows
+machine.
+
+How this is tested
+------------------
+
+  bash packaging/chocolatey/validate-nuspec.sh
+      Validates ash.nuspec against NuGet's published XSD. Runs anywhere xmllint
+      does. Rejects two deliberately broken copies of the file first, so a run that
+      prints "validates" cannot be a validator that checks nothing.
+
+  pwsh packaging/chocolatey/verify-on-windows.ps1
+      Builds the package, installs it, asserts all three names resolve to
+      Chocolatey shims, scans a fixture containing a planted secret, parses the
+      SARIF and fails unless the result count is nonzero, then uninstalls and fails
+      if the venv survived. Needs Windows and an already-built wheel in dist/.
+      .github/workflows/ash-package.yml runs it on windows-latest, whose image
+      ships Chocolatey preinstalled.
