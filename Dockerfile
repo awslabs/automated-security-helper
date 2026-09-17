@@ -47,7 +47,29 @@ RUN uv build
 
 # Second stage: Core ASH image
 FROM ${BASE_IMAGE} AS core
-SHELL ["/bin/bash", "-c"]
+# No `SHELL ["/bin/bash", "-c"]`. It was here, and it is the reason a bashism in a
+# RUN was correct under docker and silently skipped under podman and finch -- the
+# worst way for a difference to be distributed, because the runtime most people
+# develop against is the one that hides it.
+#
+# buildah honours SHELL only in `docker` image format; in OCI format it discards it
+# and logs `SHELL is not supported for OCI image format, [/bin/bash -c] will be
+# ignored` once per instruction (57 times in a full build). So the directive bought
+# bash for exactly one of the three runtimes ASH supports.
+#
+# Removing it rather than forcing `--format docker` on every caller: the format is
+# the caller's choice, `ash --mode container` supports docker, podman and finch, and
+# a plain `podman build` by hand should behave like CI. With this gone, every RUN
+# runs under /bin/sh everywhere, so a bashism fails the same way in all three.
+#
+# The contract is now: every RUN in this file must be POSIX sh. All 34 of them are;
+# tests/unit/test_dockerfile_posix_shell.py enforces it, because the failure mode
+# this replaced is invisible at review time. Where bash is genuinely needed, call it
+# explicitly -- assets/with-retry.sh is `#!/bin/bash` and runs its argument under
+# `bash -o pipefail -c`, which is how the piped installs keep pipefail.
+#
+# ENV SHELL is unrelated and stays: it is an environment variable for processes in
+# the running container, not the shell `RUN` uses at build time.
 ENV SHELL="bash"
 ARG BUILD_DATE_EPOCH="-1"
 ARG OFFLINE="NO"
@@ -233,7 +255,36 @@ ARG GRYPE_VERSION="v0.111.0"
 RUN with-retry 'install-pinned-tool grype -b /usr/local/bin'
 RUN grype --version
 
-RUN set -uex; if [[ "${OFFLINE}" == "YES" ]]; then \
+# POSIX `[ ... = ... ]`, not `[[ ... == ... ]]`. This block did not run at all under
+# podman or finch, in either direction of the condition, and nothing said so.
+#
+# `[[` is a bash keyword. buildah discards `SHELL` in OCI image format -- it says so
+# once per instruction, 57 times in a full build -- so every RUN executes under
+# /bin/sh, which is dash in this base image. dash has no `[[`, and the failing
+# command here was the CONDITION of an `if`, which under `set -e` is a false branch
+# rather than an error. Measured on run 35177045049, job 105060929678:
+#
+#     [2/3] STEP 44/58: RUN set -uex; if [[ "${OFFLINE}" == "YES" ]]; then ...
+#     + [[ NO == YES ]]
+#     /bin/sh: 1: [[: not found
+#     [2/3] STEP 45/58: ARG TRIVY_VERSION="v0.69.3"
+#
+# The `set -x` trace showing an evaluated comparison is what made it look like the
+# test ran and took the false branch. It did not run. Confirmed in this exact base
+# image with the value set to YES, where `[[` is still absent:
+#
+#     $ docker run --rm ...python:3.12-slim-bookworm sh -c \
+#         'set -uex; if [[ "YES" == "YES" ]]; then echo TAKEN; fi; echo CONTINUED'
+#     + [[ YES == YES ]]
+#     sh: 1: [[: not found
+#     + echo CONTINUED
+#     CONTINUED            <- no TAKEN, exit 0
+#
+# So OFFLINE=YES provisioned nothing on podman or finch: no grype database, no
+# semgrep or opengrep rules cache. CI never caught it because the only offline leg
+# in the matrix is `oci-runner: docker`, where SHELL is honoured and bash runs it.
+# The exposure was users building offline images with a non-docker runtime.
+RUN set -uex; if [ "${OFFLINE}" = "YES" ]; then \
     with-retry 'grype db update' && \
     mkdir -p ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR} && \
     for i in $OFFLINE_SEMGREP_RULESETS; do \
@@ -242,6 +293,32 @@ RUN set -uex; if [[ "${OFFLINE}" == "YES" ]]; then \
         cp "${outfile}" "${OPENGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; \
     done && \
     chmod -R 777 ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}; \
+    fi
+
+# Assert the block above actually provisioned something, so a repeat of the defect
+# fails the build instead of shipping an image that reports itself offline-ready and
+# has no rules to scan with. This is the part that was missing: the bracket fix stops
+# today's bug, and this stops the next one, whatever silences the block next time --
+# a shell difference, a renamed variable, a `with-retry` that exits 0 having done
+# nothing.
+#
+# Deliberately checks the ARTIFACTS rather than re-testing OFFLINE: an assertion that
+# re-evaluates the same condition through the same shell would be silenced by
+# whatever silenced the block.
+#
+# Only the semgrep and opengrep caches are asserted non-empty. The grype database
+# lands in GRYPE_DB_CACHE_DIR as a versioned subdirectory whose layout is grype's to
+# change, so this asserts the directory is non-empty rather than naming a file in it.
+RUN set -ue; if [ "${OFFLINE}" = "YES" ]; then \
+    for d in "${GRYPE_DB_CACHE_DIR}" "${SEMGREP_RULES_CACHE_DIR}" "${OPENGREP_RULES_CACHE_DIR}"; do \
+        if [ -z "$(ls -A "${d}" 2>/dev/null)" ]; then \
+            echo "OFFLINE=YES but ${d} is empty: the offline provisioning step did not run." >&2; \
+            echo "If this fired after a Dockerfile edit, check that the RUN above is POSIX sh --" >&2; \
+            echo "buildah ignores SHELL in OCI format, so a bashism there is silently skipped." >&2; \
+            exit 1; \
+        fi; \
+    done; \
+    echo "offline provisioning verified: grype db, semgrep and opengrep caches are all non-empty"; \
     fi
 
 ARG TRIVY_VERSION="v0.69.3"
