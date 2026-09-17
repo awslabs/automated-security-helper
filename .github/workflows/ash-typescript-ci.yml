@@ -1,5 +1,23 @@
 name: TypeScript CI
-# Runs the jest suites under deploy/ with coverage thresholds.
+# Runs the repository's jest suites with coverage thresholds.
+#
+# THE MATRIX IS NOT DEPLOY-ONLY, WHICH IS WHY EACH ENTRY CARRIES A DIRECTORY
+#
+# It was, and every step interpolated `deploy/${{ matrix.package }}`. editors/vscode
+# is a VS Code extension, not deployment infrastructure, so it does not belong under
+# deploy/ -- and it does belong under this gate, because it is TypeScript and the
+# coverage-completeness-outside job below fails on any tracked production TS that no
+# package scope covers. So each entry now names its own `dir` and `package` is only
+# a label, used for the job name and the artifact name.
+#
+# One thing NOT changed alongside that. assert-coverage-completeness.mjs's
+# `--scope outside` pass asserts that every directory holding a
+# `deploy/<pkg>/package.json` appears in the `--package` list; it does not make the
+# same assertion about `editors/<pkg>/package.json`. That is deliberately left
+# alone. The primary protection does not depend on it: a package added to the tree
+# and to neither list has its sources land in the outside census, which fails on
+# them by name. The deploy/-specific pass is a second line for that one directory,
+# and widening it is a change to a gate script rather than to this file.
 #
 # WHY THIS WORKFLOW EXISTS
 #
@@ -74,6 +92,9 @@ name: TypeScript CI
 # change does unblock is the self-referencing filter discussed below, and the
 # unfiltered merge_group leg added alongside these triggers.
 #
+# editors/vscode/** is filtered on the same basis and is not a special case: it is
+# a package this gate measures, so a change to it must run the gate.
+#
 # The alternative -- letting the presence check skip quietly when the directory is
 # absent -- was rejected. A job that reports success because it found nothing to
 # do is indistinguishable from a job that tested something, which is the failure
@@ -91,6 +112,7 @@ name: TypeScript CI
 #   .github/workflows/ash-typescript-ci.yml
 #   .github/scripts/assert-coverage-scope.mjs
 #   .github/scripts/assert-coverage-completeness.mjs
+#   .github/scripts/assert-jest-ran.mjs
 #   .github/typescript-coverage-exclusions.json
 #
 # The exclusions file matters most of the four. It is the one place where editing
@@ -121,6 +143,7 @@ on:
     paths:
       - "deploy/cdk/**"
       - "deploy/cdk-constructs/**"
+      - "editors/vscode/**"
       # .nvmrc is load-bearing for both jobs below: it is where setup-node reads the
       # Node version from, so editing it changes the toolchain this gate runs on. A
       # file that decides what a gate tests belongs in the gate's own filter.
@@ -134,6 +157,7 @@ on:
     paths:
       - "deploy/cdk/**"
       - "deploy/cdk-constructs/**"
+      - "editors/vscode/**"
       - ".nvmrc"
   # THE MERGE QUEUE LEG, AND WHY IT CARRIES NO paths FILTER
   #
@@ -208,6 +232,7 @@ jobs:
           # them and fails, which is the case worth catching -- and it should
           # require an explicit, reviewable edit to this file.
           - package: cdk
+            dir: deploy/cdk
             threshold: '{"global":{"statements":90,"lines":90}}'
             min_files: 11
             min_statements: 400
@@ -215,11 +240,32 @@ jobs:
             # so requiring it by name is the direct guard against that.
             require: "--require bin/ash.ts --require lib/ash-config.ts"
           - package: cdk-constructs
+            dir: deploy/cdk-constructs
             threshold: '{"global":{"statements":90,"lines":90}}'
             min_files: 7
             min_statements: 222
             # buildspec-cli.ts is the file that was actually hidden this way.
             require: "--require src/buildspec-cli.ts --require src/index.ts"
+          # The VS Code extension. Its own threshold, at the same 90, because the
+          # number this gate holds is per package and per language -- a blended
+          # figure across the three would let one of them fall while the average
+          # held.
+          #
+          # Measured on the run that added it: 6 files, 309 statements, 99.67%
+          # statements and 99.66% lines. The floors below sit just under that for
+          # the reason given above -- a source file added later raises both
+          # legitimately.
+          - package: vscode
+            dir: editors/vscode
+            threshold: '{"global":{"statements":90,"lines":90}}'
+            min_files: 6
+            min_statements: 300
+            # vsix-contents.ts is this package's equivalent of the file that was
+            # actually hidden: nothing in src/ imports it, only src/verify-vsix.ts
+            # and a test do, so it is the first thing a narrowed `roots` would drop
+            # from the report -- and it is the publishing-boundary check, so losing
+            # its coverage silently is the worst of the three.
+            require: "--require src/vsix-contents.ts --require src/extension.ts"
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -229,8 +275,8 @@ jobs:
       # reports a green check for work it never did.
       - name: Confirm the package is present
         run: |
-          if [ ! -f "deploy/${{ matrix.package }}/package.json" ]; then
-            echo "::error::deploy/${{ matrix.package }}/package.json is missing. This gate expects it to exist; it must not pass by finding nothing."
+          if [ ! -f "${{ matrix.dir }}/package.json" ]; then
+            echo "::error::${{ matrix.dir }}/package.json is missing. This gate expects it to exist; it must not pass by finding nothing."
             exit 1
           fi
 
@@ -249,24 +295,45 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
-          cache-dependency-path: deploy/${{ matrix.package }}/package-lock.json
+          cache-dependency-path: ${{ matrix.dir }}/package-lock.json
 
       - name: Install dependencies
-        run: npm ci --prefix "deploy/${{ matrix.package }}"
+        run: npm ci --prefix "${{ matrix.dir }}"
 
+      # --json --outputFile is here for the step after this one, not for this one.
+      # jest still writes its human-readable report, so the log is unchanged; the
+      # JSON is what makes the test count machine-readable. Reading the count out
+      # of the text would mean stripping ANSI first -- an anchored grep over
+      # coloured jest output matches nothing, and a naive one matches the wrong
+      # lines.
+      #
+      # It goes under RUNNER_TEMP rather than into the package, so no package needs
+      # a .gitignore entry for a CI-only file.
       - name: Run tests with coverage thresholds
         run: |
-          npm --prefix "deploy/${{ matrix.package }}" test -- \
+          npm --prefix "${{ matrix.dir }}" test -- \
             --ci \
             --coverage \
             --coverageReporters=text \
             --coverageReporters=json-summary \
-            --coverageThreshold='${{ matrix.threshold }}'
+            --coverageThreshold='${{ matrix.threshold }}' \
+            --json \
+            --outputFile="$RUNNER_TEMP/jest-${{ matrix.package }}.json"
+
+      # A jest run that collected no tests exits 0 and prints "Tests: 0 total",
+      # which reads as a pass -- this repository has already had a green run that
+      # executed nothing. A coverage threshold does not catch it either: with no
+      # files instrumented there is no percentage to fall below.
+      - name: Assert jest actually ran tests
+        run: |
+          node .github/scripts/assert-jest-ran.mjs \
+            --results "$RUNNER_TEMP/jest-${{ matrix.package }}.json" \
+            --min-tests 1
 
       - name: Assert the coverage scope was not narrowed
         run: |
           node .github/scripts/assert-coverage-scope.mjs \
-            --summary "deploy/${{ matrix.package }}/coverage/coverage-summary.json" \
+            --summary "${{ matrix.dir }}/coverage/coverage-summary.json" \
             --min-files ${{ matrix.min_files }} \
             --min-statements ${{ matrix.min_statements }} \
             ${{ matrix.require }}
@@ -279,15 +346,15 @@ jobs:
         run: |
           node .github/scripts/assert-coverage-completeness.mjs \
             --exclusions .github/typescript-coverage-exclusions.json \
-            --scope "deploy/${{ matrix.package }}" \
-            --summary "deploy/${{ matrix.package }}/coverage/coverage-summary.json"
+            --scope "${{ matrix.dir }}" \
+            --summary "${{ matrix.dir }}/coverage/coverage-summary.json"
 
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ts-coverage-${{ matrix.package }}
-          path: deploy/${{ matrix.package }}/coverage/
+          path: ${{ matrix.dir }}/coverage/
           retention-days: 7
           if-no-files-found: warn
 
@@ -317,13 +384,18 @@ jobs:
         with:
           node-version-file: .nvmrc
 
-      # --package must name the same packages as the matrix above. The check
-      # itself fails when a deploy/<pkg>/package.json exists that this list does
-      # not name, so a new package cannot slip past both.
+      # --package must name the same directories as the matrix above -- the `dir`
+      # values, not the `package` labels. The check itself fails when a
+      # deploy/<pkg>/package.json exists that this list does not name, so a new
+      # package under deploy/ cannot slip past both. It makes no equivalent
+      # assertion about editors/<pkg>, so for that directory the protection is the
+      # census below: a package added there and named in neither list has its
+      # sources reported as accounted for by nothing.
       - name: Assert no unnamed production file sits outside every package
         run: |
           node .github/scripts/assert-coverage-completeness.mjs \
             --exclusions .github/typescript-coverage-exclusions.json \
             --scope outside \
             --package deploy/cdk \
-            --package deploy/cdk-constructs
+            --package deploy/cdk-constructs \
+            --package editors/vscode

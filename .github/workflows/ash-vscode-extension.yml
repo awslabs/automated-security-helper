@@ -1,0 +1,175 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: ASH - VS Code Extension
+# Builds editors/vscode into a .vsix and opens the archive to check what is inside.
+#
+# WHY THIS IS A SEPARATE WORKFLOW FROM ash-typescript-ci.yml
+#
+# That one holds a coverage number, and editors/vscode joins its matrix for exactly
+# that. This one answers a different question -- what bytes end up in the artifact --
+# and it needs a step no other package in that matrix has. Adding a conditional
+# packaging step to a uniform matrix would make every entry carry an `if:` about a
+# format only one of them builds.
+#
+# It is also the shape the rest of this repository's packaging already has: each
+# directory under packaging/ has a verification that builds the artifact and then
+# exercises it, rather than a shared job that special-cases each format.
+#
+# WHAT IS DELIBERATELY NOT HERE
+#
+# Publishing. There is no `vsce publish`, no personal access token, no marketplace
+# submission, and no secret is referenced anywhere in this file. The extension is a
+# GitHub Release asset, the same as every other artifact packaging/README.md
+# describes, and a workflow that could publish would be the wrong place to find that
+# out.
+#
+# WHY THE CONTENTS CHECK IS THE POINT OF THE JOB
+#
+# packaging/README.md draws the line: ASH's own code may ship in a published
+# artifact, third-party code never may. `vsce package` bundles the `dependencies`
+# tree from node_modules into the .vsix by DEFAULT, so the packaging tool's own
+# default behaviour is what would cross that line, and it would cross it quietly --
+# a working extension with someone else's code inside it looks exactly like a
+# working extension.
+#
+# So the archive gets opened. editors/vscode/src/vsix-contents.ts walks the ZIP
+# central directory and requires every member to match an allowlist derived from
+# this package's own build output, plus a required-present check so an empty or
+# truncated archive cannot satisfy a subset test by carrying nothing. That is the
+# same mechanical shape as packaging/README.md's "exactly one bundled wheel", and it
+# is phrased as an allowlist for the reason given there: a denylist needs a judgment
+# call per dependency.
+on:
+  push:
+    # "**" and not "*": GitHub branch filters treat "*" as matching any character
+    # except "/", so it matches none of the ci/..., fix/... or feat/... branches
+    # this repository actually uses. Three other workflows here carry the same note.
+    branches:
+      - "**"
+    paths:
+      - "editors/vscode/**"
+      # setup-node reads the Node version from .nvmrc, so editing it changes the
+      # toolchain this job builds on.
+      - ".nvmrc"
+      - ".github/workflows/ash-vscode-extension.yml"
+  pull_request:
+    branches:
+      - "**"
+    paths:
+      - "editors/vscode/**"
+      - ".nvmrc"
+      - ".github/workflows/ash-vscode-extension.yml"
+  # merge_group takes no paths filter -- GitHub scopes paths to push, pull_request
+  # and pull_request_target only. So this leg runs on every queue entry, including
+  # entries that touch nothing here. That costs a build on unrelated entries and
+  # buys the case a per-entry filter cannot see: a queue entry is a merge of several
+  # pull requests, so the change that breaks the package may have touched none of
+  # the filtered paths.
+  #
+  # Omitting it would be worse than either. A required check with no merge_group
+  # trigger never reports for a queue entry, and a required check that cannot report
+  # does not fail the merge, it blocks it silently.
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  # Same keying as ash-typescript-ci.yml, and for the same measured reason: on push
+  # github.ref is a plain branch name that every push to that branch shares, and
+  # GitHub allows one pending run per group -- so a third run queuing into an
+  # occupied group evicts the second before it starts a job. Appending the sha on
+  # push only gives every pushed commit its own group.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || '' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  package:
+    name: build and inspect the .vsix
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: editors/vscode
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The one assertion about the package manifest rather than the archive, and it
+      # is here because it is cheap and because the archive check cannot make it: an
+      # archive with no third-party members is what a correct .vscodeignore produces
+      # from a package that HAS runtime dependencies, so passing the contents check
+      # is not evidence there are none. This says there are none.
+      - name: Assert the extension declares no runtime dependencies
+        run: |
+          count="$(node -e 'process.stdout.write(String(Object.keys(require("./package.json").dependencies || {}).length))')"
+          echo "runtime dependencies declared: $count"
+          if [ "$count" -ne 0 ]; then
+            echo "::error::editors/vscode declares $count runtime dependency/dependencies. vsce bundles them into the .vsix, which would put third-party code in a published artifact. See packaging/README.md."
+            exit 1
+          fi
+
+      # Compiles via the vscode:prepublish script, so a type error fails here rather
+      # than shipping an archive built from stale out/.
+      - name: Build the .vsix
+        run: npm run package
+
+      - name: Assert the archive carries nothing but this extension's own output
+        run: npm run verify:vsix
+
+      # A second reader over the same bytes, and not redundancy. The check above uses
+      # this package's own ZIP central-directory walk; if that walk under-reported
+      # members -- a Zip64 archive it mis-parsed, an entry count it read short -- it
+      # would report a clean subset of a dirty archive, and nothing in its own output
+      # could reveal it. Python's zipfile is an independent implementation, so the
+      # two disagreeing is the signal.
+      - name: Cross-check the member list with an independent ZIP reader
+        run: |
+          python3 - ash-vscode.vsix <<'PY'
+          import sys, zipfile
+          with zipfile.ZipFile(sys.argv[1]) as archive:
+              members = archive.namelist()
+          print(f"{len(members)} member(s):")
+          for member in members:
+              print(f"  {member}")
+          if not members:
+              raise SystemExit("FAIL: the archive has no members, so any subset check over it is vacuous")
+          bundled = [m for m in members if "/node_modules/" in m]
+          if bundled:
+              raise SystemExit(
+                  f"FAIL: {len(bundled)} member(s) under node_modules/, e.g. {bundled[0]}. "
+                  "That is third-party code in a published artifact; see packaging/README.md."
+              )
+          if "extension/out/extension.js" not in members:
+              raise SystemExit(
+                  "FAIL: extension/out/extension.js is absent. The manifest's `main` points at it, "
+                  "so this archive would install and activate nothing."
+              )
+          print("OK: independent reader agrees -- no bundled modules, entry point present")
+          PY
+
+      - name: Upload the .vsix
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ash-vscode-extension
+          path: editors/vscode/ash-vscode.vsix
+          retention-days: 7
+          # `error` and not `warn`: this job's whole output is the archive, so a run
+          # that uploaded nothing did not do its job, and a warning would leave a
+          # green check saying otherwise.
+          if-no-files-found: error

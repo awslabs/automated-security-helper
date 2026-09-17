@@ -88,6 +88,30 @@ global_settings:
         the formula's test block so that `brew test` can assert the install
         reports a finding. Nothing in this file is a credential; see
         packaging/homebrew/README.md.
+    # === detect-secrets: the VS Code extension's fixture ===
+    #
+    # A fourth file plants the same value as the three above, and it is listed
+    # separately because it is not packaging work: it belongs to the editor
+    # extension in editors/vscode, whose jest suite asserts a non-zero count of
+    # diagnostics in the editor model against it. The reasoning is identical --
+    # an ASH scan that finds nothing exits 0, so "the command completed" and "a
+    # SARIF file appeared" are both satisfied by a scan that saw nothing, and the
+    # planted value is what makes the assertion falsifiable.
+    #
+    # Scoped to the one exact path and not to `editors/vscode/test/fixtures/**`.
+    # The sibling fixtures in that directory are SARIF documents, and a measured
+    # scan of the .py file confirms they carry no credential-shaped string of
+    # their own: ASH masks the value, so its own report names the rules and the
+    # line and never the secret. A glob would stop saying that, and it would
+    # excuse the next fixture added there without anyone deciding to.
+    - rule_id: "SECRET-*"
+      path: editors/vscode/test/fixtures/planted_secret.py
+      reason: >-
+        AWS's published example secret access key, planted so the VS Code
+        extension's suite can assert findings reach the editor model rather than
+        assert that a scan exited 0. Three rules fire on it, the same three the
+        .deb and .rpm verifications see. The fixture is the assertion; removing
+        it would make the suite vacuous. See editors/vscode/README.md.
     # === bandit: /tmp is the only writable path under a read-only rootfs ===
     - rule_id: B108
       path: deploy/terraform/modules/codecommit-gate/files/ash_pr_gate.py

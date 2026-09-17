@@ -76,6 +76,11 @@
       "path": ".github/scripts/assert-actions-pinned.mjs",
       "kind": "no-harness",
       "reason": "A CI gate invoked as `node .github/scripts/...` from ash-actions-pinned.yml. Neither .github/scripts nor .github holds a package.json, tsconfig, jest or vitest config, so no JS harness exists to measure it. It is not untested: the gate is exercised by mutation in CI's own terms -- reverting a pinned ref to a tag makes it exit 1 -- and its failure paths are the reason the pull request that added it was reviewable."
+    },
+    {
+      "path": ".github/scripts/assert-jest-ran.mjs",
+      "kind": "no-harness",
+      "reason": "The fourth gate script under .github/scripts/, same disposition as the three above: run by `node` from a step in ash-typescript-ci.yml, in a tree with no package.json, tsconfig, jest or vitest config in any ancestor directory. It asserts a jest run executed a non-zero number of tests, which neither sibling can -- a zero-test run exits 0, instruments nothing, and so has no percentage to fall below. Exercised by mutation the same way assert-actions-pinned.mjs is: pointing --results at an absent file, and at a result with numTotalTests 0, each makes it exit 1."
     }
   ]
 }
