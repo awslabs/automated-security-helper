@@ -58,8 +58,29 @@ install -m 0644 "$(dirname "$0")/debian/README.Debian" "$STAGE/usr/share/doc/ash
 # by python3, so both are named. Omitting python3-venv is the classic Debian Python
 # packaging failure: `python3 -m venv` exits 1 with a message telling the user to
 # apt-get install a package the .deb should have depended on.
+# debian/control.in carries NO comments, and must not gain any. dpkg-deb parses the
+# generated DEBIAN/control verbatim and rejects a '#' line with
+#   "field name '#' must be followed by colon"
+# which fails the build rather than being ignored. Measured, after an earlier revision
+# put the Maintainer rationale in that file. Any explanation about a control field
+# therefore lives here instead.
+#
+# On Maintainer specifically: the field is mandatory in a Debian control file, but this
+# project declares no maintainer contact anywhere -- pyproject.toml has no authors or
+# maintainers table and no tracked file carries an address. control.in uses the GitHub
+# noreply form for the owning org rather than inventing a personal or internal address.
+# If the maintainers want a real contact, set it in pyproject.toml and read it here.
 sed -e "s/@DEB_VERSION@/${DEB_VERSION}/" \
     "$(dirname "$0")/debian/control.in" > "$STAGE/DEBIAN/control"
+
+# Assert the generated control file is comment-free before handing it to dpkg-deb, so a
+# future edit to control.in fails here with a message naming the cause rather than in
+# dpkg-deb's parser.
+if grep -q '^#' "$STAGE/DEBIAN/control"; then
+  echo "error: DEBIAN/control contains a '#' line; dpkg-deb rejects comments there." >&2
+  echo "       Put the explanation in build.sh instead of debian/control.in." >&2
+  exit 1
+fi
 
 install -m 0755 "$(dirname "$0")/debian/postinst" "$STAGE/DEBIAN/postinst"
 install -m 0755 "$(dirname "$0")/debian/prerm"    "$STAGE/DEBIAN/prerm"

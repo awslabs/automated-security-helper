@@ -4,7 +4,7 @@ Section: devel
 Priority: optional
 Architecture: all
 Depends: python3 (>= 3.10), python3-venv, python3-pip, ca-certificates
-Maintainer: AWS Labs <automated-security-helper@amazon.com>
+Maintainer: awslabs <awslabs@users.noreply.github.com>
 Homepage: https://github.com/awslabs/automated-security-helper
 Description: Automated Security Helper (ASH) security scan orchestrator
  ASH runs a suite of security scanners over a source tree and aggregates their
