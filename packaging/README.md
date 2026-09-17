@@ -49,6 +49,7 @@ tempted.
 | `deb/` | Debian, Ubuntu | build + install + real scan in `debian:bookworm` |
 | `rpm/` | Amazon Linux, RHEL | build + install + real scan in `amazonlinux:2023` |
 | `chocolatey/` | Windows, via Chocolatey | nuspec vs NuGet's XSD anywhere; build + install + real scan on `windows-latest` |
+| `winget/` | Windows, via winget | manifest set vs Microsoft's published JSON Schemas. Installs the MSIX, so it is schema-valid but not submission-ready; `README.winget` says why |
 
 ## Install shape, common to both
 
