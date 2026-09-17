@@ -74,7 +74,10 @@ DATA="${XDG_DATA_HOME:-$HOME/.local/share}"
 # the shorter idiom and is wrong here: set -- replaces the positional parameters, so the
 # "$@" this script ends by passing to ASH would be the wheel path instead of the user's
 # arguments. Measured, on an earlier revision -- `ash --version` reported
-#   No such command '/app/share/ash/wheels/automated_security_helper-3.7.0-...whl'
+#   No such command '/app/share/ash/wheels/automated_security_helper-<version>-...whl'
+# The version is elided on purpose: nothing under packaging/flatpak/ carries one, so
+# nothing here is in [tool.commitizen] version_files and nothing here goes stale on a
+# release. build.sh reads the version out of the wheel filename at build time.
 # because the launcher had handed ASH its own payload as an argv.
 #
 # The -f test inside the loop is what distinguishes "no wheels" from "one wheel": an
