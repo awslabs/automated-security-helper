@@ -238,6 +238,29 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
+### Gradle, for the JetBrains plugin under editors/jetbrains/ ###
+#
+# `build/` and `lib/` in the Python section above already cover Gradle's output directory
+# and would swallow any directory named lib/, which is why the plugin keeps its sources
+# under src/main/java and has no lib/ of its own. These three are what Gradle adds that
+# nothing above catches.
+#
+# Deliberately NOT ignored, and this is the sharp one:
+# editors/jetbrains/gradle/wrapper/gradle-wrapper.jar. It is conventionally committed --
+# a wrapper without its jar cannot bootstrap, so `./gradlew` fails on a clean checkout and
+# the CI job cannot run -- and it is conventionally gitignored, because a wildcard on *.jar
+# catches it. There is no *.jar rule in this file today. If one is ever added, it needs a
+# negation for that path, for the same reason packaging/rpm/ash.spec needed one: `git add`
+# skips ignored files SILENTLY, so the wrapper would be written, verified against, and lost
+# with no error anywhere.
+editors/jetbrains/.gradle/
+editors/jetbrains/local.properties
+editors/jetbrains/.kotlin/
+# The IntelliJ Platform Gradle plugin's own cache of JetBrains product-release listings.
+# It writes .json and .json.lock files here on every resolve, and they are machine-local and
+# time-dependent, so committing them would make the tree dirty after any build.
+editors/jetbrains/.intellijPlatform/
+
 ### Python Patch ###
 # Poetry local configuration file - https://python-poetry.org/docs/configuration/#local-configuration
 poetry.toml
