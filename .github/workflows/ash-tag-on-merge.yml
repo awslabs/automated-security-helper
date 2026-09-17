@@ -6,8 +6,24 @@ on:
     branches:
       - main
 
+# `contents: write` creates the tag and the release. The other two exist only for
+# provenance and are the minimum `actions/attest-build-provenance` accepts:
+#
+#   id-token: write       mints the OIDC token Sigstore binds the attestation to.
+#                         Without it the action fails at signing rather than
+#                         silently publishing an unattested asset.
+#   attestations: write   writes the attestation to this repository's attestation
+#                         store, which is what `gh attestation verify` later reads.
+#
+# Both were absent from every `permissions:` block in the repository before this
+# change, so no artifact ASH has ever released carries provenance. Note the
+# default token is NOT sufficient even with these two added at the job level if a
+# workflow-level block narrows it further -- this block is workflow-level and is
+# the only one here.
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   tag-and-release:
@@ -44,25 +60,97 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Version: $VERSION"
 
-      - name: Create tag and GitHub Release
+      # Asked before building rather than inside the release step, because the
+      # build, the contents gate and the attestation are all pointless work if the
+      # release already exists -- and an attestation is not free: it writes to the
+      # repository's attestation store, so attesting artifacts for a release that
+      # is then skipped leaves a signed record of something never published.
+      #
+      # The previous shape put this check inside the release step and used a bare
+      # `exit 0`, which meant the step could not distinguish "already released" from
+      # "released just now" for anything downstream.
+      - name: Decide whether this release already exists
+        id: existing
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
+          set -euo pipefail
           TAG="v${VERSION}"
-
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "::notice::Release $TAG already exists, skipping"
-            exit 0
+            echo "::notice::Release $TAG already exists, skipping build and publish"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # The wheel and sdist are built HERE, from the tagged tree, rather than
+      # downloaded from the ash-package.yml run on the merge commit. Two reasons:
+      # an artifact downloaded across workflow runs is not covered by this run's
+      # OIDC identity, so attesting it would bind provenance to a build this job
+      # did not perform; and `actions/download-artifact` across runs needs a token
+      # and a run id, which adds a failure mode to the publish path for no gain.
+      # `uv build` is deterministic from pyproject metadata, so building twice
+      # produces the same distribution as the gate already checked on the PR.
+      - name: Build distribution artifacts
+        if: steps.existing.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          uv build --out-dir dist
+          # `uv build` exiting 0 is not evidence it wrote anything -- assert the
+          # two artifacts exist before anything downstream trusts the directory.
+          test -n "$(find dist -maxdepth 1 -name '*.whl' -print -quit)" \
+            || { echo "::error::uv build produced no wheel"; exit 1; }
+          test -n "$(find dist -maxdepth 1 -name '*.tar.gz' -print -quit)" \
+            || { echo "::error::uv build produced no sdist"; exit 1; }
+          ls -l dist
+
+      # The same gate ash-package.yml runs on every pull request, run again on the
+      # exact bytes about to be published. This is the control that matters most for
+      # the operator's hard rule -- no GitHub-published artifact may contain
+      # third-party scanner source or assets -- because a release asset is the only
+      # artifact that actually reaches users. Running it on the PR proves the tree
+      # was clean; running it here proves the *published file* is.
+      - name: Assert no third-party scanner content in the artifacts
+        if: steps.existing.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          python .github/scripts/assert-artifact-contents.py dist/*.whl dist/*.tar.gz
+
+      # Provenance. Attested BEFORE the release is created, so a signing failure
+      # blocks publication rather than leaving an unattested asset already public
+      # and needing a delete. `subject-path` takes both artifacts in one call,
+      # which produces one attestation per subject.
+      - name: Attest build provenance
+        if: steps.existing.outputs.skip == 'false'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.whl
+            dist/*.tar.gz
+
+      - name: Create tag and GitHub Release
+        if: steps.existing.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          TAG="v${VERSION}"
+
+          # The artifacts are passed as positional arguments, which is the whole
+          # point of this change: before it, this command had no file argument at
+          # all, so every ASH release since the workflow was written published
+          # release notes and nothing installable.
           gh release create "$TAG" \
             --repo "$GITHUB_REPOSITORY" \
             --target main \
             --generate-notes \
-            --title "$TAG"
+            --title "$TAG" \
+            dist/*.whl dist/*.tar.gz
 
-          echo "Created release $TAG"
+          echo "Created release $TAG with $(find dist -maxdepth 1 \
+            \( -name '*.whl' -o -name '*.tar.gz' \) | wc -l) attached artifact(s)"
 
       - name: Update v3 floating tag
         env:
