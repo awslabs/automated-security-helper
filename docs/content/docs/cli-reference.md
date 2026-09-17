@@ -9,8 +9,8 @@ These parameters are available across multiple ASH commands:
 | Parameter              | Description                                                | Default           | Environment Variable | Commands                             |
 |------------------------|------------------------------------------------------------|-------------------|----------------------|--------------------------------------|
 | `--source-dir`         | Path to the directory containing code to scan              | Current directory | `ASH_SOURCE_DIR`     | `scan`                               |
-| `--version`            | Print the installed ASH version and exit                   |                   |                      | `scan`                               |
-| `--ash-revision-to-install` | ASH branch or tag to install in the container image for usage during containerized scans | |  | `scan` |
+| `--version`, `-V`      | Print the installed ASH version and exit                   |                   |                      | `scan`                               |
+| `--ash-revision-to-install` | ASH branch or tag to install in the container image for usage during containerized scans | |  | `scan`, `build-image` |
 | `--base-ref` | Git ref to diff against when --changed-files-only is set. | | `ASH_BASE_REF` | `scan` |
 | `--changed-files-only` | Limit the scan to files changed between the base branch and HEAD. | | `ASH_CHANGED_FILES_ONLY` | `scan` |
 | `--color` | Enable/disable colorized output | |  | `scan` |
@@ -34,9 +34,32 @@ These parameters are available across multiple ASH commands:
 | `--mode`               | Execution mode: `local`, `container`, or `precommit`       | `local`           | `ASH_MODE`           | `scan`                               |
 | `--debug`, `-d`        | Enable debug logging                                       | `False`           | `ASH_DEBUG`          | All commands                         |
 | `--verbose`, `-v`      | Enable verbose logging                                     | `False`           | `ASH_VERBOSE`        | All commands                         |
-| `--quiet`              | Suppress non-essential output                              | `False`           | `ASH_QUIET`          | All commands                         |
+| `--quiet`, `-q`        | Suppress non-essential output                              | `False`           | `ASH_QUIET`          | All commands                         |
 | `--no-color`           | Disable colored output                                     | `False`           | `ASH_NO_COLOR`       | All commands                         |
 | `--oci-runner`, `-o`   | OCI runner to use                                          | `docker`          | `ASH_OCI_RUNNER`     | `scan` (container mode)              |
+| `--help`, `-h`         | Show help for the command and exit                         |                   |                      | All commands                         |
+
+### Compatibility spellings
+
+ASH used to ship a bash script at the repository root alongside the Python CLI, and
+which one ran depended on `PATH` order. It is gone; the Python CLI parses its whole
+flag surface. Two of its spellings are accepted as aliases and warn on stderr naming
+the flag that replaces them:
+
+| Old spelling | Use instead |
+|---|---|
+| `--ash-revision`, `-rev` | `--ash-revision-to-install` |
+
+Two differences are worth knowing if you are migrating an old invocation:
+
+- `-v` is `--verbose`, not `--version`. The bash script used `-v` for the version;
+  the version flag here is `-V`.
+- `-c` is `--config` and takes a value. The bash script used `-c` for `--no-color`, so
+  an old `-c` will consume the next argument as a config path. Use `--no-color`.
+
+`ash` is the command. `automated-security-helper` is an alias kept for hosts where a
+bare `ash` resolves to something else -- MSYS2 ships the Almquist shell under that
+name. `ashv3` still works but warns, because the name pins a major version.
 
 ### Config Overrides Syntax
 

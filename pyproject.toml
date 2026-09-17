@@ -155,7 +155,12 @@ Repository = "https://github.com/awslabs/automated-security-helper"
 
 [project.scripts]
 ash = "automated_security_helper.cli.main:app"
-ashv3 = "automated_security_helper.cli.main:app"
+# Deprecated: routed through a wrapper that warns on stderr and then runs the
+# app. It names a version, so it reads wrong the moment v4 exists.
+ashv3 = "automated_security_helper.cli.main:run_ashv3"
+# Kept indefinitely and deliberately silent. This is the escape hatch for hosts
+# where a bare `ash` resolves to something else -- MSYS2 ships the Almquist shell
+# under that name and has already shadowed this entry point.
 automated-security-helper = "automated_security_helper.cli.main:app"
 
 [tool.commitizen]

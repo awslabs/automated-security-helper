@@ -182,28 +182,27 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # The `method: bash` cells are gone with the root `ash` bash script the
+        # Python CLI absorbed. They cost no platform coverage: each one paired with
+        # a `python-container` cell on the same os and oci-runner, so the pair ran
+        # the same container build from two entrypoints.
         include:
           # Linux x86 -- Docker
-          - { os: ubuntu-latest, method: bash, platform: linux/amd64, config-file: default, oci-runner: docker }
           - { os: ubuntu-latest, method: powershell, platform: linux/amd64, config-file: default, oci-runner: docker }
           - { os: ubuntu-latest, method: python-container, platform: linux/amd64, config-file: default, oci-runner: docker }
           - { os: ubuntu-latest, method: python-local, platform: linux/amd64, config-file: default, oci-runner: "" }
           # Linux x86 -- Podman
-          - { os: ubuntu-latest, method: bash, platform: linux/amd64, config-file: default, oci-runner: podman }
           - { os: ubuntu-latest, method: powershell, platform: linux/amd64, config-file: default, oci-runner: podman }
           - { os: ubuntu-latest, method: python-container, platform: linux/amd64, config-file: default, oci-runner: podman }
           # Linux x86 -- Finch
-          - { os: ubuntu-latest, method: bash, platform: linux/amd64, config-file: default, oci-runner: finch }
           - { os: ubuntu-latest, method: powershell, platform: linux/amd64, config-file: default, oci-runner: finch }
           - { os: ubuntu-latest, method: python-container, platform: linux/amd64, config-file: default, oci-runner: finch }
 
           # Linux ARM -- Docker
-          - { os: ubuntu-24.04-arm, method: bash, platform: linux/aarch64, config-file: default, oci-runner: docker }
           - { os: ubuntu-24.04-arm, method: powershell, platform: linux/aarch64, config-file: default, oci-runner: docker }
           - { os: ubuntu-24.04-arm, method: python-container, platform: linux/aarch64, config-file: default, oci-runner: docker }
           - { os: ubuntu-24.04-arm, method: python-local, platform: linux/aarch64, config-file: default, oci-runner: "" }
           # Linux ARM -- Podman
-          - { os: ubuntu-24.04-arm, method: bash, platform: linux/aarch64, config-file: default, oci-runner: podman }
           - { os: ubuntu-24.04-arm, method: powershell, platform: linux/aarch64, config-file: default, oci-runner: podman }
           - { os: ubuntu-24.04-arm, method: python-container, platform: linux/aarch64, config-file: default, oci-runner: podman }
           # Linux ARM -- Finch (x86_64 only, skip ARM)

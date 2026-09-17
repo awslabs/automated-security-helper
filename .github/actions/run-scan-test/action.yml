@@ -3,7 +3,7 @@ description: "Run ASH scan with a configurable method and validate results"
 
 inputs:
   method:
-    description: "Scan method: python-local, python-container, bash, powershell"
+    description: "Scan method: python-local, python-container, powershell"
     required: true
   os:
     description: "Runner OS label"
@@ -35,7 +35,7 @@ runs:
     # steps below that consume what this bootstraps are both gated
     # `oci-runner == 'docker'`, and ASH's own container build shells out to
     # `<runner> build` -- `podman build`, never `docker buildx` -- on every
-    # entrypoint (utils/ash_helpers.ps1, ./ash, run_ash_container.py). So on the
+    # entrypoint (utils/ash_helpers.ps1, run_ash_container.py). So on the
     # podman cells this used to boot a `docker-container` buildkit builder and
     # pull moby/buildkit:buildx-stable-1 from Docker Hub that nothing then used:
     # six matrix cells paying a network round trip purely as failure surface. One
@@ -527,32 +527,11 @@ runs:
           .ash/ash_output/ash_aggregated_results.json
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-    # Bash scan
-    - name: Validate ASH using Bash
-      if: inputs.method == 'bash'
-      shell: bash
-      env:
-        SNYK_TOKEN: ${{ inputs.snyk-token }}
-      run: |
-        echo "Testing ASH using Bash on ${{ inputs.os }} (${{ inputs.platform }}) with config: ${{ inputs.config-file }}"
-        chmod +x ./ash
-        if [ "${{ inputs.config-file }}" = "community" ]; then
-          ./ash --build-target ci --verbose --config .ash/.ash_community_plugins.yaml
-        else
-          ./ash --build-target ci --verbose
-        fi
-
-    - name: Validate No Plugin Errors (Bash)
-      if: inputs.method == 'bash'
-      shell: bash
-      run: |
-        echo "Checking for plugin execution errors..."
-        # Still printed, because it is what a human reads when this step fails.
-        # It is no longer what the check is computed from; see the script's module
-        # docstring for why counting "ERROR" in rendered prose was off by one.
-        ./ash report --format text
-        python3 "${{ github.action_path }}/count_scanner_errors.py" \
-          .ash/ash_output/ash_aggregated_results.json
+    # The `bash` method used to live here, driving the root `ash` bash script.
+    # That script is gone -- the Python CLI absorbed its whole flag surface -- and
+    # with it the method. Nothing was dropped from the platform matrix: every
+    # `bash` cell had a `python-container` cell on the same os and oci-runner, so
+    # the two differed only in which entrypoint typed the same container build.
 
     # Companion to "Expose the Actions cache credentials to ASH's build". The build
     # is done by now, so clear the credentials back out rather than leaving them in

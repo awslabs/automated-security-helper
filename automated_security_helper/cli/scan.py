@@ -22,6 +22,9 @@ from automated_security_helper.core.exceptions import (
     ShardSelectionError,
     WorkspaceDefinitionError,
 )
+from automated_security_helper.cli.deprecations import (
+    warn_deprecated_option_spellings,
+)
 from automated_security_helper.core.sharding import validate_shard_selection
 from automated_security_helper.interactions.run_ash_scan import (
     run_ash_scan,
@@ -279,6 +282,11 @@ def run_ash_scan_cli_command(
         bool,
         typer.Option(
             "--version",
+            # -V, not -v. The deleted root bash script used -v for --version,
+            # but -v is already --verbose here and has been for all of v3, so
+            # taking it back would silently turn a verbose run into a version
+            # print for anyone who has it in CI. Version gets its own letter.
+            "-V",
             help="Prints version number",
         ),
     ] = False,
@@ -301,7 +309,13 @@ def run_ash_scan_cli_command(
     show_summary: Annotated[
         bool, typer.Option(help="Show metrics table and results summary")
     ] = True,
-    quiet: Annotated[bool, typer.Option(help="Hide all log output")] = False,
+    quiet: Annotated[
+        bool,
+        # The pair is spelled out because attaching -q means naming the flag
+        # explicitly, and naming only "--quiet" would drop the --no-quiet that
+        # typer derives from the parameter name.
+        typer.Option("--quiet/--no-quiet", "-q", help="Hide all log output"),
+    ] = False,
     log_level: Annotated[
         AshLogLevel,
         typer.Option(
@@ -500,6 +514,15 @@ def run_ash_scan_cli_command(
     ash_revision_to_install: Annotated[
         str | None,
         typer.Option(
+            "--ash-revision-to-install",
+            # Both compatibility spellings come from the deleted root bash
+            # script. -rev is a single-dash multi-character option, which is
+            # unusual: click's short-option matcher would otherwise split it
+            # into -r -e -v, and -r exists here. Declaring it explicitly makes
+            # click match the whole token first, verified in
+            # tests/unit/cli/test_cli_flag_surface.py.
+            "--ash-revision",
+            "-rev",
             help="ASH branch or tag to install in the container image for usage during containerized scans",
         ),
     ] = None,
@@ -522,6 +545,11 @@ def run_ash_scan_cli_command(
     # (like 'scan') will handle the actual execution with the correct arguments
     if ctx.resilient_parsing or ctx.invoked_subcommand is not None:
         return
+
+    # Below the guard above, not in an option callback. This function is both the
+    # root callback and the `scan` command, so `ash scan ...` parses its
+    # parameters twice; an option callback would warn twice for one invocation.
+    warn_deprecated_option_spellings()
 
     if version:
         typer.echo(f"awslabs/automated-security-helper v{get_ash_version()}")

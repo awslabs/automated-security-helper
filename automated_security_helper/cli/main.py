@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import os
+import sys
+
 import typer
 from automated_security_helper.cli.config import config_app
 from automated_security_helper.cli.dependencies import dependencies_app
@@ -20,12 +22,22 @@ app = typer.Typer(
     pretty_exceptions_short=True,
     pretty_exceptions_show_locals=os.environ.get("ASH_DEBUG_SHOW_LOCALS", "NO").upper()
     in ["YES", "1", "TRUE"],
+    # click injects --help and nothing else, so -h has to be asked for. Set on
+    # the app rather than per command: click's Context inherits
+    # help_option_names from its parent, so every subcommand picks it up from
+    # the root group. -h came from the deleted root bash script.
+    context_settings={"help_option_names": ["-h", "--help"]},
 )
 
 app.callback(invoke_without_command=True)(run_ash_scan_cli_command)
+# No allow_extra_args/ignore_unknown_options here. `scan` used to swallow any
+# unrecognized flag and run a full scan regardless, so a typo in CI scanned the
+# wrong thing and exited 0. Nothing read ctx.args on this path, so the swallowed
+# arguments were discarded rather than forwarded -- dropping the pass-through
+# removes a silent failure without removing a feature. `build-image` below is
+# the deliberate exception.
 app.command(
     name="scan",
-    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
     no_args_is_help=False,
 )(run_ash_scan_cli_command)
 
@@ -249,6 +261,39 @@ def run_app():
     reset_logging_config()
 
     # Run the application
+    app()
+
+
+ASHV3_DEPRECATION_MESSAGE = (
+    "warning: the 'ashv3' command is deprecated and is scheduled for removal; "
+    "use 'ash' instead."
+)
+
+
+def _warn_ashv3_deprecation(stream=None):
+    """Announce that the ``ashv3`` console script is going away.
+
+    Written to stderr so it cannot corrupt a scan's stdout, which callers pipe
+    into report tooling.
+    """
+    print(ASHV3_DEPRECATION_MESSAGE, file=stream or sys.stderr)
+
+
+def run_ashv3():
+    """Entry point for the deprecated ``ashv3`` console script.
+
+    ``ashv3`` names a version, so it ages badly the moment v4 exists -- that is
+    the reason it is deprecated rather than any problem with the alias itself.
+    ``automated-security-helper`` is deliberately NOT deprecated alongside it: it
+    is the escape hatch for environments where a bare ``ash`` resolves to
+    something else, and that collision is real. MSYS2 ships the Almquist shell as
+    ``ash`` and it has already shadowed ASH's entry point.
+
+    The warning lives here, in a dedicated entry point, rather than in a Typer
+    callback. A callback would fire for the ``ash`` name too, and group callbacks
+    can run more than once for a single command line.
+    """
+    _warn_ashv3_deprecation()
     app()
 
 

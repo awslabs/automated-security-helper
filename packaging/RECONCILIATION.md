@@ -55,49 +55,89 @@ If you go looking for this later, scope the search to `main` rather than `--all`
 Searching all refs surfaces the archive branch's removal commit and invites the
 conclusion that a commit which never landed is what removed the file.
 
-### What actually remains, and it is a decision rather than a task
+### What remained, and how it was settled
 
-Two different things are still both called `ash`:
+Two different things used to both be called `ash`:
 
-1. A tracked **bash script at the repository root** — 232 lines, 7,332 bytes, parsing 26
-   flags of the v2-era container surface (`--source-dir`, `--offline`, `--oci-runner`,
-   `--container-uid`, `--build-target`, `--ash-revision`, …) and driving a container build
-   directly. Its only Python touchpoints are `python -m automated_security_helper.cli.main`
-   with `--help` and `--version`.
-2. The **Python console script** from `[project.scripts]`, where all three of `ash`,
-   `ashv3` and `automated-security-helper` point at
-   `automated_security_helper.cli.main:app`.
+1. A tracked **bash script at the repository root** — 232 lines, 7,332 bytes, parsing 18
+   flags in 27 alias spellings of the v2-era container surface (`--source-dir`,
+   `--offline`, `--oci-runner`, `--container-uid`, `--build-target`, `--ash-revision`, …)
+   and driving a container build directly.
+2. The **Python console script** from `[project.scripts]`.
 
-Which one runs depends entirely on PATH order. On Windows there is a third collision:
+Which one ran depended entirely on PATH order. On Windows there is a third collision:
 MSYS2 ships its own `ash`, the Almquist shell, which has already shadowed ASH's entry
 point in CI and produced `Illegal option --`.
 
-**This is a dependency of native packaging, not a parallel workstream.** Every package
-declares the console scripts it installs — the deb and rpm on this branch install
-`/usr/bin/ash` as a wrapper onto the venv's entry point — so if consolidation renames or
-drops an entry point, those manifests change with it. Settle the entry-point surface
-before writing the MSIX, Chocolatey or winget manifests.
+**This was a dependency of native packaging, not a parallel workstream.** Every package
+declares the console scripts it installs — the deb and rpm here install `/usr/bin/ash` as
+a wrapper onto the venv's entry point — so an entry point that got renamed or dropped
+would change those manifests with it. That is why it was settled before the MSIX,
+Chocolatey and winget manifests rather than alongside them.
 
-It is deliberately **not** attempted on this branch, because the open questions are
-compatibility decisions with user-visible consequences rather than mechanical edits:
+**The root bash script is deleted.** No port was written, because none was needed:
+`run_ash_container.py` already had `_OCI_RUNNER_CANDIDATES = ["finch", "docker",
+"nerdctl", "podman"]`, `_resolve_oci_runner`, `_build_image`, `_assemble_run_command` and
+`_execute_container`. Measured against the deleted script's own flag list, the Python
+`scan` command accepted 26 of its 27 spellings before this change; the exception was
+`-h`, which click does not inject.
 
-- Does the root bash `ash` disappear, or survive as a container-mode entry point? Killing
-  it means the Python CLI owns container orchestration. Check what
-  `run_ash_container.py` already covers — it has
-  `_OCI_RUNNER_CANDIDATES = ["finch", "docker", "nerdctl", "podman"]` — before assuming a
-  port is needed.
-- Which of the three aliases stay, and which become deprecated shims?
-- What does a v2-era invocation do: work, warn, or fail with a migration message? A
-  silent behavior change on a flag somebody has in CI is the expensive failure here, and
-  it cannot be chosen by inference.
+Five spellings were added rather than ported: `--ash-revision` and `-rev` as aliases of
+`--ash-revision-to-install`, `-q` for `--quiet`, `-h` for help, and `-V` for `--version`.
+
+Three decisions inside that are worth not relitigating:
+
+- **`-V`, not `-v`, is the version flag.** The bash script used `-v` for `--version`, but
+  `-v` has been `--verbose` for all of v3. Taking it back would silently turn a verbose
+  run into a version print for anyone with it in CI, so version got its own letter and
+  `-v` was left alone.
+- **`-rev` is a single-dash multi-character option**, which is unusual enough to look like
+  a mistake. It works: click matches the whole token before falling back to splitting
+  short flags, verified with `-r`, `-e` and `-v` all registered alongside it.
+- **`scan` now rejects unknown flags.** It used to accept any unrecognized flag and run a
+  full scan regardless, so a typo in CI scanned the wrong thing and exited 0. Nothing read
+  `ctx.args` on that path, so the swallowed arguments were being discarded rather than
+  forwarded. `build-image` keeps the pass-through, which its help text documents.
+
+Of the three console scripts, `ash` is the name and `automated-security-helper` is kept
+indefinitely and silent — it is the escape hatch for exactly the MSYS2 collision above.
+`ashv3` warns on stderr and stays, because the name pins a version and so reads wrong the
+moment v4 exists.
+
+**One thing this removed that was not a flag.** The CI `method: bash` matrix cells existed
+to exercise that script, and went with it — 5 cells across `ubuntu-latest` and
+`ubuntu-24.04-arm`. No platform coverage was lost, because each `bash` cell had a
+`python-container` cell on the same os and oci-runner, so the pair ran the same container
+build from two entrypoints. `utils/ash_helpers.sh`'s `invoke-ash` now calls
+`ash --mode container`; `--mode container` is load-bearing there, since the bash script
+always ran in a container while the bare Python CLI defaults to local.
+
+**A guardrail that would have gone quiet.**
+`tests/unit/test_ash_bash_entrypoint_build_failure.py` covered a real bug: a failed image
+build falling through to the run step, which reports a misleading registry error in CI and
+silently scans with a stale image locally. It guarded the bash script, and it carried a
+`skipif(not ASH_SCRIPT.is_file())`, so deleting the script would have turned it green by
+skipping rather than red. The guarantee moved to
+`tests/unit/test_container_build_failure_stops_the_run.py` against the Python path, where
+it holds for a reason invisible at the call site: `_build_image` never inspects the return
+code itself and relies on `run_cmd_direct` defaulting to `check=True`. That default is now
+pinned by a test, because flipping it would reintroduce the bug without touching either
+function.
+
+**Known gap, pre-existing and not addressed here.** In the bash script `-c` meant
+`--no-color`; in the Python CLI `-c` is `--config` and takes a value. A v2 invocation
+passing `-c` therefore consumes the next token as a config path instead of disabling
+color. That divergence shipped with v3 and is not something this change introduced, so it
+was left alone rather than fixed silently under an unrelated commit.
 
 ## Remaining scope
 
-- **Flatpak, MSIX, Chocolatey, winget** manifests and validation actions. Blocked on the
-  entry-point decision above for what they declare. None of `flatpak-builder`,
-  `makeappx`, `choco` or `winget` was available on the machine this branch was built on,
-  so writing them without local evidence would have produced CI-only code — the opposite
-  of how the deb and rpm were done.
+- **Flatpak, MSIX, Chocolatey, winget** manifests and validation actions. No longer
+  blocked on the entry-point decision — declare `ash`, `ashv3` and
+  `automated-security-helper`, matching `[project.scripts]`. Still outstanding because
+  none of `flatpak-builder`, `makeappx`, `choco` or `winget` was available on the machine
+  this branch was built on, so writing them without local evidence would have produced
+  CI-only code — the opposite of how the deb and rpm were done.
 - **Homebrew.** `Formula/ash.rb` calls `virtualenv_install_with_resources` with **zero
   `resource` stanzas**, so a real `brew install` would likely fail to vendor
   dependencies. CI only syntax-checks the formula, which is why this is invisible.

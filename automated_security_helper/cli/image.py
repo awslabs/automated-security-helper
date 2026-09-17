@@ -6,6 +6,9 @@ import typer
 import platform
 
 # Import subprocess utilities
+from automated_security_helper.cli.deprecations import (
+    warn_deprecated_option_spellings,
+)
 from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
 from automated_security_helper.core.enums import AshLogLevel, BuildTarget, RunMode
 from automated_security_helper.interactions.run_ash_scan import run_ash_scan
@@ -94,6 +97,12 @@ def build_ash_image_cli_command(
     ash_revision_to_install: Annotated[
         str | None,
         typer.Option(
+            "--ash-revision-to-install",
+            # Same two compatibility spellings as `scan`. The deleted root bash
+            # script drove an image build, so a caller migrating off it is at
+            # least as likely to land here as on `scan`.
+            "--ash-revision",
+            "-rev",
             help="ASH branch or tag to install in the container image for usage during containerized scans",
         ),
     ] = None,
@@ -123,7 +132,11 @@ def build_ash_image_cli_command(
             help="Run scan in offline/airgapped mode (skips NPM/PNPM/Yarn Audit checks). IMPORTANT: Online access is needed when building ASH to prepare it for usage during a scan! If selecting Offline while performing a build, the ASH container image will be built in offline mode and any typically online-only dependencies like downloadable tool vulnerability databases will be cached in the image itself before publishing for scan usage."
         ),
     ] = False,
-    quiet: Annotated[bool, typer.Option(help="Hide all log output")] = False,
+    quiet: Annotated[
+        bool,
+        # Pair spelled out so attaching -q does not drop --no-quiet.
+        typer.Option("--quiet/--no-quiet", "-q", help="Hide all log output"),
+    ] = False,
     log_level: Annotated[
         AshLogLevel,
         typer.Option(
@@ -150,6 +163,8 @@ def build_ash_image_cli_command(
 ):
     if ctx.resilient_parsing or ctx.invoked_subcommand not in [None, "image"]:
         return
+
+    warn_deprecated_option_spellings()
 
     # Rebind list defaults to fresh empty lists at call time.
     if custom_build_arg is None:
