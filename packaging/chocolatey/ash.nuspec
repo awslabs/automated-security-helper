@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Chocolatey package metadata for ASH.
+
+  A note on punctuation before anything else: XML forbids a double hyphen inside a
+  comment, and xmllint rejects the whole file with "Double hyphen within comment"
+  rather than skipping the comment. The rest of packaging/ uses a double hyphen the
+  way prose uses a dash. Do not carry that habit into this file.
+
+  Every element here is one the NuGet .nuspec XSD accepts, deliberately, so that
+  validate-nuspec.sh can check this file against the published schema before any
+  Windows machine is involved. Chocolatey also accepts a handful of its own
+  metadata elements (packageSourceUrl, projectSourceUrl, docsUrl, bugTrackerUrl,
+  mailingListUrl) which the NuGet XSD does not declare; adding one would make the
+  local check fail and would leave `choco pack` on a Windows runner as the only
+  thing validating this file. That trade is not worth a docsUrl.
+
+  The version below is maintained by commitizen, not by hand: see the
+  version_files list in pyproject.toml. build.ps1 also refuses to pack
+  when this literal disagrees with the version of the wheel it was handed, so a
+  missed bump fails the build instead of producing a package whose declared
+  version and payload disagree.
+-->
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <!-- `ash` rather than `automated-security-helper`: a Chocolatey package id is
+         what a user types, and the shipped deb and rpm are both named ash. The
+         longer console script name is still installed; see chocolateyinstall.ps1. -->
+    <id>ash</id>
+    <version>3.7.0</version>
+    <title>ASH - Automated Security Helper</title>
+    <authors>Amazon Web Services</authors>
+    <owners>awslabs</owners>
+    <licenseUrl>https://github.com/awslabs/automated-security-helper/blob/main/LICENSE</licenseUrl>
+    <projectUrl>https://github.com/awslabs/automated-security-helper</projectUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <summary>Runs many security scanners over a repository and reports the findings as SARIF.</summary>
+    <description>
+ASH orchestrates security scanners over a code repository and normalizes what they
+report into a single SARIF document, plus text, JSON, and Markdown reports.
+
+This package carries ASH's own wheel and nothing else. Installing it creates a
+virtualenv under %ProgramData%\ash\venv and installs that wheel into it, which
+resolves ASH's runtime dependencies from whatever Python index the machine is
+configured for. A reachable index is therefore required at install time; see
+README.chocolatey in the package for how to stage a wheelhouse on a machine
+without one.
+
+ASH drives third-party scanners; it does not contain them. After installing, run
+`ash dependencies install` to provision the ones ASH can install itself.
+    </description>
+    <!-- `admin` is Chocolatey's convention for a package whose install needs an
+         elevated shell. This one writes under %ProgramData% and creates shims in
+         the Chocolatey bin directory, so it does. -->
+    <tags>ash sast sarif security scanner iac secrets admin</tags>
+    <dependencies>
+      <!-- Bounded on both sides, for the same reason packaging/rpm/ash.spec names
+           specific interpreters instead of `python3 >= 3.10`. The floor is ASH's
+           own requires-python. The ceiling is 3.14 because ash-unified-ci.yml
+           exercises 3.10 through 3.13 and nothing above it: an unbounded
+           dependency would let Chocolatey satisfy this with whatever python3 is
+           newest on the day of install, and the first symptom would be pip failing
+           to resolve a dependency that has no wheel for that interpreter, reported
+           as a broken ASH install rather than as an untested interpreter.
+
+           NuGet bracket range syntax: [3.10,3.14) is >= 3.10 and < 3.14. -->
+      <dependency id="python3" version="[3.10,3.14)" />
+    </dependencies>
+  </metadata>
+  <files>
+    <!-- tools\ carries the install and uninstall scripts, README.chocolatey, and
+         wheels\, into which build.ps1 stages exactly one wheel. Nothing else may
+         go under wheels\: see the count assertions in build.ps1,
+         chocolateyinstall.ps1, and verify-on-windows.ps1. -->
+    <file src="tools\**" target="tools" />
+  </files>
+</package>

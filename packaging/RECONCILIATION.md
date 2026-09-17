@@ -241,6 +241,12 @@ how the deb and rpm were done.
   even though `brew install` is not. That leg runs on `macos-latest` and its first run is
   the first execution anywhere. See "The Homebrew formula could not have worked" above.
 
+The validators are named here because they are the substitute for a local build, and a
+validator is only worth what its negative control proves: `packaging/chocolatey/validate-nuspec.sh`
+against NuGet's XSD, `packaging/winget/validate-manifests.py` against Microsoft's JSON
+Schemas, and `packaging/msix/msix.py` over `AppxManifest.xml` and the staged layout. Each
+was observed rejecting a corrupted document before it was trusted to accept a correct one.
+
 Still open:
 
 - **VS Code `.vsix` and the JetBrains plugin.**

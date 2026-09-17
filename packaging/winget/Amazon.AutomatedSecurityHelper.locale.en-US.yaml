@@ -1,0 +1,57 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# winget default-locale manifest. The version manifest's DefaultLocale names en-US, and
+# this is the file that has to exist for it. A locale manifest for any other language
+# would be Amazon.AutomatedSecurityHelper.locale.<locale>.yaml and would validate
+# against the `locale` schema rather than the `defaultLocale` one, which requires
+# fewer fields.
+#
+# The publisher namespace is `Amazon`, not `AWSLabs`. That is where Amazon-owned tooling
+# already lives in microsoft/winget-pkgs: manifests/a/Amazon/ carries 25 packages
+# including AWSCLI, SAM-CLI, Corretto and Kiro. A first identifier segment that does not
+# match an existing publisher namespace is the kind of thing a submission would be sent
+# back over, and there is no reason to invent a second namespace for the same publisher.
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.12.0.schema.json
+
+PackageIdentifier: Amazon.AutomatedSecurityHelper
+PackageVersion: 3.7.0
+PackageLocale: en-US
+Publisher: Amazon Web Services
+PublisherUrl: https://github.com/awslabs
+PublisherSupportUrl: https://github.com/awslabs/automated-security-helper/issues
+Author: Amazon Web Services
+PackageName: Automated Security Helper
+PackageUrl: https://github.com/awslabs/automated-security-helper
+License: Apache-2.0
+LicenseUrl: https://github.com/awslabs/automated-security-helper/blob/main/LICENSE
+Copyright: Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# `ash` is the moniker so that `winget install ash` resolves, matching the deb, rpm and
+# Chocolatey package names. A moniker is not required to be unique across the
+# repository, which is why it can be this short.
+Moniker: ash
+ShortDescription: Runs many security scanners over a repository and reports the findings as SARIF.
+Description: |-
+  ASH orchestrates security scanners over a code repository and normalizes what they
+  report into a single SARIF document, plus text, JSON, and Markdown reports.
+
+  ASH drives third-party scanners; it does not contain them. After installing, run
+  `ash dependencies install` to provision the ones ASH can install itself.
+
+  Three commands are installed. `ash` is the one to use. `ashv3` still works and warns
+  once that its name pins a major version. `automated-security-helper` is the same
+  program under a name nothing else claims, which matters on Windows because MSYS2
+  ships the Almquist shell as `ash`.
+Tags:
+- cdk-nag
+- cfn-nag
+- devsecops
+- iac
+- sarif
+- sast
+- scanner
+- secrets
+- security
+- static-analysis
+ManifestType: defaultLocale
+ManifestVersion: 1.12.0

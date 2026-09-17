@@ -1,0 +1,71 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# winget installer manifest.
+#
+# THE INSTALLER IS THE MSIX, AND THIS FILE IS A TEMPLATE
+#
+# The MSIX under packaging/msix/ is the Windows artifact this branch produces, so it is
+# what winget installs. Two values here cannot be known until that artifact exists:
+# where it will be downloaded from, and its digest. Both are filled by
+# set-release-metadata.py, which is given the built .msix and derives them from it.
+#
+# InstallerSha256 is deliberately 64 zeros rather than a plausible-looking digest. The
+# schema requires 64 hex characters, so this field cannot be left empty or commented
+# out; anything shaped like a real digest would validate, and would keep validating
+# after the artifact it claims to describe changed. A digest of all zeros cannot be
+# mistaken for a measurement, and validate-manifests.py asserts that this is still the
+# sentinel, so committing a real digest for an artifact nobody built now fails a check
+# instead of sitting here looking authoritative.
+#
+# InstallerUrl points at the GitHub release asset path, with the tag and filename that
+# a release of this version would produce. set-release-metadata.py rewrites the
+# filename from the .msix it is handed, so a mismatch between this default and whatever
+# packaging/msix/ actually names its output corrects itself at release time rather than
+# shipping wrong.
+#
+# WHAT IS OMITTED, AND WHY OMISSION IS THE RIGHT ANSWER
+#
+# PackageFamilyName and SignatureSha256 are both recommended for an msix installer and
+# both are absent. PackageFamilyName is the Identity Name joined to a 13-character hash
+# of the publisher string; it can only be computed from the signed package, and a value
+# that matches the schema pattern but is wrong is worse than no value, because winget
+# would use it to correlate packages. SignatureSha256 is the digest of the signature
+# file inside the package, which for a self-signed build describes a signature no
+# machine trusts. Both belong to the same submission gap README.winget documents.
+#
+# Architecture and MinimumOSVersion are the two fields that must agree with
+# packaging/msix/AppxManifest.xml. They are not hand-maintained here either:
+# set-release-metadata.py reads them out of the AppxManifest inside the .msix it is
+# given and overwrites whatever this file says. The values below are the defaults a
+# Desktop Bridge package normally carries, kept so the checked-in file is complete
+# enough to validate.
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
+
+PackageIdentifier: Amazon.AutomatedSecurityHelper
+PackageVersion: 3.7.0
+InstallerType: msix
+# An MSIX install has no interactive mode to suppress; it is silent by construction.
+InstallModes:
+- silent
+- silentWithProgress
+UpgradeBehavior: install
+# The entry-point contract, recorded where winget can see it. `ash` is canonical.
+# `ashv3` is deprecated and warns once on stderr. `automated-security-helper` is kept
+# indefinitely and silent, and Windows is why it exists: MSYS2 ships the Almquist shell
+# as ash.exe, and when it is earlier on PATH than ASH's entry point a scan reaches the
+# shell and fails with `Illegal option --`. That has already happened in this project's
+# CI. Every one of these three must be an AppExecutionAlias in the MSIX manifest.
+Commands:
+- ash
+- ashv3
+- automated-security-helper
+Platform:
+- Windows.Desktop
+MinimumOSVersion: 10.0.17763.0
+Installers:
+- Architecture: x64
+  InstallerUrl: https://github.com/awslabs/automated-security-helper/releases/download/v3.7.0/automated_security_helper-3.7.0-x64.msix
+  InstallerSha256: '0000000000000000000000000000000000000000000000000000000000000000'
+ManifestType: installer
+ManifestVersion: 1.12.0

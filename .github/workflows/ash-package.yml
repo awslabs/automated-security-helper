@@ -533,6 +533,82 @@ jobs:
     # runtime before it can build, and then its first `ash` invocation resolves ASH's 27
     # runtime dependencies from a Python index, which the other two do at install time.
     timeout-minutes: 40
+
+  # The Chocolatey nuspec, checked against NuGet's published XSD.
+  #
+  # One job per format, following deb and rpm, and not one shared "validate the
+  # manifests" job holding both this and the winget check. A shared job would be cheaper
+  # by about thirty seconds of runner time and would couple the two formats: dropping
+  # Chocolatey would delete the job the winget check lives in, so the two could not be
+  # landed or reverted independently.
+  #
+  # It does not need the build job. Nothing here reads the wheel: the script checks a
+  # metadata file against a published schema and cross-checks the version it declares
+  # against the nuspec itself. So this starts immediately instead of queueing behind a
+  # build whose output it would not open.
+  #
+  # The script rejects two deliberately broken copies of the nuspec before validating
+  # the real one, for the reason the "Prove the artifact-contents check can fail" step
+  # above gives: xmllint invoked without --schema parses the document and exits 0, so a
+  # validator that has never been observed failing may be checking nothing, and its
+  # passing output looks identical either way.
+  nuspec:
+    name: "schema: chocolatey nuspec (NuGet XSD)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # xmllint comes from libxml2-utils, which is NOT in the ubuntu-24.04 runner
+      # image's apt package list -- checked against
+      # images/ubuntu/Ubuntu2404-Readme.md in actions/runner-images, whose list runs
+      # from acl to zsync and contains no libxml2 package. validate-nuspec.sh fails
+      # with a named error if xmllint is missing rather than skipping the check, so
+      # dropping this step would redden the job rather than quietly pass it, but there
+      # is no reason to make anyone read that error.
+      - name: Install xmllint
+        run: |
+          set -euo pipefail
+          sudo apt-get -qq update >/dev/null
+          sudo apt-get -qq install -y --no-install-recommends libxml2-utils >/dev/null
+          xmllint --version
+
+      - name: Validate ash.nuspec against NuGet's published XSD
+        run: bash packaging/chocolatey/validate-nuspec.sh
+
+  # The Chocolatey package. Same principle as the deb and rpm jobs: build the package
+  # in the environment that will install it, then install it and make it do real work.
+  #
+  # windows-latest rather than a container, because Chocolatey is a Windows tool and
+  # Linux Docker cannot run a Windows image. The runner ships what this needs already:
+  # images/windows/Windows2025-VS2026-Readme.md in actions/runner-images lists
+  # "Chocolatey 2.7.4" and "Python 3.12.10", and the label table in that repository's
+  # README maps windows-latest to Windows Server 2025 with that image. So there is no
+  # bootstrap step, and `choco pack` is reachable here and nowhere else in this
+  # workflow.
+  #
+  # The one place this is weaker than the deb and rpm jobs, and it is a property of the
+  # runner rather than a choice: those two start from an image with no interpreter, so
+  # the package's own dependency declaration is what makes the install work. A
+  # windows-latest runner already has Python on PATH and cannot be stripped of it, so
+  # verify-on-windows.ps1 instead asserts that Chocolatey resolved and installed the
+  # declared python3 dependency. That catches a dependency nothing can satisfy, which
+  # is the failure the rpm job found on Amazon Linux, without claiming the host was
+  # bare.
+  #
+  # A plain `run:` step, like deb and rpm use. A Docker-based action would be worse
+  # than unnecessary here: its image is pulled in the job's prepare phase, before any
+  # `if:` on the step is evaluated, so a conditional container step is an unconditional
+  # network dependency.
+  chocolatey:
+    name: "native: chocolatey (windows-latest)"
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -547,3 +623,60 @@ jobs:
         env:
           REPO: ${{ github.workspace }}
 
+
+      # `shell: pwsh` is the default on windows-latest and is stated anyway, because
+      # the body is a PowerShell script invocation and the difference matters: pwsh
+      # does not glob for external commands and expands $env:VAR rather than $VAR. See
+      # the long note above the artifact-contents step for how that bit this workflow
+      # before. Nothing is globbed here; the path is literal and the wheel is found by
+      # the script itself.
+      #
+      # $Repo is interpolated directly rather than passed through env:, for the same
+      # reason the artifact-contents step interpolates its two paths: `env:` plus
+      # "$REPO" would reintroduce a shell dependency, since pwsh expands $env:REPO and
+      # not $REPO. github.workspace is not event payload, so it is not an injection
+      # surface.
+      - name: Build the Chocolatey package, install it, and run a real scan
+        shell: pwsh
+        run: ./packaging/chocolatey/verify-on-windows.ps1 -Repo "${{ github.workspace }}"
+
+  # The winget manifest set, checked against Microsoft's published JSON Schemas.
+  #
+  # This is the whole verification winget gets, and the reason it is a schema check and
+  # not `winget validate` is that the Windows Package Manager client is not on the
+  # runner images. images/windows/Windows2025-VS2026-Readme.md in actions/runner-images
+  # lists Chocolatey and does not mention winget anywhere. The schemas are a real check
+  # in its place: they carry every required field, pattern and enum the client enforces.
+  #
+  # Its own job rather than a step on the nuspec job above, so that the two Windows
+  # packaging formats can be landed and reverted independently of each other.
+  #
+  # No `needs: build` and no artifact download. The manifests describe the MSIX, not the
+  # wheel, so there is nothing in the build job's output for this to open; the version
+  # they declare is cross-checked against pyproject.toml instead.
+  #
+  # validate-manifests.py corrupts one field per manifest and requires each broken copy
+  # to be rejected before it validates the real ones, and requires the rejection message
+  # to name the field that was corrupted. Both halves are load-bearing. A JSON Schema
+  # check whose schema fetch returned an error page can exit 0, and a rejection caused by
+  # an unrelated error proves nothing about the constraint the control was written for.
+  winget:
+    name: "schema: winget manifests (published JSON Schemas)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+
+      # No --no-project and no `uv sync`. The script carries PEP 723 inline metadata
+      # naming the packages it needs, which uv reads and resolves into an ephemeral
+      # environment, so the project is never synced. Measured at 0.7 seconds warm,
+      # against roughly a minute for a project sync.
+      - name: Validate the winget manifests against Microsoft's published JSON Schemas
+        run: uv run packaging/winget/validate-manifests.py

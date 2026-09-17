@@ -1,0 +1,168 @@
+ash for Windows, via winget
+===========================
+
+This manifest set is NOT submission-ready
+-----------------------------------------
+
+Read this section before treating these files as a submission. They are schema-valid
+against Microsoft's published 1.12.0 schemas and they are checked on every pull
+request, but they would be rejected by the microsoft/winget-pkgs validation pipeline
+today, for one reason:
+
+  The MSIX these manifests install is self-signed.
+
+winget-pkgs requires an installer signed by a certificate the validation pipeline
+trusts. A self-signed MSIX installs on a machine whose administrator has imported the
+certificate and nowhere else, so a submitted manifest pointing at one describes a
+package most people cannot install. The pipeline checks that and says so.
+
+What would change it is a real Authenticode certificate. packaging/msix/ is built so
+that swapping one is a single secret, not a rework: the signing step reads the
+certificate from a repository secret and everything else about the package is already
+correct. Until that secret exists, this directory is a manifest set that can be
+validated and cannot be submitted, and describing it as anything else would be wrong.
+
+Two other fields are absent for related reasons, and a submission would need both:
+
+  PackageFamilyName   the Identity Name joined to a 13-character hash of the publisher
+                      string. It can only be computed from the signed package, and a
+                      wrong value matches the schema pattern exactly, which is the
+                      worst failure shape available: it validates, and winget would use
+                      it to correlate this package with something else.
+  SignatureSha256     the digest of the signature file inside the package. For a
+                      self-signed build it describes a signature no machine trusts, so
+                      publishing it would assert something untrue about the artifact.
+
+Nothing in packaging/ submits to microsoft/winget-pkgs, and nothing here opens a pull
+request against it. That is a separate decision nobody has made.
+
+Why the installer is the MSIX
+-----------------------------
+
+The MSIX under packaging/msix/ is the Windows artifact this branch produces, so it is
+what winget installs. The alternative considered and rejected was inventing a third
+Windows artifact, a portable zip, so that winget had something else to point at. That
+would mean building, testing, and maintaining an installer format for no reason other
+than making one manifest easier to write, and it would leave two Windows packages whose
+behavior could drift apart.
+
+The files, and why they are named this way
+-----------------------------------------
+
+winget's multi-file manifest format is three documents describing one version of one
+package, and the filenames are part of the format:
+
+  Amazon.AutomatedSecurityHelper.yaml                 version manifest. Names the
+                                                      package, the version, and which
+                                                      locale is the default.
+  Amazon.AutomatedSecurityHelper.installer.yaml       installer manifest. What to
+                                                      download, its digest, and how it
+                                                      behaves once installed.
+  Amazon.AutomatedSecurityHelper.locale.en-US.yaml    default-locale manifest. Publisher,
+                                                      license, description, tags.
+
+Verified against a published set rather than inferred: manifests/a/Amazon/Kiro/1.1.14/
+in microsoft/winget-pkgs holds Amazon.Kiro.yaml, Amazon.Kiro.installer.yaml,
+Amazon.Kiro.locale.en-US.yaml, and Amazon.Kiro.locale.zh-CN.yaml.
+
+The publisher namespace is Amazon, not AWSLabs. manifests/a/Amazon/ already carries 25
+packages including AWSCLI, SAM-CLI, Corretto, and Kiro, and there is no reason to
+invent a second namespace for the same publisher.
+
+Which schema version, and why 1.12.0
+------------------------------------
+
+1.12.0 is the newest manifest version that exists. Three independent readings agree:
+winget-pkgs documents doc/manifest/schema/1.12.0/ and has no 1.13.0 directory; all
+three aka.ms schema links for 1.12.0 return real JSON whose $id names the URL that
+served it, while 1.13.0 does not; and a set published to winget-pkgs on 2026-09-14 is
+authored at 1.12.0.
+
+Newest rather than merely available: an older ManifestVersion still installs, but the
+winget-pkgs pipeline validates new submissions against the current schema, so an older
+version would have to be raised before this set could be submitted at all. Nothing here
+needs to support a client older than the schema, because nothing here is published to a
+source any client reads.
+
+One thing to know before raising it: the version numbers are not contiguous. 1.7.0 and
+1.11.0 have no schemas and no documentation. And aka.ms does not 404 for a version that
+does not exist. It answers HTTP 200 with a Bing search page, 67 KB of HTML, which a
+validator that only checked the status code would happily treat as a schema. That is
+why validate-manifests.py requires every fetched schema to parse as JSON and to carry
+the $id of the URL it was fetched from.
+
+The digest, and why it is 64 zeros
+----------------------------------
+
+InstallerSha256 is required by the schema and must be 64 hex characters, so it cannot
+be blank or commented out while the artifact it describes does not exist yet. The
+checked-in value is 64 zeros, and validate-manifests.py asserts that it still is.
+
+The alternative is worse in a way that is easy to miss: a plausible-looking digest
+validates. It also keeps validating after the artifact it claims to describe is rebuilt,
+because nothing compares the two. A digest of all zeros cannot be mistaken for a
+measurement, and the assertion that it is still the sentinel turns "somebody committed
+a digest for an artifact nobody built" from an invisible state into a failed check.
+
+set-release-metadata.py fills it, from the .msix it is handed:
+
+  uv run packaging/winget/set-release-metadata.py \
+      --msix dist/automated_security_helper-3.7.0-x64.msix \
+      --out-dir build/winget
+
+It writes a copy and never edits in place, because editing in place would delete the
+sentinel the assertion depends on. Four fields come out of the artifact rather than out
+of anyone's memory: InstallerSha256, InstallerUrl (built from the release tag and the
+file's own name, so a filename that does not match this directory's default corrects
+itself), Architecture, and MinimumOSVersion. The last two are read from the AppxManifest
+inside the .msix, which is what keeps them in step with packaging/msix/ without a second
+hand-maintained copy. The script then runs validate-manifests.py --released against its
+own output, which requires the opposite digest state.
+
+Three names on PATH, and why the long one exists
+------------------------------------------------
+
+The installer manifest's Commands list records what the package puts on PATH:
+
+  ash                        canonical, and the one to use.
+  ashv3                      deprecated. It works and warns once on stderr. The name
+                             pins a major version, so it reads wrong the moment v4
+                             exists.
+  automated-security-helper  kept indefinitely and silent.
+
+Windows is why the long name exists. MSYS2 ships the Almquist shell as ash.exe, and on
+a machine where that is earlier on PATH than ASH's entry point, `ash scan` reaches the
+shell and fails with `Illegal option --`. That has already happened in this project's
+CI. Every one of these three has to be an AppExecutionAlias in the MSIX manifest;
+validate-manifests.py requires the Commands list to match [project.scripts] in
+pyproject.toml exactly, so a fourth console script cannot be added without this list
+noticing.
+
+Two flags worth knowing because they are easy to get backwards: -V is --version, and -v
+is --verbose.
+
+How this is tested
+------------------
+
+  uv run packaging/winget/validate-manifests.py
+
+That is the whole verification, and it is what .github/workflows/ash-package.yml runs.
+It needs no Windows machine and does not need the wheel.
+
+`winget validate` would be the authoritative check and is not reachable: the Windows
+Package Manager client is not on the GitHub Actions Windows runner images. The runner
+image documentation for windows-latest lists Chocolatey and does not mention winget
+anywhere.
+
+So the schemas are the check. They are a real one, because they carry every required
+field, pattern, and enum the client enforces. The script also checks the four things a
+schema cannot: that the three files agree with each other, that the version they declare
+is the version this repository builds, that the installer URL names the matching release
+tag, and that Commands is exactly the console scripts pyproject.toml declares.
+
+Before it validates anything it corrupts one field per manifest in memory and requires
+each copy to be rejected, and requires the rejection message to name the field that was
+corrupted. That second half matters: a locale manifest with a deliberately invalid
+PackageLocale was, during development, rejected for a missing Publisher instead, and the
+control read as passing while proving nothing about the constraint it was written to
+exercise.
