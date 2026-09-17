@@ -175,6 +175,7 @@ def _opts(tmp_path: Path) -> ScanOptions:
         debug=True,
         color=True,
         fail_on_findings=False,
+        fail_on_incomplete_scanners=False,
         ignore_suppressions=True,
         min_severity="high",
         changed_files_only=True,
@@ -207,6 +208,11 @@ def _expected(tmp_path: Path) -> Dict[str, Any]:
         "ignore_suppressions": True,
         "min_severity": "high",
         "fail_on_findings": False,
+        # False rather than True: the dataclass default is None and the config
+        # default is on, so False is both a discriminator against the default and
+        # the value that actually means something -- an operator opting a
+        # workspace project out of the completeness gate.
+        "fail_on_incomplete_scanners": False,
         "changed_files_only": True,
         "base_ref": "origin/release",
         "precommit": True,

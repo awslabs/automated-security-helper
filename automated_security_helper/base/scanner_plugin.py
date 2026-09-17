@@ -130,6 +130,34 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         )
         return super().model_post_init(context)
 
+    def unsupported_platform_reason(self) -> str | None:
+        """Why this scanner cannot run on the current platform, or None if it can.
+
+        A DIFFERENT QUESTION FROM ``validate_plugin_dependencies``, AND THE WHOLE POINT
+        OF SEPARATING THEM. That method answers "is the tool available here", and it
+        answers it with one boolean -- so a scanner that returned False because its
+        platform is not supported was indistinguishable from one whose dependencies were
+        genuinely absent. ScanPhase classified both as MISSING, and MISSING means "this
+        scanner was supposed to run and did not", which fails the completeness gate.
+
+        The measured case is semgrep on Windows. It publishes no Windows build, said so
+        in its own log line ("Semgrep is not supported on Windows and will be skipped"),
+        and was then recorded MISSING -- while its installer status was INSTALLED with a
+        real path, so nothing was actually unprovisioned. Every Windows leg would have
+        failed the completeness gate for a scanner that is permanently and deliberately
+        absent there.
+
+        A scanner overriding this is stating a fact about the PLATFORM, not about this
+        host's installation. Return a reason only when no amount of installing would
+        help; a tool that is merely not installed yet belongs in
+        ``validate_plugin_dependencies``, where MISSING is the correct verdict and the
+        remediation is to install it.
+
+        The return is a plain string so the reason reaches the report and the log rather
+        than being reconstructed from a boolean at the call site.
+        """
+        return None
+
     def validate_plugin_dependencies(self) -> bool:
         """Check whether the scanner's command is available on PATH.
 

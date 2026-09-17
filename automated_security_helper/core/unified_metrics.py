@@ -125,8 +125,20 @@ class ScannerMetrics(ScannerSeverityCount):
 
         So read this as "produced no actionable findings", not as "ran and was
         clean". For "did the scanners I selected actually run", use
-        ``run_ash_scan.incomplete_scanners`` or the ``status`` field. Making the
-        field mean the stricter thing is a report-schema change, not a bug fix.
+        ``run_ash_scan.incomplete_scanners``, the ``status`` field, or
+        ``summary_stats``, whose five outcome counters now partition the scanner
+        set. Making the field mean the stricter thing is a report-schema change,
+        not a bug fix.
+
+        Re-examined when ``fail_on_incomplete_scanners`` was added, and left as it
+        is. Note that the flag defaults to False, so reason 3 stands at full
+        strength: on the default path a run with a MISSING scanner still exits 0,
+        and a reader who reaches ``ash.flat.json`` sees ``passed: true`` on a
+        scanner that never ran. Enabling the flag would weaken reason 3 without
+        making the field wrong, because the argument against changing it does not
+        depend on the exit code: a boolean named ``passed`` is the wrong place to
+        encode completeness when ``status`` sits in the same row and says it
+        outright.
         """
         return self.status in ("PASSED", "SKIPPED", "MISSING")
 
@@ -413,11 +425,16 @@ def _populate_summary_stats_from_unified_metrics(
     total_findings = sum(m.total for m in unified_metrics)
     total_actionable = sum(m.actionable for m in unified_metrics)
 
-    # Count scanner statuses
+    # Count scanner statuses. One counter per ScannerStatus member, so the five
+    # sum to len(unified_metrics) and a consumer can tell a complete scan from a
+    # partial one. ERROR had no counter until this was added, which made the other
+    # four sum to less than the scanner count on exactly the runs where the
+    # difference mattered.
     passed_count = sum(1 for m in unified_metrics if m.status == "PASSED")
     failed_count = sum(1 for m in unified_metrics if m.status == "FAILED")
     skipped_count = sum(1 for m in unified_metrics if m.status == "SKIPPED")
     missing_count = sum(1 for m in unified_metrics if m.status == "MISSING")
+    error_count = sum(1 for m in unified_metrics if m.status == "ERROR")
 
     # Preserve timing information if it exists
     existing_start = aggregated_results.metadata.summary_stats.start
@@ -449,6 +466,7 @@ def _populate_summary_stats_from_unified_metrics(
         failed=failed_count,
         missing=missing_count,
         skipped=skipped_count,  # Add the missing skipped field
+        error=error_count,
     )
 
     ASH_LOGGER.debug(

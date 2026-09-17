@@ -129,7 +129,13 @@ def test_run_ash_scan_with_actionable_findings(
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     # Mock scanner metrics with actionable findings
-    mock_scanner_metrics = [MagicMock(scanner_name="test-scanner", actionable=5)]
+    # status stated, not left to MagicMock: completeness is classified by membership
+    # of the complete statuses, so a fabricated attribute reads as a scanner whose
+    # outcome is unknown and the exit code becomes 1 for incompleteness rather than 2
+    # for findings. FAILED is what a scanner with actionable findings reports.
+    mock_scanner_metrics = [
+        MagicMock(scanner_name="test-scanner", actionable=5, status="FAILED")
+    ]
 
     with (
         patch(

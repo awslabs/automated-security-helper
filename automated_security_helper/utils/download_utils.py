@@ -1,6 +1,7 @@
 """Utility functions for downloading and installing binaries."""
 
 import hashlib
+import http.client
 import json
 import os
 import platform
@@ -8,9 +9,11 @@ import shutil
 import sys
 import tarfile
 import tempfile
+import time
 import zipfile
 from pathlib import Path
 from typing import Literal, Optional
+import urllib.error
 import urllib.request
 
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -29,6 +32,91 @@ RECEIPT_DIR_NAME = "install-receipts"
 # ~30MB and trivy's is larger; holding a whole release archive in memory to hash
 # it is avoidable.
 _HASH_CHUNK_BYTES = 1024 * 1024
+
+# Retry policy for the fetch inside _download_verified.
+#
+# WHY THIS EXISTS
+#
+# A single transient 5xx used to fail an entire install, and through it an entire
+# container build. Measured on job 104983960003 of this repository: grype's pinned
+# asset returned `HTTP Error 500: Internal Server Error` in the non-root image
+# stage, `ash dependencies install` exited 1, and the podman build died at
+# `RUN ash dependencies install`. The same URL had returned 200 minutes earlier in
+# the same build's first stage, so the asset was fine and the request was not.
+#
+# The shell side of the toolchain already had this: assets/with-retry.sh wraps the
+# curl-based installers for exactly this failure, and its own header records a
+# 2026-08-20 "Recv failure: Connection reset by peer" on grype's installer. The
+# Python download path had no equivalent, so the same class of blip was fatal here
+# and survivable there.
+#
+# WHAT IS DELIBERATELY NOT RETRIED
+#
+# A digest mismatch. See _download_verified: verification happens outside the retry
+# loop, so a ToolDownloadIntegrityError is raised on its first occurrence and never
+# repeated. Retrying an integrity failure would turn a supply-chain control into a
+# coin flip -- the point of a pinned digest is that one mismatch is disqualifying.
+#
+# 4xx, except 429. A 404 for a pinned asset means the asset table is wrong, and
+# three attempts only delay that message; a 403 will be 403 again. 429 is the one
+# status that explicitly means "you may succeed later", so it is treated as
+# transient. Retry-After is not honoured -- the exponential backoff below is the
+# approximation, and bounded at _DOWNLOAD_MAX_DELAY.
+_DOWNLOAD_MAX_ATTEMPTS_DEFAULT = 3
+_DOWNLOAD_BASE_DELAY_DEFAULT = 5.0
+_DOWNLOAD_MAX_DELAY = 60.0
+_TRANSIENT_HTTP_STATUS = frozenset({429})
+
+
+def _download_retry_policy() -> "tuple[int, float]":
+    """``(attempts, base delay)`` for one download, from the environment.
+
+    Overridable so a test can exercise the retry without waiting out the real
+    backoff, mirroring the WITH_RETRY_* knobs on assets/with-retry.sh. Read per
+    call rather than at import, so a test does not have to reload the module.
+
+    Clamped rather than rejected, which is where this differs from with-retry.sh.
+    That script exits 2 on a malformed value because it is a container-build entry
+    point, where a silently-wrong backoff is invisible. This runs as library code
+    partway through an install, and failing an install over a typo in an
+    environment variable is the worse trade. ``max(1, ...)`` in particular: zero
+    attempts would skip the fetch entirely and leave the caller with a missing file
+    rather than an error, which is the never-ran-but-reported hazard with-retry.sh
+    guards its own max=0 against.
+    """
+    try:
+        attempts = int(os.environ["ASH_DOWNLOAD_MAX_ATTEMPTS"])
+    except (KeyError, ValueError):
+        attempts = _DOWNLOAD_MAX_ATTEMPTS_DEFAULT
+    try:
+        base_delay = float(os.environ["ASH_DOWNLOAD_RETRY_DELAY"])
+    except (KeyError, ValueError):
+        base_delay = _DOWNLOAD_BASE_DELAY_DEFAULT
+    return max(1, attempts), max(0.0, base_delay)
+
+
+def _is_transient_download_error(exc: BaseException) -> bool:
+    """Whether a failed download attempt is worth repeating.
+
+    ``HTTPError`` is tested before ``URLError`` because it is a subclass of it.
+    Reversing the two would classify every 4xx as transient, which is the whole
+    distinction this function exists to draw.
+    """
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code >= 500 or exc.code in _TRANSIENT_HTTP_STATUS
+    if isinstance(exc, urllib.error.URLError):
+        # DNS failure, refused connection, TLS reset: no status to inspect, and
+        # every one of them is a connection that may work on a second try.
+        return True
+    return isinstance(
+        exc,
+        (
+            ConnectionError,  # includes ConnectionResetError
+            TimeoutError,  # socket.timeout is an alias of this from 3.10
+            http.client.IncompleteRead,
+            http.client.RemoteDisconnected,
+        ),
+    )
 
 
 def sha256_file(file_path: Path) -> str:
@@ -117,10 +205,38 @@ def _download_verified(
         raise ValueError(f"Invalid URL: {url}")
 
     with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-        ASH_LOGGER.info(f"Downloading {url} to {temp_file.name}")
-        # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
-        with urllib.request.urlopen(url) as response:  # nosec B310 - This url is evaluated for https scheme a few lines above
-            shutil.copyfileobj(response, temp_file)
+        attempts, base_delay = _download_retry_policy()
+        for attempt in range(1, attempts + 1):
+            # Rewound and truncated on every attempt. A retry after a partial
+            # transfer would otherwise APPEND to the bytes the failed attempt
+            # already wrote. The digest check below would catch the result, but it
+            # would report it as an integrity failure -- which reads as a
+            # supply-chain compromise rather than as the dropped connection it is.
+            temp_file.seek(0)
+            temp_file.truncate()
+            ASH_LOGGER.info(
+                f"Downloading {url} to {temp_file.name}"
+                + (f" (attempt {attempt}/{attempts})" if attempts > 1 else "")
+            )
+            try:
+                # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+                with urllib.request.urlopen(url) as response:  # nosec B310 - This url is evaluated for https scheme a few lines above
+                    shutil.copyfileobj(response, temp_file)
+                break
+            except Exception as exc:
+                # Re-raised unless the error is both transient and there is an
+                # attempt left, so nothing is swallowed: a 4xx, a bad URL or an
+                # exhausted budget still leaves this function raising exactly what
+                # it raised before the retry existed.
+                if attempt == attempts or not _is_transient_download_error(exc):
+                    raise
+                delay = min(base_delay * (2 ** (attempt - 1)), _DOWNLOAD_MAX_DELAY)
+                ASH_LOGGER.warning(
+                    f"Download of {url} failed with {type(exc).__name__}: {exc}. "
+                    f"Retrying in {delay:.1f}s "
+                    f"(attempt {attempt}/{attempts} failed)"
+                )
+                time.sleep(delay)
 
     # Verify before the bytes are allowed anywhere near the install location. On a
     # mismatch the temporary file is removed, so a failed verification cannot
@@ -388,7 +504,9 @@ def _untrusted_reason(path: Path) -> Optional[str]:
     except OSError:
         return None
     if info.st_mode & 0o022:
-        return f"{path} is writable by group or other (mode {oct(info.st_mode & 0o777)})"
+        return (
+            f"{path} is writable by group or other (mode {oct(info.st_mode & 0o777)})"
+        )
     if info.st_uid != os.getuid():
         return f"{path} is owned by uid {info.st_uid}, not {os.getuid()}"
     return None
@@ -613,8 +731,12 @@ def install_binary_from_url(
     installed_as = rename_to if rename_to is not None else url.split("/")[-1]
     target = destination.joinpath(installed_as)
 
-    if not force and _already_installed(destination, installed_as, url, expected_sha256):
-        ASH_LOGGER.info(f"{installed_as} already installed from {url}, skipping download")
+    if not force and _already_installed(
+        destination, installed_as, url, expected_sha256
+    ):
+        ASH_LOGGER.info(
+            f"{installed_as} already installed from {url}, skipping download"
+        )
         return target
 
     # Download the file, keeping the digest that was verified as the bytes landed.

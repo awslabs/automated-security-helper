@@ -42,8 +42,17 @@ def _make_opts(tmp_path, fail_on_findings=None, mode=None):
 
 
 def _make_results_with_findings(count: int = 1):
+    """A results double plus one metric that states it ran.
+
+    ``status`` is set explicitly rather than left to MagicMock. Scanner completeness
+    is classified by membership of the *complete* statuses, so a fabricated attribute
+    is not one of them and the metric reads as a scanner whose outcome is unknown --
+    which makes ``_compute_exit_code`` return 1 for incompleteness before it reaches
+    the findings verdict these tests are about.
+    """
     mock_metric = MagicMock()
     mock_metric.actionable = count
+    mock_metric.status = "FAILED" if count else "PASSED"
     results = MagicMock()
     results.sarif = None
     return results, mock_metric
@@ -126,8 +135,7 @@ class TestContainerModeConfigFailOnFindings:
                 results, opts, config_fail_on_findings, *args, **kwargs
             )
 
-        mock_metric = MagicMock()
-        mock_metric.actionable = 0
+        _, mock_metric = _make_results_with_findings(count=0)
 
         # Patch _resolve_config_fail_on_findings to return False (simulating YAML override)
         with patch.object(mod, "_resolve_config_fail_on_findings", return_value=False):
