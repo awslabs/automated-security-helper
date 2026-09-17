@@ -162,8 +162,14 @@ async def _handle_terminal_status(
 
 
 def _read_scanner_severity(result_path: Path) -> dict:
-    """Load a scanner's ASH.ScanResults.json and return its severity_counts dict."""
-    with open(result_path, "r") as f:
+    """Load a scanner's ASH.ScanResults.json and return its severity_counts dict.
+
+    encoding is explicit for the same reason as in ``cli/report.py``: ASH writes this
+    file as UTF-8, and without an encoding text-mode open() uses the locale one,
+    which on Windows is cp1252 and cannot decode a finding that quotes non-ASCII
+    source.
+    """
+    with open(result_path, "r", encoding="utf-8") as f:
         scanner_data = json.load(f)
     return scanner_data.get("severity_counts", {})
 

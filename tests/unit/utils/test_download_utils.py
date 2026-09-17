@@ -1,5 +1,6 @@
 """Unit tests for download_utils.py."""
 
+import io
 import pytest
 import sys
 from pathlib import Path
@@ -16,38 +17,37 @@ from automated_security_helper.utils.download_utils import (
 
 
 @patch("automated_security_helper.utils.download_utils.urllib.request.urlopen")
-@patch("automated_security_helper.utils.download_utils.shutil.copyfileobj")
-@patch("automated_security_helper.utils.download_utils.shutil.move")
-@patch("automated_security_helper.utils.download_utils.tempfile.NamedTemporaryFile")
-@patch("pathlib.Path.mkdir")
-def test_download_file(
-    mock_mkdir, mock_temp_file, mock_move, mock_copyfileobj, mock_urlopen, ash_temp_path
-):
-    """Test download_file function."""
-    # Setup mocks
-    mock_temp = MagicMock()
-    mock_temp.name = f"{ash_temp_path}/tempfile"
-    mock_temp_file.return_value.__enter__.return_value = mock_temp
+def test_download_file(mock_urlopen, tmp_path):
+    """Test download_file function.
 
-    mock_response = MagicMock()
-    mock_urlopen.return_value.__enter__.return_value = mock_response
+    Driven against a real directory rather than a mocked ``shutil.move`` onto
+    ``/test/destination``. The move is no longer a single ``shutil.move`` call: it
+    stages a file in the destination directory and ``os.replace``s it into position,
+    so that a symlink planted at the destination is replaced rather than written
+    through. A test that asserted on the ``shutil.move`` call could only ever check
+    that one implementation was still in use, and it broke the moment that changed --
+    while telling us nothing about whether the bytes arrived.
+    """
+    payload = b"hello from a fake release asset"
 
-    # Create test destination
-    dest = Path("/test/destination")
+    class _Response(io.BytesIO):
+        def __enter__(self):
+            return self
 
-    # Call function
+        def __exit__(self, *_exc):
+            self.close()
+            return False
+
+    mock_urlopen.return_value = _Response(payload)
+
+    dest = tmp_path / "destination"
     result = download_file("https://example.com/file.txt", dest)
 
-    # Verify mocks were called correctly
-    mock_mkdir.assert_called_once_with(parents=True, exist_ok=True)
     mock_urlopen.assert_called_once_with("https://example.com/file.txt")
-    mock_copyfileobj.assert_called_once_with(mock_response, mock_temp)
-    mock_move.assert_called_once_with(
-        f"{ash_temp_path}/tempfile", dest.joinpath("file.txt")
-    )
-
-    # Verify result
     assert result == dest.joinpath("file.txt")
+    assert result.read_bytes() == payload
+    # No staging file is left behind on the happy path.
+    assert not result.with_name("file.txt.ash-partial").exists()
 
 
 @patch("automated_security_helper.utils.download_utils.urllib.request.urlopen")
@@ -122,15 +122,23 @@ def test_unquarantine_macos_binary_non_macos(mock_run_command):
         mock_run_command.assert_not_called()
 
 
-@patch("automated_security_helper.utils.download_utils.download_file")
+@patch("automated_security_helper.utils.download_utils._download_verified")
 @patch("automated_security_helper.utils.download_utils.make_executable")
 @patch("automated_security_helper.utils.download_utils.unquarantine_macos_binary")
 def test_install_binary_from_url(
-    mock_unquarantine, mock_make_executable, mock_download_file
+    mock_unquarantine, mock_make_executable, mock_download_verified
 ):
-    """Test install_binary_from_url function."""
+    """Test install_binary_from_url function.
+
+    Driven through ``_download_verified`` rather than ``download_file``, because the
+    receipt has to record the digest that was verified as the bytes landed. Re-hashing
+    the installed file here instead would read it back after ``make_executable`` and,
+    on macOS, after ``unquarantine_macos_binary`` has spawned ``xattr`` -- see
+    ``_finalize_staged``. ``download_file`` still returns a plain path for callers
+    outside this module.
+    """
     # Setup mocks
-    mock_download_file.return_value = Path("/test/destination/file")
+    mock_download_verified.return_value = (Path("/test/destination/file"), "d" * 64)
 
     # Mock platform.system for platform-specific behavior
     with patch("platform.system", return_value="Darwin"):
@@ -139,9 +147,14 @@ def test_install_binary_from_url(
             "https://example.com/file", Path("/test/destination"), "renamed_file"
         )
 
-        # Verify mocks were called correctly
-        mock_download_file.assert_called_once_with(
-            "https://example.com/file", Path("/test/destination"), "renamed_file"
+        # Verify mocks were called correctly. expected_sha256 is threaded through
+        # explicitly; None here because this caller passes no pinned digest, and the
+        # download logs that it went unverified rather than passing silently.
+        mock_download_verified.assert_called_once_with(
+            "https://example.com/file",
+            Path("/test/destination"),
+            "renamed_file",
+            expected_sha256=None,
         )
         mock_make_executable.assert_called_once_with(Path("/test/destination/file"))
         mock_unquarantine.assert_called_once_with(Path("/test/destination/file"))

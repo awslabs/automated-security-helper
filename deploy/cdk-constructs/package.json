@@ -5,6 +5,9 @@
   "license": "Apache-2.0",
   "stability": "experimental",
   "private": true,
+  "engines": {
+    "node": ">=22"
+  },
   "author": {
     "name": "Amazon Web Services",
     "url": "https://aws.amazon.com",

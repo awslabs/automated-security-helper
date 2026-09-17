@@ -702,46 +702,85 @@ class TestExecuteScannersParallelStub:
         assert sum("Failed to process error results" in e for e in errors) == 2
 
 
+def _fake_scanner(scanner_name, *, deps_satisfied=True):
+    """A minimal scanner plugin class with a fixed name and dependency verdict.
+
+    Only the surface `_execute_phase` reaches during filtering: `config.name`
+    (which `_scanner_display_name` reads, and which `--exclude-scanners` is
+    matched against), `config.enabled`, and `validate_plugin_dependencies`.
+    """
+
+    class _Fake:
+        def __init__(self, config=None, context=None):
+            self.config = MagicMock()
+            self.config.name = scanner_name
+            self.config.enabled = True
+
+        def validate_plugin_dependencies(self):
+            return deps_satisfied
+
+    _Fake.__name__ = f"Fake{scanner_name}"
+    return _Fake
+
+
 class TestExecutePhaseScannerStateTally:
-    """_execute_phase tallies prior scanner states out of additional_reports."""
+    """_execute_phase tallies scanner states from the collections it wrote."""
 
     def test_excluded_and_missing_dependency_counts_are_reported(self, tmp_path):
-        """Existing additional_reports entries are classified into the two buckets."""
+        """Excluded and dependency-short scanners are counted and named.
+
+        These two numbers used to be re-derived by walking `additional_reports`
+        for a "source" key, and both were structurally pinned at 0:
+        `_process_results` keys that dict by `ScanResultsContainer.target_type`,
+        which is None for the excluded and missing-dependency containers built
+        during preparation, so the "source" key the walk required was never
+        there. The counts now come from `excluded_scanner_names` and
+        `dependency_error_scanners` -- the collections the filtering loop
+        actually appends to -- so this drives real plugins through that loop
+        rather than hand-building `additional_reports`, which no longer feeds it.
+        """
         manager = MagicMock(spec=ScannerValidationManager)
         manager.validate_task_queue.return_value = _checkpoint()
         manager.validate_execution_completion.return_value = _checkpoint()
         manager.ensure_complete_results.return_value = _checkpoint()
 
-        phase = _make_phase(tmp_path, plugins=[], validation_manager=manager)
+        plugins = [
+            _fake_scanner("excluded-one"),
+            _fake_scanner("excluded-two"),
+            _fake_scanner("missing-deps", deps_satisfied=False),
+        ]
+        phase = _make_phase(tmp_path, plugins=plugins, validation_manager=manager)
         aggregated = AshAggregatedResults()
-        aggregated.additional_reports = {
-            "excluded_one": {"source": {"excluded": True}},
-            "excluded_two": {"source": {"excluded": True}},
-            "missing_deps": {"source": {"dependencies_satisfied": False}},
-            "healthy": {"source": {"excluded": False, "dependencies_satisfied": True}},
-            "not_a_dict": {"source": "a string, not a mapping"},
-            "no_source_key": {"converted": {"excluded": True}},
-        }
 
         with patch(f"{_PHASE_MODULE}.ASH_LOGGER") as mock_logger:
-            result = phase._execute_phase(aggregated, parallel=False)
+            result = phase._execute_phase(
+                aggregated,
+                excluded_scanners=["excluded-one", "excluded-two"],
+                parallel=False,
+            )
 
         infos = [str(c.args[0]) for c in mock_logger.info.call_args_list]
         assert any("Excluded scanners: 2" in m for m in infos)
         assert any("Missing dependencies: 1" in m for m in infos)
         assert result is aggregated
 
-        # The tallies alone do not pin the classification: swapping the
-        # dependencies_satisfied polarity moves "healthy" into the missing bucket
-        # and "missing_deps" out of it, leaving both counts unchanged. Assert on
-        # the per-scanner debug lines, which name who landed where.
+        # The totals alone do not pin the classification -- 2 and 1 would also be
+        # produced by a loop that put the wrong scanner in each bucket. The
+        # per-scanner debug lines name who landed where, and the negative
+        # assertions below are what would catch a refactor that emptied one
+        # bucket into the other while keeping the arithmetic intact.
         debugs = [str(c.args[0]) for c in mock_logger.debug.call_args_list]
-        assert any("Scanner excluded_one: EXCLUDED" in d for d in debugs)
-        assert any("Scanner excluded_two: EXCLUDED" in d for d in debugs)
-        assert any("Scanner missing_deps: MISSING DEPENDENCIES" in d for d in debugs)
-        assert not any("Scanner healthy" in d for d in debugs)
-        assert not any("Scanner not_a_dict" in d for d in debugs)
-        assert not any("Scanner no_source_key" in d for d in debugs)
+        assert any("Scanner excluded-one: EXCLUDED" in d for d in debugs)
+        assert any("Scanner excluded-two: EXCLUDED" in d for d in debugs)
+        assert any("Scanner missing-deps: MISSING DEPENDENCIES" in d for d in debugs)
+        assert not any("Scanner missing-deps: EXCLUDED" in d for d in debugs)
+        assert not any("Scanner excluded-one: MISSING DEPENDENCIES" in d for d in debugs)
+        assert not any("Scanner excluded-two: MISSING DEPENDENCIES" in d for d in debugs)
+
+        # No scanner survived filtering, so nothing was queued to run. This is
+        # what keeps the assertions above about preparation rather than about
+        # whatever the executor would have done with a task.
+        assert phase._scanner_tasks == []
 
     def test_scanner_instance_failure_does_not_abort_the_phase(self, tmp_path):
         """A plugin that raises during filtering is logged and the phase continues."""

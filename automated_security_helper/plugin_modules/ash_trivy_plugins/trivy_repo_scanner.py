@@ -7,7 +7,7 @@ import logging
 import os
 from pathlib import Path
 from typing import Annotated, Any, ClassVar, Literal, List
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
@@ -26,6 +26,9 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Invocation,
     SarifReport,
+)
+from automated_security_helper.utils.download_utils import (
+    pinned_tool_install_commands,
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -108,6 +111,17 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
             extra_args=[],
         )
         super().model_post_init(context)
+
+    @model_validator(mode="after")
+    def setup_custom_install_commands(self) -> "TrivyRepoScanner":
+        """Set up custom installation commands for trivy.
+
+        trivy had no install path inside ASH. It could only arrive from the
+        container image, the nix toolchain or a package manager, so a
+        ``python-local`` run on a machine without it scanned without it.
+        """
+        self.custom_install_commands.update(pinned_tool_install_commands("trivy"))
+        return self
 
     def validate_plugin_dependencies(self) -> bool:
         """Validate scanner configuration.

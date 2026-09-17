@@ -604,7 +604,9 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
 
                     if result_file.exists():
                         try:
-                            with open(result_file, "r") as f:
+                            # encoding explicit: see cli/report.py. ASH writes this
+                            # file as UTF-8; the locale default is cp1252 on Windows.
+                            with open(result_file, "r", encoding="utf-8") as f:
                                 result_data = json.load(f)
 
                             scanner_results[scanner_name][target_type] = result_data

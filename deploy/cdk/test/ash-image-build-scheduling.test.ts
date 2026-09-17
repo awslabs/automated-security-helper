@@ -123,8 +123,12 @@ describe('the rebuild schedule cannot run alongside the bootstrap build', () => 
     for (const [ruleId, rule] of rebuildRules(template)) {
       const dependsOn: string[] = [].concat(rule.DependsOn ?? []);
       const ordered = bootstrapIds.some((id) => dependsOn.includes(id));
-      expect(ordered).toBe(true);
-      expect(ruleId).toBeTruthy();
+      // Compared as an object carrying the rule id, so a failure NAMES the rule.
+      // `expect(ordered).toBe(true)` reports only "Expected: true, Received: false"
+      // and the test.each title carries only the stack name. A separate
+      // `expect(ruleId).toBeTruthy()` cannot supply it either -- an Object.entries
+      // key is always a non-empty string, so that assertion can never fail.
+      expect({ rule: ruleId, ordered }).toEqual({ rule: ruleId, ordered: true });
     }
   });
 

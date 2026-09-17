@@ -127,7 +127,7 @@ brew install ash
 
 ```bash
 # Install with pipx (isolated environment)
-pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.0,1
+pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
 
 # Use as normal
 ash --help

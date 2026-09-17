@@ -34,12 +34,29 @@ def _make_opts(tmp_path, fail_on_findings=None, min_severity="low"):
     )
 
 
+def _ran_metric(actionable: int):
+    """One scanner metric that states it ran, which every metric double must.
+
+    ``status`` is set explicitly and not left to MagicMock's autospeccing. Scanner
+    completeness is classified by membership of the *complete* statuses, so a
+    fabricated attribute is not one of them and the metric reads as a scanner whose
+    outcome is unknown -- which makes ``_compute_exit_code`` return 1 for
+    incompleteness before it ever reaches the findings verdict these tests are about.
+
+    FAILED when there are actionable findings and PASSED when there are none, because
+    those are the two statuses a scan actually produces for those counts. A double
+    that claimed findings from a scanner that had not run would be describing a scan
+    that cannot happen.
+    """
+    metric = MagicMock()
+    metric.actionable = actionable
+    metric.status = "FAILED" if actionable else "PASSED"
+    return metric
+
+
 def _make_results_with_findings(count: int = 1):
     """Return a mock AshAggregatedResults with *count* actionable findings."""
-    from automated_security_helper.core.unified_metrics import ScannerMetrics
-
-    mock_metric = MagicMock(spec=ScannerMetrics)
-    mock_metric.actionable = count
+    mock_metric = _ran_metric(count)
     results = MagicMock()
     results.sarif = None
 
@@ -51,10 +68,7 @@ def _make_results_with_findings(count: int = 1):
 
 
 def _make_results_no_findings():
-    from automated_security_helper.core.unified_metrics import ScannerMetrics
-
-    mock_metric = MagicMock(spec=ScannerMetrics)
-    mock_metric.actionable = 0
+    mock_metric = _ran_metric(0)
     results = MagicMock()
     results.sarif = None
 
@@ -77,8 +91,7 @@ class TestComputeExitCodeConfigFallback:
 
         opts = _make_opts(tmp_path, fail_on_findings=None)
 
-        mock_metric = MagicMock()
-        mock_metric.actionable = 3
+        mock_metric = _ran_metric(3)
 
         with patch(
             "automated_security_helper.interactions.run_ash_scan.get_unified_scanner_metrics",
@@ -98,8 +111,7 @@ class TestComputeExitCodeConfigFallback:
 
         opts = _make_opts(tmp_path, fail_on_findings=True)
 
-        mock_metric = MagicMock()
-        mock_metric.actionable = 1
+        mock_metric = _ran_metric(1)
 
         with patch(
             "automated_security_helper.interactions.run_ash_scan.get_unified_scanner_metrics",
@@ -117,8 +129,7 @@ class TestComputeExitCodeConfigFallback:
 
         opts = _make_opts(tmp_path, fail_on_findings=False)
 
-        mock_metric = MagicMock()
-        mock_metric.actionable = 5
+        mock_metric = _ran_metric(5)
 
         with patch(
             "automated_security_helper.interactions.run_ash_scan.get_unified_scanner_metrics",
@@ -136,8 +147,7 @@ class TestComputeExitCodeConfigFallback:
 
         opts = _make_opts(tmp_path, fail_on_findings=None)
 
-        mock_metric = MagicMock()
-        mock_metric.actionable = 1
+        mock_metric = _ran_metric(1)
 
         with patch(
             "automated_security_helper.interactions.run_ash_scan.get_unified_scanner_metrics",
@@ -155,8 +165,7 @@ class TestComputeExitCodeConfigFallback:
 
         opts = _make_opts(tmp_path, fail_on_findings=None)
 
-        mock_metric = MagicMock()
-        mock_metric.actionable = 1
+        mock_metric = _ran_metric(1)
 
         with patch(
             "automated_security_helper.interactions.run_ash_scan.get_unified_scanner_metrics",

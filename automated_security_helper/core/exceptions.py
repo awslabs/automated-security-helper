@@ -28,6 +28,30 @@ class WorkspacePatternError(ASHValidationError):
     pass
 
 
+class ScannerSelectionError(ASHValidationError):
+    """Exception raised when ``--scanners`` names no scanner that exists.
+
+    The same failure mode :class:`ShardSelectionError` guards against, reached by a
+    different route: a scan that ran nothing and reported itself as a clean one.
+    Selection is matched against a scanner's configured name by string equality, so
+    ``--scanners detect_secrets`` -- underscore, where the registered name is
+    ``detect-secrets`` -- matched nothing, every scanner was recorded SKIPPED, and
+    the run produced zero findings and exit 0.
+
+    SKIPPED cannot be what gives that away. It is how sharding and
+    ``--exclude-scanners`` record work a run was never meant to do, so the
+    completeness gate has to tolerate it; that is what leaves an unresolvable
+    allowlist with no existing gate to fall foul of.
+
+    Raised only when *nothing* the operator asked for resolved. A partly
+    unresolvable allowlist warns and continues: those runs still scan and report
+    what did resolve, and a CI matrix can produce that shape legitimately when its
+    runners load different plugin modules.
+    """
+
+    pass
+
+
 class ShardSelectionError(ASHValidationError):
     """Exception raised when ``--shard-index``/``--shard-count`` cannot be used as given.
 
@@ -59,6 +83,43 @@ class ShardCoverageError(ASHValidationError):
     for whichever scanners lived on the missing shard, and nothing in the output
     says a fifth of the scan is absent. So the merge fails loudly and names the
     specific gap instead of reporting what it happens to have.
+    """
+
+    pass
+
+
+class ToolDownloadIntegrityError(ASHValidationError):
+    """Exception raised when a downloaded tool's bytes do not match its pinned digest.
+
+    Raised before the download is moved into place, so a failed verification
+    leaves nothing installed rather than installing the bad bytes and reporting
+    the mismatch afterwards.
+
+    The failure this exists to prevent is specific: without it, a scanner binary
+    that had been substituted upstream, truncated by a proxy, or served from a
+    cache poisoned in transit would be installed, found on PATH, and then trusted
+    to produce the findings a security decision is made from. A digest field that
+    is recorded but never compared is not a check, so this is raised on every
+    mismatch and never downgraded to a warning.
+    """
+
+    pass
+
+
+class ToolNotProvisionableError(ASHValidationError):
+    """Exception raised when a tool cannot be installed on the current platform.
+
+    Covers three distinct cases, all refused rather than approximated:
+
+    * the tool has no install path in ASH at all,
+    * the tool has one but publishes no asset for this platform/architecture,
+    * the pinned version and the pinned digests disagree, which is what a
+      half-applied version bump looks like.
+
+    Substituting a nearby architecture would install an executable that fails at
+    exec time, and that surfaces in a scan report as an execution failure rather
+    than as a bad install -- the diagnosis lands on the wrong thing. An absent
+    asset is a real constraint and is reported as one.
     """
 
     pass

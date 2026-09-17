@@ -72,8 +72,9 @@ import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
 
 import { AshCustomerKey, diagnosticLogGroupProps } from './ash-config';
-import { suppressCodeBuildRoleWildcards, suppressLambdaLogWildcard, suppressUnevaluableRules } from './ash-nag-suppressions';
+import { suppressImageBuildRoleWildcards, suppressLambdaLogWildcard } from './ash-nag-suppressions';
 import { MCP_ENTRYPOINT_SCRIPT, CODECOMMIT_GATE_HANDLER, ASH_MATERIALIZED_CONFIG_PATH } from './ash-container-scripts';
+import { GENERATED_CONSTRUCT_ID, ashRoleSplitScope } from './ash-policy-split';
 
 /** Upstream ASH repository. Public, so an anonymous clone works. */
 export const ASH_REPOSITORY_URL = 'https://github.com/awslabs/automated-security-helper.git';
@@ -258,7 +259,24 @@ export class AshImageBuild extends Construct {
     // `diagnosticLogGroupProps`.
     const logGroup = new logs.LogGroup(this, 'BuildLogs', diagnosticLogGroupProps(props.customerKey));
 
-    this.project = new codebuild.Project(this, 'Build', {
+    // The project's role is created here rather than by `codebuild.Project`, so
+    // that the statements the Project adds to it — logs, report groups, the ECR
+    // pull for the build image, the KMS grant for the artifact key — are filed per
+    // service instead of piling into one DefaultPolicy. In the distributed pipeline
+    // stack that pile scores 28 against cfn-nag's W76 ceiling of 25, and the
+    // statement that pushes it over is added by CodePipeline's CodeBuild action,
+    // not by this construct, so there is nothing here to move out of the way
+    // instead. `GENERATED_CONSTRUCT_ID` keeps every logical id, the role's
+    // included, exactly where it was — see ash-policy-split.ts.
+    const build = ashRoleSplitScope(
+      this,
+      'Build',
+      'codebuild.amazonaws.com',
+      suppressImageBuildRoleWildcards,
+    );
+
+    this.project = new codebuild.Project(build.scope, GENERATED_CONSTRUCT_ID, {
+      role: build.role,
       description:
         `Builds the ASH ${props.platform} image (${props.flavors.join(', ')}) into this ` +
         "account's ECR repository. ASH publishes no public image, so this build is what " +
@@ -366,11 +384,37 @@ export class AshImageBuild extends Construct {
       rebuildRule.node.addDependency(this.bootstrap);
     }
 
-    suppressCodeBuildRoleWildcards(this.project);
-    // AwsSolutions-CB5 pins the build image; it cannot evaluate one supplied as
-    // an Fn::Join over ECR attributes, which is how every consumer of this
-    // construct references the image it just built.
-    suppressUnevaluableRules(this.project, ['AwsSolutions-CB5']);
+    /*
+     * `build.role`, not `build.scope` and not `this.project`. The project's role is
+     * now the project's sibling rather than its child, so suppressing on the project
+     * would leave the role's policies unsuppressed and fail synth on an ERROR-level
+     * IAM5 finding; suppressing on the enclosing scope goes one principal too far.
+     * `targets.CodeBuildProject` above gives the rebuild rule its own `EventsRole`,
+     * created under the project, whose only statement is `codebuild:StartBuild` on one
+     * project ARN. IAM5 passes on it, so the entry was inert -- but the reason was
+     * also false there, enumerating four wildcards that policy does not have, which is
+     * the worse half. The role reaches its own per-service policies and stops at the
+     * principal those reasons describe.
+     *
+     * Passing the scope now fails loudly rather than shipping that: the helper is keyed by
+     * service group and an `EventsRole/DefaultPolicy` matches no key, so it throws at synth
+     * naming the policy instead of inventing a justification for it. The same holds for a
+     * `DefaultPolicy` on this role, which the split creates only for a statement it cannot
+     * key -- there is none today, and if one appears it needs a sentence written for it
+     * rather than a borrowed one.
+     *
+     * A `CdkNagValidationFailure` suppression for AwsSolutions-CB5 used to sit here
+     * too, on the grounds that CB5 cannot evaluate a build image supplied as an
+     * Fn::Join over ECR attributes. That is true, and it is not true of THIS project:
+     * this one builds the image, so its own `buildImage` is a literal AWS-managed
+     * standard image and CB5 evaluates it without throwing. The projects whose image
+     * is the Fn::Join are the shard and merge projects that RUN what this built, and
+     * they are suppressed where they are created, in
+     * ash-distributed-pipeline-stack.ts. Measured over all five stacks, CB5 threw on
+     * none of the five image-build projects, so the entry was written five times and
+     * read never.
+     */
+    suppressImageBuildRoleWildcards(build.role);
   }
 
   /**

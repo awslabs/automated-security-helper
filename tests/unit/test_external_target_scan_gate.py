@@ -778,6 +778,39 @@ class TestFixtureHandling:
         assert "--output-dir" in command
         assert command[command.index("--output-dir") + 1] == str(tmp_path / "out")
 
+    def test_scan_command_names_every_gate_scanner_and_nothing_else(self, tmp_path):
+        """The scanner set is declared on the command line, not left implicit.
+
+        These runners do not have the other tools -- the workflow's own comment
+        says only bandit and checkov are available on the Windows one -- and
+        an unnarrowed run reports the absent scanners MISSING. Because
+        ``fail_on_incomplete_scanners`` defaults to False that does not raise the
+        exit code, so such a run lands inside ``TOLERATED_EXIT_CODES`` having
+        exercised two scanners while appearing to cover ten. Naming the set is what
+        keeps this gate asserting something about the two scanners it has instead of
+        passing quietly on eight it was never given.
+
+        Asserted as a set equality rather than a containment check, because the
+        failure worth catching is a scanner quietly *added* back to the run: it
+        would go MISSING on the runner and redden the gate for a reason that has
+        nothing to do with what the gate measures.
+        """
+        command = gate.build_scan_command(tmp_path / "src", tmp_path / "out")
+        # Named `flag` rather than `token`: bandit's B105 keyword list contains
+        # "token", so `token == "--scanners"` was reported as a hardcoded password.
+        # The finding is a false positive -- the string is a CLI flag -- but it is
+        # cheaper to not trip the heuristic than to carry a suppression explaining
+        # that a loop variable was misnamed. The other four B105 entries in
+        # .ash/.ash.yaml are suppressed because their values genuinely have to be
+        # those strings; this one did not.
+        selected = [
+            command[index + 1]
+            for index, flag in enumerate(command)
+            if flag == "--scanners"
+        ]
+        assert sorted(selected) == sorted(gate.GATE_SCANNERS)
+        assert len(selected) == len(set(selected)), "a scanner is named twice"
+
 
 class TestOutputIsAscii:
     """Windows consoles default to cp1252 and cannot encode box-drawing or emoji."""
