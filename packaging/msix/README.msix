@@ -1,0 +1,265 @@
+ash for Windows, as an MSIX package
+===================================
+
+Why this package needs a Python index at install time
+-----------------------------------------------------
+
+The package bundles ASH's own wheel and nothing else. The first time you run ash, the
+launcher creates a virtualenv and installs that wheel into it, which resolves ASH's
+27 runtime dependencies from whatever Python index the machine is configured for.
+
+This is not an oversight. ASH's own code may ship in a package published by the
+project; third-party code may not. Carrying exactly one wheel is the guard that keeps
+this package on the right side of that line, because it can be checked by counting the
+.whl entries in the package rather than by judging each dependency one at a time.
+
+Building a self-contained offline package for your own machines is fine, and the
+commands below are the supported way to do it. The line is about what the project
+publishes, not about what the bytes are allowed to do.
+
+On a machine with no reachable index, stage a wheelhouse first:
+
+  pip download automated-security-helper==<version> -d C:\ash-wheels
+  # then, before the first ash invocation:
+  setx PIP_NO_INDEX true
+  setx PIP_FIND_LINKS C:\ash-wheels
+
+The package also does not carry a Python interpreter, so Python 3.10 or newer has to
+be on the machine. The launcher looks for `py -3`, then `python3`, then `python`, and
+checks each one's version rather than trusting that it ran, because on a machine with
+no Python installed a bare `python` resolves to the Microsoft Store placeholder that
+opens the Store instead of running anything. ASH_MSIX_PYTHON overrides the search.
+
+Why there is no install-time setup step
+--------------------------------------
+
+The .deb creates the virtualenv in a postinst scriptlet and the .rpm in %post. MSIX has
+neither. A package is a signed, immutable directory that Windows extracts under
+C:\Program Files\WindowsApps and never runs anything from at install time, so the venv
+cannot exist when the package is installed and the only moment left to create it is the
+first time you run ash. That is what the bundled launchers do, and it is why the first
+invocation is slow and prints two lines to stderr saying so.
+
+The venv could not be shipped inside the package even if there were somewhere to put it.
+A virtualenv records the absolute paths and the interpreter ABI of the machine that
+created it, so one built on a build host cannot be relocated to yours.
+
+Where the venv goes, and what removes it
+----------------------------------------
+
+  %LOCALAPPDATA%\Packages\<PackageFamilyName>\LocalCache\ash-venv
+
+That location is chosen for uninstall. MSIX has no uninstall hook either, so nothing can
+delete the venv on the way out, but Windows does delete a package's own per-user state
+directory when the package is removed. Putting the venv there is the only way to get the
+behavior the .deb and .rpm have, where removing the package reclaims what pip installed
+instead of leaving several hundred megabytes orphaned in a directory you would have to
+know about.
+
+The cost is roughly 60 characters of path, on top of a virtualenv's already deep
+site-packages tree. On a machine without long paths enabled, a dependency with a deep
+tree can exceed MAX_PATH while pip is installing. If that happens, point the venv
+somewhere shorter:
+
+  setx ASH_MSIX_VENV C:\ash-venv
+
+A venv at a path you chose is not per-package state, so uninstall will not remove it.
+That is the trade being made, stated so it is not a surprise later.
+
+Filesystem access, and the capability that is not the one doing the work
+-----------------------------------------------------------------------
+
+The manifest declares two restricted capabilities. They are not interchangeable and the
+second one is the one people delete by mistake.
+
+  runFullTrust            what actually lets ash read the tree you point it at
+  broadFileSystemAccess   what puts ash in the Windows privacy settings page
+
+A packaged app declared mediumIL, which this one is, runs with your own token and sees
+the file system you see. That is runFullTrust. Remove it and ash installs, runs, and
+scans nothing, because it is then an AppContainer app confined to its own storage.
+
+broadFileSystemAccess is an AppContainer capability: it grants a sandboxed app the access
+its user already has. On a mediumIL package it therefore grants nothing runFullTrust has
+not already granted. It is declared anyway, and here is what it buys and what it costs.
+
+What it buys. Windows lists apps that declare it under Settings > Privacy > File system,
+with a toggle. A tool whose whole job is reading every file in a repository should be
+visible and revocable where a user goes looking for exactly that, rather than invisible
+there because it happens to be full trust. Microsoft's own guidance is to declare
+privacy-sensitive capabilities even on full-trust packages for this reason.
+
+Why a narrower grant cannot express what ASH needs. ASH's default source directory is the
+process working directory, and its default output directory is `.ash\ash_output` inside
+that same tree (automated_security_helper/cli/scan.py:634-640). So the directory ash must
+read and write is not a fixed location a manifest could name: it is wherever you happened
+to cd to, and it is different on every invocation. The narrower capabilities Windows
+offers each name one fixed known folder, and two of them additionally require the manifest
+to declare specific file extensions, which a scanner that must read every file in an
+arbitrary repository cannot do. The mechanism Windows offers for arbitrary locations is a
+file picker plus a future-access list, which is a GUI flow and not available to a command
+that was handed a path on its command line.
+
+What it costs. broadFileSystemAccess is a restricted capability. Sideloading a package
+that declares one needs no approval from anybody, but submitting one to the Microsoft
+Store requires written justification on the submission form explaining why the narrower
+APIs are insufficient, and that submission can be refused. Nothing in this repository
+submits to the Store, so today the cost is the toggle: a user who switches it off gets ash
+terminated so Windows can apply the change.
+
+This package is self-signed, and that has consequences
+------------------------------------------------------
+
+The package built by build.ps1 with no signing secret set is signed with a throwaway
+self-signed certificate generated during the build. Two things follow.
+
+It is not Store-installable. The Microsoft Store will not accept a self-signed package at
+all, and nothing here submits to the Store or to any package registry.
+
+It will not install anywhere until you decide to trust its certificate. That is the point
+of the mechanism rather than an obstacle to it: trusting the certificate is you asserting
+that you got this file from somewhere you trust.
+
+To install it, in an elevated PowerShell:
+
+  # 1. Pull the signing certificate out of the package you are about to install.
+  #    Reading it from the package rather than downloading it separately means you are
+  #    trusting the certificate that actually signed THIS file.
+  $msix = 'C:\path\to\automated-security-helper-<version>.msix'
+  $signature = Get-AuthenticodeSignature -FilePath $msix
+  $signature.SignerCertificate | Format-List Subject, Thumbprint, NotAfter
+
+  # 2. Look at that Subject and Thumbprint and decide. Then:
+  [System.IO.File]::WriteAllBytes(
+      "$env:TEMP\ash-signer.cer", $signature.SignerCertificate.RawData)
+  Import-Certificate -FilePath "$env:TEMP\ash-signer.cer" `
+      -CertStoreLocation 'Cert:\LocalMachine\TrustedPeople'
+
+  # 3. Install.
+  Add-AppxPackage -Path $msix
+
+Trusted People, not Trusted Root Certification Authorities. The certificate is not a
+certificate authority, and putting it in the root store would trust it to vouch for
+anything else it signed, which is a much larger statement than "I want to run this one
+program". It has to be the Local Machine store rather than the current user's, because
+that is the only one the deployment service checks.
+
+To remove the package and the venv it created:
+
+  Get-AppxPackage -Name AWSLabs.AutomatedSecurityHelper | Remove-AppxPackage
+
+And to withdraw the trust afterwards, which is worth doing if the certificate was a
+throwaway one:
+
+  Get-ChildItem Cert:\LocalMachine\TrustedPeople |
+      Where-Object { $_.Subject -like '*ASH Development*' } | Remove-Item
+
+Swapping in a real certificate
+------------------------------
+
+Set one secret. There is nothing else to change: no thumbprint, no certificate path, no
+edit to AppxManifest.xml.
+
+Windows refuses to install a package whose Identity/@Publisher is not byte-identical to
+its signing certificate's subject, which is normally where this gets fiddly, because a
+manifest with a hardcoded Publisher has to be hand edited the day the real certificate
+arrives. build.ps1 instead reads the subject out of whichever .pfx it was given and stamps
+that into the staged manifest. The self-signed path and the real-certificate path are the
+same code with different bytes.
+
+  MSIX_SIGNING_PFX_BASE64     base64 of a PKCS#12 file
+  MSIX_SIGNING_PFX_PASSWORD   optional; a password-less .pfx keeps it to one secret
+
+A real release also wants a timestamp, because an untimestamped signature stops validating
+when the certificate expires. Pass -TimestampUrl to build.ps1 with your RFC 3161 endpoint.
+It has no default on purpose: a default would put a particular timestamping service's URL
+in this repository and would make every self-signed development build depend on reaching
+it.
+
+The three names, and why one of them is deliberately unfashionable
+------------------------------------------------------------------
+
+  ash                         canonical
+  ashv3                       deprecated; warns once on stderr, then runs the same CLI
+  automated-security-helper   kept indefinitely, and silent
+
+The long name exists for Windows in particular. MSYS2 ships the Almquist shell as `ash`
+and has already shadowed ASH's entry point, producing an "Illegal option" error from a
+program nobody meant to run.
+
+Which is worth knowing before you trust the short name here, because an app execution
+alias is itself just a name on PATH. Windows resolves a collision between two apps
+claiming the same alias by invoking whichever one registered it last, and a real
+executable earlier on PATH wins over an alias outright. So installing this package does
+not guarantee that typing `ash` reaches ASH. If an MSYS2 shell is on your PATH, use the
+long name. That is what it is for.
+
+You can also see and turn off each alias under Settings > Apps > Advanced app settings >
+App execution aliases.
+
+`-V` is `--version`. `-v` is `--verbose`. The launchers forward your command line
+unchanged, so anything the CLI accepts works the same way here.
+
+Scanners are not installed by this package
+------------------------------------------
+
+ASH drives third-party scanners; it does not contain them. After installing:
+
+  ash dependencies install              # everything ASH can provision
+  ash dependencies install --tool grype # or one at a time
+
+The one exception is detect-secrets, which is a runtime dependency of ASH and drives in
+process, so it works immediately. The rest are correctly reported SKIPPED rather than
+MISSING until they are installed.
+
+Version numbering
+-----------------
+
+MSIX requires quad notation: four dot-separated integers, major.minor.build.revision. ASH
+uses three-part semver. The mapping is major.minor.patch.0, and the trailing zero is not
+padding: the Microsoft Store reserves the fourth component and requires it to be 0 in a
+submitted package, and ASH has no fourth component to put there.
+
+A consequence worth knowing: a PEP 440 pre-release or local version, like 3.7.0rc1 or
+3.7.0+local, has no representation in quad notation. build.ps1 refuses to package such a
+wheel rather than dropping the suffix, because a package built from 3.7.0rc1 that called
+itself 3.7.0.0 would install over the real release.
+
+Building it yourself
+--------------------
+
+  # from a checkout, with a wheel already built by `uv build --out-dir dist`
+  pwsh -File packaging/msix/build.ps1 -Wheel dist\automated_security_helper-<version>-py3-none-any.whl
+
+  # or the whole thing, including installing it and running a real scan
+  pwsh -File packaging/msix/verify-on-windows.ps1
+
+build.ps1 needs makeappx.exe and signtool.exe, which ship with the Windows SDK and are not
+on PATH by default; it looks for them under Windows Kits\10\bin and reports where it looked
+if it cannot find them. If you have no SDK, `nuget install Microsoft.Windows.SDK.BuildTools`
+carries both.
+
+The manifest checks that do not need Windows at all run anywhere:
+
+  uv run --python 3.13 --no-project python packaging/msix/msix.py validate
+
+That is the same script build.ps1 runs, rather than a second copy of the same assertions.
+It exists because AppxManifest.xml cannot be schema-validated off Windows: the appx
+namespace URIs are not resolvable, and the only redistributable copy of the schema files is
+missing 30 of the 47 namespaces its own schemas reference, including the one that declares
+broadFileSystemAccess. `makeappx pack` applies the real schema, and that is the first point
+at which it is applied.
+
+Files in the package
+--------------------
+
+  AppxManifest.xml            identity, capabilities, and one Application per entry point
+  ash.exe                     launcher; bootstraps the venv, then runs the venv's ash
+  ashv3.exe                   the same launcher, compiled under a different name
+  automated-security-helper.exe   likewise
+  wheels\                     ASH's wheel, the package's only payload
+  assets\                     the logo images the manifest is required to reference
+
+The three launchers are one source file compiled three times. Each reads its own filename
+to decide which venv console script to run, which is how `ashv3` ends up printing the
+deprecation warning that lives in the wheel rather than a second copy of it written here.
