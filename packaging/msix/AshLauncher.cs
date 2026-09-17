@@ -14,9 +14,21 @@
 // instead of a one-line script.
 //
 // The venv also cannot live inside the package, because the package is read only. It goes
-// under %LOCALAPPDATA%\ash\venv. Writes to AppData pass through for a mediumIL packaged app
-// rather than being redirected into a per-package store, so that path is the one a user sees
-// and can delete.
+// under the package's own per-user state directory,
+// %LOCALAPPDATA%\Packages\<PackageFamilyName>\LocalCache\ash-venv.
+//
+// That location rather than a plain %LOCALAPPDATA%\ash\venv, and the reason is uninstall.
+// MSIX has no uninstall hook any more than it has an install hook, so nothing can run `rm -rf`
+// on the way out the way the .deb's prerm and the .rpm's %postun do. What Windows does do is
+// delete %LOCALAPPDATA%\Packages\<PackageFamilyName> when the package is removed. Putting the
+// venv there is the only way to get the .deb and .rpm behavior, where removing the package
+// reclaims the several hundred megabytes pip installed, without asking the user to know that
+// a directory somewhere else is now orphaned.
+//
+// The cost, which is why ASH_MSIX_VENV exists: that path is about 60 characters longer than
+// %LOCALAPPDATA%\ash\venv, and a venv's deepest site-packages paths are already long. On a
+// system without long paths enabled, a dependency with a deep tree can exceed MAX_PATH during
+// pip install. The override is the documented answer, and README.msix says so.
 //
 // WHY IT IS NOT A .CMD OR .PS1
 //
@@ -69,7 +81,20 @@ internal static class AshLauncher
     {
         try
         {
-            string launcherPath = Process.GetCurrentProcess().MainModule.FileName;
+            // The entry assembly's location, not Process.GetCurrentProcess().MainModule
+            // .FileName. Those are the same path for a .NET Framework exe launched directly,
+            // and they diverge the moment anything hosts the assembly: under a host process
+            // MainModule is the HOST's executable, so the script name would be read from the
+            // wrong filename and the package root would point at the wrong directory. That is
+            // not a hypothetical, it is what running this under mono does, which is also the
+            // only way to exercise this file off Windows.
+            string launcherPath = System.Reflection.Assembly.GetEntryAssembly().Location;
+            if (string.IsNullOrEmpty(launcherPath))
+            {
+                throw new LauncherError(
+                    "could not determine this launcher's own path, so there is no way to tell "
+                    + "which ASH entry point it stands for or where the package is.");
+            }
             string packageRoot = Path.GetDirectoryName(launcherPath);
             string scriptName = Path.GetFileNameWithoutExtension(launcherPath);
 
@@ -109,6 +134,55 @@ internal static class AshLauncher
         // sentence would make a bug here indistinguishable from a broken environment.
     }
 
+    // kernel32's package-identity API, rather than Windows.Storage.ApplicationData.Current
+    // .LocalFolder, which is the WinRT way to ask the same question. WinRT would mean a
+    // Windows.winmd reference and a compile that depends on which SDK is installed; this
+    // launcher is built by csc.exe from the .NET Framework with no SDK at all, and one
+    // P/Invoke keeps it that way.
+    private const int ErrorInsufficientBuffer = 122;
+    private const int AppmodelErrorNoPackage = 15700;
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern int GetCurrentPackageFamilyName(ref int length, System.Text.StringBuilder name);
+
+    private static string PackageFamilyNameOrNull()
+    {
+        try
+        {
+            int length = 0;
+            int result = GetCurrentPackageFamilyName(ref length, null);
+            if (result == AppmodelErrorNoPackage)
+            {
+                // Running outside a package. Happens when a developer runs a compiled launcher
+                // straight out of the layout directory, which is a useful thing to be able to
+                // do, so it is a supported case rather than an error.
+                return null;
+            }
+            if (result != ErrorInsufficientBuffer)
+            {
+                return null;
+            }
+
+            System.Text.StringBuilder buffer = new System.Text.StringBuilder(length);
+            result = GetCurrentPackageFamilyName(ref length, buffer);
+            return result == 0 ? buffer.ToString() : null;
+        }
+        catch (EntryPointNotFoundException)
+        {
+            // The export is present on every Windows this package can install on, so this
+            // arm is not about Windows. It is about being able to compile and exercise this
+            // launcher's logic on a machine that is not Windows at all, where the P/Invoke
+            // throws before it can return a value. Without this the whole program is
+            // untestable anywhere but the target, and the wheel-count rule below is the kind
+            // of thing worth being able to test.
+            return null;
+        }
+        catch (DllNotFoundException)
+        {
+            return null;
+        }
+    }
+
     private static string ResolveVenvDirectory()
     {
         string overridden = Environment.GetEnvironmentVariable(VenvOverrideVariable);
@@ -125,7 +199,15 @@ internal static class AshLauncher
                 "virtualenv. Set " + VenvOverrideVariable + " to a writable directory.");
         }
 
-        return Path.Combine(localAppData, "ash", "venv");
+        string family = PackageFamilyNameOrNull();
+        if (family == null)
+        {
+            // Unpackaged. There is no per-package directory to use and nothing will clean up
+            // after this, which is stated because it differs from the packaged case.
+            return Path.Combine(localAppData, "ash", "venv");
+        }
+
+        return Path.Combine(localAppData, "Packages", family, "LocalCache", "ash-venv");
     }
 
     // Creates the venv in a sibling staging directory and moves it into place when it is
@@ -143,7 +225,7 @@ internal static class AshLauncher
     private static void CreateVenv(string venvDirectory, string packageRoot, string scriptName)
     {
         string wheel = FindTheWheel(packageRoot);
-        string python = FindPython();
+        PythonCandidate python = FindPython();
 
         string staging = venvDirectory + ".staging-" + Process.GetCurrentProcess().Id;
         if (Directory.Exists(staging))
