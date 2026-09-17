@@ -164,6 +164,13 @@ global_settings:
       path: tests/unit/assets/test_with_retry.py
       reason: "Exercises a retry wrapper around a real subprocess call."
     - rule_id: B404
+      path: tests/unit/assets/test_install_pinned_tool.py
+      reason: >-
+        Runs assets/install-pinned-tool.py under `sys.executable -I -S`, which is the
+        assertion: the container build invokes it before the ASH wheel exists, so the
+        test has to prove it works with no site-packages. A patched subprocess cannot
+        show that, since the property under test is what a bare interpreter can import.
+    - rule_id: B404
       path: tests/unit/deploy/test_deploy_buildspec_ssm_moto_server.py
       reason: "Runs a moto server and the buildspec's own shell line under test."
     - rule_id: B404
