@@ -117,9 +117,75 @@ jobs:
           set -euo pipefail
           python .github/scripts/assert-artifact-contents.py dist/*.whl dist/*.tar.gz
 
+      # The MCPB bundle for Claude Desktop. Its backend has declared a
+      # release-stage `copy-archive` phase since it was written, and nothing
+      # invoked it: `agentic-plugins release` appears nowhere else in .github/, so
+      # every ASH release published a wheel and an sdist while the committed
+      # ash.mcpb never left the repository. The phase is run here rather than
+      # given a workflow of its own because this is the only job that attaches
+      # release assets, and an artifact built anywhere else is not covered by this
+      # run's OIDC identity -- the same reason the wheel and sdist are built here
+      # instead of downloaded, spelled out above.
+      #
+      # THE DRIFT CHECK IS WHAT MAKES THE STAGED FILE TRUSTWORTHY, and it is not
+      # interchangeable with comparing the two copies. copy-archive COPIES the
+      # committed archive rather than rebuilding it, so asserting that the staged
+      # file matches the committed one only proves shutil.copy2 works -- it would
+      # pass just as happily on a committed archive that went stale six releases
+      # ago, because the staged copy inherits whatever is committed. The question
+      # that can actually be answered wrongly is whether the committed bytes still
+      # equal what _base/ generates today, and that is drift. It runs on the pull
+      # request through ash-agent-plugins-drift.yml and runs again here for the
+      # reason the contents gate does: the pull request proves the tree was clean,
+      # this proves the published file is. Measured at well under a second for all
+      # 17 backends, so it costs this job nothing.
+      #
+      # THE MEMBER COUNT IS THE PUBLISHING BOUNDARY. The archive must hold exactly
+      # one member, manifest.json, which ASH authors -- see the backend's module
+      # docstring. This is the same one-file invariant packaging/README.md holds
+      # the .deb and .rpm to by counting bundled wheels, and it is asserted on the
+      # bytes about to be uploaded rather than trusted to a comment.
+      #
+      # NOT passed to assert-artifact-contents.py, and that is a property of the
+      # artifact rather than an exemption. That script reads an artifact as a
+      # Python distribution: it requires exactly one top-level distribution root
+      # and RAISES rather than reporting clean when it finds none, which is
+      # deliberate -- an artifact it cannot reason about is one it cannot clear. A
+      # .mcpb carries a single loose manifest.json and no package root, so it would
+      # exit 2 on a correct archive. Feeding it one would force either a carve-out
+      # in that script or a release that cannot publish; the member-count assertion
+      # below is the boundary control for this shape, and the script keeps its
+      # wheel-and-sdist scope untouched.
+      - name: Stage and verify the MCPB bundle
+        if: steps.existing.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          uv run --project ash-agent-plugins/agentic-coding/transpiler \
+            agentic-plugins check --drift-only
+          uv run --project ash-agent-plugins/agentic-coding/transpiler \
+            agentic-plugins release mcpb --dist dist
+          MCPB="$(find dist -maxdepth 1 -name '*.mcpb' -print -quit)"
+          test -n "$MCPB" \
+            || { echo "::error::agentic-plugins release wrote no .mcpb into dist"; exit 1; }
+          python3 - "$MCPB" <<'PY'
+          import sys
+          import zipfile
+
+          path = sys.argv[1]
+          with zipfile.ZipFile(path) as archive:
+              members = [i.filename for i in archive.infolist() if not i.is_dir()]
+          if members != ["manifest.json"]:
+              sys.exit(
+                  f"::error::{path} must hold exactly one member, manifest.json. "
+                  f"Found {len(members)}: {members}. Anything else in a published "
+                  "archive crosses the boundary in packaging/README.md."
+              )
+          print(f"{path}: 1 member, manifest.json")
+          PY
+
       # Provenance. Attested BEFORE the release is created, so a signing failure
       # blocks publication rather than leaving an unattested asset already public
-      # and needing a delete. `subject-path` takes both artifacts in one call,
+      # and needing a delete. `subject-path` takes all three artifacts in one call,
       # which produces one attestation per subject.
       - name: Attest build provenance
         if: steps.existing.outputs.skip == 'false'
@@ -128,6 +194,7 @@ jobs:
           subject-path: |
             dist/*.whl
             dist/*.tar.gz
+            dist/*.mcpb
 
       - name: Create tag and GitHub Release
         if: steps.existing.outputs.skip == 'false'
@@ -147,10 +214,14 @@ jobs:
             --target main \
             --generate-notes \
             --title "$TAG" \
-            dist/*.whl dist/*.tar.gz
+            dist/*.whl dist/*.tar.gz dist/*.mcpb
 
+          # The .mcpb belongs in this count as well as in the upload. The count is
+          # this step's own evidence of how much it attached, so an artifact
+          # missing from it is one the log says nothing about.
           echo "Created release $TAG with $(find dist -maxdepth 1 \
-            \( -name '*.whl' -o -name '*.tar.gz' \) | wc -l) attached artifact(s)"
+            \( -name '*.whl' -o -name '*.tar.gz' -o -name '*.mcpb' \) \
+            | wc -l) attached artifact(s)"
 
       - name: Update v3 floating tag
         env:
