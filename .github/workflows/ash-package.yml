@@ -418,13 +418,17 @@ jobs:
   #
   # WHAT THIS JOB TESTS, WHICH IS NOT THIS BRANCH'S CODE
   #
-  # The formula builds from `tag: "v3.7.0"`, so `brew install` fetches that release
-  # rather than the checked-out branch. That is deliberate and it is the honest scope:
-  # what is under test is whether the resource block installs and whether the resulting
-  # ASH can scan. tests/unit/test_homebrew_formula_version.py keeps the tag equal to
-  # this repository's version, so the two agree as long as `[project.dependencies]` is
-  # not edited in the same change that bumps the version without regenerating the
-  # block.
+  # The formula builds from the git tag on its `url` line, so `brew install` fetches
+  # that release rather than the checked-out branch. That is deliberate and it is the
+  # honest scope: what is under test is whether the resource block installs and whether
+  # the resulting ASH can scan. tests/unit/test_homebrew_formula_version.py keeps the
+  # tag equal to this repository's version, so the two agree as long as
+  # `[project.dependencies]` is not edited in the same change that bumps the version
+  # without regenerating the block.
+  #
+  # No version literal appears in this file on purpose. A number written here would be
+  # a fourth place that pins ASH's version and nothing rewrites, which is the failure
+  # the [tool.commitizen] version_files comment in pyproject.toml exists to describe.
   homebrew:
     name: "native: homebrew (macos-latest)"
     runs-on: macos-latest
