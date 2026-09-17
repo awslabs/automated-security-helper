@@ -1,0 +1,38 @@
+# What `vsce package` must leave OUT of the .vsix.
+#
+# This file is half of the publishing boundary and src/vsix-contents.ts is the
+# other half. packaging/README.md draws the line: ASH's own code may ship in an
+# artifact this project publishes, third-party code never may. A .vsix is
+# published as a GitHub Release asset, and `vsce` bundles the `dependencies` tree
+# from node_modules by default -- so an exclusion missing from this file is how
+# someone else's code gets into a release.
+#
+# Do not treat this file as the guard. It is a request, and a rename or a new
+# directory silently stops it covering anything. The guard is the member-list
+# check over the built archive, which fails on anything outside this package's own
+# output whether or not this file mentioned it.
+
+# Sources. The .vsix ships compiled output only.
+src/**
+test/**
+tsconfig.json
+tsconfig.test.json
+*.tsbuildinfo
+
+# Dependencies. This package has no runtime dependencies at all, so `vsce` should
+# bundle nothing from here -- the exclusion is what makes that true rather than
+# incidental, because a dependency added tomorrow would otherwise ship.
+node_modules/**
+package-lock.json
+
+# Coverage and test output.
+coverage/**
+.nyc_output/**
+
+# Build tooling that has no business inside the artifact it checks.
+out/verify-vsix.js
+
+# Repository plumbing.
+.gitignore
+.vscodeignore
+.npmrc

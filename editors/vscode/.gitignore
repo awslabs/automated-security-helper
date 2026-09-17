@@ -1,0 +1,36 @@
+# Node / TypeScript build artifacts for this package only.
+#
+# The repository root .gitignore covers `dist/` and `lib/` but not `node_modules`,
+# not `out/` and not `coverage/`, so they are listed here. Kept local to the
+# package for the same reason deploy/cdk-constructs/.gitignore is: the two
+# concerns stay separate and a root rule cannot widen by accident.
+node_modules/
+out/
+*.tsbuildinfo
+
+# Test / coverage output.
+coverage/
+.nyc_output/
+
+# The built extension. Root .gitignore:263 is a bare `*.vsix`, so this is already
+# ignored -- it is repeated here only so someone reading this file knows the
+# archive is deliberately not committed. It is a release asset built by CI, and
+# unlike the committed .mcpb it cannot be drift-checked: `vsce` owns the ZIP
+# writer, so the bytes are not reproducible without reimplementing it. What CI
+# checks instead is the archive's member list, via `npm run verify:vsix`.
+#
+# The same root rule is a trap for anything else ending in .vsix. `git add` skips
+# ignored files SILENTLY, so a fixture or a README named *.vsix would be written,
+# verified against, and then absent from every clean checkout. That has already
+# happened twice on this branch, to packaging/rpm/ash.spec (root .gitignore:102,
+# a bare `*.spec`) and packaging/msix/README.msix. Nothing tracked here ends in
+# .vsix: the test fixtures are ZIP archives built in memory by test/zip.ts, and
+# the documentation is README.md.
+*.vsix
+
+# Nothing here should carry credentials. Listed defensively so a stray registry
+# token cannot be committed by accident -- and it matters more here than in a
+# library package, because publishing a VS Code extension uses a personal access
+# token and that is exactly the file it would land in.
+.npmrc
+.vsce

@@ -1,0 +1,11 @@
+{
+  "//": "Used by jest only. It adds test/ to the program and the jest types, and it emits nothing. Compiler settings are inherited rather than restated so a test cannot pass under looser rules than the extension compiles with -- the same reason deploy/cdk-constructs/tsconfig.dev.json mirrors what jsii emits.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "types": ["node", "vscode", "jest"]
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"],
+  "exclude": ["node_modules", "out"]
+}

@@ -1,0 +1,107 @@
+{
+  "//": "The jest block below is deliberately here rather than in a jest.config.js. See README.md, 'Why the jest configuration lives in package.json', for the reason and for the reasoning that would otherwise be a comment on `roots`.",
+  "name": "ash-vscode",
+  "displayName": "Automated Security Helper",
+  "description": "Runs the ash CLI over the open workspace and reports its SARIF findings as editor diagnostics. Ships no scanners and no copy of ASH.",
+  "version": "3.7.0",
+  "license": "Apache-2.0",
+  "publisher": "awslabs",
+  "private": true,
+  "engines": {
+    "vscode": "^1.85.0",
+    "node": ">=22"
+  },
+  "categories": [
+    "Linters"
+  ],
+  "author": {
+    "name": "Amazon Web Services",
+    "url": "https://aws.amazon.com",
+    "organization": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/awslabs/automated-security-helper.git",
+    "directory": "editors/vscode"
+  },
+  "homepage": "https://github.com/awslabs/automated-security-helper",
+  "main": "./out/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      {
+        "command": "ash.scanWorkspace",
+        "title": "ASH: Scan workspace",
+        "category": "ASH"
+      },
+      {
+        "command": "ash.clearFindings",
+        "title": "ASH: Clear findings",
+        "category": "ASH"
+      }
+    ],
+    "configuration": {
+      "title": "Automated Security Helper",
+      "properties": {
+        "ash.executablePath": {
+          "type": "string",
+          "default": "ash",
+          "markdownDescription": "The ASH executable to run. `ash` resolves through PATH. On Windows with MSYS2 or Git Bash on PATH, a bare `ash` can resolve to the Almquist shell instead of ASH; set this to `automated-security-helper`, which ASH installs as a permanent alias for exactly that case."
+        },
+        "ash.outputDirectory": {
+          "type": "string",
+          "default": ".ash/ash_output",
+          "description": "Directory the scan writes to, relative to the workspace folder. ASH writes its SARIF report to reports/ash.sarif underneath it."
+        },
+        "ash.extraArguments": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "Extra arguments appended to `ash scan`, for example `--scanners detect-secrets` or `--offline`."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc --project tsconfig.json",
+    "test": "jest",
+    "package": "vsce package --out ash-vscode.vsix",
+    "verify:vsix": "node out/verify-vsix.js ash-vscode.vsix"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/node": "^22.19.0",
+    "@types/vscode": "~1.85.0",
+    "@vscode/vsce": "^3.6.0",
+    "jest": "^30.5.0",
+    "ts-jest": "^29.4.12",
+    "typescript": "~5.9.3"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "roots": [
+      "<rootDir>/src",
+      "<rootDir>/test"
+    ],
+    "testMatch": [
+      "**/*.test.ts"
+    ],
+    "transform": {
+      "^.+\\.ts$": [
+        "ts-jest",
+        {
+          "tsconfig": "tsconfig.test.json"
+        }
+      ]
+    },
+    "collectCoverageFrom": [
+      "src/**/*.ts"
+    ],
+    "moduleNameMapper": {
+      "^vscode$": "<rootDir>/test/vscode-stub.ts"
+    }
+  }
+}
