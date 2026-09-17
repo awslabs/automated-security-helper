@@ -11,6 +11,7 @@ from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sarif_utils import (
     apply_suppressions_to_sarif,
+    normalize_sarif_result_severities,
     sanitize_sarif_paths,
 )
 
@@ -71,6 +72,7 @@ class ScanResultProcessor:
                 f"{len(results.raw_results.runs[0].results) if results.raw_results.runs and results.raw_results.runs[0].results else 0} results"
             )
             sanitized_sarif = sanitize_sarif_paths(results.raw_results, self.plugin_context.source_dir)
+            sanitized_sarif = normalize_sarif_result_severities(sanitized_sarif)
 
             if not self.plugin_context.ignore_suppressions:
                 sanitized_sarif = apply_suppressions_to_sarif(

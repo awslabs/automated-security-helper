@@ -1,5 +1,6 @@
 """Utility functions for working with SARIF reports."""
 
+import math
 import random
 from contextlib import suppress
 from typing import List
@@ -253,6 +254,68 @@ def attach_scanner_details(
 
                 # Add scanner details object to result properties
                 setattr(result.properties, "scanner_details", scanner_details)
+
+    return sarif_report
+
+
+def _severity_from_security_score(value: object) -> str | None:
+    """Convert a SARIF security-severity score to an ASH severity."""
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return None
+
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return None
+
+    if not math.isfinite(score) or not 0 <= score <= 10:
+        return None
+    if score >= 9:
+        return "CRITICAL"
+    if score >= 7:
+        return "HIGH"
+    if score >= 4:
+        return "MEDIUM"
+    if score > 0:
+        return "LOW"
+    return "INFO"
+
+
+def normalize_sarif_result_severities(sarif_report: SarifReport) -> SarifReport:
+    """Copy rule security-severity values onto results that lack a severity."""
+    if not sarif_report or not sarif_report.runs:
+        return sarif_report
+
+    for run in sarif_report.runs:
+        rules = run.tool.driver.rules or []
+        rules_by_id = {rule.id: rule for rule in rules}
+
+        for result in run.results or []:
+            if result.properties:
+                current = getattr(result.properties, "issue_severity", None)
+                if isinstance(current, str) and current.strip():
+                    continue
+
+            rule = None
+            if result.ruleIndex is not None and 0 <= result.ruleIndex < len(rules):
+                rule = rules[result.ruleIndex]
+            elif result.ruleId:
+                rule = rules_by_id.get(result.ruleId)
+
+            if rule is None or rule.properties is None:
+                continue
+
+            rule_properties = rule.properties.model_extra or {}
+            score = rule_properties.get(
+                "security-severity", rule_properties.get("security_severity")
+            )
+            severity = _severity_from_security_score(score)
+            if severity is None:
+                continue
+
+            if result.properties is None:
+                result.properties = PropertyBag()
+            setattr(result.properties, "issue_severity", severity)  # noqa: B010
 
     return sarif_report
 
