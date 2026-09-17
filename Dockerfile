@@ -192,12 +192,45 @@ RUN mkdir -p ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_C
     chmod 777 /deps ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}
 ENV PATH="/usr/local/bin:$PATH"
 
+#
+# syft, grype and trivy come from their pinned release assets, verified against the
+# SHA256 digests in automated_security_helper/utils/tool_downloads.py, which is the
+# same table `ash dependencies install` and the nix flake resolve. Before this, all
+# three were installed by piping a vendor install script into a shell, which pinned
+# no bytes and gave the endpoint code execution during the build -- the alternative
+# tool_downloads.py's own docstring rejects while naming this image as the place
+# still doing it.
+#
+# It failed on availability too, not only on integrity. On run 35246976698 anchore's
+# script could not resolve get.anchore.io, fell back to github.com, got the 302 that
+# every release download answers with, and treated the redirect as an error; the
+# tarball was never written, and `RUN syft --version` failed with exit 127. Going
+# straight to the release asset removes raw.githubusercontent.com and get.anchore.io
+# from the path and follows the redirect that broke it.
+#
+# ARG stays the declaration of intent for the version, and the installer resolves it
+# from the table rather than from these values -- so a version bumped here without
+# its digests cannot install a binary nobody reviewed. The versions are asserted
+# equal to the table by tests/unit/assets/test_install_pinned_tool.py.
+#
+# The two COPY lines land before the installs on purpose. They invalidate only when
+# the pins change, so the three downloads stay cached across ordinary source edits.
+# Copying the built wheel earlier instead -- which is what calling
+# download_utils.install_pinned_tool would require, since importing it needs 19 ASH
+# modules and pydantic -- would put these layers downstream of every code change and
+# re-fetch all three binaries on every build.
+COPY automated_security_helper/assets/install-pinned-tool.py /usr/local/bin/install-pinned-tool
+COPY automated_security_helper/utils/tool_downloads.py /ash-pins/utils/tool_downloads.py
+COPY automated_security_helper/core/exceptions.py /ash-pins/core/exceptions.py
+RUN chmod +x /usr/local/bin/install-pinned-tool
+ENV ASH_PINS_DIR="/ash-pins"
+
 ARG SYFT_VERSION="v1.42.4"
-RUN with-retry 'curl -sSfL https://raw.githubusercontent.com/anchore/syft/${SYFT_VERSION}/install.sh | sh -s -- -b /usr/local/bin ${SYFT_VERSION}'
+RUN with-retry 'install-pinned-tool syft -b /usr/local/bin'
 RUN syft --version
 
 ARG GRYPE_VERSION="v0.111.0"
-RUN with-retry 'curl -sSfL https://raw.githubusercontent.com/anchore/grype/${GRYPE_VERSION}/install.sh | sh -s -- -b /usr/local/bin ${GRYPE_VERSION}'
+RUN with-retry 'install-pinned-tool grype -b /usr/local/bin'
 RUN grype --version
 
 RUN set -uex; if [[ "${OFFLINE}" == "YES" ]]; then \
@@ -212,7 +245,7 @@ RUN set -uex; if [[ "${OFFLINE}" == "YES" ]]; then \
     fi
 
 ARG TRIVY_VERSION="v0.69.3"
-RUN with-retry 'curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/${TRIVY_VERSION}/contrib/install.sh | sh -s -- -b /usr/local/bin ${TRIVY_VERSION}'
+RUN with-retry 'install-pinned-tool trivy -b /usr/local/bin'
 RUN trivy --version
 
 #

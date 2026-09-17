@@ -128,8 +128,13 @@ class TestExitStatus:
         result = run_with_retry("false", attempts=2)
         assert result.returncode == 1
 
-    def test_defaults_are_three_attempts(self):
-        """Callers in the Dockerfile pass no overrides, so the default matters."""
+    def test_defaults_are_five_attempts(self):
+        """Callers in the Dockerfile pass no overrides, so the default matters.
+
+        Five, raised from three, because three exhausted its budget in about 15
+        seconds and the runner egress it retries was impaired for longer than
+        that -- see the comment on the assignment in with-retry.sh.
+        """
         env = {**os.environ}
         env.pop("WITH_RETRY_MAX_ATTEMPTS", None)
         env["WITH_RETRY_DELAY"] = "0"
@@ -141,7 +146,7 @@ class TestExitStatus:
             timeout=60,
             check=False,
         )
-        assert "All 3 attempts failed" in result.stderr
+        assert "All 5 attempts failed" in result.stderr
 
 
 def _sleep_recorder(tmp_path):
@@ -199,11 +204,11 @@ class TestTheIntervalItActuallySleeps:
             "sleep was never invoked, so there is no backoff between attempts at "
             "all and every retry fires back-to-back"
         )
-        assert log.read_text().split() == ["5", "10"], (
-            "the interval must double between attempts. ['5', '5'] is a "
+        assert log.read_text().split() == ["5", "10", "20", "40"], (
+            "the interval must double between attempts. ['5', '5', '5', '5'] is a "
             "fixed delay wearing the name backoff, and an empty or partial list "
             "means the arithmetic broke part-way through the loop. A trailing "
-            "'20' is the sleep after the final attempt -- see "
+            "'80' is the sleep after the final attempt -- see "
             "TestNothingFollowsTheFinalAttempt"
         )
 
@@ -366,14 +371,15 @@ class TestNothingFollowsTheFinalAttempt:
     The loop announced and took a backoff unconditionally, including after the
     attempt that ended it. On the production schedule that reads:
 
-        Attempt 3/3 failed, retrying in 20s...
-        <20 real seconds pass>
-        All 3 attempts failed
+        Attempt 5/5 failed, retrying in 80s...
+        <80 real seconds pass>
+        All 5 attempts failed
 
-    Two adjacent lines contradicting each other, and 20 seconds of wall clock
-    burned per failing call site across every ``with-retry`` invocation in the
-    Dockerfile. Measured on this branch before the fix: three sleeps of 5, 10 and
-    20 for a command that fails every time; after: two, of 5 and 10.
+    Two adjacent lines contradicting each other, and -- on the five-attempt
+    default -- 80 seconds of wall clock burned per failing call site across every
+    ``with-retry`` invocation in the Dockerfile. Measured on this branch before the
+    fix, when the default was three: three sleeps of 5, 10 and 20 for a command
+    that fails every time; after: two, of 5 and 10.
 
     Both halves are asserted separately, because either can be fixed while the
     other stays broken: dropping only the message still burns the 20 seconds, and
@@ -387,21 +393,21 @@ class TestNothingFollowsTheFinalAttempt:
         result, slept = _run_recording_sleeps("false", tmp_path)
 
         assert result.returncode == 1, result.stderr
-        assert slept == ["5", "10"], (
-            "three attempts have two gaps between them, so two sleeps. A "
-            "trailing '20' is the defect: the loop announced a retry, slept the "
-            "full 20 seconds, then left the loop and reported total failure"
+        assert slept == ["5", "10", "20", "40"], (
+            "five attempts have four gaps between them, so four sleeps. A "
+            "trailing '80' is the defect: the loop announced a retry, slept the "
+            "full 80 seconds, then left the loop and reported total failure"
         )
 
     def test_the_final_attempt_does_not_announce_a_retry(self, tmp_path):
         result, _ = _run_recording_sleeps("false", tmp_path)
 
-        assert "Attempt 3/3 failed, retrying" not in result.stderr, (
+        assert "Attempt 5/5 failed, retrying" not in result.stderr, (
             "the final attempt claimed a retry was coming and then the very next "
             "line said every attempt had failed"
         )
-        assert result.stderr.count("failed, retrying in") == 2
-        assert "All 3 attempts failed" in result.stderr
+        assert result.stderr.count("failed, retrying in") == 4
+        assert "All 5 attempts failed" in result.stderr
 
     def test_a_single_attempt_never_sleeps_at_all(self, tmp_path):
         """max=1 is the degenerate case: no gaps, so nothing to wait for."""
@@ -453,11 +459,19 @@ class TestALeadingZeroDelayIsReadAsBaseTen:
     Normalizing with ``$((10#$delay))`` after validation makes both consumers
     agree, so ``010`` and ``10`` become indistinguishable -- which is what the two
     assertions below compare, rather than hard-coding one expected list.
+
+    Every test in this class pins ``attempts=3`` rather than taking the script
+    default. The subject here is the delay arithmetic, and the length of the
+    recorded sleep list is a function of the attempt count -- so inheriting the
+    default coupled these assertions to a constant they say nothing about. They
+    all went red when that default moved from 3 to 5, reporting a base-ten
+    regression that had not happened. Three is enough to see one doubling, which
+    is the whole claim.
     """
 
     def test_a_delay_of_08_no_longer_aborts_the_loop(self, tmp_path):
         """08 is not valid octal, so the doubling was a fatal arithmetic error."""
-        result, slept = _run_recording_sleeps("false", tmp_path, delay="08")
+        result, slept = _run_recording_sleeps("false", tmp_path, attempts=3, delay="08")
 
         assert "value too great for base" not in result.stderr, (
             "bash could not parse the delay as octal and the arithmetic error "
@@ -472,7 +486,7 @@ class TestALeadingZeroDelayIsReadAsBaseTen:
         assert "All 3 attempts failed" in result.stderr
 
     def test_09_is_the_other_invalid_octal_digit(self, tmp_path):
-        result, slept = _run_recording_sleeps("false", tmp_path, delay="09")
+        result, slept = _run_recording_sleeps("false", tmp_path, attempts=3, delay="09")
 
         assert "value too great for base" not in result.stderr
         assert slept == ["9", "18"]
@@ -486,7 +500,7 @@ class TestALeadingZeroDelayIsReadAsBaseTen:
         """
         marker = tmp_path / "attempts"
         result, _ = _run_recording_sleeps(
-            f"printf x >> {marker}; false", tmp_path, delay="08"
+            f"printf x >> {marker}; false", tmp_path, attempts=3, delay="08"
         )
 
         assert marker.read_text() == "xxx", (
@@ -504,9 +518,11 @@ class TestALeadingZeroDelayIsReadAsBaseTen:
         ``['010', '16']`` against ``['10', '20']``.
         """
         octal_shaped, slept_octal_shaped = _run_recording_sleeps(
-            "false", tmp_path / "octal", delay="010"
+            "false", tmp_path / "octal", attempts=3, delay="010"
         )
-        _, slept_plain = _run_recording_sleeps("false", tmp_path / "plain", delay="10")
+        _, slept_plain = _run_recording_sleeps(
+            "false", tmp_path / "plain", attempts=3, delay="10"
+        )
 
         assert slept_plain == ["10", "20"], (
             "control: a plain decimal delay must still double, or the comparison "
@@ -525,7 +541,7 @@ class TestALeadingZeroDelayIsReadAsBaseTen:
 
     def test_a_delay_without_a_leading_zero_is_unchanged(self, tmp_path):
         """Positive control: normalization must not perturb the common case."""
-        result, slept = _run_recording_sleeps("false", tmp_path, delay=5)
+        result, slept = _run_recording_sleeps("false", tmp_path, attempts=3, delay=5)
 
         assert slept == ["5", "10"]
         assert "Attempt 1/3 failed, retrying in 5s..." in result.stderr
@@ -534,7 +550,7 @@ class TestALeadingZeroDelayIsReadAsBaseTen:
     def test_a_zero_delay_is_still_zero(self, tmp_path):
         """Every other test in this file collapses the backoff with 0, so this
         path has to survive the normalization or the whole file goes red."""
-        _, slept = _run_recording_sleeps("false", tmp_path, delay=0)
+        _, slept = _run_recording_sleeps("false", tmp_path, attempts=3, delay=0)
 
         assert slept == ["0", "0"]
 
@@ -636,8 +652,12 @@ class TestADelayTooLargeToSleepIsRejected:
         )
 
     def test_an_ordinary_delay_is_still_accepted(self, tmp_path):
-        """Positive control: the ceiling must not disturb the values callers use."""
-        _, slept = _run_recording_sleeps("false", tmp_path, delay=5)
+        """Positive control: the ceiling must not disturb the values callers use.
+
+        ``attempts=3`` for the same reason as the class above: the sleep list's
+        length tracks the attempt count, which this assertion is not about.
+        """
+        _, slept = _run_recording_sleeps("false", tmp_path, attempts=3, delay=5)
 
         assert slept == ["5", "10"]
 
