@@ -132,12 +132,23 @@ was left alone rather than fixed silently under an unrelated commit.
 
 ## Remaining scope
 
-- **Flatpak, MSIX, Chocolatey, winget** manifests and validation actions. No longer
-  blocked on the entry-point decision — declare `ash`, `ashv3` and
-  `automated-security-helper`, matching `[project.scripts]`. Still outstanding because
-  none of `flatpak-builder`, `makeappx`, `choco` or `winget` was available on the machine
-  this branch was built on, so writing them without local evidence would have produced
-  CI-only code — the opposite of how the deb and rpm were done.
+- **MSIX, Chocolatey, winget** manifests and validation actions. No longer blocked on the
+  entry-point decision — declare `ash`, `ashv3` and `automated-security-helper`, matching
+  `[project.scripts]`. Still outstanding because none of `makeappx`, `choco` or `winget`
+  was available on the machine this branch was built on, so writing them without local
+  evidence would have produced CI-only code — the opposite of how the deb and rpm were
+  done.
+
+  **Flatpak is done and is no longer in this list.** It was here for the same reason, and
+  the way out is worth recording because the other three may be able to use it: no
+  `flatpak-builder` on the host, but Docker was present, and a Fedora image can install
+  one. The obstacle that made this non-obvious is that `flatpak-builder` drives `bwrap`,
+  which has to create a user namespace, and an ordinary Docker container does not permit
+  that — `docker run fedora:41 bwrap --dev-bind / / --unshare-user-try /bin/true` exits 1
+  with "No permissions to creating new namespace", while the same command under
+  `--privileged` exits 0. So the package was built, installed and scan-tested locally in a
+  privileged container, and its CI job runs on the runner host rather than under a
+  `container:` key for the same reason. See `packaging/flatpak/README.flatpak`.
 - **Homebrew.** `Formula/ash.rb` calls `virtualenv_install_with_resources` with **zero
   `resource` stanzas**, so a real `brew install` would likely fail to vendor
   dependencies. CI only syntax-checks the formula, which is why this is invisible.

@@ -104,7 +104,17 @@ fi
 #    build step could have pip-installed dependencies into /app as loose modules rather
 #    than as wheels -- so the count below is paired with a check that site-packages was
 #    never created inside the app.
-PAYLOAD_WHEELS="$(find "$BUILD_DIR/files/share/ash/wheels" -maxdepth 1 -name '*.whl' | wc -l)"
+WHEELDIR="$BUILD_DIR/files/share/ash/wheels"
+# Tested separately from the count. `find` on a missing directory writes to stderr and
+# exits non-zero while `wc -l` still prints 0, so under `set -o pipefail` the two cases
+# "no wheels directory" and "no wheels in it" would both surface as a bare find error
+# with the script's own message never printed.
+[ -d "$WHEELDIR" ] || {
+  echo "error: the built app has no $WHEELDIR." >&2
+  echo "       The manifest's build-commands did not install the wheel." >&2
+  exit 1
+}
+PAYLOAD_WHEELS="$(find "$WHEELDIR" -maxdepth 1 -name '*.whl' | wc -l)"
 if [ "$PAYLOAD_WHEELS" -ne 1 ]; then
   echo "error: expected exactly 1 bundled wheel, found $PAYLOAD_WHEELS." >&2
   echo "       Bundling dependency wheels would put detect-secrets, a scanner, in a" >&2
@@ -117,7 +127,11 @@ fi
 #    only unpacked modules and .dist-info directories. Any .dist-info under /app is
 #    therefore the signal, and there must be none -- ASH itself is installed at first
 #    run into the user's data directory, never into /app.
-STRAY="$(find "$BUILD_DIR/files" -maxdepth 4 -name '*.dist-info' -o -maxdepth 4 -name '*.egg-info' | head -5)"
+#    No -maxdepth: the built app is one wheel and three scripts, so an unbounded walk
+#    costs nothing and cannot miss a depth. `pip install --target /app` leaves .dist-info
+#    at depth 1 and `--prefix /app` leaves it at depth 4, so any fixed bound here would
+#    be a guess about which mistake someone made.
+STRAY="$(find "$BUILD_DIR/files" \( -name '*.dist-info' -o -name '*.egg-info' \) | head -5)"
 if [ -n "$STRAY" ]; then
   echo "error: the built app contains installed Python distributions:" >&2
   printf '       %s\n' $STRAY >&2

@@ -246,11 +246,23 @@ Removing the package
 leaves ~/.var/app/io.github.awslabs.automated_security_helper alone, so the venv and
 anything else the app wrote survive. This differs from the .deb and .rpm, whose removal
 steps delete /usr/lib/ash/venv, and it is flatpak's design rather than a bug -- that
-directory is user data. To reclaim it:
+directory is user data. To remove the app and its data together:
 
   flatpak uninstall --delete-data io.github.awslabs.automated_security_helper
 
-Scanner binaries under ~/.ash/bin are not touched by either form, because ASH put them
+Use that form instead of the plain one, not after it. --delete-data acts on an installed
+app: run against one you already uninstalled, it exits 1 with "No installed refs found"
+and leaves the data where it was. If you have already uninstalled, delete the directory
+directly:
+
+  rm -rf ~/.var/app/io.github.awslabs.automated_security_helper
+
+On a machine with no session bus -- a container, an SSH session with no display --
+--delete-data removes the data and then exits non-zero with "Cannot autolaunch D-Bus
+without X11 $DISPLAY", because it also tries to revoke the app's portal permissions over
+that bus. The data is gone; check the directory rather than the exit code.
+
+Scanner binaries under ~/.ash/bin are not touched by any of these, because ASH put them
 there and no package manager tracks them.
 
 Building it yourself

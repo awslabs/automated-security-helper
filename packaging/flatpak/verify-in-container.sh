@@ -288,12 +288,13 @@ echo -n "   PATH inside the sandbox: "
 flatpak run --command=sh "$APP_ID" -c 'echo $PATH'
 
 echo "== 11. a plain uninstall leaves the venv, and --delete-data removes it"
-# This is where the Flatpak genuinely differs from the .deb and .rpm, whose removal
-# steps assert the venv is gone. Flatpak keeps ~/.var/app/$FLATPAK_ID across an
-# uninstall by design -- it is user data, not package content -- so the honest analogue
-# of "removal drops the venv" is `--delete-data`. Both halves are measured rather than
-# one being assumed.
-flatpak uninstall -y --system --noninteractive "$APP_ID" >/dev/null 2>&1
+# This is where the Flatpak genuinely differs from the .deb and .rpm, whose removal steps
+# assert the venv is gone. Flatpak keeps ~/.var/app/$FLATPAK_ID across an uninstall by
+# design -- it is user data, not package content -- so the honest analogue of "removal
+# drops the venv" is `--delete-data`. Both halves are measured rather than one assumed.
+flatpak uninstall -y --system --noninteractive "$APP_ID" >/tmp/uninstall.log 2>&1 || {
+  echo "   FAIL: plain uninstall failed" >&2; cat /tmp/uninstall.log >&2; exit 1
+}
 if [ ! -d "$DATA_ROOT" ]; then
   echo "   FAIL: a plain uninstall deleted $DATA_ROOT. That contradicts what" >&2
   echo "   README.flatpak tells users about reclaiming the space, so the doc is now" >&2
@@ -302,13 +303,36 @@ if [ ! -d "$DATA_ROOT" ]; then
 fi
 echo "   OK: plain uninstall kept $DATA_ROOT ($(du -sh "$DATA_ROOT" | cut -f1))"
 
-flatpak install -y --system --noninteractive --bundle "$BUNDLE" >/dev/null 2>&1
-flatpak uninstall -y --system --noninteractive --delete-data "$APP_ID" >/dev/null 2>&1
+# Reinstalled because --delete-data only works on an INSTALLED app. Measured: running it
+# against an app that has already been uninstalled exits 1 with "No installed refs found"
+# and leaves the data in place. That is why README.flatpak gives --delete-data as the
+# uninstall command rather than as a follow-up to one.
+flatpak install -y --system --noninteractive --bundle "$BUNDLE" >/tmp/reinstall.log 2>&1 || {
+  echo "   FAIL: reinstalling from the bundle failed" >&2; cat /tmp/reinstall.log >&2
+  exit 1
+}
+
+# The exit code is deliberately NOT the assertion here, and the reason is measured rather
+# than assumed: in a headless environment --delete-data removes the data and then exits 1
+# with "Cannot autolaunch D-Bus without X11 $DISPLAY", because it also tries to revoke the
+# app's portal permissions over the session bus. Asserting rc=0 would fail this step on
+# every container while the thing it is checking worked, and asserting nothing would let a
+# real failure through. So the assertion is on the observable effect, with the exit code
+# reported.
+set +e
+flatpak uninstall -y --system --noninteractive --delete-data "$APP_ID" >/tmp/delete-data.log 2>&1
+DELETE_RC=$?
+set -e
 if [ -d "$DATA_ROOT" ]; then
-  echo "   FAIL: $DATA_ROOT survived --delete-data" >&2
+  echo "   FAIL: $DATA_ROOT survived --delete-data (rc=$DELETE_RC)" >&2
+  cat /tmp/delete-data.log >&2
   exit 1
 fi
-echo "   OK: --delete-data removed the venv the first run created"
+echo "   OK: --delete-data removed the venv the first run created (rc=$DELETE_RC)"
+if [ "$DELETE_RC" -ne 0 ]; then
+  echo "      non-zero exit, and the data is gone. Reported rather than hidden:"
+  sed 's/^/        /' /tmp/delete-data.log
+fi
 
 echo
 echo "FLATPAK VERIFICATION PASSED"

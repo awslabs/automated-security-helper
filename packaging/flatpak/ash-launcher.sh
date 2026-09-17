@@ -105,9 +105,10 @@ fi
 
 VENV="$DATA/$(basename "$WHEEL" .whl)-$PYTAG"
 
-# -f and not -x throughout. The exec at the bottom hands this script to the venv's
-# interpreter rather than running it directly, so its execute bit is not what decides
-# whether the venv is usable, and testing for it would reject a venv that works.
+# -f and not -x throughout. The exec at the bottom passes the venv's console script to
+# the venv's interpreter as an argument rather than executing it, so that script's execute
+# bit is not what decides whether the venv is usable, and testing for it would reject a
+# venv that works.
 if [ ! -f "$VENV/bin/$SELF" ]; then
   # Built under a temporary name and moved into place, so an interrupted first run
   # leaves no half-populated venv that the next run would treat as complete. The move
