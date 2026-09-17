@@ -791,14 +791,47 @@ jobs:
       # `--formula` disambiguates the path from a cask. `--build-from-source` is
       # explicit rather than necessary -- a formula outside a tap has no bottle -- and
       # it documents that every resource is compiled here.
+      # Homebrew will not install a formula from a bare file path. Measured on the
+      # first run of this job (run 35275790822):
+      #
+      #   ##[error]Homebrew requires formulae to be in a tap, rejecting:
+      #     ./Formula/ash.rb
+      #   To create a tap, run e.g.  brew tap-new <user|org>/<repository>
+      #
+      # `ruby -c` had already passed on the same file in the step above, which is the
+      # useful part: the formula was fine and the invocation was not. Nothing local
+      # could have caught this, because `brew` is not installable on the machine this
+      # branch was written on -- this is the CI-only defect the formula work said to
+      # read this job's first run for.
+      #
+      # So the formula is copied into a throwaway local tap and installed by its
+      # qualified name. `brew tap-new` creates the directory layout and the git
+      # repository Homebrew expects, with no flags: a tap without a git repository is
+      # not one as far as `brew audit` is concerned, and no flag here can be verified
+      # off a macOS runner, so the plain invocation is the one to use. The tap is local
+      # to the runner and never pushed. Formula/ash.rb at the repository root stays the
+      # single source of truth; this copies it rather than maintaining a second one.
+      - name: Put the formula in a local tap, because Homebrew requires one
+        run: |
+          set -euo pipefail
+          brew tap-new ash/local
+          tap_dir="$(brew --repository ash/local)"
+          mkdir -p "${tap_dir}/Formula"
+          cp Formula/ash.rb "${tap_dir}/Formula/ash.rb"
+          echo "tap: ${tap_dir}"
+          # A copy nobody checks is a copy that can silently be the wrong file, and
+          # every step below now reads the copy rather than the original.
+          diff -u Formula/ash.rb "${tap_dir}/Formula/ash.rb"
+          echo "the tap's copy is byte-identical to the repository's formula"
+
       - name: Install ASH from the formula
-        run: brew install --verbose --build-from-source --formula ./Formula/ash.rb
+        run: brew install --verbose --build-from-source ash/local/ash
 
       # The formula's own `test do` block: a real scan of a fixture planted with an AWS
       # secret, asserting a non-zero SARIF result count. Asserting exit 0 would prove
       # nothing, because an ASH scan that finds nothing also exits 0.
       - name: Run the formula's test block
-        run: brew test --verbose --formula ./Formula/ash.rb
+        run: brew test --verbose ash/local/ash
 
       # Audit runs LAST, and the ordering is the point. It is the cheapest step here,
       # so putting it first would be the obvious choice, but `--strict` enables cops
@@ -812,5 +845,5 @@ jobs:
       # the check that catches a malformed resource block, which is the reason audit is
       # in this job at all.
       - name: Audit the formula against Homebrew's own rules
-        run: brew audit --strict --formula ./Formula/ash.rb
+        run: brew audit --strict ash/local/ash
 

@@ -273,10 +273,65 @@ Write-Step '6. the entry point runs, which is also the first-run venv creation'
 # First invocation does the bootstrap, so this step is slow on purpose and is where a missing
 # Python interpreter or an unreachable package index surfaces.
 & $resolved['ash'] --version
-if ($LASTEXITCODE -ne 0) {
-    Fail "ash --version exited $LASTEXITCODE"
+$ashExit = $LASTEXITCODE
+
+# The state of the venv is inspected BEFORE the exit code is judged, and the reason is a
+# real failure this ordering could not explain. On the job's first run (35275790822) the
+# bootstrap completed -- pip printed "Successfully installed automated-security-helper-3.7.0"
+# -- and then `ash --version` exited 1 having written nothing further. With the venv check
+# after the exit-code check, the run failed with one line and no way to tell whether the
+# bootstrap had finished, whether the console script existed, or whether the launcher had
+# found it and failed to exec it. That is three different bugs behind one message.
+#
+# A launcher that fails with no diagnostic is the same silent failure this branch exists to
+# remove, one layer down: an empty ASH scan exits 0, and here an empty ASH *error* exits 1.
+# So the venv is described first, unconditionally, and the exit code is judged after.
+$venvScripts = Join-Path $venv 'Scripts'
+$venvAsh = Join-Path $venvScripts 'ash.exe'
+Write-Host "   venv present:        $(Test-Path $venv)"
+Write-Host "   venv console script: $(Test-Path $venvAsh)  ($venvAsh)"
+if (Test-Path $venvScripts) {
+    $entries = Get-ChildItem -LiteralPath $venvScripts -Filter '*.exe' |
+        Select-Object -ExpandProperty Name
+    Write-Host "   Scripts\*.exe:       $($entries -join ', ')"
 }
-if (-not (Test-Path (Join-Path $venv 'Scripts\ash.exe'))) {
+if (Test-Path (Join-Path $venv 'pyvenv.cfg')) {
+    Write-Host "   pyvenv.cfg:"
+    Get-Content -LiteralPath (Join-Path $venv 'pyvenv.cfg') |
+        ForEach-Object { Write-Host "     $_" }
+}
+
+if ($ashExit -ne 0) {
+    # Re-run with the streams captured separately. The invocation above streams to the
+    # console, which is right for watching a slow bootstrap but means a short stderr
+    # message can be lost among several hundred lines of pip output. The second run is
+    # cheap because the venv now exists, and it is the run whose output names the fault.
+    Write-Host "   re-running with stdout and stderr captured:"
+    $stdoutPath = Join-Path $env:TEMP 'ash-version-stdout.txt'
+    $stderrPath = Join-Path $env:TEMP 'ash-version-stderr.txt'
+    $process = Start-Process -FilePath $resolved['ash'] -ArgumentList '--version' `
+        -NoNewWindow -Wait -PassThru `
+        -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+    Write-Host "     second run exit: $($process.ExitCode)"
+    foreach ($stream in @(@('stdout', $stdoutPath), @('stderr', $stderrPath))) {
+        $body = if (Test-Path $stream[1]) { Get-Content -LiteralPath $stream[1] -Raw } else { '' }
+        if ([string]::IsNullOrWhiteSpace($body)) {
+            Write-Host "     $($stream[0]): <empty>"
+        } else {
+            Write-Host "     $($stream[0]):"
+            $body.TrimEnd() -split "`n" | ForEach-Object { Write-Host "       $_" }
+        }
+    }
+    # And the venv's own console script directly, which separates a broken launcher from a
+    # broken ASH. If this one works, the bug is in AshLauncher.cs and not in the package.
+    if (Test-Path $venvAsh) {
+        Write-Host "   the venv's own ash.exe, bypassing the launcher:"
+        & $venvAsh --version
+        Write-Host "     exit: $LASTEXITCODE"
+    }
+    Fail "ash --version exited $ashExit"
+}
+if (-not (Test-Path $venvAsh)) {
     Fail "ash ran but created no venv at $venv, so nothing was bootstrapped where uninstall can reclaim it"
 }
 Write-Host "   venv created at $venv"
