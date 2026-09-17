@@ -210,12 +210,39 @@ transitive-only change is caught by `brew install` or `--check` and not by the t
 
 ## Remaining scope
 
-- **Flatpak, MSIX, Chocolatey, winget** manifests and validation actions. No longer
-  blocked on the entry-point decision — declare `ash`, `ashv3` and
-  `automated-security-helper`, matching `[project.scripts]`. Still outstanding because
-  none of `flatpak-builder`, `makeappx`, `choco` or `winget` was available on the machine
-  this branch was built on, so writing them without local evidence would have produced
-  CI-only code — the opposite of how the deb and rpm were done.
+**Flatpak, MSIX, Chocolatey, winget and Homebrew have all left this list**, and the way
+out is worth recording because it is the same obstacle each time and the same answer: the
+tool that builds the package was absent from the machine, and the plan's own standard says
+writing a manifest without local evidence produces CI-only code, which is the opposite of
+how the deb and rpm were done.
+
+- **Flatpak** was unblocked by Docker. A Fedora image can install `flatpak-builder`, but
+  `flatpak-builder` drives `bwrap`, which has to create a user namespace, and an ordinary
+  Docker container does not permit that — `docker run fedora:41 bwrap --dev-bind / /
+  --unshare-user-try /bin/true` exits 1 with "No permissions to creating new namespace",
+  while the same command under `--privileged` exits 0. So the package was built, installed
+  and scan-tested locally in a privileged container, and its CI job runs on the runner host
+  rather than under a `container:` key for that reason. See
+  `packaging/flatpak/README.flatpak`.
+- **MSIX, Chocolatey and winget** could not be built locally at all — no `makeappx`,
+  `signtool`, `choco`, `dotnet` or PowerShell on the host — so the local evidence is
+  schema conformance rather than a build, and `windows-latest` is where each one is packed
+  and exercised. Each format carries a validator that is itself shown failing, because a
+  schema check pointed at nothing exits 0: `xmllint` without `--schema` accepts an
+  `AppxManifest.xml` missing every required element, and `aka.ms` answers a nonexistent
+  winget schema version with an HTTP 200 Bing page rather than a 404. Read
+  `packaging/msix/README.msix`, `packaging/chocolatey/README.chocolatey` and
+  `packaging/winget/README.winget` — the last of which states that the manifest set is
+  schema-valid and build-tested but deliberately **not** submission-ready, because it
+  points at a self-signed MSIX.
+- **Homebrew** still has no `brew` on the host. What changed is that the missing piece was
+  a `resource` block, and a `resource` stanza is a URL and a sha256 that the PyPI JSON API
+  serves — metadata, not a build — so the generator and its test are real local evidence
+  even though `brew install` is not. That leg runs on `macos-latest` and its first run is
+  the first execution anywhere. See "The Homebrew formula could not have worked" above.
+
+Still open:
+
 - **VS Code `.vsix` and the JetBrains plugin.**
 - **Provenance for the native packages.** The wheel and sdist are attested; the `.deb`
   and `.rpm` are built in CI but not attached to a release or attested.

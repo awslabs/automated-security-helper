@@ -1,0 +1,160 @@
+# Flatpak manifest for ASH. Built by packaging/flatpak/build.sh; do not run
+# flatpak-builder against this file in place -- see that script for why.
+#
+# YAML AND NOT JSON, WHICH IS A DECISION
+#
+# flatpak-builder accepts either. This file is YAML because every packaging file in
+# this directory tree explains itself in comments, and JSON cannot hold a comment.
+# packaging/deb/build.sh:62-72 is the evidence: a block of rationale lives there,
+# displaced from debian/control.in, because dpkg-deb rejects a '#' line in a control
+# file with "field name '#' must be followed by colon". Choosing JSON here would
+# reproduce that displacement by choice rather than by constraint -- every explanation
+# below would move into build.sh, one indirection away from the line it explains.
+#
+# WHY org.freedesktop.Sdk IS THE RUNTIME AND NOT org.freedesktop.Platform
+#
+# Platform is the conventional runtime and it is the wrong one here. Measured inside
+# `flatpak run` against 24.08 of each:
+#
+#                    Platform 24.08      Sdk 24.08
+#   python3          3.12.14             3.12.14
+#   ensurepip        present             present
+#   git              ABSENT              /usr/bin/git
+#   cc               ABSENT              /usr/bin/cc
+#
+# The interpreter is identical, so nothing is gained by the smaller runtime on the
+# axis that would normally decide this. The two absences both matter:
+#
+#   git. ASH shells out to it in automated_security_helper/utils/get_scan_set.py:677
+#   (`git rev-parse --show-toplevel`) and :718 (`git diff --name-only`). The first
+#   catches FileNotFoundError and returns None, and its own docstring says None means
+#   "not a repository, or git is not on PATH, or timed out". So on a runtime without
+#   git, a diff-scoped or precommit scan does not fail -- it silently widens to
+#   scanning everything. A scan whose scope quietly changed is worse than one that
+#   refuses to start.
+#
+#   cc. The first run resolves ASH's runtime dependencies from a Python index. Any
+#   dependency with no wheel for this interpreter and architecture is built from its
+#   sdist, which needs a compiler. On Platform that failure would land in the middle
+#   of a user's first invocation.
+#
+# The cost is size: Sdk is about 1.8 GB installed against Platform's smaller
+# footprint. README.flatpak states that plainly rather than burying it.
+#
+# runtime-version is quoted. '24.08' unquoted is not a YAML number, but 24.08 as a
+# branch name is a string in a position where a bare 2408 or 24.8 would silently be
+# accepted by the parser and rejected by flatpak, so the quotes are load-bearing
+# documentation as much as syntax.
+id: io.github.awslabs.automated_security_helper
+runtime: org.freedesktop.Sdk
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+command: ash
+
+# `stable` and not the flatpak default. flatpak-builder's default branch name is a term
+# this project does not use, and Flathub's own convention for a release branch is
+# `stable`, so naming it here is both the house style and the conventional value.
+# build.sh passes the same string to `flatpak build-bundle`, which needs a branch.
+branch: stable
+
+# THE SANDBOX GRANT. This is the part of the file to read before changing anything.
+#
+# --filesystem=host, because ASH reads arbitrary source trees and writes its report
+# inside them. Concretely: automated_security_helper/cli/scan.py:634-635 defaults
+# --source-dir to Path.cwd(), and :636-640 defaults --output-dir to
+# <source-dir>/.ash/ash_output. Both are host paths chosen by the user at invocation
+# time, and a Flatpak with no filesystem grant installs and runs `ash --version` and
+# then cannot see either of them.
+#
+# Nothing narrower works, and this was checked against the documented option set
+# rather than assumed:
+#
+#   --filesystem=home            Would cover a checkout under $HOME and nothing else.
+#                                /srv, /opt, /workspace, /data and a second disk are
+#                                all normal places to keep source.
+#   --filesystem=/some/path      Static. The docs state grants permit no variable
+#                                expansion or substitution, so there is no way to say
+#                                "wherever the user cd'd to".
+#   the Documents portal         Portals hand an app a file the user picked in a
+#                                dialog. ASH takes a directory on a command line, is
+#                                run non-interactively in hooks and CI, and walks the
+#                                tree itself, so there is no dialog to put in the path.
+#
+# What the grant costs, stated rather than softened: read and write access to every
+# toplevel path under / and their subpaths, except the reserved set (/app, /bin, /dev,
+# /etc, /lib, /lib32, /lib64, /proc, /run/flatpak, /run/host, /sbin, /usr) and except
+# /boot, /efi, /root, /sys, /tmp, /var and ~/.var/app, which host does not include.
+# That is most of the confinement a Flatpak would otherwise provide. README.flatpak
+# says what a user who wants it back can do instead.
+#
+# --share=network, because the first run pip-installs ASH's wheel and resolves its
+# dependencies from a Python index. Without it the bootstrap in ash-launcher.sh fails
+# and keeps failing. ASH also downloads scanner binaries on `ash dependencies install`.
+#
+# Nothing else is granted. No --socket=x11, --socket=wayland, --socket=pulseaudio,
+# --device=dri or --talk-name: ASH is a terminal program with no display, audio or
+# D-Bus surface, and an unused socket grant is a permission a reviewer has to think
+# about forever.
+finish-args:
+  - --filesystem=host
+  - --share=network
+
+modules:
+  - name: ash
+    buildsystem: simple
+    sources:
+      # A local directory and a local file. No `url` anywhere in this manifest, which
+      # is the whole shape of the boundary: the conventional Flatpak Python recipe is
+      # flatpak-pip-generator output, a sources list with one url+sha256 per
+      # dependency, and a build that pip-installs them into /app. That would put 27
+      # third-party distributions inside a published bundle. build.sh passes
+      # --disable-download so that adding such a source fails the build instead of
+      # fetching it, and no build-options grants the build sandbox network, so a
+      # build-time `pip install` of dependencies cannot succeed either. That second
+      # half is measured, not assumed: adding `pip download requests` to the
+      # build-commands below fails with
+      #   Failed to resolve 'pypi.org' ([Errno -3] Temporary failure in name resolution)
+      # so this boundary is a mechanism rather than a review item.
+      #
+      # wheels/ is populated by build.sh with exactly one file: the wheel that already
+      # passed .github/scripts/assert-artifact-contents.py.
+      - type: dir
+        path: wheels
+        dest: wheels
+      - type: file
+        path: ash-launcher.sh
+    build-commands:
+      - |
+        set -eu
+
+        # The one-wheel rule, checked at build time. build.sh checks the result and
+        # ash-launcher.sh checks it again on the user's machine; this is the copy that
+        # runs closest to the thing being assembled, so it is the one that names what
+        # went wrong while the build dir still exists to look at.
+        set -- wheels/*.whl
+        if [ "$#" -ne 1 ] || [ ! -f "$1" ]; then
+          echo "expected exactly 1 wheel under wheels/, found $#" >&2
+          echo "see packaging/README.md: a published artifact carries ASH's own" >&2
+          echo "wheel and no third-party code" >&2
+          exit 1
+        fi
+        install -Dm0644 "$1" "/app/share/ash/wheels/$(basename "$1")"
+
+        # All three names the wheel's [project.scripts] declares. One script, two
+        # symlinks, dispatching on basename -- so the three cannot drift apart, and
+        # `flatpak run --command=automated-security-helper` reaches the escape-hatch
+        # name that exists for hosts where a bare `ash` resolves to something else.
+        install -Dm0755 ash-launcher.sh /app/bin/ash
+        ln -s ash /app/bin/ashv3
+        ln -s ash /app/bin/automated-security-helper
+
+        # Fail the build, not the first run, if the runtime's python is below ASH's
+        # floor. This is the same defect the .rpm hit in CI on its first attempt --
+        # Amazon Linux 2023's python3 is 3.9 against ASH's >=3.10 -- caught one layer
+        # earlier. The check runs against the Sdk's python3 at build time and the
+        # runtime is that same Sdk, so it is the interpreter the launcher will use.
+        python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' || {
+          echo "the runtime's python3 is $(python3 -V 2>&1), below ASH's >=3.10 floor" >&2
+          echo "raise runtime-version in this manifest" >&2
+          exit 1
+        }

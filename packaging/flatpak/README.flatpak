@@ -1,0 +1,355 @@
+ash as a Flatpak
+================
+
+This package is built and tested here and published as a GitHub Release asset. It is
+not submitted to Flathub, and nothing under packaging/flatpak/ talks to Flathub except
+to download the org.freedesktop runtime it builds against.
+
+What you get on PATH, which is not "ash"
+----------------------------------------
+
+The .deb and .rpm both install /usr/bin/ash. A Flatpak cannot: /app is a read-only
+OSTree checkout, and the only host-visible name flatpak exports is the application ID.
+So after installing you have
+
+  flatpak run io.github.awslabs.automated_security_helper scan --source-dir .
+
+and the app ID, not "ash", is what appears in
+/var/lib/flatpak/exports/bin. All three names the wheel declares are inside the
+sandbox, reachable with --command:
+
+  flatpak run --command=ash                       io.github.awslabs.automated_security_helper --version
+  flatpak run --command=ashv3                     io.github.awslabs.automated_security_helper --version
+  flatpak run --command=automated-security-helper io.github.awslabs.automated_security_helper --version
+
+ash is canonical. ashv3 warns once on stderr and then runs. automated-security-helper
+is silent and kept indefinitely, for hosts where a bare ash resolves to something else.
+Because "ash" is the default command, the first form above is what a bare
+`flatpak run io.github.awslabs.automated_security_helper` gives you.
+
+For a short name, alias it or link it yourself:
+
+  # a shell alias
+  alias ash='flatpak run io.github.awslabs.automated_security_helper'
+
+  # or a wrapper on PATH, which also works from scripts and hooks
+  printf '#!/bin/sh\nexec flatpak run io.github.awslabs.automated_security_helper "$@"\n' \
+    | sudo tee /usr/local/bin/ash >/dev/null && sudo chmod 0755 /usr/local/bin/ash
+
+The sandbox trade: this package grants --filesystem=host
+--------------------------------------------------------
+
+Read this section before deciding whether to use the Flatpak rather than the .deb, the
+.rpm, or a pip install.
+
+ASH reads arbitrary source trees, and it writes its report inside the tree it scanned.
+Concretely, in automated_security_helper/cli/scan.py: --source-dir defaults to the
+process working directory, and --output-dir defaults to <source-dir>/.ash/ash_output.
+Both are host paths the user picks at invocation time.
+
+A Flatpak with no filesystem grant therefore installs cleanly, runs `ash --version`
+cleanly, and then scans nothing. It does not error: the sandbox shows it an empty
+directory where the source tree should be, and an empty scan exits 0 with a report
+containing no findings. That is the worst available outcome -- a security tool that
+reports all-clear because it could not see the code.
+
+So the manifest grants --filesystem=host. What that gives up, stated plainly: the app
+can read and write every top-level path under / and everything below them, except the
+reserved set (/app, /bin, /dev, /etc, /lib, /lib32, /lib64, /proc, /run/flatpak,
+/run/host, /sbin, /usr) and except /boot, /efi, /root, /sys, /tmp, /var and
+~/.var/app, which "host" does not cover. Your home directory, your SSH keys, your
+cloud credentials, and every other project on the machine are all inside that. This is
+most of the filesystem confinement a Flatpak would otherwise give you.
+
+What remains: process, IPC and network-namespace separation, an immutable /app, a
+runtime that is not your host's /usr, and no display, audio or D-Bus access at all --
+the manifest grants no --socket and no --talk-name. Those are real, and they are not
+what most people mean by "sandboxed".
+
+Why nothing narrower works
+--------------------------
+
+  --filesystem=home        Covers a checkout under $HOME and nothing else. /srv, /opt,
+                           /workspace, /data and a second disk are all ordinary places
+                           to keep source, and none of them is under $HOME.
+
+  --filesystem=/path       Static. Flatpak grants permit no variable expansion or
+                           substitution, so there is no way to write "wherever the user
+                           cd'd to" -- which is exactly what ASH's default source
+                           directory is.
+
+  the Documents portal     A portal hands an app one file the user picked in a dialog.
+                           ASH takes a directory on a command line, walks it itself,
+                           and is run non-interactively from pre-commit hooks and CI
+                           where there is no dialog and no user to answer it.
+
+  --persist=DIR            Not available to this app at all: --persist only works when
+                           the app has no home-or-broader permission, and host is
+                           broader. It would not have solved the source-tree problem
+                           anyway; it redirects a path in the sandbox to the app's own
+                           data directory rather than exposing a host path.
+
+If you want tighter confinement
+-------------------------------
+
+The grant in the manifest is a default, not a ceiling. flatpak override changes it
+per machine, and the narrower grant then applies to every invocation:
+
+  # Replace whole-host access with one tree
+  flatpak override --user \
+    --nofilesystem=host \
+    --filesystem=~/src \
+    io.github.awslabs.automated_security_helper
+
+  # Inspect what is actually in force
+  flatpak info --show-permissions io.github.awslabs.automated_security_helper
+
+  # Undo it
+  flatpak override --user --reset io.github.awslabs.automated_security_helper
+
+With that override, ASH can scan anything under ~/src and nothing else -- and a scan
+pointed anywhere else reports zero findings rather than an error, for the reason at the
+top of this section. Add --filesystem=:ro if you also pass --output-dir to somewhere
+writable; the default output path is inside the scanned tree, so a read-only grant on
+that tree alone is not enough.
+
+If filesystem confinement is the reason you are considering a Flatpak, the honest
+answer is that this package is the wrong tool for it. A .deb, an .rpm, or a pip install
+inside a container you control gives you the same scanning behavior with confinement
+you can reason about, and packaging/README.md points at both.
+
+Container mode does not work from inside this Flatpak
+-----------------------------------------------------
+
+`ash scan --mode container` cannot work here, and this is measured rather than assumed:
+the verification script asserts it.
+
+ASH's container runner looks for finch, docker, nerdctl or podman on PATH and shells
+out to whichever it finds first (automated_security_helper/interactions/
+run_ash_container.py). Inside the sandbox, PATH is /app/bin:/usr/bin, and that /usr is
+the runtime's own -- /usr is a reserved path that even --filesystem=host does not
+expose. A runner installed on the host is not on PATH and cannot be put there.
+
+Granting the docker socket would not fix this and is not worth attempting. It would
+need the client binary injected into the sandbox as well as the socket, and write access
+to a container daemon's socket is equivalent to root on the host, so it would remove
+every remaining protection this package has rather than restoring one feature.
+
+The default mode is local (RunMode.local), so this affects only an explicit
+`--mode container`. Local mode is the mode this package is verified in. `--mode nix` is
+unavailable for the same reason: it needs a host binary the sandbox cannot see.
+
+If you need container mode, use the .deb, the .rpm, or a pip install on the host.
+
+Why this package needs a Python index on first run
+--------------------------------------------------
+
+The Flatpak bundles ASH's own wheel and nothing else. There is no post-install hook in
+Flatpak -- an installed app is immutable and no code runs on your machine at install
+time -- so instead of a %post scriptlet, the launcher at /app/bin/ash creates a
+virtualenv the first time you run it, under
+
+  ~/.var/app/io.github.awslabs.automated_security_helper/data/
+
+and installs that wheel into it, which resolves ASH's 27 runtime dependencies from
+whatever Python index the host is configured for. Later runs find the venv and exec it.
+
+This is not an oversight. ASH's own code may ship in a package published by the
+project; third-party code may not. Carrying exactly one wheel is the guard that keeps
+this package on the right side of that line, because it can be checked by counting the
+files under /app/share/ash/wheels/ rather than by judging each dependency one at a
+time.
+
+For a Flatpak the pressure to do otherwise is stronger than for the .deb or .rpm. The
+conventional Python recipe is flatpak-pip-generator, which emits a sources list with one
+URL and hash per dependency and a build step that pip-installs them into /app -- and a
+bundle carries whatever is in /app, so that would publish 27 third-party distributions.
+Two things make it fail rather than merely discourage it: build.sh passes
+--disable-download, and no build-options grants the build sandbox network. Measured, by
+adding a `pip download requests` to the manifest's build-commands:
+
+  Failed to resolve 'pypi.org' ([Errno -3] Temporary failure in name resolution)
+
+So a build-time dependency install cannot reach an index even if someone adds one.
+
+Building a self-contained offline bundle for your own hosts is fine, and the commands
+below are the supported way to do it. The line is about what the project publishes, not
+about what the bytes are allowed to do.
+
+On a host with no reachable index, stage a wheelhouse and point the first run at it:
+
+  pip download automated-security-helper==<version> -d /srv/ash-wheels
+
+  PIP_NO_INDEX=1 PIP_FIND_LINKS=/srv/ash-wheels \
+    flatpak run io.github.awslabs.automated_security_helper --version
+
+Environment variables and not /etc/pip.conf. The pip that runs is inside the sandbox,
+which sees the runtime's /etc rather than the host's, so a host /etc/pip.conf is invisible
+to it. Variables do cross: `PIP_NO_INDEX=1 flatpak run ...` reaches the first-run
+bootstrap and stops it with "No matching distribution found for attrs<27.0.0,>=26.1",
+which is how the two commands above were checked.
+
+/srv is readable from the sandbox for the same reason a source tree is -- see the coverage
+list below. /tmp and /var are not, so a wheelhouse in either is invisible.
+
+For a setting that persists rather than being retyped, the pip config file the sandbox
+actually reads is under the app's own config directory. Taken from
+`pip config debug` run inside the sandbox, the user-level candidates are
+
+  ~/.pip/pip.conf
+  ~/.var/app/io.github.awslabs.automated_security_helper/config/pip/pip.conf
+
+and the second is the one flatpak points $XDG_CONFIG_HOME at:
+
+  mkdir -p ~/.var/app/io.github.awslabs.automated_security_helper/config/pip
+  printf '[global]\nno-index = true\nfind-links = /srv/ash-wheels\n' \
+    > ~/.var/app/io.github.awslabs.automated_security_helper/config/pip/pip.conf
+
+Note that ~/.config/pip/pip.conf -- the path that works for a normal pip -- is NOT read,
+because $XDG_CONFIG_HOME inside the sandbox is not ~/.config.
+
+What --filesystem=host actually covers, measured
+------------------------------------------------
+
+Writing a marker file on the host and reading it back from inside the sandbox:
+
+  /home    visible        /tmp   not visible
+  /srv     visible        /var   not visible
+  /opt     visible        /root  not visible
+  /mnt     visible
+
+A source tree under any of the visible paths scans normally. One under /var -- a CI
+workspace at /var/lib/<something>/workspace, for instance -- does not, and the symptom is
+a clean scan with no findings rather than an error. Grant it explicitly:
+
+  flatpak override --user --filesystem=/var/lib/jenkins \
+    io.github.awslabs.automated_security_helper
+
+A write to a path the sandbox cannot see does not fail. It lands in the sandbox's own
+throwaway filesystem, reads back correctly for the rest of that invocation, and is gone
+afterwards -- measured by writing a file under an ungranted $HOME, seeing `ls -l` report
+it, and finding it absent in the very next `flatpak run` and absent on the host. That is
+the shape to expect from every ungranted path, and the reason the coverage list above is
+worth checking against where your source and your output directory live.
+
+Scanners are not installed by this package
+------------------------------------------
+
+ASH drives third-party scanners; it does not contain them. After installing:
+
+  flatpak run io.github.awslabs.automated_security_helper dependencies install
+  flatpak run io.github.awslabs.automated_security_helper dependencies install --tool grype
+
+ASH installs those into $ASH_BIN_PATH, which defaults to ~/.ash/bin. For an ordinary user
+whose home is under /home that is a real host path, so the binaries land in the same place
+the .deb and .rpm put them and a machine with both packages shares one set.
+
+For root, whose home is /root, it is not: /root is outside --filesystem=host, so the
+install appears to succeed and the binaries are gone by the next invocation -- see the
+measured note at the end of the coverage section above. If you are running as root, or your
+home is anywhere the coverage list does not include, either grant it
+
+  flatpak override --user --filesystem=/root io.github.awslabs.automated_security_helper
+
+or send the binaries somewhere already reachable
+
+  ASH_BIN_PATH=/srv/ash-bin flatpak run \
+    io.github.awslabs.automated_security_helper dependencies install
+
+That second form rests on two things: environment variables set outside `flatpak run` do
+reach the app, and ASH reads $ASH_BIN_PATH in preference to the ~/.ash/bin default
+(automated_security_helper/core/constants.py:19-22).
+
+Why the runtime is org.freedesktop.Sdk and not org.freedesktop.Platform
+----------------------------------------------------------------------
+
+Platform is the conventional runtime for an application and it is the wrong one here.
+Measured inside `flatpak run` against 24.08 of each: both ship Python 3.12.14 with
+ensurepip, so the interpreter is a wash. Platform has no git and no compiler; Sdk has
+both.
+
+git matters because ASH shells out to it to compute a scan set, and the call site
+returns None when git is absent -- which widens a diff-scoped or precommit scan to
+scanning everything rather than failing. A scan whose scope quietly changed is worse
+than one that refuses to start. A compiler matters because the first run installs 27
+dependencies from an index, and any without a matching wheel are built from source.
+
+The cost is size: about 1.8 GB installed against Platform's smaller footprint. If you
+already have other Flatpaks, some of that is shared; if this is your only one, it is
+not. Nothing else is downloaded, though -- the app names Sdk as both its runtime and
+its sdk, so building it needs that one runtime rather than two.
+
+Files
+-----
+
+  /app/share/ash/wheels/       ASH's wheel, the app's only payload
+  /app/bin/ash                 the launcher; creates the venv on first run
+  /app/bin/ashv3               symlink to ash, dispatching on basename
+  /app/bin/automated-security-helper   symlink to ash
+
+  ~/.var/app/io.github.awslabs.automated_security_helper/data/
+                               where first run builds the venv, named after the wheel
+                               and the python version
+
+The venv path contains the wheel filename and the interpreter version on purpose. An
+upgraded Flatpak carries a new wheel, so it gets a new venv rather than serving the old
+ASH out of the old one -- there is no post-install hook to clear it, and a stale venv
+would make `ash --version` report the previous release with no error anywhere. A new
+runtime branch changes the python version the same way.
+
+Old venvs stay behind after an upgrade. That is disk, not correctness:
+
+  du -sh ~/.var/app/io.github.awslabs.automated_security_helper/data/*
+  rm -rf ~/.var/app/io.github.awslabs.automated_security_helper/data/automated_security_helper-<old>*
+
+Removing the package
+--------------------
+
+  flatpak uninstall io.github.awslabs.automated_security_helper
+
+leaves ~/.var/app/io.github.awslabs.automated_security_helper alone, so the venv and
+anything else the app wrote survive. This differs from the .deb and .rpm, whose removal
+steps delete /usr/lib/ash/venv, and it is flatpak's design rather than a bug -- that
+directory is user data. To remove the app and its data together:
+
+  flatpak uninstall --delete-data io.github.awslabs.automated_security_helper
+
+Use that form instead of the plain one, not after it. --delete-data acts on an installed
+app: run against one you already uninstalled, it exits 1 with "No installed refs found"
+and leaves the data where it was. If you have already uninstalled, delete the directory
+directly:
+
+  rm -rf ~/.var/app/io.github.awslabs.automated_security_helper
+
+On a machine with no session bus -- a container, an SSH session with no display --
+--delete-data removes the data and then exits non-zero with "Cannot autolaunch D-Bus
+without X11 $DISPLAY", because it also tries to revoke the app's portal permissions over
+that bus. The data is gone; check the directory rather than the exit code.
+
+Scanner binaries under ~/.ash/bin are not touched by any of these, because ASH put them
+there and no package manager tracks them.
+
+Building it yourself
+--------------------
+
+  ./packaging/flatpak/build.sh dist/automated_security_helper-<version>-py3-none-any.whl out/
+
+needs flatpak, flatpak-builder, and org.freedesktop.Sdk//24.08 installed. It writes
+out/ash-<version>-<arch>.flatpak.
+
+flatpak-builder drives bwrap, which has to create a user namespace, and an ordinary
+Docker container does not permit that. Measured on a Docker 25.0 host:
+
+  docker run fedora:41 bwrap --dev-bind / / --unshare-user-try /bin/true
+    -> bwrap: No permissions to creating new namespace, likely because the kernel does
+       not allow non-privileged user namespaces.                            (exit 1)
+  docker run --privileged fedora:41 <the same>                              (exit 0)
+
+That is why packaging/flatpak/verify-in-container.sh needs a privileged container while
+the .deb and .rpm scripts run in an ordinary job container, and why the CI job for this
+package runs on the runner host rather than under a `container:` key. The script checks
+bwrap before it checks anything else, so an environment that cannot build a Flatpak says
+so in its first few lines.
+
+  docker run --rm --privileged -v "$PWD:/src" -v ash-flatpak-store:/var/lib/flatpak \
+    fedora:41 bash /src/packaging/flatpak/verify-in-container.sh

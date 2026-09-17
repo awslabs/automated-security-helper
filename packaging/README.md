@@ -45,7 +45,13 @@ judgment nobody will re-run.
 |---|---|---|
 | `deb/` | Debian, Ubuntu | build + install + real scan in `debian:bookworm` |
 | `rpm/` | Amazon Linux, RHEL | build + install + real scan in `amazonlinux:2023` |
+| `flatpak/` | any Linux with flatpak | build + install + real scan against `org.freedesktop.Sdk//24.08` |
 | `homebrew/` | Homebrew tap, for `Formula/ash.rb` at the repository root | `brew install` + `brew test` + `brew audit --strict` on `macos-latest` |
+
+The Flatpak needs a privileged container or a host that permits unprivileged user
+namespaces, because `flatpak-builder` drives `bwrap`. That is why its CI job has no
+`container:` key while the deb and rpm jobs do, and `packaging/flatpak/README.flatpak`
+carries the measurement.
 
 `homebrew/` is the odd one out and the rest of this file does not describe it. It builds
 no package and bundles no wheel: it holds the generator that keeps the formula's
@@ -69,3 +75,28 @@ Both packages install the same way, so a bug in one is a bug in the other:
 
 Removal drops the venv, because `pip` created it after install and no package manager
 tracks files a `postinst` wrote.
+
+## Where the Flatpak differs, and why
+
+Flatpak has no post-install hook: an installed app is a read-only OSTree checkout and no
+code runs on the user's machine at install time. So the venv is built on **first run**,
+by a launcher at `/app/bin/ash`, into
+`~/.var/app/io.github.awslabs.automated_security_helper/data/`. The bundled wheel still
+lives inside the app, at `/app/share/ash/wheels/`, and the count is still one.
+
+The one-wheel rule needs a second check for this format that the `.deb` and `.rpm` do not
+need. Those two can only gain third-party code by gaining a `.whl` file. A Flatpak build
+step could instead `pip install` dependencies straight into `/app`, which leaves unpacked
+modules and `.dist-info` directories and no wheel at all — so `packaging/flatpak/build.sh`
+counts wheels *and* fails on any `.dist-info` or `.egg-info` under the built app.
+
+Two things stop that happening by accident rather than by review: `build.sh` passes
+`--disable-download`, and the manifest grants the build sandbox no network. The second was
+measured by putting a `pip download requests` in the manifest's build-commands, which fails
+with `Failed to resolve 'pypi.org' ([Errno -3] Temporary failure in name resolution)`.
+
+The Flatpak also cannot put `ash` on the host's PATH — flatpak exports the application ID
+— and it grants `--filesystem=host`, without which it would install and then be unable to
+read the tree it was asked to scan. `packaging/flatpak/README.flatpak` documents both,
+including what the permission gives up and what a user who wants tighter confinement can
+do instead.
