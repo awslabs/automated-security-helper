@@ -343,24 +343,44 @@ def check_census(
     never loaded. JaCoCo makes this less likely than jest does, and not impossible -- a class
     excluded from the compile task, or a file under a source root the build does not read,
     is absent from the report exactly as an unimported TypeScript file is.
+
+    One case a future contributor will meet and should not treat as a bug in this check: a
+    `package-info.java` or `module-info.java` carrying no annotations produces no class file, so
+    it is tracked, compiled by the same task as everything else, and absent from the report.
+    Verified by adding one, which failed here as intended. It is NOT special-cased, on purpose.
+    "Nothing can measure this file" is exactly the disposition coverage-exclusions.json exists
+    to record as a committed claim, and a silent skip for a whole file-name pattern is the
+    opposite of that. Add an entry with a new kind and the staleness test that fits it.
     """
     problems: list[str] = []
     prefix = f"{here.relative_to(repo_root).as_posix()}/{source_root}/"
     excluded_paths = {entry["path"] for entry in exclusions}
-    # Taken from the class elements' sourcefilename attribute rather than from the sourcefile
-    # elements' name attribute. Both exist in a JaCoCo report and only the first is guaranteed:
-    # sourcefile elements are emitted only when the report task was given sourceDirectories, so
-    # reading them made this census report every file as missing when it was not.
-    reported_sources = {
-        element.get("sourcefilename") for element in measured_classes(report)
-    }
+
+    # Package-qualified, not by basename. Two classes in different packages can share a file
+    # name, and a basename comparison would report the second as measured on the strength of
+    # the first -- a false pass in the one check whose whole job is to find a file nothing
+    # looked at.
+    #
+    # The pair comes from the class elements' own attributes rather than from the report's
+    # sourcefile elements: JaCoCo emits those only when the report task was given
+    # sourceDirectories, and reading them made this census report every file as missing when
+    # none was.
+    reported_sources = set()
+    for package in report.findall("package"):
+        package_path = package.get("name", "")
+        for element in package.findall("class"):
+            source = element.get("sourcefilename")
+            if source:
+                reported_sources.add(f"{package_path}/{source}" if package_path else source)
 
     for tracked in sorted(tracked_files(repo_root)):
         if not tracked.startswith(prefix) or not tracked.endswith(".java"):
             continue
         if tracked in excluded_paths:
             continue
-        if pathlib.PurePosixPath(tracked).name not in reported_sources:
+        # The path relative to the source root IS the package path plus the file name, which is
+        # exactly the key built above. That equivalence is what a Java source layout guarantees.
+        if tracked[len(prefix):] not in reported_sources:
             problems.append(
                 f"{tracked} is tracked but appears in neither the coverage report nor "
                 "coverage-exclusions.json. Either it is not being compiled into the measured "

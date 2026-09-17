@@ -44,6 +44,7 @@ check, which is a failure and not a skip.
 from __future__ import annotations
 
 import argparse
+import io
 import pathlib
 import sys
 import zipfile
@@ -143,8 +144,7 @@ def main(argv: list[str]) -> int:
 def check_own_jar(archive: zipfile.ZipFile, name: str) -> list[str]:
     """Refuses a jar of ours that has had someone else's classes folded into it."""
     problems: list[str] = []
-    import io
-
+    # Read whole, because ZipFile needs a seekable stream and the entry stream is not one.
     with archive.open(name) as stream:
         payload = io.BytesIO(stream.read())
     with zipfile.ZipFile(payload) as inner:
