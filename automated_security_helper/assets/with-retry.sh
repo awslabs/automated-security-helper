@@ -22,7 +22,25 @@
 set -o pipefail
 # Overridable so the retry behaviour can be exercised without waiting out the
 # real backoff. Defaults are what every Dockerfile caller gets.
-max=${WITH_RETRY_MAX_ATTEMPTS:-3}; delay=${WITH_RETRY_DELAY:-5}; attempt=1
+#
+# Five attempts, not three. Three gave sleeps of 5s and 10s, so the whole retry
+# window was about 15 seconds plus the time the attempts themselves took, and the
+# thing being retried is a GitHub-hosted runner's egress. Measured on run
+# 35246976698, that egress was impaired for longer than the window: the syft
+# install made three attempts at 16:41:55, 16:42:01 and 16:42:12 and every one of
+# them failed to resolve a host, exhausting the budget after 17 seconds while the
+# impairment continued. In the same run, on a different runner, the docker pull in
+# unit-test (ubuntu-24.04-arm, py3.11) failed DNS resolution for 2m16s straight.
+# A budget shorter than the outage it exists to ride out is a budget that only
+# ever converts a slow network into a failed build.
+#
+# Five attempts with the doubling below sleeps 5s, 10s, 20s and 40s: a 75-second
+# window, which covers the 17-second case with room and is the same order as the
+# longer one. Not raised further because the cost is paid on genuinely-broken
+# builds too -- a Dockerfile with fourteen with-retry call sites should not spend
+# ten minutes discovering that a URL is permanently 404, and `curl -f` failures of
+# that kind are not distinguishable here from a transient one.
+max=${WITH_RETRY_MAX_ATTEMPTS:-5}; delay=${WITH_RETRY_DELAY:-5}; attempt=1
 
 # Both knobs feed integer arithmetic below -- `$((delay * 2))` and
 # `[ $attempt -le $max ]` -- and bash arithmetic cannot parse a non-integer.

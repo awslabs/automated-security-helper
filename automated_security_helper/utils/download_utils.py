@@ -62,7 +62,18 @@ _HASH_CHUNK_BYTES = 1024 * 1024
 # status that explicitly means "you may succeed later", so it is treated as
 # transient. Retry-After is not honoured -- the exponential backoff below is the
 # approximation, and bounded at _DOWNLOAD_MAX_DELAY.
-_DOWNLOAD_MAX_ATTEMPTS_DEFAULT = 3
+#
+# Five attempts, matching the default on assets/with-retry.sh, which retries the
+# same class of failure from the container build. Raised from three there because
+# three exhausted its budget in about 15 seconds against a runner egress that was
+# impaired for longer; the reasoning and the measurements are on the assignment in
+# that script. Kept equal to it deliberately -- two retry budgets for the same
+# hazard that disagree would mean the tool version a scan runs depends on which
+# install path provisioned it.
+#
+# With the doubling below and the 60s bound, five attempts sleep 5s, 10s, 20s and
+# 40s: a 75-second window, none of it clipped by _DOWNLOAD_MAX_DELAY.
+_DOWNLOAD_MAX_ATTEMPTS_DEFAULT = 5
 _DOWNLOAD_BASE_DELAY_DEFAULT = 5.0
 _DOWNLOAD_MAX_DELAY = 60.0
 _TRANSIENT_HTTP_STATUS = frozenset({429})
