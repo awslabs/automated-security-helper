@@ -46,12 +46,18 @@ makeappx catches the things that are wrong about it as XML against the schema.
 
 RUNNING IT
 
-Needs Python 3.11 or newer, for tomllib. That is above ASH's own floor of 3.10 and is a
-deliberate choice: reading [project.scripts] and [tool.commitizen] out of pyproject.toml is
-the check that ties this manifest to the entry point contract, and a hand rolled TOML
-reader for 3.10 would be a second parser that can disagree with the real one. CI invokes
-this through `uv run --python 3.13 --no-project python`, which pins the interpreter rather
-than resolving whatever the runner image preinstalled.
+Reading [project.scripts] and [tool.commitizen] out of pyproject.toml is what ties this
+manifest to the entry point contract, so this needs a TOML reader. tomllib on 3.11 and
+newer, tomli below that, which is the same fallback
+tests/unit/test_agent_plugin_ash_version.py already uses and is not a second parser: tomli
+is the library that became tomllib. Writing a small TOML reader for 3.10 was the
+alternative and was rejected, because a reader that disagrees with the real one about
+[project.scripts] would make this check quietly wrong rather than absent.
+
+CI invokes this through `uv run --python 3.13 --no-project python`. `--no-project` because
+nothing here needs ASH's dependencies, and `--python 3.13` rather than a bare `python`
+because with no project to resolve, uv would otherwise pick whatever the runner image
+preinstalled, and the Windows images ship a 3.9 that has neither module.
 """
 
 from __future__ import annotations
@@ -65,14 +71,20 @@ import zlib
 from pathlib import Path
 from xml.etree import ElementTree
 
-if sys.version_info < (3, 11):  # pragma: no cover - guarded by the message itself
-    sys.exit(
-        "msix.py needs Python 3.11 or newer for tomllib. Run it as\n"
-        "  uv run --python 3.13 --no-project python packaging/msix/msix.py ...\n"
-        f"(this interpreter is {sys.version_info.major}.{sys.version_info.minor})"
-    )
-
-import tomllib  # noqa: E402  - after the version guard on purpose, so the message is readable
+if sys.version_info >= (3, 11):
+    import tomllib
+else:  # pragma: no cover - exercised only on 3.10
+    try:
+        import tomli as tomllib
+    except ImportError:  # pragma: no cover - the message is the whole point
+        sys.exit(
+            "msix.py needs a TOML reader: tomllib on Python 3.11 or newer, tomli below "
+            "that.\n"
+            "Run it the way CI does, which pins an interpreter that has one:\n"
+            "  uv run --python 3.13 --no-project python packaging/msix/msix.py validate\n"
+            f"(this interpreter is {sys.version_info.major}.{sys.version_info.minor} and "
+            "has neither)"
+        )
 
 # On xml.etree rather than defusedxml: the only documents this parses are files in this
 # repository, staged by this script from a manifest under version control. There is no path by
