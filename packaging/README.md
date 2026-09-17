@@ -45,6 +45,7 @@ judgment nobody will re-run.
 |---|---|---|
 | `deb/` | Debian, Ubuntu | build + install + real scan in `debian:bookworm` |
 | `rpm/` | Amazon Linux, RHEL | build + install + real scan in `amazonlinux:2023` |
+| `msix/` | Windows 10, Windows 11 | build + sign + install + real scan on `windows-latest` |
 
 ## Install shape, common to both
 

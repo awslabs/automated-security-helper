@@ -282,6 +282,13 @@ $RECYCLE.BIN/
 *.msix
 *.msm
 *.msp
+# ...except the MSIX package's documentation, which is named README.msix to sit alongside
+# packaging/rpm/README.rpm and packaging/deb/debian/README.Debian. `*.msix` above is meant to
+# catch built packages, and it catches this by accident: without the negation the file is
+# invisible to `git status`, so it is never committed and later edits to it are silent. The
+# negation is here rather than the file being renamed because the .rpm and .Debian READMEs set
+# the convention and one file spelled differently is worse than one line here.
+!packaging/msix/README.msix
 
 # Windows shortcuts
 *.lnk
