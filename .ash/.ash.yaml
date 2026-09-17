@@ -32,21 +32,40 @@ global_settings:
         it eventually fetches is never written to this file.
     # === detect-secrets: the packaging verifications and the Homebrew formula ===
     #
-    # These three files are the packaging work's own test fixtures, and they are
-    # listed here individually rather than behind a `packaging/**` glob because
+    # These files are the packaging work's own test fixtures, and they are listed
+    # here individually rather than behind a `packaging/**` glob because
     # everything else under packaging/ is a build script that has no business
     # carrying a credential-shaped string, and a glob would stop saying so.
     #
-    # All three plant the same value: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY, the
-    # example secret access key from AWS's own public documentation. It is planted
-    # deliberately, and it is what makes each verification mean anything -- an ASH
-    # scan that finds nothing exits 0, so "the package installed and ash ran" is
-    # not evidence the installed ASH can scan. Each of these asserts a non-zero
-    # SARIF result count against this fixture, so removing the fixture to quieten
-    # the scanner would turn all three verifications into the silent pass they
-    # exist to remove. Three rules fire on each: SECRET-AWS-ACCESS-KEY on the
-    # value, SECRET-SECRET-KEYWORD on the AWS_SECRET_ACCESS_KEY name beside it,
-    # and SECRET-BASE64-HIGH-ENTROPY-STRING on the value again.
+    # Every one plants the same value: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY,
+    # the example secret access key from AWS's own public documentation. It is
+    # planted deliberately, and it is what makes each verification mean anything --
+    # an ASH scan that finds nothing exits 0, so "the package installed and ash
+    # ran" is not evidence the installed ASH can scan. Each of these asserts a
+    # non-zero SARIF result count against this fixture, so removing the fixture to
+    # quieten the scanner would turn every one of those verifications into the
+    # silent pass they exist to remove. Three rules fire on each:
+    # SECRET-AWS-ACCESS-KEY on the value, SECRET-SECRET-KEYWORD on the
+    # AWS_SECRET_ACCESS_KEY name beside it, and SECRET-BASE64-HIGH-ENTROPY-STRING
+    # on the value again.
+    #
+    # A note on how this list came to be incomplete, because the shape recurs. The
+    # deb, rpm and Formula entries were written while the Flatpak, Chocolatey and
+    # MSIX verifications were being written in parallel, each in its own branch. So
+    # three new files planted the fixture and none of them could add a suppression
+    # without conflicting on this block, and the gap only appeared once the
+    # branches were merged: `ash scan` on the merge was red with six actionable
+    # findings that no single branch had introduced. Nothing was wrong with any
+    # branch in isolation. If another packaging format arrives, its fixture belongs
+    # here in the same commit that merges it.
+    #
+    # packaging/msix/verify-on-windows.ps1 is deliberately NOT listed. It plants
+    # the same key but assembles it from two halves at runtime, so detect-secrets
+    # does not match it. That was written to avoid needing an entry here at all. It
+    # works, and it is left alone rather than normalized, because the script cannot
+    # be run on this host to confirm a change to it -- but it is the odd one out,
+    # and a reader comparing the six verifications should know the split is
+    # deliberate rather than a typo.
     - rule_id: "SECRET-*"
       path: packaging/deb/verify-in-container.sh
       reason: >-
@@ -60,6 +79,20 @@ global_settings:
         Same fixture and same reason as the .deb verification above -- AWS's
         published example key, planted so the .rpm verification asserts a finding
         instead of an exit code.
+    - rule_id: "SECRET-*"
+      path: packaging/flatpak/verify-in-container.sh
+      reason: >-
+        Same fixture and same reason as the .deb and .rpm verifications above.
+        This one plants it twice: once in a directory the sandbox cannot reach, as
+        a positive control proving that an unreadable tree yields exit 0 and zero
+        findings, and once in a directory it can, where the non-zero result count
+        is asserted.
+    - rule_id: "SECRET-*"
+      path: packaging/chocolatey/verify-on-windows.ps1
+      reason: >-
+        Same fixture and same reason as the verifications above -- AWS's published
+        example key, planted so the Chocolatey verification asserts a finding on
+        windows-latest rather than an exit code.
     # === the JetBrains plugin's planted fixture ===
     #
     # The plugin under editors/jetbrains/ plants the same value the three files above do, for

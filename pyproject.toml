@@ -263,6 +263,29 @@ version_files = [
     "packaging/winget/Amazon.AutomatedSecurityHelper.installer.yaml:^  InstallerUrl",
     "packaging/winget/Amazon.AutomatedSecurityHelper.locale.en-US.yaml:^PackageVersion",
     'packaging/msix/AppxManifest.xml:^\s+Version=',
+    # The VS Code extension's manifest. Anchored at two spaces because top-level
+    # keys in that file are 2-space indented and every nested key sits at four or
+    # more, which keeps the pattern off the devDependency ranges -- simulating a
+    # bump from each version that appears in one (3.6.0 for @vscode/vsce, 5.9.3 for
+    # typescript, 1.85.0 for @types/vscode, 22.19.0 for @types/node) rewrites zero
+    # lines, so no future ASH version can collide with a dependency range.
+    #
+    # editors/vscode/package-lock.json carries the same version at `.version` and
+    # at `.packages[""].version` and is deliberately NOT listed. Its 6-space
+    # indentation is indistinguishable from every dependency's own "version" line,
+    # so there is no anchor that reaches one without risking the others, and an
+    # entry that cannot be anchored safely is worse than none. Measured: setting
+    # package.json to 3.8.0 against a 3.7.0 lock still gives `npm ci` exit 0 with
+    # no EUSAGE, so the drift is inert. `npm install --package-lock-only --prefix
+    # editors/vscode` after a bump brings it into step if that ever matters.
+    #
+    # Nothing under editors/jetbrains/ is listed, and that is a decision rather
+    # than an omission: a JetBrains plugin is versioned against the IDE builds it
+    # supports, not against the tool it drives, so tying it to ASH would force a
+    # plugin bump on every ASH patch and block a plugin fix behind an ASH release.
+    # It pins no ASH version, ref or install command, so it carries no literal that
+    # can go stale -- which is the whole failure this list exists to prevent.
+    "editors/vscode/package.json:^  \"version\"",
 ]
 # Rewriting _base/ is only half the chain: the 17 generated trees are still on
 # the old tag until the transpiler reruns, and `agentic-plugins check` byte-
