@@ -1,8 +1,29 @@
 """MCPB backend.
 
-Emits a .mcpb ZIP archive (manifest.json + bundled assets) for one-click
-install in Claude Desktop. The archive is committed; the release phase
-copies it into dist/ for GitHub release attachment.
+Emits a .mcpb ZIP archive for one-click install in Claude Desktop. The archive
+is committed; the release phase copies it into dist/ for GitHub release
+attachment.
+
+WHAT IS ACTUALLY IN THE ARCHIVE
+
+Exactly one member: manifest.json, authored here from _base/manifest.json and
+_base/mcp.json. No assets are bundled, and that is the correct shape rather than
+an unfinished one -- the manifest's mcp_config invokes uvx against a pinned git
+ref, so the server is fetched at run time by the user's own uvx. There is
+nothing to vendor, and nothing has been left out.
+
+This docstring used to say "manifest.json + bundled assets". That describes an
+archive that has never existed, and the direction of the error is the dangerous
+one: it reads as an invitation to add the assets somebody assumed were missing.
+packaging/README.md draws the line those additions would cross -- ASH's own code
+may ship in a published artifact, third-party code never may. One ASH-authored
+manifest sits on the permitted side.
+
+It stays there only while the member count is one, which is why the release path
+asserts that count rather than trusting this comment. That is the same one-file
+invariant the .deb and .rpm are held to by counting bundled wheels: cheap to
+check, hard to get wrong by accident, and it turns "did anyone vendor a scanner"
+from a per-file judgment into arithmetic.
 """
 from __future__ import annotations
 
