@@ -170,10 +170,185 @@ runs:
       if: inputs.runtime == 'nerdctl'
       shell: bash
       run: sudo nerdctl --version
+    # WHY THIS ONE BUILD IS RETRIED WHEN THE OTHER TWO ARE NOT
+    #
+    # `nerdctl build` loses a race with containerd's garbage collector roughly one
+    # run in eighteen, and loses it after the image has already been built. The
+    # failure looks like this, and it is worth reading closely because everything
+    # below turns on which process emits it:
+    #
+    #   #48 exporting to docker image format
+    #   #48 exporting manifest sha256:29750fcb... done
+    #   #48 sending tarball 3.7s done
+    #   #48 DONE 37.8s
+    #   level=fatal msg="apply layer error for \"...:ci\": failed to prepare
+    #     extraction snapshot \"extract-...\": parent snapshot sha256:594f27ed...
+    #     does not exist: not found"
+    #   unpacking docker.io/library/automated-security-helper:ci (sha256:29750fcb...)...
+    #
+    # The build succeeded. Every stage completed, all 11 scanner tools verified on
+    # PATH, the manifest and config exported, the tarball sent. What failed is the
+    # step after: loading that tarball into containerd.
+    #
+    # WHERE THE RACE LIVES, TRACED RATHER THAN GUESSED
+    #
+    # nerdctl asks buildkit whether its worker shares containerd's image store
+    # (pkg/cmd/builder/build.go, `isImageSharable`). The nerdctl-full bundle's
+    # buildkit runs the oci worker, which does not, so nerdctl takes the else
+    # branch: `--output type=docker` plus `needsLoading`. It then pipes the
+    # resulting docker-format tarball through its own `loadImage`, which calls
+    # containerd's client `Unpack`. `apply layer error for` is that function's
+    # message -- it lives in containerd's client/image.go, not in nerdctl and not
+    # in buildkit. `Unpack` walks the layers with the per-layer `rootfs.ApplyLayer`,
+    # whose Stat-then-Prepare window does not hold the parent snapshot under a
+    # lease, so a concurrent GC pass can collect the parent between the two calls.
+    #
+    # That window is a known upstream defect: containerd/nerdctl#3420 reported this
+    # exact string and traced it to the containerd GC race, and moby/buildkit#6521
+    # reported it from the other direction. moby/buildkit#6558 fixed it -- but only
+    # in buildkit's own exporter, for the `type=image,unpack=true` path. That fix is
+    # present in the bundled buildkit 0.31.2, which is consistent with `#48 DONE`
+    # above: the exporter side works. Nothing has landed for the containerd-client
+    # side that the tarball round trip routes us through, so there is no version to
+    # bump to.
+    #
+    # WHY A RETRY, AND WHY IT IS NOT A BARE ONE
+    #
+    # Measured across every Unified CI run since this leg landed: 136 nerdctl passes
+    # against 3 failures of this shape. It is not deterministic and this leg is not
+    # newly broken. The sharpest evidence is pull request 608's merge queue, which
+    # built this image five times from the same content -- four passed, one hit this
+    # error. Nothing in the repository distinguishes the four from the one.
+    #
+    # Two things make the retry honest rather than a way of turning a hard failure
+    # into a slow one:
+    #
+    # First, it only retries THIS error. Any other non-zero status exits
+    # immediately with its own code, so a real build break still fails on the first
+    # attempt and fails fast.
+    #
+    # Second, retries deliberately drop `--force`. `--force` is `--no-cache`
+    # (run_ash_container.py), so attempt 1 still proves a from-scratch build works;
+    # that is the gate's actual job and it is not weakened. Dropping it on retry
+    # means buildkit reuses the layers it just finished building, so the retry costs
+    # about a minute instead of seven and spends that minute re-running precisely
+    # the operation that raced: export, then load. This works because
+    # BUILD_DATE_EPOCH -- the one build-arg that changes per invocation -- is
+    # consumed on the last line of the `core` stage rather than near its top, so the
+    # apt, node, ruby and pinned-binary layers above it all stay cacheable.
+    #
+    # The partially-imported image is removed before each retry. containerd's
+    # `Import` can leave an image record behind whose snapshot chain is incomplete,
+    # and a retry over that record would take the same Stat shortcut that skips the
+    # lease -- the racy path -- rather than rebuilding the chain. So the retry is
+    # given clean preconditions instead of being handed the wreckage of the attempt
+    # that just failed.
+    #
+    # WHAT WAS REJECTED
+    #
+    # Configuring buildkitd with the containerd worker would make `isImageSharable`
+    # true and route the unpack through buildkit's fixed exporter, skipping the
+    # tarball entirely. Rejected because it would have this gate test a
+    # configuration no nerdctl-full user has: the bundle ships the oci worker, so
+    # the default path -- the one a user actually runs -- would stop being measured
+    # while CI went green. A gate that passes by avoiding the user's code path is
+    # the defect this action was rewritten to remove, not a fix for it.
+    #
+    # Marking the leg continue-on-error was rejected for the same reason in
+    # stronger form: it discards the signal rather than relocating it.
+    #
+    # KNOWN LIMITATION, STATED SO IT CAN BE CHECKED
+    #
+    # No CI re-run of a job that hit this error exists in the history, so "a retry
+    # succeeds" rests on the cross-run evidence above and on ddev/ddev#8142, which
+    # carried a max-3 retry keyed to this same error text until ddev/ddev#8637
+    # removed it once their path got its upstream fix. It is not a directly observed
+    # flip. The ::warning:: below is what closes that gap: it makes every retry
+    # countable in the Actions UI, so how often the race fires and whether the retry
+    # clears it both become measurable instead of argued.
+    #
+    # The retries share a runner and a containerd state with the attempt that
+    # failed, so the per-attempt failures may not be independent and the effective
+    # rate may be worse than 3 successive draws at 1-in-18 would suggest. The
+    # warning is also how that gets found out.
+    #
+    # The strongest lead for a real root-cause fix, for whoever picks this up: the
+    # finch leg drives containerd through buildkit too and took zero failures of
+    # this shape across 138 passes. The scripts differ in that setup-finch-linux.sh
+    # removes Docker Engine and containerd.io outright, while setup-nerdctl-linux.sh
+    # only stops the Docker units and lets the bundle's containerd adopt a state
+    # root still full of Docker's now-unreferenced snapshots -- which is exactly the
+    # kind of GC backlog that would widen the window above. That is a hypothesis
+    # about the trigger, not a measurement, and `apt-get remove` does not clear
+    # /var/lib/containerd, so it is deliberately not acted on here.
     - name: "nerdctl: build image"
       if: inputs.runtime == 'nerdctl'
       shell: bash
-      run: ash build-image --oci-runner nerdctl --force --no-run
+      env:
+        # The tag ash build-image applies: build_target is forced to "ci" whenever
+        # CI is set, so this is the image the load above would have created.
+        IMAGE: automated-security-helper:ci
+        ATTEMPTS: "3"
+      run: |
+        log="${RUNNER_TEMP:-/tmp}/nerdctl-build.log"
+        rc=0
+        for n in $(seq 1 "${ATTEMPTS}"); do
+          # Attempt 1 only. See the --force note above.
+          force_args=()
+          if [ "${n}" -eq 1 ]; then
+            force_args=(--force)
+          fi
+
+          echo "=== nerdctl build image: attempt ${n} of ${ATTEMPTS} ${force_args[*]} ==="
+          set +e
+          # --no-run for the same reason the podman and finch legs carry it, and it
+          # matters more here: without it every attempt would scan the checkout, so
+          # the retry loop would re-run a scan whose exit 2 on findings is not the
+          # race being matched below -- it would fail the first `grep` and abort,
+          # reporting a build break that never happened. Flag order matches those
+          # two legs on attempt 1: --oci-runner nerdctl --force --no-run.
+          ash build-image --oci-runner nerdctl "${force_args[@]}" --no-run 2>&1 | tee "${log}"
+          rc="${PIPESTATUS[0]}"
+          set -e
+
+          if [ "${rc}" -eq 0 ]; then
+            if [ "${n}" -gt 1 ]; then
+              echo "::warning::nerdctl build succeeded on attempt ${n} after the containerd snapshot GC race. See containerd/nerdctl#3420."
+            fi
+            break
+          fi
+
+          # Not the race: fail now, with the build's own status, rather than
+          # spending two more attempts on a break that will not fix itself.
+          # Unanchored so a leading ANSI sequence cannot hide the match.
+          if ! grep -q 'parent snapshot' "${log}" || ! grep -q 'does not exist' "${log}"; then
+            echo "::error::ash build-image --oci-runner nerdctl exited ${rc} for a reason other than the containerd snapshot GC race. Not retried."
+            exit "${rc}"
+          fi
+
+          if [ "${n}" -eq "${ATTEMPTS}" ]; then
+            echo "::error::nerdctl hit the containerd snapshot GC race on all ${ATTEMPTS} attempts. The image built every time and failed to load every time; this is containerd/nerdctl#3420, not an ASH defect. If this is no longer rare, the buildkit-worker question in the comment above is the next thing to settle."
+            exit "${rc}"
+          fi
+
+          echo "::warning::nerdctl build hit the containerd snapshot GC race on attempt ${n} (containerd/nerdctl#3420). The image built; loading it into containerd lost a race with the GC. Retrying."
+
+          # Clear the half-imported record so the retry rebuilds the snapshot chain
+          # instead of taking the Stat shortcut over it. Absence is normal -- the
+          # load may have failed before any record was written -- so it is reported
+          # rather than treated as an error, and a removal that genuinely fails is
+          # still left to fail.
+          if [ -n "$(sudo nerdctl images --quiet "${IMAGE}" 2>/dev/null)" ]; then
+            echo "  ${IMAGE}: partial image present, removing before retry"
+            sudo nerdctl rmi --force "${IMAGE}"
+          else
+            echo "  ${IMAGE}: no image record to remove"
+          fi
+
+          # Let any in-flight GC pass finish rather than racing it again at once.
+          sleep 10
+        done
+        exit "${rc}"
 
     # === the built image has to run ===
     #
