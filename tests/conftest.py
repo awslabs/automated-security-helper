@@ -3,6 +3,7 @@
 import logging
 import os
 import sys
+import tempfile
 import pytest
 from pathlib import Path
 from typing import List, Literal
@@ -13,8 +14,102 @@ from tests.utils.helpers import get_ash_temp_path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
+def _isolate_jsii_package_cache_per_worker() -> str | None:
+    """Give each xdist worker its own jsii package cache, and say which one.
+
+    THE RACE THIS REMOVES. jsii caches an extracted assembly under a per-user
+    directory and takes a lockfile while extracting. ``Entry.retrieve`` only locks
+    on a cache *miss*, and holds the lock for the whole extraction --
+    ``aws-cdk-lib`` is 7,457 files and about 133 MB. Its waiter, ``lockSyncWithWait``,
+    retries 12 times with randomized backoff and then rethrows, so roughly 13 s
+    expected and 26 s worst case. Two workers that each boot a kernel can therefore
+    collide on one cache entry and the loser dies with
+
+        EEXIST: file already exists, open
+        '...\\AWS\\jsii\\package-cache\\aws-cdk-lib\\<version>\\<sha>.lock'
+
+    Measured across the 600 most recent CI runs: zero occurrences in 1,772 decided
+    Windows unit-test legs while exactly one test booted a kernel, then 12 across 583
+    once a second one did. Separate roots mean there is no shared lockfile to
+    contend for, so the failure is unreachable rather than merely unlikely.
+
+    WHAT WAS NOT SHOWN. The race does not reproduce on Linux. With the guard removed,
+    a cold cache and up to three booting tests sharing one root under -n 4, no EEXIST
+    ever appeared: extraction finishes in about three seconds here, far inside the
+    retry budget, so the loser waits and then gets its hit. The guard is therefore
+    justified structurally -- distinct roots mean there is no shared lockfile to
+    contend for -- and by the CI rates above, not by reproducing a failure locally and
+    then preventing it. Anyone re-testing this on Linux should expect green either
+    way and not read that as the guard being unnecessary.
+
+    WHY IT IS NOT PLATFORM-GATED. Only Windows has been observed failing, but jsii's
+    lock path carries no platform branch -- the sole ``process.platform`` checks in
+    that module write ``.nobackup``/``.noindex`` on darwin and sweep ``.DS_Store``.
+    The bounded retry budget is identical everywhere; Windows loses because creating
+    7,457 files there is slow enough to exhaust it. Gating this to Windows would
+    leave the same defect reachable on macOS and Linux to save nothing, because:
+
+    WHAT IT COSTS, MEASURED. Extraction happens only when a kernel actually boots, so
+    the bill is (workers that boot) x extraction, not (workers) x extraction. Measured
+    on Linux with a cold cache under -n 4, one extraction being 163,654,045 bytes:
+
+        booters   guard    bytes written   per-worker roots created
+        0         on                   0   none
+        1         on         163,654,045   1
+        2         on         327,308,090   2
+        1 or 2    off        163,654,045   n/a, one shared root
+
+    So with no eager import anywhere the guard writes nothing and creates no
+    directory -- measured across the whole unit suite, 7,734 tests, zero bytes. With
+    one booter it costs the same single extraction as no guard at all. Only two or
+    more booting workers pay a multiple, and that is precisely the case which is
+    otherwise an intermittent failure. Note the multiplier counts booting *workers*,
+    not booting tests: three booters produced two roots in one run because two landed
+    on the same worker.
+
+    Returns the root it set, or ``None`` when it deliberately set nothing.
+    """
+    # xdist sets this in each worker before pytest_configure runs; the controller
+    # has neither it nor config.workerinput, and runs no tests. A plain pytest run,
+    # -n 0, or -p no:xdist likewise has no worker id -- and needs none, because one
+    # process cannot race itself. Leave jsii's own default alone in that case rather
+    # than inventing a root named after an empty string.
+    worker = (os.environ.get("PYTEST_XDIST_WORKER") or "").strip()
+    if not worker:
+        return None
+
+    # Honor an explicitly chosen location by isolating *within* it, so this does not
+    # silently relocate a cache someone pointed somewhere deliberately.
+    configured = (os.environ.get("JSII_RUNTIME_PACKAGE_CACHE_ROOT") or "").strip()
+    if configured:
+        base = Path(configured)
+    else:
+        # tempfile.gettempdir() rather than a per-platform user cache path: it needs
+        # no platform branching to rot, it is per-user on Windows, it sits outside
+        # the checkout so neither the repo nor ASH's own self-scan grows by 133 MB a
+        # worker, and jsii itself falls back to a tmpdir root, so this is a shape it
+        # already supports. The trade is that a /tmp sweep makes the cache cold.
+        # That costs nothing in CI, where the runner is fresh and this cache is not
+        # restored between runs anyway, and only costs a local re-extraction.
+        base = Path(tempfile.gettempdir()) / "ash-jsii-package-cache"
+
+    # Deliberately not created here. jsii's DiskCache.inDirectory already does a
+    # recursive mkdir, and only on the extraction path, so leaving creation to it
+    # keeps the no-booter case at literally zero directories and zero bytes rather
+    # than four empty directories per run.
+    root = base / worker
+    os.environ["JSII_RUNTIME_PACKAGE_CACHE_ROOT"] = str(root)
+    return str(root)
+
+
 def pytest_configure(config):
     """Configure pytest for ASH tests."""
+    # Must happen before anything imports a jsii-backed package. pytest_configure is
+    # the earliest per-worker hook, and collection -- which imports test modules --
+    # runs after it. jsii reads this variable in the Node runtime it spawns, so it
+    # only has to be set before the first kernel starts.
+    _isolate_jsii_package_cache_per_worker()
+
     # Register custom markers
     config.addinivalue_line(
         "markers", "unit: Unit tests that test individual components in isolation"
