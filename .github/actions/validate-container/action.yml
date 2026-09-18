@@ -173,7 +173,7 @@ runs:
     # WHY THIS ONE BUILD IS RETRIED WHEN THE OTHER TWO ARE NOT
     #
     # `nerdctl build` loses a race with containerd's garbage collector roughly one
-    # run in eighteen, and loses it after the image has already been built. The
+    # run in forty-six, and loses it after the image has already been built. The
     # failure looks like this, and it is worth reading closely because everything
     # below turns on which process emits it:
     #
@@ -214,9 +214,22 @@ runs:
     #
     # WHY A RETRY, AND WHY IT IS NOT A BARE ONE
     #
-    # Measured across every Unified CI run since this leg landed: 136 nerdctl passes
-    # against 3 failures of this shape. It is not deterministic and this leg is not
-    # newly broken. The sharpest evidence is pull request 608's merge queue, which
+    # Measured across every Unified CI run since this leg landed, with the
+    # arithmetic spelled out because a denominator nobody can reproduce is not a
+    # measurement: 168 runs swept, of which 158 produced a nerdctl job (7 produced
+    # none and 3 returned HTTP 502 on every retry and are counted as unknown rather
+    # than as passes -- 158 + 7 + 3 = 168). Those 158 split 136 success, 8 failure,
+    # 14 cancelled, so 144 terminal outcomes.
+    #
+    # Five of the eight failures are not this race and are excluded from both
+    # halves of the ratio. On those five runs the podman and finch legs failed too,
+    # in exactly the same five runs and no others, which no nerdctl-specific cause
+    # can produce; they are a branch whose `build-image` runs a full scan that
+    # reports findings and exits 2.
+    #
+    # That leaves 3 failures of this shape in 144 - 5 = 139 terminal outcomes:
+    # 2.2%, one run in forty-six. It is not deterministic and this leg is not newly
+    # broken. The sharpest evidence is pull request 608's merge queue, which
     # built this image five times from the same content -- four passed, one hit this
     # error. Nothing in the repository distinguishes the four from the one.
     #
@@ -269,7 +282,7 @@ runs:
     #
     # The retries share a runner and a containerd state with the attempt that
     # failed, so the per-attempt failures may not be independent and the effective
-    # rate may be worse than 3 successive draws at 1-in-18 would suggest. The
+    # rate may be worse than 3 successive draws at 1-in-46 would suggest. The
     # warning is also how that gets found out.
     #
     # The strongest lead for a real root-cause fix, for whoever picks this up: the
@@ -320,8 +333,32 @@ runs:
 
           # Not the race: fail now, with the build's own status, rather than
           # spending two more attempts on a break that will not fix itself.
-          # Unanchored so a leading ANSI sequence cannot hide the match.
-          if ! grep -q 'parent snapshot' "${log}" || ! grep -q 'does not exist' "${log}"; then
+          #
+          # ONE LINE, NOT TWO GREPS, AND THE DIFFERENCE IS LOAD-BEARING
+          #
+          # The first version of this tested `grep -q 'parent snapshot'` and
+          # `grep -q 'does not exist'` as two separate searches over the whole
+          # build output, which is also how ddev/ddev#8142 matched it. That is
+          # wrong, and demonstrably so: a genuine break printing "reusing parent
+          # snapshot layer cache" on one line and "requirements.txt: does not
+          # exist" three lines later satisfies both searches with no race
+          # anywhere. Measured against exactly that fixture, the two-grep form
+          # spent both retries and then reported "this is containerd/nerdctl#3420,
+          # not an ASH defect" about a real ASH defect -- the exit code survived,
+          # so it stayed red, but the log told the next reader the wrong cause.
+          #
+          # Requiring both on ONE line matches the signature instead of two of its
+          # words. containerd emits it as a single message -- client/image.go:349
+          # wraps the snapshotter error as `apply layer error for %q: %w`, and the
+          # whole thing arrives on one log line -- verified against all three
+          # observed failures, where `parent snapshot <digest> does not exist`
+          # appears exactly once per log and never split.
+          #
+          # Still unanchored, so a leading ANSI sequence cannot hide the match.
+          # `apply layer error` is deliberately NOT also required: it is nerdctl's
+          # wrapper rather than the race itself, and the match should survive
+          # nerdctl rewording its wrapper while the upstream race is still open.
+          if ! grep -qE 'parent snapshot.*does not exist' "${log}"; then
             echo "::error::ash build-image --oci-runner nerdctl exited ${rc} for a reason other than the containerd snapshot GC race. Not retried."
             exit "${rc}"
           fi
