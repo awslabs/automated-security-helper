@@ -278,7 +278,14 @@ def _severity_from_security_score(value: object) -> str | None:
         return "MEDIUM"
     if score > 0:
         return "LOW"
-    return "INFO"
+    # A score of exactly 0 is treated as "no usable score", not as INFO, so it
+    # is skipped by normalize_sarif_result_severities and the result keeps its
+    # SARIF level fallback. npm-audit defaults its rule security-severity to 0
+    # for advisories that carry no CVSS number, and mapping that to INFO would
+    # downgrade a critical/high advisory below any severity threshold — a
+    # fail-open. A real CVSS 0.0 finding is vanishingly rare and, if it ever
+    # occurs, deferring to the level is the safe direction.
+    return None
 
 
 def normalize_sarif_result_severities(sarif_report: SarifReport) -> SarifReport:

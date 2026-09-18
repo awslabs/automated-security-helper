@@ -20,6 +20,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ToolComponent,
 )
 from automated_security_helper.utils.sarif_utils import (
+    _resolve_result_severity,
     get_severity_metrics_from_sarif,
     normalize_sarif_result_severities,
 )
@@ -70,7 +71,6 @@ def _report(
 @pytest.mark.parametrize(
     ("score", "expected"),
     [
-        (0, "INFO"),
         (0.1, "LOW"),
         (3.9, "LOW"),
         (4.0, "MEDIUM"),
@@ -101,11 +101,26 @@ def test_preserves_existing_issue_severity():
     assert report.runs[0].results[0].properties.issue_severity == "HIGH"
 
 
-@pytest.mark.parametrize("score", [None, "unknown", -0.1, 10.1, float("nan")])
+@pytest.mark.parametrize("score", [0, None, "unknown", -0.1, 10.1, float("nan")])
 def test_ignores_invalid_security_severity(score):
     report = normalize_sarif_result_severities(_report(score))
 
     assert report.runs[0].results[0].properties is None
+
+
+def test_score_zero_does_not_downgrade_an_error_level_finding():
+    """A rule security-severity of 0 must not fail open.
+
+    npm-audit defaults its rule security-severity to 0 for advisories that
+    ship no CVSS number. Mapping that to INFO would drop a critical/high
+    finding under any severity threshold, so normalization leaves the result
+    untouched and the SARIF level (error -> critical) decides the severity.
+    """
+    report = normalize_sarif_result_severities(_report(0))
+    result = report.runs[0].results[0]
+
+    assert result.properties is None
+    assert _resolve_result_severity(result) == "critical"
 
 
 def test_ignores_a_result_without_a_matching_rule():

@@ -202,22 +202,31 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
                     # Create a rule for this vulnerability if it doesn't exist
                     if vuln_id not in rules_dict:
+                        rule_props = {
+                            "tags": [
+                                "security",
+                                "npm-audit",
+                                severity,
+                                f"tool_name::{self.config.name}",
+                                f"tool_type::{self.tool_type or 'UNKNOWN'}",
+                            ],
+                        }
+                        # Only attach security-severity when npm actually reported a
+                        # CVSS score. It used to default to 0, which the SARIF severity
+                        # normalizer reads as CVSS 0.0 and maps to INFO — downgrading a
+                        # critical/high advisory that ships no CVSS number below the
+                        # severity threshold (fail-open). Omitting it leaves the
+                        # level-based severity in place.
+                        cvss_score = via.get("cvss", {}).get("score")
+                        if cvss_score is not None:
+                            rule_props["security_severity"] = cvss_score
                         rule = ReportingDescriptor(
                             id=vuln_id,
                             name=f"npm-audit-{vuln_id}",
                             shortDescription=MultiformatMessageString(text=title),
                             fullDescription=MultiformatMessageString(text=description),
                             helpUri=via.get("url", ""),
-                            properties=PropertyBag(
-                                tags=[
-                                    "security",
-                                    "npm-audit",
-                                    severity,
-                                    f"tool_name::{self.config.name}",
-                                    f"tool_type::{self.tool_type or 'UNKNOWN'}",
-                                ],
-                                security_severity=via.get("cvss", {}).get("score", 0),
-                            ),
+                            properties=PropertyBag(**rule_props),
                         )
                         rules_dict[vuln_id] = rule
 
@@ -282,7 +291,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                     f"tool_name::{self.config.name}",
                                     f"tool_type::{self.tool_type or 'UNKNOWN'}",
                                 ],
-                                security_severity=0,
+                                # No security-severity: a transitive advisory carries no
+                                # CVSS score here, and a hardcoded 0 made the severity
+                                # normalizer downgrade it to INFO (fail-open). Absent, the
+                                # SARIF level determines severity.
                             ),
                         )
                         rules_dict[vuln_id] = rule
