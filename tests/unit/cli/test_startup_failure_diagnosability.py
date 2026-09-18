@@ -32,6 +32,7 @@ file pass green.
 """
 
 import os
+import re
 import subprocess
 import sys
 import textwrap
@@ -292,6 +293,84 @@ def test_scan_exit_codes_are_not_rewritten(tmp_path):
     assert result.returncode == 3, (
         f"exit code was rewritten to {result.returncode}. "
         f"stderr={result.stderr!r}"
+    )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        # The exact two shapes from #589. The first reads as a closing tag and
+        # makes rich.markup.render raise; the second reads as an opening tag and
+        # is consumed silently as a style name.
+        "[/bin/bash -c]",
+        "[node_modules]",
+    ],
+)
+def test_bracketed_failure_messages_survive_the_report(tmp_path, payload):
+    """Rich markup in a failure message must not destroy the report.
+
+    #589 fixed Rich parsing ``[...]`` in *log messages* -- ``RichHandler`` with
+    ``markup=True`` either raised ``MarkupError`` or swallowed the span. The floor
+    added here has its own first rung that renders through Rich, via
+    ``sys.excepthook``, so the same family has to be ruled out on that path
+    rather than assumed absent: a startup failure explaining itself with a
+    subprocess argv or a Windows path is exactly when brackets show up.
+
+    ``rich.traceback.install()`` stands in for the hook Typer installs inside
+    ``Typer.__call__``. Using it rather than reaching into Typer keeps the test
+    about the floor's contract -- text in, same text out -- instead of about
+    Typer's internals.
+
+    The trailing marker matters as much as the payload. The swallowing shape
+    truncates rather than erroring, so asserting only that the payload is absent
+    would not distinguish "dropped the span" from "dropped everything after it".
+    """
+    module, attr = _console_script_target()
+    result = _run_child(
+        textwrap.dedent(
+            f"""
+            import sys
+            import rich.traceback
+
+            rich.traceback.install()
+
+
+            class _BrokenCLI:
+                __name__ = "automated_security_helper.cli.main"
+
+                def __getattr__(self, name):
+                    def _run_app():
+                        raise RuntimeError(
+                            "{payload} {SENTINEL} trailing_marker"
+                        )
+
+                    return _run_app
+
+
+            sys.modules["automated_security_helper.cli.main"] = _BrokenCLI()
+            sys.stdout = sys.stderr = None
+            sys.__stdout__ = sys.__stderr__ = None
+
+            from {module} import {attr}
+
+            sys.exit({attr}())
+            """
+        ),
+        tmp_path,
+    )
+
+    assert result.returncode != 0
+    # Rich wraps and colorizes, so compare with ANSI and whitespace removed.
+    flat = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout + result.stderr)
+    flat = re.sub(r"\s+", "", flat)
+
+    assert payload.replace(" ", "") in flat, (
+        f"Rich markup destroyed the failure message. {payload!r} did not survive "
+        f"the report. stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    assert "trailing_marker" in flat, (
+        "the message was truncated after the bracketed span. "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
     )
 
 
