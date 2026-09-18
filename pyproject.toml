@@ -2,10 +2,10 @@
 name = "automated-security-helper"
 version = "3.7.0"
 description = "Automated Security Helper for GitHub Actions"
-requires-python = ">=3.10,<4"
+requires-python = ">=3.10,<3.15"
 readme = "README.md"
 license = "Apache-2.0"
-classifiers = [ "Development Status :: 5 - Production/Stable", "Intended Audience :: Developers", "License :: OSI Approved :: Apache Software License", "Programming Language :: Python :: 3", "Programming Language :: Python :: 3.10", "Programming Language :: Python :: 3.11", "Programming Language :: Python :: 3.12",]
+classifiers = [ "Development Status :: 5 - Production/Stable", "Intended Audience :: Developers", "License :: OSI Approved :: Apache Software License", "Programming Language :: Python :: 3", "Programming Language :: Python :: 3.10", "Programming Language :: Python :: 3.11", "Programming Language :: Python :: 3.12", "Programming Language :: Python :: 3.13", "Programming Language :: Python :: 3.14",]
 dependencies = [
  "uv>=0.12.13,<0.13",
  "requests>=2.34,<3.0.0",
@@ -154,9 +154,15 @@ build-backend = "hatchling.build"
 Repository = "https://github.com/awslabs/automated-security-helper"
 
 [project.scripts]
-ash = "automated_security_helper.cli.main:app"
-ashv3 = "automated_security_helper.cli.main:app"
-automated-security-helper = "automated_security_helper.cli.main:app"
+# Every alias goes through cli.entrypoint:main rather than the bare Typer app.
+# pip's generated stub imports the target and calls it, so pointing at `app`
+# meant the import of the whole CLI happened before any ASH code ran -- and on a
+# host where sys.stderr is None (a console-less Windows app; see that module's
+# docstring) a failure there exits 1 with both streams empty. main() reattaches
+# the streams first, then imports.
+ash = "automated_security_helper.cli.entrypoint:main"
+ashv3 = "automated_security_helper.cli.entrypoint:main"
+automated-security-helper = "automated_security_helper.cli.entrypoint:main"
 
 [tool.commitizen]
 name = "cz_conventional_commits"

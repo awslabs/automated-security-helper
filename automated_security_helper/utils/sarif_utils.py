@@ -1,5 +1,6 @@
 """Utility functions for working with SARIF reports."""
 
+import math
 import random
 from contextlib import suppress
 from typing import List
@@ -257,6 +258,88 @@ def attach_scanner_details(
     return sarif_report
 
 
+def _severity_from_security_score(value: object) -> str | None:
+    """Convert a SARIF security-severity score to an ASH severity."""
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return None
+
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return None
+
+    if not math.isfinite(score) or not 0 <= score <= 10:
+        return None
+    if score >= 9:
+        return "CRITICAL"
+    if score >= 7:
+        return "HIGH"
+    if score >= 4:
+        return "MEDIUM"
+    if score > 0:
+        return "LOW"
+    # A score of exactly 0 is treated as "no usable score", not as INFO, so it
+    # is skipped by normalize_sarif_result_severities and the result keeps its
+    # SARIF level fallback. npm-audit defaults its rule security-severity to 0
+    # for advisories that carry no CVSS number, and mapping that to INFO would
+    # downgrade a critical/high advisory below any severity threshold — a
+    # fail-open. A real CVSS 0.0 finding is vanishingly rare and, if it ever
+    # occurs, deferring to the level is the safe direction.
+    return None
+
+
+#: The severity bands _resolve_result_severity honors from ``issue_severity``.
+#: Kept as one constant so the normalizer's skip test and the resolver's read
+#: cannot drift apart.
+_CANONICAL_SEVERITIES = ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO")
+
+
+def normalize_sarif_result_severities(sarif_report: SarifReport) -> SarifReport:
+    """Copy rule security-severity values onto results that lack a severity."""
+    if not sarif_report or not sarif_report.runs:
+        return sarif_report
+
+    for run in sarif_report.runs:
+        rules = run.tool.driver.rules or []
+        rules_by_id = {rule.id: rule for rule in rules}
+
+        for result in run.results or []:
+            if result.properties:
+                current = getattr(result.properties, "issue_severity", None)
+                # Skip only when the existing value is one the resolver actually
+                # honors. A non-canonical string (e.g. "moderate") is ignored by
+                # _resolve_result_severity and would otherwise silently fall to
+                # the level fallback, so it must NOT block the rule-score fix.
+                if (
+                    isinstance(current, str)
+                    and current.strip().upper() in _CANONICAL_SEVERITIES
+                ):
+                    continue
+
+            rule = None
+            if result.ruleIndex is not None and 0 <= result.ruleIndex < len(rules):
+                rule = rules[result.ruleIndex]
+            elif result.ruleId:
+                rule = rules_by_id.get(result.ruleId)
+
+            if rule is None or rule.properties is None:
+                continue
+
+            rule_properties = rule.properties.model_extra or {}
+            score = rule_properties.get(
+                "security-severity", rule_properties.get("security_severity")
+            )
+            severity = _severity_from_security_score(score)
+            if severity is None:
+                continue
+
+            if result.properties is None:
+                result.properties = PropertyBag()
+            setattr(result.properties, "issue_severity", severity)  # noqa: B010
+
+    return sarif_report
+
+
 def _resolve_result_severity(result) -> str:
     """Resolve a SARIF result to a normalized severity name."""
     if result.properties:
@@ -266,7 +349,7 @@ def _resolve_result_severity(result) -> str:
         issue_sev = (
             props.get("issue_severity", "").upper() if isinstance(props, dict) else ""
         )
-        if issue_sev in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"):
+        if issue_sev in _CANONICAL_SEVERITIES:
             return issue_sev.lower()
 
     if result.level:
@@ -284,6 +367,13 @@ def get_severity_metrics_from_sarif(
     sarif_report: SarifReport,
     plugin_context: PluginContext,
 ) -> ScannerSeverityCount:
+    # Normalize here so per-scanner counts resolve the SAME severities as the
+    # aggregate gate. The per-scanner path (scanner_executor) previously counted
+    # un-normalized results while the aggregate (scan_result_processor) did not,
+    # so a Grype finding could report CRITICAL in the per-scanner summary but HIGH
+    # in the total and the threshold gate. Idempotent: a result whose
+    # issue_severity is already canonical is skipped.
+    normalize_sarif_result_severities(sarif_report)
     counts = ScannerSeverityCount()
     for result in sarif_report.get_all_results():
         if result.suppressions and len(result.suppressions) > 0:

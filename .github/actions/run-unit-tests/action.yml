@@ -74,14 +74,18 @@ runs:
     # Rendered by coverage.py itself rather than by irongut/CodeCoverageSummary, which is a
     # Docker-based action. A Docker action's image is pulled during the job's prepare phase,
     # BEFORE any step's `if` is evaluated, so this step's condition -- which selects exactly
-    # one of the twenty matrix legs -- did not stop the other legs from pulling it. Measured
+    # one of the twenty-five matrix legs -- did not stop the other legs from pulling it. Measured
     # on run 35246976698: every Linux leg logged "Pull ghcr.io/irongut/codecoveragesummary
     # :v1.3.0", including ubuntu-24.04-arm/py3.11 and ubuntu-latest/py3.13, where the
-    # condition is false. macOS and Windows legs logged no pull at all, so the exposure was
-    # the eight Linux legs, of which one actually runs the step.
+    # condition is false. macOS and Windows legs logged no pull at all, so the exposure was the
+    # Linux legs, of which one actually runs the step. That run had eight of them; the matrix now
+    # has ten, ubuntu-latest and ubuntu-24.04-arm across five Python versions each. The leg count
+    # is stated for the matrix as it stands, the eight for the run it was measured on -- they are
+    # different populations and only one of them was ever counted on a runner.
     #
-    # That made a cosmetic summary a hard dependency on ghcr.io for seven legs that never use
-    # it. On that run the pull failed DNS resolution three times (6.4s and 8.8s backoffs, then
+    # That made a cosmetic summary a hard dependency on ghcr.io for every Linux leg but one --
+    # seven at the time of that run, nine now. On that run the pull failed DNS resolution three
+    # times (6.4s and 8.8s backoffs, then
     # give up), and because the prepare phase precedes execution, "Install dependencies",
     # "Run PyTest" and "Run cdk-nag integration tests" were all skipped with duration_ms=0.
     # The leg reported failure having run zero tests, and it ejected PR #587 from the merge
