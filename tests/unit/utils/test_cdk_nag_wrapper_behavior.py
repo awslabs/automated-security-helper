@@ -353,7 +353,12 @@ def test_response_container_retains_all_three_fields(tmp_path):
 
 
 def test_template_without_resources_returns_none(cdk_doubles, tmp_path, outdir):
-    """A YAML file that is not a CloudFormation template is skipped."""
+    """A YAML file that is not a CloudFormation template is skipped.
+
+    The only bare-None return left in the wrapper, and the control for the two that were
+    converted to ``failure`` responses. If this ever returns a failure instead, every
+    repository with no CloudFormation in it starts reporting ERROR for cdk-nag.
+    """
     not_a_template = tmp_path / "compose.yaml"
     not_a_template.write_text("services:\n  web:\n    image: nginx\n", encoding="utf-8")
 
@@ -407,16 +412,39 @@ def test_one_bad_pack_name_fails_the_whole_call_not_just_that_pack(
     )
 
 
-def test_empty_pack_list_returns_none_rather_than_an_empty_clean_result(
+def test_empty_pack_list_reports_a_failure_rather_than_an_empty_clean_result(
     cdk_doubles, template_file, outdir
 ):
     """Requesting zero packs cannot produce a report, so it must not look like a clean scan.
 
     With no pack registered no rule can fire, and the resulting empty findings set is
-    indistinguishable from a compliant template. None is the signal the scanner reads as
-    "unavailable", which is the honest answer here.
+    indistinguishable from a compliant template.
+
+    This used to assert None on the reading that None means "unavailable" to the scanner. It
+    does not: ``cdk_nag_scanner`` has one branch for None and it is the per-file skip, which
+    decrements the attempt count back down. So a scan of real templates with every pack
+    disabled ended at zero attempts and reported SKIPPED -- on the completeness allowlist in
+    both gates, therefore exit code 0 with executionSuccessful=True, for a run in which no rule
+    was evaluated against a real CloudFormation template.
+
+    ``failure`` is the signal that means "no rule was evaluated"; the scanner counts a response
+    carrying it as a failed target, which reaches ERROR. See
+    ``tests/unit/plugin_modules/ash_builtin/test_cdk_nag_unevaluated_is_not_skipped.py`` for
+    why the previous classification was overturned rather than kept, and for the control
+    proving a repository with no CloudFormation in it is still a clean skip.
     """
-    assert _run(template_file, outdir, nag_packs=[]) is None
+    response = _run(template_file, outdir, nag_packs=[])
+
+    assert response is not None, (
+        "a bare None lands in the scanner's not-a-CloudFormation-template branch, which "
+        "un-counts the attempt and lets a scan that evaluated nothing exit 0"
+    )
+    assert response.failure is not None
+    assert "no cdk-nag pack was registered" in response.failure
+    assert response.results == {}, (
+        "and the results must stay empty -- the failure explains the emptiness rather than "
+        "the emptiness being read as compliance"
+    )
     assert cdk_doubles.pack_instances == []
 
 
