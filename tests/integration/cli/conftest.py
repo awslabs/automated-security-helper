@@ -1,206 +1,110 @@
-"""
-Configuration for MCP CLI integration tests.
+"""Shared harness for the MCP CLI integration tests.
 
-This module provides pytest configuration and fixtures specifically
-for MCP CLI integration tests.
+WHAT THIS PROVIDES AND WHY IT IS SHAPED THIS WAY
+------------------------------------------------
+One fixture, :func:`ash_mcp_client`, which hands a test a real MCP client
+connected to the real ASH server object over the SDK's in-memory transport. Every
+protocol-level integration test in this directory goes through it, so a test here
+exercises ``tools/list``, ``tools/call``, ``resources/read`` and ``prompts/get``
+as a client sees them rather than calling a Python function that happens to be
+decorated.
+
+That distinction is the whole point of the fixture. ASH once shipped four
+source-delivery tools that no client could call because ``@mcp.tool()`` was never
+applied; forty unit tests exercised the functions directly and all of them passed
+(see tests/unit/cli/mcp/test_tool_surface_parity.py for the full account). A test
+that reaches past the protocol cannot see that class of defect. This fixture
+exists so the tests in this directory cannot accidentally reach past it.
+
+The transport is ``mcp.Client(server)``, which the SDK documents as the supported
+way to test a server in-process: it wraps ``InMemoryTransport``, runs the real
+low-level server in a background task, and performs the real ``initialize``
+handshake. No part of the server is doubled -- not the server object, not the
+tool registry, not the request dispatch. The only thing that is not real is the
+socket, and nothing in ASH's tool layer depends on there being one.
+
+WHAT IS DELIBERATELY NOT MOCKED
+-------------------------------
+Scans. ``run_ash_scan`` runs a real ASH scan in a worker thread of the test
+process, so the workflow test in test_mcp_scan_workflow.py plants a real secret,
+gets real findings back, and reads real report files off disk. Mocking the scan
+would leave the test asserting that a mock returned what the test told it to
+return, which is worth nothing here. The cost is runtime: a default local-mode
+scan of a single-file tree measured 13 seconds on a 192-core host.
+
+ISOLATION UNDER PARALLEL EXECUTION
+----------------------------------
+pytest.ini runs the suite with ``-n auto``, which on this host is 192 workers, so
+nothing here may contend on a fixed name. Three properties give that:
+
+* No port and no fixed socket. The in-memory transport is a pair of anyio object
+  streams private to one test; the stdio tests in test_mcp_stdio_server.py use a
+  subprocess reached over its own pipes, which are private too.
+* No fixed path. Every scan target is a per-test temporary subdirectory, and ASH
+  writes its output tree inside the target, so two tests never share an output
+  directory.
+* No assertion on registry totals. ``get_scan_registry()`` is a process-global
+  singleton shared by every test in one xdist worker, so a test that asserted
+  "exactly one scan exists" would pass alone and fail beside a sibling. The
+  tests assert membership of their own scan id instead.
+
+The one piece of global state a test must restore is ``ASH_MCP_ALLOWED_ROOTS``,
+which the scan-target policy reads from the environment. Function-scoped tests set
+it with ``monkeypatch.setenv``; the module-scoped scan fixture in
+test_mcp_scan_workflow.py sets and restores it explicitly, because monkeypatch's
+own fixture is function-scoped.
+
+REMOVED FIXTURES
+----------------
+This module used to define ``integration_test_config``, ``mock_mcp_environment``,
+``temp_scan_directory``, ``mock_ash_scan_results``, ``mock_aggregated_results``
+and ``temp_output_directory``. None of them was ever requested by a test -- the
+only file that named them, test_mcp_integration_simple.py, listed them as string
+literals in an assertion that this file contained the string ``def <name>``.
+
+``mock_mcp_environment`` is worth naming specifically, because it was worse than
+dead: it patched ``sys.modules`` for ``mcp``, ``mcp.server`` and
+``mcp.server.mcpserver`` with ``MagicMock``. Any test in this directory that had
+requested it would have replaced the MCP SDK -- the thing these tests exist to
+exercise -- with a mock that answers every call successfully. Leaving it beside
+:func:`ash_mcp_client` would have been a trap.
 """
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Callable
 
 import pytest
-import tempfile
-from pathlib import Path
-from unittest.mock import patch, MagicMock
-
-
-@pytest.fixture(scope="session")
-def integration_test_config():
-    """Configuration for integration tests."""
-    return {
-        "timeout": 30,  # Maximum test timeout in seconds
-        "temp_dir_prefix": "ash_mcp_integration_test_",
-        "mock_mcp_available": True,  # Whether to mock MCP as available
-    }
 
 
 @pytest.fixture
-def mock_mcp_environment():
-    """Mock MCP environment for integration tests."""
-    # Mock MCP modules to be available
-    mock_mcp = MagicMock()
-    mock_mcpserver = MagicMock()
-    mock_context = MagicMock()
+def ash_mcp_client() -> Callable[[], object]:
+    """Return a factory for a real MCP client bound to the real ASH server.
 
-    # Create a mock MCPServer
-    mock_server = MagicMock()
-    mock_server.run = MagicMock()
-    mock_mcpserver.return_value = mock_server
+    Used as ``async with ash_mcp_client() as client:`` rather than being awaited
+    as a fixture value, and that shape is forced rather than chosen. An
+    ``async def`` fixture that yielded a live client would have pytest-asyncio run
+    its setup and its teardown in two different asyncio tasks, while the client's
+    ``__aenter__``/``__aexit__`` open and close an anyio cancel scope that checks
+    it is exited from the task that entered it. Measured: thirteen tests passed
+    and every one of them errored in teardown with "Attempted to exit cancel scope
+    in a different task than it was entered in". Keeping the ``async with`` inside
+    the test body keeps both ends in one task.
 
-    # Mock async methods for context
-    async def mock_report_progress(current, total, message):
-        pass
+    ``raise_exceptions=True`` makes a server-side crash surface as a test error
+    rather than as a JSON-RPC error result that an assertion might read as an
+    ordinary "tool returned failure" response. The two are different findings and
+    should not be confusable.
+    """
+    from mcp import Client
 
-    mock_context.report_progress = mock_report_progress
-    mock_context.info = MagicMock()
+    from automated_security_helper.cli.mcp_server import mcp
 
-    modules_to_mock = {
-        "mcp": mock_mcp,
-        "mcp.server": MagicMock(),
-        "mcp.server.mcpserver": MagicMock(
-            MCPServer=mock_mcpserver, Context=mock_context
-        ),
-    }
+    def connect() -> object:
+        return Client(mcp, raise_exceptions=True)
 
-    with patch.dict("sys.modules", modules_to_mock):
-        yield {
-            "mcp": mock_mcp,
-            "MCPServer": mock_mcpserver,
-            "Context": mock_context,
-            "server": mock_server,
-        }
-
-
-@pytest.fixture
-def temp_scan_directory():
-    """Create a temporary directory with sample files for scanning."""
-    with tempfile.TemporaryDirectory(prefix="ash_mcp_test_scan_") as temp_dir:
-        scan_dir = Path(temp_dir)
-
-        # Create a Python file with potential security issues
-        python_file = scan_dir / "sample.py"
-        python_file.write_text(
-            """
-import os
-import subprocess
-
-# Potential security issue - hardcoded secret
-SECRET_KEY = "sk-1234567890abcdef"
-
-def run_command(user_input):
-    # Shell injection vulnerability
-    os.system(f"echo {user_input}")
-
-def another_function():
-    # Another potential issue
-    subprocess.call("ls -la", shell=True)
-
-if __name__ == "__main__":
-    run_command("test")
-"""
-        )
-
-        # Create a requirements.txt file
-        requirements_file = scan_dir / "requirements.txt"
-        requirements_file.write_text(
-            """
-requests==2.25.1
-flask==1.1.4
-pyyaml==3.13
-"""
-        )
-
-        # Create a simple Dockerfile
-        dockerfile = scan_dir / "Dockerfile"
-        dockerfile.write_text(
-            """
-FROM ubuntu:latest
-RUN apt-get update
-COPY . /app
-WORKDIR /app
-USER root
-CMD ["python", "sample.py"]
-"""
-        )
-
-        yield str(scan_dir)
-
-
-@pytest.fixture
-def mock_ash_scan_results():
-    """Mock ASH scan results for testing."""
-    return {
-        "success": True,
-        "exit_code": 0,
-        "execution_time_seconds": 3.5,
-        "ash_version": f"ASH version {__import__('automated_security_helper.utils.version_management', fromlist=['get_version']).get_version()}",
-        "output_dir": "/.ash/mock_ash_output",
-        "results": {
-            "scanners": {
-                "bandit": {
-                    "status": "completed",
-                    "findings": 2,
-                    "actionable_findings": 1,
-                },
-                "semgrep": {
-                    "status": "completed",
-                    "findings": 1,
-                    "actionable_findings": 1,
-                },
-                "detect-secrets": {
-                    "status": "completed",
-                    "findings": 1,
-                    "actionable_findings": 1,
-                },
-            }
-        },
-    }
-
-
-@pytest.fixture
-def mock_aggregated_results():
-    """Mock aggregated results JSON structure."""
-    return {
-        "additional_reports": {
-            "bandit": {
-                "source": {
-                    "finding_count": 2,
-                    "actionable_finding_count": 1,
-                    "status": "failed",
-                }
-            },
-            "semgrep": {
-                "source": {
-                    "finding_count": 1,
-                    "actionable_finding_count": 1,
-                    "status": "failed",
-                }
-            },
-            "detect-secrets": {
-                "source": {
-                    "finding_count": 1,
-                    "actionable_finding_count": 1,
-                    "status": "failed",
-                }
-            },
-        },
-        "metadata": {"summary_stats": {"total": 4, "actionable": 3}},
-    }
-
-
-@pytest.fixture
-def temp_output_directory(mock_aggregated_results):
-    """Create a temporary output directory with mock ASH results."""
-    with tempfile.TemporaryDirectory(prefix="ash_mcp_test_output_") as temp_dir:
-        output_dir = Path(temp_dir)
-
-        # Create aggregated results file
-        results_file = output_dir / "ash_aggregated_results.json"
-        import json
-
-        with open(results_file, "w") as f:
-            json.dump(mock_aggregated_results, f)
-
-        # Create reports directory with sample files
-        reports_dir = output_dir / "reports"
-        reports_dir.mkdir()
-
-        (reports_dir / "ash.sarif").write_text('{"version": "2.1.0", "runs": []}')
-        (reports_dir / "ash.html").write_text(
-            "<html><body><h1>ASH Report</h1></body></html>"
-        )
-        (reports_dir / "ash.json").write_text(
-            '{"findings": [], "summary": {"total": 4}}'
-        )
-
-        yield str(output_dir)
+    return connect
 
 
 # Pytest markers for integration tests
@@ -245,6 +149,17 @@ def pytest_collection_modifyitems(config, items):
     ``integration`` marker now hangs off the same path scoping as everything
     else. Detected by diffing the skipped-test IDs against a baseline, which is
     the only signal this failure emits.
+
+    A NOTE FOR ANYONE ADDING A TEST TO THIS DIRECTORY
+    -------------------------------------------------
+    The slow rule below is a second gate, not a label. A test whose *function
+    name* contains "workflow", "lifecycle" or "end_to_end" needs both
+    ``--run-integration`` and ``--run-slow`` to execute, and running with only
+    the first produces a green result that silently skipped it. The MCP protocol,
+    scan and stdio modules therefore avoid those three words in their function
+    names on purpose, and test_marker_gating.py asserts that they still do. Name
+    a test for the property it checks rather than for the shape of the flow, and
+    it stays reachable with one flag.
     """
     integration_root = Path(__file__).resolve().parent.parent
 

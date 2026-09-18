@@ -1,255 +1,138 @@
-# MCP CLI Integration Tests
+# MCP CLI integration tests
 
-This directory contains comprehensive integration tests for the MCP (Model Context Protocol) CLI command functionality in ASH (Automated Security Helper).
+Integration tests for ASH's MCP server. Every test here drives the server the way a
+client does, rather than calling the tool functions directly.
 
-## Overview
+## How to run them
 
-The integration tests validate end-to-end functionality of the MCP CLI command, covering:
+These tests are gated. `tests/conftest.py` skips anything marked `integration` unless
+`--run-integration` is passed, and `pytest.ini` carries `--cov` with a `fail_under=80`
+gate in `.coveragerc`, so any subset run exits non-zero even when every test passes.
+Use `--no-cov` and read the summary line:
 
-- Complete MCP server startup and tool execution
-- Scan workflow through MCP with real ASH integration
-- MCP server lifecycle and graceful shutdown
-- Functionality parity with original standalone script
+```bash
+# everything in this directory
+python -m pytest tests/integration/cli/ --run-integration --no-cov
 
-## Test Files
+# one module
+python -m pytest tests/integration/cli/test_mcp_scan_workflow.py --run-integration --no-cov
+```
 
-### `test_mcp_integration.py`
-Main integration test file containing comprehensive end-to-end tests:
+Do not grep the output for `FAILED`. It appears as a parametrization value in green logs.
+Read the `short test summary info` block.
 
-- **TestMcpServerLifecycle**: Server startup, shutdown, and error handling
-- **TestMcpToolExecution**: MCP tool execution with ASH integration
-- **TestMcpResourcesAndPrompts**: MCP resources and prompts functionality
-- **TestMcpScanWorkflow**: Complete scan workflow testing
-- **TestTemporaryResourceManagement**: Resource cleanup and management
-- **TestFunctionalityParity**: Parity with original standalone script
+### These tests do not run in CI
 
-### `test_mcp_integration_simple.py`
-Validation tests to ensure integration test structure and coverage:
+CI runs the unit suite and does not pass `--run-integration`, so nothing in this directory
+executes there. A green CI run is not evidence that any of this passes. Verify locally.
+Enabling the suite in CI is a separate change.
 
-- Test structure validation
-- Requirement coverage verification
-- Fixture functionality validation
-- Mock environment testing
+### One flag, not two
+
+The conftest in this directory also adds the `slow` marker to any test whose **function
+name** contains `workflow`, `lifecycle` or `end_to_end`, and `tests/conftest.py` skips
+`slow` tests unless `--run-slow` is passed. A test that picks up both markers is silently
+skipped by a `--run-integration` run that reports green.
+
+The MCP modules are named to avoid those three words for that reason, and
+`test_marker_gating.py` fails if a new test name reintroduces the problem. One test is
+exempted there with a reason: `test_file_based_tracking_workflow`, which is double-gated
+today and currently fails when it does run.
+
+## What is here
+
+### `test_mcp_protocol_integration.py`
+
+A real `mcp.Client` connected to the real server object over the SDK's in-memory
+transport. Thirteen tests, no scan, about ten seconds.
+
+Covers the `initialize` handshake and server identity; `tools/list` against the full
+21-tool surface; the published input schemas, including that the injected `Context`
+parameter is not exposed as a caller argument; a read-only `tools/call` round trip; the
+content-block shape of the one tool that returns a list rather than a dict; the
+convention that a domain failure comes back as a successful call carrying
+`success: False` while an unknown tool or a missing required argument comes back with
+`is_error: True`; `resources/list` and `resources/read` for all five resources, with a
+structural check on the generated config schema and an equality check of `ash://exit-codes`
+against `ASH_EXIT_CODES`; `prompts/get` for both prompts including argument
+interpolation; and the `ASH_MCP_ALLOWED_ROOTS` scan-target policy in both directions.
+
+### `test_mcp_scan_workflow.py`
+
+One real ASH local-mode scan, driven end to end over the protocol. Nine tests sharing a
+single module-scoped scan, about fifteen seconds.
+
+A secret is planted in a temporary tree, `run_ash_scan` starts a real scan,
+`get_scan_progress` is polled to completion, and the findings, the report inventory and
+the report files themselves are read back. Covers scan completion and the output
+directory; a control that scanners actually ran rather than all reporting SKIPPED or
+MISSING; the planted secret arriving as a critical actionable finding; the report
+inventory naming files that exist and parse, including counting SARIF results; registry
+listing and the refusal to cancel a finished scan; the progress notification the server
+sends during the start call; the echoed session id; and the semantics of `is_complete`.
+
+One test is `xfail(strict=True)`: `filter_level="summary"` does not filter. The reason and
+the measurement are in that test's docstring.
+
+### `test_mcp_stdio_server.py`
+
+The `ash mcp` process, launched for real and spoken to over its own pipes. Three tests,
+about six seconds.
+
+Covers that the CLI serves the same tool surface the in-process tests see; that every line
+the running server writes to stdout is a JSON-RPC frame, checked by owning the pipe and
+running under `--no-quiet --debug` (the configuration in which ASH previously corrupted
+its own stream); and that closing stdin ends the process with exit code 0.
+
+### `test_mcp_file_tracking_integration.py`
+
+Pre-existing. One test, currently failing when it runs: it calls
+`mcp_get_scan_results(scan_id)` while that function's parameter is `output_dir`. Not
+touched by the modules above.
+
+### `test_marker_gating.py`
+
+Three tests asserting that nothing in this directory needs `--run-slow` as well as
+`--run-integration`, that the keyword list it reads out of the conftest is still the one it
+was written against, and that its exemption list has not gone stale.
 
 ### `conftest.py`
-Pytest configuration and fixtures for integration tests:
 
-- Mock MCP environment setup
-- Temporary directory fixtures
-- Mock scan results and aggregated data
-- Test configuration and markers
+Provides `ash_mcp_client`, a factory used as `async with ash_mcp_client() as client:`, and
+the collection hook that applies the `integration`, `slow` and `mcp` markers to this tree.
+The hook's docstring records two occasions on which its name rules were unscoped and
+silently skipped tests elsewhere in the repository; read it before changing it.
 
-### `test_mcp_integration_runner.py`
-Simple test runner for executing integration tests with proper configuration.
+## Design constraints
 
-## Requirements Coverage
+**Nothing is doubled that matters.** A test that mocks the MCP server and then asserts the
+mock behaved is worth nothing here. ASH has already shipped four tools that no client could
+call because `@mcp.tool()` was never applied, with forty passing unit tests over the same
+functions; the only thing that catches that is going through the protocol. The in-memory
+transport is the SDK's own supported way to do it, and the only thing it replaces is the
+socket.
 
-The integration tests cover the following requirements from the MCP CLI integration spec:
+**Scans are real.** `run_ash_scan` runs a real scan in a worker thread of the test process
+and the workflow module reads the reports it writes. That costs about thirteen seconds.
 
-### Requirement 1.1 - MCP Server Startup
-- ✅ `test_mcp_server_startup_success`: Server starts with ASH capabilities
-- ✅ `test_mcp_server_name_consistency`: Uses correct server name "ASH Security Scanner"
+**Nothing contends.** The suite runs under `-n auto`, which on a large host means one worker
+per CPU. No test binds a port or a socket; the in-memory transport is a private pair of
+anyio streams and the stdio tests use pipes. Scan targets are per-test temporary
+directories and ASH writes its output inside the target. `get_scan_registry()` is a
+process-global singleton shared by every test in one worker, so registry assertions test
+membership of the test's own scan id and never totals. `ASH_MCP_ALLOWED_ROOTS` is set with
+`monkeypatch.setenv`, or set and restored explicitly where a module-scoped fixture needs it.
 
-### Requirement 1.3 - Complete Scan Workflow
-- ✅ `test_end_to_end_scan_workflow`: Complete scan through MCP with real ASH integration
-- ✅ `test_scan_directory_tool_success`: Successful scan execution
+**Async fixtures do not hold live clients.** pytest-asyncio runs an async generator
+fixture's setup and teardown in different asyncio tasks, and the client's enter and exit
+open and close an anyio cancel scope that refuses to be exited from another task. An
+`async with` therefore stays inside one function body: either in the test, via the
+`ash_mcp_client` factory, or inside a single `asyncio.run` in a synchronous fixture.
 
-### Requirement 1.4 - Graceful Shutdown
-- ✅ `test_mcp_server_graceful_shutdown`: Graceful shutdown on interrupt
-- ✅ `test_signal_handler_registration`: Signal handler registration
-- ✅ `test_resource_cleanup_on_shutdown`: Resource cleanup on termination
+## Adding a test here
 
-### Requirement 5.1 - MCP Resources
-- ✅ `test_ash_status_resource_installed`: ash://status resource functionality
-- ✅ `test_ash_status_resource_not_installed`: Error handling for status resource
-
-### Requirement 5.2 - MCP Tools
-- ✅ `test_scan_directory_tool_success`: scan_directory tool with identical interface
-- ✅ `test_check_installation_tool_success`: check_installation tool functionality
-- ✅ `test_scan_directory_tool_validation_error`: Error handling for invalid parameters
-
-### Requirement 5.3 - Help Resource
-- ✅ `test_ash_help_resource`: ash://help resource with identical content
-
-### Requirement 5.4 - Security Analysis Prompt
-- ✅ `test_analyze_security_findings_prompt`: analyze_security_findings prompt functionality
-
-### Requirement 5.5 - Result Parsing
-- ✅ `test_result_parsing_functionality`: Result parsing with identical logic and format
-- ✅ `test_parse_ash_results_*`: Various result parsing scenarios
-
-## Test Execution
-
-### Running All Integration Tests
-
-```bash
-# Run all MCP integration tests
-python -m pytest tests/integration/cli/ -m integration -v
-
-# Run with specific markers
-python -m pytest tests/integration/cli/ -m "integration and mcp" -v
-
-# Run slow tests (end-to-end workflows)
-python -m pytest tests/integration/cli/ -m "integration and slow" -v
-```
-
-### Running Specific Test Classes
-
-```bash
-# Test server lifecycle
-python -m pytest tests/integration/cli/test_mcp_integration.py::TestMcpServerLifecycle -v
-
-# Test tool execution
-python -m pytest tests/integration/cli/test_mcp_integration.py::TestMcpToolExecution -v
-
-# Test scan workflow
-python -m pytest tests/integration/cli/test_mcp_integration.py::TestMcpScanWorkflow -v
-```
-
-### Running Validation Tests
-
-```bash
-# Validate test structure and coverage
-python -m pytest tests/integration/cli/test_mcp_integration_simple.py -v
-
-# Or run directly
-python tests/integration/cli/test_mcp_integration_runner.py
-```
-
-## Test Environment
-
-### Prerequisites
-
-The integration tests require:
-
-- Python 3.10+
-- ASH package installed or available in PYTHONPATH
-- pytest and testing dependencies
-- Mock MCP dependencies (handled by fixtures)
-
-### Mock Environment
-
-The tests use comprehensive mocking to avoid requiring actual MCP package installation:
-
-- **MCP Server**: Mocked MCPServer with tool/resource registration
-- **ASH Integration**: Mocked direct function calls to ASH core functionality
-- **File System**: Temporary directories and files for realistic testing
-- **Results**: Mock aggregated results and report files
-
-### Fixtures
-
-Key fixtures provided by `conftest.py`:
-
-- `mock_mcp_environment`: Complete MCP environment mock
-- `temp_scan_directory`: Temporary directory with sample scannable files
-- `mock_ash_scan_results`: Mock ASH scan results structure
-- `temp_output_directory`: Temporary output directory with mock results
-- `integration_test_config`: Test configuration settings
-
-## Test Data
-
-### Sample Scan Directory Structure
-```
-temp_scan_dir/
-├── sample.py          # Python file with security issues
-├── requirements.txt   # Dependencies file
-└── Dockerfile        # Container configuration
-```
-
-### Mock Aggregated Results Structure
-```json
-{
-  "additional_reports": {
-    "bandit": {
-      "source": {
-        "finding_count": 2,
-        "actionable_finding_count": 1,
-        "status": "failed"
-      }
-    },
-    "semgrep": {
-      "source": {
-        "finding_count": 1,
-        "actionable_finding_count": 1,
-        "status": "failed"
-      }
-    }
-  },
-  "metadata": {
-    "summary_stats": {
-      "total": 3,
-      "actionable": 2
-    }
-  }
-}
-```
-
-## Error Scenarios Tested
-
-### Server Lifecycle Errors
-- Server initialization failures
-- Runtime errors during execution
-- Signal handling and graceful shutdown
-- Resource cleanup on unexpected termination
-
-### Tool Execution Errors
-- Invalid scan parameters (directory path, severity threshold)
-- File system access errors
-- ASH installation/dependency issues
-- Scan execution failures
-
-### Validation Errors
-- Directory validation (existence, permissions, access)
-- Parameter validation (types, values, ranges)
-- Structured error response format
-
-## Performance Considerations
-
-### Test Execution Time
-- **Fast tests**: Basic validation and mocking (~1-5 seconds each)
-- **Medium tests**: Tool execution with file I/O (~5-15 seconds each)
-- **Slow tests**: End-to-end workflows with full scan simulation (~15-30 seconds each)
-
-### Resource Usage
-- Temporary directories are automatically cleaned up
-- Mock objects minimize memory usage
-- File I/O is limited to temporary locations
-
-## Debugging
-
-### Common Issues
-
-1. **Import Errors**: Ensure ASH package is in PYTHONPATH
-2. **Permission Errors**: Check temporary directory permissions
-3. **Mock Failures**: Verify mock environment setup in fixtures
-
-### Debug Output
-
-Enable verbose logging for debugging:
-
-```bash
-# Run with debug output
-python -m pytest tests/integration/cli/ -v -s --log-cli-level=DEBUG
-
-# Run specific test with full output
-python -m pytest tests/integration/cli/test_mcp_integration.py::TestMcpServerLifecycle::test_mcp_server_startup_success -v -s
-```
-
-## Contributing
-
-When adding new integration tests:
-
-1. Follow the existing test class structure
-2. Use appropriate fixtures from `conftest.py`
-3. Add proper requirement references in docstrings
-4. Include both success and error scenarios
-5. Update this README with new test coverage
-
-## Maintenance
-
-### Regular Updates Needed
-
-- Update mock data structures when ASH output format changes
-- Adjust test timeouts for performance changes
-- Update requirement coverage when spec changes
-- Refresh sample scan files for new security patterns
+Drive the server through a client, not through an imported tool function -- the unit suite
+in `tests/unit/cli/` already does the latter thoroughly and cannot see the protocol. Name
+the test for the property it checks and keep `workflow`, `lifecycle` and `end_to_end` out
+of the name. Say in the docstring what would have to break for it to fail, and if the test
+depends on a control elsewhere in the module, name that control.
