@@ -532,7 +532,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-14, windows-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
         method: [pip, pipx, uvx, homebrew, pre-commit, podman, finch, nerdctl, mcp]
         exclude:
           # Homebrew not on Windows
@@ -556,20 +556,24 @@ jobs:
           - { os: ubuntu-latest, python-version: "3.10", method: nerdctl }
           - { os: ubuntu-latest, python-version: "3.11", method: nerdctl }
           - { os: ubuntu-latest, python-version: "3.13", method: nerdctl }
+          - { os: ubuntu-latest, python-version: "3.14", method: nerdctl }
 
           # Container runtimes only need Python 3.12
           - { os: ubuntu-latest, python-version: "3.10", method: podman }
           - { os: ubuntu-latest, python-version: "3.11", method: podman }
           - { os: ubuntu-latest, python-version: "3.13", method: podman }
+          - { os: ubuntu-latest, python-version: "3.14", method: podman }
           - { os: ubuntu-24.04-arm, python-version: "3.10", method: podman }
           - { os: ubuntu-24.04-arm, python-version: "3.11", method: podman }
           - { os: ubuntu-24.04-arm, python-version: "3.13", method: podman }
+          - { os: ubuntu-24.04-arm, python-version: "3.14", method: podman }
           # Podman/Finch not on macOS (no nested virtualization on hosted runners)
           - { os: macos-latest, method: podman }
           - { os: macos-14, method: podman }
           - { os: ubuntu-latest, python-version: "3.10", method: finch }
           - { os: ubuntu-latest, python-version: "3.11", method: finch }
           - { os: ubuntu-latest, python-version: "3.13", method: finch }
+          - { os: ubuntu-latest, python-version: "3.14", method: finch }
           - { os: macos-latest, method: finch }
           - { os: macos-14, method: finch }
 
@@ -577,32 +581,41 @@ jobs:
           - { os: ubuntu-latest, python-version: "3.10", method: homebrew }
           - { os: ubuntu-latest, python-version: "3.11", method: homebrew }
           - { os: ubuntu-latest, python-version: "3.13", method: homebrew }
+          - { os: ubuntu-latest, python-version: "3.14", method: homebrew }
           - { os: ubuntu-24.04-arm, python-version: "3.10", method: homebrew }
           - { os: ubuntu-24.04-arm, python-version: "3.11", method: homebrew }
           - { os: ubuntu-24.04-arm, python-version: "3.13", method: homebrew }
+          - { os: ubuntu-24.04-arm, python-version: "3.14", method: homebrew }
           - { os: macos-latest, python-version: "3.10", method: homebrew }
           - { os: macos-latest, python-version: "3.11", method: homebrew }
           - { os: macos-latest, python-version: "3.13", method: homebrew }
+          - { os: macos-latest, python-version: "3.14", method: homebrew }
           - { os: macos-14, python-version: "3.10", method: homebrew }
           - { os: macos-14, python-version: "3.11", method: homebrew }
           - { os: macos-14, python-version: "3.13", method: homebrew }
+          - { os: macos-14, python-version: "3.14", method: homebrew }
 
           # uvx bundles its own Python -- only needs 3.12
           - { os: ubuntu-latest, python-version: "3.10", method: uvx }
           - { os: ubuntu-latest, python-version: "3.11", method: uvx }
           - { os: ubuntu-latest, python-version: "3.13", method: uvx }
+          - { os: ubuntu-latest, python-version: "3.14", method: uvx }
           - { os: ubuntu-24.04-arm, python-version: "3.10", method: uvx }
           - { os: ubuntu-24.04-arm, python-version: "3.11", method: uvx }
           - { os: ubuntu-24.04-arm, python-version: "3.13", method: uvx }
+          - { os: ubuntu-24.04-arm, python-version: "3.14", method: uvx }
           - { os: macos-latest, python-version: "3.10", method: uvx }
           - { os: macos-latest, python-version: "3.11", method: uvx }
           - { os: macos-latest, python-version: "3.13", method: uvx }
+          - { os: macos-latest, python-version: "3.14", method: uvx }
           - { os: macos-14, python-version: "3.10", method: uvx }
           - { os: macos-14, python-version: "3.11", method: uvx }
           - { os: macos-14, python-version: "3.13", method: uvx }
+          - { os: macos-14, python-version: "3.14", method: uvx }
           - { os: windows-latest, python-version: "3.10", method: uvx }
           - { os: windows-latest, python-version: "3.11", method: uvx }
           - { os: windows-latest, python-version: "3.13", method: uvx }
+          - { os: windows-latest, python-version: "3.14", method: uvx }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -630,14 +643,14 @@ jobs:
   # One check name that can actually be required
   # ---------------------------------------------------------------------------
   #
-  # Every job above names itself from its matrix, so this workflow contributes 164 check runs
+  # Every job above names itself from its matrix, so this workflow contributes 194 check runs
   # to a pull request and not one of their names is stable. A ruleset's
   # required_status_checks list holds literal context strings with no wildcard, so requiring
-  # `unit-test` means enumerating all 20 of its names -- and then any matrix edit either orphans
+  # `unit-test` means enumerating all 25 of its names -- and then any matrix edit either orphans
   # a required context that no longer runs, which leaves a pull request pending forever, or
   # quietly adds a leg that nothing requires. That maintenance cost is why the ruleset requires
-  # two contexts today while the other 184 checks on the pull request measured below are
-  # advisory -- a figure that moves with the trigger set, as the 186 below explains.
+  # two contexts today while every other check on the pull request is advisory -- a count that
+  # moves with the trigger set, as the 186 below explains.
   #
   # Those two numbers count different populations, which is how the previous pair of them went
   # stale unnoticed. Both were measured on pull request 599 at b5111830, and both are
@@ -646,11 +659,27 @@ jobs:
   #   gh api repos/<owner>/<repo>/actions/runs/<run>/jobs --paginate --jq '.jobs[].name'
   #   gh api repos/<owner>/<repo>/commits/<sha>/check-runs --paginate --jq '.check_runs[].name'
   #
-  # 164 is this workflow's own contribution: 144 jobs, plus the 20 `PyTest - ...` check runs
-  # that mikepenz/action-junit-report publishes from inside the unit-test legs. Those 20 are
-  # not jobs and land in a separate check suite, so a job census alone undercounts what this
-  # file puts on a pull request -- that gap is most of why the old figure of 84 looked
+  # 194 is this workflow's own contribution: 169 jobs, plus the 25 `PyTest - ...` check runs
+  # that mikepenz/action-junit-report publishes from inside the unit-test legs -- one per leg.
+  # Those 25 are not jobs and land in a separate check suite, so a job census alone undercounts
+  # what this file puts on a pull request -- that gap is most of why the old figure of 84 looked
   # defensible.
+  #
+  # The 169 is measured, not only expanded: run 35370310502 reported `total_count` 168 with 168
+  # rows received, `unit-test` 25 and `install-validation` 113 by name, and `required-checks`
+  # absent because it is `needs`-gated and is not created until the run resolves. 168 + 1 = 169.
+  # The 25 `PyTest - ...` runs are derived from that leg count by the one-per-leg rule #602
+  # measured at 20 legs, not counted again.
+  #
+  # Where 169 comes from, per job: lint 1, unit-test 25, scan-validation 24,
+  # external-target-scan 2, multi-project-attribution 2, deploy-aws-helpers 1,
+  # install-validation 113, required-checks 1.
+  #
+  # unit-test reached 25 from three independent changes that all had to land: adding 3.14 to the
+  # axis (18 -> 23), removing the macos-14 exclusion for 3.10 and 3.11 (#599), and nothing in
+  # #601, which relabels `macos-latest` as arm64 and moves no count. Either matrix change alone
+  # gives 23 or 20, so a merge or rebase that keeps one side's intent would look clean and be
+  # wrong by two legs. The check is the count and the leg NAMES, not the diff.
   #
   # 186 is every check run on that commit, from every workflow the commit triggered plus the
   # GitHub Advanced Security app. It is 185 distinct names over 186 check runs, because
@@ -674,6 +703,13 @@ jobs:
   #
   # Reconcile the row count against the endpoint's own `total_count` before trusting either
   # query. Both routes cap at `per_page` and report the true total alongside a short page.
+  #
+  # The 186 and 185 above are left exactly as measured, on pull request 599 at b5111830, and are
+  # NOT restated for this branch -- that commit predates Python 3.14, so re-labelling its numbers
+  # would be inventing a measurement rather than citing one. What can be said is the delta this
+  # file contributes: 25 more jobs and 5 more `PyTest - ...` runs than at b5111830, so a
+  # comparable CI-plumbing commit would see 216 rather than 186. That is arithmetic on a measured
+  # baseline, not a count anyone has taken, and it is why the 186 keeps its own commit's name.
   #
   # This job's name does not depend on the matrix, so it can be required once and stay correct
   # across matrix changes. It reports the verdict the individual legs already computed.
