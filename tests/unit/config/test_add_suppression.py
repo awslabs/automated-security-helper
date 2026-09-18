@@ -148,3 +148,113 @@ class TestAddSuppressionToConfig:
         assert config_path.exists()
         data = yaml.safe_load(config_path.read_text())
         assert len(data["global_settings"]["suppressions"]) == 1
+
+    def test_preserves_comments_on_first_suppression(self, tmp_path: Path):
+        """First suppression into a commented config must not strip comments.
+
+        This is the MED-1 regression: global_settings exists but has no
+        suppressions key, which used to route to a full yaml.safe_dump rewrite
+        that dropped every comment. It must now text-insert instead.
+        """
+        config_path = tmp_path / ".ash.yaml"
+        config_path.write_text(
+            "# Top-of-file rationale, must survive\n"
+            "project_name: my-project\n"
+            "global_settings:\n"
+            "  # keep this note about the threshold\n"
+            "  severity_threshold: MEDIUM\n"
+        )
+
+        add_suppression_to_config(
+            config_path,
+            AshSuppression(rule_id="R-1", path="x.py", reason="ok"),
+        )
+
+        written = config_path.read_text()
+        assert "# Top-of-file rationale, must survive" in written
+        assert "# keep this note about the threshold" in written
+
+        data = yaml.safe_load(written)
+        assert data["project_name"] == "my-project"
+        assert data["global_settings"]["severity_threshold"] == "MEDIUM"
+        assert data["global_settings"]["suppressions"][0]["rule_id"] == "R-1"
+
+    def test_preserves_comments_when_appending_to_existing_list(self, tmp_path: Path):
+        config_path = tmp_path / ".ash.yaml"
+        config_path.write_text(
+            "global_settings:\n"
+            "  suppressions:\n"
+            "    # an existing, reviewed entry\n"
+            "    - rule_id: OLD-1\n"
+            "      path: old.py\n"
+            "      reason: legacy\n"
+        )
+
+        add_suppression_to_config(
+            config_path,
+            AshSuppression(rule_id="NEW-2", path="new.py", reason="accepted"),
+        )
+
+        written = config_path.read_text()
+        assert "# an existing, reviewed entry" in written
+        rule_ids = [
+            s["rule_id"]
+            for s in yaml.safe_load(written)["global_settings"]["suppressions"]
+        ]
+        assert rule_ids == ["OLD-1", "NEW-2"]
+
+    def test_appends_block_when_no_global_settings(self, tmp_path: Path):
+        config_path = tmp_path / ".ash.yaml"
+        config_path.write_text("# only a project name here\nproject_name: p\n")
+
+        add_suppression_to_config(
+            config_path,
+            AshSuppression(rule_id="C-1", path="c.py", reason="ok"),
+        )
+
+        written = config_path.read_text()
+        assert "# only a project name here" in written
+        data = yaml.safe_load(written)
+        assert data["project_name"] == "p"
+        assert data["global_settings"]["suppressions"][0]["rule_id"] == "C-1"
+
+    @pytest.mark.parametrize(
+        "reason",
+        [
+            'He said "hi" to the scanner',
+            "path C:\\Users\\x and a : colon",
+            "trailing backslash \\",
+            "hash # and braces {} and brackets []",
+        ],
+    )
+    def test_reason_with_special_characters_round_trips(
+        self, tmp_path: Path, reason: str
+    ):
+        """A reason with quotes/backslashes/colons must produce valid YAML.
+
+        The old hand-rolled _yaml_scalar double-quoted without escaping embedded
+        quotes or backslashes, so these reasons produced invalid YAML on the
+        supposedly-safe append path. Free-text reasons from the dialog are
+        exactly where this hit.
+        """
+        config_path = tmp_path / ".ash.yaml"
+        # Start with an existing suppressions list so the append path is exercised.
+        config_path.write_text(
+            "global_settings:\n"
+            "  suppressions:\n"
+            "    - rule_id: OLD-1\n"
+            "      path: old.py\n"
+            "      reason: legacy\n"
+        )
+
+        add_suppression_to_config(
+            config_path,
+            AshSuppression(rule_id="Q-1", path="q.py", reason=reason),
+        )
+
+        # Must parse, and the reason must survive verbatim.
+        data = yaml.safe_load(config_path.read_text())
+        entries = {
+            s["rule_id"]: s for s in data["global_settings"]["suppressions"]
+        }
+        assert entries["Q-1"]["reason"] == reason
