@@ -70,7 +70,6 @@ import ast
 from pathlib import Path
 
 import pytest
-import tomllib
 
 from tests.utils.helpers import (
     ASH_TEST_TEMP_ROOT,
@@ -189,7 +188,18 @@ class TestNoTestWalksTheRepoRootWithRglob:
         ``REPO_ROOT.glob("a/b.md")`` resolves one path. ``REPO_ROOT.glob("**/b.md")``
         walks the whole tree and would race exactly like the rest. So the exemption
         is conditional, and this is the condition.
+
+        ``tomllib`` is imported here rather than at module scope, and skipped rather
+        than depended on, because it is standard library only from 3.11 while
+        ``requires-python`` starts at 3.10. A module-level import took out the whole
+        file -- and therefore the guard itself -- on every 3.10 leg. The guard is
+        the valuable part and must run everywhere; only this one assertion needs a
+        TOML parser, so only this one skips.
         """
+        tomllib = pytest.importorskip(
+            "tomllib",
+            reason="stdlib from 3.11; requires-python starts at 3.10",
+        )
         with (REPO_ROOT / "pyproject.toml").open("rb") as handle:
             settings = tomllib.load(handle)["tool"]["commitizen"]
 
