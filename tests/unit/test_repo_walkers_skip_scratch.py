@@ -71,6 +71,7 @@ from pathlib import Path
 
 import pytest
 
+from automated_security_helper.utils.version_management import _load_toml
 from tests.utils.helpers import (
     ASH_TEST_TEMP_ROOT,
     is_under_test_scratch,
@@ -189,19 +190,19 @@ class TestNoTestWalksTheRepoRootWithRglob:
         walks the whole tree and would race exactly like the rest. So the exemption
         is conditional, and this is the condition.
 
-        ``tomllib`` is imported here rather than at module scope, and skipped rather
-        than depended on, because it is standard library only from 3.11 while
-        ``requires-python`` starts at 3.10. A module-level import took out the whole
-        file -- and therefore the guard itself -- on every 3.10 leg. The guard is
-        the valuable part and must run everywhere; only this one assertion needs a
-        TOML parser, so only this one skips.
+        Read through the package's own ``_load_toml`` rather than ``tomllib``.
+        ``tomllib`` is standard library only from 3.11 while ``requires-python``
+        floors at 3.10, and a module-level ``import tomllib`` took out this whole
+        file -- and therefore the guard itself -- on all three 3.10 legs.
+
+        Skipping below 3.11 was the first fix and it was wrong. This file *is* the
+        guard: a guard that skips on 3.10 does not protect 3.10, and a skipped
+        guard exits 0, which is the failure mode this entire change exists to
+        close. ``_load_toml`` already solves it properly -- ``tomllib`` on 3.11+,
+        falling back to the ``toml`` package, which is a declared runtime
+        dependency -- so nothing needs to be skipped or added.
         """
-        tomllib = pytest.importorskip(
-            "tomllib",
-            reason="stdlib from 3.11; requires-python starts at 3.10",
-        )
-        with (REPO_ROOT / "pyproject.toml").open("rb") as handle:
-            settings = tomllib.load(handle)["tool"]["commitizen"]
+        settings = _load_toml(REPO_ROOT / "pyproject.toml")["tool"]["commitizen"]
 
         entries = settings["version_files"]
         assert entries, "version_files is empty, so the exemption guards nothing"
