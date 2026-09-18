@@ -522,46 +522,48 @@ jobs:
   # Integration suite: the tests that were skipped in every run until now
   # ---------------------------------------------------------------------------
   #
-  # WHAT THIS RECOVERS, AND WHY IT IS NOT "35 FIXES"
+  # WHAT THIS RECOVERS, AND WHY IT IS NOT A COUNT OF FIXES
   #
   # tests/conftest.py skips every item whose keywords contain "integration" unless
   # --run-integration is passed. Nothing passed it except the single cdk-nag step in
-  # run-unit-tests, so 104 items were skipped in every run -- and a skipped suite exits 0,
-  # which is why nobody noticed. Measured on this tree at -n 0: with the flags off, 104
-  # skipped; with them on, 39 failed, 63 passed, 2 skipped, reconciling to the same 104.
+  # run-unit-tests, so the whole set was skipped in every run -- and a skipped suite exits 0,
+  # which is why nobody noticed. Measured on this tree at -n 0: with the flags off, 115
+  # skipped; with them on, 10 failed, 102 passed, 2 skipped, 1 xfailed, reconciling to the
+  # same 115.
   #
-  # So the honest account is that the gate was hiding roughly as much working coverage as
-  # broken coverage. The ~63 that pass have been passing all along and asserting nothing.
-  # The failures are the more visible half but not the larger one, and two tests in
+  # So the honest account is that the gate was hiding far more working coverage than broken
+  # coverage. Around 102 of these pass and have been asserting nothing. The failures are the
+  # more visible part and much the smaller one, and two tests in
   # tests/integration/test_global_suppressions.py had never passed since the day they were
   # written -- a skip cannot tell you whether a test ever worked.
   #
-  # The authoritative failure census is 35 for the whole suite in one invocation, rising to
-  # 38 when files run individually. This job's own 39 is a third figure: py3.14, -n 0, and
-  # --run-slow included. Do not treat any of them as the others; the count depends on
-  # invocation, which is the same lesson as the check-run counts in the required-checks note.
+  # Every figure here is invocation-dependent and commit-dependent, so treat it as a
+  # measurement with a date rather than a property of the suite. The same population was 104
+  # items with 39 failures before the resource_management and MCP repairs landed on this
+  # branch; those deleted a duplicated test file and added MCP coverage, which is why it is
+  # now 115 items with 10 failures. Re-measure rather than adjusting these by arithmetic.
   #
-  # THREE POPULATIONS THAT RECONCILE, SO NONE OF THEM HAS TO BE TAKEN ON TRUST
+  # POPULATIONS THAT RECONCILE, SO NONE OF THEM HAS TO BE TAKEN ON TRUST
   #
-  # A parallel census of this suite counted 97 items un-skipping, against the 104 above. Both
-  # are right, and the difference is the two gates named below rather than a disagreement:
+  # A census of what un-skips under --run-integration alone will not match the 115 above, and
+  # the difference is the two gates below rather than a disagreement:
   #
-  #     104   items whose keywords contain "integration"
-  #     - 5   of those also carry @pytest.mark.slow, so --run-integration alone leaves them
+  #     115   items whose keywords contain "integration"
+  #     - 4   of those also carry @pytest.mark.slow, so --run-integration alone leaves them
   #           skipped; this job passes --run-slow as well, which is why it sees them
   #     - 2   unconditional @pytest.mark.skip in test_detect_secrets_scanner.py, which no
   #           flag reaches
-  #     = 97  items that actually run under --run-integration by itself
+  #     = 109 items that actually run under --run-integration by itself
   #
-  # Checked the other direction too: this job's own control ran 102 items (39 failed, 63
-  # passed), and 102 - 5 = 97. The five slow items and the two unconditional ones are
-  # disjoint sets, so nothing is subtracted twice. Anyone auditing a count here should be
-  # able to land on the same three numbers; if two of them disagree, the gate list above is
-  # where the missing items went.
+  # Checked the other direction too: this job's own control ran 113 items (10 failed, 102
+  # passed, 1 xfailed), and 113 - 4 = 109. The slow-marked items and the unconditionally
+  # skipped ones are disjoint sets, verified rather than assumed, so nothing is subtracted
+  # twice. Anyone auditing a count here should be able to land on the same three numbers; if
+  # two of them disagree, the gate list above is where the missing items went.
   #
   # WHY THESE SELECTORS AND NOT THE OBVIOUS ONES
   #
-  # Both flags, not just --run-integration. Five of the 104 also carry @pytest.mark.slow,
+  # Both flags, not just --run-integration. Four of the 115 also carry @pytest.mark.slow,
   # which conftest gates separately, so --run-integration alone leaves them skipped -- the
   # same silent pass this job exists to remove. --run-slow costs nothing in scope: measured,
   # there are exactly zero slow-marked items that are not also integration-marked.
@@ -571,10 +573,12 @@ jobs:
   # @pytest.mark.integration at the test. A bare `pytest tests/integration` would leave that
   # one permanently skipped.
   #
-  # Not `-k integration`. It selects 115 rather than 104, because -k substring-matches node
+  # Not `-k integration`. It selects 126 rather than 115, because -k substring-matches node
   # ids as well as keywords and picks up 11 tests that are not gated and already run in
-  # unit-test. Re-derive the real population with a collection pass that asks pytest for
-  # `"integration" in item.keywords` rather than trusting any selector to mirror it.
+  # unit-test. That 11-test gap has held across both measurements of this suite while the
+  # absolute numbers moved, which is the reason to re-derive the real population with a
+  # collection pass asking pytest for `"integration" in item.keywords` rather than trusting
+  # any selector to mirror it.
   #
   # Its own job rather than a step in run-unit-tests, because these exercise scanner and MCP
   # integration, not Python-version behavior; at 25 unit-test legs a step there buys 25

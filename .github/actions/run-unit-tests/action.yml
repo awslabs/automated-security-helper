@@ -33,7 +33,7 @@ runs:
     #
     # This step is no longer the only thing that passes --run-integration. The rest of the
     # suite now runs in the `integration-test` job in ash-unified-ci.yml, which covers all
-    # 104 gated items including these 11. So the reason this step stays scoped to one file
+    # 115 gated items including these 11. So the reason this step stays scoped to one file
     # has changed, and it is worth stating rather than leaving the old one to rot: it is
     # here to keep the cdk-nag path exercised on every Python version in the matrix, which
     # a single-platform, single-version integration job does not do. That is also why the
