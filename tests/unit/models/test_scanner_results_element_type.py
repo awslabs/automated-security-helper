@@ -183,6 +183,29 @@ class TestSuppressionSideEffectsAcceptWhatReachesThem:
             "how the original defect stayed hidden"
         )
 
+    def test_a_wrong_model_with_unset_fields_normalises(self):
+        """The shapes disagree on optionality, not only on which fields exist.
+
+        ``ScannerStatusInfo`` declares ``status: ScannerStatus | None = None`` while
+        ``ScannerTargetStatusInfo`` declares ``status: ScannerStatus``. Forwarding the
+        dump verbatim therefore sent an explicit ``None`` into a non-optional field and
+        traded the original AttributeError for a ValidationError -- a different
+        failure, not a fix. Unset keys are dropped so the target's defaults apply.
+
+        This is the default-constructed case, which is exactly what the scan phase
+        used to store, so it is the one that has to work.
+        """
+        model = self._model(ScannerStatusInfo())
+        assert model.scanner_results["bandit"].status is None, (
+            "precondition: the source shape must leave status unset, or this test "
+            "is not exercising the optionality mismatch"
+        )
+        model._apply_suppression_side_effects("bandit")
+        entry = model.scanner_results["bandit"]
+        assert isinstance(entry, ScannerTargetStatusInfo)
+        assert entry.status == ScannerStatus.PASSED, "the target's default should apply"
+        assert entry.suppressed_finding_count == 1
+
     def test_a_missing_key_is_a_no_op(self):
         model = AshAggregatedResults()
         model.scanner_results = {}

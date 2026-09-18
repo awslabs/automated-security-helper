@@ -713,7 +713,18 @@ class AshAggregatedResults(BaseModel):
                     f"not ScannerTargetStatusInfo; normalising. This is a writer "
                     f"that did not honour the declared type."
                 )
-                target_info = target_info.model_dump()
+                # Drop keys the source left unset so the target's own defaults
+                # apply. The shapes disagree on optionality as well as on which
+                # fields exist: ScannerStatusInfo declares
+                # `status: ScannerStatus | None = None`, while
+                # ScannerTargetStatusInfo declares `status: ScannerStatus`, so
+                # forwarding an explicit None fails validation on a field the
+                # source simply never filled in.
+                target_info = {
+                    field_name: value
+                    for field_name, value in target_info.model_dump().items()
+                    if value is not None
+                }
             target_info = ScannerTargetStatusInfo.model_validate(target_info)
             self.scanner_results[key] = target_info
 
