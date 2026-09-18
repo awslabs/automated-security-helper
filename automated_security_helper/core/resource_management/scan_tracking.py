@@ -920,9 +920,13 @@ def get_scan_results(
     """
     Get the results of a completed scan.
 
+    This locates a scan by output directory, not by ID, so it cannot report the
+    ID the scan was registered under. The returned ``scan_id`` is minted here as
+    ``scan-<timestamp>``.
+
     Args:
-        scan_id: ID of the scan (can be None or arbitrary if just looking for results in output_dir)
-        output_dir: Path to the scan output directory
+        output_dir: Path to the scan output directory. Defaults to
+            ``.ash/ash_output`` under the working directory.
 
     Returns:
         Dictionary containing scan results information

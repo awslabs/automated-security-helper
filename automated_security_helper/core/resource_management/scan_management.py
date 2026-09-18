@@ -58,10 +58,9 @@ async def cancel_scan(scan_id: str) -> Dict[str, Any]:
         scan_id: ID of the scan to cancel
 
     Returns:
-        Dictionary with cancellation result information
-
-    Raises:
-        MCPResourceError: If the scan cannot be cancelled
+        Dictionary with cancellation result information, or the error response
+        produced by ``create_error_response`` on failure. This does not raise;
+        callers should branch on ``success``.
     """
     from automated_security_helper.core.resource_management.error_handling import (
         validate_scan_id,
@@ -184,10 +183,9 @@ async def cleanup_scan_resources(
         remove_output: If True, also remove output files
 
     Returns:
-        Dictionary with cleanup result information
-
-    Raises:
-        MCPResourceError: If the scan cannot be cleaned up
+        Dictionary with cleanup result information, or the error response
+        produced by ``create_error_response`` on failure. This does not raise;
+        callers should branch on ``success``.
     """
     from automated_security_helper.core.resource_management.error_handling import (
         validate_scan_id,
@@ -429,10 +427,11 @@ async def check_scan_progress(scan_id: str) -> Dict[str, Any]:
         scan_id: ID of the scan to check
 
     Returns:
-        Dictionary with scan progress information
-
-    Raises:
-        MCPResourceError: If the scan is not found
+        Dictionary with scan progress information, or, on any failure, the
+        error response produced by ``create_error_response``. This does not
+        raise: the registry method underneath raises, and every raise is caught
+        here and converted, so callers should branch on ``success`` rather than
+        on an exception.
     """
     from automated_security_helper.core.resource_management.error_handling import (
         validate_scan_id,
