@@ -260,28 +260,17 @@ class TestErrorHandlingIntegration:
         # Clean up
         await cleanup_scan_resources(scan_id)
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "Live defect, not a stale assertion. get_scan_results calls "
-            "validate_result_structure(results) with the AshAggregatedResults it "
-            "just built, and that function's first line returns (True, None) for "
-            "any instance of that model. So the validator body -- which does "
-            "implement 'either sarif or scanner_results must be present' -- is "
-            "dead on the only path that uses it. Combined with the model's "
-            "extra='ignore', a results document with no recognizable content "
-            "loads as an all-default model and is reported as a completed scan "
-            "with total_scanners=0, which is indistinguishable from a clean scan. "
-            "The isinstance shortcut is pinned in "
-            "tests/unit/core/resource_management/test_scan_tracking.py, so a fix "
-            "has to land with that unit test."
-        ),
-    )
     @pytest.mark.asyncio
     async def test_missing_required_fields_in_results(
         self, test_directory, output_directory
     ):
-        """A results document with neither sarif nor scanner_results is invalid."""
+        """A results document with neither sarif nor scanner_results is invalid.
+
+        get_scan_results now validates the raw document before building the model
+        from it. It used to validate the model, and validate_result_structure
+        returned (True, None) for that type on its first line, so the check was
+        dead and this document was reported as a completed scan.
+        """
         registry = get_scan_registry()
 
         # Register a scan

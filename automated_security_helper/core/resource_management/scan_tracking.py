@@ -25,6 +25,36 @@ from automated_security_helper.utils.log import ASH_LOGGER
 # Configure module logger
 _logger = ASH_LOGGER
 
+# The severity buckets this module's progress views count into, plus the bucket
+# that catches everything else.
+#
+# UNKNOWN_SEVERITY exists because a finding must never be counted in
+# total_findings and nowhere in severity_counts. It used to be: the summary held
+# only the six named buckets and every producer guarded with
+# `if severity in <buckets>`, so a finding whose severity was missing, or was a
+# value outside the ladder -- a SARIF `level` of "error" or "warning", say --
+# was dropped from the breakdown while still counting toward the total. For a
+# security scanner that is the wrong direction to fail in: the finding is real,
+# and it disappeared from the only view that says how bad things are.
+#
+# Every one of the three sites that builds one of these dicts derives it from
+# here, because the bug was originally fixed in one of them and left in the
+# other two.
+#
+# This is deliberately NOT the same thing as ASH's severity ladder. The
+# canonical per-scanner counts in the aggregated results file are typed by
+# ScannerTargetStatusInfo and have a fixed field set; this constant governs only
+# the MCP progress and summary views assembled in this module.
+SEVERITY_BUCKETS = ("critical", "high", "medium", "low", "info", "suppressed")
+UNKNOWN_SEVERITY = "unknown"
+
+
+def empty_severity_counts() -> Dict[str, int]:
+    """A zeroed severity breakdown, including the catch-all bucket."""
+    counts = {bucket: 0 for bucket in SEVERITY_BUCKETS}
+    counts[UNKNOWN_SEVERITY] = 0
+    return counts
+
 
 class MCScannerStatus(Enum):
     """Status of an individual scanner."""
@@ -171,14 +201,7 @@ class ScanProgress:
         self.end_time: Optional[datetime] = None
         self.duration: Optional[float] = None
         self.total_findings: int = 0
-        self.severity_counts: Dict[str, int] = {
-            "critical": 0,
-            "high": 0,
-            "medium": 0,
-            "low": 0,
-            "info": 0,
-            "suppressed": 0,
-        }
+        self.severity_counts: Dict[str, int] = empty_severity_counts()
 
     def add_scanner_progress(self, scanner_progress: ScannerProgress) -> None:
         """
@@ -201,23 +224,24 @@ class ScanProgress:
         self.update_totals()
 
     def update_totals(self) -> None:
-        """Update total findings and severity counts from all scanners."""
+        """Update total findings and severity counts from all scanners.
+
+        A per-scanner count under a key this aggregate does not name is folded
+        into UNKNOWN_SEVERITY rather than discarded. Scanner counts can arrive
+        verbatim from the aggregated results file, so this layer cannot assume
+        the producer used only the named buckets.
+        """
         self.total_findings = 0
-        self.severity_counts = {
-            "critical": 0,
-            "high": 0,
-            "medium": 0,
-            "low": 0,
-            "info": 0,
-            "suppressed": 0,
-        }
+        self.severity_counts = empty_severity_counts()
 
         for scanner_dict in self.scanners.values():
             for scanner_progress in scanner_dict.values():
                 self.total_findings += scanner_progress.finding_count
                 for severity, count in scanner_progress.severity_counts.items():
-                    if severity in self.severity_counts:
-                        self.severity_counts[severity] += count
+                    bucket = severity if severity in self.severity_counts else None
+                    if bucket is None:
+                        bucket = UNKNOWN_SEVERITY
+                    self.severity_counts[bucket] += count
 
     def mark_completed(self) -> None:
         """Mark the scan as completed and calculate duration."""
@@ -865,21 +889,20 @@ def extract_findings_summary(findings: List[Dict[str, Any]]) -> Dict[str, int]:
         findings: List of findings
 
     Returns:
-        Dictionary mapping severity levels to counts
+        Dictionary mapping severity levels to counts, keyed by the lowercase
+        buckets in SEVERITY_BUCKETS plus UNKNOWN_SEVERITY. A finding whose
+        severity is missing or is not one of the named buckets counts under
+        UNKNOWN_SEVERITY, so ``sum(result.values()) == len(findings)``.
     """
-    summary = {
-        "critical": 0,
-        "high": 0,
-        "medium": 0,
-        "low": 0,
-        "info": 0,
-        "suppressed": 0,
-    }
+    summary = empty_severity_counts()
 
     for finding in findings:
-        severity = finding.get("severity", "UNKNOWN").lower()
-        if severity in summary:
-            summary[severity] += 1
+        severity = str(finding.get("severity") or "").lower()
+        # An unrecognized or missing severity goes to the catch-all rather than
+        # being dropped, so sum(summary.values()) == len(findings) always holds.
+        if severity not in summary:
+            severity = UNKNOWN_SEVERITY
+        summary[severity] += 1
 
     return summary
 
@@ -970,10 +993,22 @@ def get_scan_results(
     try:
         # Parse aggregated results
         int_results_dict = parse_aggregated_results(output_dir)
-        results: AshAggregatedResults = AshAggregatedResults(**int_results_dict)
 
-        # Validate result structure
-        is_valid, validation_error = validate_result_structure(results)
+        # Validate the raw document, before the model is built from it.
+        #
+        # Order matters both ways here. AshAggregatedResults is configured
+        # extra="ignore" and supplies a default for every field, so constructing
+        # it erases the distinction this check exists to make: an empty {} and a
+        # full scan produce models that are indistinguishable. Validating the
+        # model also took validate_result_structure's isinstance short-circuit,
+        # so the check was dead on its only call path and an empty results
+        # document was reported as a completed scan with total_scanners=0 -- a
+        # scanner that measured nothing, reading as a scanner that found nothing.
+        #
+        # Validating first also means a structurally wrong document is reported
+        # as invalid_format with the field named, rather than as the
+        # unexpected_error that model construction would raise.
+        is_valid, validation_error = validate_result_structure(int_results_dict)
         if not is_valid:
             raise MCPResourceError(
                 f"Invalid result structure: {validation_error}",
@@ -988,6 +1023,8 @@ def get_scan_results(
                     ],
                 },
             )
+
+        results: AshAggregatedResults = AshAggregatedResults(**int_results_dict)
 
         # Build comprehensive results object
         results_dict = results.model_dump(
@@ -1088,29 +1125,39 @@ def extract_scan_summary(results: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def validate_result_structure(
-    results: Dict[str, Any] | AshAggregatedResults,
+    results: Dict[str, Any],
 ) -> Tuple[bool, Optional[str]]:
     """
     Validate the structure of scan results.
 
+    Takes the raw parsed document, not an AshAggregatedResults. It previously
+    accepted either and returned ``(True, None)`` for any instance of the model
+    on its first line, which made the whole body below unreachable from
+    ``get_scan_results`` -- its only caller. The model cannot be validated
+    meaningfully anyway: every field has a default and unknown keys are ignored,
+    so by the time a document has become a model there is nothing left to check.
+
     Args:
-        results: Dictionary containing scan results
+        results: Dictionary containing the raw parsed scan results
 
     Returns:
         Tuple of (is_valid, error_message)
     """
-    if isinstance(results, AshAggregatedResults):
-        return True, None
+    # A key present but explicitly null is absent for our purposes. A document
+    # can carry "sarif": null, and rejecting that outright would fail scans whose
+    # results are entirely in scanner_results.
+    has_sarif = results.get("sarif") is not None
+    has_scanner_results = results.get("scanner_results") is not None
 
     # Check for required fields - we need either sarif or scanner_results
-    if "sarif" not in results and "scanner_results" not in results:
+    if not has_sarif and not has_scanner_results:
         return (
             False,
             "Missing required fields: either 'sarif' or 'scanner_results' must be present",
         )
 
     # If sarif is present, validate its structure
-    if "sarif" in results:
+    if has_sarif:
         sarif = results["sarif"]
         if not isinstance(sarif, dict):
             return False, "SARIF data must be a dictionary"
@@ -1122,7 +1169,7 @@ def validate_result_structure(
             return False, "SARIF 'runs' must be a list"
 
     # If scanner_results is present, validate its structure
-    if "scanner_results" in results:
+    if has_scanner_results:
         scanner_results = results["scanner_results"]
         if not isinstance(scanner_results, dict):
             return False, "scanner_results must be a dictionary"

@@ -763,30 +763,19 @@ class TestScanWorkflowIntegration:
         # Clean up the scan
         await cleanup_scan_resources(scan_id)
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "Live defect, not a stale assertion. extract_findings_summary "
-            "defaults a missing severity to 'UNKNOWN' and then drops it, because "
-            "its `if severity in summary` guard only admits the six lowercase "
-            "buckets, so the 'UNKNOWN' default is dead code. ScanProgress drops "
-            "it a second time: both __init__ and update_totals build the same "
-            "six-key dict and aggregate under `if severity in "
-            "self.severity_counts`. A fix has to touch both layers. Either way "
-            "the finding counts toward total_findings and toward nothing in "
-            "severity_counts, so the two disagree and a finding with no severity "
-            "is invisible in the breakdown. Latent since the v3 release, and "
-            "pinned from the SARIF side in "
-            "tests/unit/core/resource_management/test_scan_tracking_results.py as "
-            "'current behavior, not endorsed as correct'. Fixing it changes the "
-            "severity_counts key set, so it needs to land with that unit test."
-        ),
-    )
     @pytest.mark.asyncio
     async def test_scan_with_missing_required_fields(
         self, test_directory, output_directory
     ):
-        """A finding with no severity should be counted as UNKNOWN."""
+        """A finding with no severity is counted under "unknown", not dropped.
+
+        The bucket is lowercase like every other key in the same dict. The
+        assertion here originally read ``severity_counts["UNKNOWN"]``, matching
+        the uppercase string extract_findings_summary defaulted to internally --
+        but a single uppercase key in an otherwise-lowercase mapping is a trap for
+        consumers, and every other producer and reader in the module uses
+        lowercase.
+        """
         # Get the scan registry
         registry = get_scan_registry()
 
@@ -821,9 +810,13 @@ class TestScanWorkflowIntegration:
 
             # The invalid finding should be handled gracefully
             assert progress["total_findings"] == 2  # Both findings should be counted
+            assert progress["severity_counts"]["unknown"] == 1
+            assert progress["severity_counts"]["high"] == 1
+            # The property that makes this worth asserting: the breakdown
+            # accounts for every finding, rather than quietly totaling less.
             assert (
-                progress["severity_counts"]["UNKNOWN"] == 1
-            )  # The missing severity should be counted as UNKNOWN
+                sum(progress["severity_counts"].values()) == progress["total_findings"]
+            )
         finally:
             await cleanup_scan_resources(scan_id)
 
