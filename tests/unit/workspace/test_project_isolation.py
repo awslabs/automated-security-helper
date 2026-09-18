@@ -110,6 +110,7 @@ from automated_security_helper.workspace.execution import (
     execute_workspace,
 )
 from automated_security_helper.workspace.resolver import resolve_workspace
+from tests.utils.helpers import ASH_TEST_TEMP_ROOT
 
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()
@@ -910,11 +911,42 @@ class TestPluginManagerSingletonState:
         under ``tests/`` can reach the same singleton, and the package walk would
         not have seen it. Out-of-tree plugin modules remain outside the reach of
         any check that reads this repository; see the class docstring.
+
+        The tests' own scratch root is excluded, and it is the one exclusion that
+        is about correctness rather than speed. ``rglob`` is materialised in full
+        before the first ``read_text``, so the window between enumerating a path
+        and reading it is the whole duration of the sweep. The ``ash_temp_path``
+        fixture creates ``tests/pytest-temp/<uuid>/`` and ``shutil.rmtree``s it on
+        teardown, so under ``-n auto`` another worker's teardown deletes a file
+        this walk has already listed and ``read_text`` raises
+        ``FileNotFoundError``. Measured once on ``macos-latest`` py3.12, on
+        ``tests/pytest-temp/<uuid>/source/test.py``.
+
+        Excluded by path containment against the constant the fixture itself
+        uses, so the two cannot drift; a second literal ``"pytest-temp"`` in
+        ``_SKIP_DIRS`` would be free to.
+
+        Deliberately *not* fixed by catching ``FileNotFoundError`` around the
+        read. That would convert "a file vanished" into "no match found", which
+        is precisely the blindness-reads-as-cleanliness failure this class exists
+        to rule out -- see ``test_the_sweep_is_not_blind``.
+
+        The other in-tree gitignored paths were checked and are not exposed:
+        every ``output/``, ``ash_output`` and ``.ash/`` directory the tests build
+        lives under ``tmp_path`` or ``tempfile.mkdtemp()``, both outside the
+        repository, and the generated files inside the package
+        (``assets/tool_downloads.py``, ``assets/exceptions.py``) are stable for a
+        run's whole duration, so they cannot race a reader. ``tests/pytest-temp``
+        is the only in-tree directory with a concurrent create-and-delete
+        lifecycle.
         """
         root = Path(__file__).resolve().parents[3]
         this_file = Path(__file__).resolve()
+        temp_root = ASH_TEST_TEMP_ROOT.resolve()
         for path in sorted(root.rglob("*.py")):
             if path == this_file:
+                continue
+            if path.is_relative_to(temp_root):
                 continue
             parts = set(path.relative_to(root).parts)
             if any(part.startswith(".") for part in parts):
@@ -1037,6 +1069,109 @@ class TestPluginManagerSingletonState:
             "Route this through the manager's own API, and read "
             "test_plugin_registry_scoping.py first: " + repr(offenders)
         )
+
+    def test_the_temp_root_exclusion_is_the_one_the_fixture_writes_to(self):
+        """The exclusion and the thing excluded must come from one constant.
+
+        A literal ``"pytest-temp"`` here would be free to drift from
+        ``tests/utils/helpers.py``, and the drift would be invisible: the sweep
+        would simply go back to reading other workers' scratch trees and start
+        raising ``FileNotFoundError`` again, intermittently, on one leg.
+        """
+        from tests.utils.helpers import get_ash_temp_path
+
+        created = get_ash_temp_path()
+        try:
+            assert created.parent == ASH_TEST_TEMP_ROOT, (
+                f"the fixture writes to {created.parent} but the sweep excludes "
+                f"{ASH_TEST_TEMP_ROOT}; the exclusion no longer covers the race"
+            )
+            assert ASH_TEST_TEMP_ROOT.resolve().is_relative_to(
+                Path(__file__).resolve().parents[3]
+            ), "the temp root is outside the repository, so nothing would sweep it"
+        finally:
+            created.rmdir()
+
+    def test_a_file_under_the_temp_root_is_invisible_to_the_sweep(self):
+        """The fix, demonstrated: a planted match under the scratch root is not read.
+
+        Plants a pattern that the matcher provably *does* find elsewhere, so a
+        pass here means the file was excluded rather than the pattern being
+        unmatchable. Without that pairing this test would pass against a matcher
+        that finds nothing at all.
+        """
+        from tests.utils.helpers import get_ash_temp_path
+
+        pattern = "ash_plugin_manager.set_context"
+        scratch = get_ash_temp_path()
+        planted = scratch / "leaky_scratch_module.py"
+        planted.write_text(f"{pattern}(None)\n", encoding="utf-8")
+        try:
+            # The control: this pattern is findable, so an empty result below is
+            # the exclusion working and not a broken matcher.
+            assert self._hits((pattern,)), (
+                "the matcher cannot find this pattern anywhere in the repository, "
+                "so it cannot demonstrate that the planted copy was excluded"
+            )
+            assert planted.read_text(encoding="utf-8").strip() == f"{pattern}(None)"
+
+            hits = self._hits((pattern,))
+            assert planted.name not in {location.split(":")[0] for location in hits}, (
+                f"the sweep read a file under {ASH_TEST_TEMP_ROOT}: {sorted(hits)}"
+            )
+        finally:
+            planted.unlink()
+            scratch.rmdir()
+
+    def test_the_exclusion_removes_nothing_but_the_temp_root(self):
+        """Narrowness, asserted as a set difference rather than assumed.
+
+        An exclusion that quietly dropped real source would make every clean
+        result in this class meaningless, and it would look identical to a clean
+        repository. So the swept set is compared against the same walk with the
+        exclusion removed: the only permitted difference is files under the
+        scratch root.
+        """
+        root = Path(__file__).resolve().parents[3]
+        this_file = Path(__file__).resolve()
+        temp_root = ASH_TEST_TEMP_ROOT.resolve()
+
+        def walk_without_the_temp_exclusion():
+            for path in sorted(root.rglob("*.py")):
+                if path == this_file:
+                    continue
+                parts = set(path.relative_to(root).parts)
+                if any(part.startswith(".") for part in parts):
+                    continue
+                if parts & self._SKIP_DIRS:
+                    continue
+                yield path
+
+        from tests.utils.helpers import get_ash_temp_path
+
+        scratch = get_ash_temp_path()
+        planted = scratch / "excluded_probe.py"
+        planted.write_text("x = 1\n", encoding="utf-8")
+        try:
+            swept = set(self._source_files())
+            unfiltered = set(walk_without_the_temp_exclusion())
+            removed = unfiltered - swept
+
+            assert planted.resolve() in {p.resolve() for p in removed}, (
+                "the planted scratch file was not excluded, so this test is not "
+                "measuring the exclusion at all"
+            )
+            outside_temp_root = {
+                path for path in removed if not path.resolve().is_relative_to(temp_root)
+            }
+            assert outside_temp_root == set(), (
+                "the exclusion dropped files outside the tests' scratch root, so "
+                f"the sweep is now blind to real source: {sorted(outside_temp_root)}"
+            )
+            assert swept, "the sweep found no source files at all"
+        finally:
+            planted.unlink()
+            scratch.rmdir()
 
     def test_the_registry_sweep_would_catch_a_new_offender(self):
         """The companion assertion: prove the allowlist is narrow, not the matcher.
