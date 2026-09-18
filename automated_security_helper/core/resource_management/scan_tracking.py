@@ -964,6 +964,10 @@ def get_scan_results(
         ErrorCategory,
     )
 
+    # Always None, and it exists only to populate the error context below, which
+    # callers read and two tests assert on. It is not an input: this function takes
+    # no scan id, and the returned one is minted rather than echoed. Do not wire a
+    # parameter to it without reading the docstring's note about why that cannot work.
     scan_id = None
 
     # Validate output directory
@@ -1046,10 +1050,13 @@ def get_scan_results(
             if scanner_results.get("status", "UNKNOWN") in ["PASSED", "FAILED"]:
                 scanners_completed.append(scanner_name)
 
-        # Use a generated scan_id if none was provided
-        result_scan_id = (
-            scan_id if scan_id else f"scan-{datetime.now().strftime('%Y%m%d%H%M%S')}"
-        )
+        # Minted unconditionally. This used to read
+        # `scan_id if scan_id else f"scan-{...}"`, whose first arm was unreachable --
+        # scan_id is bound to None above and nothing assigns it. The ternary advertised
+        # a passthrough the function does not have, so a reader could reasonably believe
+        # supplying an id would round-trip it. It cannot: this locates a scan by output
+        # directory, which carries no record of the id it was registered under.
+        result_scan_id = f"scan-{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
         return {
             "scan_id": result_scan_id,
