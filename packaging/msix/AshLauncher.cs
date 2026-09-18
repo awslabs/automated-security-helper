@@ -257,8 +257,13 @@ internal static class AshLauncher
     // run without -I, so cwd was on sys.path and they imported the REPOSITORY checkout rather
     // than what pip put in site-packages. They therefore did not prove site-packages intact, and
     // that script now passes -I so they do. The conclusion above does not rest on them; it rests
-    // on the empty streams. Step 6 of that script also reads the interpreter path back out of
-    // ash.exe now and fails by name if it does not exist, which is the direct check.
+    // on the empty streams. Step 6 of that script now also compares pyvenv.cfg's `command`
+    // against where the venv actually is, and fails by name if they differ, so a return of this
+    // fault is a sentence rather than a silent exit 1.
+    //
+    // Confirmed by the change itself: with the venv built at its final path, on the same runner
+    // image and the same pinned 3.13, `ash --version` printed the version through the same
+    // pip-generated ash.exe that had been exiting 1 with empty streams.
     //
     // Building at the final path is what removes the move. Both properties staging bought are
     // real and are kept by other means.

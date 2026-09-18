@@ -301,38 +301,56 @@ if (Test-Path (Join-Path $venv 'pyvenv.cfg')) {
         ForEach-Object { Write-Host "     $_" }
 }
 
-# The interpreter path baked into the console script, checked unconditionally and before the
-# exit code is judged, because this is the one fault this job has actually hit that produces no
-# diagnostic of its own.
+# Whether this venv was created where it now lives, checked unconditionally and before the exit
+# code is judged, because a venv that was moved is the one fault this job has hit that produces
+# no diagnostic of its own.
 #
-# pip writes each Scripts\*.exe as a stub, a `#!<absolute path to python.exe>` line, and a zip.
-# The stub reads that line and execs it, so a venv that has been moved since pip ran has a shim
-# naming a directory that no longer exists -- and it fails by exiting 1 with both streams empty,
-# which is indistinguishable at a glance from ASH itself failing silently. It cost this job
-# several runs and one wrong diagnosis (see AshLauncher.cs FindPython). Naming it here turns it
-# back into a sentence.
-if (Test-Path $venvAsh) {
-    $shimBytes = [System.IO.File]::ReadAllBytes($venvAsh)
-    $shimText = [System.Text.Encoding]::ASCII.GetString($shimBytes)
-    $shebang = [regex]::Match($shimText, '#!([^\r\n]+)')
-    if (-not $shebang.Success) {
-        Write-Host "   ash.exe carries no #! line, so its interpreter cannot be read from it"
+# On Windows pip writes each Scripts\*.exe with the absolute path of the interpreter it generated
+# the script for embedded in it, so moving a venv leaves every shim naming a directory that is
+# gone. python.exe keeps working, because it resolves its home through the relative pyvenv.cfg
+# beside it. The result is a venv that passes every other check here and whose console scripts
+# exit 1 with both streams empty -- indistinguishable at a glance from ASH failing silently, and
+# it cost this job several runs and one wrong diagnosis blaming Python 3.14.
+#
+# Read out of pyvenv.cfg's `command`, not out of the .exe. Parsing the shim was tried first and
+# is a trap: the launcher stub pip prepends carries its own UTF-16 diagnostic strings, several of
+# them about shebang lines, so a regex for `#!` over the file's bytes matches inside the stub
+# long before it reaches the real shebang. That version reported a page of binary as the
+# interpreter path and failed a run in which `ash --version` had in fact just printed the
+# version. `command` records the path as passed to `-m venv`, which is exactly the question.
+#
+# `command` is written by Python 3.11 and newer. On an older interpreter it is absent and this
+# check says so rather than passing quietly, because a check that cannot run is not a pass.
+$pyvenvCfg = Join-Path $venv 'pyvenv.cfg'
+if (Test-Path $pyvenvCfg) {
+    $commandLine = Get-Content -LiteralPath $pyvenvCfg |
+        Where-Object { $_ -match '^\s*command\s*=' } |
+        Select-Object -First 1
+    $marker = '-m venv '
+    if (-not $commandLine) {
+        Write-Host "   pyvenv.cfg has no 'command' key (Python 3.11+ writes it), so where this venv"
+        Write-Host "   was created cannot be read back and the moved-venv check is not running"
+    } elseif ($commandLine.LastIndexOf($marker) -lt 0) {
+        Write-Host "   pyvenv.cfg 'command' does not contain '$marker', so the creation path cannot"
+        Write-Host "   be read out of it: $commandLine"
     } else {
-        $embedded = $shebang.Groups[1].Value.Trim('"')
-        $embeddedExists = Test-Path -LiteralPath $embedded
-        Write-Host "   ash.exe interpreter: $embedded"
-        Write-Host "   that interpreter exists: $embeddedExists"
-        if (-not $embeddedExists) {
+        $index = $commandLine.LastIndexOf($marker) + $marker.Length
+        $createdAt = $commandLine.Substring($index).Trim().Trim('"')
+        $createdFull = [System.IO.Path]::GetFullPath($createdAt).TrimEnd('\')
+        $venvFull = [System.IO.Path]::GetFullPath($venv).TrimEnd('\')
+        Write-Host "   venv was created at: $createdFull"
+        Write-Host "   venv now lives at:   $venvFull"
+        if ($createdFull -ine $venvFull) {
             Fail @"
-$venvAsh names an interpreter that does not exist:
+this virtualenv was created somewhere other than where it now lives:
 
-  $embedded
+  created at: $createdFull
+  now at:     $venvFull
 
-pip embeds the absolute path of the interpreter it generated the script for, so this means the
-virtualenv was created somewhere else and moved. A moved venv is broken on Windows even though
-python.exe inside it still runs, because python.exe finds its home through the relative
-pyvenv.cfg beside it while every .exe shim carries an absolute path. Build the venv where it
-will live; see the CreateVenv comment in packaging/msix/AshLauncher.cs.
+A virtualenv cannot be moved on Windows. pip embeds the absolute path of the interpreter into
+every Scripts\*.exe, so after a move each one names a directory that no longer exists and fails
+by exiting 1 with nothing on stdout or stderr, while python.exe inside the venv keeps working.
+Build the venv where it will live; see the CreateVenv comment in packaging/msix/AshLauncher.cs.
 "@
         }
     }
@@ -375,8 +393,8 @@ if ($ashExit -ne 0) {
     #
     #   * If A fails, the venv's interpreter is not usable at all and nothing below matters.
     #   * If A passes and C fails, the defect is in ASH's CLI rather than in this package.
-    #   * If A and C pass while ash.exe does not, the shim is broken in some way the
-    #     interpreter-path check above did not catch, and that check is what needs widening.
+    #   * If A and C pass while ash.exe does not, the shim is broken in some way the moved-venv
+    #     check above did not catch, and that check is what needs widening.
     #
     # B and C pass -I, and that flag is load-bearing. Without it `python -c` puts the current
     # directory on sys.path, and this script runs from the repository root, so both probes
