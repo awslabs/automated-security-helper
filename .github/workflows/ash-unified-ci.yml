@@ -519,6 +519,97 @@ jobs:
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
+  # Integration suite: the tests that were skipped in every run until now
+  # ---------------------------------------------------------------------------
+  #
+  # WHAT THIS RECOVERS, AND WHY IT IS NOT "35 FIXES"
+  #
+  # tests/conftest.py skips every item whose keywords contain "integration" unless
+  # --run-integration is passed. Nothing passed it except the single cdk-nag step in
+  # run-unit-tests, so 104 items were skipped in every run -- and a skipped suite exits 0,
+  # which is why nobody noticed. Measured on this tree at -n 0: with the flags off, 104
+  # skipped; with them on, 39 failed, 63 passed, 2 skipped, reconciling to the same 104.
+  #
+  # So the honest account is that the gate was hiding roughly as much working coverage as
+  # broken coverage. The ~63 that pass have been passing all along and asserting nothing.
+  # The failures are the more visible half but not the larger one, and two tests in
+  # tests/integration/test_global_suppressions.py had never passed since the day they were
+  # written -- a skip cannot tell you whether a test ever worked.
+  #
+  # The authoritative failure census is 35 for the whole suite in one invocation, rising to
+  # 38 when files run individually. This job's own 39 is a third figure: py3.14, -n 0, and
+  # --run-slow included. Do not treat any of them as the others; the count depends on
+  # invocation, which is the same lesson as the check-run counts in the required-checks note.
+  #
+  # WHY THESE SELECTORS AND NOT THE OBVIOUS ONES
+  #
+  # Both flags, not just --run-integration. Five of the 104 also carry @pytest.mark.slow,
+  # which conftest gates separately, so --run-integration alone leaves them skipped -- the
+  # same silent pass this job exists to remove. --run-slow costs nothing in scope: measured,
+  # there are exactly zero slow-marked items that are not also integration-marked.
+  #
+  # A path, plus one file outside it. The predicate is keywords, not paths, so it reaches
+  # outside tests/integration/: tests/unit/cli/mcp/test_source_delivery_scan_e2e.py carries
+  # @pytest.mark.integration at the test. A bare `pytest tests/integration` would leave that
+  # one permanently skipped.
+  #
+  # Not `-k integration`. It selects 115 rather than 104, because -k substring-matches node
+  # ids as well as keywords and picks up 11 tests that are not gated and already run in
+  # unit-test. Re-derive the real population with a collection pass that asks pytest for
+  # `"integration" in item.keywords` rather than trusting any selector to mirror it.
+  #
+  # Its own job rather than a step in run-unit-tests, because these exercise scanner and MCP
+  # integration, not Python-version behavior; at 25 unit-test legs a step there buys 25
+  # copies of one signal. -n 0 rather than the inherited -n auto because every cdk-nag test
+  # boots a real kernel and jsii extraction is billed per booting worker -- see the table in
+  # tests/conftest.py.
+  #
+  # --no-cov because pytest.ini's --cov plus .coveragerc's fail_under=80 would make this job
+  # a second coverage gate that fails on a subset at 100% green.
+  #
+  # Two items stay skipped with both flags on, at
+  # tests/integration/scanners/test_detect_secrets_scanner.py:111 and :139. Those are
+  # unconditional @pytest.mark.skip with a written reason, and they report as skipped with
+  # that reason rather than vanishing.
+  integration-test:
+    name: integration-test (ubuntu-latest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-ash
+        with:
+          python-version: "3.12"
+          install-ash: "false"
+      - name: Install dependencies
+        run: uv sync --extra cdk
+      # ASH_REQUIRE_CDK_EXTRA turns a missing cdk extra into a hard failure rather than a
+      # skip, so this job cannot quietly stop testing the cdk-nag path if the install above
+      # changes.
+      - name: Run the integration suite
+        env:
+          ASH_REQUIRE_CDK_EXTRA: "1"
+        run: |
+          uv run pytest \
+            tests/integration \
+            tests/unit/cli/mcp/test_source_delivery_scan_e2e.py \
+            --run-integration --run-slow \
+            --no-cov -p no:randomly -n 0 \
+            --junit-xml=test-results/integration.junit.xml
+      # A red run leaves per-test evidence rather than only the summary line.
+      - name: Collect the suite report
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: integration-suite-report
+          path: test-results/integration.junit.xml
+          retention-days: 7
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
   # Install methods: method x OS x Python (matches ash-install-methods.yml)
   # ---------------------------------------------------------------------------
   #
@@ -764,6 +855,7 @@ jobs:
       - external-target-scan
       - multi-project-attribution
       - deploy-aws-helpers
+      - integration-test
       - install-validation
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -773,7 +865,7 @@ jobs:
           NEEDS_JSON: ${{ toJSON(needs) }}
           # Bump deliberately when adding a job above, which is the point: the assertion below
           # fails until this matches, so a new job cannot slip past the gate unnoticed.
-          EXPECTED_UPSTREAM_JOBS: "7"
+          EXPECTED_UPSTREAM_JOBS: "8"
         shell: bash
         run: |
           python3 - <<'PY'
