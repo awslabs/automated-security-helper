@@ -107,8 +107,14 @@ class TestAWindowsDriveUriReducesToAUsablePath:
         )
 
     def test_a_posix_uri_keeps_its_leading_separator(self):
-        """The guard is keyed on the colon, so it must not eat a POSIX root."""
-        assert _file_uri_to_path_text("file:///tmp/proj/a.py") == "/tmp/proj/a.py"
+        """The guard is keyed on the colon, so it must not eat a POSIX root.
+
+        Any absolute POSIX path proves this. ``/srv`` rather than ``/tmp`` because
+        bandit's B108 flags a hardcoded temp directory on sight, and a suppression
+        would be recording an accepted risk where there is none -- these strings
+        are never used as paths, the whole file is text reduction.
+        """
+        assert _file_uri_to_path_text("file:///srv/proj/a.py") == "/srv/proj/a.py"
 
     def test_a_host_segment_still_does_not_become_a_path_segment(self):
         """Pinned so the unquoting change cannot regress TestBug47."""
@@ -144,19 +150,20 @@ class TestThePremiseOfEveryAssertionAbove:
     def test_the_bare_parse_leaves_percent_encoding(self):
         from urllib.parse import urlparse
 
-        uri = "file:///tmp/my%20proj/src/a.py"
+        uri = "file:///srv/my%20proj/src/a.py"
 
-        assert urlparse(uri).path == "/tmp/my%20proj/src/a.py"
-        assert _file_uri_to_path_text(uri) == "/tmp/my proj/src/a.py"
+        assert urlparse(uri).path == "/srv/my%20proj/src/a.py"
+        assert _file_uri_to_path_text(uri) == "/srv/my proj/src/a.py"
 
 
 class TestPercentEncodingIsDecoded:
     """``as_uri()`` encodes; a path that is still encoded matches nothing."""
 
     def test_a_space_is_decoded(self):
+        """Any directory name containing a space proves this; ``/srv`` avoids B108."""
         assert (
-            _file_uri_to_path_text("file:///tmp/my%20proj/src/a.py")
-            == "/tmp/my proj/src/a.py"
+            _file_uri_to_path_text("file:///srv/my%20proj/src/a.py")
+            == "/srv/my proj/src/a.py"
         )
 
     def test_a_space_is_decoded_on_a_windows_drive_uri(self):
