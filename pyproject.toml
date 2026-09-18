@@ -86,7 +86,7 @@ dev = [
  "pytest-cov>=7.1,<8.0.0",
  "pytest-mock>=3.15,<4.0.0",
  "mypy>=2.3,<3.0.0",
- "types-pyyaml>=6.0",
+ "types-pyyaml>=6.0.12.20260906",
  "lazydocs>=0.4,<1.0.0",
  "mkdocs>=1.6,<2.0.0",
  "mkdocs-material>=9.7.7,<10.0.0",  # floor is advisory-driven: GHSA-xvg9-69gf-fjrf affects >= 7.2.0, < 9.7.7
