@@ -30,10 +30,16 @@ on:
   #
   # WHAT THIS COSTS, AND WHAT WAS REJECTED
   #
-  # Counted rather than estimated: this workflow expands to 141 jobs and
-  # ash-iac-drift.yml to 6, so a queued merge that also pushes to main is ~294 runner
-  # jobs instead of ~147. The duplicate verdict on a queued merge is the price of
+  # Counted rather than estimated: this workflow expands to 144 jobs and
+  # ash-iac-drift.yml to 6, so a queued merge that also pushes to main is ~300 runner
+  # jobs instead of ~150. The duplicate verdict on a queued merge is the price of
   # covering the bypassed one, and it was accepted deliberately.
+  #
+  # Both counts are job counts, from
+  # `gh api .../actions/runs/<run>/jobs --paginate --jq '.jobs[].name' | wc -l`
+  # reconciled against the same endpoint's `total_count`. They are not check-run
+  # counts, which are higher -- see the note on the required-checks job for why the
+  # two populations differ and why conflating them is what let the old figures rot.
   #
   # The cheaper alternative -- leave both files queue-only and add one small scheduled
   # workflow to check main periodically -- was rejected because a schedule reports on
@@ -608,13 +614,34 @@ jobs:
   # One check name that can actually be required
   # ---------------------------------------------------------------------------
   #
-  # Every job above names itself from its matrix, so this workflow contributes 84 distinct
-  # check-run names to a pull request and not one of them is stable. A ruleset's
+  # Every job above names itself from its matrix, so this workflow contributes 164 check runs
+  # to a pull request and not one of their names is stable. A ruleset's
   # required_status_checks list holds literal context strings with no wildcard, so requiring
   # `unit-test` means enumerating all 20 of its names -- and then any matrix edit either orphans
   # a required context that no longer runs, which leaves a pull request pending forever, or
   # quietly adds a leg that nothing requires. That maintenance cost is why the ruleset requires
-  # two contexts today while 150 of the 152 checks on a pull request are advisory.
+  # two contexts today while the other 184 checks on a pull request are advisory.
+  #
+  # Those two numbers count different populations, which is how the previous pair of them went
+  # stale unnoticed. Both were measured on pull request 599 at b5111830, and both are
+  # re-derivable:
+  #
+  #   gh api repos/<owner>/<repo>/actions/runs/<run>/jobs --paginate --jq '.jobs[].name'
+  #   gh api repos/<owner>/<repo>/commits/<sha>/check-runs --paginate --jq '.check_runs[].name'
+  #
+  # 164 is this workflow's own contribution: 144 jobs, plus the 20 `PyTest - ...` check runs
+  # that mikepenz/action-junit-report publishes from inside the unit-test legs. Those 20 are
+  # not jobs and land in a separate check suite, so a job census alone undercounts what this
+  # file puts on a pull request -- that gap is most of why the old figure of 84 looked
+  # defensible.
+  #
+  # 186 is every check run on the head commit, across all workflows plus the GitHub Advanced
+  # Security app. It is 185 distinct names over 186 check runs: `Validate PR title` appears
+  # twice because two check suites publish it. So a count over this namespace has to say
+  # whether it means check runs or distinct names, and names collide across workflows.
+  #
+  # Reconcile the row count against the endpoint's own `total_count` before trusting either
+  # query. Both routes cap at `per_page` and report the true total alongside a short page.
   #
   # This job's name does not depend on the matrix, so it can be required once and stay correct
   # across matrix changes. It reports the verdict the individual legs already computed.
