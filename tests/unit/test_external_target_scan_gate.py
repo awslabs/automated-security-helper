@@ -23,6 +23,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.utils.helpers import iter_repo_files
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GATE_PATH = REPO_ROOT / "scripts" / "verify_external_target_scan.py"
 
@@ -758,10 +760,20 @@ class TestTargetMustBeOutsideTheRepo:
 
 class TestFixtureHandling:
     def test_fixture_is_generated_not_committed(self):
-        """A committed fixture would be found by ASH's own repository self-scan."""
-        for name in gate.FIXTURE_FILES:
-            matches = sorted(str(p) for p in REPO_ROOT.rglob(name))
-            assert matches == [], matches
+        """A committed fixture would be found by ASH's own repository self-scan.
+
+        Walked with iter_repo_files rather than REPO_ROOT.rglob for two reasons.
+        rglob raises from inside its own descent when another xdist worker's
+        ash_temp_path teardown removes a directory it has already listed. And the
+        scratch tree must be excluded on the merits anyway: another test writing
+        a fixture-named file into tests/pytest-temp/ is not a *committed* fixture,
+        so counting it would fail this assertion for the wrong reason.
+        """
+        names = set(gate.FIXTURE_FILES)
+        matches = sorted(
+            str(path) for path in iter_repo_files(REPO_ROOT) if path.name in names
+        )
+        assert matches == [], matches
 
     def test_write_fixture_creates_every_file(self, tmp_path):
         target = tmp_path / "target"

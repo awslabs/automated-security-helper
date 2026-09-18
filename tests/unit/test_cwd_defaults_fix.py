@@ -30,6 +30,8 @@ from typing import List, Tuple
 
 import pytest
 
+from tests.utils.helpers import iter_repo_files
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PKG_ROOT = REPO_ROOT / "automated_security_helper"
 
@@ -41,8 +43,12 @@ PKG_ROOT = REPO_ROOT / "automated_security_helper"
 
 
 def _iter_python_files(root: Path):
-    for p in root.rglob("*.py"):
-        if "__pycache__" in set(p.parts):
+    # iter_repo_files, not root.rglob: rglob raises from inside its own descent
+    # when another xdist worker's ash_temp_path teardown removes a directory it
+    # has already listed. Pruning during the walk is the only thing that helps,
+    # because rglob never yields. See tests/utils/helpers.iter_repo_files.
+    for p in iter_repo_files(root, skip_dirs=frozenset({"__pycache__"})):
+        if p.suffix != ".py":
             continue
         yield p
 
@@ -195,7 +201,6 @@ def test_resolve_config_uses_runtime_cwd(monkeypatch, tmp_path):
     assert config is not None
 
 
-
 # ---------------------------------------------------------------------------
 # The interaction entry points (run_ash_scan, run_ash_container) have
 # enormous side effects, so we don't call them end-to-end. Instead we assert
@@ -241,7 +246,9 @@ def test_scan_tracking_signatures_are_none():
         sig = inspect.signature(fn)
         # Each of these has an output_dir or result_file parameter.
         target_param = next(
-            p for p in sig.parameters.values() if p.name in {"output_dir", "result_file"}
+            p
+            for p in sig.parameters.values()
+            if p.name in {"output_dir", "result_file"}
         )
         assert target_param.default is None, (
             f"{fname}: {target_param.name} default must be None, got {target_param.default!r}"
@@ -264,7 +271,6 @@ def test_resolve_config_signature_is_none():
 
     sig = inspect.signature(resolve_config)
     assert sig.parameters["source_dir"].default is None
-
 
 
 def test_scan_set_signature_is_none():

@@ -69,6 +69,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.utils.helpers import iter_repo_files
+
 if sys.version_info >= (3, 11):
     import tomllib
 else:  # pragma: no cover - exercised only on 3.10
@@ -220,7 +222,13 @@ def _commitizen_settings() -> dict:
 
 
 def _candidate_files():
-    for path in REPO_ROOT.rglob("*"):
+    # iter_repo_files rather than REPO_ROOT.rglob("*"): rglob raises from inside
+    # its own descent when a directory disappears between being listed and being
+    # scanned, which is what another xdist worker's ash_temp_path teardown does.
+    # Measured on macos-14 py3.11, FileNotFoundError from os.scandir on
+    # tests/pytest-temp/<uuid>/test_output_dir. Pruning during the walk removes
+    # the race; filtering rglob's output cannot, because it never yields.
+    for path in iter_repo_files(REPO_ROOT, skip_dirs=_SKIP_DIRS):
         if not path.is_file() or path.is_symlink():
             continue
         if any(part in _SKIP_DIRS for part in path.relative_to(REPO_ROOT).parts):
