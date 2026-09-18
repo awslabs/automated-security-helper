@@ -620,7 +620,8 @@ jobs:
   # `unit-test` means enumerating all 20 of its names -- and then any matrix edit either orphans
   # a required context that no longer runs, which leaves a pull request pending forever, or
   # quietly adds a leg that nothing requires. That maintenance cost is why the ruleset requires
-  # two contexts today while the other 184 checks on a pull request are advisory.
+  # two contexts today while the other 184 checks on the pull request measured below are
+  # advisory -- a figure that moves with the trigger set, as the 186 below explains.
   #
   # Those two numbers count different populations, which is how the previous pair of them went
   # stale unnoticed. Both were measured on pull request 599 at b5111830, and both are
@@ -635,10 +636,25 @@ jobs:
   # file puts on a pull request -- that gap is most of why the old figure of 84 looked
   # defensible.
   #
-  # 186 is every check run on the head commit, across all workflows plus the GitHub Advanced
-  # Security app. It is 185 distinct names over 186 check runs: `Validate PR title` appears
-  # twice because two check suites publish it. So a count over this namespace has to say
-  # whether it means check runs or distinct names, and names collide across workflows.
+  # 186 is every check run on that commit, from every workflow the commit triggered plus the
+  # GitHub Advanced Security app. It is 185 distinct names over 186 check runs, because
+  # `Validate PR title` gets published by two check suites.
+  #
+  # That total depends on WHICH workflows a commit triggers, so it is not one number for all
+  # pull requests. This file and ash-install-methods.yml name their install jobs from the same
+  # template -- `${{ matrix.method }} (${{ matrix.os }}, py${{ matrix.python-version }})`, here
+  # and at ash-install-methods.yml:34 -- so every cell the two matrices share produces two
+  # check runs under one name whenever both run. The collision is structural, not incidental.
+  # ash-install-methods.yml is path-filtered to pyproject.toml, hatch_build.py,
+  # automated_security_helper/**, .pre-commit-hooks.yaml, Formula/** and itself, so whether it
+  # runs is decided by whether the commit touches those paths. A CI-plumbing commit like the
+  # one measured here triggers no run of it -- confirmed by querying that workflow for runs on
+  # the branch and getting zero, rather than assuming the filter excluded it -- and sees 186
+  # check runs over 185 names. A commit touching package code triggers both surfaces and sees
+  # 278 check runs over the same 185 names, 93 of them duplicated, all cross-workflow.
+  #
+  # So a count over this namespace has to name three things to mean anything: check runs or
+  # distinct names, which trigger set, and which commit.
   #
   # Reconcile the row count against the endpoint's own `total_count` before trusting either
   # query. Both routes cap at `per_page` and report the true total alongside a short page.
