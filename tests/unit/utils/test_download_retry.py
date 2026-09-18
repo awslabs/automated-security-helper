@@ -256,7 +256,10 @@ class TestRetryPolicy:
         monkeypatch.delenv("ASH_DOWNLOAD_MAX_ATTEMPTS", raising=False)
         monkeypatch.delenv("ASH_DOWNLOAD_RETRY_DELAY", raising=False)
         attempts, delay = _download_retry_policy()
-        assert attempts == 3
+        assert attempts == 5, (
+            "five, and equal to WITH_RETRY_MAX_ATTEMPTS in assets/with-retry.sh: "
+            "both budgets retry the same runner-egress failures"
+        )
         assert delay == 5.0
 
     @pytest.mark.parametrize("raw", ["0", "-1"])
@@ -275,7 +278,7 @@ class TestRetryPolicy:
         monkeypatch.setenv("ASH_DOWNLOAD_MAX_ATTEMPTS", raw)
         monkeypatch.setenv("ASH_DOWNLOAD_RETRY_DELAY", raw)
         attempts, delay = _download_retry_policy()
-        assert attempts == 3
+        assert attempts == 5
         assert delay == 5.0
 
     def test_the_backoff_is_bounded_and_grows(self):

@@ -44,22 +44,33 @@
 name: ASH - IaC Drift
 
 on:
-  # No push trigger, for the reasons set out at length on ash-unified-ci.yml's
+  # Push on main only, for the reasons set out at length on ash-unified-ci.yml's
   # triggers. In short: the active "Protect main" ruleset requires the merge queue for
-  # main and this workflow runs on merge_group, so the tree that becomes main is
-  # already gated -- verified on pull requests 544, 547 and 558. A push trigger would
-  # add a duplicate run of all six jobs per merge and, because github.ref is
-  # refs/heads/main for every main push while cancel-in-progress is false for push,
-  # could have its verdict evicted while pending. Run 34418283475 shows that happening
-  # to another workflow in this repository: cancelled with zero jobs started, one
-  # second after the following main push queued into the same group.
+  # main and this workflow runs on merge_group, so anything reaching main through the
+  # queue is already gated -- but the ruleset also grants one repository role an
+  # always-on bypass, and a merge taken under it lands on main with none of these six
+  # checks having run. Pull request 565 is the measured instance: no merge_group run of
+  # any workflow, and only the docs deploy and the default code-scanning run against
+  # its commit on main.
+  #
+  # `[main]` rather than `["**"]` because pull_request already covers every branch with
+  # an open pull request, so a wider filter would duplicate those runs. The filter was
+  # once `["!main"]`, which matches no branch at all rather than every branch but main;
+  # this workflow had zero push runs across its whole history as a result.
+  #
+  # The duplicate run on a queued merge is real and was accepted: six more single-runner
+  # jobs per merge to cover the merge that skips the queue. The eviction hazard that
+  # made an earlier attempt at this trigger unsafe is handled by the per-commit
+  # concurrency group below, not by leaving the trigger off.
   #
   # Worth stating for this file specifically, because its jobs are cheap and the
-  # temptation to run them everywhere is real: cost is not the argument. All six jobs
-  # are single-runner and offline -- cdk synth, terraform validate and cdk-nag read
-  # local files only. The argument is that a second verdict on the same tree is not a
-  # second check, and an evictable one is worse than none because its absence blocks
-  # nothing.
+  # temptation to run them everywhere is real: cost is not the argument for keeping the
+  # filter narrow. All six jobs are single-runner and offline -- cdk synth, terraform
+  # validate and cdk-nag read local files only. The argument is that a second verdict on
+  # a tree pull_request already covered is not a second check.
+  push:
+    branches:
+      - main
   pull_request:
     # "**" not "*": GitHub branch filters treat "*" as matching any character
     # except "/", so a PR whose BASE is a nested branch (a stacked PR targeting
@@ -90,13 +101,22 @@ concurrency:
   # github.ref is refs/pull/<n>/merge on pull_request, and on merge_group it is the
   # per-entry gh-readonly-queue/main/pr-<n>-<sha> branch, so every queue entry lands
   # in its own group and entries never serialize behind one another.
-  group: ${{ github.workflow }}-${{ github.ref }}
-  # Only pull_request runs may be cancelled. A merge_group run must finish or the
-  # queue loses its verdict, and a workflow_dispatch run was asked for by a person.
   #
-  # Safe as one group because no remaining event puts a shared branch name in
-  # github.ref -- there is no push trigger. See the note on the triggers above for
-  # what went wrong when there was.
+  # On push, github.ref is refs/heads/main for every commit, so ref alone would put all
+  # main pushes in one group. GitHub keeps one pending run per group and
+  # cancel-in-progress is false for push, so a third run would evict the pending second
+  # before it started a job -- and on a push there is no pull request for the missing
+  # verdict to block. Run 34418283475 in this repository is that happening to the docs
+  # deploy: cancelled with zero jobs started, one second after the next main push queued
+  # into the same group. The sha suffix gives every pushed commit its own group.
+  #
+  # The suffix is empty for every event except push, so nothing above changes. It is
+  # appended rather than substituted so github.ref stays in the key, and it matches the
+  # form ash-typescript-ci.yml and ash-unified-ci.yml use.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || '' }}
+  # Only pull_request runs may be cancelled. A merge_group run must finish or the queue
+  # loses its verdict, a push to main is the only report its commit will get, and a
+  # workflow_dispatch run was asked for by a person.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:

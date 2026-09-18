@@ -71,19 +71,36 @@ runs:
         include_passed: true
         check_name: PyTest - ${{ inputs.os }} ${{ inputs.arch }} Python ${{ inputs.python-version }}
 
-    - name: Code Coverage Report
-      uses: irongut/CodeCoverageSummary@51cc3a756ddcd398d447c044c02cb6aa83fdae95 # v1.3.0
+    # Rendered by coverage.py itself rather than by irongut/CodeCoverageSummary, which is a
+    # Docker-based action. A Docker action's image is pulled during the job's prepare phase,
+    # BEFORE any step's `if` is evaluated, so this step's condition -- which selects exactly
+    # one of the eighteen matrix legs -- did not stop the other legs from pulling it. Measured
+    # on run 35246976698: every Linux leg logged "Pull ghcr.io/irongut/codecoveragesummary
+    # :v1.3.0", including ubuntu-24.04-arm/py3.11 and ubuntu-latest/py3.13, where the
+    # condition is false. macOS and Windows legs logged no pull at all, so the exposure was
+    # the eight Linux legs, of which one actually runs the step.
+    #
+    # That made a cosmetic summary a hard dependency on ghcr.io for seven legs that never use
+    # it. On that run the pull failed DNS resolution three times (6.4s and 8.8s backoffs, then
+    # give up), and because the prepare phase precedes execution, "Install dependencies",
+    # "Run PyTest" and "Run cdk-nag integration tests" were all skipped with duration_ms=0.
+    # The leg reported failure having run zero tests, and it ejected PR #587 from the merge
+    # queue.
+    #
+    # coverage.py has rendered Markdown since 7.0 and pytest-cov>=7.1 already pins it, so this
+    # needs no new dependency and no container. `--fail-under=0` is load-bearing: .coveragerc
+    # sets fail_under=80, `coverage report` exits 2 below it, and this step must not become a
+    # second coverage gate. The real gate is the `--cov` run in pytest.ini, which has already
+    # run by this point and fails the leg on its own.
+    - name: Code coverage summary
+      shell: bash
       if: runner.os == 'Linux' && inputs.python-version == '3.12' && inputs.arch == 'x86_64'
-      with:
-        filename: "test-results/pytest.coverage.xml"
-        badge: true
-        format: markdown
-        fail_below_min: false
-        hide_branch_rate: false
-        hide_complexity: false
-        indicators: true
-        output: both
-        thresholds: "50 75"
+      run: |
+        {
+          echo '## Code coverage'
+          echo
+          uv run coverage report --format=markdown --fail-under=0
+        } >> "$GITHUB_STEP_SUMMARY"
 
     - name: Upload test results
       if: success() || failure()

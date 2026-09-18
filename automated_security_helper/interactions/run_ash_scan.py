@@ -42,6 +42,7 @@ from automated_security_helper.interactions.run_ash_container import run_ash_con
 from automated_security_helper.interactions.run_ash_nix import run_ash_nix
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.workspace import WorkspaceExitCode
+from automated_security_helper.utils.log import NO_MARKUP, escape_markup
 from automated_security_helper.workspace.plan import WorkspacePlan
 
 if TYPE_CHECKING:
@@ -907,15 +908,27 @@ def _run_container_mode(
             f"Container execution failed with code {container_result.returncode}"
         )
         if hasattr(container_result, "stderr") and container_result.stderr:
-            logger.error(f"Container stderr:\n{container_result.stderr}")
+            # The container runner's own output is data, not markup. podman
+            # writes lines like `msg="SHELL is not supported ... [/bin/bash -c]
+            # will be ignored"`, which Rich reads as a closing tag and rejects --
+            # destroying the report that explains the failed build. The logger
+            # takes NO_MARKUP so the message string is not rewritten; the print
+            # below styles its own heading, so there only the value is escaped.
+            logger.error(
+                f"Container stderr:\n{container_result.stderr}", extra=NO_MARKUP
+            )
             print(
-                f"\n[bold red]Container Error Output:[/bold red]\n{container_result.stderr}"
+                f"\n[bold red]Container Error Output:[/bold red]\n"
+                f"{escape_markup(container_result.stderr)}"
             )
         if hasattr(container_result, "stdout") and container_result.stdout:
-            logger.debug(f"Container stdout:\n{container_result.stdout}")
+            logger.debug(
+                f"Container stdout:\n{container_result.stdout}", extra=NO_MARKUP
+            )
             if opts.debug:
                 print(
-                    f"\n[bold blue]Container Standard Output:[/bold blue]\n{container_result.stdout}"
+                    f"\n[bold blue]Container Standard Output:[/bold blue]\n"
+                    f"{escape_markup(container_result.stdout)}"
                 )
 
     if not opts.run:

@@ -141,7 +141,7 @@ if _CDK_AVAILABLE:
 # written for this -- started failing. Anything edited here must be edited in
 # pyproject.toml too, and vice versa; that test is what enforces the pairing.
 _CDK_EXTRA_FALLBACK_REQUIREMENTS: List[str] = [
-    "aws-cdk-lib>=2.268.0,<3.0.0",
+    "aws-cdk-lib>=2.269.0,<3.0.0",
     "cdk-nag>=3.0,<4.0.0",
     "constructs>=10.8,<11.0.0",
 ]
