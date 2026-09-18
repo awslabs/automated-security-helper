@@ -11,6 +11,24 @@ ASH_REPO_ROOT: Path = Path(__file__).parent
 ASH_ASSETS_PATH: Path = ASH_REPO_ROOT.joinpath("automated_security_helper", "assets")
 ASH_INSTALLED_REVISION_PATH: Path = ASH_ASSETS_PATH.joinpath("ASH_INSTALLED_REVISION")
 
+# Files the root Dockerfile COPYs from elsewhere in the package, as
+# (path under automated_security_helper/, filename inside assets/).
+#
+# The shipped Dockerfile's build context is the assets directory itself --
+# run_ash_container._build_image passes `dockerfile_path.parent` as the context --
+# so a COPY naming any path outside assets/ fails there with "file not found"
+# while working perfectly from a checkout. These two are staged flat into assets/
+# and their COPY lines rewritten to match, the same treatment
+# `COPY automated_security_helper/assets/...` already gets below.
+#
+# They are the pinned tool table and the exception module it imports, needed by
+# assets/install-pinned-tool.py before the ASH wheel exists in the image. See that
+# script's docstring for why it cannot just call download_utils.install_pinned_tool.
+DOCKERFILE_STAGED_PACKAGE_FILES: tuple = (
+    ("utils/tool_downloads.py", "tool_downloads.py"),
+    ("core/exceptions.py", "exceptions.py"),
+)
+
 
 class CustomBuildHook(BuildHookInterface):
     """Build hook to stage build assets before packaging."""
@@ -37,8 +55,28 @@ class CustomBuildHook(BuildHookInterface):
                 content = content.replace(
                     "COPY automated_security_helper/assets/", "COPY "
                 )
+                # Stage the package files the Dockerfile COPYs from outside assets/,
+                # and point the COPY lines at the staged copies. Asserted rather
+                # than skipped when a source is missing: a silently-dropped stage
+                # produces a Dockerfile that fails at build time in the shipped
+                # artifact only, which is the hardest place to notice it.
+                for source_rel, staged_name in DOCKERFILE_STAGED_PACKAGE_FILES:
+                    source = ASH_REPO_ROOT.joinpath(
+                        "automated_security_helper", *source_rel.split("/")
+                    )
+                    if not source.exists():
+                        raise FileNotFoundError(
+                            f"Dockerfile stages {source_rel}, which does not exist "
+                            f"at {source}"
+                        )
+                    shutil.copyfile(source, ASH_ASSETS_PATH.joinpath(staged_name))
+                    content = content.replace(
+                        f"COPY automated_security_helper/{source_rel}",
+                        f"COPY {staged_name}",
+                    )
+                    print(f"Staged {source_rel} into assets/{staged_name}")
                 dockerfile_copy_path.write_text(content)
-                print(f"Successfully generated assets/Dockerfile from root Dockerfile")
+                print("Successfully generated assets/Dockerfile from root Dockerfile")
             else:
                 print(f"Warning: Dockerfile not found at {dockerfile_path}")
                 if dockerfile_copy_path.exists():
@@ -47,7 +85,6 @@ class CustomBuildHook(BuildHookInterface):
                     print(
                         "No Dockerfile available - this may be expected for wheel-only builds"
                     )
-
 
             # Handle Git commit SHA
             commit_sha = self._get_commit_sha()

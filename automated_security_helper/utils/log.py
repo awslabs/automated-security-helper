@@ -85,6 +85,51 @@ class ASHLogger(logging.Logger):
 logging.setLoggerClass(ASHLogger)
 
 
+# The console handler below is built with markup=True, so Rich parses "[...]" in
+# every message it renders. That is fine for the handful of messages that style
+# themselves and wrong for everything else, because subprocess output, command
+# lines and file paths all contain brackets that Rich reads as tags. Two shapes
+# bite, and only one of them is loud:
+#
+#   * "[/bin/bash -c]" -- body starts with "/", so Rich reads a closing tag with
+#     no opener and raises MarkupError. RichHandler.emit does not catch it and
+#     neither does logging.Handler.handle, so the exception replaces whatever
+#     report was being written, and it escapes before the file handlers added
+#     further down ever see the record. The message is lost from the console and
+#     from the log files at the same time.
+#   * "[node_modules]" -- body starts with a lowercase letter, so Rich reads an
+#     opening tag, consumes it as a style name and drops it. Nothing raises;
+#     "semgrep --exclude [node_modules]" simply logs as "semgrep --exclude".
+#
+# Rich's tag pattern is \[([a-z#/@][^[]*?)], so only those four leading
+# characters matter -- "[0]", "[B404]" and a Python argv repr are all inert.
+NO_MARKUP: Dict[str, bool] = {"markup": False}
+"""``extra`` for a log call whose message is data rather than markup.
+
+``RichHandler.render_message`` reads ``getattr(record, "markup", self.markup)``,
+so this turns markup off for one record without touching the others.
+
+Preferred over escaping for messages that carry no styling of their own, because
+it leaves the message string alone. The same record also goes to the JSONL and
+tabular ``FileHandler``s configured in ``setup_logging``; escaping the string
+would satisfy the console and write a literal backslash into those files, which
+is the diagnostic record operators read after a failure.
+"""
+
+
+def escape_markup(value: object) -> str:
+    """Neutralize Rich markup in *value* so it renders as the text it is.
+
+    For the messages that do style part of themselves -- and for ``rich.print``,
+    which has no per-record equivalent of :data:`NO_MARKUP` -- escape the
+    untrusted value only. Escaping the whole message would print the styling tags
+    literally instead of applying them.
+    """
+    from rich.markup import escape
+
+    return escape(str(value))
+
+
 def _detect_encoding_issues() -> bool:
     """Return True if running on Windows with an encoding that cannot represent Unicode."""
     if platform.system().lower() != "windows":

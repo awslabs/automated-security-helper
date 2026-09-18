@@ -32,6 +32,13 @@ docs/**/*_temp.html
 ### Generated or cloned into the assets directory at time of build/install ###
 automated_security_helper/assets/ASH_INSTALLED_REVISION
 automated_security_helper/assets/Dockerfile
+# Staged flat into assets/ by hatch_build.py because the shipped Dockerfile's
+# build context is the assets directory and cannot COPY from outside it. The
+# tracked originals are automated_security_helper/utils/tool_downloads.py and
+# automated_security_helper/core/exceptions.py; these are copies, so committing
+# them would create a second place a digest could be edited.
+automated_security_helper/assets/tool_downloads.py
+automated_security_helper/assets/exceptions.py
 
 ### macOS ###
 # General

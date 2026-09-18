@@ -882,7 +882,7 @@ class TestUnnormalizedPathsCannotDefeatTheAllowlist:
     A reviewer appended each of these to the REAL wheel, ran the gate (exit 0),
     then `uv pip install --no-cache --no-deps` into a fresh venv and confirmed the
     payload landed at site-packages/automated_security_helper/assets/upstream.yaml
-    -- the exact directory the 14-entry allowlist enumerates. The payload was a
+    -- the exact directory the 17-entry allowlist enumerates. The payload was a
     genuine upstream LGPL-2.1 semgrep-registry rule.
 
     The root cause was a single raw-string comparison. Rule 5a tested
@@ -1166,12 +1166,18 @@ class TestAllowlistsAreWhatTheArtifactContains:
     """The allowlists are claims about the built artifact. Pin the claims."""
 
     def test_assets_allowlist_has_the_measured_member_count(self):
-        """14 members in both the wheel and the sdist, measured, not guessed.
+        """17 members in both the wheel and the sdist, measured, not guessed.
 
         A change to this number is a change to what ships in assets/, which is
         the thing the rule exists to make visible.
+
+        Was 14. The three added are assets/install-pinned-tool.py, which replaced
+        the piped vendor installers in the Dockerfile, and the two files
+        hatch_build.py stages beside it -- assets/tool_downloads.py and
+        assets/exceptions.py -- because the shipped Dockerfile's build context is
+        assets/ and it cannot COPY from outside it.
         """
-        assert len(gate.ASSETS_ALLOWLIST) == 14
+        assert len(gate.ASSETS_ALLOWLIST) == 17
 
     @pytest.mark.parametrize("member", sorted(gate.ASSETS_ALLOWLIST))
     def test_every_allowlisted_asset_is_under_the_assets_prefix(self, member):
@@ -1538,7 +1544,7 @@ class TestAllowlistsAreCheckedInBothDirections:
         the rule under test -- quietly ending the single-variable property that every
         neutering experiment depends on. So an artifact carrying nothing under
         `assets/` has nothing asserted about `assets/`. The cost is that deleting
-        ALL 14 at once goes unreported; that is a build catastrophe with louder
+        ALL 17 at once goes unreported; that is a build catastrophe with louder
         symptoms than this gate.
         """
         members = [
@@ -1611,7 +1617,7 @@ class TestKnownGapsArePinned:
         and the same swap succeeded at assets/Gemfile, assets/with-retry.sh,
         assets/appsec_cfn_rules/IamUserExistsRule.rb and __init__.py.
 
-        Not closable with digests: two of the 14 assets are build-generated, so
+        Not closable with digests: four of the 17 assets are build-generated, so
         pinned digests would fail on ordinary work and the gate would get deleted.
         """
         assert (
@@ -1978,8 +1984,8 @@ class TestSelfTestIsTheControl:
         """The accept side of the allowlist, which widening cannot test.
 
         Widening proves the allowlist is what stops the planted member. This
-        proves the 14 pinned entries are what lets ASH's own assets through: drop
-        any one and the clean fixture -- which carries all 14 -- is rejected. An
+        proves the 17 pinned entries are what lets ASH's own assets through: drop
+        any one and the clean fixture -- which carries all 17 -- is rejected. An
         allowlist needs both experiments, because a typo in an entry fails only
         this one.
         """

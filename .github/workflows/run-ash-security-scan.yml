@@ -153,7 +153,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           enable-cache: true
 
@@ -195,15 +195,51 @@ jobs:
           path: ~/.opengrep/cli/latest
           key: opengrep-${{ runner.os }}-${{ steps.cachekeys.outputs.week }}
 
+      # `ash dependencies install`, not `curl https://get.anchore.io/... | sudo sh`.
+      #
+      # The piped form pinned nothing and gave the endpoint root on the runner at
+      # install time, in a workflow whose subject is supply-chain risk. It also broke:
+      # on run 35246976698 the same installer script could not resolve get.anchore.io,
+      # fell back to github.com, received the 302 that every release download answers
+      # with, treated the redirect as a failure, and left no binary behind.
+      #
+      # This path resolves the version and SHA256 from
+      # automated_security_helper/utils/tool_downloads.py at the pinned `ash-version`
+      # ref, verifies the digest before installing, and refuses to install on a
+      # mismatch. It is the same table the container image and the nix flake use, so a
+      # scan run through this workflow executes the same tool versions as one run any
+      # other way -- which the piped script could not promise, since it always
+      # installed whatever was newest.
+      #
+      # Two steps rather than one, because the two inputs are independent and merging
+      # them would mean interpolating booleans into shell to rebuild the condition.
+      # The second `uvx` call reuses the environment the first one resolved.
+      #
+      # ASH_TOOL_BIN is added to PATH the same way the OpenGrep step below does it.
+      # The previous form installed into /usr/local/bin, which is already on PATH, so
+      # without this a later step that expects grype or syft there would regress.
+      # `sudo` is gone with it: this writes under $HOME.
       - name: Install Grype
         if: inputs.install-grype
+        env:
+          ASH_TOOL_BIN: ${{ runner.temp }}/ash-tools
         run: |
-          curl -sSfL https://get.anchore.io/grype | sudo sh -s -- -b /usr/local/bin
+          set -euo pipefail
+          uvx --from ${ASH_UVX_SOURCE} ash dependencies install \
+            --tool grype \
+            --bin-path "${ASH_TOOL_BIN}"
+          echo "${ASH_TOOL_BIN}" >> "$GITHUB_PATH"
 
       - name: Install Syft
         if: inputs.install-syft
+        env:
+          ASH_TOOL_BIN: ${{ runner.temp }}/ash-tools
         run: |
-          curl -sSfL https://get.anchore.io/syft | sudo sh -s -- -b /usr/local/bin
+          set -euo pipefail
+          uvx --from ${ASH_UVX_SOURCE} ash dependencies install \
+            --tool syft \
+            --bin-path "${ASH_TOOL_BIN}"
+          echo "${ASH_TOOL_BIN}" >> "$GITHUB_PATH"
 
       - name: Install OpenGrep
         if: inputs.install-opengrep
