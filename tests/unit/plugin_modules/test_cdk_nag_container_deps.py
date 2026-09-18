@@ -24,6 +24,7 @@ import re
 import sys
 import urllib.request
 from importlib.metadata import PackageNotFoundError, packages_distributions
+from urllib.parse import unquote
 from pathlib import Path, PureWindowsPath
 from unittest.mock import MagicMock, patch
 
@@ -633,6 +634,26 @@ class TestCdkExtraResolution:
         assert cdk_nag_scanner_module._local_path_from_file_url(
             "file://localhost/proj"
         ) == cdk_nag_scanner_module._local_path_from_file_url("file:///proj")
+
+        # The assertion above cannot see who did the collapsing. From 3.12 the
+        # stdlib reduces "//localhost/proj" to "/proj" by itself, so it holds on
+        # 3.12+ whether or not `_local_path_from_file_url` special-cases
+        # localhost at all -- deleting that line leaves this test green on every
+        # interpreter from 3.12 up, and only 3.10 and 3.11 would notice.
+        #
+        # Substituting a conversion that unquotes and does nothing else -- which
+        # is precisely what POSIX url2pathname did through 3.13 -- puts the
+        # collapsing back in ASH's hands, so this observes ASH's own line on
+        # every supported version rather than the stdlib's behavior.
+        with patch.object(cdk_nag_scanner_module, "url2pathname", unquote):
+            assert cdk_nag_scanner_module._local_path_from_file_url(
+                "file://localhost/proj"
+            ) == cdk_nag_scanner_module._local_path_from_file_url("file:///proj"), (
+                "localhost was not reduced to the empty-authority form by ASH "
+                "itself, so on an interpreter whose url2pathname does not "
+                "collapse it, a distribution installed from this host would read "
+                "as the unrelated path //localhost/proj"
+            )
 
     def test_an_unreadable_url_is_skipped_rather_than_raising(self) -> None:
         """The walk covers every installed distribution, so nothing may escape.
