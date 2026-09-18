@@ -5,7 +5,15 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import threading
-from pydantic import AnyUrl, BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
+from pydantic import (
+    AnyUrl,
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    field_validator,
+    model_validator,
+)
 
 from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
@@ -33,7 +41,9 @@ __all__ = ["AshAggregatedResults"]
 
 _SEVERITY_ORDER = ("critical", "high", "medium", "low", "info")
 _VALID_INCREMENT_FIELDS = _SEVERITY_ORDER + ("suppressed",)
-_SUMMARY_SEVERITY_FIELDS = frozenset(("critical", "high", "medium", "low", "info", "suppressed"))
+_SUMMARY_SEVERITY_FIELDS = frozenset(
+    ("critical", "high", "medium", "low", "info", "suppressed")
+)
 
 
 class ScannerSeverityCount(BaseModel):
@@ -275,17 +285,13 @@ class ScannerStatusInfo(BaseModel):
         A target is "non-default" if its status is not PASSED, or if any of its
         severity counts (including suppressed) are non-zero.
         """
+
         def _non_default(t: ScannerTargetStatusInfo) -> bool:
             if t.status != ScannerStatus.PASSED:
                 return True
             sc = t.severity_counts
             return (
-                sc.critical
-                + sc.high
-                + sc.medium
-                + sc.low
-                + sc.info
-                + sc.suppressed
+                sc.critical + sc.high + sc.medium + sc.low + sc.info + sc.suppressed
             ) > 0
 
         return _non_default(self.source) and _non_default(self.converted)
@@ -627,7 +633,9 @@ class AshAggregatedResults(BaseModel):
                 if run.tool and run.tool.driver:
                     tool_name = run.tool.driver.name
                     driver_props = getattr(run.tool.driver, "properties", None)
-                    driver_tags = getattr(driver_props, "tags", None) if driver_props else None
+                    driver_tags = (
+                        getattr(driver_props, "tags", None) if driver_props else None
+                    )
                     if driver_tags:
                         for tag in driver_tags:
                             if tag.upper() in {
@@ -683,22 +691,41 @@ class AshAggregatedResults(BaseModel):
         if key not in self.scanner_results:
             return
 
-        target_info: ScannerTargetStatusInfo | dict = self.scanner_results[key]
-        if isinstance(target_info, dict):
-            target_info = ScannerTargetStatusInfo.model_validate(target_info)
-            self.scanner_results[key] = target_info
+        target_info = self.scanner_results[key]
         if target_info is None:
             return
+        if not isinstance(target_info, ScannerTargetStatusInfo):
+            # Normalise to the declared element type before reading, rather than
+            # guarding each read. Six fields -- finding_count,
+            # actionable_finding_count, suppressed_finding_count, severity_counts,
+            # exit_code, duration -- are declared on ScannerTargetStatusInfo and not
+            # on ScannerStatusInfo, so reading any of them off the wrong shape
+            # raises. A hasattr guard would be worse than a raise: both classes set
+            # extra="allow", so the assignment below would then succeed by creating
+            # an undeclared attribute, and the suppression count would be written to
+            # an object nothing reads.
+            #
+            # dicts arrive from JSON and are expected. Anything else is a writer that
+            # did not honour the annotation, so it is logged rather than absorbed.
+            if not isinstance(target_info, dict):
+                ASH_LOGGER.warning(
+                    f"scanner_results[{key!r}] holds {type(target_info).__name__}, "
+                    f"not ScannerTargetStatusInfo; normalising. This is a writer "
+                    f"that did not honour the declared type."
+                )
+                target_info = target_info.model_dump()
+            target_info = ScannerTargetStatusInfo.model_validate(target_info)
+            self.scanner_results[key] = target_info
 
         if target_info.suppressed_finding_count is None:
             target_info.suppressed_finding_count = 1
         else:
             target_info.suppressed_finding_count += 1
 
-        if not hasattr(target_info.severity_counts, "suppressed"):
-            target_info.severity_counts.suppressed = 1
-        else:
-            target_info.severity_counts.suppressed += 1
+        # ScannerSeverityCount declares `suppressed: int = 0`, so the hasattr check
+        # that used to guard this was dead -- the attribute always exists, and the
+        # else arm always ran. Incrementing directly says the same thing honestly.
+        target_info.severity_counts.suppressed += 1
 
     @classmethod
     def from_json(cls, json_data: Union[str, Dict[str, Any]]) -> "AshAggregatedResults":

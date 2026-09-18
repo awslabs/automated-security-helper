@@ -12,7 +12,7 @@ from automated_security_helper.core.exceptions import ScannerSelectionError
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     ScannerSeverityCount,
-    ScannerStatusInfo,
+    ScannerTargetStatusInfo,
 )
 from automated_security_helper.models.scan_results_container import ScanResultsContainer
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
@@ -27,7 +27,9 @@ from automated_security_helper.utils.sarif_utils import (
 )
 from automated_security_helper.models.scanner_validation import ScannerValidationManager
 from automated_security_helper.core.phases.scanner_executor import ScannerExecutor
-from automated_security_helper.core.phases.scan_result_processor import ScanResultProcessor
+from automated_security_helper.core.phases.scan_result_processor import (
+    ScanResultProcessor,
+)
 from automated_security_helper.core.sharding import (
     ShardAssignment,
     partition_scanners,
@@ -118,7 +120,7 @@ class ScanPhase(EnginePhase):
             aggregated_results=aggregated_results,
         )
 
-        aggregated_results.scanner_results[display_name] = ScannerStatusInfo(
+        aggregated_results.scanner_results[display_name] = ScannerTargetStatusInfo(
             status=ScannerStatus.SKIPPED,
             excluded=True,
             dependencies_satisfied=True,
@@ -196,21 +198,15 @@ class ScanPhase(EnginePhase):
 
         # Compute the source file list once so scanners don't each re-glob
         source_files = [
-            str(p)
-            for p in self.plugin_context.source_dir.rglob("*")
-            if p.is_file()
+            str(p) for p in self.plugin_context.source_dir.rglob("*") if p.is_file()
         ]
         if self._include_work_dir:
             source_files.extend(
-                str(p)
-                for p in self.plugin_context.work_dir.rglob("*")
-                if p.is_file()
+                str(p) for p in self.plugin_context.work_dir.rglob("*") if p.is_file()
             )
         # Store on the context so individual scanners can access it
         self.plugin_context.cached_source_files = source_files
-        ASH_LOGGER.debug(
-            f"Cached {len(source_files)} source files for scanner use"
-        )
+        ASH_LOGGER.debug(f"Cached {len(source_files)} source files for scanner use")
 
         # Debug logging for scanner filtering parameters
         ASH_LOGGER.debug(f"Enabled scanners parameter: {enabled_scanners}")
@@ -320,9 +316,7 @@ class ScanPhase(EnginePhase):
                     _scanner_display_name(instance).lower().strip()
                     for instance in scanner_instances
                 }
-                requested = [
-                    (name, name.lower().strip()) for name in enabled_scanners
-                ]
+                requested = [(name, name.lower().strip()) for name in enabled_scanners]
                 unresolved = [
                     name for name, key in requested if key not in registered_names
                 ]
@@ -446,7 +440,7 @@ class ScanPhase(EnginePhase):
                             # self._completed_scanners.append(plugin_instance)
 
                             aggregated_results.scanner_results[display_name] = (
-                                ScannerStatusInfo(
+                                ScannerTargetStatusInfo(
                                     status=ScannerStatus.SKIPPED,
                                     excluded=True,
                                     dependencies_satisfied=True,
@@ -608,7 +602,7 @@ class ScanPhase(EnginePhase):
                             # self._completed_scanners.append(plugin_instance)
 
                             aggregated_results.scanner_results[display_name] = (
-                                ScannerStatusInfo(
+                                ScannerTargetStatusInfo(
                                     status=ScannerStatus.MISSING,
                                     dependencies_satisfied=False,
                                     excluded=False,
@@ -821,7 +815,7 @@ class ScanPhase(EnginePhase):
                         aggregated_results=aggregated_results,
                     )
                     aggregated_results.scanner_results[display_name] = (
-                        ScannerStatusInfo(
+                        ScannerTargetStatusInfo(
                             status=ScannerStatus.MISSING,
                             dependencies_satisfied=True,
                             excluded=False,
@@ -1127,19 +1121,24 @@ class ScanPhase(EnginePhase):
                         f"SCAN_START notification for {scanner_name} failed: {notify_error!r}"
                     )
 
-                results_list = self._safe_execute_scanner(scanner_name, scanner_plugin, scan_targets)
+                results_list = self._safe_execute_scanner(
+                    scanner_name, scanner_plugin, scan_targets
+                )
 
                 if results_list is None:
                     ASH_LOGGER.error(f"Scanner {scanner_name} returned None results")
                     failure_container = ScanResultsContainer.for_failure(
-                        scanner_name, errors=[f"Scanner {scanner_name} failed with no results"]
+                        scanner_name,
+                        errors=[f"Scanner {scanner_name} failed with no results"],
                     )
                     failure_container.raw_results = {
                         "errors": [f"Scanner {scanner_name} failed with no results"],
                         "status": "failed",
                         "exception": "Scanner returned None results",
                     }
-                    processed = self._process_results(failure_container, aggregated_results)
+                    processed = self._process_results(
+                        failure_container, aggregated_results
+                    )
                     if isinstance(processed, AshAggregatedResults):
                         aggregated_results = processed
                     self.progress_display.update_task(
@@ -1164,10 +1163,16 @@ class ScanPhase(EnginePhase):
                         remaining_scanners.remove(scanner_name)
 
                     try:
-                        from automated_security_helper.plugins.events import AshEventType
+                        from automated_security_helper.plugins.events import (
+                            AshEventType,
+                        )
 
                         remaining_count = len(remaining_scanners)
-                        remaining_list = ", ".join(remaining_scanners) if remaining_scanners else "None"
+                        remaining_list = (
+                            ", ".join(remaining_scanners)
+                            if remaining_scanners
+                            else "None"
+                        )
                         self.notify_event(
                             AshEventType.SCAN_COMPLETE,
                             scanner=scanner_name,
@@ -1187,7 +1192,9 @@ class ScanPhase(EnginePhase):
 
             except Exception as e:
                 stack_trace = _traceback.format_exc()
-                ASH_LOGGER.debug(f"Stack trace for scanner {scanner_name} failure:\n{stack_trace}")
+                ASH_LOGGER.debug(
+                    f"Stack trace for scanner {scanner_name} failure:\n{stack_trace}"
+                )
                 self.progress_display.update_task(
                     phase=ExecutionPhase.SCAN,
                     task_id=scanner_task,
@@ -1207,11 +1214,15 @@ class ScanPhase(EnginePhase):
                     "stack_trace": stack_trace,
                 }
                 try:
-                    processed = self._process_results(failure_container, aggregated_results)
+                    processed = self._process_results(
+                        failure_container, aggregated_results
+                    )
                     if isinstance(processed, AshAggregatedResults):
                         aggregated_results = processed
                 except Exception as process_error:
-                    ASH_LOGGER.error(f"Failed to process error results for {scanner_name}: {str(process_error)}")
+                    ASH_LOGGER.error(
+                        f"Failed to process error results for {scanner_name}: {str(process_error)}"
+                    )
             finally:
                 completed += 1
 
@@ -1250,11 +1261,18 @@ class ScanPhase(EnginePhase):
                     completed=10,
                     description=f"[blue]({scanner_name}) Queued scan...",
                 )
-                future = executor.submit(self._safe_execute_scanner, scanner_name, scanner_plugin, scan_targets)
+                future = executor.submit(
+                    self._safe_execute_scanner,
+                    scanner_name,
+                    scanner_plugin,
+                    scan_targets,
+                )
                 future.scanner_info = {"name": scanner_name, "task_key": task_key}
                 futures.append(future)
 
-            self.update_progress(50, f"Running {len(futures)} scanner tasks in parallel...")
+            self.update_progress(
+                50, f"Running {len(futures)} scanner tasks in parallel..."
+            )
 
             completed_count = 0
             for future in as_completed(futures):
@@ -1266,16 +1284,23 @@ class ScanPhase(EnginePhase):
                     results_list = future.result()
 
                     if results_list is None:
-                        ASH_LOGGER.error(f"Scanner {scanner_name} returned None results")
+                        ASH_LOGGER.error(
+                            f"Scanner {scanner_name} returned None results"
+                        )
                         failure_container = ScanResultsContainer.for_failure(
-                            scanner_name, errors=[f"Scanner {scanner_name} failed with no results"]
+                            scanner_name,
+                            errors=[f"Scanner {scanner_name} failed with no results"],
                         )
                         failure_container.raw_results = {
-                            "errors": [f"Scanner {scanner_name} failed with no results"],
+                            "errors": [
+                                f"Scanner {scanner_name} failed with no results"
+                            ],
                             "status": "failed",
                             "exception": "Scanner returned None results",
                         }
-                        processed = self._process_results(failure_container, aggregated_results)
+                        processed = self._process_results(
+                            failure_container, aggregated_results
+                        )
                         if isinstance(processed, AshAggregatedResults):
                             aggregated_results = processed
                         if task_id is not None:
@@ -1287,7 +1312,9 @@ class ScanPhase(EnginePhase):
                             )
                     else:
                         for results in results_list:
-                            processed = self._process_results(results, aggregated_results)
+                            processed = self._process_results(
+                                results, aggregated_results
+                            )
                             if isinstance(processed, AshAggregatedResults):
                                 aggregated_results = processed
 
@@ -1311,10 +1338,16 @@ class ScanPhase(EnginePhase):
                             if scanner_name in remaining_scanners:
                                 remaining_scanners.remove(scanner_name)
                             try:
-                                from automated_security_helper.plugins.events import AshEventType
+                                from automated_security_helper.plugins.events import (
+                                    AshEventType,
+                                )
 
                                 remaining_count = len(remaining_scanners)
-                                remaining_list = ", ".join(remaining_scanners) if remaining_scanners else "None"
+                                remaining_list = (
+                                    ", ".join(remaining_scanners)
+                                    if remaining_scanners
+                                    else "None"
+                                )
                                 self.notify_event(
                                     AshEventType.SCAN_COMPLETE,
                                     scanner=scanner_name,
@@ -1336,7 +1369,9 @@ class ScanPhase(EnginePhase):
 
                 except Exception as e:
                     stack_trace = _traceback.format_exc()
-                    ASH_LOGGER.debug(f"Stack trace for scanner {scanner_name} thread failure:\n{stack_trace}")
+                    ASH_LOGGER.debug(
+                        f"Stack trace for scanner {scanner_name} thread failure:\n{stack_trace}"
+                    )
                     if task_id is not None:
                         self.progress_display.update_task(
                             phase=ExecutionPhase.SCAN,
@@ -1344,24 +1379,34 @@ class ScanPhase(EnginePhase):
                             completed=100,
                             description=f"[red]({scanner_name}) Failed: {str(e)}",
                         )
-                    ASH_LOGGER.error(f"Scanner execution failed in thread pool: {scanner_name} - {str(e)}")
+                    ASH_LOGGER.error(
+                        f"Scanner execution failed in thread pool: {scanner_name} - {str(e)}"
+                    )
                     failure_container = ScanResultsContainer.for_failure(
                         scanner_name,
-                        errors=[f"Scanner {scanner_name} failed in thread pool: {str(e)}"],
+                        errors=[
+                            f"Scanner {scanner_name} failed in thread pool: {str(e)}"
+                        ],
                         exception=e,
                     )
                     failure_container.raw_results = {
-                        "errors": [f"Scanner {scanner_name} failed in thread pool: {str(e)}"],
+                        "errors": [
+                            f"Scanner {scanner_name} failed in thread pool: {str(e)}"
+                        ],
                         "status": "failed",
                         "exception": str(e),
                         "stack_trace": stack_trace,
                     }
                     try:
-                        processed = self._process_results(failure_container, aggregated_results)
+                        processed = self._process_results(
+                            failure_container, aggregated_results
+                        )
                         if isinstance(processed, AshAggregatedResults):
                             aggregated_results = processed
                     except Exception as process_error:
-                        ASH_LOGGER.error(f"Failed to process error results for {scanner_name}: {str(process_error)}")
+                        ASH_LOGGER.error(
+                            f"Failed to process error results for {scanner_name}: {str(process_error)}"
+                        )
                 finally:
                     completed_count += 1
                     if len(futures) > 0:
@@ -1399,7 +1444,9 @@ class ScanPhase(EnginePhase):
             stack_trace = _traceback.format_exc()
             error_msg = f"Unexpected error in scanner {scanner_name}: {str(e)}"
             ASH_LOGGER.error(error_msg)
-            ASH_LOGGER.debug(f"Stack trace for scanner {scanner_name} failure:\n{stack_trace}")
+            ASH_LOGGER.debug(
+                f"Stack trace for scanner {scanner_name} failure:\n{stack_trace}"
+            )
             failure_container = ScanResultsContainer.for_failure(
                 scanner_name, errors=[error_msg], exception=e
             )
@@ -1412,7 +1459,12 @@ class ScanPhase(EnginePhase):
             try:
                 from automated_security_helper.plugins.events import AshEventType
 
-                self.notify_event(AshEventType.ERROR, message=error_msg, scanner=scanner_name, exception=e)
+                self.notify_event(
+                    AshEventType.ERROR,
+                    message=error_msg,
+                    scanner=scanner_name,
+                    exception=e,
+                )
             except Exception as notify_error:
                 # Same reasoning as the SCAN_START guard: notify_event has no
                 # handler of its own. Doubly important on this path -- the
@@ -1423,7 +1475,6 @@ class ScanPhase(EnginePhase):
                     f"ERROR notification for {scanner_name} failed: {notify_error!r}"
                 )
             return [failure_container]
-
 
     def _validate_metrics_consistency(self, aggregated_results: AshAggregatedResults):
         """Validate that scanner_results totals match summary_stats.
@@ -1452,7 +1503,12 @@ class ScanPhase(EnginePhase):
                 scanner_name,
                 scanner_info,
             ) in aggregated_results.scanner_results.items():
-                # Handle both old ScannerStatusInfo and new ScannerMetrics structures
+                # Three shapes reach this dict. ScannerTargetStatusInfo is the
+                # declared element type and what unified_metrics writes before the
+                # report phase; ScannerStatusInfo is the legacy scanner-level shape
+                # with source/converted; ScannerMetrics is the unified per-scanner
+                # row. Order matters: ScannerStatusInfo also has severity_counts on
+                # its children, so the source/converted arm has to be tried first.
                 if hasattr(scanner_info, "source") and hasattr(
                     scanner_info, "converted"
                 ):
@@ -1475,6 +1531,28 @@ class ScanPhase(EnginePhase):
                             scanner_totals["actionable"] += (
                                 target_info.actionable_finding_count or 0
                             )
+                elif hasattr(scanner_info, "severity_counts") and not hasattr(
+                    scanner_info, "source"
+                ):
+                    # ScannerTargetStatusInfo -- the declared element type of
+                    # scanner_results, and what unified_metrics writes before the
+                    # report phase. This arm was missing, so every entry reaching
+                    # this check after normalisation fell through to the else and
+                    # added nothing, leaving scanner_totals at zero and making the
+                    # comparison below warn about differences that were artefacts
+                    # of the missing branch rather than real inconsistencies.
+                    counts = scanner_info.severity_counts
+                    if counts:
+                        scanner_totals["critical"] += counts.critical
+                        scanner_totals["high"] += counts.high
+                        scanner_totals["medium"] += counts.medium
+                        scanner_totals["low"] += counts.low
+                        scanner_totals["info"] += counts.info
+                        scanner_totals["suppressed"] += counts.suppressed
+                    scanner_totals["total"] += scanner_info.finding_count or 0
+                    scanner_totals["actionable"] += (
+                        scanner_info.actionable_finding_count or 0
+                    )
                 elif hasattr(scanner_info, "critical") and hasattr(
                     scanner_info, "scanner_name"
                 ):
