@@ -30,6 +30,12 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # The second of two install-validation surfaces. ash-unified-ci.yml has its own
+  # `install-validation` job, which is unconditional and is what `required-checks`
+  # gates on; this workflow is path-filtered (see `paths` above) and adds the
+  # `nix` method that job does not carry. Keep the `python-version` axes of the
+  # two identical, deliberately -- a version added to one and not the other
+  # leaves a supported interpreter untested on whichever surface was missed.
   validate:
     name: ${{ matrix.method }} (${{ matrix.os }}, py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}

@@ -521,6 +521,25 @@ jobs:
   # ---------------------------------------------------------------------------
   # Install methods: method x OS x Python (matches ash-install-methods.yml)
   # ---------------------------------------------------------------------------
+  #
+  # There are two install-validation surfaces and they are NOT redundant, so both
+  # have to carry every supported Python version. This one is unconditional --
+  # push, pull_request and merge_group -- and it is the one `required-checks`
+  # depends on, so it is what actually gates a merge. ash-install-methods.yml is
+  # path-filtered to pyproject.toml, hatch_build.py, automated_security_helper/**
+  # and a few others, and it adds the `nix` method this job does not carry.
+  #
+  # Keep the `python-version` axes of the two identical, deliberately: a version
+  # added to one and not the other leaves a supported interpreter untested on
+  # whichever surface was missed. The two install matrices agree exactly on
+  # macos-14 -- both keep macos-14 x {3.10, 3.11} for pip, pipx, pre-commit and
+  # mcp -- so the axes are the only thing needing that discipline.
+  #
+  # Worth a look by someone with a macOS ARM runner: `unit-test` above excludes
+  # macos-14 x {3.10, 3.11} on the grounds that macOS ARM only has 3.12 and
+  # later, while this job runs those same cells unconditionally on every pull
+  # request. Both cannot be right. Not changed here because it predates Python
+  # 3.14 and settling it needs a macOS ARM runner, which no local check provides.
   install-validation:
     name: "${{ matrix.method }} (${{ matrix.os }}, py${{ matrix.python-version }})"
     runs-on: ${{ matrix.os }}
