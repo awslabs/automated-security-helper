@@ -334,15 +334,27 @@ class TestTheMarkerStillMatchesTheInstalledCdkNag:
     """
 
     def test_the_prefix_appears_verbatim_in_the_installed_distribution(self):
+        import importlib.util
         import tarfile
-
-        import cdk_nag
 
         from automated_security_helper.utils.cdk_nag_wrapper import (
             _UNEVALUATED_DESCRIPTION_PREFIX,
         )
 
-        root = Path(cdk_nag.__file__).parent
+        # Locate the installed cdk-nag distribution WITHOUT importing it. `import
+        # cdk_nag` runs its __init__, which imports `aws_cdk._jsii` and starts a
+        # jsii kernel that extracts aws-cdk-lib into a shared per-user cache
+        # (%LOCALAPPDATA%\AWS\jsii\package-cache). Under pytest-xdist on Windows two
+        # workers race to create that cache's lock file and the loser dies with
+        # "RuntimeError: EEXIST ... .lock" -- a recurring CI flake. This test only
+        # reads static *.tgz files from the package directory, so `find_spec` (which
+        # resolves the module without executing it) gives everything it needs and
+        # never touches jsii.
+        spec = importlib.util.find_spec("cdk_nag")
+        assert spec is not None and spec.origin, (
+            "cdk_nag is not installed, so the marker cannot be confirmed"
+        )
+        root = Path(spec.origin).parent
         tarballs = sorted(root.rglob("*.tgz"))
         assert tarballs, (
             f"no cdk-nag tarball under {root}; this test cannot fail as written, so the "
