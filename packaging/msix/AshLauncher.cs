@@ -499,9 +499,18 @@ internal static class AshLauncher
         // The bound is kept anyway, on the narrower ground that it was never entitled to
         // claim: ash-unified-ci.yml exercises 3.10 through 3.13 and nothing above, so 3.14
         // is untested rather than known-broken, and Chocolatey declares the same range for
-        // the same reason. It is narrower than the `requires-python = ">=3.10,<4"` in
-        // pyproject.toml, and that gap is real. Once 3.14 is actually exercised in CI this
-        // ceiling has nothing left holding it up and should move with Chocolatey's.
+        // the same reason.
+        //
+        // What this bound is NOT is `requires-python`, which reads ">=3.10,<4" in
+        // pyproject.toml. This one decides which interpreter the launcher will build a venv
+        // against; that one declares what ASH supports. They are separate settings that move
+        // for separate reasons, and reading them as one thing is how the wrong diagnosis
+        // above survived as long as it did. Raising `requires-python` does not raise this.
+        //
+        // This ceiling rises when the MSIX leg itself runs against 3.14 -- that is, once this
+        // branch merges a main whose CI matrices include it -- and Chocolatey's nuspec rises
+        // with it. Not before: raising it earlier would ship a range this package's own
+        // verification has never exercised. README.msix records the same trigger in full.
         bool sawSomethingTooOld = false;
         bool sawSomethingTooNew = false;
         foreach (PythonCandidate candidate in candidates)

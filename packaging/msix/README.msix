@@ -32,11 +32,29 @@ a bare `python` resolves to the Microsoft Store placeholder that opens the Store
 instead of running anything. ASH_MSIX_PYTHON overrides the search and is not
 version-checked, so it can be pointed at 3.14 deliberately.
 
-The upper bound is narrower than ASH's own `requires-python`, which is `>=3.10,<4`. The
-bound exists because `ash-unified-ci.yml` exercises 3.10 through 3.13 and nothing above,
-so the top of the declared range is untested, and `packaging/chocolatey` declares the
-same `python3 [3.10,3.14)` for the same reason. Two Windows packages with one bound is
-deliberate. Once 3.14 is exercised in CI, both bounds move together.
+This bound is on WHICH INTERPRETER THE LAUNCHER PICKS. It is not ASH's `requires-python`,
+which reads `>=3.10,<4` and is a different setting in a different file. The two are
+independent and move for different reasons, and conflating them is easy enough that it
+has already happened once: a bound here does not narrow what ASH supports, and widening
+`requires-python` does not widen this.
+
+The bound exists because `ash-unified-ci.yml` exercises 3.10 through 3.13 and nothing
+above, so this package would otherwise pick an interpreter the MSIX verification has
+never run against. `packaging/chocolatey` declares the same `python3 [3.10,3.14)` for the
+same reason, and two Windows packages with one bound is deliberate.
+
+When it is removed, and by what:
+
+  1. main gains 3.14 in its CI matrices (PR #596, which also raises `requires-python`
+     to `<3.15` -- that half is independent of this bound and does not on its own
+     justify moving it)
+  2. this branch merges that main, so the MSIX leg inherits 3.14 coverage
+  3. the launcher bound rises to match, and Chocolatey's nuspec rises with it
+
+Step 2 is the one that matters. Until the MSIX leg itself runs against 3.14, raising the
+bound would ship a claim this package's own verification cannot check. The trigger is
+written down because a bound whose removal condition is not recorded stops being a
+decision and becomes folklore that nobody feels entitled to touch.
 
 An earlier version of this file claimed more than that, and the correction is worth
 recording. The bound was first introduced as a measured defect: on a `windows-latest`
