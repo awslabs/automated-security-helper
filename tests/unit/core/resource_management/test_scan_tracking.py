@@ -204,7 +204,14 @@ class TestScannerProgress:
 
     def test_init_with_custom_severity_counts(self):
         """Custom severity_counts dict is copied, not aliased."""
-        counts = {"critical": 2, "high": 1, "medium": 0, "low": 0, "info": 0, "suppressed": 0}
+        counts = {
+            "critical": 2,
+            "high": 1,
+            "medium": 0,
+            "low": 0,
+            "info": 0,
+            "suppressed": 0,
+        }
         progress = ScannerProgress("s", "source", severity_counts=counts)
 
         # Mutating the original should not affect the progress instance
@@ -345,7 +352,12 @@ class TestScanProgress:
         sp = ScannerProgress("bandit", "source")
         sp.finding_count = 5
         sp.severity_counts = {
-            "critical": 1, "high": 2, "medium": 1, "low": 1, "info": 0, "suppressed": 0
+            "critical": 1,
+            "high": 2,
+            "medium": 1,
+            "low": 1,
+            "info": 0,
+            "suppressed": 0,
         }
 
         scan.add_scanner_progress(sp)
@@ -363,13 +375,23 @@ class TestScanProgress:
         sp_source = ScannerProgress("trivy", "source")
         sp_source.finding_count = 2
         sp_source.severity_counts = {
-            "critical": 0, "high": 1, "medium": 1, "low": 0, "info": 0, "suppressed": 0
+            "critical": 0,
+            "high": 1,
+            "medium": 1,
+            "low": 0,
+            "info": 0,
+            "suppressed": 0,
         }
 
         sp_converted = ScannerProgress("trivy", "converted")
         sp_converted.finding_count = 1
         sp_converted.severity_counts = {
-            "critical": 0, "high": 0, "medium": 0, "low": 1, "info": 0, "suppressed": 0
+            "critical": 0,
+            "high": 0,
+            "medium": 0,
+            "low": 1,
+            "info": 0,
+            "suppressed": 0,
         }
 
         scan.add_scanner_progress(sp_source)
@@ -387,7 +409,12 @@ class TestScanProgress:
         sp = ScannerProgress("s1", "source")
         sp.finding_count = 3
         sp.severity_counts = {
-            "critical": 1, "high": 1, "medium": 1, "low": 0, "info": 0, "suppressed": 0
+            "critical": 1,
+            "high": 1,
+            "medium": 1,
+            "low": 0,
+            "info": 0,
+            "suppressed": 0,
         }
         scan.add_scanner_progress(sp)
 
@@ -703,14 +730,47 @@ class TestExtractFindingsSummary:
         summary = extract_findings_summary([])
         assert all(v == 0 for v in summary.values())
 
-    def test_ignores_unknown_severities(self):
-        """Unknown severity values are not counted."""
+    def test_unrecognized_severities_are_counted_as_unknown(self):
+        """A severity outside the ladder counts under "unknown", not nowhere.
+
+        This replaces test_ignores_unknown_severities, which asserted
+        `all(v == 0 ...)` here and so specified the opposite. That was a real
+        defect rather than a deliberate contract: the function already defaulted
+        a missing severity to the string "UNKNOWN" and then discarded it, because
+        the summary held only the six named buckets and the write was guarded by
+        `if severity in summary`. The effect was that such a finding counted
+        toward total_findings and toward nothing in severity_counts, so a real
+        finding was invisible in the only view that reports how bad a scan is.
+        """
         findings = [
             {"severity": "UNKNOWN"},
             {"severity": "EXTREMELY_HIGH"},
         ]
         summary = extract_findings_summary(findings)
-        assert all(v == 0 for v in summary.values())
+
+        assert summary["unknown"] == 2
+        assert all(v == 0 for k, v in summary.items() if k != "unknown")
+
+    def test_a_missing_severity_is_counted_as_unknown(self):
+        """A finding with no severity key at all is still counted."""
+        summary = extract_findings_summary([{"id": "1"}, {"severity": None}])
+
+        assert summary["unknown"] == 2
+
+    def test_every_finding_lands_in_exactly_one_bucket(self):
+        """The invariant the fix buys: the breakdown accounts for every finding."""
+        findings = [
+            {"severity": "CRITICAL"},
+            {"severity": "high"},
+            {"severity": "error"},  # a SARIF level, not an ASH severity
+            {"id": "no-severity"},
+        ]
+        summary = extract_findings_summary(findings)
+
+        assert sum(summary.values()) == len(findings)
+        assert summary["critical"] == 1
+        assert summary["high"] == 1
+        assert summary["unknown"] == 2
 
     def test_case_insensitive_severity(self):
         """Severity matching is case-insensitive (lowered)."""
@@ -744,6 +804,7 @@ class TestValidateOutputDirectory:
         # The scanners dir exists but is empty - the function checks for
         # aggregated results as an alternative
         import shutil
+
         shutil.rmtree(scanners_dir)
 
         is_valid, error_msg = validate_output_directory(mock_aggregated_results)
@@ -814,16 +875,33 @@ class TestValidateResultStructure:
         assert not is_valid
         assert "must be a dictionary" in error
 
-    def test_valid_with_ash_aggregated_results_model(self):
-        """Valid when input is an AshAggregatedResults model instance."""
-        from unittest.mock import MagicMock
-        from automated_security_helper.models.asharp_model import AshAggregatedResults
+    def test_an_explicit_null_sarif_is_treated_as_absent(self):
+        """A document can carry "sarif": null and still be valid via scanner_results.
 
-        # Mock the model since we just need isinstance check to pass
-        mock_model = MagicMock(spec=AshAggregatedResults)
-        is_valid, error = validate_result_structure(mock_model)
+        Replaces test_valid_with_ash_aggregated_results_model, which passed a
+        MagicMock(spec=AshAggregatedResults) and asserted it validated -- pinning
+        the `if isinstance(results, AshAggregatedResults): return True, None`
+        short-circuit that used to be this function's first statement. That
+        short-circuit was the defect: get_scan_results was its only caller and
+        passed exactly that type, so everything below was unreachable in
+        production. The function now takes the raw document only, so there is no
+        longer a type that bypasses it.
+        """
+        is_valid, error = validate_result_structure(
+            {"sarif": None, "scanner_results": {"bandit": {}}}
+        )
+
         assert is_valid
         assert error is None
+
+    def test_a_null_for_both_fields_is_still_missing(self):
+        """Null is absent, so a document with both null is rejected."""
+        is_valid, error = validate_result_structure(
+            {"sarif": None, "scanner_results": None}
+        )
+
+        assert not is_valid
+        assert "Missing required fields" in error
 
 
 # ---------------------------------------------------------------------------
@@ -999,7 +1077,9 @@ class TestGetScanResults:
         """Raises MCPResourceError when scan is not complete."""
         with pytest.raises(MCPResourceError) as exc_info:
             get_scan_results(temp_output_dir)
-        assert "scan_incomplete" in str(exc_info.value.context.get("error_category", ""))
+        assert "scan_incomplete" in str(
+            exc_info.value.context.get("error_category", "")
+        )
 
     def test_raises_for_invalid_directory(self, tmp_path):
         """Raises MCPResourceError for non-existent directory."""

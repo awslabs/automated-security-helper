@@ -58,35 +58,34 @@ class TestErrorHandlingIntegration:
 
     @pytest.mark.asyncio
     async def test_invalid_scan_id_format(self):
-        """Test handling of invalid scan ID format."""
-        # Try to check progress with an invalid scan ID
-        with pytest.raises(MCPResourceError) as excinfo:
-            await check_scan_progress("")
+        """Test handling of invalid scan ID format.
 
-        error = excinfo.value
-        assert "Invalid scan ID" in str(error)
-        assert (
-            error.context.get("error_category") == ErrorCategory.INVALID_PARAMETER.value
-        )
+        check_scan_progress returns a create_error_response dict rather than
+        raising. validate_scan_id's message for an empty ID is "Scan ID cannot be
+        empty"; only the mocked branch below produces "Invalid scan ID".
+        """
+        result = await check_scan_progress("")
 
-        # Try with a non-string scan ID
-        with pytest.raises(MCPResourceError) as excinfo:
-            # We can't directly pass None to check_scan_progress due to type hints,
-            # so we'll mock validate_scan_id to simulate the error
-            with mock.patch(
-                "automated_security_helper.core.resource_management.error_handling.validate_scan_id"
-            ) as mock_validate:
-                mock_validate.return_value = MCPResourceError(
-                    "Invalid scan ID: None. Must be a non-empty string.",
-                    context={"error_category": ErrorCategory.INVALID_PARAMETER.value},
-                )
-                await check_scan_progress("dummy")
+        assert result["success"] is False
+        assert "Scan ID cannot be empty" in result["error"]
+        assert result["error_category"] == ErrorCategory.INVALID_PARAMETER.value
+        assert result["operation"] == "check_scan_progress"
 
-        error = excinfo.value
-        assert "Invalid scan ID" in str(error)
-        assert (
-            error.context.get("error_category") == ErrorCategory.INVALID_PARAMETER.value
-        )
+        # Try with a non-string scan ID. check_scan_progress imports
+        # validate_scan_id inside the function body, so patching it on the
+        # error_handling module reaches the call.
+        with mock.patch(
+            "automated_security_helper.core.resource_management.error_handling.validate_scan_id"
+        ) as mock_validate:
+            mock_validate.return_value = MCPResourceError(
+                "Invalid scan ID: None. Must be a non-empty string.",
+                context={"error_category": ErrorCategory.INVALID_PARAMETER.value},
+            )
+            result = await check_scan_progress("dummy")
+
+        assert result["success"] is False
+        assert "Invalid scan ID" in result["error"]
+        assert result["error_category"] == ErrorCategory.INVALID_PARAMETER.value
 
     @pytest.mark.asyncio
     async def test_invalid_directory_path(self, test_directory):
@@ -156,11 +155,18 @@ class TestErrorHandlingIntegration:
             scan_id=scan_id,
         )
 
+        # register_scan validates both directories before it looks at the scan
+        # ID, so these have to exist for the duplicate-ID check to be reached.
+        other_directory = test_directory / "other"
+        other_directory.mkdir()
+        other_output = output_directory / "other"
+        other_output.mkdir()
+
         # Try to register another scan with the same ID
         with pytest.raises(MCPResourceError) as excinfo:
             registry.register_scan(
-                directory_path=str(test_directory / "other"),
-                output_directory=str(output_directory / "other"),
+                directory_path=str(other_directory),
+                output_directory=str(other_output),
                 severity_threshold="MEDIUM",
                 scan_id=scan_id,
             )
@@ -186,11 +192,16 @@ class TestErrorHandlingIntegration:
             severity_threshold="MEDIUM",
         )
 
+        # The output directory has to exist for validation to pass, so that the
+        # duplicate-directory check is what rejects this call.
+        other_output = output_directory / "other"
+        other_output.mkdir()
+
         # Try to register another scan for the same directory
         with pytest.raises(MCPResourceError) as excinfo:
             registry.register_scan(
                 directory_path=str(test_directory),
-                output_directory=str(output_directory / "other"),
+                output_directory=str(other_output),
                 severity_threshold="MEDIUM",
             )
 
@@ -237,9 +248,10 @@ class TestErrorHandlingIntegration:
         with open(output_directory / "ash_aggregated_results.json", "w") as f:
             f.write("{invalid json")
 
-        # Try to get scan results
+        # Try to get scan results. get_scan_results takes only the output
+        # directory; it does not know the registry's scan ID.
         with pytest.raises(MCPResourceError) as excinfo:
-            get_scan_results(scan_id, output_directory)
+            get_scan_results(output_directory)
 
         error = excinfo.value
         assert "Invalid JSON" in str(error) or "JSON decode error" in str(error)
@@ -252,7 +264,13 @@ class TestErrorHandlingIntegration:
     async def test_missing_required_fields_in_results(
         self, test_directory, output_directory
     ):
-        """Test handling of missing required fields in results."""
+        """A results document with neither sarif nor scanner_results is invalid.
+
+        get_scan_results now validates the raw document before building the model
+        from it. It used to validate the model, and validate_result_structure
+        returned (True, None) for that type on its first line, so the check was
+        dead and this document was reported as a completed scan.
+        """
         registry = get_scan_registry()
 
         # Register a scan
@@ -265,29 +283,33 @@ class TestErrorHandlingIntegration:
         # Mark the scan as running
         registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
 
-        # Create aggregated results file with missing required fields
+        # Neither "sarif" nor "scanner_results" is present, which is exactly what
+        # validate_result_structure rejects when it is given the raw document.
         with open(output_directory / "ash_aggregated_results.json", "w") as f:
             json.dump(
                 {
-                    # Missing "findings" field
-                    "scanners_completed": ["scanner1"],
-                    "completion_time": datetime.now().isoformat(),
+                    "name": "ASH Scan Report",
+                    "metadata": {"generated_at": datetime.now().isoformat()},
                 },
                 f,
             )
 
-        # Try to get scan results
-        with pytest.raises(MCPResourceError) as excinfo:
-            get_scan_results(scan_id, output_directory)
+        # The registry is a process-wide singleton, so this has to be cleaned up
+        # on the failing path too or the leaked entry perturbs sibling tests.
+        try:
+            with pytest.raises(MCPResourceError) as excinfo:
+                get_scan_results(output_directory)
 
-        error = excinfo.value
-        assert "Invalid result structure" in str(
-            error
-        ) or "Missing required field" in str(error)
-        assert error.context.get("error_category") == ErrorCategory.INVALID_FORMAT.value
-
-        # Clean up
-        await cleanup_scan_resources(scan_id)
+            error = excinfo.value
+            assert "Invalid result structure" in str(
+                error
+            ) or "Missing required field" in str(error)
+            assert (
+                error.context.get("error_category")
+                == ErrorCategory.INVALID_FORMAT.value
+            )
+        finally:
+            await cleanup_scan_resources(scan_id)
 
     @pytest.mark.asyncio
     async def test_permission_denied_for_output_directory(
@@ -312,15 +334,14 @@ class TestErrorHandlingIntegration:
                 context={"error_category": ErrorCategory.PERMISSION_DENIED.value},
             )
 
-            # Try to check scan progress
-            with pytest.raises(MCPResourceError) as excinfo:
-                await check_scan_progress(scan_id)
+            # The registry raises; check_scan_progress converts that to a
+            # response dict.
+            result = await check_scan_progress(scan_id)
 
-        error = excinfo.value
-        assert "Permission denied" in str(error)
-        assert (
-            error.context.get("error_category") == ErrorCategory.PERMISSION_DENIED.value
-        )
+        assert result["success"] is False
+        assert "Permission denied" in result["error"]
+        assert result["error_category"] == ErrorCategory.PERMISSION_DENIED.value
+        assert result["context"]["scan_id"] == scan_id
 
         # Clean up
         await cleanup_scan_resources(scan_id)
@@ -368,8 +389,9 @@ class TestErrorHandlingIntegration:
             severity_threshold="MEDIUM",
         )
 
-        # Try to get results for incomplete scan
-        result = get_scan_results_with_error_handling(scan_id, output_directory)
+        # Try to get results for incomplete scan. Like get_scan_results, this
+        # takes only the output directory.
+        result = get_scan_results_with_error_handling(output_directory)
 
         # Verify error response format
         assert result["success"] is False
@@ -402,17 +424,15 @@ class TestErrorHandlingIntegration:
         ) as mock_check:
             mock_check.side_effect = Exception("Unexpected test error")
 
-            # Try to check scan progress
-            with pytest.raises(MCPResourceError) as excinfo:
-                await check_scan_progress(scan_id)
+            # The registry wraps the bare Exception in an MCPResourceError and
+            # raises; check_scan_progress returns it as a response dict.
+            result = await check_scan_progress(scan_id)
 
-        error = excinfo.value
-        assert "Unexpected" in str(error)
-        assert (
-            error.context.get("error_category") == ErrorCategory.UNEXPECTED_ERROR.value
-        )
-        assert "error_type" in error.context
-        assert error.context["error_type"] == "Exception"
+        assert result["success"] is False
+        assert "Failed to check scan progress" in result["error"]
+        assert result["error_category"] == ErrorCategory.UNEXPECTED_ERROR.value
+        assert result["context"]["error_type"] == "Exception"
+        assert result["context"]["error_message"] == "Unexpected test error"
 
         # Clean up
         await cleanup_scan_resources(scan_id)

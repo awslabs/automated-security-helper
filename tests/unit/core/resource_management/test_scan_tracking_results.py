@@ -312,10 +312,14 @@ class TestCreateScanProgressFromFiles:
         assert source.finding_count == 2
         assert progress.total_findings == 2
         # SARIF "level" values (error/warning/note) are carried through as the
-        # finding severity, but extract_findings_summary only counts
-        # critical/high/medium/low/info/suppressed. So a SARIF-derived finding
-        # counts toward finding_count and toward nothing in severity_counts.
-        # Pinned as current behavior, not endorsed as correct.
+        # finding severity, and they are not ASH severities. This used to assert
+        # `sum(...) == 0` over exactly the six named buckets, with the note
+        # "Pinned as current behavior, not endorsed as correct" -- so the drop was
+        # already identified as wrong here and recorded rather than fixed.
+        #
+        # That pin is deliberately retired. Such findings now land in the
+        # "unknown" bucket, which is what makes the breakdown account for every
+        # finding instead of disagreeing with finding_count.
         assert set(source.severity_counts) == {
             "critical",
             "high",
@@ -323,8 +327,10 @@ class TestCreateScanProgressFromFiles:
             "low",
             "info",
             "suppressed",
+            "unknown",
         }
-        assert sum(source.severity_counts.values()) == 0
+        assert source.severity_counts["unknown"] == 2
+        assert sum(source.severity_counts.values()) == source.finding_count
 
     def test_severity_counts_on_the_scanner_take_precedence_over_findings(
         self, tmp_path
@@ -560,16 +566,62 @@ class TestGetScanResults:
         assert excinfo.value.context["output_dir"] == str(tmp_path)
         assert "model rejected the document" in str(excinfo.value)
 
-    def test_a_document_the_model_rejects_becomes_an_unexpected_error(self, tmp_path):
-        """scanner_results is typed as a mapping; a list fails model construction."""
+    def test_a_structurally_wrong_document_is_an_invalid_format_error(self, tmp_path):
+        """scanner_results must be a mapping, and saying so beats a pydantic error.
+
+        This previously asserted ``unexpected_error``, because the document
+        reached AshAggregatedResults construction and pydantic raised. The
+        document is not unexpected, though -- it is the wrong shape, and which
+        field is wrong is known. Validation now runs before construction, so the
+        caller gets invalid_format and the offending field named.
+        ``unexpected_error`` is reserved for failures that genuinely are not
+        understood, which is what makes it useful in a log.
+        """
         _write_results(tmp_path, {"scanner_results": ["bandit"]})
 
         with pytest.raises(MCPResourceError) as excinfo:
             get_scan_results(tmp_path)
 
-        assert excinfo.value.context["error_category"] == "unexpected_error"
-        assert "Unexpected error retrieving scan results" in str(excinfo.value)
+        assert excinfo.value.context["error_category"] == "invalid_format"
+        assert "scanner_results must be a dictionary" in str(excinfo.value)
         assert excinfo.value.context["output_dir"] == str(tmp_path)
+
+    @pytest.mark.parametrize(
+        "document, expected",
+        [
+            ({}, "Missing required fields"),
+            ({"metadata": {"generated_at": "2024-05-05T00:00:00"}}, "Missing required"),
+            # The shape the MCP integration tests used to write. It has never
+            # been the schema, and extra="ignore" drops all of it.
+            (
+                {"findings": [{"id": "1"}], "scanners_completed": ["bandit"]},
+                "Missing required fields",
+            ),
+            ({"sarif": "not a dict"}, "SARIF data must be a dictionary"),
+            ({"sarif": {"version": "2.1.0"}}, "missing 'runs'"),
+        ],
+    )
+    def test_a_document_with_no_usable_results_is_rejected(
+        self, tmp_path, document, expected
+    ):
+        """A results file with nothing recognizable must not read as a clean scan.
+
+        This is the regression test for the defect that made these cases return
+        ``status="completed"``, ``is_complete=True``, ``total_scanners=0``.
+        get_scan_results validated the AshAggregatedResults it had just built, and
+        validate_result_structure's first statement returned (True, None) for that
+        type -- so the check was dead on its only call path. Since every model
+        field has a default and unknown keys are ignored, an empty document and a
+        real scan produced the same model, and "nothing was measured" was
+        indistinguishable from "nothing was found".
+        """
+        _write_results(tmp_path, document)
+
+        with pytest.raises(MCPResourceError) as excinfo:
+            get_scan_results(tmp_path)
+
+        assert excinfo.value.context["error_category"] == "invalid_format"
+        assert expected in str(excinfo.value)
 
 
 class TestResolveOutputDirectory:
