@@ -301,6 +301,43 @@ if (Test-Path (Join-Path $venv 'pyvenv.cfg')) {
         ForEach-Object { Write-Host "     $_" }
 }
 
+# The interpreter path baked into the console script, checked unconditionally and before the
+# exit code is judged, because this is the one fault this job has actually hit that produces no
+# diagnostic of its own.
+#
+# pip writes each Scripts\*.exe as a stub, a `#!<absolute path to python.exe>` line, and a zip.
+# The stub reads that line and execs it, so a venv that has been moved since pip ran has a shim
+# naming a directory that no longer exists -- and it fails by exiting 1 with both streams empty,
+# which is indistinguishable at a glance from ASH itself failing silently. It cost this job
+# several runs and one wrong diagnosis (see AshLauncher.cs FindPython). Naming it here turns it
+# back into a sentence.
+if (Test-Path $venvAsh) {
+    $shimBytes = [System.IO.File]::ReadAllBytes($venvAsh)
+    $shimText = [System.Text.Encoding]::ASCII.GetString($shimBytes)
+    $shebang = [regex]::Match($shimText, '#!([^\r\n]+)')
+    if (-not $shebang.Success) {
+        Write-Host "   ash.exe carries no #! line, so its interpreter cannot be read from it"
+    } else {
+        $embedded = $shebang.Groups[1].Value.Trim('"')
+        $embeddedExists = Test-Path -LiteralPath $embedded
+        Write-Host "   ash.exe interpreter: $embedded"
+        Write-Host "   that interpreter exists: $embeddedExists"
+        if (-not $embeddedExists) {
+            Fail @"
+$venvAsh names an interpreter that does not exist:
+
+  $embedded
+
+pip embeds the absolute path of the interpreter it generated the script for, so this means the
+virtualenv was created somewhere else and moved. A moved venv is broken on Windows even though
+python.exe inside it still runs, because python.exe finds its home through the relative
+pyvenv.cfg beside it while every .exe shim carries an absolute path. Build the venv where it
+will live; see the CreateVenv comment in packaging/msix/AshLauncher.cs.
+"@
+        }
+    }
+}
+
 if ($ashExit -ne 0) {
     # Re-run with the streams captured separately. The invocation above streams to the
     # console, which is right for watching a slow bootstrap but means a short stderr
@@ -330,23 +367,24 @@ if ($ashExit -ne 0) {
         Write-Host "     exit: $LASTEXITCODE"
     }
 
-    # Three probes that separate what is left, because the ones above have already ruled
-    # out the launcher (the venv's own ash.exe fails identically) and the interpreter
-    # version (this job pins 3.13 and it failed the same way as 3.14 did).
+    # Three probes that separate a broken shim from a broken ASH. They have fired once in
+    # anger and the answer was the shim: probe A ran, probe C printed a version and exited 0,
+    # and ash.exe exited 1 with both streams empty. The check above now names that fault
+    # directly, so reaching this point means something ELSE is wrong and these three are the
+    # readings that narrow it.
     #
-    # What remains are two different faults with the same symptom, and each probe below
-    # only moves if one of them is true:
+    #   * If A fails, the venv's interpreter is not usable at all and nothing below matters.
+    #   * If A passes and C fails, the defect is in ASH's CLI rather than in this package.
+    #   * If A and C pass while ash.exe does not, the shim is broken in some way the
+    #     interpreter-path check above did not catch, and that check is what needs widening.
     #
-    #   * A .exe console script in a venv that has been MOVED. This venv is built at
-    #     <venv>.staging-<pid> and renamed into place, and a venv is not relocatable: on
-    #     Windows the Scripts\*.exe shims embed the absolute path of the interpreter they
-    #     were written for. The Flatpak work on this branch hit exactly this and fixed it
-    #     by invoking the interpreter directly rather than trusting the shim. If
-    #     `python.exe -m` works while ash.exe does not, that is this, and the fix is the
-    #     same one.
-    #   * ASH itself failing on Windows. If even `import automated_security_helper` fails,
-    #     or the module entry point fails the same way as the shim, the packaging is
-    #     exonerated and the defect belongs to the CLI.
+    # B and C pass -I, and that flag is load-bearing. Without it `python -c` puts the current
+    # directory on sys.path, and this script runs from the repository root, so both probes
+    # imported the SOURCE TREE instead of what pip installed into the venv -- which is exactly
+    # the copy under test. The first time these ran, probe B reported
+    # `import ok D:\a\...\automated_security_helper\__init__.py`, a repository path, and the
+    # comment here claimed it had exonerated the installed package. It had not. -I drops cwd
+    # from sys.path, so an import that succeeds now succeeded out of site-packages.
     #
     # Every probe captures its own exit code and does not stop the script, because the
     # point is to collect all three readings in one run rather than to fail on the first.
@@ -356,14 +394,14 @@ if ($ashExit -ne 0) {
         & $venvPython -c "import sys; print(sys.version); print(sys.executable)"
         Write-Host "     exit: $LASTEXITCODE"
 
-        Write-Host "   probe B -- ASH imports in that interpreter:"
-        & $venvPython -c "import automated_security_helper as m; print('import ok', m.__file__)"
+        Write-Host "   probe B -- ASH imports in that interpreter, out of site-packages:"
+        & $venvPython -I -c "import automated_security_helper as m; print('import ok', m.__file__)"
         Write-Host "     exit: $LASTEXITCODE"
 
         # The same callable [project.scripts] binds `ash` to, reached without the .exe
-        # shim. This is the probe that distinguishes the two faults above.
+        # shim. This is the probe that distinguishes a broken shim from a broken CLI.
         Write-Host "   probe C -- the console-script callable, bypassing the .exe shim:"
-        & $venvPython -c "from automated_security_helper.cli.main import app; app(['--version'])"
+        & $venvPython -I -c "from automated_security_helper.cli.main import app; app(['--version'])"
         Write-Host "     exit: $LASTEXITCODE"
     } else {
         Write-Host "   no python.exe in the venv's Scripts, so the venv itself is incomplete"
@@ -466,8 +504,9 @@ Write-Host '   OK: the installed package ran a scan and reported findings'
 
 Write-Step '10. a reinstall must not lose the venv'
 # The MSIX equivalent of the rpm script's %postun check. There is no scriptlet ordering to get
-# wrong here, but the launcher decides whether to bootstrap by looking for one file, so a
-# reinstall that left a partial venv behind would be found and used.
+# wrong here, but the launcher decides whether to bootstrap by looking for the completion marker
+# it writes beside site-packages, so a reinstall that damaged the venv while leaving that marker
+# in place would be found and used.
 Add-AppxPackage -Path $msix -ForceUpdateFromAnyVersion -ErrorAction Stop
 if (-not (Test-Path (Join-Path $venv 'Scripts\ash.exe'))) {
     Fail 'the venv did not survive a reinstall'

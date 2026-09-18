@@ -32,20 +32,21 @@ a bare `python` resolves to the Microsoft Store placeholder that opens the Store
 instead of running anything. ASH_MSIX_PYTHON overrides the search and is not
 version-checked, so it can be pointed at 3.14 deliberately.
 
-The upper bound is narrower than ASH's own `requires-python`, which is `>=3.10,<4`, and
-the reason is measured rather than cautious. On a `windows-latest` runner the launcher's
-old `py -3` probe selected Python 3.14.7, the virtualenv built, pip reported
-`Successfully installed automated-security-helper-3.7.0`, and `ash --version` then
-exited 1 writing nothing to stdout or stderr. Running the virtualenv's own
-`Scripts\ash.exe` directly, with no launcher involved, failed the same way, so this is
-ASH on Windows under 3.14 rather than anything about this package.
+The upper bound is narrower than ASH's own `requires-python`, which is `>=3.10,<4`. The
+bound exists because `ash-unified-ci.yml` exercises 3.10 through 3.13 and nothing above,
+so the top of the declared range is untested, and `packaging/chocolatey` declares the
+same `python3 [3.10,3.14)` for the same reason. Two Windows packages with one bound is
+deliberate. Once 3.14 is exercised in CI, both bounds move together.
 
-`ash-unified-ci.yml` exercises 3.10 through 3.13 and nothing above, so the top of the
-declared range has never been tested. `packaging/chocolatey` reached the same ceiling
-independently and by a different route -- its nuspec declares `python3 [3.10,3.14)` --
-and its job passed on the same runner image in the same run that this one failed on.
-Two Windows packages with the same bound is deliberate. If the 3.14 failure is fixed,
-or `requires-python` is narrowed to match what CI runs, both bounds move together.
+An earlier version of this file claimed more than that, and the correction is worth
+recording. The bound was first introduced as a measured defect: on a `windows-latest`
+runner the launcher's old `py -3` probe selected Python 3.14.7 and `ash --version`
+exited 1 writing nothing to stdout or stderr, while the Chocolatey job passed on the
+same image in the same run. That was read as "ASH is broken on Windows under 3.14". It
+was not. With the bound in place the job pinned 3.13.15 and hit the identical failure;
+the cause was this launcher building the virtualenv at a staging path and renaming it,
+which invalidates every console-script shim inside it. Nothing is known to be wrong with
+ASH on 3.14, and no claim to the contrary should be read out of this bound.
 
 Why there is no install-time setup step
 --------------------------------------
@@ -82,6 +83,28 @@ somewhere shorter:
 
 A venv at a path you chose is not per-package state, so uninstall will not remove it.
 That is the trade being made, stated so it is not a surprise later.
+
+Two other files appear alongside it, and both are the launcher's.
+
+  <venv>\.ash-bootstrap-complete   written after pip finishes
+  <venv>.lock                      held while a first run is in progress
+
+The launcher decides whether to bootstrap by looking for the marker, not by looking for
+a console script, because pip writes the console scripts before the last of
+site-packages and a bootstrap interrupted near the end would otherwise leave something
+that looks finished. Deleting the marker is the supported way to force a rebuild on the
+next `ash`; the run will remove what is there and install again. The lock is what stops
+two shells running `ash` for the first time at the same moment from installing over each
+other -- the second waits for the first and then finds the work done. If a run is killed
+hard the lock file is left behind, which is harmless: it holds no lock once the process
+is gone, and the next run reuses it.
+
+The venv is built where it will live, and is never created elsewhere and moved. A
+virtualenv on Windows cannot be relocated: pip writes each Scripts\*.exe with the
+absolute path of the interpreter it was generated for baked in, so a moved venv has
+shims naming a directory that no longer exists, while python.exe inside it keeps working
+because it resolves its home through the relative pyvenv.cfg beside it. The failure that
+produces is a console script exiting 1 with nothing on stdout or stderr.
 
 Filesystem access, and the capability that is not the one doing the work
 -----------------------------------------------------------------------

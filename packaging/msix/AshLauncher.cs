@@ -70,14 +70,20 @@ internal static class AshLauncher
     private const string VenvOverrideVariable = "ASH_MSIX_VENV";
     private const string PythonOverrideVariable = "ASH_MSIX_PYTHON";
 
+    // Written as the last act of a successful bootstrap and checked before the venv is used.
+    // CreateVenv explains why completeness is a file of its own rather than the presence of a
+    // console script.
+    private const string CompletionMarker = ".ash-bootstrap-complete";
+
     // The probe below must print this exact token. An interpreter that is too old prints the
     // other one, and the Microsoft Store's python.exe placeholder (which opens the Store
     // rather than running anything) prints neither. Testing the exit code alone would read
     // that placeholder as a working Python.
     private const string PythonOkToken = "ASH_PY_OK";
     private const string PythonOldToken = "ASH_PY_OLD";
-    // A third verdict, added because a floor-only check found 3.14 and the package then
-    // failed. See FindPython for the measurement.
+    // A third verdict, for an interpreter above the range CI exercises. It was added while
+    // 3.14 was believed to be the cause of a silent failure that turned out to have a
+    // different cause entirely; FindPython has the correction and the reason the bound stays.
     private const string PythonNewToken = "ASH_PY_NEW";
 
     private static int Main()
@@ -104,7 +110,7 @@ internal static class AshLauncher
             string venvDirectory = ResolveVenvDirectory();
             string target = Path.Combine(venvDirectory, "Scripts", scriptName + ".exe");
 
-            if (!File.Exists(target))
+            if (!IsBootstrapped(venvDirectory, target))
             {
                 CreateVenv(venvDirectory, packageRoot, scriptName);
             }
@@ -213,99 +219,186 @@ internal static class AshLauncher
         return Path.Combine(localAppData, "Packages", family, "LocalCache", "ash-venv");
     }
 
-    // Creates the venv in a sibling staging directory and moves it into place when it is
-    // known good. Two reasons, and the second is the one that bites.
+    // Whether the venv at the real path is finished. Deliberately not "does the console script
+    // exist": pip writes the Scripts\*.exe shims before the last of site-packages, so a
+    // bootstrap killed near the end leaves a console script that runs and then dies on a
+    // missing import. The marker is written after pip returns 0 AND after the console script is
+    // confirmed, so its presence is the only honest answer to this question.
+    private static bool IsBootstrapped(string venvDirectory, string target)
+    {
+        return File.Exists(Path.Combine(venvDirectory, CompletionMarker)) && File.Exists(target);
+    }
+
+    // Creates the venv AT ITS FINAL PATH, under a cross-process lock, and marks it complete
+    // when pip has finished. It used to build in a sibling <venv>.staging-<pid> and
+    // Directory.Move it into place, and why that had to change is the point of this comment.
     //
-    // A half built venv left at the real path by an interrupted or failed install would be
-    // found by the next run, which checks only whether the console script exists; the run
-    // after that would then fail in a way that looks nothing like "the first run did not
-    // finish". Staging means the real path either does not exist or is complete.
+    // A Windows venv is not relocatable. pip writes each console script as a small .exe with
+    // the ABSOLUTE path of the interpreter it was generated for embedded in it, so after a move
+    // every shim in the venv names a directory that no longer exists. python.exe survives,
+    // because it finds its home through the pyvenv.cfg beside it and that lookup is relative.
+    // The venv therefore looks healthy from every angle except the one that matters.
     //
-    // And two shells can run ash for the first time at the same moment. Both build their own
-    // staging directory; the first to finish moves it into place and the second discovers the
-    // destination already exists, discards its own work and continues. Directory.Move fails
-    // rather than merging when the destination exists, which is what makes that check honest.
+    // On the MSIX leg of ASH - Package Build, with the staging-and-move code, three things were
+    // true at once. The venv's own python.exe ran and reported its version, so the interpreter
+    // survived the move. Every .exe in Scripts failed -- `ash --version` through the launcher
+    // and the venv's Scripts\ash.exe run directly both exited 1. And both of those wrote
+    // NOTHING to stdout or stderr, which is the reading that matters: a Python that starts and
+    // then fails to import writes a traceback, so empty streams mean Python never started. The
+    // venv's pyvenv.cfg named `python -m venv <venv>.staging-7836` as the command that built it,
+    // and that directory is deleted after the move.
+    //
+    // A shim whose embedded interpreter path no longer exists accounts for all of that. Nothing
+    // else does. packaging/flatpak hit the same fault and answered it by invoking its
+    // interpreter directly rather than trusting a shim.
+    //
+    // One honest limit on that evidence, because the comment here used to claim more. The two
+    // probes in verify-on-windows.ps1 that reach ASH through the interpreter were, at the time,
+    // run without -I, so cwd was on sys.path and they imported the REPOSITORY checkout rather
+    // than what pip put in site-packages. They therefore did not prove site-packages intact, and
+    // that script now passes -I so they do. The conclusion above does not rest on them; it rests
+    // on the empty streams. Step 6 of that script also reads the interpreter path back out of
+    // ash.exe now and fails by name if it does not exist, which is the direct check.
+    //
+    // Building at the final path is what removes the move. Both properties staging bought are
+    // real and are kept by other means.
+    //
+    // A half built venv must not be mistaken for a finished one. Staging got that by making the
+    // real path appear atomically. The marker file gets it by being written last, with
+    // IsBootstrapped checking the marker rather than the console script, and an unfinished tree
+    // found here is deleted and rebuilt rather than used.
+    //
+    // Two shells can run ash for the first time at the same moment. Staging let both build a
+    // full copy and threw one away, which cost a duplicate download of every dependency. The
+    // lock makes the second wait for the first and then find the work already done.
     private static void CreateVenv(string venvDirectory, string packageRoot, string scriptName)
     {
         string wheel = FindTheWheel(packageRoot);
-        PythonCandidate python = FindPython();
+        string target = Path.Combine(venvDirectory, "Scripts", scriptName + ".exe");
 
-        string staging = venvDirectory + ".staging-" + Process.GetCurrentProcess().Id;
-        if (Directory.Exists(staging))
+        // The parent has to exist before a lock file can be created beside the venv.
+        Directory.CreateDirectory(Path.GetDirectoryName(venvDirectory));
+
+        using (WaitForGate(venvDirectory))
         {
-            Directory.Delete(staging, true);
-        }
-
-        // Progress goes to stderr, not stdout. A first run can take a minute while pip
-        // resolves ASH's dependencies, so saying nothing looks like a hang; but ASH's stdout
-        // is read by scripts, and a banner mixed into it would corrupt a piped report.
-        Console.Error.WriteLine("ash: first run, creating a virtualenv at " + venvDirectory);
-        Console.Error.WriteLine("ash: this resolves ASH's dependencies from a Python index and happens once.");
-
-        try
-        {
-            RunOrThrow(
-                python.Executable,
-                python.PrefixArguments + "-m venv " + Quote(staging),
-                "failed to create a virtualenv with " + python.Description + ".");
-
-            string stagedPython = Path.Combine(staging, "Scripts", "python.exe");
-            if (!File.Exists(stagedPython))
+            // Re-checked under the lock, because the wait may have been a wait for another
+            // process to do exactly this work.
+            if (IsBootstrapped(venvDirectory, target))
             {
-                throw new LauncherError(
-                    "python -m venv reported success but produced no " + stagedPython + ".");
+                return;
             }
 
-            // The wheel comes from the package; its DEPENDENCIES come from an index. That
-            // split is the whole reason this package is not self contained, and README.msix
-            // documents it along with the offline wheelhouse commands.
-            RunOrThrow(
-                stagedPython,
-                "-m pip install --disable-pip-version-check --no-warn-script-location " + Quote(wheel),
-                "failed to install " + Path.GetFileName(wheel) + " into the new virtualenv. " +
-                "This step needs a reachable Python package index; see README.msix for how " +
-                "to stage a wheelhouse on a host that has none.");
-
-            // Asserted rather than assumed. A wheel can install cleanly and still produce no
-            // console script if its entry point metadata is wrong, and the failure would
-            // otherwise surface as a missing file on the NEXT run, one layer away from its
-            // cause.
-            string stagedTarget = Path.Combine(staging, "Scripts", scriptName + ".exe");
-            if (!File.Exists(stagedTarget))
+            // Either a previous bootstrap died partway or this is a first run. Both are handled
+            // the same way, because anything without the marker is by definition unfinished and
+            // there is nothing in it worth keeping.
+            if (Directory.Exists(venvDirectory))
             {
-                throw new LauncherError(
-                    Path.GetFileName(wheel) + " installed but produced no '" + scriptName +
-                    "' entry point, so this package's Application entries and the wheel's " +
-                    "[project.scripts] have gone out of step.");
+                Console.Error.WriteLine(
+                    "ash: removing an unfinished virtualenv at " + venvDirectory + " and starting over.");
+                Directory.Delete(venvDirectory, true);
             }
 
-            Directory.CreateDirectory(Path.GetDirectoryName(venvDirectory));
+            PythonCandidate python = FindPython();
+
+            // Progress goes to stderr, not stdout. A first run can take a minute while pip
+            // resolves ASH's dependencies, so saying nothing looks like a hang; but ASH's stdout
+            // is read by scripts, and a banner mixed into it would corrupt a piped report.
+            Console.Error.WriteLine("ash: first run, creating a virtualenv at " + venvDirectory);
+            Console.Error.WriteLine("ash: this resolves ASH's dependencies from a Python index and happens once.");
+
+            bool finished = false;
             try
             {
-                Directory.Move(staging, venvDirectory);
+                RunOrThrow(
+                    python.Executable,
+                    python.PrefixArguments + "-m venv " + Quote(venvDirectory),
+                    "failed to create a virtualenv with " + python.Description + ".");
+
+                string venvPython = Path.Combine(venvDirectory, "Scripts", "python.exe");
+                if (!File.Exists(venvPython))
+                {
+                    throw new LauncherError(
+                        "python -m venv reported success but produced no " + venvPython + ".");
+                }
+
+                // The wheel comes from the package; its DEPENDENCIES come from an index. That
+                // split is the whole reason this package is not self contained, and README.msix
+                // documents it along with the offline wheelhouse commands.
+                RunOrThrow(
+                    venvPython,
+                    "-m pip install --disable-pip-version-check --no-warn-script-location " + Quote(wheel),
+                    "failed to install " + Path.GetFileName(wheel) + " into the new virtualenv. " +
+                    "This step needs a reachable Python package index; see README.msix for how " +
+                    "to stage a wheelhouse on a host that has none.");
+
+                // Asserted rather than assumed. A wheel can install cleanly and still produce no
+                // console script if its entry point metadata is wrong, and the failure would
+                // otherwise surface as a missing file on the NEXT run, one layer away from its
+                // cause.
+                if (!File.Exists(target))
+                {
+                    throw new LauncherError(
+                        Path.GetFileName(wheel) + " installed but produced no '" + scriptName +
+                        "' entry point, so this package's Application entries and the wheel's " +
+                        "[project.scripts] have gone out of step.");
+                }
+
+                File.WriteAllText(
+                    Path.Combine(venvDirectory, CompletionMarker),
+                    "Written by ASH's MSIX launcher once pip finished installing ASH's wheel." +
+                    Environment.NewLine +
+                    "The presence of THIS file, not of any console script, is what marks this" +
+                    Environment.NewLine +
+                    "virtualenv usable. Deleting it forces the next ash run to rebuild." +
+                    Environment.NewLine);
+                finished = true;
+            }
+            finally
+            {
+                if (!finished && Directory.Exists(venvDirectory))
+                {
+                    try
+                    {
+                        Directory.Delete(venvDirectory, true);
+                    }
+                    catch (IOException)
+                    {
+                        // The next run deletes it anyway, since it has no marker. Replacing a
+                        // real diagnostic with a cleanup error would be strictly worse.
+                    }
+                }
+            }
+        }
+    }
+
+    // Serializes first runs across processes. The lock file sits BESIDE the venv rather than
+    // inside it, because the venv directory is deleted and recreated under this lock and an
+    // open handle to something inside it is exactly what would stop that delete.
+    private static FileStream WaitForGate(string venvDirectory)
+    {
+        string gatePath = venvDirectory + ".lock";
+        // Bounded rather than infinite. A first run takes about a minute in CI and longer on a
+        // slow link, so the budget is generous; but a wedged holder should end in a sentence
+        // naming the file to delete, not in a command that never returns.
+        DateTime deadline = DateTime.UtcNow.AddMinutes(30);
+        while (true)
+        {
+            try
+            {
+                return new FileStream(
+                    gatePath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
             }
             catch (IOException)
             {
-                if (!File.Exists(Path.Combine(venvDirectory, "Scripts", scriptName + ".exe")))
+                // Held by another first run, which is the normal case this exists for.
+                if (DateTime.UtcNow >= deadline)
                 {
-                    throw;
+                    throw new LauncherError(
+                        "waited 30 minutes for another ash process to finish creating the " +
+                        "virtualenv at " + venvDirectory + ", and it never did. If no other ash " +
+                        "is running, delete " + gatePath + " and run this again.");
                 }
-                // Another first run won the race and its venv is complete. Nothing to do.
-            }
-        }
-        finally
-        {
-            if (Directory.Exists(staging))
-            {
-                try
-                {
-                    Directory.Delete(staging, true);
-                }
-                catch (IOException)
-                {
-                    // Leaving a staging directory behind is untidy and harmless; failing the
-                    // user's command because cleanup could not delete it would not be.
-                }
+                System.Threading.Thread.Sleep(500);
             }
         }
     }
@@ -380,31 +473,30 @@ internal static class AshLauncher
             candidates.Add(new PythonCandidate { Executable = "python", PrefixArguments = "", Description = "python" });
         }
 
-        // The probe has a CEILING as well as a floor, and the ceiling is the whole reason
-        // this function was rewritten.
+        // The probe has a CEILING as well as a floor. Read the next three paragraphs before
+        // reasoning about that ceiling, because the measurement it was originally justified
+        // by turned out not to say what it was taken to say.
         //
-        // It used to check `sys.version_info >= (3, 10)` and nothing else. On a
-        // windows-latest runner that selected Python 3.14.7 out of the hosted toolcache,
-        // the venv built and pip reported "Successfully installed
-        // automated-security-helper-3.7.0", and then `ash --version` exited 1 writing
-        // nothing to stdout or stderr. Measured in run 35279579798, and the launcher was
-        // ruled out as the cause: running the venv's own Scripts\ash.exe directly, with no
-        // launcher in the path, exits 1 the same way.
+        // The check used to be `sys.version_info >= (3, 10)` and nothing else. A
+        // windows-latest runner selected Python 3.14.7 out of the hosted toolcache, the venv
+        // built, pip reported "Successfully installed automated-security-helper-3.7.0", and
+        // then `ash --version` exited 1 writing nothing to stdout or stderr. Chocolatey
+        // passed on the same image in the same run and its nuspec declares
+        // `python3 [3.10,3.14)`, so 3.14 looked like the discriminator and this ceiling was
+        // added.
         //
-        // The discriminator is the Chocolatey package, which passed on the same runner
-        // image in the same run with a real scan. Its nuspec declares
-        // `python3 [3.10,3.14)` and its install script rejects anything at or above 3.14.
-        // Same OS, same wheel, same day: bounded below 3.14 works, 3.14 does not.
+        // IT WAS NOT THE DISCRIMINATOR. With the ceiling in place the job pinned 3.13.15 and
+        // `ash --version` failed identically -- same exit 1, same empty streams. The real
+        // cause was the venv being built at a staging path and renamed, which invalidates
+        // every console-script shim in it; CreateVenv now describes that in full. The
+        // Chocolatey comparison was a coincidence of a package that does not move its venv.
         //
-        // 3.14 is inside what pyproject.toml declares -- `requires-python = ">=3.10,<4"` --
-        // so this ceiling is narrower than ASH's stated support. That gap is real and is
-        // not this file's to close: ash-unified-ci.yml exercises 3.10 through 3.13 and
-        // nothing above, so the declared range has simply never been tested at its top
-        // end, and packaging/chocolatey/README.chocolatey already says so in as many
-        // words. Matching Chocolatey keeps the two Windows packages consistent and keeps
-        // this one inside the range the project actually tests. If the 3.14 defect is
-        // fixed, or requires-python is narrowed to match what CI runs, this bound and
-        // Chocolatey's move together.
+        // The bound is kept anyway, on the narrower ground that it was never entitled to
+        // claim: ash-unified-ci.yml exercises 3.10 through 3.13 and nothing above, so 3.14
+        // is untested rather than known-broken, and Chocolatey declares the same range for
+        // the same reason. It is narrower than the `requires-python = ">=3.10,<4"` in
+        // pyproject.toml, and that gap is real. Once 3.14 is actually exercised in CI this
+        // ceiling has nothing left holding it up and should move with Chocolatey's.
         bool sawSomethingTooOld = false;
         bool sawSomethingTooNew = false;
         foreach (PythonCandidate candidate in candidates)

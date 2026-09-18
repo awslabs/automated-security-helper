@@ -511,16 +511,19 @@ jobs:
         with:
           enable-cache: true
 
-      # An explicit interpreter, because leaving it to the runner selected one ASH does
-      # not work with. On the first two runs of this job the launcher's `py -3` probe
-      # picked Python 3.14.7 out of the hosted toolcache, and `ash --version` then exited
-      # 1 writing nothing at all -- including when the venv's own Scripts\ash.exe was run
-      # directly, so the launcher was not the cause. The Chocolatey job passed in the same
-      # run on the same image because its nuspec pins python3 to [3.10,3.14).
+      # An explicit interpreter, so this job tests the package rather than testing which
+      # Python the runner image happens to prefer that week. 3.13 is the newest version
+      # ash-unified-ci.yml exercises, and it is the same ceiling the launcher enforces for
+      # a user.
       #
-      # 3.13 is the newest version ash-unified-ci.yml exercises. Pinning it here makes
-      # this job test the package rather than test which Python the image happens to
-      # prefer that week, and it is the same bound the launcher now enforces for a user.
+      # The pin was originally added for a different and wrong reason, which is recorded
+      # because the wrong reason is still written down in places. The launcher's old
+      # `py -3` probe picked Python 3.14.7 out of the hosted toolcache and `ash --version`
+      # exited 1 writing nothing at all, so 3.14 was blamed. Pinning 3.13 did not fix it:
+      # the job then failed identically on 3.13.15. The cause was the launcher building
+      # its venv at a staging path and renaming it, which breaks every console-script shim
+      # in the venv; packaging/msix/AshLauncher.cs CreateVenv has the detail. The pin is
+      # kept on its own merits, not as a workaround for a 3.14 defect that was never there.
       - name: Use a Python this project is exercised on
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
