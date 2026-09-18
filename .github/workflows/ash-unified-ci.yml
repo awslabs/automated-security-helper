@@ -535,11 +535,20 @@ jobs:
   # macos-14 -- both keep macos-14 x {3.10, 3.11} for pip, pipx, pre-commit and
   # mcp -- so the axes are the only thing needing that discipline.
   #
-  # Worth a look by someone with a macOS ARM runner: `unit-test` above excludes
-  # macos-14 x {3.10, 3.11} on the grounds that macOS ARM only has 3.12 and
-  # later, while this job runs those same cells unconditionally on every pull
-  # request. Both cannot be right. Not changed here because it predates Python
-  # 3.14 and settling it needs a macOS ARM runner, which no local check provides.
+  # `unit-test` above excludes macos-14 x {3.10, 3.11} on the grounds that macOS
+  # ARM only has 3.12 and later. THAT REASON IS FALSE, measured two ways:
+  #
+  # 1. This job runs macos-14 x {3.10, 3.11} for pip, pipx, pre-commit and mcp on
+  #    every pull request, and they pass. Sampled runs 35350532730 and
+  #    35351617775: 8 of 8 success in each.
+  # 2. The actions/python-versions manifest carries darwin/arm64 builds for
+  #    3.10.11 and 3.11.9, so setup-python has something to resolve.
+  #
+  # Deliberately NOT un-excluded here. The evidence proves those versions run on
+  # that platform for *installs*; it does not prove the unit-test suite passes
+  # there, and no unit-test leg has ever executed on macos-14 below 3.12, so
+  # dropping the exclusion would run them for the first time inside an unrelated
+  # change. Un-excluding is its own change, with its own verdict to read.
   install-validation:
     name: "${{ matrix.method }} (${{ matrix.os }}, py${{ matrix.python-version }})"
     runs-on: ${{ matrix.os }}
