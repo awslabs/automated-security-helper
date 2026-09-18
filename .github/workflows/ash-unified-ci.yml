@@ -167,10 +167,20 @@ jobs:
         # interpreters are proven; a Sonoma-only failure was not ruled out in
         # advance.
         include:
-          # Arch labels for artifact naming
+          # Arch labels for artifact naming. These are hand-written labels, not
+          # values read from the runner, so they can disagree with the machine --
+          # and macos-latest did. It is an alias, and GitHub moved it to Apple
+          # silicon: the runner logs `Image: macos-26-arm64` and setup-python
+          # fetches python-3.10.11-darwin-arm64.tar.gz on it. It was labeled
+          # x86_64 here, so every macos-latest artifact and PyTest check run
+          # claimed an architecture the job did not have.
+          #
+          # Being an alias, macos-latest can move again. What would catch it is
+          # the runner's own `Image:` line, not this list, so treat a mismatch
+          # between the two as this list being stale.
           - { os: ubuntu-latest, arch: x86_64 }
           - { os: ubuntu-24.04-arm, arch: arm64 }
-          - { os: macos-latest, arch: x86_64 }
+          - { os: macos-latest, arch: arm64 }
           - { os: macos-14, arch: arm64 }
           - { os: windows-latest, arch: x86_64 }
     steps:
