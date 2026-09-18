@@ -629,10 +629,19 @@ global_settings:
     # explains the choice in prose at its import block.
     #
     # Not suppressed, for contrast, because it WAS fixable: B310 on
-    # packaging/winget/validate-manifests.py. That script already imports jsonschema
-    # and yaml and runs without `--no-project`, so `urllib.request.urlopen` became
+    # packaging/winget/validate-manifests.py, where `urllib.request.urlopen` became
     # `requests.get` -- requests speaks only http and https, which retires the rule's
     # concern structurally instead of arguing it away. One rule, one fix, no entry.
+    #
+    # That script can take a dependency where the three above cannot, but by a
+    # different mechanism than "it is not run with --no-project": it carries PEP 723
+    # inline metadata and `uv run` builds an isolated environment from that list,
+    # ignoring any project virtualenv. So the dependency had to be added to the block
+    # at the top of the file, and the first attempt at this fix omitted it -- the
+    # import passed locally under a project interpreter that happened to have requests
+    # and failed in CI with ModuleNotFoundError. msix.py and the two JetBrains scripts
+    # have no such block and no dependency management at all, which is why the same
+    # fix is unavailable to them.
     - rule_id: B314
       path: packaging/msix/msix.py
       reason: >-

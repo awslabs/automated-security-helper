@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["jsonschema>=4.26,<5", "PyYAML>=6,<7"]
+# dependencies = ["jsonschema>=4.26,<5", "PyYAML>=6,<7", "requests>=2.34,<3"]
 # ///
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
@@ -121,9 +121,17 @@ def fetch_schema(manifest_type: str, version: str) -> dict[str, Any]:
     # accepts file: and any scheme a handler is registered for, so bandit flags every call to
     # it (B310) with no way to argue the point in code -- the rule is a blacklist on the name
     # and does not look at the argument. requests speaks only http and https, which makes the
-    # guarantee structural instead of a claim in a comment, and this script already depends on
-    # jsonschema and yaml so it is not a new kind of dependency. Do not simplify this back to
-    # the standard library; it would reintroduce an actionable finding in ASH's scan of itself.
+    # guarantee structural instead of a claim in a comment. Do not simplify this back to the
+    # standard library; it would reintroduce an actionable finding in ASH's scan of itself.
+    #
+    # requests is declared in the PEP 723 block at the top of this file, and that is the only
+    # place that matters. `uv run` builds an isolated environment from that list and ignores
+    # any project virtualenv, so a third party import added here without a matching line up
+    # there fails with ModuleNotFoundError in CI while passing for anyone who happens to run
+    # the file with an interpreter that already has the package. That is not hypothetical: it
+    # is how this change first shipped, and the winget leg of ASH - Package Build caught it.
+    # Run it the way the docstring says -- `uv run packaging/winget/validate-manifests.py` --
+    # because that is the invocation CI uses and the only one that reads the block.
     try:
         response = requests.get(url, timeout=60)
         # Mirrors urlopen, which raises HTTPError for a non-2xx status. Deliberately NOT a
