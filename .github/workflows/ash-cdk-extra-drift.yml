@@ -1,0 +1,130 @@
+name: CDK Extra Drift
+
+# WHAT THIS GATES, AND WHY A TEST WAS NOT ENOUGH
+#
+# _CDK_EXTRA_FALLBACK_REQUIREMENTS in
+# automated_security_helper/plugin_modules/ash_builtin/scanners/cdk_nag_scanner.py
+# is a hand-maintained copy of [project.optional-dependencies] cdk in
+# pyproject.toml. It is reached only when reading the installed distribution's
+# metadata fails, which happens in editable and source layouts, so it cannot be
+# deleted.
+#
+# test_fallback_matches_installed_metadata already detects the drift, and it does
+# so well -- it fails on a bumped floor, a dropped ceiling, a removed
+# requirement, an added requirement and a renamed package. Detection was never
+# the gap. The gap was that nothing repaired it: 200a6565 (#547) bumped
+# aws-cdk-lib in pyproject.toml alone, and every dependabot bump since has done
+# the same. dependabot/uv/scanner-minor broke that test on all 18 unit-test legs;
+# dependabot/uv/engine-minor broke it twice before that. Each time a human edited
+# the constant by hand.
+#
+# scripts/sync_cdk_extra_fallback.py --fix is the repair, wired into
+# .pre-commit-config.yaml so a bump fixes itself locally. This workflow is the
+# --check half, for the bumps that never run pre-commit -- dependabot's, above
+# all, since it edits pyproject.toml and uv.lock and nothing else.
+#
+# WHY CODEGEN RATHER THAN READING PYPROJECT AT RUNTIME
+#
+# Reading pyproject.toml inside the scanner would remove the duplication outright,
+# and it would work: in the layouts where metadata is unreadable, pyproject.toml
+# is on disk beside the package. It was rejected on dependency grounds. tomllib
+# entered the standard library in 3.11 while requires-python starts at 3.10, so
+# the scanner would need tomli as a runtime dependency purely to serve the oldest
+# supported interpreter. A security scanner's runtime dependency surface is part
+# of its risk profile. A pre-commit hook and a CI job carry no such constraint,
+# which is the whole argument for generating instead of reading.
+#
+# PATH FILTERS
+#
+# Three inputs and one output, all of them load-bearing:
+#
+#   - pyproject.toml, the source of truth. A dependabot bump touches this and
+#     uv.lock, so this filter is the one that matters most.
+#   - the scanner module, which holds the generated constant.
+#   - the script itself, so a change to the generator is tested by the gate.
+#   - this workflow file, same reason.
+#
+# uv.lock is deliberately absent. The lock pins resolved versions; the extra's
+# declared specifiers are what the constant copies, and a lock-only change cannot
+# move them.
+#
+# THE MERGE QUEUE LEG
+#
+# ash-unified-ci.yml declares merge_group, and merge_group is a distinct event
+# from both push and pull_request. A gate that omits it does not run on queue
+# entries, which is exactly where this one earns its keep: PR A bumps pyproject,
+# PR B edits the scanner, each passes alone, and the queue combines them into the
+# drift this exists to catch.
+#
+# merge_group takes no paths filter -- GitHub scopes paths to push, pull_request
+# and pull_request_target only -- so this leg is unfiltered and runs on every
+# queue entry. That is the wanted behavior rather than a limitation worked
+# around: a queue entry merges several pull requests, so the change that
+# introduces drift may have touched none of the filtered paths. Filtering here
+# would also break the queue outright once this becomes a required check, because
+# a skipped required check never reports and the merge waits on a verdict that
+# never arrives.
+
+on:
+  push:
+    branches:
+      - "*"
+    tags:
+      - "*"
+    paths:
+      - "pyproject.toml"
+      - "automated_security_helper/plugin_modules/ash_builtin/scanners/cdk_nag_scanner.py"
+      - "scripts/sync_cdk_extra_fallback.py"
+      - ".github/workflows/ash-cdk-extra-drift.yml"
+  pull_request:
+    branches:
+      - "*"
+    paths:
+      - "pyproject.toml"
+      - "automated_security_helper/plugin_modules/ash_builtin/scanners/cdk_nag_scanner.py"
+      - "scripts/sync_cdk_extra_fallback.py"
+      - ".github/workflows/ash-cdk-extra-drift.yml"
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch: {}
+
+# Least privilege: this workflow only reads the repository and runs one script.
+permissions:
+  contents: read
+
+concurrency:
+  # One in-flight run per pull request; pushing again supersedes the previous run.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Only pull_request runs may be cancelled. A merge_group run must finish or the
+  # queue loses its verdict.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  cdk-extra-matches-pyproject:
+    name: cdk extra fallback matches pyproject
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    # THIRD-PARTY ACTIONS ARE PINNED BY COMMIT SHA, NOT BY TAG
+    #
+    # A tag is a mutable pointer: whoever controls the action's repository can move
+    # it to any commit, and every workflow naming the tag picks that up on its next
+    # run with no diff here to review. A 40-character commit SHA is immutable. The
+    # trailing comment is what Dependabot reads to know which release a SHA
+    # corresponds to, and it rewrites both together, so pinning does not mean going
+    # stale. Do not "simplify" these back to a tag.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          enable-cache: true
+
+      # No --fix here. CI reporting drift and silently repairing it would hide the
+      # very pairing the constant needs, and would leave the pushed commit still
+      # drifted. The script prints the exact command to run locally.
+      - name: Check the fallback constant against pyproject
+        run: uv run --python 3.13 python scripts/sync_cdk_extra_fallback.py
