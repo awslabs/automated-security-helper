@@ -632,3 +632,109 @@ def dummy_converter(test_plugin_context, dummy_converter_config):
         config=dummy_converter_config, context=test_plugin_context
     )
     return converter
+
+
+@pytest.fixture
+def no_cdk_kernel(monkeypatch):
+    """Let a unit test call into ``cdk_nag_wrapper`` without booting a jsii kernel.
+
+    WHY THIS EXISTS. ``run_cdk_nag_against_cfn_template`` opens with ``import
+    cdk_nag``, then ``from aws_cdk import ...``, before it touches any argument or
+    helper. Both are real jsii packages, so importing them starts a Node kernel that
+    extracts the ``aws-cdk-lib`` assembly -- 7,457 files, ~133 MB -- into a per-user
+    cache under a lock. Patching a collaborator like ``get_model_from_template``
+    happens far too late to prevent that; the imports have already run.
+
+    WHAT THAT COSTS. jsii holds the cache lock for the whole extraction and its
+    waiter gives up after 12 randomised retries (~13 s expected, ~26 s worst case).
+    On Windows CI the suite runs under ``-n auto`` = 4 workers, so two tests that
+    each boot a kernel can land on different workers, race the same cache entry, and
+    the loser dies with ``EEXIST ... aws-cdk-lib/<version>/<sha>.lock``. That was
+    measured: zero occurrences across 1,772 Windows legs while exactly one test
+    booted a kernel, then 12 occurrences once a second one did.
+
+    SO: any test that calls into the wrapper but is not testing real cdk-nag
+    behaviour should request this fixture. It installs doubles under the names the
+    wrapper imports, which is the only thing that stops the import.
+
+    NOT A BEHAVIOUR HARNESS. These doubles carry just enough shape to get past the
+    import block and the ``WrapperStack`` class body. Tests that exercise what the
+    wrapper *does* -- synth, nag packs, report parsing -- want the far richer
+    ``cdk_doubles`` in ``tests/unit/utils/test_cdk_nag_wrapper_behavior.py``, which
+    mirrors the real cdk-nag 3.x signatures on purpose. Do not grow this one into
+    that; pick the right one.
+    """
+    import types
+
+    class _Stack:
+        """Subclassable: the wrapper declares ``class WrapperStack(Stack)``."""
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+    class _App:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    class _Validations:
+        @staticmethod
+        def of(_scope):
+            raise AssertionError(
+                "no_cdk_kernel is import-level only; a test that reaches synth "
+                "wants cdk_doubles instead"
+            )
+
+    class _CfnInclude:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    class _Construct:
+        pass
+
+    aws_cdk = types.ModuleType("aws_cdk")
+    aws_cdk.App = _App
+    aws_cdk.Stack = _Stack
+    aws_cdk.Validations = _Validations
+
+    cfn_include = types.ModuleType("aws_cdk.cloudformation_include")
+    cfn_include.CfnInclude = _CfnInclude
+    aws_cdk.cloudformation_include = cfn_include
+
+    constructs = types.ModuleType("constructs")
+    constructs.Construct = _Construct
+
+    # No NagPack attribute: get_nag_packs() is defined but not called on the paths
+    # this fixture is for, and leaving it absent makes a test that does reach it
+    # fail loudly rather than pass against a silently wrong double.
+    cdk_nag = types.ModuleType("cdk_nag")
+
+    doubles = {
+        "cdk_nag": cdk_nag,
+        "aws_cdk": aws_cdk,
+        "aws_cdk.cloudformation_include": cfn_include,
+        "constructs": constructs,
+    }
+    for name, module in doubles.items():
+        monkeypatch.setitem(sys.modules, name, module)
+
+    # Snapshot AFTER the doubles are in place, so the doubles themselves do not read
+    # as newly imported. Compared against a snapshot rather than asserting the names
+    # are simply absent, because another test sharing this xdist worker may already
+    # have imported them for its own reasons -- only what the test under
+    # measurement causes should be able to fail its assertion.
+    installed = set(sys.modules)
+
+    def newly_imported_cdk() -> set:
+        """Real jsii-backed module names imported since this fixture ran."""
+        return {
+            name
+            for name in set(sys.modules) - installed
+            if name == "jsii"
+            or name.startswith(("jsii.", "aws_cdk", "cdk_nag", "constructs"))
+        }
+
+    ns = types.SimpleNamespace(
+        **{k.replace(".", "_"): v for k, v in doubles.items()},
+    )
+    ns.newly_imported_cdk = newly_imported_cdk
+    return ns
