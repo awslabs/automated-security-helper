@@ -53,6 +53,35 @@ and only ``path`` is read, so a UNC path is reduced to ``/share/x``.
 ``TestBug47FileUriHostSegment`` in ``test_sarif_utils_regression.py`` pins that
 behavior deliberately, so it is left alone here; a genuine UNC source directory
 is a separate change.
+
+That gap widens on 3.14, and in the quieter direction. Measured on four
+interpreters, same platform throughout::
+
+    url2pathname("//build-share/proj")
+      3.10.20 -> '//build-share/proj'
+      3.11.15 -> '//build-share/proj'
+      3.13.12 -> '//build-share/proj'
+      3.14.6  -> URLError: file:// scheme is supported only on localhost
+
+So through 3.13 the standard library and this function both produce something
+useless for a UNC URI -- meaningless text there, a silently de-authoritied
+``/share/x`` here. On 3.14 the library *refuses*, and this function still returns
+``/share/x`` as though it were a path. A reader comparing the two on 3.14 will see
+them disagree; the disagreement is intentional and this is the note saying so.
+
+Do not "fix" it by switching to ``url2pathname``. The two solve different
+problems, and the same measurement shows why: ``url2pathname("/C:/proj/src/a.py")``
+on POSIX returns ``'/C:/proj/src/a.py'`` -- drive separator intact, the exact
+defect this module exists to correct. ``url2pathname`` resolves a URL written on
+*this* host, so being platform-specific is right for it and wrong here, where a
+Windows-shaped SARIF URI can arrive on a POSIX reader. Compare
+``cdk_nag_scanner._local_path_from_file_url``, which has the former contract and
+correctly uses ``url2pathname``.
+
+If the UNC case is ever revisited, assert the invariant rather than the rendering
+-- ``share != local`` rather than ``is not None`` -- which is the pattern #596
+landed for exactly this reason: a ``not None`` assertion pins one interpreter's
+output instead of the property worth protecting.
 """
 
 from pathlib import Path, PureWindowsPath
