@@ -541,6 +541,24 @@ jobs:
   # --run-slow included. Do not treat any of them as the others; the count depends on
   # invocation, which is the same lesson as the check-run counts in the required-checks note.
   #
+  # THREE POPULATIONS THAT RECONCILE, SO NONE OF THEM HAS TO BE TAKEN ON TRUST
+  #
+  # A parallel census of this suite counted 97 items un-skipping, against the 104 above. Both
+  # are right, and the difference is the two gates named below rather than a disagreement:
+  #
+  #     104   items whose keywords contain "integration"
+  #     - 5   of those also carry @pytest.mark.slow, so --run-integration alone leaves them
+  #           skipped; this job passes --run-slow as well, which is why it sees them
+  #     - 2   unconditional @pytest.mark.skip in test_detect_secrets_scanner.py, which no
+  #           flag reaches
+  #     = 97  items that actually run under --run-integration by itself
+  #
+  # Checked the other direction too: this job's own control ran 102 items (39 failed, 63
+  # passed), and 102 - 5 = 97. The five slow items and the two unconditional ones are
+  # disjoint sets, so nothing is subtracted twice. Anyone auditing a count here should be
+  # able to land on the same three numbers; if two of them disagree, the gate list above is
+  # where the missing items went.
+  #
   # WHY THESE SELECTORS AND NOT THE OBVIOUS ONES
   #
   # Both flags, not just --run-integration. Five of the 104 also carry @pytest.mark.slow,
