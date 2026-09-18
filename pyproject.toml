@@ -2,10 +2,10 @@
 name = "automated-security-helper"
 version = "3.7.0"
 description = "Automated Security Helper for GitHub Actions"
-requires-python = ">=3.10,<4"
+requires-python = ">=3.10,<3.15"
 readme = "README.md"
 license = "Apache-2.0"
-classifiers = [ "Development Status :: 5 - Production/Stable", "Intended Audience :: Developers", "License :: OSI Approved :: Apache Software License", "Programming Language :: Python :: 3", "Programming Language :: Python :: 3.10", "Programming Language :: Python :: 3.11", "Programming Language :: Python :: 3.12",]
+classifiers = [ "Development Status :: 5 - Production/Stable", "Intended Audience :: Developers", "License :: OSI Approved :: Apache Software License", "Programming Language :: Python :: 3", "Programming Language :: Python :: 3.10", "Programming Language :: Python :: 3.11", "Programming Language :: Python :: 3.12", "Programming Language :: Python :: 3.13", "Programming Language :: Python :: 3.14",]
 dependencies = [
  "uv>=0.12.13,<0.13",
  "requests>=2.34,<3.0.0",

@@ -88,7 +88,7 @@ Nothing may escape as anything but a workspace error
 ----------------------------------------------------
 Folder entries are untrusted text from a file, handed to pathlib. Which inputs
 pathlib refuses, and with which exception type, has changed across the Python
-versions this project supports (3.10 through 3.13) -- a null byte, for instance,
+versions this project supports (3.10 through 3.14) -- a null byte, for instance,
 raised ``ValueError`` straight out of ``os.lstat``, escaped uncaught, and turned
 a malformed workspace file into a traceback and exit 1 rather than exit 4. So the
 containment call is wrapped, and any ``OSError`` or ``ValueError`` from it becomes
