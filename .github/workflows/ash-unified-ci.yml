@@ -30,10 +30,16 @@ on:
   #
   # WHAT THIS COSTS, AND WHAT WAS REJECTED
   #
-  # Counted rather than estimated: this workflow expands to 141 jobs and
-  # ash-iac-drift.yml to 6, so a queued merge that also pushes to main is ~294 runner
-  # jobs instead of ~147. The duplicate verdict on a queued merge is the price of
+  # Counted rather than estimated: this workflow expands to 144 jobs and
+  # ash-iac-drift.yml to 6, so a queued merge that also pushes to main is ~300 runner
+  # jobs instead of ~150. The duplicate verdict on a queued merge is the price of
   # covering the bypassed one, and it was accepted deliberately.
+  #
+  # Both counts are job counts, from
+  # `gh api .../actions/runs/<run>/jobs --paginate --jq '.jobs[].name' | wc -l`
+  # reconciled against the same endpoint's `total_count`. They are not check-run
+  # counts, which are higher -- see the note on the required-checks job for why the
+  # two populations differ and why conflating them is what let the old figures rot.
   #
   # The cheaper alternative -- leave both files queue-only and add one small scheduled
   # workflow to check main periodically -- was rejected because a schedule reports on
@@ -167,10 +173,20 @@ jobs:
         # interpreters are proven; a Sonoma-only failure was not ruled out in
         # advance.
         include:
-          # Arch labels for artifact naming
+          # Arch labels for artifact naming. These are hand-written labels, not
+          # values read from the runner, so they can disagree with the machine --
+          # and macos-latest did. It is an alias, and GitHub moved it to Apple
+          # silicon: the runner logs `Image: macos-26-arm64` and setup-python
+          # fetches python-3.10.11-darwin-arm64.tar.gz on it. It was labeled
+          # x86_64 here, so every macos-latest artifact and PyTest check run
+          # claimed an architecture the job did not have.
+          #
+          # Being an alias, macos-latest can move again. What would catch it is
+          # the runner's own `Image:` line, not this list, so treat a mismatch
+          # between the two as this list being stale.
           - { os: ubuntu-latest, arch: x86_64 }
           - { os: ubuntu-24.04-arm, arch: arm64 }
-          - { os: macos-latest, arch: x86_64 }
+          - { os: macos-latest, arch: arm64 }
           - { os: macos-14, arch: arm64 }
           - { os: windows-latest, arch: x86_64 }
     steps:
@@ -608,13 +624,50 @@ jobs:
   # One check name that can actually be required
   # ---------------------------------------------------------------------------
   #
-  # Every job above names itself from its matrix, so this workflow contributes 84 distinct
-  # check-run names to a pull request and not one of them is stable. A ruleset's
+  # Every job above names itself from its matrix, so this workflow contributes 164 check runs
+  # to a pull request and not one of their names is stable. A ruleset's
   # required_status_checks list holds literal context strings with no wildcard, so requiring
   # `unit-test` means enumerating all 20 of its names -- and then any matrix edit either orphans
   # a required context that no longer runs, which leaves a pull request pending forever, or
   # quietly adds a leg that nothing requires. That maintenance cost is why the ruleset requires
-  # two contexts today while 150 of the 152 checks on a pull request are advisory.
+  # two contexts today while the other 184 checks on the pull request measured below are
+  # advisory -- a figure that moves with the trigger set, as the 186 below explains.
+  #
+  # Those two numbers count different populations, which is how the previous pair of them went
+  # stale unnoticed. Both were measured on pull request 599 at b5111830, and both are
+  # re-derivable:
+  #
+  #   gh api repos/<owner>/<repo>/actions/runs/<run>/jobs --paginate --jq '.jobs[].name'
+  #   gh api repos/<owner>/<repo>/commits/<sha>/check-runs --paginate --jq '.check_runs[].name'
+  #
+  # 164 is this workflow's own contribution: 144 jobs, plus the 20 `PyTest - ...` check runs
+  # that mikepenz/action-junit-report publishes from inside the unit-test legs. Those 20 are
+  # not jobs and land in a separate check suite, so a job census alone undercounts what this
+  # file puts on a pull request -- that gap is most of why the old figure of 84 looked
+  # defensible.
+  #
+  # 186 is every check run on that commit, from every workflow the commit triggered plus the
+  # GitHub Advanced Security app. It is 185 distinct names over 186 check runs, because
+  # `Validate PR title` gets published by two check suites.
+  #
+  # That total depends on WHICH workflows a commit triggers, so it is not one number for all
+  # pull requests. This file and ash-install-methods.yml name their install jobs from the same
+  # template -- `${{ matrix.method }} (${{ matrix.os }}, py${{ matrix.python-version }})`, here
+  # and at ash-install-methods.yml:34 -- so every cell the two matrices share produces two
+  # check runs under one name whenever both run. The collision is structural, not incidental.
+  # ash-install-methods.yml is path-filtered to pyproject.toml, hatch_build.py,
+  # automated_security_helper/**, .pre-commit-hooks.yaml, Formula/** and itself, so whether it
+  # runs is decided by whether the commit touches those paths. A CI-plumbing commit like the
+  # one measured here triggers no run of it -- confirmed by querying that workflow for runs on
+  # the branch and getting zero, rather than assuming the filter excluded it -- and sees 186
+  # check runs over 185 names. A commit touching package code triggers both surfaces and sees
+  # 278 check runs over the same 185 names, 93 of them duplicated, all cross-workflow.
+  #
+  # So a count over this namespace has to name three things to mean anything: check runs or
+  # distinct names, which trigger set, and which commit.
+  #
+  # Reconcile the row count against the endpoint's own `total_count` before trusting either
+  # query. Both routes cap at `per_page` and report the true total alongside a short page.
   #
   # This job's name does not depend on the matrix, so it can be required once and stay correct
   # across matrix changes. It reports the verdict the individual legs already computed.

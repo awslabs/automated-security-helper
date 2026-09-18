@@ -9,6 +9,22 @@ repos:
         language: system
         verbose: true
         pass_filenames: false
+      # Runs in --fix mode, so a pyproject bump repairs the duplicated constant in
+      # the same commit that causes the drift. That is the point: the CI gate and
+      # test_fallback_matches_installed_metadata both only ever *reported* it, and
+      # a human edited the constant by hand on every dependabot bump.
+      #
+      # --python 3.13 is explicit because the script needs tomllib (3.11+) while
+      # requires-python starts at 3.10. It never runs inside ASH, so that is a
+      # constraint on this hook and not on the supported interpreter range -- which
+      # is the whole reason this is codegen rather than a runtime pyproject read.
+      - id: sync-cdk-extra-fallback
+        name: Sync the cdk extra fallback constant with pyproject
+        entry: uv run --python 3.13 python scripts/sync_cdk_extra_fallback.py --fix
+        language: system
+        verbose: true
+        pass_filenames: false
+        files: ^(pyproject\.toml|automated_security_helper/plugin_modules/ash_builtin/scanners/cdk_nag_scanner\.py|scripts/sync_cdk_extra_fallback\.py)$
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:

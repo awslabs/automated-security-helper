@@ -74,7 +74,7 @@ runs:
     # Rendered by coverage.py itself rather than by irongut/CodeCoverageSummary, which is a
     # Docker-based action. A Docker action's image is pulled during the job's prepare phase,
     # BEFORE any step's `if` is evaluated, so this step's condition -- which selects exactly
-    # one of the eighteen matrix legs -- did not stop the other legs from pulling it. Measured
+    # one of the twenty matrix legs -- did not stop the other legs from pulling it. Measured
     # on run 35246976698: every Linux leg logged "Pull ghcr.io/irongut/codecoveragesummary
     # :v1.3.0", including ubuntu-24.04-arm/py3.11 and ubuntu-latest/py3.13, where the
     # condition is false. macOS and Windows legs logged no pull at all, so the exposure was
