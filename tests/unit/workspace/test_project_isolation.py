@@ -110,7 +110,7 @@ from automated_security_helper.workspace.execution import (
     execute_workspace,
 )
 from automated_security_helper.workspace.resolver import resolve_workspace
-from tests.utils.helpers import ASH_TEST_TEMP_ROOT
+from tests.utils.helpers import ASH_TEST_TEMP_ROOT, iter_repo_files
 
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()
@@ -942,11 +942,17 @@ class TestPluginManagerSingletonState:
         """
         root = Path(__file__).resolve().parents[3]
         this_file = Path(__file__).resolve()
-        temp_root = ASH_TEST_TEMP_ROOT.resolve()
-        for path in sorted(root.rglob("*.py")):
-            if path == this_file:
+        # iter_repo_files rather than root.rglob("*.py"). The exclusion below was
+        # added first and is not sufficient on its own: rglob raises from inside
+        # its own descent, before it yields, when another worker's ash_temp_path
+        # teardown removes a directory rglob has already listed. That is a
+        # separate race from the read-after-enumerate one, it survived the first
+        # fix, and it failed on macos-14 py3.11 three hours later. Pruning during
+        # the walk is what actually removes it.
+        for path in sorted(iter_repo_files(root, skip_dirs=cls._SKIP_DIRS)):
+            if path.suffix != ".py":
                 continue
-            if path.is_relative_to(temp_root):
+            if path == this_file:
                 continue
             parts = set(path.relative_to(root).parts)
             if any(part.startswith(".") for part in parts):
@@ -1137,7 +1143,14 @@ class TestPluginManagerSingletonState:
         temp_root = ASH_TEST_TEMP_ROOT.resolve()
 
         def walk_without_the_temp_exclusion():
-            for path in sorted(root.rglob("*.py")):
+            # prune_scratch=False: this control has to see the scratch tree, or the
+            # set difference below is empty for the wrong reason. It tolerates a
+            # vanished directory rather than raising, which is correct only here.
+            for path in sorted(
+                iter_repo_files(root, skip_dirs=self._SKIP_DIRS, prune_scratch=False)
+            ):
+                if path.suffix != ".py":
+                    continue
                 if path == this_file:
                     continue
                 parts = set(path.relative_to(root).parts)

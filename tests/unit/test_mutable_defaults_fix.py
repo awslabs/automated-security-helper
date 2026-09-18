@@ -24,6 +24,8 @@ from typing import List, Tuple
 
 import pytest
 
+from tests.utils.helpers import iter_repo_files
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PKG_ROOT = REPO_ROOT / "automated_security_helper"
 
@@ -34,7 +36,13 @@ PKG_ROOT = REPO_ROOT / "automated_security_helper"
 
 
 def _iter_python_files(root: Path):
-    for p in root.rglob("*.py"):
+    # iter_repo_files, not root.rglob: rglob raises from inside its own descent
+    # when another xdist worker's ash_temp_path teardown removes a directory it
+    # has already listed. Pruning during the walk is the only thing that helps,
+    # because rglob never yields. See tests/utils/helpers.iter_repo_files.
+    for p in iter_repo_files(root, skip_dirs=frozenset({"__pycache__"})):
+        if p.suffix != ".py":
+            continue
         # Skip generated / vendored / cached code
         parts = set(p.parts)
         if "__pycache__" in parts:
@@ -68,7 +76,9 @@ def _mutable_default_offenders(py_path: Path) -> List[Tuple[str, int, str]]:
     def _check(node):
         all_args = node.args.args + node.args.kwonlyargs
         all_defaults = node.args.defaults + node.args.kw_defaults
-        padded_defaults = [None] * (len(all_args) - len(all_defaults)) + list(all_defaults)
+        padded_defaults = [None] * (len(all_args) - len(all_defaults)) + list(
+            all_defaults
+        )
         for arg, default in zip(all_args, padded_defaults):
             if default is None:
                 continue
