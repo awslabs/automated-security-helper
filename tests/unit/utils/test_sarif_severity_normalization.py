@@ -129,6 +129,33 @@ def test_ignores_a_result_without_a_matching_rule():
     assert report.runs[0].results[0].properties is None
 
 
+def test_metrics_path_normalizes_so_per_scanner_matches_the_gate():
+    """MED-2: the per-scanner metrics path must normalize before counting.
+
+    A Grype-shaped finding (rule CVSS 7.5, result level=error, no issue_severity)
+    must count as HIGH, not the level-fallback CRITICAL. Otherwise the per-scanner
+    summary disagrees with the normalized aggregate and the threshold gate.
+    """
+    counts = get_severity_metrics_from_sarif(_report("7.5"), MagicMock())
+
+    assert counts.high == 1
+    assert counts.critical == 0
+
+
+def test_non_canonical_issue_severity_does_not_block_the_rule_score():
+    """LOW-1: a non-canonical issue_severity must not block normalization.
+
+    "moderate" is not honored by _resolve_result_severity, so skipping on it would
+    silently drop the finding to its level fallback. With a real rule score
+    present, the rule score wins.
+    """
+    report = normalize_sarif_result_severities(
+        _report("7.5", issue_severity="moderate")
+    )
+
+    assert report.runs[0].results[0].properties.issue_severity == "HIGH"
+
+
 def test_scan_result_processor_preserves_grype_severity_through_aggregation(
     tmp_path,
 ):
