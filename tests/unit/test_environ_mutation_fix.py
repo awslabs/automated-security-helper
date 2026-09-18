@@ -198,10 +198,10 @@ def test_cdk_nag_wrapper_restores_os_environ(no_cdk_kernel):
                 pass
 
         after = _snapshot_env()
-        leaked = {k: after.get(k) for k in watched_keys if k in after and k not in before}
-        assert not leaked, (
-            f"cdk_nag_wrapper leaked env vars after exit: {leaked}"
-        )
+        leaked = {
+            k: after.get(k) for k in watched_keys if k in after and k not in before
+        }
+        assert not leaked, f"cdk_nag_wrapper leaked env vars after exit: {leaked}"
         assert before == after, (
             f"cdk_nag_wrapper left os.environ in a different state. "
             f"Added: {set(after) - set(before)}, "
@@ -265,8 +265,7 @@ def test_plugin_base_run_subprocess_accepts_and_forwards_env(tmp_path):
         )
 
     assert captured.get("env") == {"FOO": "bar"}, (
-        f"env not forwarded to run_command_with_output_handling: "
-        f"{captured.get('env')}"
+        f"env not forwarded to run_command_with_output_handling: {captured.get('env')}"
     )
 
 
@@ -286,7 +285,11 @@ def test_run_command_with_output_handling_forwards_env_to_subprocess(tmp_path):
     import sys
 
     response = run_command_with_output_handling(
-        command=[sys.executable, "-c", "import os; print(os.environ.get('ASH_TEST_ENV', 'MISSING'))"],
+        command=[
+            sys.executable,
+            "-c",
+            "import os; print(os.environ.get('ASH_TEST_ENV', 'MISSING'))",
+        ],
         results_dir=None,
         stdout_preference="return",
         stderr_preference="return",
