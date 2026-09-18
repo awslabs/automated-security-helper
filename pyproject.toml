@@ -143,7 +143,7 @@ dev = [
  # decorator patches botocore in the current interpreter only and cannot reach a
  # child, so those tests need a real HTTP endpoint. The extra is what pulls in
  # flask/flask-cors for moto.server.ThreadedMotoServer.
- "moto[server]>=5.2,<6",
+ "moto[server]>=5.2.3,<6",
 ]
 
 [build-system]
