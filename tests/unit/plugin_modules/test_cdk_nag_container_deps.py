@@ -22,6 +22,7 @@ version of this file: the tests asserted the buggy behavior.
 import json
 import re
 import sys
+import urllib.request
 from importlib.metadata import PackageNotFoundError, packages_distributions
 from pathlib import Path, PureWindowsPath
 from unittest.mock import MagicMock, patch
@@ -46,6 +47,36 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scann
 # version bounds are asserted against metadata in TestCdkExtraResolution rather
 # than duplicated here, so bumping a bound does not require editing this file.
 _REAL_CDK_PACKAGES = ("aws-cdk-lib", "cdk-nag", "constructs")
+
+
+def _windows_url2pathname():
+    """The ``url2pathname`` a Windows runner uses, obtained from any platform.
+
+    Only Windows renders a drive path or a UNC share, so neither shape is
+    observable on the Linux runner this suite usually gets. Which object to
+    substitute depends on the interpreter, because 3.14 rewrote the conversion:
+
+    * Through 3.13, ``urllib.request`` picks the implementation at import time --
+      ``from nturl2path import url2pathname`` under ``os.name == "nt"`` -- so
+      substituting ``nturl2path.url2pathname`` runs exactly what Windows runs.
+    * 3.14 replaced that with a single ``url2pathname`` that branches on
+      ``os.name`` when called, and deprecated ``nturl2path`` (removal slated for
+      3.19). Substituting the deprecated module there would assert a function
+      Windows no longer uses, so the real one is called with the name forced
+      instead. The patch covers only that call: ``pathlib.Path`` also reads
+      ``os.name`` to choose its flavour, so holding it open across the caller's
+      ``Path(...)`` would change the returned type as well as the string.
+    """
+    if sys.version_info < (3, 14):
+        import nturl2path
+
+        return nturl2path.url2pathname
+
+    def nt_url2pathname(url: str) -> str:
+        with patch.object(urllib.request.os, "name", "nt"):
+            return urllib.request.url2pathname(url)
+
+    return nt_url2pathname
 
 
 def _self_referential_names() -> set[str]:
@@ -486,17 +517,14 @@ class TestCdkExtraResolution:
     def test_a_windows_drive_letter_url_reads_back_as_a_drive_path(self) -> None:
         """The Windows half of the defect, asserted from any runner.
 
-        On Windows ``urllib.request.url2pathname`` *is* ``nturl2path.url2pathname``
-        -- urllib.request imports it under ``os.name == "nt"`` -- and nturl2path
-        imports on every platform, so substituting it here runs the conversion the
-        Windows cells run. Without this the drive-letter shape is observable only
-        on a Windows runner, and the round-trip test above, which passes on POSIX
-        before and after the fix, would be the only thing standing behind it.
+        ``_windows_url2pathname`` supplies the conversion the Windows cells run,
+        whichever interpreter is hosting this run. Without it the drive-letter
+        shape is observable only on a Windows runner, and the round-trip test
+        above, which passes on POSIX before and after the fix, would be the only
+        thing standing behind it.
         """
-        import nturl2path
-
         with patch.object(
-            cdk_nag_scanner_module, "url2pathname", nturl2path.url2pathname
+            cdk_nag_scanner_module, "url2pathname", _windows_url2pathname()
         ):
             recovered = cdk_nag_scanner_module._local_path_from_file_url(
                 "file:///D:/a/project"
@@ -559,8 +587,19 @@ class TestCdkExtraResolution:
         On Windows a host authority addresses ``\\\\server\\share``. Dropping it
         would turn that share into a local directory spelling the same tail, so a
         distribution installed from a network share could match a local path it
-        has nothing to do with. Asserted as "the host survives" rather than as
-        one platform's rendering of it, because only Windows renders a UNC path.
+        has nothing to do with.
+
+        Split into two assertions, because POSIX answers differently on 3.14 and
+        both answers are correct. Through 3.13, POSIX ``url2pathname`` unquoted
+        and did nothing else, so a share URL came back as the meaningless text
+        ``//build-share/proj``. 3.14 raises ``URLError`` for a non-local
+        authority on POSIX -- there is no UNC path there, so the URL names no
+        path on this host -- and ``URLError`` subclasses ``OSError``, so
+        ``_local_path_from_file_url`` already turns it into ``None``. Asserting
+        "the result is not None" therefore pinned one interpreter's rendering
+        rather than the property worth protecting, which is that a share is never
+        mistaken for the local path. The surviving host is asserted separately,
+        against the Windows converter, since only Windows renders a share.
 
         ``localhost`` is the one authority that means *this* host and names no
         path of its own, so it has to reduce to the empty-authority form.
@@ -568,10 +607,27 @@ class TestCdkExtraResolution:
         share = cdk_nag_scanner_module._local_path_from_file_url(
             "file://build-share/proj"
         )
-        assert share is not None
-        assert "build-share" in str(share), (
+        local = cdk_nag_scanner_module._local_path_from_file_url("file:///proj")
+        assert local is not None, (
+            "the empty-authority URL stopped resolving, so this test can no "
+            "longer tell a dropped authority from a kept one"
+        )
+        assert share != local, (
             f"the host authority was dropped, so a share reads as the local "
             f"directory /proj: {share}"
+        )
+
+        with patch.object(
+            cdk_nag_scanner_module, "url2pathname", _windows_url2pathname()
+        ):
+            unc = cdk_nag_scanner_module._local_path_from_file_url(
+                "file://build-share/proj"
+            )
+        assert unc is not None
+        assert "build-share" in str(unc), (
+            f"the host authority did not survive into the UNC path, so a "
+            f"distribution installed from \\\\build-share\\proj would match the "
+            f"local directory /proj: {unc}"
         )
 
         assert cdk_nag_scanner_module._local_path_from_file_url(

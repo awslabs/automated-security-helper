@@ -44,7 +44,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-14, windows-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
         method: [pip, pipx, uvx, homebrew, pre-commit, podman, finch, nerdctl, mcp, nix]
         exclude:
           # Native Windows Nix cannot supply the toolchain: it has no fixed-output
@@ -56,15 +56,19 @@ jobs:
           - { os: ubuntu-latest, python-version: "3.10", method: nix }
           - { os: ubuntu-latest, python-version: "3.11", method: nix }
           - { os: ubuntu-latest, python-version: "3.13", method: nix }
+          - { os: ubuntu-latest, python-version: "3.14", method: nix }
           - { os: ubuntu-24.04-arm, python-version: "3.10", method: nix }
           - { os: ubuntu-24.04-arm, python-version: "3.11", method: nix }
           - { os: ubuntu-24.04-arm, python-version: "3.13", method: nix }
+          - { os: ubuntu-24.04-arm, python-version: "3.14", method: nix }
           - { os: macos-latest, python-version: "3.10", method: nix }
           - { os: macos-latest, python-version: "3.11", method: nix }
           - { os: macos-latest, python-version: "3.13", method: nix }
+          - { os: macos-latest, python-version: "3.14", method: nix }
           - { os: macos-14, python-version: "3.10", method: nix }
           - { os: macos-14, python-version: "3.11", method: nix }
           - { os: macos-14, python-version: "3.13", method: nix }
+          - { os: macos-14, python-version: "3.14", method: nix }
           # Homebrew not available on Windows
           - { os: windows-latest, method: homebrew }
           # Podman/Finch/nerdctl not available on Windows
@@ -88,50 +92,63 @@ jobs:
           - { os: ubuntu-latest, python-version: "3.10", method: nerdctl }
           - { os: ubuntu-latest, python-version: "3.11", method: nerdctl }
           - { os: ubuntu-latest, python-version: "3.13", method: nerdctl }
+          - { os: ubuntu-latest, python-version: "3.14", method: nerdctl }
           # Container runtimes only need one Python version
           - { os: ubuntu-latest, python-version: "3.10", method: podman }
           - { os: ubuntu-latest, python-version: "3.11", method: podman }
           - { os: ubuntu-latest, python-version: "3.13", method: podman }
+          - { os: ubuntu-latest, python-version: "3.14", method: podman }
           - { os: ubuntu-24.04-arm, python-version: "3.10", method: podman }
           - { os: ubuntu-24.04-arm, python-version: "3.11", method: podman }
           - { os: ubuntu-24.04-arm, python-version: "3.13", method: podman }
+          - { os: ubuntu-24.04-arm, python-version: "3.14", method: podman }
           # Podman/Finch not on macOS (no nested virtualization on hosted runners)
           - { os: macos-latest, method: podman }
           - { os: macos-14, method: podman }
           - { os: ubuntu-latest, python-version: "3.10", method: finch }
           - { os: ubuntu-latest, python-version: "3.11", method: finch }
           - { os: ubuntu-latest, python-version: "3.13", method: finch }
+          - { os: ubuntu-latest, python-version: "3.14", method: finch }
           - { os: macos-latest, method: finch }
           - { os: macos-14, method: finch }
           # Homebrew only needs one Python (formula validation)
           - { os: ubuntu-latest, python-version: "3.10", method: homebrew }
           - { os: ubuntu-latest, python-version: "3.11", method: homebrew }
           - { os: ubuntu-latest, python-version: "3.13", method: homebrew }
+          - { os: ubuntu-latest, python-version: "3.14", method: homebrew }
           - { os: ubuntu-24.04-arm, python-version: "3.10", method: homebrew }
           - { os: ubuntu-24.04-arm, python-version: "3.11", method: homebrew }
           - { os: ubuntu-24.04-arm, python-version: "3.13", method: homebrew }
+          - { os: ubuntu-24.04-arm, python-version: "3.14", method: homebrew }
           - { os: macos-latest, python-version: "3.10", method: homebrew }
           - { os: macos-latest, python-version: "3.11", method: homebrew }
           - { os: macos-latest, python-version: "3.13", method: homebrew }
+          - { os: macos-latest, python-version: "3.14", method: homebrew }
           - { os: macos-14, python-version: "3.10", method: homebrew }
           - { os: macos-14, python-version: "3.11", method: homebrew }
           - { os: macos-14, python-version: "3.13", method: homebrew }
+          - { os: macos-14, python-version: "3.14", method: homebrew }
           # uvx doesn't need Python setup (it bundles its own)
           - { os: ubuntu-latest, python-version: "3.10", method: uvx }
           - { os: ubuntu-latest, python-version: "3.11", method: uvx }
           - { os: ubuntu-latest, python-version: "3.13", method: uvx }
+          - { os: ubuntu-latest, python-version: "3.14", method: uvx }
           - { os: ubuntu-24.04-arm, python-version: "3.10", method: uvx }
           - { os: ubuntu-24.04-arm, python-version: "3.11", method: uvx }
           - { os: ubuntu-24.04-arm, python-version: "3.13", method: uvx }
+          - { os: ubuntu-24.04-arm, python-version: "3.14", method: uvx }
           - { os: macos-latest, python-version: "3.10", method: uvx }
           - { os: macos-latest, python-version: "3.11", method: uvx }
           - { os: macos-latest, python-version: "3.13", method: uvx }
+          - { os: macos-latest, python-version: "3.14", method: uvx }
           - { os: macos-14, python-version: "3.10", method: uvx }
           - { os: macos-14, python-version: "3.11", method: uvx }
           - { os: macos-14, python-version: "3.13", method: uvx }
+          - { os: macos-14, python-version: "3.14", method: uvx }
           - { os: windows-latest, python-version: "3.10", method: uvx }
           - { os: windows-latest, python-version: "3.11", method: uvx }
           - { os: windows-latest, python-version: "3.13", method: uvx }
+          - { os: windows-latest, python-version: "3.14", method: uvx }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

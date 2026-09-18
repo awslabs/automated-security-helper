@@ -155,7 +155,7 @@ RESULTS_FILENAME = "ash_aggregated_results.json"
 
 #: A Windows drive at the start of a path, e.g. ``C:/ws/api``. Matched on the raw
 #: text rather than via ``PureWindowsPath.drive``, whose value for unusual inputs
-#: changed between 3.11 and 3.12 and this project supports 3.10 through 3.13.
+#: changed between 3.11 and 3.12 and this project supports 3.10 through 3.14.
 _DRIVE_ANCHOR = re.compile(r"^[A-Za-z]:[/\\]")
 
 #: The component that makes ``relative_to`` unable to answer containment.

@@ -158,7 +158,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-14, windows-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
         # No exclusions. macos-14 was excluded from 3.10 and 3.11 on the stated
         # grounds that arm64 macOS "only has 3.12 and 3.13". That is not true, and
         # this job disproves it itself: macos-latest resolves to an arm64 image
@@ -172,6 +172,12 @@ jobs:
         # the test suite before, on macOS 14 specifically. The architecture and the
         # interpreters are proven; a Sonoma-only failure was not ruled out in
         # advance.
+        #
+        # 3.14 needs no exclusion either, and that is measured rather than argued:
+        # `unit-test (macos-14, py3.14)` ran green in run 35350532714, alongside
+        # macos-latest, ubuntu-latest, ubuntu-24.04-arm and windows-latest. The
+        # actions/python-versions manifest carries a darwin/arm64 build for 3.14.7,
+        # the newest stable 3.14, which is what makes that resolvable.
         include:
           # Arch labels for artifact naming. These are hand-written labels, not
           # values read from the runner, so they can disagree with the machine --
