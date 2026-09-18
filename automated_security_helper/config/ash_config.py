@@ -960,88 +960,147 @@ class AshConfig(BaseModel):
 
 
 def add_suppression_to_config(config_path: Path, suppression: AshSuppression) -> None:
-    """Append a suppression to the suppressions list in an .ash.yaml config file.
+    """Add a suppression to the suppressions list in an .ash.yaml config file.
 
-    Uses an append-only strategy when the file already contains a suppressions
-    section, preserving existing comments and formatting. Falls back to a full
-    rewrite for new files or files without a suppressions section.
+    Comment- and formatting-preserving by construction: the new entry is
+    serialized with PyYAML (so quoting and escaping are correct) and inserted as
+    text. A full ``yaml.safe_dump`` rewrite -- which drops every comment in the
+    file -- is a last resort, reached only for a brand-new file or a structure
+    that cannot be edited as text (an inline ``global_settings: {...}`` mapping),
+    i.e. a file with no comments to preserve or a shape that essentially never
+    occurs in practice.
     """
     entry = suppression.model_dump(exclude_none=True)
-    entry_yaml = yaml.safe_dump(
-        [entry], default_flow_style=False, sort_keys=False
-    ).rstrip("\n")
-    # yaml.safe_dump wraps in a list; strip the leading "- " indent is handled below
-
     config_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if config_path.exists():
-        text = config_path.read_text(encoding="utf-8")
+    # A brand-new file has no comments to lose, so a fresh dump is fine.
+    if not config_path.exists():
+        _rewrite_config_with_entry(config_path, {}, entry)
+        return
 
-        # Duplicate detection: check if rule_id+path already suppressed
-        data = yaml.safe_load(text) or {}
-        if isinstance(data, dict):
-            existing = data.get("global_settings", {}).get("suppressions", []) or []
-            for existing_entry in existing:
-                if (
-                    isinstance(existing_entry, dict)
-                    and existing_entry.get("rule_id") == entry.get("rule_id")
-                    and existing_entry.get("path") == entry.get("path")
-                ):
-                    return  # already suppressed
+    text = config_path.read_text(encoding="utf-8")
+    data = yaml.safe_load(text) or {}
 
-        # Append-only: find the suppressions list and append at its end
-        lines = text.splitlines(keepends=True)
-        insert_idx, list_indent = _find_suppressions_append_point(lines)
-        if insert_idx is not None:
-            field_indent = list_indent + "  "
-            items = list(entry.items())
-            first_key, first_val = items[0]
-            formatted_lines = [
-                f"{list_indent}- {first_key}: {_yaml_scalar(first_val)}\n"
-            ]
-            for k, v in items[1:]:
-                formatted_lines.append(f"{field_indent}{k}: {_yaml_scalar(v)}\n")
-            for line in reversed(formatted_lines):
-                lines.insert(insert_idx, line)
-            config_path.write_text("".join(lines), encoding="utf-8")
-            return
+    # Duplicate detection: skip if this rule_id+path is already suppressed.
+    if isinstance(data, dict):
+        existing = (data.get("global_settings") or {}).get("suppressions") or []
+        for existing_entry in existing:
+            if (
+                isinstance(existing_entry, dict)
+                and existing_entry.get("rule_id") == entry.get("rule_id")
+                and existing_entry.get("path") == entry.get("path")
+            ):
+                return  # already suppressed
 
-    # Fallback: full rewrite (new file or no suppressions section found)
-    if config_path.exists():
-        with open(config_path, mode="r", encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
-    else:
-        data = {}
+    lines = text.splitlines(keepends=True)
 
+    # Case A: a suppressions list already exists -> insert the item at its end.
+    insert_idx, list_indent = _find_suppressions_append_point(lines)
+    if insert_idx is not None:
+        for line in reversed(_serialize_entry_lines(entry, list_indent)):
+            lines.insert(insert_idx, line)
+        config_path.write_text("".join(lines), encoding="utf-8")
+        return
+
+    # Case B: a block-style global_settings exists but has no suppressions key ->
+    # insert the key plus the item at the end of that block. This is the common
+    # first-suppression case, and the one the old full-rewrite fallback silently
+    # stripped every comment from.
+    gs_insert_idx, gs_child_indent = _find_global_settings_insert_point(lines)
+    if gs_insert_idx is not None:
+        block = [f"{gs_child_indent}suppressions:\n"]
+        block += _serialize_entry_lines(entry, gs_child_indent + "  ")
+        for line in reversed(block):
+            lines.insert(gs_insert_idx, line)
+        config_path.write_text("".join(lines), encoding="utf-8")
+        return
+
+    # Case C: content, but no global_settings key at all -> append a fresh block
+    # at EOF, leaving every existing line (and comment) untouched.
+    if not _has_top_level_key(lines, "global_settings"):
+        block: list[str] = []
+        if lines and not lines[-1].endswith("\n"):
+            block.append("\n")
+        block.append("global_settings:\n")
+        block.append("  suppressions:\n")
+        block += _serialize_entry_lines(entry, "    ")
+        config_path.write_text("".join(lines) + "".join(block), encoding="utf-8")
+        return
+
+    # Case D (last resort): a shape we cannot safely edit as text, e.g. an inline
+    # `global_settings: {...}` mapping. Fall back to a full rewrite. This loses
+    # comments, but only for a structure that essentially never occurs.
+    _rewrite_config_with_entry(config_path, data if isinstance(data, dict) else {}, entry)
+
+
+def _serialize_entry_lines(entry: dict, item_indent: str) -> list[str]:
+    """Render one suppression entry as indented YAML lines.
+
+    Serialized with ``yaml.safe_dump`` so a reason (or any value) containing
+    ``"``, ``\\``, ``:`` or ``#`` is quoted and escaped correctly.
+    ``safe_dump([entry])`` emits the item at column 0 (``- key: value`` then
+    ``  key: value``); each line is prefixed with ``item_indent``.
+    """
+    dumped = yaml.safe_dump([entry], default_flow_style=False, sort_keys=False)
+    return [f"{item_indent}{line}\n" for line in dumped.splitlines()]
+
+
+def _rewrite_config_with_entry(config_path: Path, data: dict, entry: dict) -> None:
+    """Full ``safe_dump`` rewrite. Only for files with no comments to preserve."""
     if not isinstance(data, dict):
         data = {}
-
     global_settings = data.setdefault("global_settings", {})
     if not isinstance(global_settings, dict):
         global_settings = {}
         data["global_settings"] = global_settings
-
     suppressions_list = global_settings.setdefault("suppressions", [])
     if not isinstance(suppressions_list, list):
         suppressions_list = []
         global_settings["suppressions"] = suppressions_list
-
     suppressions_list.append(entry)
     with open(config_path, mode="w", encoding="utf-8") as f:
         yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False)
 
 
-def _yaml_scalar(value: object) -> str:
-    """Format a value for inline YAML output."""
-    if isinstance(value, str):
-        if any(c in value for c in ":#{}[]&*!|>'\","):
-            return f'"{value}"'
-        return value
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, int):
-        return str(value)
-    return repr(value)
+def _has_top_level_key(lines: list, key: str) -> bool:
+    prefix = f"{key}:"
+    return any(
+        (len(line) - len(line.lstrip())) == 0 and line.lstrip().startswith(prefix)
+        for line in lines
+    )
+
+
+def _find_global_settings_insert_point(lines: list) -> tuple:
+    """End-of-block index and child indent for a block-style global_settings.
+
+    Returns ``(insert_index, child_indent)`` for a top-level ``global_settings:``
+    that has block children, or ``(None, None)`` if it is absent, inline
+    (``global_settings: {...}``), or has no children to anchor indentation on.
+    """
+    in_global = False
+    block_end = None
+    child_indent = None
+    for idx, line in enumerate(lines):
+        stripped = line.lstrip()
+        indent_len = len(line) - len(stripped)
+        if not in_global:
+            if indent_len == 0 and stripped.startswith("global_settings:"):
+                # An inline mapping value after the colon is not text-insertable.
+                if stripped[len("global_settings:") :].strip():
+                    return (None, None)
+                in_global = True
+                block_end = idx + 1
+            continue
+        if stripped == "" or stripped.startswith("#"):
+            continue  # inside the block, but not a child to anchor on
+        if indent_len == 0:
+            break  # a following top-level key: the block has ended
+        if child_indent is None:
+            child_indent = line[:indent_len]
+        block_end = idx + 1
+    if not in_global or child_indent is None:
+        return (None, None)
+    return (block_end, child_indent)
 
 
 def _find_suppressions_append_point(lines: list) -> tuple:
