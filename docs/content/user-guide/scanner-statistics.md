@@ -24,6 +24,31 @@ ASH uses the following severity levels for findings:
 - **Low**: Lower risk findings
 - **Info**: Informational findings with minimal risk
 
+### How ASH determines a finding's severity
+
+For each finding, ASH resolves the severity used for counting, the
+`--severity-threshold` gate, and the exit code in this order:
+
+1. **The finding's own severity**, when it carries a recognized band
+   (`CRITICAL`/`HIGH`/`MEDIUM`/`LOW`/`INFO`).
+2. **The rule's CVSS base score** (the SARIF `security-severity` property), when
+   the finding has no recognized severity of its own but its rule declares a
+   numeric score. The score maps to a band as: `>=9` Critical, `>=7` High, `>=4`
+   Medium, `>0` Low. A score of `0` or a non-numeric/out-of-range value is treated
+   as "no usable score" and falls through to the next step.
+3. **The SARIF level**, as a last resort: `error` → Critical, `warning` → Medium,
+   `note` → Low, otherwise Info.
+
+Step 2 is a deliberate, repo-wide policy: **when a rule carries a real CVSS base
+score, that score is authoritative over the scanner's own `level`** — for every
+scanner, not just one. The CVSS base score is objective and comparable across
+tools, whereas `level` is a coarse per-tool label. This can move a finding's
+severity in either direction versus what a scanner's native report shows (e.g. an
+`error`-level advisory with CVSS 5.0 counts as Medium; a `note`-level rule with
+CVSS 9.1 counts as Critical), and because it feeds the threshold gate it can
+change which findings block a build. It applies to any current or future scanner
+whose SARIF puts a CVSS score on rules while leaving results at a coarse level.
+
 ## Suppressed Findings
 
 Suppressed findings are those that have been explicitly marked as suppressed, either through:
