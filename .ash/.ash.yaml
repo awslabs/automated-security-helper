@@ -59,13 +59,22 @@ global_settings:
     # branch in isolation. If another packaging format arrives, its fixture belongs
     # here in the same commit that merges it.
     #
-    # packaging/msix/verify-on-windows.ps1 is deliberately NOT listed. It plants
-    # the same key but assembles it from two halves at runtime, so detect-secrets
-    # does not match it. That was written to avoid needing an entry here at all. It
-    # works, and it is left alone rather than normalized, because the script cannot
-    # be run on this host to confirm a change to it -- but it is the odd one out,
-    # and a reader comparing the six verifications should know the split is
-    # deliberate rather than a typo.
+    # packaging/msix/verify-on-windows.ps1 used to be the odd one out, and the way
+    # it was odd is worth keeping written down. It planted the same key but
+    # assembled it from two halves at runtime, specifically so detect-secrets would
+    # not match it and no entry would be needed here.
+    #
+    # That worked and was still wrong. The scanner reported the file clean, but for
+    # a reason unrelated to the file being clean, and the two outcomes are
+    # indistinguishable from the outside: a reader comparing the six verifications
+    # could not tell a deliberate fixture from a credential that leaked in, and a
+    # real key added to that script later would have been just as invisible. The
+    # argument for leaving it alone was that the script cannot be run on this host
+    # to confirm a change -- true, but it only ever guarded a string literal, and
+    # the MSIX leg of ASH - Package Build runs the script on windows-latest.
+    #
+    # So the split was removed, the key is one literal there now, and the entry
+    # below is the declaration that replaces the evasion.
     - rule_id: "SECRET-*"
       path: packaging/deb/verify-in-container.sh
       reason: >-
@@ -93,6 +102,16 @@ global_settings:
         Same fixture and same reason as the verifications above -- AWS's published
         example key, planted so the Chocolatey verification asserts a finding on
         windows-latest rather than an exit code.
+    - rule_id: "SECRET-*"
+      path: packaging/msix/verify-on-windows.ps1
+      reason: >-
+        Same fixture and same reason as the verifications above -- AWS's published
+        example key, planted so the MSIX verification asserts a non-zero SARIF
+        result count rather than an exit code. This one carries the fixture through
+        an installed MSIX package, so the scan it asserts on is run by the launcher
+        in packaging/msix/AshLauncher.cs against a virtualenv that package
+        bootstrapped, which is the specific thing step 8 of that script exists to
+        prove can read a tree at all.
     # === the JetBrains plugin's planted fixture ===
     #
     # The plugin under editors/jetbrains/ plants the same value the three files above do, for

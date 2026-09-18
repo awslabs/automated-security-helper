@@ -451,16 +451,27 @@ if (Test-Path $fixture) {
 }
 New-Item -ItemType Directory -Force -Path $fixture | Out-Null
 
-# The planted key is assembled from two halves rather than written as one literal, and that is
-# not obfuscation. ASH scans its own repository, and .ash/.ash.yaml suppresses SECRET-* under
-# tests/ and scripts/ but not under packaging/, so a complete key sitting in this file would
-# be a finding in ASH's own scan of itself. Splitting it keeps this file clean while the file
-# it WRITES carries the whole thing, which is the only copy the scan under test needs to see.
-$plantedKey = 'wJalrXUtnFEMI/K7MDENG/' + 'bPxRfiCYEXAMPLEKEY'
-@"
+# The same value the other five packaging verifications plant: the example secret access key
+# from AWS's own public documentation. It is written the same way they write it -- the keyword
+# and the value together, in one non-interpolating here-string -- and that shape is the point.
+#
+# This file used to assemble the key from two halves at runtime and interpolate it next to the
+# AWS_SECRET_ACCESS_KEY name, so detect-secrets matched nothing and no entry was needed in
+# .ash/.ash.yaml. That is the wrong trade. A scanner that cannot see a fixture it should be told
+# to ignore reports this file clean for a reason that has nothing to do with the file being
+# clean, and a reader is left with no way to tell a deliberate fixture from a credential that
+# leaked in. The entry in .ash/.ash.yaml carries the justification instead.
+#
+# Writing it as one literal rather than merely un-splitting the value is what makes this file
+# trip the same three rules as its five siblings: SECRET-AWS-ACCESS-KEY and
+# SECRET-BASE64-HIGH-ENTROPY-STRING on the value, and SECRET-SECRET-KEYWORD on the name beside
+# it. Interpolating the value through a variable kept the name and the value apart and only the
+# entropy rule fired, which would have made this the one entry in that block whose count did not
+# match its neighbours -- measured, not assumed.
+@'
 # Fixture for packaging verification. Not a real credential.
-AWS_SECRET_ACCESS_KEY = "$plantedKey"
-"@ | Set-Content -Path (Join-Path $fixture 'leak.py') -Encoding utf8
+AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+'@ | Set-Content -Path (Join-Path $fixture 'leak.py') -Encoding utf8
 
 # detect-secrets is a runtime dependency of ASH and drives in process, so it is the one default
 # scanner present after installing ASH alone. The rest are correctly reported SKIPPED rather
