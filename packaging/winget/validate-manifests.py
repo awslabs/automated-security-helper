@@ -67,12 +67,11 @@ import json
 import re
 import sys
 import tomllib
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Any
 
 import jsonschema
+import requests
 import yaml
 
 PACKAGE_IDENTIFIER = "Amazon.AutomatedSecurityHelper"
@@ -118,11 +117,22 @@ class Failure(Exception):
 def fetch_schema(manifest_type: str, version: str) -> dict[str, Any]:
     """Fetch one published schema, refusing anything that is not that schema."""
     url = f"https://aka.ms/winget-manifest.{manifest_type}.{version}.schema.json"
+    # requests rather than urllib.request.urlopen, and not as a style preference. urlopen
+    # accepts file: and any scheme a handler is registered for, so bandit flags every call to
+    # it (B310) with no way to argue the point in code -- the rule is a blacklist on the name
+    # and does not look at the argument. requests speaks only http and https, which makes the
+    # guarantee structural instead of a claim in a comment, and this script already depends on
+    # jsonschema and yaml so it is not a new kind of dependency. Do not simplify this back to
+    # the standard library; it would reintroduce an actionable finding in ASH's scan of itself.
     try:
-        with urllib.request.urlopen(url, timeout=60) as response:  # noqa: S310
-            body = response.read()
-            final_url = response.geturl()
-    except urllib.error.URLError as exc:
+        response = requests.get(url, timeout=60)
+        # Mirrors urlopen, which raises HTTPError for a non-2xx status. Deliberately NOT a
+        # guard against a 200 that is not the schema: aka.ms answers 200 with a search page
+        # for a version that does not exist, and the JSON decode below is what catches that.
+        response.raise_for_status()
+        body = response.content
+        final_url = response.url
+    except requests.RequestException as exc:
         raise Failure(f"could not fetch {url}: {exc}") from exc
 
     try:
