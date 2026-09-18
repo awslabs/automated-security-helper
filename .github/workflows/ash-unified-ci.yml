@@ -30,9 +30,9 @@ on:
   #
   # WHAT THIS COSTS, AND WHAT WAS REJECTED
   #
-  # Counted rather than estimated: this workflow expands to 144 jobs and
-  # ash-iac-drift.yml to 6, so a queued merge that also pushes to main is ~300 runner
-  # jobs instead of ~150. The duplicate verdict on a queued merge is the price of
+  # Counted rather than estimated: this workflow expands to 169 jobs and
+  # ash-iac-drift.yml to 6, so a queued merge that also pushes to main is ~350 runner
+  # jobs instead of ~175. The duplicate verdict on a queued merge is the price of
   # covering the bypassed one, and it was accepted deliberately.
   #
   # Both counts are job counts, from
