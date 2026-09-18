@@ -153,10 +153,19 @@ jobs:
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-14, windows-latest]
         python-version: ["3.10", "3.11", "3.12", "3.13"]
-        exclude:
-          # macOS ARM (macos-14) only has 3.12 and 3.13
-          - { os: macos-14, python-version: "3.10" }
-          - { os: macos-14, python-version: "3.11" }
+        # No exclusions. macos-14 was excluded from 3.10 and 3.11 on the stated
+        # grounds that arm64 macOS "only has 3.12 and 3.13". That is not true, and
+        # this job disproves it itself: macos-latest resolves to an arm64 image
+        # (macos-26-arm64), and its 3.10 leg installs CPython 3.10.11 from
+        # actions/python-versions as python-3.10.11-darwin-arm64.tar.gz, then runs
+        # the whole suite green. macos-14 is the same architecture -- macos-14-arm64
+        # -- and install-validation already sets up 3.10 and 3.11 on it. So the two
+        # cells were excluded for a reason that never applied.
+        #
+        # What removing this did NOT establish: these two cells had never executed
+        # the test suite before, on macOS 14 specifically. The architecture and the
+        # interpreters are proven; a Sonoma-only failure was not ruled out in
+        # advance.
         include:
           # Arch labels for artifact naming
           - { os: ubuntu-latest, arch: x86_64 }
@@ -602,7 +611,7 @@ jobs:
   # Every job above names itself from its matrix, so this workflow contributes 84 distinct
   # check-run names to a pull request and not one of them is stable. A ruleset's
   # required_status_checks list holds literal context strings with no wildcard, so requiring
-  # `unit-test` means enumerating all 18 of its names -- and then any matrix edit either orphans
+  # `unit-test` means enumerating all 20 of its names -- and then any matrix edit either orphans
   # a required context that no longer runs, which leaves a pull request pending forever, or
   # quietly adds a leg that nothing requires. That maintenance cost is why the ruleset requires
   # two contexts today while 150 of the 152 checks on a pull request are advisory.
