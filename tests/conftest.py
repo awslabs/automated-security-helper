@@ -67,6 +67,27 @@ def _isolate_jsii_package_cache_per_worker() -> str | None:
     not booting tests: three booters produced two roots in one run because two landed
     on the same worker.
 
+    WHERE IT ACTUALLY COSTS SOMETHING: the integration invocation. CI runs
+    tests/integration/scanners/test_cdk_nag_real_pack.py as a second, separate pytest
+    step, and all 11 of its tests boot a real kernel, because you cannot double the
+    thing you are integration-testing. That step inherits ``-n auto`` -- it passes no
+    ``-n`` of its own -- so on windows-latest its 11 tests spread over 4 workers and
+    every one of them extracts. Measured at ``-n 4``:
+
+        guard   wall clock   bytes written   extracting roots   result
+        on            7.7s     748,018,196   4                  11 passed
+        off           7.5s     187,004,549   1                  11 passed
+
+    Four times the bytes and, within noise, the same wall clock -- because the four
+    extractions run concurrently on separate roots, where today one extracts and three
+    wait out the same duration and sometimes exhaust the budget instead. This is the
+    step whose Windows legs fail, and neither removing nor doubling booters can help
+    it, so it is the case this guard exists for.
+
+    A caution on scale, since the cost tracks worker count and ``-n auto`` ties that to
+    core count: on a 192-core host the same file produced 192 worker roots and 2.2 GB.
+    If this ever runs on a large self-hosted runner, cap the workers for that step.
+
     Returns the root it set, or ``None`` when it deliberately set nothing.
     """
     # xdist sets this in each worker before pytest_configure runs; the controller
