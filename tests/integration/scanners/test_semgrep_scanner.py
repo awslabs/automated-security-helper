@@ -19,6 +19,36 @@ def test_semgrep_scanner(test_plugin_context):
     )
 
 
+@pytest.fixture
+def semgrep_rule_cache(tmp_path, monkeypatch):
+    """A populated offline rule cache, which offline mode requires.
+
+    ``_configure_offline_mode`` validates ``$SEMGREP_RULES_CACHE_DIR`` through
+    ``OfflineModeValidator.validate_cache_directory`` and raises ``ScannerError``
+    when it holds no ``.yaml``/``.yml`` files. That guard is correct -- running
+    offline with no rules would scan nothing and report clean -- so a test that
+    turns offline mode on has to supply the cache rather than avoid the check.
+
+    Turning offline mode off instead would be the wrong repair: these two tests
+    exist to exercise the offline path.
+    """
+    cache = tmp_path / "semgrep-rules"
+    cache.mkdir()
+    # One real-shaped rule file is enough for the validator, which checks for the
+    # extensions rather than parsing them.
+    (cache / "rules.yaml").write_text(
+        "rules:\n"
+        "  - id: ash-test-placeholder\n"
+        "    languages: [python]\n"
+        "    message: placeholder\n"
+        "    severity: INFO\n"
+        "    pattern: $X == $X\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SEMGREP_RULES_CACHE_DIR", str(cache))
+    return cache
+
+
 def test_semgrep_scanner_init(test_plugin_context):
     """Test SemgrepScanner initialization."""
     scanner = SemgrepScanner(
@@ -61,7 +91,18 @@ def test_semgrep_scanner_uv_tool_integration(test_plugin_context):
         # Test version detection
         version = scanner._get_uv_tool_version("semgrep")
         assert version == "1.125.0"
-        mock_runner_instance.get_tool_version.assert_called_with("semgrep")
+        # Asserted against the scanner's own ``--from`` spec rather than a
+        # literal, so a version-constraint bump does not break this test while
+        # still pinning the property #426 and #549 added: the probe must run under
+        # the same ``--from`` environment the scan will use. ``uv tool run semgrep``
+        # and ``uv tool run --from '<spec>' semgrep`` resolve to different
+        # environments, and stevedore's entry-point cache is keyed on
+        # ``sys.executable``/``sys.prefix``, so probing the wrong one leaves the
+        # scan's cache cold. The bare-name assertion this replaces could not tell
+        # those two invocations apart.
+        mock_runner_instance.get_tool_version.assert_called_with(
+            "semgrep", scanner._uv_from_spec()
+        )
 
     # Test validation with UV tool available
     with unittest.mock.patch(
@@ -79,7 +120,8 @@ def test_semgrep_scanner_uv_tool_integration(test_plugin_context):
             "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner"
         ) as mock_runner,
         unittest.mock.patch(
-            "automated_security_helper.utils.subprocess_utils.find_executable"
+            "automated_security_helper.plugin_modules.ash_builtin.scanners."
+            "semgrep_scanner.get_uv_tool_command"
         ) as mock_find,
     ):
         mock_runner_instance = unittest.mock.MagicMock()
@@ -90,13 +132,21 @@ def test_semgrep_scanner_uv_tool_integration(test_plugin_context):
         assert scanner.validate_plugin_dependencies() is True
         assert scanner.use_uv_tool is False  # Should be disabled after fallback
 
+    # Restore the flag before the next case. These four blocks share one scanner
+    # instance, and the fallback above leaves use_uv_tool False --
+    # _validate_uv_tool_availability returns True immediately when it is False, so
+    # the next case would skip the resolver entirely and pass for the wrong reason
+    # regardless of what its mock returns.
+    scanner.use_uv_tool = True
+
     # Test validation with neither UV tool nor direct executable available
     with (
         unittest.mock.patch(
             "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner"
         ) as mock_runner,
         unittest.mock.patch(
-            "automated_security_helper.utils.subprocess_utils.find_executable"
+            "automated_security_helper.plugin_modules.ash_builtin.scanners."
+            "semgrep_scanner.get_uv_tool_command"
         ) as mock_find,
     ):
         mock_runner_instance = unittest.mock.MagicMock()
@@ -107,7 +157,7 @@ def test_semgrep_scanner_uv_tool_integration(test_plugin_context):
         assert scanner.validate_plugin_dependencies() is False
 
 
-def test_semgrep_scanner_configure(test_plugin_context):
+def test_semgrep_scanner_configure(test_plugin_context, semgrep_rule_cache):
     """Test SemgrepScanner configuration."""
     scanner = SemgrepScanner(
         context=test_plugin_context,
@@ -162,7 +212,7 @@ def test_semgrep_scanner_scan_error(test_semgrep_scanner):
     )
 
 
-def test_process_config_options_offline_mode(test_plugin_context):
+def test_process_config_options_offline_mode(test_plugin_context, semgrep_rule_cache):
     """Test processing of offline mode options."""
     scanner = SemgrepScanner(
         context=test_plugin_context,

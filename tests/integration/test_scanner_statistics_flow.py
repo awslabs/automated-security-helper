@@ -264,9 +264,22 @@ class TestScannerStatisticsFlow:
         metrics = get_unified_scanner_metrics(model)
 
         # Verify that edge cases are handled correctly
-        assert (
-            len(metrics) == 2
-        )  # Only the 2 edge cases are present since the regular scanners don't have entries in scanner_results
+        # Four, not two. #452 ("report scanners that never ran instead of hiding
+        # them") made excluded and missing-dependency scanners appear in the
+        # metrics alongside the ones that ran, which is the whole point of that
+        # change -- so expecting two encoded the behaviour it fixed. The comment
+        # claiming "the regular scanners don't have entries" was wrong even then:
+        # create_test_model gives scanner1 and scanner2 findings.
+        #
+        # Asserted as a set of names rather than a count, because a count is a
+        # one-dimensional projection: len(metrics) == 4 would also pass if a
+        # scanner were dropped and an unrelated one appeared.
+        assert {m.scanner_name for m in metrics} == {
+            "excluded_scanner",
+            "missing_deps_scanner",
+            "scanner1",
+            "scanner2",
+        }, f"unexpected scanner set: {sorted(m.scanner_name for m in metrics)}"
 
         excluded_metrics = next(
             m for m in metrics if m.scanner_name == "excluded_scanner"
@@ -288,7 +301,16 @@ class TestScannerStatisticsFlow:
         scanner_results = emitter.get_scanner_results()
 
         # Verify that scanner results include edge cases
-        assert len(scanner_results) == 2  # Only the 2 edge cases are present
+        # Four, for the same reason as the metrics assertion above: #452 made
+        # never-run scanners visible instead of hiding them. Fixing only the
+        # metrics assertion left this one, on a different variable in the same
+        # test, still encoding the behaviour that was fixed.
+        assert {entry["scanner_name"] for entry in scanner_results} == {
+            "excluded_scanner",
+            "missing_deps_scanner",
+            "scanner1",
+            "scanner2",
+        }, f"unexpected scanners: {sorted(e['scanner_name'] for e in scanner_results)}"
         assert any(
             r["scanner_name"] == "excluded_scanner" and r["status"] == "SKIPPED"
             for r in scanner_results
