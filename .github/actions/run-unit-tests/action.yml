@@ -29,13 +29,18 @@ runs:
 
     # Runs the cdk-nag integration tests, which the default pytest invocation above does
     # NOT run: tests/conftest.py skips anything whose keywords include "integration", and
-    # pytest picks that up from the tests/integration directory name. Every integration
-    # test in the repository has therefore been skipped in CI, and a skipped suite exits 0.
+    # pytest picks that up from the tests/integration directory name.
     #
-    # Scoped to this one file on purpose. Enabling --run-integration across the whole tree
-    # currently surfaces 35 pre-existing failures unrelated to cdk-nag, which would make
-    # this check meaningless noise. Repairing and enabling the rest of the suite is separate
-    # work; this step secures the specific coverage that was missing.
+    # This step is no longer the only thing that passes --run-integration. The rest of the
+    # suite now runs in the `integration-test` job in ash-unified-ci.yml, which covers all
+    # 115 gated items including these 11. So the reason this step stays scoped to one file
+    # has changed, and it is worth stating rather than leaving the old one to rot: it is
+    # here to keep the cdk-nag path exercised on every Python version in the matrix, which
+    # a single-platform, single-version integration job does not do. That is also why the
+    # duplication is deliberate rather than an oversight.
+    #
+    # The old reason -- that enabling the tree surfaced pre-existing failures and would
+    # make this check noise -- was true when written and is not why the scoping remains.
     #
     # ASH_REQUIRE_CDK_EXTRA turns a missing extra into a hard failure instead of a skip, so
     # this step cannot silently stop testing anything if the install step above changes.
