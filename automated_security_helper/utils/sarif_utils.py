@@ -48,6 +48,39 @@ def get_finding_id(
     return str(uuid.UUID(int=rd.getrandbits(128), version=4))
 
 
+def _file_uri_to_path_text(uri: str) -> str:
+    """The path that a ``file://`` URI names, as text, on any platform.
+
+    Parsed rather than sliced because a host segment must not survive as a path
+    segment: ``file://host/p`` names ``/p``, and ``TestBug47FileUriHostSegment``
+    pins that. But ``urlparse().path`` alone is not the path, in two ways that a
+    scanner reporting ``Path.as_uri()`` output reaches immediately:
+
+    * ``file:///C:/proj`` gives ``/C:/proj``. On Windows that is absolute by no
+      measure pathlib recognizes -- ``PureWindowsPath("/C:/proj").drive`` is
+      empty, so ``is_absolute()`` is False -- and it does not carry the source
+      prefix either, so both relativization branches in :func:`_sanitize_uri`
+      were skipped and the absolute path was reported verbatim. Every other
+      ``file://`` reducer in this codebase already drops that separator
+      (``workspace/aggregation._strip_file_scheme``,
+      ``schemas/sarif_schema_model``, ``scanners/cdk_nag_scanner``); this was
+      the one that did not.
+    * Percent-encoding survives. ``as_uri()`` encodes, and nothing downstream
+      decoded, so a source directory containing a space arrived as ``my%20dir``
+      and then matched no file on disk and no suppression ``path``. That one
+      misses on every platform, not only Windows.
+    """
+    from urllib.parse import unquote, urlparse
+
+    path = urlparse(uri).path
+    # "/C:/proj" -> "C:/proj". Guarded on the colon rather than on the platform,
+    # because a Windows-shaped URI can be read on a POSIX host (a container
+    # scanning a bind mount, or a SARIF file moved between machines).
+    if len(path) > 2 and path[0] == "/" and path[2] == ":":
+        path = path[1:]
+    return unquote(path)
+
+
 def _sanitize_uri(uri: str, source_dir_path: Path, source_dir_str: str) -> str:
     """
     Sanitize a URI in a SARIF report.
@@ -65,10 +98,7 @@ def _sanitize_uri(uri: str, source_dir_path: Path, source_dir_str: str) -> str:
 
     # Remove file:// prefix if present, using urlparse to handle host segments
     if uri.startswith("file://"):
-        from urllib.parse import urlparse
-
-        parsed = urlparse(uri)
-        uri = parsed.path
+        uri = _file_uri_to_path_text(uri)
 
     # Make path relative to source directory
     try:
@@ -97,8 +127,16 @@ def _sanitize_uri(uri: str, source_dir_path: Path, source_dir_str: str) -> str:
                 # common case pays nothing for it.
                 with suppress(ValueError, OSError):
                     uri = str(path_obj.resolve().relative_to(source_dir_path))
-        elif uri.startswith(source_dir_str):
-            uri = uri.removeprefix(source_dir_str)
+        else:
+            # Both sides reduced to one spelling before a textual prefix test.
+            # source_dir_str is built from a Path, so it carries backslashes on
+            # Windows, while a SARIF URI carries forward slashes by convention:
+            # comparing the raw text made this branch platform-dependent, and on
+            # Windows it could not fire at all.
+            posix_uri = uri.replace("\\", "/")
+            posix_prefix = source_dir_str.replace("\\", "/")
+            if posix_uri.startswith(posix_prefix):
+                uri = posix_uri.removeprefix(posix_prefix)
     except Exception as e:
         ASH_LOGGER.debug(f"Error processing path {uri}: {e}")
 
@@ -124,7 +162,9 @@ def sanitize_sarif_paths(
         return sarif_report
 
     source_dir_path = Path(source_dir).resolve()
-    source_dir_str = str(source_dir_path) + "/"
+    # as_posix() rather than str(): the prefix is compared against a SARIF URI,
+    # which is forward-slashed by convention, and str() on Windows is not.
+    source_dir_str = source_dir_path.as_posix() + "/"
 
     ASH_LOGGER.debug(f"Sanitizing SARIF paths relative to: {source_dir_str}")
 
