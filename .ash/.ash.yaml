@@ -161,6 +161,18 @@ global_settings:
       path: scripts/verify_moto_server_suite.py
       reason: "Starts a moto server subprocess for the suite it verifies."
     - rule_id: B404
+      path: tests/integration/cli/test_mcp_stdio_server.py
+      reason: >-
+        Launches `ash mcp` as a real child and speaks JSON-RPC over its pipes,
+        which is the assertion rather than the setup. On the stdio transport
+        stdout IS the protocol channel, and the two properties this file covers --
+        that every line a running server writes there parses as a frame, and that
+        EOF on stdin ends the process reporting success -- are only observable from
+        outside the process. A patched subprocess has no pipe to read and no exit
+        status to report, which is why the deleted TestMcpServerLifecycle class the
+        file's docstring describes could patch `mcp.run` and still miss a server
+        that corrupted its own output stream.
+    - rule_id: B404
       path: tests/unit/assets/test_with_retry.py
       reason: "Exercises a retry wrapper around a real subprocess call."
     - rule_id: B404
@@ -222,6 +234,18 @@ global_settings:
     - rule_id: B603
       path: scripts/verify_moto_server_suite.py
       reason: "List argv, shell=False, which-resolved argv[0]."
+    - rule_id: B603
+      path: tests/integration/cli/test_mcp_stdio_server.py
+      reason: >-
+        List argv, shell left at its default of False, and argv[0] is
+        `sys.executable`, so there is no PATH resolution for an attacker to
+        influence. The file's ISOLATION note records that as deliberate: it starts
+        from `sys.executable` rather than from an `ash` console script "so that the
+        test runs against the interpreter running the suite rather than against
+        whatever is first on PATH". The rest of the argv is the module-level
+        SERVER_ARGV constant, plus the literals `--no-quiet --debug` at the one
+        call site that takes extras. Passing shell=True to quiet this rule would
+        create the injection surface it exists to warn about.
     - rule_id: B603
       path: tests/unit/cli/test_startup_failure_diagnosability.py
       reason: >-
