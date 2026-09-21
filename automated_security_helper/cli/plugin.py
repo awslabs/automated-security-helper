@@ -71,6 +71,19 @@ def list_plugins(
     debug: Annotated[
         bool, typer.Option("--debug", "-d", help="Enable debug logging")
     ] = False,
+    show_versions: Annotated[
+        bool,
+        typer.Option(
+            "--show-versions",
+            help=(
+                "For scanners, add Version and Reachable columns reporting each "
+                "scanner's detected tool version and whether its dependencies are "
+                "satisfied (Yes/No/Unknown). Off by default, so the fast listing is "
+                "unchanged; enabling it instantiates each scanner and runs its "
+                "dependency check, which takes longer."
+            ),
+        ),
+    ] = False,
     color: Annotated[bool, typer.Option(help="Enable/disable colorized output")] = True,
 ):
     """
@@ -115,13 +128,60 @@ def list_plugins(
             "reporters": loaded_plugins.get("reporters", []),
         }
 
+        # When --show-versions is requested, describe each loaded scanner once
+        # through the shared inventory helper (the same path the MCP
+        # list_scanners tool uses, so the two surfaces cannot drift -- issues
+        # #606/#626). Keyed by the class name so each per-class table row can
+        # look up its own version/reachability. Only computed for scanners and
+        # only when asked, keeping the default listing fast.
+        scanner_inventory_by_class: dict = {}
+        if show_versions:
+            from automated_security_helper.core.scanner_inventory import (
+                describe_scanner,
+            )
+            from automated_security_helper.config.default_config import (
+                get_default_config,
+            )
+
+            default_config = get_default_config()
+            for scanner_class in plugin_types["scanners"]:
+                try:
+                    scanner_inventory_by_class[scanner_class] = describe_scanner(
+                        scanner_class, plugin_context, default_config
+                    )
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.debug(
+                        f"Could not describe {getattr(scanner_class, '__name__', scanner_class)}: {exc}"
+                    )
+                    scanner_inventory_by_class[scanner_class] = None
+
+        def _reachable_label(entry) -> str:
+            """Map tri-state dependencies_satisfied to a Yes/No/Unknown label."""
+            if entry is None:
+                return "Unknown"
+            satisfied = entry.get("dependencies_satisfied")
+            if satisfied is True:
+                return "Yes"
+            if satisfied is False:
+                return "No"
+            return "Unknown"
+
+        def _version_label(entry) -> str:
+            """Render the detected version, or 'Unknown' when none was detected."""
+            if entry is None:
+                return "Unknown"
+            return entry.get("version") or "Unknown"
+
         for plugin_type, plugin_list in plugin_types.items():
+            show_version_cols = show_versions and plugin_type == "scanners"
+
+            columns = ["Name", "Enabled", "Class", "Module"]
+            if show_version_cols:
+                columns.extend(["Version", "Reachable"])
+            columns.append("Plugin Config")
+
             table = Table(
-                "Name",
-                "Enabled",
-                "Class",
-                "Module",
-                "Plugin Config",
+                *columns,
                 title=f"ASH {plugin_type.capitalize()}",
                 title_justify="left",
                 title_style="bold",
@@ -134,6 +194,8 @@ def list_plugins(
                     plugin_class_name = getattr(plugin_class, "__name__", "Unknown")
                     plugin_module = getattr(plugin_class, "__module__", "Unknown")
                     plugin_name = plugin_class_name
+
+                    inventory_entry = scanner_inventory_by_class.get(plugin_class)
 
                     # Create an instance to get the config name
                     try:
@@ -160,8 +222,9 @@ def list_plugins(
                             except AttributeError:
                                 plugin_name = plugin_class_name
 
-                        # Add row to table
-                        table.add_row(
+                        # Assemble the row in column order. Version/Reachable are
+                        # inserted only when the scanner version columns are shown.
+                        row = [
                             plugin_name,
                             (
                                 plugin_config.enabled
@@ -170,28 +233,43 @@ def list_plugins(
                             ),
                             plugin_class_name,
                             plugin_module,
-                            (
-                                ""
-                                if not include_plugin_config
+                        ]
+                        if show_version_cols:
+                            row.append(_version_label(inventory_entry))
+                            row.append(_reachable_label(inventory_entry))
+                        row.append(
+                            ""
+                            if not include_plugin_config
+                            else (
+                                plugin_config.model_dump_json(indent=2)
+                                if hasattr(plugin_config, "model_dump_json")
+                                and callable(plugin_config.model_dump_json)
                                 else (
-                                    plugin_config.model_dump_json(indent=2)
-                                    if hasattr(plugin_config, "model_dump_json")
-                                    and callable(plugin_config.model_dump_json)
-                                    else (
-                                        json.dumps(plugin_config, default=str, indent=2)
-                                        if plugin_config
-                                        else "N/A"
-                                    )
+                                    json.dumps(plugin_config, default=str, indent=2)
+                                    if plugin_config
+                                    else "N/A"
                                 )
-                            ),
+                            )
                         )
+                        # Enabled may be a bool; Rich requires str cells.
+                        table.add_row(*[str(cell) for cell in row])
                     except Exception as e:
-                        # If we can't instantiate, still show the plugin but note the error
-                        table.add_row(
+                        # If we can't instantiate, still show the plugin but note the
+                        # error. The row must fill every column of the table, so it is
+                        # built from the same column order rather than a fixed 3-arg
+                        # call (the pre-existing bug: a 5- or 7-column table given 3
+                        # cells raised "Not enough columns" and masked the real error).
+                        error_row = [
                             f"{plugin_class_name.lower()} (Error: {str(e)})",
+                            "Unknown",
                             plugin_class_name,
                             plugin_module,
-                        )
+                        ]
+                        if show_version_cols:
+                            error_row.append(_version_label(inventory_entry))
+                            error_row.append(_reachable_label(inventory_entry))
+                        error_row.append("")
+                        table.add_row(*[str(cell) for cell in error_row])
 
             console.print(table)
     except Exception as e:
