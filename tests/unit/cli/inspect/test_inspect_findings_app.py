@@ -5,17 +5,19 @@ searching, action handlers, and the extract_findings utility function.
 Textual rendering internals are not tested.
 """
 
-import pytest
-from unittest.mock import MagicMock, patch
 from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from automated_security_helper.cli.inspect.inspect_findings_app import (
-    FindingsExplorerApp,
     FindingDetailScreen,
+    FindingsExplorerApp,
+    SuppressDialog,
+    _resolve_suppression_config_path,
     extract_findings,
     map_level_to_severity,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -131,6 +133,46 @@ class TestAppInitialization:
     def test_custom_title(self, sample_findings):
         custom = FindingsExplorerApp(sample_findings, title="Custom Title")
         assert custom.title == "Custom Title"
+
+    def test_custom_config_path(self, sample_findings, tmp_path):
+        config_path = tmp_path / ".ash" / ".ash.yaml"
+        custom = FindingsExplorerApp(sample_findings, config_path=config_path)
+        assert custom.config_path == config_path
+
+    def test_default_config_path(self, sample_findings, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        default = FindingsExplorerApp(sample_findings)
+        assert default.config_path == tmp_path / ".ash.yaml"
+
+    def test_suppress_dialog_uses_config_path(
+        self, sample_findings, tmp_path, monkeypatch
+    ):
+        config_path = tmp_path / ".ash" / ".ash.yaml"
+        custom = FindingsExplorerApp(sample_findings, config_path=config_path)
+        table = MagicMock(row_count=1, cursor_row=0)
+        monkeypatch.setattr(custom, "query_one", MagicMock(return_value=table))
+        push_screen = MagicMock()
+        monkeypatch.setattr(custom, "push_screen", push_screen)
+
+        custom.action_suppress_selected()
+
+        dialog = push_screen.call_args.args[0]
+        assert isinstance(dialog, SuppressDialog)
+        assert dialog.config_path == config_path
+
+    def test_suppression_result_names_config_path(
+        self, sample_findings, tmp_path, monkeypatch
+    ):
+        config_path = tmp_path / ".ash" / ".ash.yaml"
+        custom = FindingsExplorerApp(sample_findings, config_path=config_path)
+        status_bar = MagicMock()
+        table = MagicMock(cursor_row=None)
+        query_one = MagicMock(side_effect=[status_bar, table])
+        monkeypatch.setattr(custom, "query_one", query_one)
+
+        custom._on_suppress_result(True)
+
+        status_bar.update.assert_called_once_with(f"Suppression saved to {config_path}")
 
     def test_empty_findings(self, empty_app):
         assert empty_app.findings == []
@@ -784,7 +826,65 @@ class TestExtractFindings:
 # ---------------------------------------------------------------------------
 
 
+class TestSuppressionConfigPath:
+    def test_uses_explicit_path(self, tmp_path):
+        config_path = tmp_path / "custom" / "ash.yaml"
+        assert _resolve_suppression_config_path(config_path) == config_path
+
+    def test_discovers_nested_config(self, tmp_path, monkeypatch):
+        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path.parent.mkdir()
+        config_path.touch()
+        monkeypatch.chdir(tmp_path)
+        assert _resolve_suppression_config_path() == config_path
+
+    def test_prefers_root_config(self, tmp_path, monkeypatch):
+        root_config = tmp_path / ".ash.yaml"
+        root_config.touch()
+        nested_config = tmp_path / ".ash" / ".ash.yaml"
+        nested_config.parent.mkdir()
+        nested_config.touch()
+        monkeypatch.chdir(tmp_path)
+        assert _resolve_suppression_config_path() == root_config
+
+    def test_falls_back_to_root_config(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        assert _resolve_suppression_config_path() == tmp_path / ".ash.yaml"
+
+
 class TestFindingsCommand:
+    @patch(
+        "automated_security_helper.cli.inspect.inspect_findings_app.FindingsExplorerApp"
+    )
+    @patch(
+        "automated_security_helper.cli.inspect.inspect_findings_app.extract_findings"
+    )
+    @patch(
+        "automated_security_helper.cli.inspect.inspect_findings_app.AshAggregatedResults"
+    )
+    def test_command_uses_discovered_config(
+        self, mock_model_cls, mock_extract, mock_app_cls, tmp_path, monkeypatch
+    ):
+        from automated_security_helper.cli.inspect.inspect_findings_app import (
+            findings_command,
+        )
+
+        report_path = tmp_path / "report.json"
+        report_path.write_text("{}")
+        config_path = tmp_path / ".ash" / ".ash.yaml"
+        config_path.parent.mkdir()
+        config_path.write_text("project_name: test")
+        mock_model_cls.load_model.return_value = MagicMock()
+        mock_extract.return_value = [{"rule_id": "TEST"}]
+        monkeypatch.chdir(tmp_path)
+
+        findings_command(output_dir=tmp_path, report_file="report.json")
+
+        mock_app_cls.assert_called_once_with(
+            mock_extract.return_value, config_path=config_path
+        )
+        mock_app_cls.return_value.run.assert_called_once_with()
+
     @patch(
         "automated_security_helper.cli.inspect.inspect_findings_app.AshAggregatedResults"
     )
@@ -857,12 +957,12 @@ class TestFindingsCommand:
     @patch("typer.echo")
     def test_command_handles_none_output_dir(self, mock_echo):
         """Test that findings_command handles None output_dir gracefully."""
+        import os
+        import tempfile
+
         from automated_security_helper.cli.inspect.inspect_findings_app import (
             findings_command,
         )
-
-        import tempfile
-        import os
 
         # Run from a temp directory with no .ash/ash_output
         with tempfile.TemporaryDirectory() as tmpdir:
