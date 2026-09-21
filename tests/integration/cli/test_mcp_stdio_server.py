@@ -191,7 +191,11 @@ def _exchange(
             if isinstance(message, dict) and message.get("id") in expect_ids:
                 answered.add(message["id"])
 
-        process.stdin.close()
+        # Do not close stdin here: communicate() closes it itself (sending EOF
+        # after every response has been read above), and closing it first left
+        # communicate() flushing an already-closed pipe -- "ValueError: flush of
+        # closed file" under Python 3.12, though 3.14 tolerated it, which is why
+        # this passed locally and failed in CI.
         remaining, stderr = process.communicate(timeout=PROCESS_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired:
         process.kill()
