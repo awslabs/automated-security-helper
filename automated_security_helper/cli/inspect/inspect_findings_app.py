@@ -1,27 +1,31 @@
-import typer
 from pathlib import Path
+from typing import Annotated
+
+import typer
 from textual.app import App, ComposeResult
+from textual.binding import Binding
+from textual.containers import (
+    Container,
+    HorizontalGroup,
+    ScrollableContainer,
+    VerticalGroup,
+)
+from textual.screen import ModalScreen, Screen
 from textual.widgets import (
     Button,
     DataTable,
     Footer,
     Header,
-    Static,
-    Select,
     Input,
-    Markdown,
     Label,
+    Markdown,
+    Select,
+    Static,
 )
-from textual.containers import (
-    HorizontalGroup,
-    ScrollableContainer,
-    Container,
-    VerticalGroup,
-)
-from textual.screen import ModalScreen, Screen
-from textual.binding import Binding
 
 from automated_security_helper.config.ash_config import add_suppression_to_config
+from automated_security_helper.config.resolve_config import find_config_file
+from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.core import AshSuppression
 from automated_security_helper.schemas.sarif_schema_model import Result
@@ -335,9 +339,15 @@ class FindingsExplorerApp(App):
     }
     """
 
-    def __init__(self, findings, title="ASH Security Findings"):
+    def __init__(
+        self,
+        findings,
+        title="ASH Security Findings",
+        config_path: Path | None = None,
+    ):
         super().__init__()
         self.title = title
+        self.config_path = config_path or Path.cwd() / ".ash.yaml"
         self.findings = findings
         self.filtered_findings = findings
         self.current_filter = "all"
@@ -522,13 +532,16 @@ class FindingsExplorerApp(App):
             finding_idx = table.cursor_row
             if 0 <= finding_idx < len(self.filtered_findings):
                 finding = self.filtered_findings[finding_idx]
-                self.push_screen(SuppressDialog(finding), self._on_suppress_result)
+                self.push_screen(
+                    SuppressDialog(finding, self.config_path),
+                    self._on_suppress_result,
+                )
 
     def _on_suppress_result(self, result: bool) -> None:
         """Handle the result from the suppression dialog."""
         if result:
             status_bar = self.query_one("#status_bar", Static)
-            status_bar.update("Suppression saved to .ash.yaml")
+            status_bar.update(f"Suppression saved to {self.config_path}")
 
             table = self.query_one("#findings_table", DataTable)
             idx = table.cursor_row
@@ -979,6 +992,11 @@ def map_level_to_severity(level):
         return "info"
 
 
+def _resolve_suppression_config_path(config: Path | None = None) -> Path:
+    """Return the config file that should receive new suppressions."""
+    return config or find_config_file() or Path.cwd() / ".ash.yaml"
+
+
 def findings_command(
     output_dir: Path = typer.Option(
         None,
@@ -988,6 +1006,18 @@ def findings_command(
         "ash_aggregated_results.json",
         help="Name of the report file to analyze. Defaults to 'ash_aggregated_results.json'.",
     ),
+    config: Annotated[
+        Path | None,
+        typer.Option(
+            "--config",
+            "-c",
+            help=(
+                "Path to the configuration file where suppressions should be "
+                f"saved. By default, ASH searches for {ASH_CONFIG_FILE_NAMES}."
+            ),
+            envvar="ASH_CONFIG",
+        ),
+    ] = None,
 ):
     """Interactively explore security findings."""
     # Try to load the model from the output directory
@@ -1031,8 +1061,10 @@ def findings_command(
             typer.echo("No findings to display.")
             return
 
+        config_path = _resolve_suppression_config_path(config)
+
         # Launch the Textual app
-        app = FindingsExplorerApp(findings)
+        app = FindingsExplorerApp(findings, config_path=config_path)
         app.run()
     except Exception as e:
         typer.secho(f"Error loading model or report: {e}", fg="red")
