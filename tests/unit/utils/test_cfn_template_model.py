@@ -63,11 +63,7 @@ class TestGetModelFromTemplate:
     def test_valid_yaml_template(self, tmp_path):
         """A valid YAML CloudFormation template is parsed into a model."""
         template_file = tmp_path / "template.yaml"  # nosec B108
-        template_file.write_text(
-            "Resources:\n"
-            "  MyBucket:\n"
-            "    Type: AWS::S3::Bucket\n"
-        )
+        template_file.write_text("Resources:\n  MyBucket:\n    Type: AWS::S3::Bucket\n")
 
         result = get_model_from_template(template_file)
 
@@ -88,10 +84,51 @@ class TestGetModelFromTemplate:
         """A template with an invalid resource Type pattern returns None."""
         template_file = tmp_path / "bad_type.yaml"  # nosec B108
         template_file.write_text(
-            "Resources:\n"
-            "  Bad:\n"
-            "    Type: 'invalid type with spaces'\n"
+            "Resources:\n  Bad:\n    Type: 'invalid type with spaces'\n"
         )
 
         result = get_model_from_template(template_file)
         assert result is None
+
+    # The parse step used to run above the try that wraps model_validate, so these
+    # inputs raised out of the function rather than being skipped. Both are real files
+    # found in ordinary repositories, which is why they are the cases chosen here: the
+    # scan set is whatever the tree contains, not a curated set of templates.
+    def test_json_with_comments_returns_none(self, tmp_path):
+        """A tsconfig.json-style file with // comments returns None, not ParserError."""
+        template_file = tmp_path / "tsconfig.json"  # nosec B108
+        template_file.write_text(
+            "{\n"
+            "  // comments are legal in tsconfig.json and not in YAML\n"
+            '  "compilerOptions": {"strict": true}\n'
+            "}\n"
+        )
+
+        assert get_model_from_template(template_file) is None
+
+    def test_python_name_tag_returns_none(self, tmp_path):
+        """A mkdocs.yml-style !!python/name: tag returns None, not ConstructorError."""
+        template_file = tmp_path / "mkdocs.yml"  # nosec B108
+        template_file.write_text(
+            "markdown_extensions:\n"
+            "  - pymdownx.emoji:\n"
+            "      emoji_index: !!python/name:material.extensions.emoji.twemoji\n"
+        )
+
+        assert get_model_from_template(template_file) is None
+
+    def test_undecodable_file_returns_none(self, tmp_path):
+        """A file that is not valid UTF-8 returns None rather than UnicodeDecodeError.
+
+        This one fails in the read rather than the parse, which is why the read is
+        inside the try as well -- otherwise it escapes by the route the parse error
+        used to.
+        """
+        template_file = tmp_path / "binary.yaml"  # nosec B108
+        template_file.write_bytes(b"\xff\xfe\x00Resources:\x00")
+
+        assert get_model_from_template(template_file) is None
+
+    def test_missing_file_returns_none(self, tmp_path):
+        """A path that does not exist returns None rather than FileNotFoundError."""
+        assert get_model_from_template(tmp_path / "absent.yaml") is None  # nosec B108
