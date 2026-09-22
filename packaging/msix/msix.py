@@ -1,6 +1,21 @@
 #!/usr/bin/env python3
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+#
+# PEP 723 inline metadata. `uv run --script` reads this block and builds an
+# environment from it that is isolated from any project virtualenv, which is what lets
+# this file take a dependency without packaging depending on ASH's dependency
+# resolution. build.ps1 invokes it as `uv run --script --python 3.13`; both flags are
+# required and neither is redundant. `--script` is what makes this block apply at all --
+# the older `uv run --no-project python msix.py` form ignores it entirely and fails with
+# ModuleNotFoundError. `--python 3.13` is the pin, kept on the command line rather than
+# left to requires-python below, because a floor of ">=3.11" resolves to whatever uv
+# prefers (measured: 3.12.13) and the interpreter choice here is deliberate. The floor is
+# still stated, so running this file by hand cannot pick up a 3.10 that has no tomllib.
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["defusedxml>=0.7,<0.8"]
+# ///
 """Stage and check the ASH MSIX package layout.
 
 Two subcommands:
@@ -54,10 +69,16 @@ is the library that became tomllib. Writing a small TOML reader for 3.10 was the
 alternative and was rejected, because a reader that disagrees with the real one about
 [project.scripts] would make this check quietly wrong rather than absent.
 
-CI invokes this through `uv run --python 3.13 --no-project python`. `--no-project` because
-nothing here needs ASH's dependencies, and `--python 3.13` rather than a bare `python`
-because with no project to resolve, uv would otherwise pick whatever the runner image
-preinstalled, and the Windows images ship a 3.9 that has neither module.
+CI invokes this through `uv run --script --python 3.13`. `--script` reads the PEP 723 block
+at the top of this file and builds an environment from it, which is how the one dependency
+below arrives without packaging resolving ASH's. `--python 3.13` rather than a bare
+`python` because uv would otherwise pick whatever the runner image preinstalled, and the
+Windows images ship a 3.9 that has neither TOML module.
+
+It used to be `uv run --python 3.13 --no-project python`, and that form no longer works:
+`--no-project` with the interpreter named explicitly ignores the PEP 723 block, so the
+defusedxml import below fails with ModuleNotFoundError. If you are editing build.ps1, the
+two invocations there have to keep `--script`.
 """
 
 from __future__ import annotations
@@ -71,6 +92,20 @@ import zlib
 from pathlib import Path
 from xml.etree import ElementTree
 
+# Parsing goes through defusedxml; everything else still comes from the stdlib module
+# above. The split is not stylistic -- defusedxml re-exports only the entry points that
+# read a document, and this file also needs ElementTree.Element for annotations,
+# ElementTree.register_namespace and a tree's own write(), none of which defusedxml
+# provides. ParseError is deliberately still caught off the stdlib module: defusedxml
+# raises that same class, so the existing except clauses keep working unchanged.
+from defusedxml.ElementTree import iterparse, parse
+
+# The 3.10 branch is now unreachable under the supported invocation and is kept anyway.
+# requires-python in the PEP 723 block is ">=3.11", so `uv run --script` cannot hand this
+# file an interpreter without tomllib; and a bare `python3 msix.py` on a 3.10 fails at the
+# defusedxml import above before it ever reaches here. What it still covers is the one case
+# where someone has defusedxml installed on a 3.10 and no tomli -- narrow, but the branch
+# costs two lines and deleting it would change behavior on a path that is not tested.
 if sys.version_info >= (3, 11):
     import tomllib
 else:  # pragma: no cover - exercised only on 3.10
@@ -81,17 +116,34 @@ else:  # pragma: no cover - exercised only on 3.10
             "msix.py needs a TOML reader: tomllib on Python 3.11 or newer, tomli below "
             "that.\n"
             "Run it the way CI does, which pins an interpreter that has one:\n"
-            "  uv run --python 3.13 --no-project python packaging/msix/msix.py validate\n"
+            "  uv run --script --python 3.13 packaging/msix/msix.py validate\n"
             f"(this interpreter is {sys.version_info.major}.{sys.version_info.minor} and "
             "has neither)"
         )
 
-# On xml.etree rather than defusedxml: the only documents this parses are files in this
-# repository, staged by this script from a manifest under version control. There is no path by
-# which untrusted XML reaches it, and stdlib ElementTree does not resolve external entities at
-# all, so the exposure would be entity expansion in a file a reviewer already has to read.
-# Taking a third party dependency to parse it would also break the property that matters more
-# here, which is that this script runs with nothing installed.
+# On defusedxml rather than xml.etree, which reverses what this comment used to say.
+#
+# The documents parsed here are still only files in this repository, staged by this script from
+# a manifest under version control, so the exposure was never large: stdlib ElementTree does not
+# resolve external entities on any Python this runs on, which leaves entity expansion in a file
+# a reviewer already has to read. That argument is why this file carried a B314 suppression
+# rather than a fix.
+#
+# It was fixed instead because the premise the suppression rested on stopped being worth
+# defending, not because the exposure grew. This script used to run with nothing installed, and
+# that property is now gone deliberately: PEP 723 plus `uv run --script` supplies exactly one
+# dependency in an environment isolated from any project virtualenv, so packaging still does not
+# resolve ASH's dependencies. That was the constraint that actually mattered, and it survives.
+#
+# What is bought: entity expansion is refused by the parser rather than argued about in a
+# comment, and this file is scanned to the same verdict under .ash/.ash.yaml and
+# .ash/.ash_community_plugins.yaml. Two configs disagreeing about the same code was the real
+# defect -- the community config never carried this file's suppression, so the four Community
+# Plugins scan legs failed on findings the default config had already accepted.
+#
+# What is paid: staging an MSIX now downloads a wheel. If that is ever unacceptable, the honest
+# reversal is to restore `--no-project`, drop the PEP 723 block, and put the suppression back in
+# BOTH config files -- not to keep the import and hope the fetch succeeds.
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[1]
@@ -202,7 +254,7 @@ def _declared_namespaces(manifest_path: Path) -> dict[str, str]:
     them.
     """
     declarations: dict[str, str] = {}
-    for event, payload in ElementTree.iterparse(str(manifest_path), events=("start-ns",)):
+    for event, payload in iterparse(str(manifest_path), events=("start-ns",)):
         if event == "start-ns":
             prefix, uri = payload
             declarations[prefix] = uri
@@ -223,7 +275,7 @@ def validate_manifest(manifest_path: Path) -> list[str]:
 
     try:
         declarations = _declared_namespaces(manifest_path)
-        tree = ElementTree.parse(str(manifest_path))
+        tree = parse(str(manifest_path))
     except ElementTree.ParseError as error:
         message = str(error)
         # An unbound prefix is the specific corruption worth naming, because it is what
@@ -573,7 +625,7 @@ def _check_alias(
 def validate_layout(manifest_path: Path, layout: Path) -> list[str]:
     """Assertions that need a staged layout rather than only the manifest."""
     failures: list[str] = []
-    root = ElementTree.parse(str(manifest_path)).getroot()
+    root = parse(str(manifest_path)).getroot()
 
     referenced: set[str] = set()
     properties = root.find(_qualify(FOUNDATION, "Properties"))
@@ -745,7 +797,7 @@ def stage(wheel: Path, out: Path, publisher: str | None) -> Path:
     (layout / "wheels").mkdir(parents=True)
     (layout / "assets").mkdir(parents=True)
 
-    tree = ElementTree.parse(str(MANIFEST_PATH))
+    tree = parse(str(MANIFEST_PATH))
     root = tree.getroot()
     identity = root.find(_qualify(FOUNDATION, "Identity"))
     identity.set("Version", quad)

@@ -255,10 +255,14 @@ Write-Host "publisher (from the certificate subject): $publisher"
 
 Write-Host ''
 Write-Host '== 1. stage the layout'
-# uv with a pinned interpreter, and --no-project because this script needs none of ASH's
-# dependencies. A bare `python` here would resolve to whatever the image preinstalled, which
-# on the Windows runner images is a 3.9 with no tomllib.
-& uv run --python 3.13 --no-project python (Join-Path $scriptDirectory 'msix.py') `
+# uv with a pinned interpreter, and --script so the PEP 723 block at the top of msix.py is
+# read and its one dependency (defusedxml) is installed into an environment isolated from any
+# project virtualenv. That isolation is what --no-project used to provide here; --script keeps
+# it while allowing the dependency. Naming the interpreter after `python`, as this line did
+# before, makes uv ignore the PEP 723 block entirely and msix.py then dies on the defusedxml
+# import. The 3.13 pin stays because a bare `python` resolves to whatever the image
+# preinstalled, which on the Windows runner images is a 3.9 with no tomllib.
+& uv run --script --python 3.13 (Join-Path $scriptDirectory 'msix.py') `
     stage --wheel $Wheel --out $OutputDirectory --publisher $publisher
 Assert-LastExitCode 'msix.py stage'
 
@@ -294,7 +298,9 @@ Write-Host '== 3. validate the manifest and the staged layout'
 # The same script a developer runs, and the gate before anything is packed. Everything it
 # checks was observed rejecting a corrupted manifest before being trusted to pass a correct
 # one; see the commit that added it.
-& uv run --python 3.13 --no-project python (Join-Path $scriptDirectory 'msix.py') `
+# --script for the same reason as the stage step above: it is what makes msix.py's PEP 723
+# dependency resolve. Both invocations have to carry it or neither works.
+& uv run --script --python 3.13 (Join-Path $scriptDirectory 'msix.py') `
     validate --manifest (Join-Path $layout 'AppxManifest.xml') --layout $layout
 Assert-LastExitCode 'msix.py validate'
 

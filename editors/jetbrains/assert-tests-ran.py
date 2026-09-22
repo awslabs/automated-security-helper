@@ -58,7 +58,28 @@ from __future__ import annotations
 import argparse
 import pathlib
 import sys
-import xml.etree.ElementTree as ElementTree
+
+# defusedxml rather than xml.etree, and with no fallback deliberately: if it is not importable
+# this gate must stop rather than parse anyway and report a test count. A gate that still says
+# "161 tests ran" after losing its parser is the silent pass this file exists to remove.
+# verify-in-container.sh step 3 provisions it, since gradle:jdk21 ships python3 and no package
+# manager. Only fromstring is needed here, so the stdlib module is no longer imported at all.
+#
+# Exits 1, which is this file's only failure code per the docstring -- it has no separate
+# "could not run" status the way assert-coverage.py does. Verified in the real image: on a
+# gradle:jdk21 with nothing provisioned, a HEALTHY results fixture exits 1 with the message
+# below rather than printing a test count.
+try:
+    from defusedxml.ElementTree import fromstring
+except ImportError:  # pragma: no cover - the message is the whole point
+    sys.exit(
+        "assert-tests-ran.py needs defusedxml and it is not importable.\n"
+        "This gate does not fall back to xml.etree, because a test-count gate that still\n"
+        "reports a count after losing its XML parser is worse than one that stops.\n"
+        "In CI, editors/jetbrains/verify-in-container.sh step 3 fetches the wheel and puts\n"
+        "it on PYTHONPATH. To run this by hand, do that step first, or run the whole\n"
+        "script: bash editors/jetbrains/verify-in-container.sh"
+    )
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -113,10 +134,11 @@ def main(argv: list[str]) -> int:
     tests = failures = errors = skipped = 0
     reported: set[str] = set()
     for path in result_files:
-        # The file was written by Gradle's own test listener moments ago. It is read with the
-        # stdlib parser and no entity handling; assert-coverage.py carries the longer note on
-        # why defusedxml is not a dependency of this directory.
-        root = ElementTree.fromstring(path.read_text(encoding="utf-8"))  # noqa: S314
+        # The file was written by Gradle's own test listener moments ago, so the input is not
+        # untrusted. It is read through defusedxml regardless; assert-coverage.py carries the
+        # longer note on how that dependency reaches this directory, which has no package
+        # manager of its own.
+        root = fromstring(path.read_text(encoding="utf-8"))
         tests += int(root.get("tests", "0"))
         failures += int(root.get("failures", "0"))
         errors += int(root.get("errors", "0"))

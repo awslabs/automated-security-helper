@@ -69,6 +69,33 @@ import subprocess
 import sys
 import xml.etree.ElementTree as ElementTree
 
+# Parsing goes through defusedxml. Only the reading entry point comes from it -- defusedxml
+# does not re-export Element or ParseError, both of which are used below, so the stdlib module
+# above stays imported for those. ParseError is the same class either way, so the except clause
+# in load_report keeps working.
+#
+# The import is at module scope and has no fallback ON PURPOSE. If defusedxml is missing this
+# gate must fail, not quietly parse with xml.etree and report a coverage verdict: a gate that
+# degrades to a no-op when a dependency is unavailable still prints a pass, which is the exact
+# failure this directory's checks exist to remove. verify-in-container.sh step 3 provisions it,
+# because gradle:jdk21 has python3 and no package manager at all.
+#
+# Exit 2, not 1, per the code table in the docstring: this is "could not run its checks at
+# all" rather than "a check failed". Written as a write-then-exit because sys.exit(str) sets
+# the status to 1, which would report a missing parser as an ordinary coverage failure.
+try:
+    from defusedxml.ElementTree import fromstring
+except ImportError:  # pragma: no cover - the message is the whole point
+    sys.stderr.write(
+        "assert-coverage.py needs defusedxml and it is not importable.\n"
+        "This gate does not fall back to xml.etree, because a coverage gate that still\n"
+        "prints a verdict after losing its XML parser is worse than one that stops.\n"
+        "In CI, editors/jetbrains/verify-in-container.sh step 3 fetches the wheel and puts\n"
+        "it on PYTHONPATH. To run the Gradle tasks by hand, do that step first, or run the\n"
+        "whole script: bash editors/jetbrains/verify-in-container.sh\n"
+    )
+    sys.exit(2)
+
 # Kinds a coverage-exclusions.json entry may declare. The kind selects the staleness test, so
 # an unknown kind is a failure rather than a pass with no test run.
 KIND_IDE_GLUE = "ide-glue"
@@ -104,13 +131,17 @@ def load_report(path: pathlib.Path) -> ElementTree.Element:
     # <!DOCTYPE report PUBLIC "-//JACOCO//DTD Report 1.1//EN" ...>, so rejecting every doctype
     # would reject every real report. Both attacks on a stdlib XML parser -- an external
     # entity reference and a recursive internal one -- need an <!ENTITY declaration, and
-    # nothing JaCoCo writes has one. Python 3.9 and later no longer resolve external entities
-    # in xml.etree at all, so this guard is aimed at the expansion attack that remains, and at
-    # the case where this script is pointed at a file that is not a JaCoCo report.
+    # nothing JaCoCo writes has one.
     #
-    # defusedxml would be the usual answer and is not used: this directory has no Python
-    # dependencies and adding one to a script whose only input is a file the build just wrote
-    # would mean a pip install in the CI job to check a local artifact.
+    # KEPT after the parser became defusedxml, which now refuses entities itself. Two reasons
+    # to hold both rather than delete this as redundant. It is a control that works and needs
+    # nothing fetched, so it still holds if the provisioning in verify-in-container.sh is ever
+    # changed or reordered. And the two do not say the same thing: defusedxml raises
+    # EntitiesForbidden, a parser error about a class of document, while this raises Failure
+    # with the sentence a reader needs -- that JaCoCo does not write entities, so this file is
+    # either not a JaCoCo report or has been altered. Measured, so the overlap is not assumed:
+    # defusedxml's ElementTree defaults to forbid_dtd=False and forbid_entities=True, so a real
+    # JaCoCo report with its DOCTYPE parses and a document carrying <!ENTITY does not.
     if "<!ENTITY" in text:
         raise Failure(
             f"{path} declares an XML entity. JaCoCo does not write one, so this is either not "
@@ -118,7 +149,7 @@ def load_report(path: pathlib.Path) -> ElementTree.Element:
         )
 
     try:
-        return ElementTree.fromstring(text)  # noqa: S314
+        return fromstring(text)
     except ElementTree.ParseError as error:
         raise Failure(f"{path} is not parseable XML: {error}") from error
 

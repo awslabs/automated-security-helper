@@ -299,7 +299,11 @@ carries both.
 
 The manifest checks that do not need Windows at all run anywhere:
 
-  uv run --python 3.13 --no-project python packaging/msix/msix.py validate
+  uv run --script --python 3.13 packaging/msix/msix.py validate
+
+`--script` is required, not cosmetic: msix.py carries PEP 723 inline metadata declaring
+defusedxml, and only `--script` reads it. The older `--no-project python msix.py` form
+ignores the block and the script dies on its defusedxml import.
 
 That is the same script build.ps1 runs, rather than a second copy of the same assertions.
 It exists because AppxManifest.xml cannot be schema-validated off Windows: the appx
