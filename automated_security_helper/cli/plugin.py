@@ -128,31 +128,36 @@ def list_plugins(
             "reporters": loaded_plugins.get("reporters", []),
         }
 
-        # When --show-versions is requested, describe each loaded scanner once
-        # through the shared inventory helper (the same path the MCP
-        # list_scanners tool uses, so the two surfaces cannot drift -- issues
-        # #606/#626). Keyed by the class name so each per-class table row can
-        # look up its own version/reachability. Only computed for scanners and
-        # only when asked, keeping the default listing fast.
+        # When --show-versions is requested, describe the loaded scanners through
+        # the SAME shared inventory path the MCP list_scanners tool uses, so the
+        # two surfaces cannot drift (issues #606/#626). list_scanner_inventory
+        # probes in an isolated throwaway context (not the cwd) on purpose:
+        # dependency/version checks ask environment questions ("is this binary on
+        # PATH", "is this module importable"), so pointing the probe at the working
+        # tree would let a stray file change the answer to a deployment question.
+        # The CLI therefore delegates to that isolated path rather than re-probing
+        # against Path.cwd() -- both surfaces now share one probe context, and the
+        # parity test exercises this exact call. Keyed by the scanner's snake_cased
+        # config name so each per-class row can look up its own entry.
         scanner_inventory_by_class: dict = {}
         if show_versions:
             from automated_security_helper.core.scanner_inventory import (
-                describe_scanner,
-            )
-            from automated_security_helper.config.default_config import (
-                get_default_config,
+                list_scanner_inventory,
+                _scanner_name_from_class,
             )
 
-            default_config = get_default_config()
-            for scanner_class in plugin_types["scanners"]:
-                try:
-                    scanner_inventory_by_class[scanner_class] = describe_scanner(
-                        scanner_class, plugin_context, default_config
+            try:
+                inventory = list_scanner_inventory(
+                    scanner_classes_provider=lambda: plugin_types["scanners"]
+                )
+                by_name = {entry.get("name"): entry for entry in inventory}
+                for scanner_class in plugin_types["scanners"]:
+                    scanner_inventory_by_class[scanner_class] = by_name.get(
+                        _scanner_name_from_class(scanner_class)
                     )
-                except Exception as exc:  # pragma: no cover - defensive
-                    logger.debug(
-                        f"Could not describe {getattr(scanner_class, '__name__', scanner_class)}: {exc}"
-                    )
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug(f"Could not build scanner inventory: {exc}")
+                for scanner_class in plugin_types["scanners"]:
                     scanner_inventory_by_class[scanner_class] = None
 
         def _reachable_label(entry) -> str:
@@ -222,15 +227,24 @@ def list_plugins(
                             except AttributeError:
                                 plugin_name = plugin_class_name
 
+                        # Resolve the real enabled state. By this point
+                        # plugin_config has been model_dump()'d to a dict in every
+                        # reachable branch, so `hasattr(plugin_config, "enabled")`
+                        # was always False and the column previously rendered the
+                        # literal "True" for every plugin (incl. disabled ones).
+                        # Read the dict key (or an object attr, defensively),
+                        # falling back to True only when the flag is genuinely
+                        # absent.
+                        if isinstance(plugin_config, dict):
+                            enabled_value = plugin_config.get("enabled", True)
+                        else:
+                            enabled_value = getattr(plugin_config, "enabled", True)
+
                         # Assemble the row in column order. Version/Reachable are
                         # inserted only when the scanner version columns are shown.
                         row = [
                             plugin_name,
-                            (
-                                plugin_config.enabled
-                                if hasattr(plugin_config, "enabled")
-                                else "True"
-                            ),
+                            enabled_value,
                             plugin_class_name,
                             plugin_module,
                         ]

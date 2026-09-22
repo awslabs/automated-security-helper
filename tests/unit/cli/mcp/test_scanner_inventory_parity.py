@@ -21,6 +21,9 @@ class _StubConfig:
         self.name = name
         self.enabled = enabled
 
+    def model_dump(self):
+        return {"name": self.name, "enabled": self.enabled}
+
 
 class _StubScanner:
     offline_strategy = None
@@ -28,7 +31,7 @@ class _StubScanner:
     _satisfied = True
     _version = None
 
-    def __init__(self, context=None):
+    def __init__(self, context=None, config=None):
         self.config = _StubConfig(self._name)
         self.tool_version = self._version
 
@@ -91,3 +94,82 @@ class TestMcpAndSharedHelperAgree:
         assert set(entries) == {"solo"}
         assert entries["solo"]["version"] == "3.3.3"
         assert entries["solo"]["dependencies_satisfied"] is True
+
+
+class TestCliUsesTheSameIsolatedInventoryPath:
+    """The CLI's --show-versions path must delegate to list_scanner_inventory,
+    not re-probe against Path.cwd(). This closes the drift the reviewer flagged:
+    the parity guard now exercises the CLI surface, not only MCP-vs-shared.
+    """
+
+    def test_cli_show_versions_matches_shared_inventory(self, monkeypatch):
+        from typer.testing import CliRunner
+        from unittest.mock import patch
+        from automated_security_helper.cli.plugin import plugin_app
+
+        classes = [
+            _stub("alpha", _version="1.0.0", _satisfied=True),
+            _stub("beta", _version="2.0.0", _satisfied=False),
+        ]
+
+        # Ground truth: the isolated shared inventory for this scanner set.
+        expected = {
+            e["name"]: e
+            for e in scanner_inventory.list_scanner_inventory(
+                scanner_classes_provider=lambda: list(classes)
+            )
+        }
+
+        # The CLI loads scanners via load_plugins; feed it the same stub set and
+        # render the --show-versions table.
+        with patch(
+            "automated_security_helper.cli.plugin.load_plugins"
+        ) as mock_load:
+            mock_load.return_value = {
+                "scanners": list(classes),
+                "converters": [],
+                "reporters": [],
+            }
+            result = CliRunner().invoke(plugin_app, ["--show-versions"])
+
+        assert result.exit_code == 0
+        out = result.output
+        # Each scanner's shared-inventory version + reachability must be exactly
+        # what the CLI rendered (so the two surfaces cannot report differently).
+        for name, entry in expected.items():
+            version_label = entry.get("version") or "Unknown"
+            assert version_label in out, f"{name} version {version_label!r} missing"
+        # alpha satisfied -> Yes present; beta unsatisfied -> No present.
+        assert "Yes" in out
+        assert "No" in out
+
+    def test_cli_delegates_to_list_scanner_inventory(self, monkeypatch):
+        """The CLI must call the shared isolated inventory, not build its own
+        cwd-based context. Assert list_scanner_inventory is the invoked path."""
+        from typer.testing import CliRunner
+        from unittest.mock import patch
+        from automated_security_helper.cli.plugin import plugin_app
+
+        classes = [_stub("alpha", _version="1.0.0", _satisfied=True)]
+        called = {"n": 0}
+        real = scanner_inventory.list_scanner_inventory
+
+        def _tracking(*args, **kwargs):
+            called["n"] += 1
+            return real(*args, **kwargs)
+
+        with patch(
+            "automated_security_helper.cli.plugin.load_plugins"
+        ) as mock_load, patch(
+            "automated_security_helper.core.scanner_inventory.list_scanner_inventory",
+            _tracking,
+        ):
+            mock_load.return_value = {
+                "scanners": list(classes),
+                "converters": [],
+                "reporters": [],
+            }
+            result = CliRunner().invoke(plugin_app, ["--show-versions"])
+
+        assert result.exit_code == 0
+        assert called["n"] == 1, "CLI did not delegate to list_scanner_inventory"

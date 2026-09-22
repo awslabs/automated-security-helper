@@ -155,6 +155,32 @@ class TestShowVersionsColumns:
         assert result.exit_code == 0
         assert "Unknown" in result.output
 
+    def test_disabled_scanner_renders_false_in_enabled_column(self):
+        """Regression for the always-"True" Enabled bug: by row-build time the
+        plugin config has been model_dump()'d to a dict, so the old
+        `hasattr(plugin_config, "enabled")` was always False and every plugin
+        rendered "True". A disabled scanner must render its real state.
+        """
+
+        class _DisabledConfig(_StubConfig):
+            def __init__(self):
+                super().__init__("disabled_one", enabled=False)
+
+        disabled = type(
+            "DisabledOneScanner",
+            (_StubScanner,),
+            {
+                "_name": "disabled_one",
+                "__init__": lambda self, context=None, config=None: setattr(
+                    self, "config", _DisabledConfig()
+                )
+                or setattr(self, "tool_version", None),
+            },
+        )
+        result = _run_list(["--no-color"], [disabled])
+        assert result.exit_code == 0
+        assert "False" in result.output
+
     def test_uninstantiable_scanner_does_not_crash_the_table(self):
         """The pre-existing add_row arity bug: an error row must fill every column.
 
