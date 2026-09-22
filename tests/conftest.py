@@ -3,6 +3,7 @@
 import logging
 import os
 import sys
+import tempfile
 import pytest
 from pathlib import Path
 from typing import List, Literal
@@ -13,8 +14,123 @@ from tests.utils.helpers import get_ash_temp_path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
+def _isolate_jsii_package_cache_per_worker() -> str | None:
+    """Give each xdist worker its own jsii package cache, and say which one.
+
+    THE RACE THIS REMOVES. jsii caches an extracted assembly under a per-user
+    directory and takes a lockfile while extracting. ``Entry.retrieve`` only locks
+    on a cache *miss*, and holds the lock for the whole extraction --
+    ``aws-cdk-lib`` is 7,457 files and about 133 MB. Its waiter, ``lockSyncWithWait``,
+    retries 12 times with randomized backoff and then rethrows, so roughly 13 s
+    expected and 26 s worst case. Two workers that each boot a kernel can therefore
+    collide on one cache entry and the loser dies with
+
+        EEXIST: file already exists, open
+        '...\\AWS\\jsii\\package-cache\\aws-cdk-lib\\<version>\\<sha>.lock'
+
+    Measured across the 600 most recent CI runs: zero occurrences in 1,772 decided
+    Windows unit-test legs while exactly one test booted a kernel, then 12 across 583
+    once a second one did. Separate roots mean there is no shared lockfile to
+    contend for, so the failure is unreachable rather than merely unlikely.
+
+    WHAT WAS NOT SHOWN. The race does not reproduce on Linux. With the guard removed,
+    a cold cache and up to three booting tests sharing one root under -n 4, no EEXIST
+    ever appeared: extraction finishes in about three seconds here, far inside the
+    retry budget, so the loser waits and then gets its hit. The guard is therefore
+    justified structurally -- distinct roots mean there is no shared lockfile to
+    contend for -- and by the CI rates above, not by reproducing a failure locally and
+    then preventing it. Anyone re-testing this on Linux should expect green either
+    way and not read that as the guard being unnecessary.
+
+    WHY IT IS NOT PLATFORM-GATED. Only Windows has been observed failing, but jsii's
+    lock path carries no platform branch -- the sole ``process.platform`` checks in
+    that module write ``.nobackup``/``.noindex`` on darwin and sweep ``.DS_Store``.
+    The bounded retry budget is identical everywhere; Windows loses because creating
+    7,457 files there is slow enough to exhaust it. Gating this to Windows would
+    leave the same defect reachable on macOS and Linux to save nothing, because:
+
+    WHAT IT COSTS, MEASURED. Extraction happens only when a kernel actually boots, so
+    the bill is (workers that boot) x extraction, not (workers) x extraction. Measured
+    on Linux with a cold cache under -n 4, one extraction being 163,654,045 bytes:
+
+        booters   guard    bytes written   per-worker roots created
+        0         on                   0   none
+        1         on         163,654,045   1
+        2         on         327,308,090   2
+        1 or 2    off        163,654,045   n/a, one shared root
+
+    So with no eager import anywhere the guard writes nothing and creates no
+    directory -- measured across the whole unit suite, 7,734 tests, zero bytes. With
+    one booter it costs the same single extraction as no guard at all. Only two or
+    more booting workers pay a multiple, and that is precisely the case which is
+    otherwise an intermittent failure. Note the multiplier counts booting *workers*,
+    not booting tests: three booters produced two roots in one run because two landed
+    on the same worker.
+
+    WHERE IT ACTUALLY COSTS SOMETHING: the integration invocation. CI runs
+    tests/integration/scanners/test_cdk_nag_real_pack.py as a second, separate pytest
+    step, and all 11 of its tests boot a real kernel, because you cannot double the
+    thing you are integration-testing. That step inherits ``-n auto`` -- it passes no
+    ``-n`` of its own -- so on windows-latest its 11 tests spread over 4 workers and
+    every one of them extracts. Measured at ``-n 4``:
+
+        guard   wall clock   bytes written   extracting roots   result
+        on            7.7s     748,018,196   4                  11 passed
+        off           7.5s     187,004,549   1                  11 passed
+
+    Four times the bytes and, within noise, the same wall clock -- because the four
+    extractions run concurrently on separate roots, where today one extracts and three
+    wait out the same duration and sometimes exhaust the budget instead. This is the
+    step whose Windows legs fail, and neither removing nor doubling booters can help
+    it, so it is the case this guard exists for.
+
+    A caution on scale, since the cost tracks worker count and ``-n auto`` ties that to
+    core count: on a 192-core host the same file produced 192 worker roots and 2.2 GB.
+    If this ever runs on a large self-hosted runner, cap the workers for that step.
+
+    Returns the root it set, or ``None`` when it deliberately set nothing.
+    """
+    # xdist sets this in each worker before pytest_configure runs; the controller
+    # has neither it nor config.workerinput, and runs no tests. A plain pytest run,
+    # -n 0, or -p no:xdist likewise has no worker id -- and needs none, because one
+    # process cannot race itself. Leave jsii's own default alone in that case rather
+    # than inventing a root named after an empty string.
+    worker = (os.environ.get("PYTEST_XDIST_WORKER") or "").strip()
+    if not worker:
+        return None
+
+    # Honor an explicitly chosen location by isolating *within* it, so this does not
+    # silently relocate a cache someone pointed somewhere deliberately.
+    configured = (os.environ.get("JSII_RUNTIME_PACKAGE_CACHE_ROOT") or "").strip()
+    if configured:
+        base = Path(configured)
+    else:
+        # tempfile.gettempdir() rather than a per-platform user cache path: it needs
+        # no platform branching to rot, it is per-user on Windows, it sits outside
+        # the checkout so neither the repo nor ASH's own self-scan grows by 133 MB a
+        # worker, and jsii itself falls back to a tmpdir root, so this is a shape it
+        # already supports. The trade is that a /tmp sweep makes the cache cold.
+        # That costs nothing in CI, where the runner is fresh and this cache is not
+        # restored between runs anyway, and only costs a local re-extraction.
+        base = Path(tempfile.gettempdir()) / "ash-jsii-package-cache"
+
+    # Deliberately not created here. jsii's DiskCache.inDirectory already does a
+    # recursive mkdir, and only on the extraction path, so leaving creation to it
+    # keeps the no-booter case at literally zero directories and zero bytes rather
+    # than four empty directories per run.
+    root = base / worker
+    os.environ["JSII_RUNTIME_PACKAGE_CACHE_ROOT"] = str(root)
+    return str(root)
+
+
 def pytest_configure(config):
     """Configure pytest for ASH tests."""
+    # Must happen before anything imports a jsii-backed package. pytest_configure is
+    # the earliest per-worker hook, and collection -- which imports test modules --
+    # runs after it. jsii reads this variable in the Node runtime it spawns, so it
+    # only has to be set before the first kernel starts.
+    _isolate_jsii_package_cache_per_worker()
+
     # Register custom markers
     config.addinivalue_line(
         "markers", "unit: Unit tests that test individual components in isolation"
@@ -516,3 +632,109 @@ def dummy_converter(test_plugin_context, dummy_converter_config):
         config=dummy_converter_config, context=test_plugin_context
     )
     return converter
+
+
+@pytest.fixture
+def no_cdk_kernel(monkeypatch):
+    """Let a unit test call into ``cdk_nag_wrapper`` without booting a jsii kernel.
+
+    WHY THIS EXISTS. ``run_cdk_nag_against_cfn_template`` opens with ``import
+    cdk_nag``, then ``from aws_cdk import ...``, before it touches any argument or
+    helper. Both are real jsii packages, so importing them starts a Node kernel that
+    extracts the ``aws-cdk-lib`` assembly -- 7,457 files, ~133 MB -- into a per-user
+    cache under a lock. Patching a collaborator like ``get_model_from_template``
+    happens far too late to prevent that; the imports have already run.
+
+    WHAT THAT COSTS. jsii holds the cache lock for the whole extraction and its
+    waiter gives up after 12 randomised retries (~13 s expected, ~26 s worst case).
+    On Windows CI the suite runs under ``-n auto`` = 4 workers, so two tests that
+    each boot a kernel can land on different workers, race the same cache entry, and
+    the loser dies with ``EEXIST ... aws-cdk-lib/<version>/<sha>.lock``. That was
+    measured: zero occurrences across 1,772 Windows legs while exactly one test
+    booted a kernel, then 12 occurrences once a second one did.
+
+    SO: any test that calls into the wrapper but is not testing real cdk-nag
+    behaviour should request this fixture. It installs doubles under the names the
+    wrapper imports, which is the only thing that stops the import.
+
+    NOT A BEHAVIOUR HARNESS. These doubles carry just enough shape to get past the
+    import block and the ``WrapperStack`` class body. Tests that exercise what the
+    wrapper *does* -- synth, nag packs, report parsing -- want the far richer
+    ``cdk_doubles`` in ``tests/unit/utils/test_cdk_nag_wrapper_behavior.py``, which
+    mirrors the real cdk-nag 3.x signatures on purpose. Do not grow this one into
+    that; pick the right one.
+    """
+    import types
+
+    class _Stack:
+        """Subclassable: the wrapper declares ``class WrapperStack(Stack)``."""
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+    class _App:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    class _Validations:
+        @staticmethod
+        def of(_scope):
+            raise AssertionError(
+                "no_cdk_kernel is import-level only; a test that reaches synth "
+                "wants cdk_doubles instead"
+            )
+
+    class _CfnInclude:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    class _Construct:
+        pass
+
+    aws_cdk = types.ModuleType("aws_cdk")
+    aws_cdk.App = _App
+    aws_cdk.Stack = _Stack
+    aws_cdk.Validations = _Validations
+
+    cfn_include = types.ModuleType("aws_cdk.cloudformation_include")
+    cfn_include.CfnInclude = _CfnInclude
+    aws_cdk.cloudformation_include = cfn_include
+
+    constructs = types.ModuleType("constructs")
+    constructs.Construct = _Construct
+
+    # No NagPack attribute: get_nag_packs() is defined but not called on the paths
+    # this fixture is for, and leaving it absent makes a test that does reach it
+    # fail loudly rather than pass against a silently wrong double.
+    cdk_nag = types.ModuleType("cdk_nag")
+
+    doubles = {
+        "cdk_nag": cdk_nag,
+        "aws_cdk": aws_cdk,
+        "aws_cdk.cloudformation_include": cfn_include,
+        "constructs": constructs,
+    }
+    for name, module in doubles.items():
+        monkeypatch.setitem(sys.modules, name, module)
+
+    # Snapshot AFTER the doubles are in place, so the doubles themselves do not read
+    # as newly imported. Compared against a snapshot rather than asserting the names
+    # are simply absent, because another test sharing this xdist worker may already
+    # have imported them for its own reasons -- only what the test under
+    # measurement causes should be able to fail its assertion.
+    installed = set(sys.modules)
+
+    def newly_imported_cdk() -> set:
+        """Real jsii-backed module names imported since this fixture ran."""
+        return {
+            name
+            for name in set(sys.modules) - installed
+            if name == "jsii"
+            or name.startswith(("jsii.", "aws_cdk", "cdk_nag", "constructs"))
+        }
+
+    ns = types.SimpleNamespace(
+        **{k.replace(".", "_"): v for k, v in doubles.items()},
+    )
+    ns.newly_imported_cdk = newly_imported_cdk
+    return ns

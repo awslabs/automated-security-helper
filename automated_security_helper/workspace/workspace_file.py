@@ -69,7 +69,7 @@ one that matters:
 2. The wording is version-dependent: Python 3.10 says ``embedded null byte``
    and 3.13 says ``lstat: embedded null character in path``. Anything asserting
    on it passes on one supported interpreter and fails on another. This project
-   supports 3.10 through 3.13, so no behaviour may rest on pathlib's handling of
+   supports 3.10 through 3.14, so no behaviour may rest on pathlib's handling of
    an unusual input; such inputs are decided from the raw string, where the
    answer is the same everywhere.
 

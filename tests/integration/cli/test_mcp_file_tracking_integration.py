@@ -170,11 +170,14 @@ async def test_file_based_tracking_workflow(test_directory, mock_scan_process):
                             "message": {"text": "Hardcoded password found"},
                             "locations": [
                                 {
+                                    # No "root" wrapper. That is how a pydantic RootModel
+                                    # serializes, not how SARIF is shaped, and
+                                    # AshAggregatedResults rejects it: physicalLocation
+                                    # matches neither variant, so parsing the file failed
+                                    # with four validation errors.
                                     "physicalLocation": {
-                                        "root": {
-                                            "artifactLocation": {"uri": "test.py"},
-                                            "region": {"startLine": 1, "endLine": 1},
-                                        }
+                                        "artifactLocation": {"uri": "test.py"},
+                                        "region": {"startLine": 1, "endLine": 1},
                                     }
                                 }
                             ],
@@ -200,13 +203,29 @@ async def test_file_based_tracking_workflow(test_directory, mock_scan_process):
     assert progress_result["is_complete"] is True
     assert progress_result["status"] == "completed"
 
-    # Get scan results
-    results = await mcp_get_scan_results(scan_id)
-    assert results["scan_id"] == scan_id
+    # Get scan results. This takes an absolute output directory, not a scan id --
+    # it locates a scan by directory, which is the whole point of file-based
+    # tracking. Passing scan_id here tripped the absolute-path guard, so the call
+    # returned an error response and every assertion below it was unreachable.
+    results = await mcp_get_scan_results(str(output_dir))
     assert results["status"] == "completed"
     assert results["is_complete"] is True
-    assert results["findings_count"] == 1
-    assert results["severity_counts"]["HIGH"] == 1
+
+    # The returned scan_id is minted as scan-<timestamp> by get_scan_results,
+    # which says so in its own docstring: locating a scan by directory cannot
+    # recover the id it was registered under. So this asserts the shape, and
+    # asserts it is NOT the caller's id, which is the part that would silently
+    # start passing if someone later threaded scan_id through.
+    assert results["scan_id"].startswith("scan-")
+    assert results["scan_id"] != scan_id
+
+    # Findings come back under summary_stats, with lowercase severity keys. The
+    # fixture above declares two scanners contributing one HIGH and one MEDIUM,
+    # so the totals are 2 and 1 -- the previous findings_count == 1 disagreed
+    # with this test's own fixture.
+    assert results["summary_stats"]["total"] == 2
+    assert results["summary_stats"]["severity_counts"]["high"] == 1
+    assert results["summary_stats"]["severity_counts"]["medium"] == 1
 
     # List active scans
     active_scans = await mcp_list_active_scans()

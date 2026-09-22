@@ -61,7 +61,18 @@ def test_checkov_scanner_uv_tool_integration(test_plugin_context):
         # Test version detection
         version = scanner._get_uv_tool_version("checkov")
         assert version == "3.2.0"
-        mock_runner_instance.get_tool_version.assert_called_with("checkov")
+        # Asserted against the scanner's own ``--from`` spec rather than a
+        # literal, so a version-constraint bump does not break this test while
+        # still pinning the property #426 and #549 added: the probe must run under
+        # the same ``--from`` environment the scan will use. ``uv tool run checkov``
+        # and ``uv tool run --from '<spec>' checkov`` resolve to different
+        # environments, and stevedore's entry-point cache is keyed on
+        # ``sys.executable``/``sys.prefix``, so probing the wrong one leaves the
+        # scan's cache cold. The bare-name assertion this replaces could not tell
+        # those two invocations apart.
+        mock_runner_instance.get_tool_version.assert_called_with(
+            "checkov", scanner._uv_from_spec()
+        )
 
     # Test validation with UV tool available
     with unittest.mock.patch(
@@ -73,15 +84,51 @@ def test_checkov_scanner_uv_tool_integration(test_plugin_context):
 
         assert scanner.validate_plugin_dependencies() is True
 
-    # Test validation with UV tool unavailable
-    with unittest.mock.patch(
-        "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner"
-    ) as mock_runner:
+    # Test validation with UV tool unavailable AND no direct binary.
+    #
+    # Both halves are required. When UV is missing the scanner defers to
+    # ``get_uv_tool_command`` for a directly installed binary and returns True if it
+    # finds one, so "UV unavailable" alone does not mean validation fails -- this
+    # assertion passed only on a host with no checkov on PATH, and failed wherever
+    # checkov was installed. ``get_uv_tool_command`` is patched in the scanner's own
+    # module because checkov_scanner binds the name at import time; patching
+    # ``uv_tool_runner.get_uv_tool_command`` would not affect that binding.
+    with (
+        unittest.mock.patch(
+            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner"
+        ) as mock_runner,
+        unittest.mock.patch(
+            "automated_security_helper.plugin_modules.ash_builtin.scanners."
+            "checkov_scanner.get_uv_tool_command",
+            return_value=None,
+        ),
+    ):
         mock_runner_instance = unittest.mock.MagicMock()
         mock_runner.return_value = mock_runner_instance
         mock_runner_instance.is_uv_available.return_value = False
 
         assert scanner.validate_plugin_dependencies() is False
+
+    # And the fallback itself: UV unavailable but a direct binary present means
+    # validation passes with use_uv_tool switched off. Without this case the branch
+    # above could be satisfied by the scanner never consulting the resolver at all.
+    with (
+        unittest.mock.patch(
+            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner"
+        ) as mock_runner,
+        unittest.mock.patch(
+            "automated_security_helper.plugin_modules.ash_builtin.scanners."
+            "checkov_scanner.get_uv_tool_command",
+            return_value="/usr/local/bin/checkov",
+        ),
+    ):
+        mock_runner_instance = unittest.mock.MagicMock()
+        mock_runner.return_value = mock_runner_instance
+        mock_runner_instance.is_uv_available.return_value = False
+
+        assert scanner.validate_plugin_dependencies() is True
+        assert scanner.use_uv_tool is False
+        scanner.use_uv_tool = True  # restore for any later assertion
 
 
 def test_checkov_scanner_configure(test_plugin_context):
@@ -170,9 +217,19 @@ def test_process_config_options_skip_paths(test_plugin_context):
     )
     scanner._process_config_options()
 
-    # Check that skip path arguments were added
+    # checkov takes the value joined to the flag, so the arg is
+    # ``--skip-path=tests/*`` and the bare string ``--skip-path`` is never a
+    # member. Asserting on the configured paths instead of on the flag name is
+    # what this test was for: a flag present with the wrong paths, or with none,
+    # used to pass.
     skip_args = [arg.key for arg in scanner.args.extra_args]
-    assert "--skip-path" in skip_args
+    assert any(a.startswith("--skip-path=") for a in skip_args), (
+        f"no --skip-path argument was emitted at all: {skip_args}"
+    )
+    for configured in ("tests/*", "examples/*"):
+        assert f"--skip-path={configured}" in skip_args, (
+            f"configured skip path {configured!r} did not reach checkov: {skip_args}"
+        )
 
 
 def test_checkov_scanner_scan(test_checkov_scanner, test_data_dir):

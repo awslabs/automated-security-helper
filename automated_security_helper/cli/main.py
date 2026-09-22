@@ -304,4 +304,8 @@ def run_ashv3():
 
 
 if __name__ == "__main__":
-    run_app()
+    # Routed through the console scripts' entry point so running this file
+    # directly gets the same guaranteed-diagnosable failure path they do.
+    from automated_security_helper.cli.entrypoint import main
+
+    main()

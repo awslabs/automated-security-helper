@@ -7,6 +7,14 @@ Integration tests for concurrent scan execution.
 
 This module tests the behavior of the scan workflow when multiple scans
 are running concurrently, ensuring proper isolation and resource management.
+
+The fixture writes the aggregated results schema ASH actually produces --
+``scanner_results`` keyed by scanner name plus ``metadata.summary_stats``. It
+previously wrote ``{"findings": [...], "scanners_completed": [...]}``, which
+``AshAggregatedResults`` has never had; with ``extra="ignore"`` every one of
+those keys was dropped on load, so the isolation assertions below were comparing
+two identically empty models. See test_scan_workflow_integration.py for the
+fuller account.
 """
 
 import json
@@ -31,6 +39,42 @@ from automated_security_helper.core.resource_management.scan_management import (
 from automated_security_helper.core.resource_management.scan_tracking import (
     get_scan_results,
 )
+
+# The buckets extract_findings_summary counts into; anything else is dropped.
+SEVERITY_BUCKETS = ("critical", "high", "medium", "low", "info", "suppressed")
+
+
+def severity_counts(findings):
+    """Bucket findings by severity the way extract_findings_summary does."""
+    counts = {bucket: 0 for bucket in SEVERITY_BUCKETS}
+    for finding in findings:
+        bucket = finding.get("severity", "").lower()
+        if bucket in counts:
+            counts[bucket] += 1
+    return counts
+
+
+def write_aggregated_results(output_dir, scanner_results):
+    """Write an ash_aggregated_results.json that AshAggregatedResults accepts."""
+    totals = {bucket: 0 for bucket in SEVERITY_BUCKETS}
+    actionable = 0
+    for info in scanner_results.values():
+        actionable += info.get("finding_count", 0)
+        for bucket, count in info.get("severity_counts", {}).items():
+            if bucket in totals:
+                totals[bucket] += count
+
+    with open(output_dir / "ash_aggregated_results.json", "w") as handle:
+        json.dump(
+            {
+                "scanner_results": scanner_results,
+                "metadata": {
+                    "summary_stats": {"actionable": actionable, **totals},
+                    "generated_at": datetime.now().isoformat(),
+                },
+            },
+            handle,
+        )
 
 
 @pytest.fixture
@@ -83,6 +127,8 @@ def mock_scan_process():
         scanners_dir = output_dir / "scanners"
         scanners_dir.mkdir(exist_ok=True)
 
+        scanner_results = {}
+
         # Create scanner result files
         for i in range(scanner_count):
             scanner_name = f"scanner{i + 1}"
@@ -118,49 +164,25 @@ def mock_scan_process():
             with open(result_file, "w") as f:
                 json.dump(result_data, f)
 
+            scanner_results[scanner_name] = {
+                "status": "FAILED" if findings else "PASSED",
+                "finding_count": len(findings),
+                "severity_counts": severity_counts(findings),
+            }
+
             # Simulate scan duration with some variability
             time.sleep(duration * (0.8 + (i * 0.1)))
 
-        # Create aggregated results file
-        all_findings = []
-        scanners_completed = []
-
-        for i in range(scanner_count):
-            scanner_name = f"scanner{i + 1}"
-            scanners_completed.append(scanner_name)
-
-            # Read scanner findings
-            scanner_result_file = (
-                scanners_dir / scanner_name / "source" / "ASH.ScanResults.json"
-            )
-            with open(scanner_result_file, "r") as f:
-                scanner_data = json.load(f)
-                all_findings.extend(scanner_data["findings"])
-
-        # Add an error if requested
+        # A scanner that ran and errored. It is reported, but it is not a
+        # completed scanner, so it stays out of total_scanners.
         if with_errors:
-            all_findings.append(
-                {
-                    "id": "error-1",
-                    "severity": "HIGH",
-                    "scanner": "error_scanner",
-                    "message": "Test error finding",
-                    "file": "app.py",
-                    "line": 10,
-                    "error": True,
-                }
-            )
-            scanners_completed.append("error_scanner")
+            scanner_results["error_scanner"] = {
+                "status": "ERROR",
+                "finding_count": 1,
+                "severity_counts": severity_counts([{"severity": "HIGH"}]),
+            }
 
-        # Write aggregated results file
-        aggregated_data = {
-            "findings": all_findings,
-            "scanners_completed": scanners_completed,
-            "completion_time": datetime.now().isoformat(),
-        }
-
-        with open(output_dir / "ash_aggregated_results.json", "w") as f:
-            json.dump(aggregated_data, f)
+        write_aggregated_results(output_dir, scanner_results)
 
     return create_mock_scan_results
 
@@ -189,6 +211,10 @@ class TestConcurrentScansIntegration:
             # Mark as running
             registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
 
+        # Scanner counts per scan, matching the submissions below, so the
+        # expectations are not magic numbers.
+        expected_scanner_counts = [2, 3, 1, 4, 2]
+
         # Start background tasks to create mock scan results with different parameters
         with ThreadPoolExecutor(max_workers=5) as executor:
             # Run the mock scan processes in separate threads with different parameters
@@ -210,14 +236,17 @@ class TestConcurrentScansIntegration:
                 ),
             ]
 
-            # Check active scans while they're running
-            active_scans = await list_active_scans()
-            assert len(active_scans) == 5
+            # Check active scans while they're running. The registry is a module
+            # level singleton shared with every other test in this process, so
+            # these assert on this test's own scan IDs rather than on a global
+            # count that any sibling test can move.
+            active_ids = {scan["scan_id"] for scan in await list_active_scans()}
+            assert set(scan_ids) <= active_ids
 
             # Check scan statistics
             stats = await get_scan_statistics()
-            assert stats["total_scans"] == 5
-            assert stats["active_scans"] == 5
+            assert stats["total_scans"] >= 5
+            assert stats["active_scans"] >= 5
 
             # Check progress of each scan while they're running
             for scan_id in scan_ids:
@@ -236,31 +265,31 @@ class TestConcurrentScansIntegration:
             assert progress["status"] == "completed"
             assert progress["is_complete"] is True
 
-            # Get scan results
-            results = get_scan_results(scan_id, output_directories[i])
-            assert results["scan_id"] == scan_id
+            # Get scan results. get_scan_results reads a directory, so it mints
+            # its own ID rather than reporting the registry's.
+            results = get_scan_results(output_directories[i])
+            assert results["scan_id"].startswith("scan-")
             assert results["status"] == "completed"
             assert results["is_complete"] is True
 
-            # Verify results are isolated between scans
-            if i == 2 or i == 4:  # Scans with errors
-                error_findings = [
-                    f for f in results["findings"] if f.get("error", False)
-                ]
-                assert len(error_findings) > 0
+            # Each scan sees only its own scanners, and an errored scanner is
+            # reported without counting as completed.
+            scanner_results = results["raw_results"]["scanner_results"]
+            assert results["total_scanners"] == expected_scanner_counts[i]
+            if i in (2, 4):  # Scans with an errored scanner
+                assert scanner_results["error_scanner"]["status"] == "ERROR"
+                assert len(scanner_results) == expected_scanner_counts[i] + 1
             else:
-                error_findings = [
-                    f for f in results["findings"] if f.get("error", False)
-                ]
-                assert len(error_findings) == 0
+                assert "error_scanner" not in scanner_results
+                assert len(scanner_results) == expected_scanner_counts[i]
 
         # Clean up all scans
         for scan_id in scan_ids:
             await cleanup_scan_resources(scan_id, remove_output=True)
 
         # Verify all scans were cleaned up
-        active_scans = await list_active_scans()
-        assert len(active_scans) == 0
+        active_ids = {scan["scan_id"] for scan in await list_active_scans()}
+        assert active_ids.isdisjoint(scan_ids)
 
     @pytest.mark.asyncio
     async def test_concurrent_scan_cancellation(
@@ -399,44 +428,53 @@ class TestConcurrentScansIntegration:
         with open(source_dir2 / "ASH.ScanResults.json", "w") as f:
             json.dump(result_data2, f)
 
-        # Create aggregated results for both scans
-        aggregated_data1 = {
-            "findings": result_data1["findings"],
-            "scanners_completed": ["scanner1"],
-            "completion_time": datetime.now().isoformat(),
-        }
-        with open(output_directories[0] / "ash_aggregated_results.json", "w") as f:
-            json.dump(aggregated_data1, f)
-
-        aggregated_data2 = {
-            "findings": result_data2["findings"],
-            "scanners_completed": ["scanner1"],
-            "completion_time": datetime.now().isoformat(),
-        }
-        with open(output_directories[1] / "ash_aggregated_results.json", "w") as f:
-            json.dump(aggregated_data2, f)
+        # Create aggregated results for both scans. Both scans name their
+        # scanner "scanner1", so anything shared between the two directories
+        # would show up as one scan reporting the other's severities.
+        write_aggregated_results(
+            output_directories[0],
+            {
+                "scanner1": {
+                    "status": "FAILED",
+                    "finding_count": 1,
+                    "severity_counts": severity_counts(result_data1["findings"]),
+                }
+            },
+        )
+        write_aggregated_results(
+            output_directories[1],
+            {
+                "scanner1": {
+                    "status": "FAILED",
+                    "finding_count": 1,
+                    "severity_counts": severity_counts(result_data2["findings"]),
+                }
+            },
+        )
 
         # Check progress of both scans
         progress1 = await check_scan_progress(scan_id1)
         progress2 = await check_scan_progress(scan_id2)
 
-        # Verify isolation of results
+        # Verify isolation of results. severity_counts uses lowercase buckets.
         assert progress1["total_findings"] == 1
         assert progress2["total_findings"] == 1
-        assert progress1["severity_counts"]["CRITICAL"] == 1
-        assert progress1["severity_counts"]["HIGH"] == 0
-        assert progress2["severity_counts"]["CRITICAL"] == 0
-        assert progress2["severity_counts"]["HIGH"] == 1
+        assert progress1["severity_counts"]["critical"] == 1
+        assert progress1["severity_counts"]["high"] == 0
+        assert progress2["severity_counts"]["critical"] == 0
+        assert progress2["severity_counts"]["high"] == 1
 
         # Get results for both scans
-        results1 = get_scan_results(scan_id1, output_directories[0])
-        results2 = get_scan_results(scan_id2, output_directories[1])
+        results1 = get_scan_results(output_directories[0])
+        results2 = get_scan_results(output_directories[1])
 
-        # Verify isolation of findings
-        assert len(results1["findings"]) == 1
-        assert len(results2["findings"]) == 1
-        assert results1["findings"][0]["message"] == "Critical in scan 1"
-        assert results2["findings"][0]["message"] == "High in scan 2"
+        # Verify isolation of the per-scan severity breakdown
+        assert results1["summary_stats"]["severity_counts"]["critical"] == 1
+        assert results1["summary_stats"]["severity_counts"].get("high", 0) == 0
+        assert results2["summary_stats"]["severity_counts"]["high"] == 1
+        assert results2["summary_stats"]["severity_counts"].get("critical", 0) == 0
+        assert results1["total_scanners"] == 1
+        assert results2["total_scanners"] == 1
 
         # Clean up
         await cleanup_scan_resources(scan_id1, remove_output=True)

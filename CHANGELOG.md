@@ -160,6 +160,38 @@
 
 ### Breaking changes
 
+- **A rule's CVSS base score is now authoritative over a scanner's SARIF `level`,
+  for every scanner, and this changes gate outcomes with nothing to opt into.**
+
+  When a finding carries no severity band of its own but its rule declares a
+  numeric CVSS score (the SARIF `security-severity` property), ASH now grades the
+  finding from that score — `>=9` Critical, `>=7` High, `>=4` Medium, `>0` Low —
+  instead of falling back to the SARIF `level` (`error` → Critical, `warning` →
+  Medium, `note` → Low). A score of `0` or a non-numeric/out-of-range value is
+  ignored and the level fallback still applies.
+
+  This began as a Grype fix: Grype writes its CVSS on the rule and leaves the
+  result at `level: error`, so every Grype finding previously counted as Critical
+  regardless of its real score. But the trigger is the *shape* of the data ("the
+  rule has a valid score"), not the scanner name, so it governs any current or
+  future scanner — or externally ingested SARIF — that puts a CVSS score on rules
+  while leaving results at a coarse level.
+
+  **It changes severity counts, the `--severity-threshold` gate, and the exit
+  code, in both directions.** An `error`-level advisory with CVSS 5.0 now counts
+  as Medium (down); a `note`-level rule with CVSS 9.1 counts as Critical (up). A
+  downgrade can let a finding that used to trip the threshold pass; an upgrade can
+  newly block a build. This is not cosmetic, and it is on by default with no flag.
+
+  **It is a deliberate scoring policy:** the objective, cross-tool CVSS base score
+  wins over a scanner's coarse four-level label when both are present. The two
+  legitimately disagree — an ecosystem advisory may be labeled "high" while its
+  base CVSS is lower, and base CVSS ignores environmental and temporal context —
+  so ASH's reported severity can differ from a scanner's own report. To keep a
+  finding's severity where it is, suppress it or set the finding's own
+  `issue_severity`. See "How ASH determines a finding's severity" in the
+  [scanner statistics guide](user-guide/scanner-statistics.md).
+
 - **A scanner that lost every target on any one tree now reports `ERROR`, on every
   scan, with nothing to opt into.** This is wider than the flag change above and
   wants reading first.

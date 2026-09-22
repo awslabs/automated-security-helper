@@ -68,7 +68,9 @@ class ScannerMetrics(ScannerSeverityCount):
     duration: Optional[float] = (
         None  # Time taken by the scanner in seconds, None for skipped/missing scanners
     )
-    status: str = "PASSED"  # Scanner status: "PASSED", "FAILED", "SKIPPED", or "MISSING"
+    status: str = (
+        "PASSED"  # Scanner status: "PASSED", "FAILED", "SKIPPED", or "MISSING"
+    )
     threshold: str = ""  # Severity threshold used for this scanner
     threshold_source: str = ""  # Source of the threshold ("global", "config", etc.)
     excluded: bool = False  # Whether the scanner was explicitly excluded
@@ -385,7 +387,8 @@ def populate_metrics_from_unified_source(
     Args:
         aggregated_results: The AshAggregatedResults model to update
     """
-    ASH_LOGGER.verbose(        "Aligning all metrics using unified scanner metrics as source of truth"
+    ASH_LOGGER.verbose(
+        "Aligning all metrics using unified scanner metrics as source of truth"
     )
 
     # Get unified metrics from the final SARIF data
@@ -401,7 +404,8 @@ def populate_metrics_from_unified_source(
         aggregated_results, unified_metrics
     )
 
-    ASH_LOGGER.verbose(        "Metrics alignment completed - all sources now use unified metrics"
+    ASH_LOGGER.verbose(
+        "Metrics alignment completed - all sources now use unified metrics"
     )
     return aggregated_results
 
@@ -527,14 +531,17 @@ def _populate_scanner_results_from_unified_metrics(
             status=status,
         )
 
-        # Update scanner_results with consolidated information
-        # We'll put the consolidated metrics in the 'source' field and zero out 'converted'
-        # to maintain the existing structure while consolidating the data
+        # Update scanner_results with consolidated information.
+        #
+        # The assignment below replaces the entry outright. It does NOT put the
+        # metrics in a 'source' field and zero 'converted' -- that was an earlier
+        # design, and the comment describing it survived the change. Direct
+        # replacement is correct: scanner_results is declared
+        # Dict[str, ScannerTargetStatusInfo] and the published schema agrees
+        # (AshAggregatedResults.json, additionalProperties -> ScannerTargetStatusInfo).
         aggregated_results.scanner_results[scanner_name] = consolidated_target_info
 
     ASH_LOGGER.debug(
         f"Updated scanner_results for {len(unified_metrics)} scanners with consolidated metrics"
     )
     return aggregated_results
-
-

@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from automated_security_helper.base.plugin_context import PluginContext
     from automated_security_helper.models.asharp_model import (
         AshAggregatedResults,
-        ScannerStatusInfo,
+        ScannerTargetStatusInfo,
     )
 
 
@@ -298,7 +298,8 @@ class ScannerStateTracker:
             )
             return {
                 "status": "failed",
-                "dependencies_satisfied": scanner_state.enablement_status != "missing_deps",
+                "dependencies_satisfied": scanner_state.enablement_status
+                != "missing_deps",
                 "excluded": False,
                 "execution_completed": False,
                 "failure_reason": failure_reason,
@@ -307,7 +308,8 @@ class ScannerStateTracker:
         if scanner_state.failure_reason:
             return {
                 "status": "failed",
-                "dependencies_satisfied": scanner_state.enablement_status != "missing_deps",
+                "dependencies_satisfied": scanner_state.enablement_status
+                != "missing_deps",
                 "excluded": scanner_state.enablement_status == "excluded",
                 "execution_completed": False,
                 "failure_reason": scanner_state.failure_reason,
@@ -339,7 +341,9 @@ class ScannerStateTracker:
             # Skip any legacy class-name entries that pre-date name validation
             if _is_class_name(scanner_name):
                 continue
-            status_info = self.determine_scanner_status_from_execution_data(scanner_name)
+            status_info = self.determine_scanner_status_from_execution_data(
+                scanner_name
+            )
             status = status_info["status"]
             if status in state_summary:
                 state_summary[status].append(scanner_name)
@@ -360,7 +364,9 @@ class ValidationCheckpointer:
         self.checkpoints: List[ValidationCheckpoint] = []
         self.logger = ASH_LOGGER
 
-    def create_checkpoint(self, checkpoint_name: str, **kwargs: Any) -> ValidationCheckpoint:
+    def create_checkpoint(
+        self, checkpoint_name: str, **kwargs: Any
+    ) -> ValidationCheckpoint:
         """Create a new validation checkpoint and append it to the list.
 
         Args:
@@ -397,7 +403,9 @@ class ValidationCheckpointer:
             if missing:
                 self.logger.debug(f"  Missing scanners: {', '.join(sorted(missing))}")
             if unexpected:
-                self.logger.debug(f"  Unexpected scanners: {', '.join(sorted(unexpected))}")
+                self.logger.debug(
+                    f"  Unexpected scanners: {', '.join(sorted(unexpected))}"
+                )
 
         return checkpoint
 
@@ -559,9 +567,13 @@ class ValidationCheckpointer:
         )
 
         completion_rate = (
-            len(completed_scanners) / len(expected_scanners) if expected_scanners else 0.0
+            len(completed_scanners) / len(expected_scanners)
+            if expected_scanners
+            else 0.0
         )
-        missing_completions = [s for s in expected_scanners if s not in completed_scanners]
+        missing_completions = [
+            s for s in expected_scanners if s not in completed_scanners
+        ]
 
         self.logger.info("Scanner execution completion validation summary:")
         if missing_completions:
@@ -583,7 +595,9 @@ class ValidationCheckpointer:
                     execution_completed=False,
                     failure_reason="Scanner was queued for execution but did not complete - execution failed",
                 )
-                self.logger.error(f"  Scanner '{scanner_name}' failed to complete execution")
+                self.logger.error(
+                    f"  Scanner '{scanner_name}' failed to complete execution"
+                )
         else:
             self.logger.verbose("  All expected scanners completed execution")
 
@@ -723,8 +737,10 @@ class ValidationCheckpointer:
                     )
                     continue
 
-                status_info = self._tracker.determine_scanner_status_from_execution_data(
-                    scanner_name
+                status_info = (
+                    self._tracker.determine_scanner_status_from_execution_data(
+                        scanner_name
+                    )
                 )
                 scanner_status_info = self._create_missing_scanner_result_entry(
                     scanner_name, scanner_state
@@ -735,9 +751,13 @@ class ValidationCheckpointer:
 
                 aggregated_results.scanner_results[scanner_name] = scanner_status_info
                 added_scanners.append(scanner_name)
-                self._tracker.update_scanner_state(scanner_name, included_in_results=True)
+                self._tracker.update_scanner_state(
+                    scanner_name, included_in_results=True
+                )
 
-                reason = status_info.get("failure_reason", "No specific reason provided")
+                reason = status_info.get(
+                    "failure_reason", "No specific reason provided"
+                )
                 if scanner_status_info.status == ScannerStatus.ERROR:
                     self.logger.error(
                         f"  + Added '{scanner_name}' with status {scanner_status_info.status.value} - EXECUTION FAILED (Reason: {reason})"
@@ -763,7 +783,9 @@ class ValidationCheckpointer:
                     included_in_results=True,
                 )
             else:
-                self._tracker.update_scanner_state(scanner_name, included_in_results=True)
+                self._tracker.update_scanner_state(
+                    scanner_name, included_in_results=True
+                )
 
         if missing_scanners:
             for scanner_name in missing_scanners:
@@ -792,7 +814,9 @@ class ValidationCheckpointer:
         self.logger.verbose(f"  Scanners added to results: {len(added_scanners)}")
 
         if added_scanners:
-            self.logger.verbose(f"  Added scanners: {', '.join(sorted(added_scanners))}")
+            self.logger.verbose(
+                f"  Added scanners: {', '.join(sorted(added_scanners))}"
+            )
 
         if unexpected_scanners:
             self.logger.verbose(
@@ -847,7 +871,9 @@ class ValidationCheckpointer:
             if len(queue_item) >= 1:
                 scanner_name = queue_item[0]
                 queued_scanner_names.append(scanner_name)
-                self._tracker.update_scanner_state(scanner_name, queued_for_execution=True)
+                self._tracker.update_scanner_state(
+                    scanner_name, queued_for_execution=True
+                )
 
         queued_scanner_names.sort()
         expected_scanners = self._tracker.get_scanners_by_status(
@@ -973,8 +999,10 @@ class ValidationCheckpointer:
 
     def _create_missing_scanner_result_entry(
         self, scanner_name: str, scanner_state: Optional[ScannerValidationState]
-    ) -> "ScannerStatusInfo":
-        from automated_security_helper.models.asharp_model import ScannerStatusInfo
+    ) -> "ScannerTargetStatusInfo":
+        from automated_security_helper.models.asharp_model import (
+            ScannerTargetStatusInfo,
+        )
 
         status_info = self._tracker.determine_scanner_status_from_execution_data(
             scanner_name
@@ -991,7 +1019,7 @@ class ValidationCheckpointer:
         else:
             status = ScannerStatus.MISSING
 
-        return ScannerStatusInfo(
+        return ScannerTargetStatusInfo(
             status=status,
             dependencies_satisfied=status_info["dependencies_satisfied"],
             excluded=status_info["excluded"],
@@ -1100,7 +1128,9 @@ class ScannerValidationManager:
     def add_queue_validation_error(
         self, error_message: str, scanner_name: str | None = None
     ) -> None:
-        return self._checkpointer.add_queue_validation_error(error_message, scanner_name)
+        return self._checkpointer.add_queue_validation_error(
+            error_message, scanner_name
+        )
 
     def handle_queue_validation_errors(
         self,

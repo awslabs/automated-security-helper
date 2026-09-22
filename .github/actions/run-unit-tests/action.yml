@@ -29,13 +29,18 @@ runs:
 
     # Runs the cdk-nag integration tests, which the default pytest invocation above does
     # NOT run: tests/conftest.py skips anything whose keywords include "integration", and
-    # pytest picks that up from the tests/integration directory name. Every integration
-    # test in the repository has therefore been skipped in CI, and a skipped suite exits 0.
+    # pytest picks that up from the tests/integration directory name.
     #
-    # Scoped to this one file on purpose. Enabling --run-integration across the whole tree
-    # currently surfaces 35 pre-existing failures unrelated to cdk-nag, which would make
-    # this check meaningless noise. Repairing and enabling the rest of the suite is separate
-    # work; this step secures the specific coverage that was missing.
+    # This step is no longer the only thing that passes --run-integration. The rest of the
+    # suite now runs in the `integration-test` job in ash-unified-ci.yml, which covers all
+    # 115 gated items including these 11. So the reason this step stays scoped to one file
+    # has changed, and it is worth stating rather than leaving the old one to rot: it is
+    # here to keep the cdk-nag path exercised on every Python version in the matrix, which
+    # a single-platform, single-version integration job does not do. That is also why the
+    # duplication is deliberate rather than an oversight.
+    #
+    # The old reason -- that enabling the tree surfaced pre-existing failures and would
+    # make this check noise -- was true when written and is not why the scoping remains.
     #
     # ASH_REQUIRE_CDK_EXTRA turns a missing extra into a hard failure instead of a skip, so
     # this step cannot silently stop testing anything if the install step above changes.
@@ -74,14 +79,18 @@ runs:
     # Rendered by coverage.py itself rather than by irongut/CodeCoverageSummary, which is a
     # Docker-based action. A Docker action's image is pulled during the job's prepare phase,
     # BEFORE any step's `if` is evaluated, so this step's condition -- which selects exactly
-    # one of the eighteen matrix legs -- did not stop the other legs from pulling it. Measured
+    # one of the twenty-five matrix legs -- did not stop the other legs from pulling it. Measured
     # on run 35246976698: every Linux leg logged "Pull ghcr.io/irongut/codecoveragesummary
     # :v1.3.0", including ubuntu-24.04-arm/py3.11 and ubuntu-latest/py3.13, where the
-    # condition is false. macOS and Windows legs logged no pull at all, so the exposure was
-    # the eight Linux legs, of which one actually runs the step.
+    # condition is false. macOS and Windows legs logged no pull at all, so the exposure was the
+    # Linux legs, of which one actually runs the step. That run had eight of them; the matrix now
+    # has ten, ubuntu-latest and ubuntu-24.04-arm across five Python versions each. The leg count
+    # is stated for the matrix as it stands, the eight for the run it was measured on -- they are
+    # different populations and only one of them was ever counted on a runner.
     #
-    # That made a cosmetic summary a hard dependency on ghcr.io for seven legs that never use
-    # it. On that run the pull failed DNS resolution three times (6.4s and 8.8s backoffs, then
+    # That made a cosmetic summary a hard dependency on ghcr.io for every Linux leg but one --
+    # seven at the time of that run, nine now. On that run the pull failed DNS resolution three
+    # times (6.4s and 8.8s backoffs, then
     # give up), and because the prepare phase precedes execution, "Install dependencies",
     # "Run PyTest" and "Run cdk-nag integration tests" were all skipped with duration_ms=0.
     # The leg reported failure having run zero tests, and it ejected PR #587 from the merge

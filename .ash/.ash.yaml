@@ -326,6 +326,18 @@ global_settings:
       path: scripts/verify_moto_server_suite.py
       reason: "Starts a moto server subprocess for the suite it verifies."
     - rule_id: B404
+      path: tests/integration/cli/test_mcp_stdio_server.py
+      reason: >-
+        Launches `ash mcp` as a real child and speaks JSON-RPC over its pipes,
+        which is the assertion rather than the setup. On the stdio transport
+        stdout IS the protocol channel, and the two properties this file covers --
+        that every line a running server writes there parses as a frame, and that
+        EOF on stdin ends the process reporting success -- are only observable from
+        outside the process. A patched subprocess has no pipe to read and no exit
+        status to report, which is why the deleted TestMcpServerLifecycle class the
+        file's docstring describes could patch `mcp.run` and still miss a server
+        that corrupted its own output stream.
+    - rule_id: B404
       path: tests/unit/assets/test_with_retry.py
       reason: "Exercises a retry wrapper around a real subprocess call."
     - rule_id: B404
@@ -335,6 +347,14 @@ global_settings:
         assertion: the container build invokes it before the ASH wheel exists, so the
         test has to prove it works with no site-packages. A patched subprocess cannot
         show that, since the property under test is what a bare interpreter can import.
+    - rule_id: B404
+      path: tests/unit/cli/test_startup_failure_diagnosability.py
+      reason: >-
+        Spawns a real child interpreter whose sys.stderr is None, which is the whole
+        assertion: CPython discards an unhandled traceback without a word when the
+        sink is absent, so the loss is only observable from outside the process. A
+        patched subprocess cannot show it, because the behavior under test belongs to
+        the interpreter's shutdown path rather than to any call ASH makes.
     - rule_id: B404
       path: tests/unit/deploy/test_deploy_buildspec_ssm_moto_server.py
       reason: "Runs a moto server and the buildspec's own shell line under test."
@@ -379,6 +399,26 @@ global_settings:
     - rule_id: B603
       path: scripts/verify_moto_server_suite.py
       reason: "List argv, shell=False, which-resolved argv[0]."
+    - rule_id: B603
+      path: tests/integration/cli/test_mcp_stdio_server.py
+      reason: >-
+        List argv, shell left at its default of False, and argv[0] is
+        `sys.executable`, so there is no PATH resolution for an attacker to
+        influence. The file's ISOLATION note records that as deliberate: it starts
+        from `sys.executable` rather than from an `ash` console script "so that the
+        test runs against the interpreter running the suite rather than against
+        whatever is first on PATH". The rest of the argv is the module-level
+        SERVER_ARGV constant, plus the literals `--no-quiet --debug` at the one
+        call site that takes extras. Passing shell=True to quiet this rule would
+        create the injection surface it exists to warn about.
+    - rule_id: B603
+      path: tests/unit/cli/test_startup_failure_diagnosability.py
+      reason: >-
+        List argv, shell=False, and argv[0] is `sys.executable` — the interpreter
+        already running the suite — so there is no PATH resolution for an attacker to
+        influence. argv[1] is a script this test wrote into pytest's own tmp_path.
+        Passing shell=True to quiet the rule would create the injection surface the
+        rule exists to warn about.
     - rule_id: B603
       path: tests/unit/deploy/test_deploy_buildspec_ssm_moto_server.py
       reason: >-

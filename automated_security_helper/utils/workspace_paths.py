@@ -228,9 +228,9 @@ def _normalise(value: PathLike, *, label: str) -> PurePosixPath:
 
     The leading-separator rule is decided by counting characters, NOT by
     ``PureWindowsPath(raw).drive``, because that value changed between 3.11 and
-    3.12 and this project supports 3.10 through 3.13::
+    3.12 and this project supports 3.10 through 3.14::
 
-        input            3.10/3.11 .drive     3.12/3.13 .drive
+        input            3.10/3.11 .drive     3.12-3.14 .drive
         /src/x.py        ''       falsy       ''         falsy
         //src/x.py       '\\\\\\\\src\\\\x.py'  truthy      same       truthy
         ///src/x.py      ''       FALSY       '\\\\\\\\\\\\src'  TRUTHY
@@ -241,7 +241,7 @@ def _normalise(value: PathLike, *, label: str) -> PurePosixPath:
     made ``///src/x.py`` accepted on the older interpreters and rejected on the
     newer ones -- the module docstring claimed the latter, and CI's py3.10 and
     py3.11 rows disagreed. Counting characters is identical on every version.
-    ``PurePosixPath.parts`` is NOT the culprit: it is identical across all four
+    ``PurePosixPath.parts`` is NOT the culprit: it is identical across all five
     versions, collapsing three-or-more leading separators to a single ``/``,
     which is precisely why the anchor cannot be recovered after parsing.
     """

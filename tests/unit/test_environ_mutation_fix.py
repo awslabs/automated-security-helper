@@ -144,7 +144,7 @@ def test_snyk_code_scanner_source_has_no_os_environ_mutation():
 # mutation here, but ONLY inside a try/finally that restores os.environ
 # back to its starting state. A separate behavior test below proves it.
 # ---------------------------------------------------------------------------
-def test_cdk_nag_wrapper_restores_os_environ():
+def test_cdk_nag_wrapper_restores_os_environ(no_cdk_kernel):
     """cdk_nag_wrapper must restore os.environ even if the wrapped code
     raises.
 
@@ -152,6 +152,20 @@ def test_cdk_nag_wrapper_restores_os_environ():
     JSII_SILENCE_WARNING_* at Python module import time, so env= on a
     subprocess cannot be used. Instead the wrapper must save and restore
     os.environ around the work.
+
+    ``no_cdk_kernel`` is required, not decoration. ``run_cdk_nag_against_cfn_template``
+    runs ``import cdk_nag`` and ``from aws_cdk import ...`` as the first statements in
+    its body, before it looks at any argument -- so the ``get_model_from_template``
+    patch below cannot keep the real packages out, and without the fixture this test
+    starts a jsii kernel and extracts ~133 MB of aws-cdk-lib into a shared, locked
+    cache. Measured before the fixture was added: this test passed while leaving
+    ``aws_cdk``, ``cdk_nag`` and ``jsii`` in ``sys.modules``.
+
+    That mattered on Windows CI, where the suite runs 4 xdist workers. Two tests each
+    booting a kernel can race the same cache entry and the loser dies with
+    ``EEXIST ... aws-cdk-lib/<version>/<sha>.lock`` -- zero such failures across 1,772
+    Windows legs while one test booted a kernel, 12 once a second one did. The doubles
+    keep this test at zero boots, so it cannot be half of that pair.
     """
     from automated_security_helper.utils import cdk_nag_wrapper
 
@@ -168,7 +182,10 @@ def test_cdk_nag_wrapper_restores_os_environ():
 
         before = _snapshot_env()
 
-        # Force early failure so we don't need real CDK machinery.
+        # Raise from inside the wrapper so the restore path is exercised on the
+        # exception route, not just the happy one. This is reached only because
+        # no_cdk_kernel got execution past the import block; the CDK machinery is
+        # absent because of the doubles, not because of this patch.
         with patch(
             "automated_security_helper.utils.cdk_nag_wrapper.get_model_from_template",
             side_effect=RuntimeError("forced-exit"),
@@ -190,6 +207,18 @@ def test_cdk_nag_wrapper_restores_os_environ():
             f"Added: {set(after) - set(before)}, "
             f"Removed: {set(before) - set(after)}"
         )
+
+    # The env assertions above pass whether or not a kernel booted -- that is how
+    # this test sat on the flaky side of the race for months. Assert the absence of
+    # the boot directly, on observable state, so removing the doubles fails here
+    # instead of turning Windows CI red days later.
+    booted = no_cdk_kernel.newly_imported_cdk()
+    assert not booted, (
+        f"a real jsii kernel booted during this test: {sorted(booted)}. "
+        "The no_cdk_kernel doubles are missing or no longer cover every name the "
+        "wrapper imports -- check the imports at the top of "
+        "run_cdk_nag_against_cfn_template."
+    )
 
 
 # ---------------------------------------------------------------------------

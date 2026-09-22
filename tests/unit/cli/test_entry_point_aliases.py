@@ -42,8 +42,19 @@ def console_scripts():
 
 
 class TestConsoleScriptTargets:
-    def test_ash_points_at_the_app(self, console_scripts):
-        assert console_scripts["ash"] == "automated_security_helper.cli.main:app"
+    """Every name resolves through ``cli.entrypoint``, not the bare Typer app.
+
+    These assertions named ``cli.main:app`` until ``cli.entrypoint`` landed. pip's
+    generated stub imports the target and calls it, so a target of ``app`` put the
+    whole CLI import ahead of any ASH code -- and on a console-less host, where
+    ``sys.stderr`` is ``None``, a failure in it exits 1 with both streams empty.
+    See ``cli/entrypoint.py`` and ``test_startup_failure_diagnosability.py``, which
+    resolves ``ash`` out of the manifest for exactly that reason. So the target has
+    to be a module that is cheap to import and repairs the streams first.
+    """
+
+    def test_ash_goes_through_the_entry_point(self, console_scripts):
+        assert console_scripts["ash"] == "automated_security_helper.cli.entrypoint:main"
 
     def test_ashv3_points_at_the_warning_wrapper(self, console_scripts):
         """``ashv3`` must not share ``ash``'s target.
@@ -51,15 +62,20 @@ class TestConsoleScriptTargets:
         The deprecation has to fire once per invocation. Routing it through a
         dedicated entry point makes that structural: there is exactly one call
         site and it is the process entry, so it cannot fire per subcommand.
+
+        ``main_ashv3`` is that entry point. It reaches ``cli.main:run_ashv3``, and
+        the stream repair runs first so the notice itself has somewhere to go.
         """
         assert (
-            console_scripts["ashv3"] == "automated_security_helper.cli.main:run_ashv3"
+            console_scripts["ashv3"]
+            == "automated_security_helper.cli.entrypoint:main_ashv3"
         )
 
     def test_long_form_is_kept_and_silent(self, console_scripts):
+        """The long form shares ``main`` with ``ash``, so it never warns."""
         assert (
             console_scripts["automated-security-helper"]
-            == "automated_security_helper.cli.main:app"
+            == "automated_security_helper.cli.entrypoint:main"
         )
 
 
