@@ -18,6 +18,7 @@ tree and no scan is run.
 
 import re as _re
 import tempfile
+import time as _time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -154,11 +155,7 @@ def _declared_config_class(cls):
         return None
     annotation = getattr(config_field, "annotation", None)
     for arg in getattr(annotation, "__args__", None) or ():
-        if (
-            isinstance(arg, type)
-            and arg.__name__.endswith("ScannerConfig")
-            and arg.__name__ != "ScannerPluginConfigBase"
-        ):
+        if isinstance(arg, type) and arg.__name__.endswith("ScannerConfig"):
             return arg
     return None
 
@@ -202,10 +199,16 @@ def _normalized_version(raw) -> Optional[str]:
 #: its turn.
 _VERSION_PROBE_ARG_FORMS = (("version",), ("--version",))
 
-#: Upper bound on a single version probe. A binary that does not answer promptly
+#: Total wall-clock budget for probing ONE scanner's version, shared across both
+#: arg forms rather than applied to each. A binary that does not answer promptly
 #: is treated as version-unknown rather than allowed to stall the inventory: the
-#: whole point of the inventory is a quick "what is here", not a scan.
-_VERSION_PROBE_TIMEOUT_SECONDS = 10
+#: whole point of the inventory is a quick "what is here", not a scan. Sharing the
+#: budget bounds the worst case at this many seconds per scanner (not 2x it): the
+#: second arg form only runs with whatever time the first left, so a hung tool
+#: cannot cost ~20s. A floor keeps the last attempt from getting an unusably tiny
+#: slice when the first nearly exhausted the budget.
+_VERSION_PROBE_TOTAL_BUDGET_SECONDS = 10
+_VERSION_PROBE_MIN_ATTEMPT_SECONDS = 2
 
 #: First token shaped like a dotted version (``1.9.4``, ``0.79.0``, ``v3.2``).
 #: Used only to pull a version out of raw ``--version`` output, which mixes the
@@ -220,10 +223,13 @@ def _extract_version_from_probe(raw: Optional[str]) -> Optional[str]:
     Unlike :func:`_normalized_version`, this DOES extract a token, because raw
     probe output is not a bare version -- ``grype 0.79.0`` and
     ``semgrep 1.177.0`` carry the tool name alongside the number, and returning
-    the whole line would render a cluttered, inconsistent Version column. The
-    first dotted-numeric token is taken; if none is present the stripped first
-    non-empty line is returned as-is (some tools print an unusual format we would
-    rather surface verbatim than drop), and genuinely empty output yields None.
+    the whole line would render a cluttered, inconsistent Version column. Only a
+    dotted-numeric token is accepted; any real version contains one, so output
+    with none is not an odd version format but a usage banner, an error line or
+    other non-version text, and returning that verbatim would print garbage in
+    the Version column. So output with no such token yields None (reported as
+    ``Unknown``), consistent with the module's no-guess policy. Empty output also
+    yields None.
     """
     if raw is None:
         return None
@@ -233,11 +239,9 @@ def _extract_version_from_probe(raw: Optional[str]) -> Optional[str]:
     match = _PROBE_VERSION_TOKEN.search(text)
     if match:
         return match.group(0)
-    # No dotted token: return the first non-empty line rather than nothing, so an
-    # unrecognized-but-present version format is surfaced instead of silently
-    # dropped to Unknown.
-    first_line = next((ln.strip() for ln in text.splitlines() if ln.strip()), None)
-    return first_line
+    # No dotted token means the output carries no version (a usage banner or an
+    # error line): report Unknown rather than surface non-version text verbatim.
+    return None
 
 
 def _probe_tool_version(command: Optional[str]) -> Optional[str]:
@@ -267,7 +271,13 @@ def _probe_tool_version(command: Optional[str]) -> Optional[str]:
     if not resolved:
         return None
 
+    deadline = _time.monotonic() + _VERSION_PROBE_TOTAL_BUDGET_SECONDS
     for arg_form in _VERSION_PROBE_ARG_FORMS:
+        remaining = deadline - _time.monotonic()
+        if remaining < _VERSION_PROBE_MIN_ATTEMPT_SECONDS:
+            # The prior form nearly spent the shared budget; do not start another
+            # probe with a slice too small to give the tool a fair chance.
+            break
         try:
             result = run_command(
                 [resolved, *arg_form],
@@ -275,7 +285,7 @@ def _probe_tool_version(command: Optional[str]) -> Optional[str]:
                 text=True,
                 check=False,
                 shell=False,
-                timeout=_VERSION_PROBE_TIMEOUT_SECONDS,
+                timeout=remaining,
             )
         except Exception as exc:  # pragma: no cover - run_command swallows most
             ASH_LOGGER.debug(

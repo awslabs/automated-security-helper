@@ -281,9 +281,11 @@ class TestExtractVersionFromProbe:
     def test_prerelease_and_build_suffix_kept(self):
         assert _extract_version_from_probe("tool 1.2.3-rc1") == "1.2.3-rc1"
 
-    def test_no_dotted_token_returns_first_nonempty_line(self):
-        # An unusual format is surfaced verbatim rather than dropped to Unknown.
-        assert _extract_version_from_probe("\nbuild abcdef\nmore") == "build abcdef"
+    def test_no_dotted_token_returns_none(self):
+        # Output with no dotted-version token is a banner or error line, not an
+        # odd version format, so it is dropped to Unknown rather than surfaced.
+        assert _extract_version_from_probe("\nbuild abcdef\nmore") is None
+        assert _extract_version_from_probe("Usage: grype [OPTIONS]") is None
 
 
 class TestProbeToolVersion:
@@ -407,6 +409,81 @@ class TestProbeToolVersion:
             lambda args, **kwargs: _Result(),
         )
         assert _probe_tool_version("tool") == "2.0.1"
+
+    def test_second_arg_form_gets_the_remaining_shared_budget(self, monkeypatch):
+        # The two arg forms share one wall-clock budget rather than each getting
+        # the full timeout: the second probe's timeout must be strictly less than
+        # the first's, so a hung tool cannot cost ~2x the budget.
+        monkeypatch.setattr(
+            "automated_security_helper.utils.subprocess_utils.find_executable",
+            lambda _cmd: "/usr/bin/semgrep",
+        )
+        timeouts = []
+        clock = {"t": 0.0}
+
+        def _now():
+            return clock["t"]
+
+        monkeypatch.setattr(scanner_inventory._time, "monotonic", _now)
+
+        class _Result:
+            def __init__(self, returncode, stdout="", stderr=""):
+                self.returncode = returncode
+                self.stdout = stdout
+                self.stderr = stderr
+
+        def _run_command(args, **kwargs):
+            timeouts.append(kwargs["timeout"])
+            # First form burns 3s of the shared budget then fails; advance the
+            # clock so the second form sees a smaller remaining slice.
+            clock["t"] += 3.0
+            if len(timeouts) == 1:
+                return _Result(2, stderr="unknown command 'version'")
+            return _Result(0, stdout="1.177.0\n")
+
+        monkeypatch.setattr(
+            "automated_security_helper.utils.subprocess_utils.run_command",
+            _run_command,
+        )
+        assert _probe_tool_version("semgrep") == "1.177.0"
+        assert len(timeouts) == 2
+        assert timeouts[0] == scanner_inventory._VERSION_PROBE_TOTAL_BUDGET_SECONDS
+        assert timeouts[1] < timeouts[0]
+
+    def test_second_arg_form_skipped_when_budget_nearly_spent(self, monkeypatch):
+        # If the first probe nearly exhausts the shared budget, the second is not
+        # started with an unusably tiny slice.
+        monkeypatch.setattr(
+            "automated_security_helper.utils.subprocess_utils.find_executable",
+            lambda _cmd: "/usr/bin/tool",
+        )
+        calls = []
+        clock = {"t": 0.0}
+        monkeypatch.setattr(
+            scanner_inventory._time, "monotonic", lambda: clock["t"]
+        )
+
+        class _Result:
+            returncode = 1
+            stdout = ""
+            stderr = "boom"
+
+        def _run_command(args, **kwargs):
+            calls.append(args)
+            # Burn all but a sliver of the budget.
+            clock["t"] += (
+                scanner_inventory._VERSION_PROBE_TOTAL_BUDGET_SECONDS
+                - (scanner_inventory._VERSION_PROBE_MIN_ATTEMPT_SECONDS - 0.5)
+            )
+            return _Result()
+
+        monkeypatch.setattr(
+            "automated_security_helper.utils.subprocess_utils.run_command",
+            _run_command,
+        )
+        assert _probe_tool_version("tool") is None
+        # Only the first form ran; the second was skipped (budget too small).
+        assert len(calls) == 1
 
 
 class TestDescribeScannerProbeFallback:
