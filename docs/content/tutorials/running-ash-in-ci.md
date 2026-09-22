@@ -91,7 +91,7 @@ jobs:
         with:
           python-version: '3.10'
       - name: Install ASH
-        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
       - name: Run ASH scan
         run: ash --mode local
       - name: Upload scan results
@@ -120,7 +120,7 @@ jobs:
         with:
           python-version: '3.10'
       - name: Install ASH
-        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
       - name: Run ASH scan
         run: ash --mode container
       - name: Upload scan results
@@ -193,7 +193,7 @@ jobs:
         with:
           python-version: '3.10'
       - name: Install ASH
-        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
       - name: Run ASH scan
         run: ash --mode local
       - name: Add PR comment
@@ -248,7 +248,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install ASH
-        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
       - name: Run ASH shard ${{ matrix.shard }}
         # --no-fail-on-findings: this shard's exit code is not the verdict.
         run: |
@@ -274,7 +274,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install ASH
-        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+        run: pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
       - name: Download shard results
         uses: actions/download-artifact@v8
         with:
@@ -309,7 +309,7 @@ The shard upload step has no `if: always()`, so a shard whose scan crashed uploa
 ash-scan:
   image: python:3.10
   script:
-    - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+    - pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
     - ash --mode local
   artifacts:
     paths:
@@ -327,7 +327,7 @@ ash-scan-container:
     DOCKER_TLS_CERTDIR: "/certs"
   script:
     - apk add --no-cache python3 py3-pip git
-    - pip3 install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+    - pip3 install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
     - ash --mode container
   artifacts:
     paths:
@@ -351,7 +351,7 @@ Example using local mode:
 ash-scan:
   image: python:3.10
   script:
-    - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+    - pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
     - ash --mode local --no-fail-on-findings
   artifacts:
     paths:
@@ -372,7 +372,7 @@ ash-scan-shard:
   image: python:3.12
   parallel: 4
   script:
-    - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+    - pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
     # GitLab's CI_NODE_INDEX runs 1..CI_NODE_TOTAL; ASH's shard index is zero-based.
     - export ASH_SHARD_INDEX="$((CI_NODE_INDEX - 1))"
     - export ASH_SHARD_COUNT="$CI_NODE_TOTAL"
@@ -393,7 +393,7 @@ ash-merge:
     - job: ash-scan-shard
       artifacts: true
   script:
-    - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+    - pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
     # This step is the gate. ash merge fails if the shards do not reconstruct
     # one whole scan, then applies the findings verdict.
     - |
@@ -424,7 +424,7 @@ phases:
     runtime-versions:
       python: 3.10
     commands:
-      - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+      - pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
 
   build:
     commands:
@@ -445,7 +445,7 @@ phases:
     runtime-versions:
       python: 3.10
     commands:
-      - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+      - pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
 
   pre_build:
     commands:
@@ -508,7 +508,7 @@ phases:
     runtime-versions:
       python: 3.12
     commands:
-      - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+      - pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
 
   build:
     commands:
@@ -529,7 +529,7 @@ phases:
     runtime-versions:
       python: 3.12
     commands:
-      - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+      - pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
 
   build:
     commands:
@@ -577,7 +577,7 @@ phases:
     runtime-versions:
       python: 3.12
     commands:
-      - pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+      - pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
 
   build:
     commands:
@@ -601,7 +601,7 @@ pipeline {
     stages {
         stage('Install ASH') {
             steps {
-                sh 'pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0'
+                sh 'pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0'
             }
         }
         stage('Run ASH Scan') {
@@ -632,7 +632,7 @@ pipeline {
         stage('Install ASH') {
             steps {
                 sh 'apk add --no-cache python3 py3-pip git'
-                sh 'pip3 install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0'
+                sh 'pip3 install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0'
             }
         }
         stage('Run ASH Scan') {
@@ -666,7 +666,7 @@ pipeline {
                     agent { docker { image 'python:3.12' } }
                     environment { ASH_SHARD_INDEX = '0' }
                     steps {
-                        sh 'pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0'
+                        sh 'pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0'
                         sh 'ash scan --mode local --no-fail-on-findings'
                         sh 'mkdir -p shards/shard-$ASH_SHARD_INDEX && cp .ash/ash_output/ash_aggregated_results.json shards/shard-$ASH_SHARD_INDEX/'
                         stash name: 'ash-shard-0', includes: 'shards/shard-0/**'
@@ -676,7 +676,7 @@ pipeline {
                     agent { docker { image 'python:3.12' } }
                     environment { ASH_SHARD_INDEX = '1' }
                     steps {
-                        sh 'pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0'
+                        sh 'pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0'
                         sh 'ash scan --mode local --no-fail-on-findings'
                         sh 'mkdir -p shards/shard-$ASH_SHARD_INDEX && cp .ash/ash_output/ash_aggregated_results.json shards/shard-$ASH_SHARD_INDEX/'
                         stash name: 'ash-shard-1', includes: 'shards/shard-1/**'
@@ -686,7 +686,7 @@ pipeline {
                     agent { docker { image 'python:3.12' } }
                     environment { ASH_SHARD_INDEX = '2' }
                     steps {
-                        sh 'pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0'
+                        sh 'pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0'
                         sh 'ash scan --mode local --no-fail-on-findings'
                         sh 'mkdir -p shards/shard-$ASH_SHARD_INDEX && cp .ash/ash_output/ash_aggregated_results.json shards/shard-$ASH_SHARD_INDEX/'
                         stash name: 'ash-shard-2', includes: 'shards/shard-2/**'
@@ -696,7 +696,7 @@ pipeline {
                     agent { docker { image 'python:3.12' } }
                     environment { ASH_SHARD_INDEX = '3' }
                     steps {
-                        sh 'pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0'
+                        sh 'pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0'
                         sh 'ash scan --mode local --no-fail-on-findings'
                         sh 'mkdir -p shards/shard-$ASH_SHARD_INDEX && cp .ash/ash_output/ash_aggregated_results.json shards/shard-$ASH_SHARD_INDEX/'
                         stash name: 'ash-shard-3', includes: 'shards/shard-3/**'
@@ -707,7 +707,7 @@ pipeline {
         stage('Merge Shard Results') {
             agent { docker { image 'python:3.12' } }
             steps {
-                sh 'pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0'
+                sh 'pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0'
                 unstash 'ash-shard-0'
                 unstash 'ash-shard-1'
                 unstash 'ash-shard-2'
@@ -752,7 +752,7 @@ jobs:
       - checkout
       - run:
           name: Install ASH
-          command: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+          command: pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
       - run:
           name: Run ASH scan
           command: ash --mode local
@@ -779,7 +779,7 @@ jobs:
       - checkout
       - run:
           name: Install ASH
-          command: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+          command: pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
       - run:
           name: Run ASH scan
           command: ash --mode container
@@ -809,7 +809,7 @@ jobs:
       - checkout
       - run:
           name: Install ASH
-          command: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+          command: pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
       - run:
           name: Run ASH shard
           # --no-fail-on-findings: this container's exit code is not the verdict.
@@ -835,7 +835,7 @@ jobs:
           at: .
       - run:
           name: Install ASH
-          command: pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+          command: pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
       - run:
           name: Merge shard results
           # This step is the gate. ash merge fails if the shards do not
@@ -864,7 +864,7 @@ workflows:
 
 ## Best Practices for CI Integration
 
-> **Tip**: The CI examples in this guide use pinned versions (`@v3.7.0`) for reproducibility. You can also use the `v3` floating tag (`@v3`) to always get the latest stable v3.x release, though pinned versions are recommended for CI/CD pipelines.
+> **Tip**: The CI examples in this guide use pinned versions (`@v4.0.0`) for reproducibility. You can also use the `v3` floating tag (`@v3`) to always get the latest stable v3.x release, though pinned versions are recommended for CI/CD pipelines.
 
 1. **Fail builds on critical findings**:
    ```bash

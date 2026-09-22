@@ -39,7 +39,7 @@ Nix mode supplies every scanner from a pinned flake, so nothing else needs insta
 curl -sSf https://astral.sh/uv/install.sh | sh
 
 # Create an alias for ASH
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v4.0.0"
 
 # Use as normal
 ash --help
@@ -51,14 +51,14 @@ ash --help
 irm https://astral.sh/uv/install.ps1 | iex
 
 # Create a function for ASH
-function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v3.7.0 $args }
+function ash { uvx git+https://github.com/awslabs/automated-security-helper.git@v4.0.0 $args }
 
 # Use as normal
 ash --help
 ```
 
 !!! tip "Floating tag `v3`"
-    We also maintain a `v3` floating tag that always points to the latest stable v3.x release. You can use `@v3` instead of a specific version to stay up to date automatically. Pin a specific version (e.g., `@v3.7.0`) when you need reproducible builds, such as in CI/CD pipelines.
+    We also maintain a `v3` floating tag that always points to the latest stable v3.x release. You can use `@v3` instead of a specific version to stay up to date automatically. Pin a specific version (e.g., `@v4.0.0`) when you need reproducible builds, such as in CI/CD pipelines.
 
 #### 2. Using `pipx`
 
@@ -66,7 +66,7 @@ ash --help
 
 ```bash
 # Works on Windows, macOS, and Linux
-pipx install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+pipx install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
 
 # Use as normal
 ash --help
@@ -78,7 +78,7 @@ Standard Python package installation:
 
 ```bash
 # Works on Windows, macOS, and Linux
-pip install git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+pip install git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
 
 # Use as normal
 ash --help
@@ -90,7 +90,7 @@ For development or if you want to modify ASH:
 
 ```bash
 # Works on Windows, macOS, and Linux
-git clone https://github.com/awslabs/automated-security-helper.git --branch v3.7.0
+git clone https://github.com/awslabs/automated-security-helper.git --branch v4.0.0
 cd automated-security-helper
 pip install .
 
@@ -173,7 +173,7 @@ To upgrade ASH to the latest version:
 ### If installed with `uvx`
 ```bash
 # Your alias will use the latest version when specified
-alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v3.7.0"
+alias ash="uvx git+https://github.com/awslabs/automated-security-helper.git@v4.0.0"
 ```
 
 ### If installed with `pipx`
@@ -183,7 +183,7 @@ pipx upgrade automated-security-helper
 
 ### If installed with `pip`
 ```bash
-pip install --upgrade git+https://github.com/awslabs/automated-security-helper.git@v3.7.0
+pip install --upgrade git+https://github.com/awslabs/automated-security-helper.git@v4.0.0
 ```
 
 ### If installed from repository
