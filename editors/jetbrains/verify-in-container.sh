@@ -83,7 +83,15 @@ echo "== 3. provision the one Python dependency the two gates need"
 # degraded to the standard library when the network hiccuped would be strictly worse than the
 # B314 suppression it replaced, because it would still print PASSED.
 DEFUSEDXML_WHEEL_URL="https://files.pythonhosted.org/packages/07/6c/aa3f2f849e01cb6a001cd8554a88d4c77c5c1a31c95bdf1cf9301e6d9ef4/defusedxml-0.7.1-py2.py3-none-any.whl"
-DEFUSEDXML_WHEEL_SHA256="a352e7e428770286cc899e2542b6cdaedb2b4953ff269a210103ec58f6198a61"
+# The digest carries `# pragma: allowlist secret` for the same reason the pinned tool
+# digests in automated_security_helper/utils/tool_downloads.py do, and that block states it
+# at length: a 64-character hex string is exactly what a high-entropy-string detector is
+# built to find, and ASH flagged this line as a CRITICAL secret on the first run after it
+# was added -- correctly, by its own heuristic. A published package digest is public by
+# construction and is the opposite of a credential; it exists to be compared against.
+# Marked on this one line rather than by suppressing the rule or the file, so a real secret
+# added to this script later is still found.
+DEFUSEDXML_WHEEL_SHA256="a352e7e428770286cc899e2542b6cdaedb2b4953ff269a210103ec58f6198a61"  # pragma: allowlist secret
 VENDOR="$HERE/build/python-vendor"
 rm -rf "$VENDOR"
 mkdir -p "$VENDOR"
