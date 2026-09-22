@@ -50,6 +50,55 @@ runs:
         esac
         echo "${RUNTIME}: scan leg present"
 
+    # WHY EVERY BUILD STEP PASSES --no-run
+    #
+    # `ash build-image` defaults to building AND scanning: cli/image.py passes
+    # `run=not no_run`, and it never passes `source_dir`, so run_ash_scan.py resolves
+    # the source to `Path.cwd()` -- this checkout. A build step written as a plain
+    # `run:` therefore scanned ASH's own repository and exited with that scan's status,
+    # which is 2 on actionable findings. The build leg failed for a reason that has
+    # nothing to do with whether the image built.
+    #
+    # `--no-run` takes the `if run:` branch in run_ash_container.py, which returns
+    # returncode 0 immediately after the build instead of assembling a run command. So
+    # the build step now reports only the build.
+    #
+    # No coverage is lost. The scan below is the deliberate one: it targets
+    # /tmp/ash-selftest, a fixture that is a single print statement, precisely so that
+    # only exit 0 is acceptable. A checkout scan cannot be held to that bar -- its
+    # status depends on what happens to be committed -- so it was never the thing
+    # proving the image can scan.
+    #
+    # Mirrors the scan-leg assertion above: a build step that loses --no-run should
+    # fail here rather than quietly go back to scanning the checkout.
+    - name: "Assert no build step scans the checkout"
+      shell: bash
+      run: |
+        python3 <<'PY'
+        import pathlib
+        import sys
+
+        action = pathlib.Path(".github/actions/validate-container/action.yml")
+
+        # Only `run:` steps, not the prose above -- this comment and the one at the top
+        # of the file both name `ash build-image` while carrying no flags, and a check
+        # that flagged them would fail on every commit and get deleted rather than
+        # fixed.
+        offenders = [
+            stripped
+            for line in action.read_text().splitlines()
+            if (stripped := line.strip()).startswith("run:")
+            and "ash build-image" in stripped
+            and "--no-run" not in stripped
+        ]
+        if offenders:
+            sys.exit(
+                "FAIL: build steps missing --no-run, so they scan this checkout and "
+                "fail on its findings: " + "; ".join(offenders)
+            )
+        print("PASS: every build-image invocation passes --no-run")
+        PY
+
     # One place decides the wrapper, so the build and the scan cannot disagree about
     # it -- and they must agree. An image built rootless is invisible to
     # `sudo <runtime>`, which reads root's image store instead, so a mismatch surfaces
@@ -82,7 +131,7 @@ runs:
     - name: "podman: build image"
       if: inputs.runtime == 'podman'
       shell: bash
-      run: ash build-image --oci-runner podman --force
+      run: ash build-image --oci-runner podman --force --no-run
 
     # === finch ===
     - name: "finch: install (macOS)"
@@ -104,7 +153,7 @@ runs:
     - name: "finch: build image"
       if: inputs.runtime == 'finch'
       shell: bash
-      run: ash build-image --oci-runner finch --force
+      run: ash build-image --oci-runner finch --force --no-run
 
     # === nerdctl ===
     #
@@ -124,7 +173,7 @@ runs:
     - name: "nerdctl: build image"
       if: inputs.runtime == 'nerdctl'
       shell: bash
-      run: ash build-image --oci-runner nerdctl --force
+      run: ash build-image --oci-runner nerdctl --force --no-run
 
     # === the built image has to run ===
     #
