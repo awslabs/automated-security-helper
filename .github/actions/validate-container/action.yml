@@ -79,24 +79,56 @@ runs:
         import sys
 
         action = pathlib.Path(".github/actions/validate-container/action.yml")
+        lines = action.read_text().splitlines()
 
-        # Only `run:` steps, not the prose above -- this comment and the one at the top
-        # of the file both name `ash build-image` while carrying no flags, and a check
-        # that flagged them would fail on every commit and get deleted rather than
-        # fixed.
-        offenders = [
-            stripped
-            for line in action.read_text().splitlines()
-            if (stripped := line.strip()).startswith("run:")
-            and "ash build-image" in stripped
-            and "--no-run" not in stripped
-        ]
+        # WHY THIS MATCHES TWO SHAPES AND COUNTS WHAT IT FOUND
+        #
+        # An earlier version of this check tested `stripped.startswith("run:")`. That
+        # covered podman and finch, whose builds are one-liners, and silently stopped
+        # covering nerdctl the moment its build was wrapped in the retry loop below --
+        # the invocation moved inside a `run: |` block, so the line no longer begins
+        # with `run:`. The check still passed, on two legs out of three, which is the
+        # worst way for it to be wrong: it read as a guard while covering the one leg
+        # most likely to be edited.
+        #
+        # So the shape test is "the command is the first thing on the line, after an
+        # optional `run:`", which catches both forms. Four kinds of line in this file
+        # name `ash build-image` without being an invocation of it, and all four must
+        # stay excluded: the prose at the top, the two comment blocks, this check's own
+        # source, and the `echo "::error::ash build-image ..."` in the retry loop.
+        #
+        # The count is asserted too. Without it a future edit that hides an invocation
+        # from the shape test would leave this passing on whatever it still sees, which
+        # is exactly how the `run:`-only version failed.
+        expected = ("podman", "finch", "nerdctl")
+        found, offenders = {}, []
+        for line in lines:
+            stripped = line.strip()
+            command = stripped[4:].strip() if stripped.startswith("run:") else stripped
+            if not command.startswith("ash build-image"):
+                continue
+            runtime = next((r for r in expected if f"--oci-runner {r}" in command), None)
+            found.setdefault(runtime, []).append(command)
+            if "--no-run" not in command:
+                offenders.append(command)
+
         if offenders:
             sys.exit(
-                "FAIL: build steps missing --no-run, so they scan this checkout and "
-                "fail on its findings: " + "; ".join(offenders)
+                "FAIL: build invocations missing --no-run, so they scan this checkout "
+                "and fail on its findings: " + "; ".join(offenders)
             )
-        print("PASS: every build-image invocation passes --no-run")
+
+        missing = [r for r in expected if r not in found]
+        if missing:
+            sys.exit(
+                f"FAIL: found no build invocation for {missing}. Either a leg was "
+                "removed, or its invocation changed shape and this check has stopped "
+                "measuring it -- both must fail rather than pass on the rest."
+            )
+
+        for runtime in expected:
+            print(f"  {runtime:<8} --no-run present")
+        print(f"PASS: all {len(expected)} build invocations pass --no-run")
         PY
 
     # One place decides the wrapper, so the build and the scan cannot disagree about
