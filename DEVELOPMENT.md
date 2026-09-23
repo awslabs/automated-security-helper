@@ -221,7 +221,7 @@ Releases are cut by maintainers via **Actions > ASH - Create Release > Run workf
 After merging the release PR, a second workflow automatically:
 - Creates the git tag (`v{version}`)
 - Publishes a GitHub Release with auto-generated notes
-- Updates the `v3` floating tag
+- Updates the floating major tag for the released version -- `v3` for a 3.x release, `v4` for a 4.x one, creating it if it does not exist yet
 
 ### Manual Version Bumping
 
