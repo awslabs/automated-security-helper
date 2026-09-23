@@ -180,16 +180,32 @@ def _normalized_version(raw) -> Optional[str]:
     Whitespace is stripped because at least one scanner's ``tool_version`` carries
     a trailing newline from the subprocess it shells out to.
 
-    Deliberately does NOT try to extract a bare version number. Scanners disagree
-    about the format -- bandit reports "bandit 1.9.4" while checkov reports
-    "3.3.11" -- and a parser that guessed would silently mangle whichever format
-    it was not written for. The raw string each scanner chose is reported as-is;
-    normalizing that inconsistency belongs with the scanners, not here.
+    Scanners disagree about the format: bandit reports "bandit 1.9.4" while
+    checkov reports "3.3.19". Both land in one Version column, so reporting each
+    verbatim rendered that column in two formats at once -- and bandit's entry
+    was long enough to wrap onto a second line, which changed the height of the
+    whole table row. The reason :func:`_extract_version_from_probe` extracts is
+    that returning a whole line "would render a cluttered, inconsistent Version
+    column"; the same argument applies to the values arriving through here, so
+    the same token is taken.
+
+    The direction chosen is to strip down to the bare token rather than to keep
+    prefixes everywhere, because the other direction is not available: probe
+    output is multi-line ("Application:   syft\\nVersion:    1.42.4") and has no
+    verbatim form a table cell could hold.
+
+    Extraction here cannot lose information the way a guessing parser would: a
+    value with no version-shaped token is returned unchanged rather than dropped,
+    so a scanner reporting something this module does not understand still shows
+    what it said instead of "Unknown".
     """
     if raw is None:
         return None
     text = str(raw).strip()
-    return None if text.lower() in _ABSENT_VERSION_MARKERS else text
+    if text.lower() in _ABSENT_VERSION_MARKERS:
+        return None
+    # Token when there is one, the scanner's own string when there is not.
+    return _version_token(text) or text
 
 
 #: Arg forms to try when asking a binary for its version, in order.
@@ -262,6 +278,30 @@ _PROBE_DATETIME_SHAPES = _re.compile(
 _PROBE_VERSION_MAX_LEADING_DIGITS = 4
 
 
+def _version_token(text: str) -> Optional[str]:
+    """The first version-shaped token in ``text``, or None if it holds none.
+
+    One definition of "looks like a version", shared by both paths that need it:
+    :func:`_extract_version_from_probe`, which reports None when a probe's output
+    holds no version, and :func:`_normalized_version`, which falls back to the
+    scanner's own string. Splitting these would let the two surfaces disagree
+    about the same value, which is the class of drift this module exists to
+    prevent.
+    """
+    # Timestamps first: their seconds-and-offset tail matches the version token,
+    # so searching before removing them returns the clock, not a version.
+    cleaned = _PROBE_DATETIME_SHAPES.sub(" ", text)
+    for match in _PROBE_VERSION_TOKEN.finditer(cleaned):
+        token = match.group(0)
+        leading = token.lstrip("v").split(".", 1)[0]
+        if len(leading) > _PROBE_VERSION_MAX_LEADING_DIGITS:
+            # A counter that happens to carry a dot (epoch seconds), not a
+            # version. Keep scanning: a real version may follow it.
+            continue
+        return token
+    return None
+
+
 def _extract_version_from_probe(raw: Optional[str]) -> Optional[str]:
     """Pull a version string out of a binary's ``--version`` output.
 
@@ -288,21 +328,12 @@ def _extract_version_from_probe(raw: Optional[str]) -> Optional[str]:
     text = str(raw).strip()
     if not text:
         return None
-    # Excise timestamps first: their seconds-and-offset tail matches the version
-    # token, and searching before removing them returns the clock, not a version.
-    text = _PROBE_DATETIME_SHAPES.sub(" ", text)
-    for match in _PROBE_VERSION_TOKEN.finditer(text):
-        token = match.group(0)
-        leading = token.lstrip("v").split(".", 1)[0]
-        if len(leading) > _PROBE_VERSION_MAX_LEADING_DIGITS:
-            # A counter that happens to carry a dot (epoch seconds), not a
-            # version. Keep scanning: a real version may follow it.
-            continue
-        return token
-    # No dotted token means the output carries no version (a usage banner, an
-    # error line or a bare timestamp): report Unknown rather than surface
-    # non-version text verbatim.
-    return None
+    # No token means the output carries no version (a usage banner, an error line
+    # or a bare timestamp): report Unknown rather than surface non-version text
+    # verbatim. This is the one difference from _normalized_version, which keeps
+    # the scanner's own string in that case because a scanner naming its version
+    # in a format this module does not parse is still saying something true.
+    return _version_token(text)
 
 
 def _probe_tool_version(command: Optional[str]) -> Optional[str]:

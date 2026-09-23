@@ -44,8 +44,18 @@ class TestNormalizedVersion:
     def test_trailing_whitespace_is_stripped(self):
         assert _normalized_version("1.2.3\n") == "1.2.3"
 
-    def test_real_version_is_returned_verbatim(self):
-        assert _normalized_version("bandit 1.9.4") == "bandit 1.9.4"
+    def test_tool_name_prefix_is_stripped_to_the_bare_token(self):
+        # bandit reports "bandit 1.9.4" and checkov reports "3.3.19". Both render
+        # in one Version column, so the prefix is stripped rather than left to
+        # render that column in two formats at once.
+        assert _normalized_version("bandit 1.9.4") == "1.9.4"
+
+    def test_value_with_no_version_token_is_kept_verbatim(self):
+        # Extraction must not cost information: a scanner naming its version in a
+        # format this module does not parse still gets reported, not dropped to
+        # Unknown the way probe output would be.
+        assert _normalized_version("build-abcdef") == "build-abcdef"
+        assert _normalized_version("nightly") == "nightly"
 
     @pytest.mark.parametrize("marker", sorted(_ABSENT_VERSION_MARKERS))
     def test_absence_markers_map_to_none(self, marker):
@@ -54,6 +64,30 @@ class TestNormalizedVersion:
     def test_absence_markers_are_case_insensitive(self):
         assert _normalized_version("UNKNOWN") is None
         assert _normalized_version("Unavailable") is None
+
+
+class TestVersionColumnUsesOneFormat:
+    """Self-reported and probed versions must render in the same shape.
+
+    Self-reported values used to be returned verbatim while probed values were
+    reduced to a bare token, so one column carried two formats -- and bandit's
+    "bandit 1.9.4" was long enough to wrap, changing the height of its table row.
+    """
+
+    @pytest.mark.parametrize(
+        "self_reported,probed,expected",
+        [
+            ("bandit 1.9.4", "bandit 1.9.4", "1.9.4"),
+            ("grype 0.111.0", "grype 0.111.0", "0.111.0"),
+            ("1.42.4", "syft 1.42.4", "1.42.4"),
+            ("v2.0.1", "tool v2.0.1", "v2.0.1"),
+        ],
+    )
+    def test_both_paths_agree_on_the_same_underlying_version(
+        self, self_reported, probed, expected
+    ):
+        assert _normalized_version(self_reported) == expected
+        assert _extract_version_from_probe(probed) == expected
 
 
 class TestScannerNameFromClass:
@@ -620,7 +654,8 @@ class TestDescribeScannerProbeFallback:
         self._patch_probe(monkeypatch, recorder)
         cls = _stub("bandit", _satisfied=True, _version="bandit 1.9.4", command="bandit")
         entry = describe(cls)
-        assert entry["version"] == "bandit 1.9.4"
+        # Reported, and reduced to the same bare token a probed scanner yields.
+        assert entry["version"] == "1.9.4"
         assert recorder == []  # already had a version; no probe
 
     def test_unreachable_scanner_is_not_probed(self, describe, monkeypatch):
