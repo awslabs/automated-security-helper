@@ -4,18 +4,46 @@
 
 """Shared scanner-inventory introspection for ASH.
 
-This module is the single source of truth for "which scanners does this build
-have, and what does each one report about itself" -- the tool version it detects,
-whether its dependencies are satisfied, its offline strategy, and whether it is
-enabled. Both the MCP ``list_scanners`` tool (``cli/mcp_tools.py``) and the
-``ash plugin list`` CLI command consume it, so the two paths cannot drift: a fix
-to the probe here is a fix to both surfaces at once (issues #606 and #626).
+This module is the single source of truth for what a scanner reports about
+itself -- the tool version it detects, whether its dependencies are satisfied,
+its offline strategy, and whether it is enabled. Both the MCP ``list_scanners``
+tool (``cli/mcp_tools.py``) and the ``ash plugin list`` CLI command build their
+entries by calling :func:`list_scanner_inventory` here, so a fix to the probe is
+a fix to both surfaces at once (issues #606 and #626).
+
+What the surfaces cannot drift on, and what they deliberately differ on
+----------------------------------------------------------------------
+They cannot drift on *how a scanner is described*. Given the same scanner, both
+produce the same entry, because both reach it through the same
+:func:`describe_scanner`.
+
+They do differ on *which scanners exist*, and that difference is intentional.
+Both call :func:`list_scanner_inventory`; they differ only in the provider they
+hand it. MCP passes :func:`_loaded_scanner_classes`, which additionally loads
+:data:`_VENDORED_SCANNER_PLUGIN_PACKAGES`, so it reports the set this build
+*contains*. The CLI passes the classes ``load_plugins(plugin_context)`` resolved,
+which is the set *active for this configuration*. Measured on one machine that is
+13 and 10; the three the CLI does not list are ``ferret_scan``, ``snyk_code`` and
+``trivy_repo``.
+
+So the two answer different questions, and the CLI's answer is the one an
+operator reads to decide what is configured. Loading the vendored packages
+CLI-side was considered and rejected: it would name three scanners in that table
+that a scan will not run unless they are separately enabled, trading a
+documentation problem for a behavioral one.
+
+The cost of that choice, stated plainly because it is a real limit rather than a
+nicety: ``ash plugin list --show-versions`` cannot tell an operator whether
+trivy, snyk or ferret are reachable, while ``list_scanners`` can. Anyone needing
+that answer should use the MCP tool. Revisiting this means deciding what
+``ash plugin list`` is for, not just adding a loader call.
 
 Everything here is read-only introspection. Scanners are instantiated in a
 throwaway directory and asked about themselves; nothing writes to the working
 tree and no scan is run.
 """
 
+import logging
 import re as _re
 import tempfile
 import time as _time
@@ -179,25 +207,56 @@ def _normalized_version(raw) -> Optional[str]:
     Whitespace is stripped because at least one scanner's ``tool_version`` carries
     a trailing newline from the subprocess it shells out to.
 
-    Deliberately does NOT try to extract a bare version number. Scanners disagree
-    about the format -- bandit reports "bandit 1.9.4" while checkov reports
-    "3.3.11" -- and a parser that guessed would silently mangle whichever format
-    it was not written for. The raw string each scanner chose is reported as-is;
-    normalizing that inconsistency belongs with the scanners, not here.
+    Scanners disagree about the format: bandit reports "bandit 1.9.4" while
+    checkov reports "3.3.19". Both land in one Version column, so reporting each
+    verbatim rendered that column in two formats at once -- and bandit's entry
+    was long enough to wrap onto a second line, which changed the height of the
+    whole table row. The reason :func:`_extract_version_from_probe` extracts is
+    that returning a whole line "would render a cluttered, inconsistent Version
+    column"; the same argument applies to the values arriving through here, so
+    the same token is taken.
+
+    The direction chosen is to strip down to the bare token rather than to keep
+    prefixes everywhere, because the other direction is not available: probe
+    output is multi-line ("Application:   syft\\nVersion:    1.42.4") and has no
+    verbatim form a table cell could hold.
+
+    Extraction here cannot lose information the way a guessing parser would: a
+    value with no version-shaped token is returned unchanged rather than dropped,
+    so a scanner reporting something this module does not understand still shows
+    what it said instead of "Unknown".
     """
     if raw is None:
         return None
     text = str(raw).strip()
-    return None if text.lower() in _ABSENT_VERSION_MARKERS else text
+    if text.lower() in _ABSENT_VERSION_MARKERS:
+        return None
+    # Token when there is one, the scanner's own string when there is not.
+    return _version_token(text) or text
 
 
-#: Arg forms to try when asking a binary for its version, in order. ``version``
-#: comes first because grype and syft answer to the subcommand form (``grype
-#: version`` / ``syft version``) and treat ``--version`` as a flag on the scan
-#: command; tools that only know ``--version`` (semgrep, npm) ignore an unknown
-#: ``version`` argument or exit non-zero, so the flag form behind it still gets
-#: its turn.
-_VERSION_PROBE_ARG_FORMS = (("version",), ("--version",))
+#: Arg forms to try when asking a binary for its version, in order.
+#:
+#: ``--version`` comes first because it is the form every scanner binary ASH
+#: ships answers correctly. Measured across the ten reachable on one machine --
+#: grype, syft, bandit, semgrep, checkov, npm, opengrep, cfn_nag_scan,
+#: detect-secrets and the python cdk_nag uses -- all ten exit 0 and print a
+#: parseable version for ``--version``. grype and syft also answer the
+#: subcommand form, so putting the flag form first costs them nothing.
+#:
+#: The subcommand form is second, not gone: it stays as the fallback for a tool
+#: that only knows ``version``. Nothing ASH ships needs it today, and keeping it
+#: is cheap because a tool answering the flag form never reaches it.
+#:
+#: Order matters here in a way that is not obvious. ``version`` was first, and
+#: for bandit that is actively wrong rather than merely redundant: ``bandit
+#: version`` reads ``version`` as a path to scan, finds nothing, and still exits
+#: 0 after printing ``Run started:<timestamp>``. A zero exit is the whole test
+#: :func:`_probe_tool_version` applies before accepting output, so the flag form
+#: never got its turn and bandit's reported version came out of the timestamp,
+#: changing on every invocation. Any tool that treats an unknown argument as a
+#: scan target rather than an error has this shape.
+_VERSION_PROBE_ARG_FORMS = (("--version",), ("version",))
 
 #: Total wall-clock budget for probing ONE scanner's version, shared across both
 #: arg forms rather than applied to each. A binary that does not answer promptly
@@ -211,10 +270,64 @@ _VERSION_PROBE_TOTAL_BUDGET_SECONDS = 10
 _VERSION_PROBE_MIN_ATTEMPT_SECONDS = 2
 
 #: First token shaped like a dotted version (``1.9.4``, ``0.79.0``, ``v3.2``).
-#: Used only to pull a version out of raw ``--version`` output, which mixes the
-#: number with the tool name and other words; the scanner-reported path keeps its
-#: no-guess policy in ``_normalized_version``.
+#: Raw ``--version`` output mixes the number with the tool name and other words,
+#: and so does at least one scanner's self-reported ``tool_version`` ("bandit
+#: 1.9.4"), so both paths reach this through :func:`_version_token`. Matching is
+#: necessary but not sufficient -- see :data:`_PROBE_DATETIME_SHAPES`.
 _PROBE_VERSION_TOKEN = _re.compile(r"v?\d+(?:\.\d+)+(?:[.\-+][A-Za-z0-9.]+)?")
+
+#: Date and time-of-day shapes, excised before the version token is looked for.
+#:
+#: A dotted-numeric run is not by itself a version, and a timestamp contains one:
+#: in ``Run started:2026-09-22 18:15:34.653010+00:00`` the seconds-and-offset
+#: tail ``34.653010+00`` matches :data:`_PROBE_VERSION_TOKEN` exactly. That is
+#: how bandit's reported version became a number that changed every invocation.
+#: Reordering the probe arg forms stopped bandit from reaching this path, but the
+#: mechanism is not specific to bandit -- any tool that prints a date on a
+#: successful exit hits it -- so the shape is rejected here too.
+#:
+#: Excising rather than rejecting the whole line keeps real output working: a
+#: tool printing ``1.2.3 built at 10:30:00`` still reports 1.2.3. Matches are
+#: replaced with a space so removal cannot splice two numbers into a third.
+_PROBE_DATETIME_SHAPES = _re.compile(
+    r"""
+      \d{4}-\d{2}-\d{2}                 # ISO date: 2026-09-22
+    | \d{1,2}:\d{2}(?::\d{2})?          # clock time: 18:15 or 18:15:34
+      (?:\.\d+)?                        #   fractional seconds: .653010
+      (?:\s*(?:[+-]\d{2}:?\d{2}|Z))?    #   UTC offset: +00:00, -0700, Z
+    """,
+    _re.VERBOSE,
+)
+
+#: Largest plausible first component of a version. CalVer legitimately uses a
+#: four-digit year (``2024.1.1``), so the cap is four digits rather than fewer;
+#: anything longer is not a version but a counter that happens to carry a dot,
+#: epoch seconds (``1758628650.325994``) being the shape that motivates this.
+_PROBE_VERSION_MAX_LEADING_DIGITS = 4
+
+
+def _version_token(text: str) -> Optional[str]:
+    """The first version-shaped token in ``text``, or None if it holds none.
+
+    One definition of "looks like a version", shared by both paths that need it:
+    :func:`_extract_version_from_probe`, which reports None when a probe's output
+    holds no version, and :func:`_normalized_version`, which falls back to the
+    scanner's own string. Splitting these would let the two surfaces disagree
+    about the same value, which is the class of drift this module exists to
+    prevent.
+    """
+    # Timestamps first: their seconds-and-offset tail matches the version token,
+    # so searching before removing them returns the clock, not a version.
+    cleaned = _PROBE_DATETIME_SHAPES.sub(" ", text)
+    for match in _PROBE_VERSION_TOKEN.finditer(cleaned):
+        token = match.group(0)
+        leading = token.lstrip("v").split(".", 1)[0]
+        if len(leading) > _PROBE_VERSION_MAX_LEADING_DIGITS:
+            # A counter that happens to carry a dot (epoch seconds), not a
+            # version. Keep scanning: a real version may follow it.
+            continue
+        return token
+    return None
 
 
 def _extract_version_from_probe(raw: Optional[str]) -> Optional[str]:
@@ -230,18 +343,25 @@ def _extract_version_from_probe(raw: Optional[str]) -> Optional[str]:
     the Version column. So output with no such token yields None (reported as
     ``Unknown``), consistent with the module's no-guess policy. Empty output also
     yields None.
+
+    A dotted token is necessary but not sufficient. Timestamps contain one --
+    ``Run started:2026-09-22 18:15:34.653010+00:00`` yields ``34.653010+00`` --
+    so date and clock shapes are excised before the search, and a token with an
+    implausibly long leading component is refused. Without that, a tool printing
+    a date on a successful exit reports a version that changes every invocation,
+    which is what bandit did.
     """
     if raw is None:
         return None
     text = str(raw).strip()
     if not text:
         return None
-    match = _PROBE_VERSION_TOKEN.search(text)
-    if match:
-        return match.group(0)
-    # No dotted token means the output carries no version (a usage banner or an
-    # error line): report Unknown rather than surface non-version text verbatim.
-    return None
+    # No token means the output carries no version (a usage banner, an error line
+    # or a bare timestamp): report Unknown rather than surface non-version text
+    # verbatim. This is the one difference from _normalized_version, which keeps
+    # the scanner's own string in that case because a scanner naming its version
+    # in a format this module does not parse is still saying something true.
+    return _version_token(text)
 
 
 def _probe_tool_version(command: Optional[str]) -> Optional[str]:
@@ -286,6 +406,12 @@ def _probe_tool_version(command: Optional[str]) -> Optional[str]:
                 check=False,
                 shell=False,
                 timeout=remaining,
+                # An inventory listing is not a scan, and the probe is an
+                # implementation detail of answering "what version is on PATH".
+                # run_command logs "Running command: ..." at its log_level, which
+                # defaults to INFO, so leaving it unset printed one line per
+                # probed scanner on a completely successful run.
+                log_level=logging.DEBUG,
             )
         except Exception as exc:  # pragma: no cover - run_command swallows most
             ASH_LOGGER.debug(
