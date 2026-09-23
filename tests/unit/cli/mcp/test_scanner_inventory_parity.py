@@ -4,12 +4,29 @@
 """Parity guard: the MCP tool and the CLI describe scanners through one helper.
 
 Issue #626 asked that ``ash plugin list`` and the MCP ``list_scanners`` tool not
-drift. They cannot, because both now delegate to
-``automated_security_helper.core.scanner_inventory``. These tests pin that: they
-assert the MCP module re-exports the shared symbols by identity (so a future edit
-that reintroduces a private copy in mcp_tools fails here), and that
-``mcp_list_scanners`` produces exactly what the shared ``list_scanner_inventory``
-produces for the same injected scanner set.
+drift. What these tests pin is the parity that actually holds: given the same
+scanner, both surfaces describe it identically, because both reach it through
+``automated_security_helper.core.scanner_inventory.describe_scanner``. They also
+assert the MCP module re-exports the shared symbols by identity, so a future edit
+reintroducing a private copy in mcp_tools fails here.
+
+Why the injected scanner sets differ per side
+---------------------------------------------
+An earlier version of this file injected ONE class list into both sides and
+compared the whole output. That passes, but it cannot fail for the reason anyone
+would care about: the surfaces do not hold the same scanner set in production --
+MCP reports 13 and the CLI 10, the difference being ferret_scan, snyk_code and
+trivy_repo -- and feeding both the same list held that axis constant by
+construction. The test then read as coverage of set parity, which does not exist
+and is not meant to, while proving only that one function returns the same value
+when called twice.
+
+So the sets are varied per side here, matching the production asymmetry, and the
+assertions split in two: every scanner both surfaces hold is described
+identically, and the set difference is asserted as the intended behavior rather
+than silently avoided. ``TestTheParityAssertionCanFail`` is the control -- it
+shows the description comparison responds to a real difference, so a passing
+parity test is evidence rather than a tautology.
 """
 
 from automated_security_helper.cli import mcp_tools
@@ -65,24 +82,87 @@ class TestMcpReExportsSharedSymbolsByIdentity:
 
 
 class TestMcpAndSharedHelperAgree:
-    def test_same_scanner_set_yields_identical_output(self, monkeypatch):
-        classes = [
+    def test_common_scanners_agree_while_the_sets_differ(self, monkeypatch):
+        """The invariant that holds: same scanner, same description.
+
+        The sets are deliberately unequal, mirroring production, where MCP loads
+        the vendored packages and the CLI does not. Holding them equal is what
+        made the previous version of this test unable to fail.
+        """
+        shared_set = [
             _stub("alpha", _version="1.0.0", _satisfied=True),
             _stub("beta", _version="2.0.0", _satisfied=False),
         ]
+        # Stands in for ferret_scan / snyk_code / trivy_repo: present in the MCP
+        # set, absent from the other.
+        mcp_set = shared_set + [_stub("zeta", _version="9.9.9", _satisfied=True)]
 
-        # The MCP wrapper reads mcp_tools._loaded_scanner_classes; the shared
-        # helper reads scanner_inventory._loaded_scanner_classes. Patch both to
-        # the same set so the two outputs are comparable.
-        monkeypatch.setattr(mcp_tools, "_loaded_scanner_classes", lambda: list(classes))
+        monkeypatch.setattr(mcp_tools, "_loaded_scanner_classes", lambda: list(mcp_set))
         monkeypatch.setattr(
-            scanner_inventory, "_loaded_scanner_classes", lambda: list(classes)
+            scanner_inventory, "_loaded_scanner_classes", lambda: list(shared_set)
         )
 
-        via_mcp = mcp_tools.mcp_list_scanners()
-        via_shared = scanner_inventory.list_scanner_inventory()
+        via_mcp = {e["name"]: e for e in mcp_tools.mcp_list_scanners()}
+        via_shared = {e["name"]: e for e in scanner_inventory.list_scanner_inventory()}
 
-        assert via_mcp == via_shared
+        # The axis the old test held constant: the sets really do differ here.
+        assert set(via_shared) == {"alpha", "beta"}
+        assert set(via_mcp) == {"alpha", "beta", "zeta"}
+        assert set(via_shared) < set(via_mcp)
+
+        # The axis parity is actually claimed on: every scanner both hold is
+        # described identically, field for field.
+        common = set(via_mcp) & set(via_shared)
+        assert common == {"alpha", "beta"}
+        for name in sorted(common):
+            assert via_mcp[name] == via_shared[name], f"{name} described differently"
+
+    def test_set_difference_is_reported_not_silently_dropped(self, monkeypatch):
+        """A scanner only one surface holds is still fully described by it.
+
+        The divergence is in which scanners appear, not in the quality of the
+        entry, so the MCP-only scanner must carry the same populated fields.
+        """
+        mcp_set = [_stub("zeta", _version="9.9.9", _satisfied=True)]
+        monkeypatch.setattr(mcp_tools, "_loaded_scanner_classes", lambda: list(mcp_set))
+
+        entries = {e["name"]: e for e in mcp_tools.mcp_list_scanners()}
+        assert set(entries) == {"zeta"}
+        assert entries["zeta"]["version"] == "9.9.9"
+        assert entries["zeta"]["dependencies_satisfied"] is True
+
+
+class TestTheParityAssertionCanFail:
+    """Control for the test above: the comparison responds to a real difference.
+
+    Without this, ``via_mcp[name] == via_shared[name]`` passing would be equally
+    consistent with the two surfaces agreeing and with the comparison being
+    incapable of distinguishing anything -- comparing empty dicts, say, or values
+    that are equal whatever the scanner reports.
+    """
+
+    def test_same_name_different_reported_state_compares_unequal(self, monkeypatch):
+        # One scanner name, two different underlying scanners.
+        monkeypatch.setattr(
+            mcp_tools,
+            "_loaded_scanner_classes",
+            lambda: [_stub("alpha", _version="1.0.0", _satisfied=True)],
+        )
+        monkeypatch.setattr(
+            scanner_inventory,
+            "_loaded_scanner_classes",
+            lambda: [_stub("alpha", _version="7.7.7", _satisfied=False)],
+        )
+
+        via_mcp = {e["name"]: e for e in mcp_tools.mcp_list_scanners()}
+        via_shared = {e["name"]: e for e in scanner_inventory.list_scanner_inventory()}
+
+        assert set(via_mcp) == set(via_shared) == {"alpha"}
+        assert via_mcp["alpha"] != via_shared["alpha"]
+        assert via_mcp["alpha"]["version"] == "1.0.0"
+        assert via_shared["alpha"]["version"] == "7.7.7"
+        assert via_mcp["alpha"]["dependencies_satisfied"] is True
+        assert via_shared["alpha"]["dependencies_satisfied"] is False
 
     def test_mcp_wrapper_honors_its_own_patch_target(self, monkeypatch):
         """The existing test suite patches mcp_tools._loaded_scanner_classes; the
@@ -103,30 +183,38 @@ class TestCliUsesTheSameIsolatedInventoryPath:
     """
 
     def test_cli_show_versions_matches_shared_inventory(self, monkeypatch):
+        """The CLI renders its OWN set, and agrees on every scanner it shares.
+
+        The shared inventory is given one scanner more than the CLI, standing in
+        for the vendored three. So this asserts both halves at once: the versions
+        the CLI renders match the shared inventory's for the common scanners, and
+        the extra one does not appear in the CLI table -- the documented, intended
+        divergence rather than a bug the test has to route around.
+        """
         from typer.testing import CliRunner
         from unittest.mock import patch
         from automated_security_helper.cli.plugin import plugin_app
 
-        classes = [
+        cli_classes = [
             _stub("alpha", _version="1.0.0", _satisfied=True),
             _stub("beta", _version="2.0.0", _satisfied=False),
         ]
+        # Short name on purpose: the Name column truncates with an ellipsis, so a
+        # long name would make the absence assertion below pass either way.
+        inventory_only = _stub("zeta", _version="9.9.9", _satisfied=True)
 
-        # Ground truth: the isolated shared inventory for this scanner set.
+        # Ground truth spans a WIDER set than the CLI is given.
         expected = {
             e["name"]: e
             for e in scanner_inventory.list_scanner_inventory(
-                scanner_classes_provider=lambda: list(classes)
+                scanner_classes_provider=lambda: cli_classes + [inventory_only]
             )
         }
+        assert set(expected) == {"alpha", "beta", "zeta"}
 
-        # The CLI loads scanners via load_plugins; feed it the same stub set and
-        # render the --show-versions table.
-        with patch(
-            "automated_security_helper.cli.plugin.load_plugins"
-        ) as mock_load:
+        with patch("automated_security_helper.cli.plugin.load_plugins") as mock_load:
             mock_load.return_value = {
-                "scanners": list(classes),
+                "scanners": list(cli_classes),
                 "converters": [],
                 "reporters": [],
             }
@@ -134,14 +222,19 @@ class TestCliUsesTheSameIsolatedInventoryPath:
 
         assert result.exit_code == 0
         out = result.output
-        # Each scanner's shared-inventory version + reachability must be exactly
-        # what the CLI rendered (so the two surfaces cannot report differently).
-        for name, entry in expected.items():
-            version_label = entry.get("version") or "Unknown"
+        # Common scanners: the CLI's rendered version is the shared inventory's.
+        for name in ("alpha", "beta"):
+            version_label = expected[name].get("version") or "Unknown"
             assert version_label in out, f"{name} version {version_label!r} missing"
+            assert name in out, f"{name} row missing"
         # alpha satisfied -> Yes present; beta unsatisfied -> No present.
         assert "Yes" in out
         assert "No" in out
+        # The scanner only the wider set holds is absent. `alpha`/`beta` being
+        # found above is the positive control that makes this a real check: a
+        # four-character name would have rendered had the CLI listed it.
+        assert "zeta" not in out
+        assert "9.9.9" not in out
 
     def test_cli_delegates_to_list_scanner_inventory(self, monkeypatch):
         """The CLI must call the shared isolated inventory, not build its own
