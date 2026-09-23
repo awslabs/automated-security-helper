@@ -159,7 +159,9 @@ def describe():
     """Describe one stub scanner with a throwaway context and stub default config."""
 
     def _describe(cls):
-        return describe_scanner(cls, context=object(), default_config=_DefaultConfigStub())
+        return describe_scanner(
+            cls, context=object(), default_config=_DefaultConfigStub()
+        )
 
     return _describe
 
@@ -343,9 +345,7 @@ class TestParsingAsADottedTokenIsNotEnoughToBeAVersion:
         # The exact string measured from `bandit version`. Under the unguarded
         # regex this returned "34.653010+00".
         assert (
-            _extract_version_from_probe(
-                "Run started:2026-09-22 18:15:34.653010+00:00"
-            )
+            _extract_version_from_probe("Run started:2026-09-22 18:15:34.653010+00:00")
             is None
         )
 
@@ -461,6 +461,7 @@ class TestProbeToolVersion:
                 _Result(0, stdout="1.177.0\n"),
             ]
         )
+
         def _run_command(args, **kwargs):
             calls.append(args)
             return next(seq)
@@ -602,9 +603,7 @@ class TestProbeToolVersion:
         )
         calls = []
         clock = {"t": 0.0}
-        monkeypatch.setattr(
-            scanner_inventory._time, "monotonic", lambda: clock["t"]
-        )
+        monkeypatch.setattr(scanner_inventory._time, "monotonic", lambda: clock["t"])
 
         class _Result:
             returncode = 1
@@ -614,9 +613,8 @@ class TestProbeToolVersion:
         def _run_command(args, **kwargs):
             calls.append(args)
             # Burn all but a sliver of the budget.
-            clock["t"] += (
-                scanner_inventory._VERSION_PROBE_TOTAL_BUDGET_SECONDS
-                - (scanner_inventory._VERSION_PROBE_MIN_ATTEMPT_SECONDS - 0.5)
+            clock["t"] += scanner_inventory._VERSION_PROBE_TOTAL_BUDGET_SECONDS - (
+                scanner_inventory._VERSION_PROBE_MIN_ATTEMPT_SECONDS - 0.5
             )
             return _Result()
 
@@ -652,7 +650,9 @@ class TestDescribeScannerProbeFallback:
     ):
         recorder = []
         self._patch_probe(monkeypatch, recorder)
-        cls = _stub("bandit", _satisfied=True, _version="bandit 1.9.4", command="bandit")
+        cls = _stub(
+            "bandit", _satisfied=True, _version="bandit 1.9.4", command="bandit"
+        )
         entry = describe(cls)
         # Reported, and reduced to the same bare token a probed scanner yields.
         assert entry["version"] == "1.9.4"
@@ -669,9 +669,7 @@ class TestDescribeScannerProbeFallback:
     def test_unmeasurable_scanner_is_not_probed(self, describe, monkeypatch):
         recorder = []
         self._patch_probe(monkeypatch, recorder)
-        cls = _stub(
-            "weird", _raise_on_validate=True, _version=None, command="weird"
-        )
+        cls = _stub("weird", _raise_on_validate=True, _version=None, command="weird")
         entry = describe(cls)
         assert entry["dependencies_satisfied"] is None
         assert entry["version"] is None
