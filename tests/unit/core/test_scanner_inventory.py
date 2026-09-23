@@ -16,6 +16,8 @@ value assertions independent of which tools are installed on the machine running
 the suite.
 """
 
+import logging
+
 import pytest
 
 from automated_security_helper.core import scanner_inventory
@@ -440,6 +442,33 @@ class TestProbeToolVersion:
             ["/usr/bin/legacytool", "--version"],
             ["/usr/bin/legacytool", "version"],
         ]
+
+    def test_probe_runs_the_command_at_debug_level(self, monkeypatch):
+        # run_command logs "Running command: ..." at its log_level, which defaults
+        # to INFO. An inventory listing is not a scan, so a fully successful
+        # `ash plugin list --show-versions` printed one INFO line per probed
+        # scanner. The probe must ask for DEBUG explicitly.
+        monkeypatch.setattr(
+            "automated_security_helper.utils.subprocess_utils.find_executable",
+            lambda _cmd: "/usr/bin/grype",
+        )
+        levels = []
+
+        class _Result:
+            returncode = 0
+            stdout = "grype 0.79.0\n"
+            stderr = ""
+
+        def _run_command(args, **kwargs):
+            levels.append(kwargs.get("log_level"))
+            return _Result()
+
+        monkeypatch.setattr(
+            "automated_security_helper.utils.subprocess_utils.run_command",
+            _run_command,
+        )
+        assert _probe_tool_version("grype") == "0.79.0"
+        assert levels == [logging.DEBUG]
 
     def test_all_forms_fail_returns_none(self, monkeypatch):
         monkeypatch.setattr(

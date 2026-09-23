@@ -16,6 +16,7 @@ throwaway directory and asked about themselves; nothing writes to the working
 tree and no scan is run.
 """
 
+import logging
 import re as _re
 import tempfile
 import time as _time
@@ -346,6 +347,12 @@ def _probe_tool_version(command: Optional[str]) -> Optional[str]:
                 check=False,
                 shell=False,
                 timeout=remaining,
+                # An inventory listing is not a scan, and the probe is an
+                # implementation detail of answering "what version is on PATH".
+                # run_command logs "Running command: ..." at its log_level, which
+                # defaults to INFO, so leaving it unset printed one line per
+                # probed scanner on a completely successful run.
+                log_level=logging.DEBUG,
             )
         except Exception as exc:  # pragma: no cover - run_command swallows most
             ASH_LOGGER.debug(
