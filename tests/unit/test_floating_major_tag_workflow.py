@@ -57,8 +57,8 @@ moves ``v3`` exactly as it did before.
 
 Failure mode of this harness itself
 -----------------------------------
-Two ways it could report success over nothing, so both are controlled for below in
-``TestTheHarnessCanFail``.
+Three ways it could report success over nothing. All three are controlled for, and the
+third was found the hard way.
 
 The first is a locator that finds no step. The step is found by content -- the only
 step in the job whose ``run`` touches ``git/refs/tags`` -- rather than by name, because
@@ -72,18 +72,73 @@ pre-fix script, and ``test_the_harness_rejects_the_pre_fix_script`` requires the
 assertions to FAIL against it -- a ``4.0.0`` release must be caught moving ``v3``. That
 control was run against the real file before the fix landed and did fail there; it is
 frozen here so it keeps failing after the working tree stops containing the bug.
+
+The third is an assertion satisfied by a harness that never ran, and it is not
+hypothetical: the first version of this file shipped nine of them. On run 35877713374
+every ``windows-latest`` leg resolved ``bash`` to the WSL launcher stub, so the step
+never executed -- exit 1, no ``gh`` calls, a UTF-16 error about missing distributions --
+and nine tests reported PASSED anyway. They were the ones phrased as absences:
+``test_a_later_major_never_touches_v3`` asserted ``"v3" not in []``, and all six
+``TestAMalformedVersionWritesNothing`` cases asserted "wrote no ref and exited
+non-zero", which is precisely the signature of a harness that cannot start.
+
+The lesson is narrow and worth stating, because the Windows skip below does not fix it
+-- it only hides it on one platform. An assertion about what the step did NOT do needs a
+companion assertion that the step ran at all. So the nine now require positive evidence
+first: a ref actually written, or the step's own ``::error::`` annotation proving control
+reached the version guard. Verified by pointing the harness at a fake ``bash`` that exits
+1 like the stub: against the pre-fix assertions those nine pass, and against the current
+ones all nine fail.
 """
 
 from __future__ import annotations
 
 import os
 import re
+import shutil
 import stat
 import subprocess
 from pathlib import Path
 
 import pytest
 import yaml
+
+# Applied to the tests that execute the step's shell, and only to those -- the locator
+# control in TestTheHarnessCanFail parses YAML and must keep running everywhere.
+#
+# The mechanism and both conditions are taken from
+# tests/unit/test_ash_bash_entrypoint_build_failure.py rather than invented here, so
+# there is one skip idiom for this reason instead of two that can drift. That file
+# records why a which("bash") guard alone is not enough: on a GitHub Windows runner
+# `bash` resolves to C:\Windows\System32\bash.exe, the WSL launcher stub, which is on
+# PATH whether or not a distribution is installed. Measured on run 35877713374, this
+# harness hit exactly that -- exit 1, no gh calls, and "Windows Subsystem for Linux has
+# no installed distributions" printed as UTF-16 -- on all five windows-latest legs.
+#
+# Skipping is the honest answer rather than a portability fix. The step under test is a
+# `run:` block in a job with `runs-on: ubuntu-latest`, whose shell is `bash -e {0}`. It
+# will never execute on Windows. Git Bash does exist on the runner and the harness could
+# be pointed at it, but that would exercise the step under a shell it never runs on: a
+# pass would be evidence about a configuration that does not exist, and a failure would
+# be a false alarm. It would also couple this file to the runner image's install layout
+# for no added signal.
+_REQUIRES_BASH = [
+    pytest.mark.skipif(
+        os.name == "nt",
+        reason="bash on Windows runners is the WSL stub; the step under test runs on ubuntu-latest",
+    ),
+    pytest.mark.skipif(
+        shutil.which("bash") is None, reason="the step under test is a bash script"
+    ),
+]
+
+
+def _requires_bash(func):
+    """Apply _REQUIRES_BASH to a single test, for classes that are not wholly skipped."""
+    for mark in reversed(_REQUIRES_BASH):
+        func = mark(func)
+    return func
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ash-tag-on-merge.yml"
@@ -237,6 +292,8 @@ def _run(script: str, version: str, tmp_path: Path, tag_exists: bool = True) -> 
 class TestTheFloatingTagMatchesTheReleasedMajor:
     """The invariant, one case per release shape so a failure names the version."""
 
+    pytestmark = _REQUIRES_BASH
+
     @pytest.mark.parametrize(
         ("version", "expected"),
         [
@@ -254,7 +311,9 @@ class TestTheFloatingTagMatchesTheReleasedMajor:
     ):
         result = _run(_floating_tag_script(), version, tmp_path, tag_exists=True)
 
-        assert result.ok, f"the step failed on a valid version {version}\n{result.describe()}"
+        assert result.ok, (
+            f"the step failed on a valid version {version}\n{result.describe()}"
+        )
         assert result.refs_written == [expected], (
             f"releasing {version} must move {expected} and nothing else, but the step "
             f"wrote {result.refs_written}\n{result.describe()}"
@@ -270,6 +329,14 @@ class TestTheFloatingTagMatchesTheReleasedMajor:
         """
         result = _run(_floating_tag_script(), version, tmp_path, tag_exists=True)
 
+        # Liveness first. `v3 not in []` is true, so without this the assertion below
+        # passes on a harness that never ran -- which is not hypothetical: it is what
+        # these three cases did on all five windows-latest legs of run 35877713374,
+        # reporting PASSED while bash was the WSL stub and no gh call was made.
+        assert result.refs_written, (
+            "the step wrote no ref at all, so the assertion below would hold "
+            f"vacuously\n{result.describe()}"
+        )
         assert "v3" not in result.refs_written, (
             f"releasing {version} wrote v3. README.md line 112 promises v3 always "
             "points to the latest stable v3.x release, so this hands 4.x to every user "
@@ -293,6 +360,8 @@ class TestTheAbsentTagPath:
     `v4` -- and the alternative, a step that finds no tag and exits 0 having done
     nothing, is the silent-success shape this repository's other gates exist to reject.
     """
+
+    pytestmark = _REQUIRES_BASH
 
     def test_an_absent_tag_is_created_at_the_released_major(self, tmp_path: Path):
         result = _run(_floating_tag_script(), "4.0.0", tmp_path, tag_exists=False)
@@ -322,7 +391,15 @@ class TestAMalformedVersionWritesNothing:
     Failing is deliberate rather than skipping. By this point in the job the GitHub
     release already exists, so a skip would leave a published release whose floating
     tag silently never moved, and the run would still be green.
+
+    Note what makes this class hard to assert honestly: "wrote no ref and exited
+    non-zero" is also the signature of a harness that could not start bash at all. All
+    six cases reported PASSED on every windows-latest leg of run 35877713374 while the
+    harness was in exactly that state. So each case additionally requires the step's own
+    `::error::` annotation, which only appears if control reached the version guard.
     """
+
+    pytestmark = _REQUIRES_BASH
 
     @pytest.mark.parametrize(
         "version",
@@ -338,6 +415,14 @@ class TestAMalformedVersionWritesNothing:
     def test_no_ref_is_written_and_the_step_fails(self, version: str, tmp_path: Path):
         result = _run(_floating_tag_script(), version, tmp_path, tag_exists=True)
 
+        # Liveness first: proves the step ran and rejected this version itself, rather
+        # than dying before it got there. Without it the two assertions below are
+        # satisfied by any harness that fails to launch.
+        assert "::error::" in result.proc.stdout, (
+            f"VERSION={version!r} produced no ::error:: annotation, so the step did not "
+            "reach its own version guard -- the assertions below would hold for a "
+            f"harness that never started\n{result.describe()}"
+        )
         assert result.refs_written == [], (
             f"VERSION={version!r} is not a version this step can act on, but it wrote "
             f"{result.refs_written}\n{result.describe()}"
@@ -349,7 +434,12 @@ class TestAMalformedVersionWritesNothing:
 
 
 class TestTheHarnessCanFail:
-    """Positive controls. Every assertion above is satisfiable by a broken harness."""
+    """Positive controls. Every assertion above is satisfiable by a broken harness.
+
+    Deliberately NOT skipped as a class. The locator control below needs no bash and so
+    runs on every platform; only the three that execute the shell carry the skip. A
+    control that is skipped wherever it might have fired is worse than no control.
+    """
 
     def test_exactly_one_step_writes_a_tag_ref(self):
         """The locator must find the step. Finding none makes everything above vacuous."""
@@ -363,6 +453,7 @@ class TestTheHarnessCanFail:
         )
         assert "refs/tags" in steps[0]["run"]
 
+    @_requires_bash
     def test_the_stub_records_calls_at_all(self, tmp_path: Path):
         """If the gh stub logged nothing, `refs_written == []` would pass everywhere."""
         result = _run(_floating_tag_script(), "3.8.0", tmp_path, tag_exists=True)
@@ -372,6 +463,7 @@ class TestTheHarnessCanFail:
             f"would hold no matter what the step did\n{result.describe()}"
         )
 
+    @_requires_bash
     @pytest.mark.parametrize(
         ("version", "wrong_ref"),
         [("4.0.0", "v3"), ("4.1.2", "v3"), ("10.0.0", "v3")],
@@ -393,6 +485,7 @@ class TestTheHarnessCanFail:
             "this no longer reproduces, the harness is not measuring what it claims."
         )
 
+    @_requires_bash
     def test_the_pre_fix_script_is_indifferent_to_a_malformed_version(
         self, tmp_path: Path
     ):
