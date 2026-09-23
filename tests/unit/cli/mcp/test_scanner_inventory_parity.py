@@ -131,6 +131,17 @@ class TestMcpAndSharedHelperAgree:
         assert entries["zeta"]["version"] == "9.9.9"
         assert entries["zeta"]["dependencies_satisfied"] is True
 
+    def test_mcp_wrapper_honors_its_own_patch_target(self, monkeypatch):
+        """The existing test suite patches mcp_tools._loaded_scanner_classes; the
+        wrapper must still route through that name so the patch intercepts."""
+        classes = [_stub("solo", _version="3.3.3", _satisfied=True)]
+        monkeypatch.setattr(mcp_tools, "_loaded_scanner_classes", lambda: list(classes))
+
+        entries = {e["name"]: e for e in mcp_tools.mcp_list_scanners()}
+        assert set(entries) == {"solo"}
+        assert entries["solo"]["version"] == "3.3.3"
+        assert entries["solo"]["dependencies_satisfied"] is True
+
 
 class TestTheParityAssertionCanFail:
     """Control for the test above: the comparison responds to a real difference.
@@ -163,17 +174,6 @@ class TestTheParityAssertionCanFail:
         assert via_shared["alpha"]["version"] == "7.7.7"
         assert via_mcp["alpha"]["dependencies_satisfied"] is True
         assert via_shared["alpha"]["dependencies_satisfied"] is False
-
-    def test_mcp_wrapper_honors_its_own_patch_target(self, monkeypatch):
-        """The existing test suite patches mcp_tools._loaded_scanner_classes; the
-        wrapper must still route through that name so the patch intercepts."""
-        classes = [_stub("solo", _version="3.3.3", _satisfied=True)]
-        monkeypatch.setattr(mcp_tools, "_loaded_scanner_classes", lambda: list(classes))
-
-        entries = {e["name"]: e for e in mcp_tools.mcp_list_scanners()}
-        assert set(entries) == {"solo"}
-        assert entries["solo"]["version"] == "3.3.3"
-        assert entries["solo"]["dependencies_satisfied"] is True
 
 
 class TestCliUsesTheSameIsolatedInventoryPath:
