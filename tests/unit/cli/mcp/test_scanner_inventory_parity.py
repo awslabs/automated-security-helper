@@ -67,7 +67,10 @@ class TestMcpReExportsSharedSymbolsByIdentity:
         assert mcp_tools._describe_scanner is scanner_inventory.describe_scanner
 
     def test_loaded_scanner_classes_is_the_shared_one(self):
-        assert mcp_tools._loaded_scanner_classes is scanner_inventory._loaded_scanner_classes
+        assert (
+            mcp_tools._loaded_scanner_classes
+            is scanner_inventory._loaded_scanner_classes
+        )
 
     def test_vendored_packages_tuple_is_shared(self):
         assert (
@@ -76,9 +79,14 @@ class TestMcpReExportsSharedSymbolsByIdentity:
         )
 
     def test_pure_helpers_are_shared(self):
-        assert mcp_tools._scanner_name_from_class is scanner_inventory._scanner_name_from_class
+        assert (
+            mcp_tools._scanner_name_from_class
+            is scanner_inventory._scanner_name_from_class
+        )
         assert mcp_tools._normalized_version is scanner_inventory._normalized_version
-        assert mcp_tools._declared_config_class is scanner_inventory._declared_config_class
+        assert (
+            mcp_tools._declared_config_class is scanner_inventory._declared_config_class
+        )
 
 
 class TestMcpAndSharedHelperAgree:
@@ -251,11 +259,12 @@ class TestCliUsesTheSameIsolatedInventoryPath:
             called["n"] += 1
             return real(*args, **kwargs)
 
-        with patch(
-            "automated_security_helper.cli.plugin.load_plugins"
-        ) as mock_load, patch(
-            "automated_security_helper.core.scanner_inventory.list_scanner_inventory",
-            _tracking,
+        with (
+            patch("automated_security_helper.cli.plugin.load_plugins") as mock_load,
+            patch(
+                "automated_security_helper.core.scanner_inventory.list_scanner_inventory",
+                _tracking,
+            ),
         ):
             mock_load.return_value = {
                 "scanners": list(classes),
