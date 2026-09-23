@@ -243,9 +243,10 @@ _VERSION_PROBE_TOTAL_BUDGET_SECONDS = 10
 _VERSION_PROBE_MIN_ATTEMPT_SECONDS = 2
 
 #: First token shaped like a dotted version (``1.9.4``, ``0.79.0``, ``v3.2``).
-#: Used only to pull a version out of raw ``--version`` output, which mixes the
-#: number with the tool name and other words; the scanner-reported path keeps its
-#: no-guess policy in ``_normalized_version``.
+#: Raw ``--version`` output mixes the number with the tool name and other words,
+#: and so does at least one scanner's self-reported ``tool_version`` ("bandit
+#: 1.9.4"), so both paths reach this through :func:`_version_token`. Matching is
+#: necessary but not sufficient -- see :data:`_PROBE_DATETIME_SHAPES`.
 _PROBE_VERSION_TOKEN = _re.compile(r"v?\d+(?:\.\d+)+(?:[.\-+][A-Za-z0-9.]+)?")
 
 #: Date and time-of-day shapes, excised before the version token is looked for.
