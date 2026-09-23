@@ -64,23 +64,49 @@ jobs:
 
           echo "Created release $TAG"
 
-      - name: Update v3 floating tag
+      # The floating tag is named from the version being released. It used to be the
+      # literal `v3`, which meant a 4.x release would have pointed `v3` at a 4.0 commit
+      # -- and README.md tells users `@v3` "always points to the latest stable v3.x
+      # release", so they would have received 4.0 on their next install with no tag name
+      # changing to warn them.
+      #
+      # $VERSION is the same value the release step above turns into $TAG, rather than a
+      # second read of the version: two parsers for one version is how they come to
+      # disagree. The major is derived here in the shell for the same reason -- an `if:`
+      # on this step would have to re-derive it in an Actions expression.
+      #
+      # Covered by tests/unit/test_floating_major_tag_workflow.py, which runs this
+      # script with `gh` stubbed and asserts which ref each version touches.
+      - name: Update floating major tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
+          # Validate before touching anything: every ref name below is derived from
+          # $VERSION, so an unparsable value would otherwise name a ref from garbage.
+          # A prerelease such as 4.0.0rc1 is accepted and resolves to v4 -- only the
+          # major is read, and refusing one here would stop maintaining the floating
+          # tag for a shape this repository has released before (v3.0.0-beta-*).
+          if [[ ! "$VERSION" =~ ^([0-9]+)\.[0-9]+\.[0-9]+[0-9A-Za-z.+-]*$ ]]; then
+            # Fails rather than skips. The GitHub release already exists by now, so a
+            # skip would leave a published release whose floating tag silently never
+            # moved, on a green run.
+            echo "::error::VERSION is '${VERSION}', which is not a release version. Refusing to derive a floating tag name from it. The release itself was created; move the floating tag by hand and fix the 'Read version' step."
+            exit 1
+          fi
+          FLOATING="v${BASH_REMATCH[1]}"
           MAIN_SHA=$(git rev-parse HEAD)
 
-          if gh api "repos/${GITHUB_REPOSITORY}/git/refs/tags/v3" >/dev/null 2>&1; then
-            gh api "repos/${GITHUB_REPOSITORY}/git/refs/tags/v3" \
+          if gh api "repos/${GITHUB_REPOSITORY}/git/refs/tags/${FLOATING}" >/dev/null 2>&1; then
+            gh api "repos/${GITHUB_REPOSITORY}/git/refs/tags/${FLOATING}" \
               -X PATCH \
               --field sha="$MAIN_SHA" \
               --field force=true
-            echo "Moved v3 tag to $MAIN_SHA (v${VERSION})"
+            echo "Moved ${FLOATING} tag to $MAIN_SHA (v${VERSION})"
           else
             gh api "repos/${GITHUB_REPOSITORY}/git/refs" \
               -X POST \
-              --field ref="refs/tags/v3" \
+              --field ref="refs/tags/${FLOATING}" \
               --field sha="$MAIN_SHA"
-            echo "Created v3 tag at $MAIN_SHA (v${VERSION})"
+            echo "Created ${FLOATING} tag at $MAIN_SHA (v${VERSION})"
           fi
