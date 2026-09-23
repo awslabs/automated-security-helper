@@ -191,13 +191,28 @@ def _normalized_version(raw) -> Optional[str]:
     return None if text.lower() in _ABSENT_VERSION_MARKERS else text
 
 
-#: Arg forms to try when asking a binary for its version, in order. ``version``
-#: comes first because grype and syft answer to the subcommand form (``grype
-#: version`` / ``syft version``) and treat ``--version`` as a flag on the scan
-#: command; tools that only know ``--version`` (semgrep, npm) ignore an unknown
-#: ``version`` argument or exit non-zero, so the flag form behind it still gets
-#: its turn.
-_VERSION_PROBE_ARG_FORMS = (("version",), ("--version",))
+#: Arg forms to try when asking a binary for its version, in order.
+#:
+#: ``--version`` comes first because it is the form every scanner binary ASH
+#: ships answers correctly. Measured across the ten reachable on one machine --
+#: grype, syft, bandit, semgrep, checkov, npm, opengrep, cfn_nag_scan,
+#: detect-secrets and the python cdk_nag uses -- all ten exit 0 and print a
+#: parseable version for ``--version``. grype and syft also answer the
+#: subcommand form, so putting the flag form first costs them nothing.
+#:
+#: The subcommand form is second, not gone: it stays as the fallback for a tool
+#: that only knows ``version``. Nothing ASH ships needs it today, and keeping it
+#: is cheap because a tool answering the flag form never reaches it.
+#:
+#: Order matters here in a way that is not obvious. ``version`` was first, and
+#: for bandit that is actively wrong rather than merely redundant: ``bandit
+#: version`` reads ``version`` as a path to scan, finds nothing, and still exits
+#: 0 after printing ``Run started:<timestamp>``. A zero exit is the whole test
+#: :func:`_probe_tool_version` applies before accepting output, so the flag form
+#: never got its turn and bandit's reported version came out of the timestamp,
+#: changing on every invocation. Any tool that treats an unknown argument as a
+#: scan target rather than an error has this shape.
+_VERSION_PROBE_ARG_FORMS = (("--version",), ("version",))
 
 #: Total wall-clock budget for probing ONE scanner's version, shared across both
 #: arg forms rather than applied to each. A binary that does not answer promptly

@@ -326,7 +326,7 @@ class TestProbeToolVersion:
 
         def _run_command(args, **kwargs):
             calls.append(args)
-            # `version` subcommand succeeds first.
+            # The `--version` flag form succeeds first.
             return _Result(0, stdout="grype 0.79.0\n")
 
         monkeypatch.setattr(
@@ -334,14 +334,17 @@ class TestProbeToolVersion:
             _run_command,
         )
         assert _probe_tool_version("grype") == "0.79.0"
-        # Only the first arg form ran; the flag form was never tried.
-        assert calls == [["/usr/bin/grype", "version"]]
+        # Only the first arg form ran; the subcommand form was never tried.
+        assert calls == [["/usr/bin/grype", "--version"]]
 
-    def test_falls_through_to_flag_form_when_subcommand_fails(self, monkeypatch):
+    def test_falls_through_to_subcommand_form_when_flag_fails(self, monkeypatch):
+        # A tool that only knows `version` still gets answered: the flag form is
+        # tried first, and its failure must not end the probe.
         monkeypatch.setattr(
             "automated_security_helper.utils.subprocess_utils.find_executable",
-            lambda _cmd: "/usr/bin/semgrep",
+            lambda _cmd: "/usr/bin/legacytool",
         )
+        calls = []
 
         class _Result:
             def __init__(self, returncode, stdout="", stderr=""):
@@ -351,15 +354,25 @@ class TestProbeToolVersion:
 
         seq = iter(
             [
-                _Result(2, stderr="unknown command 'version'"),
+                _Result(2, stderr="unknown flag '--version'"),
                 _Result(0, stdout="1.177.0\n"),
             ]
         )
+        def _run_command(args, **kwargs):
+            calls.append(args)
+            return next(seq)
+
         monkeypatch.setattr(
             "automated_security_helper.utils.subprocess_utils.run_command",
-            lambda args, **kwargs: next(seq),
+            _run_command,
         )
-        assert _probe_tool_version("semgrep") == "1.177.0"
+        assert _probe_tool_version("legacytool") == "1.177.0"
+        # Both forms ran, flag first then subcommand -- pinning the order, not
+        # just that some form eventually answered.
+        assert calls == [
+            ["/usr/bin/legacytool", "--version"],
+            ["/usr/bin/legacytool", "version"],
+        ]
 
     def test_all_forms_fail_returns_none(self, monkeypatch):
         monkeypatch.setattr(
