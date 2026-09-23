@@ -288,6 +288,73 @@ class TestExtractVersionFromProbe:
         assert _extract_version_from_probe("Usage: grype [OPTIONS]") is None
 
 
+class TestParsingAsADottedTokenIsNotEnoughToBeAVersion:
+    """A dotted-numeric run is necessary but not sufficient to be a version.
+
+    The general property, pinned rather than the one instance that exposed it.
+    `bandit version` treats `version` as a path to scan, scans nothing, exits 0
+    and prints `Run started:<timestamp>`; the seconds-and-offset tail of that
+    timestamp matches the version token, and a zero exit was the only other test
+    applied, so the reported version changed on every invocation.
+
+    Reordering the probe arg forms stopped bandit specifically from reaching
+    this path. It did not make timestamp output safe, so the next tool that
+    prints a date on success would reintroduce the same wrong answer. These
+    tests fail if the extractor ever again accepts a clock as a version.
+    """
+
+    def test_bandit_scan_banner_timestamp_is_not_a_version(self):
+        # The exact string measured from `bandit version`. Under the unguarded
+        # regex this returned "34.653010+00".
+        assert (
+            _extract_version_from_probe(
+                "Run started:2026-09-22 18:15:34.653010+00:00"
+            )
+            is None
+        )
+
+    @pytest.mark.parametrize(
+        "timestamp_output",
+        [
+            "Run started:2026-09-22 18:15:34.653010+00:00",
+            "2026-09-22 18:15:34.653010+00:00",
+            "started 18:15:34.653010",
+            "at 18:15:34",
+            "18:15",
+            "2026-09-22T11:57:30.325994Z",
+            "finished 2026-09-22 11:57:30.325994 -0700",
+            # Epoch seconds: a counter carrying a dot, not a version.
+            "1758628650.325994",
+        ],
+    )
+    def test_timestamp_shaped_output_never_yields_a_version(self, timestamp_output):
+        assert _extract_version_from_probe(timestamp_output) is None
+
+    @pytest.mark.parametrize(
+        "output,expected",
+        [
+            # Real versions must survive the timestamp guard unchanged.
+            ("bandit 1.9.4", "1.9.4"),
+            ("grype 0.111.0", "0.111.0"),
+            ("syft 1.42.4", "1.42.4"),
+            ("0.8.10", "0.8.10"),
+            ("Python 3.9.25", "3.9.25"),
+            ("version v3.2.1", "v3.2.1"),
+            ("tool 1.2.3-rc1", "1.2.3-rc1"),
+            # CalVer: a four-digit leading component is a version, not a year to
+            # be thrown away. Guarding by digit count must not cost this.
+            ("tool 2024.1.1", "2024.1.1"),
+            # A version printed alongside a build timestamp still resolves: the
+            # clock is excised, the version is not.
+            ("mytool 1.2.3 built at 10:30:00", "1.2.3"),
+            ("mytool 4.5.6 (2026-09-22)", "4.5.6"),
+            ("Application: syft\nVersion: 1.42.4", "1.42.4"),
+        ],
+    )
+    def test_real_version_output_is_unaffected(self, output, expected):
+        assert _extract_version_from_probe(output) == expected
+
+
 class TestProbeToolVersion:
     def test_empty_command_returns_none_without_probing(self, monkeypatch):
         # Guard: no command means nothing to resolve; must not touch subprocess.

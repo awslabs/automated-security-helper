@@ -231,6 +231,35 @@ _VERSION_PROBE_MIN_ATTEMPT_SECONDS = 2
 #: no-guess policy in ``_normalized_version``.
 _PROBE_VERSION_TOKEN = _re.compile(r"v?\d+(?:\.\d+)+(?:[.\-+][A-Za-z0-9.]+)?")
 
+#: Date and time-of-day shapes, excised before the version token is looked for.
+#:
+#: A dotted-numeric run is not by itself a version, and a timestamp contains one:
+#: in ``Run started:2026-09-22 18:15:34.653010+00:00`` the seconds-and-offset
+#: tail ``34.653010+00`` matches :data:`_PROBE_VERSION_TOKEN` exactly. That is
+#: how bandit's reported version became a number that changed every invocation.
+#: Reordering the probe arg forms stopped bandit from reaching this path, but the
+#: mechanism is not specific to bandit -- any tool that prints a date on a
+#: successful exit hits it -- so the shape is rejected here too.
+#:
+#: Excising rather than rejecting the whole line keeps real output working: a
+#: tool printing ``1.2.3 built at 10:30:00`` still reports 1.2.3. Matches are
+#: replaced with a space so removal cannot splice two numbers into a third.
+_PROBE_DATETIME_SHAPES = _re.compile(
+    r"""
+      \d{4}-\d{2}-\d{2}                 # ISO date: 2026-09-22
+    | \d{1,2}:\d{2}(?::\d{2})?          # clock time: 18:15 or 18:15:34
+      (?:\.\d+)?                        #   fractional seconds: .653010
+      (?:\s*(?:[+-]\d{2}:?\d{2}|Z))?    #   UTC offset: +00:00, -0700, Z
+    """,
+    _re.VERBOSE,
+)
+
+#: Largest plausible first component of a version. CalVer legitimately uses a
+#: four-digit year (``2024.1.1``), so the cap is four digits rather than fewer;
+#: anything longer is not a version but a counter that happens to carry a dot,
+#: epoch seconds (``1758628650.325994``) being the shape that motivates this.
+_PROBE_VERSION_MAX_LEADING_DIGITS = 4
+
 
 def _extract_version_from_probe(raw: Optional[str]) -> Optional[str]:
     """Pull a version string out of a binary's ``--version`` output.
@@ -245,17 +274,33 @@ def _extract_version_from_probe(raw: Optional[str]) -> Optional[str]:
     the Version column. So output with no such token yields None (reported as
     ``Unknown``), consistent with the module's no-guess policy. Empty output also
     yields None.
+
+    A dotted token is necessary but not sufficient. Timestamps contain one --
+    ``Run started:2026-09-22 18:15:34.653010+00:00`` yields ``34.653010+00`` --
+    so date and clock shapes are excised before the search, and a token with an
+    implausibly long leading component is refused. Without that, a tool printing
+    a date on a successful exit reports a version that changes every invocation,
+    which is what bandit did.
     """
     if raw is None:
         return None
     text = str(raw).strip()
     if not text:
         return None
-    match = _PROBE_VERSION_TOKEN.search(text)
-    if match:
-        return match.group(0)
-    # No dotted token means the output carries no version (a usage banner or an
-    # error line): report Unknown rather than surface non-version text verbatim.
+    # Excise timestamps first: their seconds-and-offset tail matches the version
+    # token, and searching before removing them returns the clock, not a version.
+    text = _PROBE_DATETIME_SHAPES.sub(" ", text)
+    for match in _PROBE_VERSION_TOKEN.finditer(text):
+        token = match.group(0)
+        leading = token.lstrip("v").split(".", 1)[0]
+        if len(leading) > _PROBE_VERSION_MAX_LEADING_DIGITS:
+            # A counter that happens to carry a dot (epoch seconds), not a
+            # version. Keep scanning: a real version may follow it.
+            continue
+        return token
+    # No dotted token means the output carries no version (a usage banner, an
+    # error line or a bare timestamp): report Unknown rather than surface
+    # non-version text verbatim.
     return None
 
 
