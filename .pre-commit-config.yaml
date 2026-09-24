@@ -69,7 +69,7 @@ repos:
     # out of the project environment -- which is why "pre-commit" is a declared dev
     # dependency rather than something each contributor installs by unrecorded means
     # -- pins the interpreter to this repo's own requires-python floor of 3.10.
-    rev: v4.19.0
+    rev: v4.18.1
     hooks:
       - id: commitizen
         stages: [commit-msg]
@@ -81,10 +81,28 @@ repos:
     # dependency group.
     #
     # It was v0.11.8, five minor versions under that floor, and the two ruffs do not
-    # agree about what an error is. Measured on this tree with `ruff check .`:
-    # 316 errors under 0.11.8, 6,853 under 0.16.8. Ruff's DEFAULT rule set widened
-    # enormously in between, so the old hook was enforcing a small fraction of what
-    # the project's own ruff reports -- while looking like it enforced all of it.
+    # agree about what an error is, because ruff's DEFAULT rule set widened enormously
+    # in between. Measured on this branch, after the lint fixes in this same pull
+    # request, with
+    #
+    #   ruff check . --isolated
+    #
+    # that is 29 errors under 0.11.8 and 6,428 under the pinned 0.16.7. 0.16.8 reports
+    # the same 6,428, so the gap is the version span rather than an artifact of which
+    # patch release got measured.
+    #
+    # --isolated is not a stylistic choice in that command. It is the only way to get a
+    # number out of 0.11.8 at all: `required-version = ">=0.16.7"` in [tool.ruff] makes
+    # the old ruff exit 2 with "Required version `>=0.16.7` does not match the running
+    # version `0.11.8`" before it lints anything. It also means both figures count
+    # ruff's own defaults and NOT this repo's rule set -- a bare `ruff check .` reads
+    # [tool.ruff], whose explicit select this tree is clean under, and exits 0. Seeing
+    # "All checks passed!" from that command has not contradicted the two counts above.
+    # The pre-fix default-rule count is recorded with the other anchored figures under
+    # [tool.ruff.lint] in pyproject.toml.
+    #
+    # So the old hook was enforcing a small fraction of what the project's own ruff
+    # reports -- while looking like it enforced all of it.
     # Reconciling this pin is a prerequisite for the lint steps in
     # .github/workflows/ash-unified-ci.yml, not a tidy-up.
     #
