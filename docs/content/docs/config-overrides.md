@@ -35,7 +35,7 @@ You can append to existing lists by adding a `+` at the end of the key path:
 
 ```bash
 # Add a new plugin module without replacing existing ones
-ash --config-overrides 'ash_plugin_modules+=["my_custom_plugin_module"]'
+ash --config-overrides 'ash_plugin_modules+=["my_ash_plugins"]'
 ```
 
 ### Complex Structures
@@ -181,17 +181,21 @@ ash config validate --config-overrides 'scanners.bandit.options.confidence_level
 
 ### Custom Plugins
 
-You can add custom plugins to ASH by specifying them in the `ash_plugin_modules` list:
+You can add custom plugins to ASH by specifying them in the `ash_plugin_modules` list.
+The top-level package must be inside ASH's plugin namespace: either under
+`automated_security_helper.`, or a top-level package whose name ends in `ash_plugins`
+(`my_ash_plugins`, `acme_ash_plugins`). A module outside that namespace is skipped with
+a warning rather than imported, so a name like `my_plugins` silently registers nothing.
 
 ```yaml
 ash_plugin_modules:
-  - my_custom_plugin_module
+  - my_ash_plugins
 ```
 
 Or using the override:
 
 ```bash
-ash --config-overrides 'ash_plugin_modules+=["my_custom_plugin_module"]'
+ash --config-overrides 'ash_plugin_modules+=["my_ash_plugins"]'
 ```
 
 ## Notes

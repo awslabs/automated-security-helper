@@ -1,14 +1,19 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for opengrep offline mode cache-miss hard-fail behaviour.
+"""Tests for opengrep offline mode cache-miss behaviour.
 
-When offline=True and OPENGREP_RULES_CACHE_DIR is unset or points to a
-directory with no .yaml/.yml files, _process_config_options must raise
-ScannerError with an actionable message — and must never invoke subprocess.
+When offline=True and OPENGREP_RULES_CACHE_DIR is unset or points to a directory
+with no .yaml/.yml rule files, opengrep cannot run. It must say so in a way the
+scan phase can record, and it must never invoke subprocess.
 
-Note: _process_config_options is called during model_post_init (scanner
-construction), so env vars must be set before instantiation.
+The assertions here inverted for the reason set out in
+``test_semgrep_offline_fallback``: the verdict used to be raised from
+``_process_config_options``, which runs inside ``model_post_init``, so the
+scanner never became an instance and never reached the hooks that turn "cannot
+run here" into a recorded MISSING row. Both scanners are covered because both
+inherit the single implementation in ``_grep_scanner_base``; the shared-base
+control lives in ``tests/unit/plugin_modules/scanners/test_grep_scanner_base.py``.
 """
 
 import pytest
@@ -29,44 +34,47 @@ def _make_scanner(test_plugin_context):
     return scanner
 
 
-def test_opengrep_offline_missing_cache_raises_actionable_error(
+def test_opengrep_offline_missing_cache_records_actionable_reason(
     test_plugin_context, monkeypatch
 ):
-    """No OPENGREP_RULES_CACHE_DIR → ScannerError with guidance."""
+    """No OPENGREP_RULES_CACHE_DIR -> constructed, declines, keeps the guidance."""
     monkeypatch.delenv("OPENGREP_RULES_CACHE_DIR", raising=False)
 
-    with pytest.raises(ScannerError) as exc_info:
-        _make_scanner(test_plugin_context)
+    scanner = _make_scanner(test_plugin_context)
 
-    msg = str(exc_info.value)
+    assert scanner.validate_plugin_dependencies() is False
+    msg = scanner.dependency_unavailable_reason
+    assert msg is not None
     assert "OPENGREP_RULES_CACHE_DIR" in msg
     assert "ash build-image --offline" in msg
 
 
-def test_opengrep_offline_empty_cache_raises_actionable_error(
+def test_opengrep_offline_empty_cache_records_actionable_reason(
     test_plugin_context, monkeypatch, tmp_path
 ):
-    """OPENGREP_RULES_CACHE_DIR set but empty → ScannerError with guidance."""
+    """OPENGREP_RULES_CACHE_DIR set but empty -> same verdict, same guidance."""
     monkeypatch.setenv("OPENGREP_RULES_CACHE_DIR", str(tmp_path))
 
-    with pytest.raises(ScannerError) as exc_info:
-        _make_scanner(test_plugin_context)
+    scanner = _make_scanner(test_plugin_context)
 
-    msg = str(exc_info.value)
+    assert scanner.validate_plugin_dependencies() is False
+    msg = scanner.dependency_unavailable_reason
+    assert msg is not None
     assert "OPENGREP_RULES_CACHE_DIR" in msg
     assert "ash build-image --offline" in msg
 
 
-def test_opengrep_offline_with_cache_does_not_raise(
+def test_opengrep_offline_with_cache_does_not_decline(
     test_plugin_context, monkeypatch, tmp_path
 ):
-    """OPENGREP_RULES_CACHE_DIR set with a .yaml file → no error, --config appended."""
+    """OPENGREP_RULES_CACHE_DIR set with a .yaml file -> no reason, --config appended."""
     rule_file = tmp_path / "rules.yaml"
     rule_file.write_text("rules: []")
     monkeypatch.setenv("OPENGREP_RULES_CACHE_DIR", str(tmp_path))
 
     scanner = _make_scanner(test_plugin_context)
 
+    assert scanner.dependency_unavailable_reason is None
     config_args = [a for a in scanner.args.extra_args if a.key == "--config"]
     cache_configs = [a for a in config_args if str(tmp_path) in a.value]
     assert cache_configs, "Expected --config pointing to cache dir"
@@ -83,7 +91,20 @@ def test_opengrep_offline_no_subprocess_on_failure(test_plugin_context, monkeypa
     with patch(
         "automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner.OpengrepScanner._run_subprocess"
     ) as mock_run_subprocess:
-        with pytest.raises(ScannerError):
-            _make_scanner(test_plugin_context)
-
+        _make_scanner(test_plugin_context)
         mock_run_subprocess.assert_not_called()
+
+
+def test_opengrep_offline_execute_scan_still_fails_closed(
+    test_plugin_context, monkeypatch
+):
+    """A declined scanner must refuse to execute, not run against no rules."""
+    monkeypatch.delenv("OPENGREP_RULES_CACHE_DIR", raising=False)
+    scanner = _make_scanner(test_plugin_context)
+
+    with pytest.raises(ScannerError, match="OPENGREP_RULES_CACHE_DIR"):
+        scanner._execute_scan(
+            target=test_plugin_context.source_dir,
+            target_type="source",
+            global_ignore_paths=[],
+        )

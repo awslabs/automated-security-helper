@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Dict, List, Sequence, Tuple
 
 import pytest
+from pydantic import ValidationError
 from typer.testing import CliRunner
 
 from automated_security_helper.base.plugin_context import PluginContext
@@ -637,6 +638,148 @@ class TestCoverageIsRefused:
 
         with pytest.raises(ShardCoverageError, match=r"no shard was assigned them"):
             merge_shard_results(as_loaded(shards))
+
+    def _orphan_grype_with_status(self, shards, status: str, name: str = "grype"):
+        """Drop grype from every assignment and record *name* under *status* instead.
+
+        The shape a scanner takes when it failed to construct on every executor: the
+        name is absent from ``assigned_scanners`` -- that list is built from
+        ``scanner_instances``, and a class whose constructor raised never becomes an
+        instance -- while a row for it exists in every shard's results. Passing *name*
+        covers the other shape, a plugin module that failed to import, which ScanPhase
+        records under its dotted module path.
+        """
+        for model in shards:
+            assignment = read_shard_assignment(model)
+            assignment.assigned_scanners = [
+                scanner
+                for scanner in assignment.assigned_scanners
+                if scanner != "grype"
+            ]
+            assignment.candidate_scanners = None
+            stamp_shard_assignment(model, assignment)
+            model.scanner_results[name] = ScannerStatusInfo(
+                status=status, excluded=False, dependencies_satisfied=True
+            )
+            model.additional_reports[name] = {
+                "None": {"scanner_name": name, "status": status, "excluded": False}
+            }
+        return shards
+
+    @pytest.mark.parametrize("status", ["ERROR", "MISSING"])
+    def test_a_never_attempted_orphan_is_not_a_shard_coverage_failure(self, status):
+        """The row already says never-attempted, so refusing the merge adds nothing.
+
+        This is the case the scan phase records for a scanner that failed to construct.
+        Before the narrowing it reached ``ShardCoverageError``, which no flag gates and
+        which attributed the loss to a partitioning disagreement that had not happened.
+        The scanner is still reported -- through ``incomplete_scanners`` and
+        ``--fail-on-incomplete-scanners`` -- which is the channel that exists for it.
+        """
+        shards = self._orphan_grype_with_status(build_shards(3), status)
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        assert merged.scanner_results["grype"].status == status, (
+            "exempting the row from the coverage refusal must not drop it: the whole "
+            "point is that it survives to be reported through the gated path"
+        )
+
+    def test_a_failed_plugin_module_row_is_not_a_shard_coverage_failure(self):
+        """The other row shape, keyed by a dotted module path.
+
+        A module can never appear in ``assigned_scanners``, so before the narrowing
+        this refused unconditionally rather than only when no shard owned the name. It
+        is the common case of the two, because an import failure is a property of the
+        image rather than of one host.
+
+        Assignments are left INTACT here, unlike the sibling tests. Dropping grype as
+        well made an earlier version of this test pass its module-path assertion and
+        then fail on grype instead -- the refusal named ``grype (PASSED, SKIPPED)``,
+        which is the other scenario entirely. The module path has to be the only
+        unclaimed name for this to be measuring what it says.
+        """
+        module = "automated_security_helper.plugin_modules.ash_builtin.scanners"
+        shards = build_shards(3)
+        for model in shards:
+            model.scanner_results[module] = ScannerStatusInfo(
+                status=ScannerStatus.ERROR, excluded=False, dependencies_satisfied=True
+            )
+            model.additional_reports[module] = {
+                "None": {"scanner_name": module, "status": "ERROR", "excluded": False}
+            }
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        assert merged.scanner_results[module].status == ScannerStatus.ERROR
+
+    @pytest.mark.parametrize("status", ["PASSED", "FAILED", "SKIPPED"])
+    def test_an_orphan_claiming_a_known_outcome_is_still_refused(self, status):
+        """The signal the narrowing must not lose.
+
+        A row asserting its scanner reached a verdict, with no shard owning it, is the
+        original defect: merging adopts that claim and reports a scanner nobody ran as
+        one that ran. SKIPPED is included and is the shape the sibling test above
+        exercises through the legacy path -- it means "not selected here", which
+        merging would read as "deliberately skipped" for a scanner no shard selected
+        anywhere.
+        """
+        shards = self._orphan_grype_with_status(build_shards(3), status)
+
+        with pytest.raises(ShardCoverageError, match=r"no shard was assigned them"):
+            merge_shard_results(as_loaded(shards))
+
+    def test_an_unrecognised_status_cannot_reach_the_union_check_at_all(self):
+        """Why the unknown-status case is defensive rather than load-bearing.
+
+        The exemption is spelled as a denylist of the two never-attempted statuses and
+        not as ``not _completed(entry)``, because that helper returns False for a
+        status it has never heard of -- fail-closed where it is used, fail-OPEN here,
+        where False would mean "exempt". That polarity argument is correct, but it is
+        not what keeps this safe, and the difference is worth recording rather than
+        implying a guard is doing work it is not.
+
+        ``ScannerStatusInfo.status`` is enum-typed, so an unrecognised status is
+        refused at model-validation time -- both when constructing one and when
+        loading a shard written by a newer ASH. It never reaches
+        ``_verify_scanner_union``. The denylist costs nothing and is the right shape if
+        that ever stops being true; today the enum is the guarantee.
+        """
+        with pytest.raises(ValidationError):
+            ScannerStatusInfo(
+                status="QUARANTINED", excluded=False, dependencies_satisfied=True
+            )
+
+    def test_one_shard_claiming_a_verdict_defeats_another_shards_error(self):
+        """Every status a name carries has to qualify, not just one of them.
+
+        A name recorded PASSED by one shard and ERROR by another is the original
+        defect, and taking the ERROR as permission to exempt would hide it.
+        """
+        shards = self._orphan_grype_with_status(build_shards(3), "ERROR")
+        shards[0].scanner_results["grype"] = ScannerStatusInfo(
+            status=ScannerStatus.PASSED, excluded=False, dependencies_satisfied=True
+        )
+
+        with pytest.raises(ShardCoverageError, match=r"no shard was assigned them"):
+            merge_shard_results(as_loaded(shards))
+
+    def test_the_refusal_names_each_orphans_status(self):
+        """The message must not assert a cause it cannot know.
+
+        It read "Every shard excluded these scanners", which is false for a scanner
+        that failed to construct on every executor -- nobody excluded it. Naming the
+        status lets the reader tell the causes apart instead of being sent to look for
+        an ``--exclude-scanners`` setting that does not exist.
+        """
+        shards = self._orphan_grype_with_status(build_shards(3), "SKIPPED")
+
+        with pytest.raises(ShardCoverageError) as excinfo:
+            merge_shard_results(as_loaded(shards))
+
+        message = str(excinfo.value)
+        assert "SKIPPED" in message
+        assert "Every shard excluded these scanners" not in message
 
     def test_executors_resolving_different_scanner_sets_are_refused(self):
         # The disagreement itself, rather than its consequence: one executor was

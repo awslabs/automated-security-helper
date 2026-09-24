@@ -378,6 +378,48 @@ class ReportMetadata(BaseModel):
         ),
     ] = None
 
+    # The completeness denominator, recorded so it is not re-derived from the
+    # numerator.
+    #
+    # `expected_scanners` used to have no existence outside the scan phase, where it
+    # was derived from `self._scanner_tasks` -- built from the resolved plugin set,
+    # which is also where the completed set comes from. Both sides of the comparison
+    # came from one resolve, so a scanner that never joined that resolve was absent
+    # from both and produced no discrepancy: the five status counters summed
+    # correctly over the scanners that remained and `_validate_result_completeness`
+    # reported 100% for a run that had lost scanners.
+    #
+    # Declared rather than left to this model's extra="allow", for the reasons the
+    # `shard` field above states: model_json_schema() carries it so the committed
+    # AshAggregatedResults.json documents what
+    # .github/scripts/assert_scanners_completed.py reads, and a malformed block is
+    # refused at validate time instead of surfacing as a TypeError inside the gate.
+    expected_scanners: Annotated[
+        List[str],
+        Field(
+            default_factory=list,
+            description=(
+                "Scanner names this run was supposed to account for, taken from the "
+                "configuration's declared scanner roster rather than from the "
+                "plugins that resolved. A name here with no scanner_results entry is "
+                "a scanner that never joined the run. Empty when the run did not "
+                "resolve ASH's built-in plugin set -- a caller supplying its own "
+                "plugin classes is not measured against the built-in roster."
+            ),
+        ),
+    ]
+    plugin_load_errors: Annotated[
+        Dict[str, str],
+        Field(
+            default_factory=dict,
+            description=(
+                "Plugin modules that failed to import during this run, mapped to the "
+                "error text. Non-empty means the run is missing plugins it ships "
+                "with, whatever the per-scanner statuses say."
+            ),
+        ),
+    ]
+
     @field_validator("project_name")
     @classmethod
     def validate_non_empty_str(cls, v: str, info) -> str:

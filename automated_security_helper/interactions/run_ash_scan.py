@@ -303,18 +303,38 @@ def scanner_statuses(
     ]
 
 
-def no_scanner_ran(observed: List[tuple[str, str]]) -> bool:
-    """True when *observed* is non-empty and none of its scanners reached a verdict.
+def no_scanner_ran(
+    observed: List[tuple[str, str]],
+    expected: Optional[List[str]] = None,
+) -> bool:
+    """True when this run reached no verdict about the target.
 
-    Non-empty is load-bearing and is not the same assertion. An empty scanner set
-    means the scan phase recorded nothing, which is reachable from a legitimate
-    ``--phases convert`` run and is refused at the CI boundary instead (see
-    ``assert_scanners_completed.py``, which fails a results file reporting no
-    scanners at all). Folding the two together here would turn a phase-limited run
-    into an error.
+    Two conditions, and the second exists because the first could not express it.
+
+    1. *observed* is non-empty and none of its scanners reached a verdict. SKIPPED
+       has to be tolerated one entry at a time -- it is how sharding and
+       ``--exclude-scanners`` record work a run was never meant to do -- so a file
+       in which every entry is SKIPPED clears the per-scanner pass while having
+       measured nothing.
+
+    2. *observed* is empty AND *expected* is not. An empty scanner set used to be
+       exempt unconditionally, on the reasoning that it is reachable from a
+       legitimate ``--phases convert`` run. That reasoning is sound but covers two
+       different states, and a boolean over ``observed`` alone cannot separate
+       them: "the scan phase was not requested", which is benign, and "the scan
+       phase ran and had nothing to run", which is the silent-zero case this gate
+       exists for.
+
+    *expected* is what separates them, and it needs no new state to do it.
+    ``ScanPhase`` is what records ``metadata.expected_scanners``, so a recorded
+    roster means the scan phase ran; no roster and no scanners means it never did.
+
+    Defaults to None so a results file written by a version that recorded no roster
+    -- which ``ash merge`` reads, from whatever ASH produced each shard -- keeps the
+    old benign reading rather than becoming a failure on upgrade.
     """
     if not observed:
-        return False
+        return bool(expected)
     return not any(status in _RAN_SCANNER_STATUSES for _, status in observed)
 
 
@@ -1800,7 +1820,10 @@ def _compute_exit_code(
         one_shard_of_a_split = (
             opts.shard_index is not None or opts.shard_count is not None
         )
-        if not one_shard_of_a_split and no_scanner_ran(observed):
+        expected_roster = list(
+            getattr(getattr(results, "metadata", None), "expected_scanners", None) or []
+        )
+        if not one_shard_of_a_split and no_scanner_ran(observed, expected_roster):
             logging.getLogger(__name__).error(
                 "Scan ran no scanners: %s. Every scanner was skipped, so this run "
                 "has shown the target to be neither clean nor dirty -- most often a "

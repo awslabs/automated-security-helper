@@ -188,13 +188,27 @@ def test_transient_settings_receives_a_nonempty_plugin_list(tmp_path, monkeypatc
     )
 
     captured: dict = {}
-    real_transient_settings = detect_secrets_scanner.transient_settings
+
+    # Re-pointed at the moved seam, not weakened. ``transient_settings`` is no
+    # longer a module-level name: it is imported inside ``_detect_secrets_api()`` so
+    # that a missing detect-secrets records a reason and reports MISSING instead of
+    # taking the whole plugin registry down at import time. Patching the accessor
+    # captures the same dict at the same point in the scan, so the assertion below
+    # is unchanged -- it is still the value handed to detect-secrets, which is where
+    # the empty list was being dropped.
+    _collection, real_transient_settings, _mapping = (
+        detect_secrets_scanner._detect_secrets_api()
+    )
 
     def capturing(settings):
         captured["settings"] = settings
         return real_transient_settings(settings)
 
-    monkeypatch.setattr(detect_secrets_scanner, "transient_settings", capturing)
+    monkeypatch.setattr(
+        detect_secrets_scanner,
+        "_detect_secrets_api",
+        lambda: (_collection, capturing, _mapping),
+    )
 
     report = scanner.scan(target=source_dir, target_type="source")
 

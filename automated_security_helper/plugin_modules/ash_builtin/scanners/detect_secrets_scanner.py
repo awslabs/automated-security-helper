@@ -44,9 +44,44 @@ from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
 from automated_security_helper.models.core import IgnorePathWithReason
 
-from detect_secrets import SecretsCollection
-from detect_secrets.settings import transient_settings
-from detect_secrets.core.plugins.util import get_mapping_from_secret_type_to_class
+#: Why this scanner cannot run when its library is absent. One string, used for
+#: the recorded reason and for the log line, so the two cannot drift.
+_MISSING_LIBRARY_REASON = (
+    "detect-secrets is not importable, so the detect-secrets scanner cannot run. "
+    "It ships as a dependency of ASH; reinstall ASH (`pip install --force-reinstall "
+    "automated-security-helper`) or install the library directly with "
+    "`pip install detect-secrets`."
+)
+
+
+def _detect_secrets_api():
+    """Import the three detect-secrets entry points this scanner uses.
+
+    IMPORTED HERE RATHER THAN AT MODULE LEVEL, and that placement is the fix
+    rather than a style choice. Plugin registration is a decorator side effect at
+    class-definition time, so it happens during import -- and
+    ``scanners/__init__.py`` imports its ten scanners in one module in source
+    order. A top-level ``import detect_secrets`` that raises therefore removed this
+    scanner AND every plugin module imported after it: measured with the library
+    blocked, the registry held 4 of 10 scanners, 0 of 15 reporters and neither
+    event handler, while ``load_internal_plugins`` reported zeros for all three
+    groups and four of its five call sites discarded that return value.
+
+    ``config/ash_config.py`` also imports ``DetectSecretsScannerConfig`` from this
+    module, so the top-level form additionally took out config resolution -- a hard
+    startup failure rather than a degraded scan.
+
+    Raising ImportError from here is deliberate: callers that need the library
+    catch it and record ``dependency_unavailable_reason``, which is what routes the
+    scanner to a MISSING row instead of to nowhere.
+    """
+    from detect_secrets import SecretsCollection
+    from detect_secrets.core.plugins.util import (
+        get_mapping_from_secret_type_to_class,
+    )
+    from detect_secrets.settings import transient_settings
+
+    return SecretsCollection, transient_settings, get_mapping_from_secret_type_to_class
 
 
 class DetectSecretsScanSettingsPluginsUsed(BaseModel):
@@ -119,8 +154,26 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             self.config = DetectSecretsScannerConfig()
         self.command = "detect-secrets"
         self.tool_type = ScannerToolType.SECRETS
-        self.tool_version = version("detect-secrets")
-        self._secrets_collection = SecretsCollection()
+        # The library's absence is recorded, not raised. This runs inside a
+        # constructor, and ScanPhase builds every scanner inside a try/except that
+        # logs one line and does not append to scanner_instances -- so a raise here
+        # deletes the scanner from the run rather than reporting it MISSING.
+        try:
+            secrets_collection_cls, _, _ = _detect_secrets_api()
+        except ImportError as exc:
+            self.dependency_unavailable_reason = _MISSING_LIBRARY_REASON
+            ASH_LOGGER.warning(f"{_MISSING_LIBRARY_REASON} ({exc})")
+            self._secrets_collection = None
+        else:
+            self._secrets_collection = secrets_collection_cls()
+            # PackageNotFoundError is a subclass of ModuleNotFoundError, so this is
+            # only reached when the library imports but its distribution metadata is
+            # missing -- a vendored or frozen install. The scanner still works;
+            # only the reported version is unknown.
+            try:
+                self.tool_version = version("detect-secrets")
+            except Exception:  # pragma: no cover - depends on install shape
+                self.tool_version = None
         super().model_post_init(context)
 
     def validate_plugin_dependencies(self) -> bool:
@@ -132,13 +185,18 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         Raises:
             ScannerError: If validation fails
         """
-        # detect-secrets is a dependency of this Python module and we interact
-        # with it purely through Python. If the Python import got this far then
-        # we know we're in a valid runtime for this scanner.
-        #
-        # We additionally consult the consolidated UV-or-direct-binary
-        # resolver for diagnostic logging only — its return value never gates
-        # the result because the Python import is the authoritative signal.
+        # The Python import is the authoritative signal, and it is now asked rather
+        # than assumed. This used to return an unconditional True on the reasoning
+        # that "if the Python import got this far then we know we're in a valid
+        # runtime" -- true only while the import was at module level, where its
+        # failure deleted the scanner from the run instead of reaching this method.
+        # With the import moved into the methods that use it, getting this far no
+        # longer proves the library is present, so the recorded reason decides.
+        if self.dependency_unavailable_reason:
+            return False
+
+        # Consulted for diagnostic logging only — its return value never gates the
+        # result, because this scanner uses the in-process Python API and not the CLI.
         cmd = get_uv_tool_command("detect-secrets", fallback_binary="detect-secrets")
         if cmd is not None:
             ASH_LOGGER.debug(
@@ -212,6 +270,13 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     f"Falling back to default settings."
                 )
 
+        # Skipped when the library is absent: the plugin list has to be read out of
+        # detect-secrets itself, and there is no scan to configure for a scanner that
+        # has already been recorded unable to run. Returning here rather than
+        # raising keeps the instance alive so it can be reported MISSING.
+        if self.dependency_unavailable_reason:
+            return super()._process_config_options()
+
         # If no plugins are configured then use all detect-secrets plugins. This is
         # the same set the default_settings function provided by detect-secrets
         # installs.
@@ -229,10 +294,19 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         # ``filters_used`` loaded from a baseline immediately above, and any extra
         # keys the model accepts -- a second silent loss on the way to fixing the
         # first.
+        #
+        # The class mapping is reached through ``_detect_secrets_api()`` rather than
+        # a module-level import, so a missing detect-secrets records a reason and
+        # reports MISSING instead of taking the entire plugin registry down at
+        # import time. Both properties are load-bearing and neither subsumes the
+        # other: the condition and the merge are what keep a configured scan from
+        # silently detecting nothing, and the indirection is what keeps the other
+        # nine scanners registered.
         if len(self.config.options.scan_settings.plugins_used) == 0:
+            _, _, secret_type_to_class = _detect_secrets_api()
             self.config.options.scan_settings.plugins_used = [
                 DetectSecretsScanSettingsPluginsUsed(name=plugin_type.__name__)
-                for plugin_type in get_mapping_from_secret_type_to_class().values()
+                for plugin_type in secret_type_to_class().values()
             ]
             settings = self.config.options.scan_settings.model_dump(
                 exclude_defaults=True, exclude_none=True, exclude_unset=True
@@ -401,7 +475,12 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         ASH_LOGGER.debug(f"config: {config}")
 
         try:
-            self._secrets_collection = SecretsCollection()
+            (
+                secrets_collection_cls,
+                transient_settings,
+                _,
+            ) = _detect_secrets_api()
+            self._secrets_collection = secrets_collection_cls()
             target_results_dir = self.results_dir.joinpath(target_type)
             results_file = target_results_dir.joinpath("results_sarif.sarif")
             results_file.parent.mkdir(exist_ok=True, parents=True)
@@ -412,8 +491,10 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                 and self.config.options.baseline_file is not None
             ):
                 with open(self.config.options.baseline_file, "r") as f:
-                    self._secrets_collection = SecretsCollection.load_from_baseline(
-                        baseline=json.load(f),
+                    self._secrets_collection = (
+                        secrets_collection_cls.load_from_baseline(
+                            baseline=json.load(f),
+                        )
                     )
 
             # ``root`` has to be set for every scan, not only for the baseline

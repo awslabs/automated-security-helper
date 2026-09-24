@@ -163,7 +163,13 @@ class SemgrepScanner(GrepScannerBase[SemgrepScannerConfig]):
             return "semgrep publishes no Windows build"
         return None
 
-    def validate_plugin_dependencies(self) -> bool:
+    def _validate_tool_dependencies(self) -> bool:
+        """Semgrep's tool-reachability check.
+
+        Named for the ``GrepScannerBase`` hook rather than overriding
+        ``validate_plugin_dependencies`` directly: the base method now consults the
+        offline-cache verdict first, and an override here would skip it.
+        """
         unsupported = self.unsupported_platform_reason()
         if unsupported is not None:
             # Still False, because the answer to "can this run here" is still no. What

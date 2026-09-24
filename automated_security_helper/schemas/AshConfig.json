@@ -3318,6 +3318,19 @@
           "title": "Dependencies Satisfied",
           "type": "boolean"
         },
+        "dependency_unavailable_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Why this scanner cannot run, recorded during construction rather than raised from it. None when nothing blocks it.",
+          "title": "Dependency Unavailable Reason"
+        },
         "end_time": {
           "anyOf": [
             {

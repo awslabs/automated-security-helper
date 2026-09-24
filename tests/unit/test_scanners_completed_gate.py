@@ -367,3 +367,123 @@ def test_ran_statuses_are_exactly_the_two_that_mean_the_scanner_executed(status)
     """
     assert status in gate.RAN_STATUSES
     assert set(gate.RAN_STATUSES) == {"PASSED", "FAILED"}
+
+
+def _write_with_metadata(tmp_path, scanner_results, **metadata):
+    path = tmp_path / "ash_aggregated_results.json"
+    path.write_text(
+        json.dumps({"scanner_results": scanner_results, "metadata": metadata}),
+        encoding="utf-8",
+    )
+    return path
+
+
+class TestTheRosterIsAnIndependentDenominator:
+    """The gate builds its universe from the dict it is handed, and that was all.
+
+    It carried no expected roster, so it could only fail on the rows present: eight
+    of ten scanners printed "All 8 scanners accounted for; none incomplete" and
+    returned 0. The two that never registered were absent from the numerator and
+    from the denominator at once, so no arithmetic over that dict could notice them.
+
+    ``metadata.expected_scanners`` is written by ASH from the configuration's
+    declared scanner roster rather than from the plugins that resolved, which is why
+    comparing against it is not the same question as comparing the rows to each
+    other.
+    """
+
+    def test_an_expected_scanner_with_no_row_fails(self, tmp_path, capsys):
+        path = _write_with_metadata(
+            tmp_path,
+            {"bandit": _entry("PASSED")},
+            expected_scanners=["bandit", "grype", "syft"],
+        )
+
+        assert _run(path) == 1
+        out = capsys.readouterr().out
+        assert "grype" in out
+        assert "syft" in out
+
+    def test_a_complete_roster_passes(self, tmp_path):
+        path = _write_with_metadata(
+            tmp_path,
+            {"bandit": _entry("PASSED"), "grype": _entry("SKIPPED")},
+            expected_scanners=["bandit", "grype"],
+        )
+
+        assert _run(path) == 0
+
+    def test_the_comparison_ignores_case_and_separator_spelling(self, tmp_path):
+        """A roster written ``detect_secrets`` must not fail a row ``detect-secrets``.
+
+        The roster is taken from config field aliases and the rows from
+        ``config.name`` on the instantiated plugin. Those agree today; a gate that
+        compared them literally would turn any future divergence into ten false
+        failures rather than into the one real one it exists to report.
+        """
+        path = _write_with_metadata(
+            tmp_path,
+            {"detect-secrets": _entry("PASSED")},
+            expected_scanners=["Detect_Secrets"],
+        )
+
+        assert _run(path) == 0
+
+    def test_no_roster_leaves_the_gate_as_it_was(self, tmp_path):
+        """Backward compatibility, and it is load-bearing rather than polite.
+
+        ``ash merge`` reads shard results from whatever ASH wrote each one, and the
+        reusable workflow runs this script against files produced by released
+        versions. A missing roster has to read as "this producer recorded none",
+        not as "every scanner is missing".
+        """
+        path = _write(tmp_path, {"bandit": _entry("PASSED")})
+
+        assert _run(path) == 0
+
+    def test_an_extra_row_not_on_the_roster_is_not_a_failure(self, tmp_path):
+        """A third-party scanner the config did not declare still ran.
+
+        Only the roster-minus-rows direction is a finding. The other direction is a
+        plugin module an operator loaded without a config entry, which is a
+        supported arrangement.
+        """
+        path = _write_with_metadata(
+            tmp_path,
+            {"bandit": _entry("PASSED"), "ferret-scan": _entry("PASSED")},
+            expected_scanners=["bandit"],
+        )
+
+        assert _run(path) == 0
+
+
+class TestRecordedPluginLoadErrorsFailTheGate:
+    """Per-module import isolation is only safe if the loss is loud.
+
+    Isolating each plugin group's import turns a hard startup failure into a
+    degraded run. That is the right direction -- one missing optional dependency
+    should not cost fifteen reporters -- but only if something fails on the
+    degradation. A run that lost a plugin module still produces valid-looking rows
+    for every scanner that survived.
+    """
+
+    def test_a_recorded_load_error_fails(self, tmp_path, capsys):
+        path = _write_with_metadata(
+            tmp_path,
+            {"bandit": _entry("PASSED")},
+            plugin_load_errors={
+                "automated_security_helper.plugin_modules.ash_builtin.reporters": (
+                    "ImportError: No module named 'boto3'"
+                )
+            },
+        )
+
+        assert _run(path) == 1
+        assert "reporters" in capsys.readouterr().out
+
+    def test_an_empty_load_error_map_passes(self, tmp_path):
+        path = _write_with_metadata(
+            tmp_path, {"bandit": _entry("PASSED")}, plugin_load_errors={}
+        )
+
+        assert _run(path) == 0

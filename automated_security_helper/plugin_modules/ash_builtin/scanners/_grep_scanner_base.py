@@ -89,6 +89,34 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         """
         return None
 
+    def _validate_tool_dependencies(self) -> bool:
+        """Whether this scanner's TOOL is reachable. Subclasses override THIS.
+
+        Split out from ``validate_plugin_dependencies`` so the offline-cache verdict
+        below cannot be bypassed by a subclass. Both concrete scanners resolve their
+        binary through their own UV-or-PATH logic and neither chained to the base
+        implementation, so a guard added to ``ScannerPluginBase`` was simply not
+        reached -- measured: both returned True with the cache absent. Writing the
+        same two lines into each subclass would work today and break on the third
+        grep-family scanner, which is the failure mode this repository has already
+        paid for elsewhere.
+        """
+        return super().validate_plugin_dependencies()
+
+    def validate_plugin_dependencies(self) -> bool:
+        """Final for this family: the offline-cache verdict, then the tool check.
+
+        Subclasses customise ``_validate_tool_dependencies`` instead of this method.
+        Overriding this one restores the bypass it exists to close.
+        """
+        if self.dependency_unavailable_reason:
+            # Not re-logged. `_configure_offline_mode` already emitted this at
+            # WARNING during construction, and ScanPhase logs its own line when it
+            # records the scanner MISSING; a third copy per scanner per run says
+            # nothing new.
+            return False
+        return self._validate_tool_dependencies()
+
     # ---------------------------------------------------------------
     # Shared arg-building (was duplicated in each scanner).
     # ---------------------------------------------------------------
@@ -157,13 +185,41 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
             scanner_name=scanner_label,
         )
         if not offline_valid:
-            raise ScannerError(
+            # RECORDED, NOT RAISED, and the difference is a scanner that exists
+            # versus one that does not.
+            #
+            # This runs inside `_process_config_options`, whose only caller is
+            # `ScannerPluginBase.model_post_init` -- a constructor. pydantic 2
+            # propagates the exception unwrapped, and `ScanPhase`'s scanner-creation
+            # loop catches it, logs one line, and does not append to
+            # `scanner_instances`. The instance therefore did not exist to be asked
+            # `validate_plugin_dependencies()` or `unsupported_platform_reason()`,
+            # both of which exist so that "cannot run here" is recorded rather than
+            # dropped, and both of which are consulted only on entries in that list.
+            #
+            # What that produced: two scanners absent from `scanner_results`, five
+            # status counters summing correctly over the eight that remained, and a
+            # results file a consumer cannot tell apart from a complete scan. A
+            # false negative of exactly the shape the completeness gate exists to
+            # catch, and one it could not see because the denominator shrank with
+            # the numerator.
+            #
+            # The remediation text travels with the verdict rather than being
+            # reconstructed by the reader, because it is the only thing that tells
+            # an operator how to fix a real misconfiguration.
+            self.dependency_unavailable_reason = (
                 f"{scanner_label} is running in offline mode but no rule cache was found. "
                 f"Set ${cache_env} to a directory containing .yaml/.yml rule files. "
                 "Run `ash build-image --offline` to pre-warm the cache via Dockerfile, "
                 "or download rulesets manually with `semgrep --config p/ci --dryrun` "
                 "while online and copy to cache."
             )
+            ASH_LOGGER.warning(self.dependency_unavailable_reason)
+            # No cache `--config` to append, so nothing further to configure. The
+            # online default is deliberately NOT substituted: an offline run that
+            # silently fetched the registry ruleset would be a different scan than
+            # the one that was asked for, reported as the one that was asked for.
+            return
 
         ASH_LOGGER.info(
             f"{scanner_label} offline mode: using cached rules from {cache_dir}"
@@ -218,6 +274,18 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         # later as "'NoneType' object has no attribute 'joinpath'" instead of
         # naming the real problem. ScannerError matches how the rest of this
         # class reports unusable configuration.
+        # Fail closed on a verdict that construction recorded instead of raising.
+        #
+        # `_configure_offline_mode` appends no cache `--config` when the rule cache
+        # is absent, so a scanner that reached execution anyway would scan with
+        # whatever rules it happened to have and report the result as an offline
+        # scan. `ScanPhase` asks `validate_plugin_dependencies()` first and never
+        # dispatches this scanner, but that is a property of one caller; this class
+        # should not depend on it, and a second caller (an installer probe, a
+        # plugin-inventory path, an out-of-tree orchestrator) would not inherit it.
+        if self.dependency_unavailable_reason:
+            raise ScannerError(self.dependency_unavailable_reason)
+
         if self.results_dir is None:
             raise ScannerError(
                 f"{self.__class__.__name__} has no results_dir; it must be set by "

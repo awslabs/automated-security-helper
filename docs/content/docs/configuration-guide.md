@@ -279,8 +279,13 @@ The `ash_plugin_modules` section allows you to specify custom Python modules con
 ```yaml
 ash_plugin_modules:
   - my_custom_ash_plugins
-  - another_plugin_module
+  - another_ash_plugins
 ```
+
+The top-level package must be inside ASH's plugin namespace: either under
+`automated_security_helper.`, or a top-level package whose name ends in `ash_plugins`.
+A module outside that namespace is skipped with a warning rather than imported, so a
+name like `another_plugin_module` silently registers nothing.
 
 ## Validating Configuration
 
@@ -319,7 +324,7 @@ ash --config-overrides 'scanners.bandit.enabled=true'
 ash --config-overrides 'global_settings.severity_threshold=LOW'
 
 # Append to a list
-ash --config-overrides 'ash_plugin_modules+=["my_custom_plugin"]'
+ash --config-overrides 'ash_plugin_modules+=["my_ash_plugins"]'
 
 # Add a complex value
 ash --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
