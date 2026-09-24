@@ -53,7 +53,11 @@ from automated_security_helper.core.resource_management.result_filters import (
     add_findings_list,
 )
 from automated_security_helper.cli.mcp.progress_monitor import monitor_scan_progress
-from automated_security_helper.cli.mcp.scan_target import validate_scan_target
+from automated_security_helper.cli.mcp.scan_target import (
+    resolve_scan_target,
+    validate_output_tree,
+    validate_scan_target,
+)
 from automated_security_helper.cli.mcp.session_identity import resolve_session_id
 from automated_security_helper.cli.mcp.source_delivery import (
     delivered_session_count,
@@ -117,6 +121,12 @@ def _resolve_omitted_source_dir(session_id: str) -> _OmittedSourceResolution:
     exactly that rather than papered over -- the count of other delivering
     sessions is the tell, and it names the likely cause in the error.
 
+    The registry record is checked against the filesystem rather than trusted.
+    The two can disagree -- a delivery interrupted mid-swap, or anything outside
+    the server removing the directory -- and a record pointing at a directory
+    that is gone, or at one that is empty, is the same false-negative shape as
+    the fallback above: the scan runs and reports clean.
+
     Args:
         session_id: The session this call resolved to.
 
@@ -130,8 +140,31 @@ def _resolve_omitted_source_dir(session_id: str) -> _OmittedSourceResolution:
     )
 
     delivered = get_session_source_dir(session_id)
-    if delivered is not None:
+    if delivered is not None and delivered.is_dir():
         return _OmittedSourceResolution(source_dir=str(delivered))
+
+    if delivered is not None:
+        # Registered, but the directory is gone. Returning the path anyway would
+        # report "directory not found" for a tree the server said it had, and an
+        # empty-but-present tree would be worse still -- it scans and reports
+        # clean. Naming the state is what makes it actionable, since re-delivering
+        # is the fix and the caller cannot guess that from a missing-path error.
+        return _OmittedSourceResolution(
+            error={
+                "success": False,
+                "error": (
+                    f"The source tree delivered under this session id is no "
+                    f"longer on disk at {delivered}. Deliver it again with "
+                    f"set_source_git or "
+                    f"set_source_zip_chunk/set_source_zip_finalize. Refusing to "
+                    f"scan: the recorded directory cannot be read, and scanning "
+                    f"the server's working directory instead would report on a "
+                    f"tree that is not yours."
+                ),
+                "error_type": "delivered_source_missing",
+                "session_id": session_id,
+            }
+        )
 
     if session_id == DEFAULT_SESSION_ID:
         # No session header at all: a single local client, where the working
@@ -265,23 +298,38 @@ async def run_ash_scan(
         # a permitted root. Without it a delivered tree is refused by the very
         # allowlist the operator set to bound the scan surface, since no operator
         # lists a directory the server invented per connection.
-        target_error = validate_scan_target(source_dir, session_id=session_id)
-        if target_error:
-            await ctx.error(str(target_error))
+        target = resolve_scan_target(source_dir, session_id=session_id)
+        if target.error is not None:
+            await ctx.error(str(target.error))
             return {
                 "success": False,
-                "error": str(target_error),
+                "error": str(target.error),
                 "error_type": "scan_target_not_permitted",
                 # Mirrors the category create_error_response sets on the
                 # mcp_tools side, so one key identifies a refusal from any entry
                 # point rather than two depending on which tool was called.
-                "error_category": target_error.context["error_category"],
+                "error_category": target.error.context["error_category"],
+            }
+        resolved_target = target.require()
+
+        # The policy canonicalized the target and nothing beneath it. The
+        # clean_output branch below deletes a file inside <target>/.ash, which
+        # follows a symlinked .ash out of the permitted roots, so the tree is
+        # checked before anything reads or writes through it.
+        output_error = validate_output_tree(resolved_target, ".ash", "ash_output")
+        if output_error is not None:
+            await ctx.error(str(output_error))
+            return {
+                "success": False,
+                "error": str(output_error),
+                "error_type": "output_dir_not_permitted",
+                "error_category": output_error.context["error_category"],
             }
 
         await ctx.info(f"Starting scan for directory: {source_dir}")
 
         directory_path_obj = Path(source_dir)
-        output_dir = directory_path_obj.joinpath(".ash", "ash_output")
+        output_dir = resolved_target.joinpath(".ash", "ash_output")
         aggregated_results_path = output_dir.joinpath("ash_aggregated_results.json")
 
         if clean_output and aggregated_results_path.exists():

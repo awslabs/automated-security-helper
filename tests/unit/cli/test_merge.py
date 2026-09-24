@@ -946,16 +946,23 @@ class TestExitCode:
         assert _merged_exit_code(merged, tmp_path, "low", True) == 2
 
     def test_min_severity_gates_the_verdict(self, tmp_path):
-        # Parity with `ash scan --min-severity`. The gate in _compute_exit_code
-        # reads the SARIF *level*, not issue_severity, so downgrading every
-        # finding to warning puts them all at medium: actionable against the
-        # config's MEDIUM threshold, but below a critical floor. Without
-        # min_severity reaching _compute_exit_code both floors would answer 2,
-        # and the second answer would be wrong.
+        # Parity with `ash scan --min-severity`. Downgrading every finding to
+        # MEDIUM puts them all above the config's MEDIUM threshold and below a
+        # critical floor. Without min_severity reaching _compute_exit_code both
+        # floors would answer 2, and the second answer would be wrong.
+        #
+        # issue_severity is downgraded alongside the level, and the level alone is
+        # not enough. This used to set only `result.level = "warning"` and lean on
+        # _compute_exit_code's min_severity gate reading the level while ignoring
+        # issue_severity -- which left the fixture's HIGH and CRITICAL severities in
+        # place and made the assertion depend on the one severity resolver in ASH
+        # that disagreed with the others. That resolver now reads issue_severity, so
+        # a fixture that downgrades only the level is no longer downgrading anything.
         shards = build_shards(3)
         for model in shards:
             for result in model.sarif.runs[0].results:
                 result.level = "warning"
+                result.properties.issue_severity = "MEDIUM"
         merged = merge_shard_results(as_loaded(shards))
 
         assert merged.metadata.summary_stats.actionable > 0

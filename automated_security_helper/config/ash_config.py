@@ -500,8 +500,18 @@ class AshMcpConfig(BaseModel):
 
 
 class AshConfigGlobalSettingsSection(BaseModel):
+    # validate_default is here because `severity_threshold`'s default is derived
+    # from an environment variable, and pydantic does not validate a default no
+    # caller supplied. Without it an off-table `ASH_DEFAULT_SEVERITY_LEVEL` landed
+    # in a Literal-typed field that forbids it, and the ladder in
+    # utils.severity_ladder read the result as CRITICAL -- the strictest gate --
+    # for an operator who had asked for the loosest. core.constants now normalizes
+    # at the boundary, so this guards the other direction: a future default written
+    # in this file that the Literal does not admit fails at construction instead of
+    # travelling into the exit code.
     model_config = ConfigDict(
         extra="forbid",
+        validate_default=True,
     )
 
     severity_threshold: Annotated[

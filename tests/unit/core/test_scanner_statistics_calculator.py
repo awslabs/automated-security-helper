@@ -251,12 +251,19 @@ class TestScannerStatisticsCalculator:
             == 1
         )
 
-        # Test with invalid threshold
+        # An unrecognized threshold counts critical findings, not nothing. This
+        # assertion used to expect 0 under a neutral "# Test with invalid threshold"
+        # comment, and nothing anywhere documented the zero as intentional -- so it
+        # pinned the fail-open arm rather than describing a decision. A threshold
+        # ASH does not understand now gates the way utils.severity_ladder gates one,
+        # which is critical-only; see calculate_actionable_count for why not zero and
+        # not everything. tests/unit/core/test_severity_threshold_boundary.py carries
+        # the rest of the cases.
         assert (
             ScannerStatisticsCalculator.calculate_actionable_count(
                 1, 2, 3, 4, 5, "INVALID"
             )
-            == 0
+            == 1
         )
 
     def test_get_scanner_threshold_info_global(self):

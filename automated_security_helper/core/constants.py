@@ -1,9 +1,15 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import logging
 import os
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
+
+from automated_security_helper.utils.severity_ladder import (
+    SEVERITY_THRESHOLDS,
+    normalize_threshold,
+)
 
 ASH_ASSETS_DIR = Path(__file__).parent.parent.joinpath("assets")
 ASH_INSTALLED_REVISION_PATH = ASH_ASSETS_DIR.joinpath("ASH_INSTALLED_REVISION")
@@ -21,7 +27,67 @@ ASH_BIN_PATH = (
     if os.environ.get("ASH_BIN_PATH", None) is not None
     else Path.home().joinpath(".ash", "bin")
 )
-ASH_DEFAULT_SEVERITY_LEVEL = os.environ.get("ASH_DEFAULT_SEVERITY_LEVEL", "MEDIUM")
+#: Used when ``ASH_DEFAULT_SEVERITY_LEVEL`` is unset or names no threshold. MEDIUM
+#: is what ASH has always shipped, so an unusable value behaves as though the
+#: variable were absent rather than moving the gate somewhere new.
+_FALLBACK_SEVERITY_LEVEL = "MEDIUM"
+
+
+def _resolve_default_severity_level(raw: Optional[str]) -> str:
+    """Return a ladder threshold for *raw*, warning when it is not one.
+
+    Why this is a function and not an ``os.environ.get`` with a default
+    ---------------------------------------------------------------------
+    The value becomes the default for ``global_settings.severity_threshold``, a
+    ``Literal`` of the five ladder values -- and ``pydantic`` does not validate a
+    default that no caller supplied. So an off-table environment value used to
+    land in the field unchallenged, and the ladder reads an unrecognised threshold
+    as CRITICAL. ``ASH_DEFAULT_SEVERITY_LEVEL=INFO``, which an operator would
+    plausibly write meaning "report everything", therefore produced the strictest
+    gate ASH has and dropped every finding below ``error`` from the verdict.
+    Normalising here is what lets ``AshConfigGlobalSettingsSection`` assert its own
+    default with ``validate_default=True``.
+
+    Why it falls back rather than raising
+    ------------------------------------
+    This module is imported before anything can catch an exception from it, so
+    raising would turn one mistyped variable into an ASH that cannot start at all
+    -- ``ash --help`` included -- and report it as an import error rather than as a
+    configuration problem. The fallback is announced at WARNING instead, which
+    reaches stderr through ``logging.lastResort`` even this early in the process.
+
+    Why the fallback is MEDIUM and not ALL
+    -------------------------------------
+    MEDIUM is the value ASH ships when the variable is unset, so an unrecognised
+    value behaves exactly as though the operator had not set one -- the most
+    reversible outcome, and the only one that cannot surprise a reader of the
+    documented default. The junitxml reporter faces the same question about a
+    threshold it cannot recognise and answers ALL, on the grounds that a reporter
+    should show everything and let a human filter; that argument is about what to
+    *display*, and a gate is not a display. Choosing ALL here would silently turn
+    every informational finding in an adopter's tree into a build failure on
+    upgrade, from a typo.
+    """
+    normalized = normalize_threshold(raw)
+    if normalized is not None:
+        return normalized
+
+    if raw is not None:
+        logging.getLogger(__name__).warning(
+            "ASH_DEFAULT_SEVERITY_LEVEL=%r is not a severity threshold; falling "
+            "back to %s. Valid values are: %s. Note that these name the least "
+            "severe finding that still fails a scan, so they are not severity "
+            "names -- there is no INFO or NONE threshold.",
+            raw,
+            _FALLBACK_SEVERITY_LEVEL,
+            ", ".join(SEVERITY_THRESHOLDS),
+        )
+    return _FALLBACK_SEVERITY_LEVEL
+
+
+ASH_DEFAULT_SEVERITY_LEVEL = _resolve_default_severity_level(
+    os.environ.get("ASH_DEFAULT_SEVERITY_LEVEL")
+)
 
 ASH_CONFIG_FILE_NAMES = [
     ".ash.yml",
