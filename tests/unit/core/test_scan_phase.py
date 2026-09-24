@@ -1,17 +1,12 @@
 """Tests for core/phases/scan_phase.py — covers ScanPhase initialization and validation manager usage."""
 
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 import pytest
 
-from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.phases.scan_phase import ScanPhase
-from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
-    ScannerStatusInfo,
 )
-from automated_security_helper.models.scan_results_container import ScanResultsContainer
 from automated_security_helper.models.scanner_validation import ScannerValidationManager
 
 # Rebuild model to handle forward references

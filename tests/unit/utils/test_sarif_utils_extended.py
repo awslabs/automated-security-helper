@@ -11,7 +11,9 @@ from automated_security_helper.utils.sarif_utils import (
     attach_scanner_details,
     apply_suppressions_to_sarif,
 )
-from automated_security_helper.utils.suppression_matcher import file_path_matches as path_matches_pattern
+from automated_security_helper.utils.suppression_matcher import (
+    file_path_matches as path_matches_pattern,
+)
 from automated_security_helper.schemas.sarif_schema_model import (
     SarifReport,
     Run,
@@ -139,7 +141,10 @@ def test_attach_scanner_details():
 def test_attach_scanner_details_with_invocation():
     """Test attaching scanner details with invocation details."""
     sarif = create_test_sarif()
-    invocation = {"command_line": "scanner --scan file.py", "working_directory": "/var/data"}
+    invocation = {
+        "command_line": "scanner --scan file.py",
+        "working_directory": "/var/data",
+    }
 
     result = attach_scanner_details(sarif, "NewScanner", "2.0.0", invocation)
 

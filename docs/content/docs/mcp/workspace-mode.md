@@ -20,8 +20,8 @@ Call it first when a workspace is unfamiliar. Resolution is the cheap half; a wo
 ```python
 resolve_ash_workspace(
     workspace_file="/srv/repos/platform/dev.code-workspace",
-    workspace_config="/etc/ash/workspace-policy.yaml",   # optional
-    allow_missing_projects=False,                        # optional
+    workspace_config="/etc/ash/workspace-policy.yaml",  # optional
+    allow_missing_projects=False,  # optional
     config_overrides=["global_settings.severity_threshold=HIGH"],  # optional
 )
 ```
@@ -45,14 +45,14 @@ The response carries:
 ```python
 run_ash_workspace_scan(
     workspace_file="/srv/repos/platform/dev.code-workspace",
-    workspace_config="/etc/ash/workspace-policy.yaml",   # optional
-    allow_missing_projects=False,                        # optional
-    config_overrides=None,                               # optional
-    output_dir=None,                                     # optional
-    scanners=None,                                       # optional
-    excluded_scanners=None,                              # optional
-    offline=False,                                       # optional
-    clean_output=True,                                   # optional
+    workspace_config="/etc/ash/workspace-policy.yaml",  # optional
+    allow_missing_projects=False,  # optional
+    config_overrides=None,  # optional
+    output_dir=None,  # optional
+    scanners=None,  # optional
+    excluded_scanners=None,  # optional
+    offline=False,  # optional
+    clean_output=True,  # optional
 )
 ```
 

@@ -12,7 +12,6 @@ from datetime import datetime, date
 
 from automated_security_helper.utils.path_matching import (
     _path_pattern_matches,
-    _recursive_glob_match,
 )
 
 if TYPE_CHECKING:
@@ -94,9 +93,7 @@ class AshSuppression(IgnorePathWithReason):
             try:
                 datetime.strptime(v, "%Y-%m-%d")
             except ValueError:
-                raise ValueError(
-                    f"Invalid expiration date format. Use YYYY-MM-DD: {v}"
-                )
+                raise ValueError(f"Invalid expiration date format. Use YYYY-MM-DD: {v}")
         return v
 
     @property
@@ -107,9 +104,7 @@ class AshSuppression(IgnorePathWithReason):
         ``line_start`` is reused to match how suppressions are indexed elsewhere
         in the codebase.
         """
-        line_end_val = (
-            self.line_end if self.line_end is not None else self.line_start
-        )
+        line_end_val = self.line_end if self.line_end is not None else self.line_start
         parts = [
             self.path,
             self.rule_id or "*",
@@ -156,9 +151,7 @@ class AshSuppression(IgnorePathWithReason):
             if finding.rule_id is None:
                 return False
             # Case-insensitive glob match for OS portability
-            if not fnmatch.fnmatch(
-                finding.rule_id.lower(), self.rule_id.lower()
-            ):
+            if not fnmatch.fnmatch(finding.rule_id.lower(), self.rule_id.lower()):
                 return False
 
         if not _path_pattern_matches(finding.file_path, self.path):

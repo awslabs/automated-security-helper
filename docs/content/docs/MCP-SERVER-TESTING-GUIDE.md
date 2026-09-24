@@ -86,12 +86,12 @@ result = await mcp_ash_check_installation()
 
 # Expected response:
 {
-  "success": true,
-  "installed": true,
-  "version": "3.2.2",  # or your current version
-  "ash_command_available": true,
-  "ash_command_output": "ASH version 3.2.2",
-  "timestamp": "2026-02-28T10:10:41.009478"
+    "success": true,
+    "installed": true,
+    "version": "3.2.2",  # or your current version
+    "ash_command_available": true,
+    "ash_command_output": "ASH version 3.2.2",
+    "timestamp": "2026-02-28T10:10:41.009478",
 }
 ```
 
@@ -108,19 +108,17 @@ Start a security scan on a test directory.
 ```python
 # Start a scan
 result = await mcp_ash_run_ash_scan(
-    source_dir="/path/to/test/project",
-    severity_threshold="MEDIUM",
-    clean_output=true
+    source_dir="/path/to/test/project", severity_threshold="MEDIUM", clean_output=true
 )
 
 # Expected response:
 {
-  "success": true,
-  "status": "running",
-  "scan_id": "2e0cd8d2-132c-4eb1-a822-38dd237067f3",
-  "progress": 0.0,
-  "message": "Scan started, initializing scanners...",
-  "directory_path": "/path/to/test/project"
+    "success": true,
+    "status": "running",
+    "scan_id": "2e0cd8d2-132c-4eb1-a822-38dd237067f3",
+    "progress": 0.0,
+    "message": "Scan started, initializing scanners...",
+    "directory_path": "/path/to/test/project",
 }
 ```
 
@@ -327,26 +325,22 @@ result = await mcp_ash_list_active_scans()
 
 # Expected response:
 {
-  "success": true,
-  "active_scans": [],  # or list of running scans
-  "all_scans": [
-    {
-      "scan_id": "2e0cd8d2-132c-4eb1-a822-38dd237067f3",
-      "status": "completed",
-      "directory_path": "/path/to/test/project",
-      "start_time": "2026-02-28T10:10:46.026299",
-      "end_time": "2026-02-28T10:12:09.962812"
-    }
-  ],
-  "stats": {
-    "total_scans": 1,
-    "active_scans": 0,
-    "status_counts": {
-      "completed": 1,
-      "running": 0,
-      "failed": 0
-    }
-  }
+    "success": true,
+    "active_scans": [],  # or list of running scans
+    "all_scans": [
+        {
+            "scan_id": "2e0cd8d2-132c-4eb1-a822-38dd237067f3",
+            "status": "completed",
+            "directory_path": "/path/to/test/project",
+            "start_time": "2026-02-28T10:10:46.026299",
+            "end_time": "2026-02-28T10:12:09.962812",
+        }
+    ],
+    "stats": {
+        "total_scans": 1,
+        "active_scans": 0,
+        "status_counts": {"completed": 1, "running": 0, "failed": 0},
+    },
 }
 ```
 
@@ -413,15 +407,13 @@ Verify error handling for invalid inputs.
 
 ```python
 # Test with non-existent directory
-result = await mcp_ash_get_scan_results(
-    output_dir="/non/existent/path"
-)
+result = await mcp_ash_get_scan_results(output_dir="/non/existent/path")
 
 # Expected response:
 {
-  "success": false,
-  "error": "Output directory does not exist: /non/existent/path",
-  "error_type": "DirectoryNotFound"
+    "success": false,
+    "error": "Output directory does not exist: /non/existent/path",
+    "error_type": "DirectoryNotFound",
 }
 ```
 

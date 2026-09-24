@@ -50,8 +50,6 @@ def get_version_from_pyproject() -> str:
     text = read_text(PYPROJECT_TOML)
 
     if tomllib:
-        import io
-
         data = tomllib.loads(text)
         return data["project"]["version"]
 
@@ -107,7 +105,9 @@ def check_cli_flags() -> list[str]:
         if flag.lower() not in docs_lower:
             # Also try with backtick wrapping
             if f"`{flag}`".lower() not in docs_lower:
-                failures.append(f"CLI flag {flag} found in source but missing from cli-reference.md")
+                failures.append(
+                    f"CLI flag {flag} found in source but missing from cli-reference.md"
+                )
 
     return failures
 
@@ -130,7 +130,7 @@ def check_reporters() -> list[str]:
         alias = None
         if field_info.alias:
             alias = field_info.alias
-        display_name = alias if alias else field_name.replace("_", "-")
+        display_name = alias or field_name.replace("_", "-")
 
         if display_name.lower() not in docs:
             failures.append(
@@ -157,7 +157,7 @@ def check_scanners() -> list[str]:
         alias = None
         if field_info.alias:
             alias = field_info.alias
-        display_name = alias if alias else field_name.replace("_", "-")
+        display_name = alias or field_name.replace("_", "-")
 
         # Check both the alias and the raw field name variants
         found = (
@@ -257,20 +257,17 @@ def check_config_path() -> list[str]:
     not be flagged. This check previously asserted ".ash/.ash.yaml" was the only
     correct form, which contradicted the source of truth.
     """
-    failures: list[str] = []
-
-    # Pattern: .ash/ash.yaml NOT preceded by a dot (i.e., not .ash/.ash.yaml)
-    # We look for occurrences of ".ash/ash.yaml" that are NOT ".ash/.ash.yaml"
-    bad_pattern = re.compile(r"(?<!\.)\.ash/ash\.yaml")
-
-    for md_file in collect_md_files():
-        content = read_text(md_file)
-        matches = bad_pattern.findall(content)
-        if matches:
-            rel_path = md_file.relative_to(REPO_ROOT)
-            pass  # ".ash/ash.yaml" is a supported name; nothing to report
-
-    return failures
+    # No scan. The check that used to live here walked every markdown file
+    # looking for ".ash/ash.yaml" not preceded by a dot, then discarded every
+    # match it found -- `failures` was appended to nowhere, so the function read
+    # the whole docs tree and could only ever return []. The pattern it searched
+    # for is legal per ASH_CONFIG_FILE_NAMES (see the docstring), so the right
+    # answer is no finding; the loop was dead work, not a disabled check.
+    #
+    # Kept as a function returning [] rather than deleted outright because the
+    # docstring above is the record of why ".ash/ash.yaml" must not be flagged,
+    # and the caller's check list is not this change's to edit.
+    return []
 
 
 # ---------------------------------------------------------------------------

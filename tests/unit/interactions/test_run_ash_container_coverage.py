@@ -1,9 +1,5 @@
 """Tests for interactions/run_ash_container.py — covers container command building and execution."""
 
-from pathlib import Path
-from unittest.mock import patch, MagicMock
-import pytest
-
 
 class TestContainerModuleImport:
     """Tests that the container module can be imported and key functions exist."""

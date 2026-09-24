@@ -9,17 +9,20 @@ when the process cwd is set to an unrelated directory.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 
-from automated_security_helper.interactions.run_ash_scan import ScanOptions, _run_local_mode
+from automated_security_helper.interactions.run_ash_scan import (
+    ScanOptions,
+    _run_local_mode,
+)
 
 
 class TestScanSucceedsWhenCwdDiffersFromSourceDir:
-    def test_scan_succeeds_when_cwd_differs_from_source_dir(self, tmp_path, monkeypatch):
+    def test_scan_succeeds_when_cwd_differs_from_source_dir(
+        self, tmp_path, monkeypatch
+    ):
         """_run_local_mode must work correctly when cwd != source_dir.
 
         Sets cwd to /tmp (or a pytest tmp dir), runs against a different absolute
@@ -47,7 +50,9 @@ class TestScanSucceedsWhenCwdDiffersFromSourceDir:
         mock_orchestrator.config = MagicMock()
         mock_orchestrator.config.fail_on_findings = True
 
-        with patch("os.chdir", side_effect=AssertionError("os.chdir must not be called")):
+        with patch(
+            "os.chdir", side_effect=AssertionError("os.chdir must not be called")
+        ):
             with patch(
                 "automated_security_helper.core.orchestrator.ASHScanOrchestrator.create",
                 return_value=mock_orchestrator,
@@ -58,7 +63,9 @@ class TestScanSucceedsWhenCwdDiffersFromSourceDir:
 
         assert result is mock_results
 
-    def test_scan_options_source_dir_is_absolute_regardless_of_cwd(self, tmp_path, monkeypatch):
+    def test_scan_options_source_dir_is_absolute_regardless_of_cwd(
+        self, tmp_path, monkeypatch
+    ):
         """ScanOptions must coerce source_dir to absolute at construction time.
 
         This means the absolute path is captured before any cwd change, so
@@ -73,10 +80,16 @@ class TestScanSucceedsWhenCwdDiffersFromSourceDir:
 
         opts = ScanOptions(source_dir=source_dir, output_dir=tmp_path / "out")
 
-        assert opts.source_dir.is_absolute(), "source_dir must be absolute after ScanOptions coercion"
-        assert opts.output_dir.is_absolute(), "output_dir must be absolute after ScanOptions coercion"
+        assert opts.source_dir.is_absolute(), (
+            "source_dir must be absolute after ScanOptions coercion"
+        )
+        assert opts.output_dir.is_absolute(), (
+            "output_dir must be absolute after ScanOptions coercion"
+        )
 
-    def test_os_getcwd_in_scan_set_is_called_at_runtime_not_import(self, tmp_path, monkeypatch):
+    def test_os_getcwd_in_scan_set_is_called_at_runtime_not_import(
+        self, tmp_path, monkeypatch
+    ):
         """os.getcwd() in scan_set() resolves at call time, not import time.
 
         Changing cwd after import must be reflected in scan_set()'s default

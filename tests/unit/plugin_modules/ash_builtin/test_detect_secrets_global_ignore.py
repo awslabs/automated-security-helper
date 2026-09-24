@@ -31,7 +31,9 @@ class TestGlobalIgnorePathsFiltering:
         """Sample ignore paths configuration."""
         return [
             IgnorePathWithReason(path=".cruft.json", reason="Template metadata file"),
-            IgnorePathWithReason(path="*/node_modules/*", reason="Third-party packages"),
+            IgnorePathWithReason(
+                path="*/node_modules/*", reason="Third-party packages"
+            ),
             IgnorePathWithReason(path="**/credentials.json", reason="Credentials file"),
         ]
 

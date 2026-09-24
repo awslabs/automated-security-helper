@@ -682,9 +682,7 @@ class WorkspaceAggregator:
                 # derivations of one number disagree the moment a workspace
                 # ceiling tightened anything: the project reported 1 actionable
                 # and this split summed to 0, with no rule for which to trust.
-                actionable = count_actionable_results(
-                    results, project.gate_threshold
-                )
+                actionable = count_actionable_results(results, project.gate_threshold)
                 self._scanner_actionable[name] = (
                     self._scanner_actionable.get(name, 0) + actionable
                 )
@@ -842,8 +840,10 @@ class WorkspaceAggregator:
         try:
             with open(target, "w", encoding="utf-8") as handle:
                 handle.write("{\n")
-                for key, value in header.items():
-                    handle.write(f"{json.dumps(key)}: {json.dumps(value)},\n")
+                handle.writelines(
+                    f"{json.dumps(key)}: {json.dumps(value)},\n"
+                    for key, value in header.items()
+                )
                 handle.write('"sarif": {"version": "2.1.0", "runs": [')
                 for position, spool in enumerate(ordered_spools):
                     if position:

@@ -171,16 +171,21 @@ print(f"Project: {metadata['project']}, Tool: {metadata['tool_version']}")
 
 # Scanner results
 for scanner in report["scanner_metrics"]:
-    print(f"{scanner['scanner_name']}: {scanner['status']} ({scanner['actionable']} actionable)")
+    print(
+        f"{scanner['scanner_name']}: {scanner['status']} ({scanner['actionable']} actionable)"
+    )
 
 # Filter to actionable HIGH findings
 high_findings = [
-    f for f in report["findings"]
+    f
+    for f in report["findings"]
     if f["severity"] == "HIGH" and not f.get("is_suppressed", False)
 ]
 
 for finding in high_findings:
-    print(f"  {finding['file_path']}:{finding.get('line_start', '?')} - {finding['description']}")
+    print(
+        f"  {finding['file_path']}:{finding.get('line_start', '?')} - {finding['description']}"
+    )
 ```
 
 ---

@@ -69,9 +69,9 @@ def test_pnpm_audit_runs_from_lockfile_directory(npm_scanner, tmp_path):
 
     # At least one call must have cwd pointing at the nested dir
     cwds = [kw.get("cwd") for kw in captured_kwargs]
-    assert any(
-        cwd is not None and Path(cwd) == nested for cwd in cwds
-    ), f"Expected cwd={nested}, got cwds={cwds}"
+    assert any(cwd is not None and Path(cwd) == nested for cwd in cwds), (
+        f"Expected cwd={nested}, got cwds={cwds}"
+    )
 
 
 def test_npm_audit_runs_from_lockfile_directory(npm_scanner, tmp_path):
@@ -106,9 +106,9 @@ def test_npm_audit_runs_from_lockfile_directory(npm_scanner, tmp_path):
         npm_scanner.scan(target=root, target_type="source")
 
     cwds = [kw.get("cwd") for kw in captured_kwargs]
-    assert any(
-        cwd is not None and Path(cwd) == nested for cwd in cwds
-    ), f"Expected cwd={nested}, got cwds={cwds}"
+    assert any(cwd is not None and Path(cwd) == nested for cwd in cwds), (
+        f"Expected cwd={nested}, got cwds={cwds}"
+    )
 
 
 def test_yarn_audit_runs_from_lockfile_directory(npm_scanner, tmp_path):
@@ -143,6 +143,6 @@ def test_yarn_audit_runs_from_lockfile_directory(npm_scanner, tmp_path):
         npm_scanner.scan(target=root, target_type="source")
 
     cwds = [kw.get("cwd") for kw in captured_kwargs]
-    assert any(
-        cwd is not None and Path(cwd) == nested for cwd in cwds
-    ), f"Expected cwd={nested}, got cwds={cwds}"
+    assert any(cwd is not None and Path(cwd) == nested for cwd in cwds), (
+        f"Expected cwd={nested}, got cwds={cwds}"
+    )

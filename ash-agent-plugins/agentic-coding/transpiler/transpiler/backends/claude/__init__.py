@@ -6,6 +6,7 @@ commands, autonomous agents, and a CLAUDE.md that @-imports the universal
 AGENTS.md so Claude Code (which doesn't read AGENTS.md natively) still gets
 the same content as the AGENTS.md-aware platforms.
 """
+
 from __future__ import annotations
 
 import json
@@ -99,7 +100,11 @@ class ClaudeBackend(BaseBackend):
 
         pins = self._load_cli_pins(ctx.base_dir)
         if "claude" in pins:
-            ver = self._assert_version_pin("claude", ["claude", "--version"], pins["claude"])
+            ver = self._assert_version_pin(
+                "claude", ["claude", "--version"], pins["claude"]
+            )
             if ver and ver.get("ok") is False:
                 return ver
-        return self._invoke_validator(["claude", "plugin", "validate", str(ctx.out.resolve())])
+        return self._invoke_validator(
+            ["claude", "plugin", "validate", str(ctx.out.resolve())]
+        )

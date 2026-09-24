@@ -89,8 +89,10 @@ BASHISMS = [
     (
         "[[ ]]",
         re.compile(r"(^|[;&|(}\s])\[\[(\s|$)"),
-        "bash keyword. dash says '[[: not found', and as an if-condition that is a "
-        "false branch under set -e rather than an error",
+        (
+            "bash keyword. dash says '[[: not found', and as an if-condition that is a "
+            "false branch under set -e rather than an error"
+        ),
     ),
     (
         "== inside [ ]",
@@ -143,8 +145,10 @@ BASHISMS = [
         re.compile(
             r"(^|[;&|(}\s])set\s+(-[a-zA-Z]*o[a-zA-Z]*\s+pipefail|(-[a-zA-Z]+\s+)*-o\s+pipefail)"
         ),
-        "not a dash option; dash exits with 'Illegal option -o pipefail'. Use "
-        "assets/with-retry.sh, which runs its argument under 'bash -o pipefail -c'",
+        (
+            "not a dash option; dash exits with 'Illegal option -o pipefail'. Use "
+            "assets/with-retry.sh, which runs its argument under 'bash -o pipefail -c'"
+        ),
     ),
     (
         "here-string <<<",
@@ -161,14 +165,18 @@ BASHISMS = [
         "brace expansion",
         # Shell-word alternation only. Excludes JSON, which carries quotes and colons.
         re.compile(r"\{[A-Za-z0-9._*/@=-]+(,[A-Za-z0-9._*/@=-]+)+\}"),
-        "bash only; dash passes the braces through literally, so 'mkdir -p a/{b,c}' "
-        "creates a directory named '{b,c}'",
+        (
+            "bash only; dash passes the braces through literally, so 'mkdir -p a/{b,c}' "
+            "creates a directory named '{b,c}'"
+        ),
     ),
     (
         "echo -e",
         re.compile(r"(^|[;&|(}\s])echo\s+(-[a-zA-Z]+\s+)*-e\b"),
-        "dash's echo interprets escapes by default and prints '-e' as a literal argument; "
-        "use printf",
+        (
+            "dash's echo interprets escapes by default and prints '-e' as a literal argument; "
+            "use printf"
+        ),
     ),
     (
         "local",
@@ -228,10 +236,12 @@ class TestEveryRunIsPosixSh:
 
         assert not findings, "\n".join(
             [
-                f"{dockerfile.relative_to(REPO_ROOT)} has {len(findings)} RUN "
-                f"instruction(s) that /bin/sh cannot run. buildah discards SHELL in "
-                f"OCI format, so these are silently skipped under podman and finch "
-                f"while working under docker:"
+                (
+                    f"{dockerfile.relative_to(REPO_ROOT)} has {len(findings)} RUN "
+                    f"instruction(s) that /bin/sh cannot run. buildah discards SHELL in "
+                    f"OCI format, so these are silently skipped under podman and finch "
+                    f"while working under docker:"
+                )
             ]
             + [
                 f"  line {line_no}: {name} -- {why}\n    {command[:160]}"

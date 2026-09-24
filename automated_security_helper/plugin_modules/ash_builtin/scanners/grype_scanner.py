@@ -228,22 +228,16 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             target=f"dir:{target.as_posix()}",
             results_file=results_file,
         )
-        subprocess_env = (
-            {**os.environ, **self.extra_env} if self.extra_env else None
-        )
+        subprocess_env = {**os.environ, **self.extra_env} if self.extra_env else None
         return final_args, results_file, subprocess_env
 
     def _ensure_runs(self, sarif_report: SarifReport) -> None:
         """Synthesize a fallback Run when Grype emits a runless SARIF."""
         if not sarif_report.runs:
-            ASH_LOGGER.warning(
-                "Grype SARIF report has no runs, creating empty run"
-            )
+            ASH_LOGGER.warning("Grype SARIF report has no runs, creating empty run")
             sarif_report.runs = [
                 Run(
-                    tool=Tool(
-                        driver=ToolComponent(name="grype", version="unknown")
-                    ),
+                    tool=Tool(driver=ToolComponent(name="grype", version="unknown")),
                     results=[],
                 )
             ]

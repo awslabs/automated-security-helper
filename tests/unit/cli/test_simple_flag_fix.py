@@ -11,6 +11,7 @@ runner = CliRunner()
 
 import re
 
+
 def _strip_ansi(text: str) -> str:
     return re.sub(r"\x1b\[[0-9;]*m", "", text)
 
@@ -25,9 +26,7 @@ def test_simple_flag_in_help():
     result = runner.invoke(app, ["scan", "--help"])
     assert result.exit_code == 0, f"scan --help exited with {result.exit_code}"
     clean = _strip_ansi(result.output)
-    assert "simple" in clean.lower(), (
-        "--simple flag not found in scan --help output"
-    )
+    assert "simple" in clean.lower(), "--simple flag not found in scan --help output"
 
 
 @pytest.mark.unit

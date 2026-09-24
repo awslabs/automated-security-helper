@@ -98,9 +98,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
 
         # Drop any --metrics already pushed into extra_args (some scanners
         # re-call this and we want a clean state).
-        self.args.extra_args = [
-            a for a in self.args.extra_args if a.key != "--metrics"
-        ]
+        self.args.extra_args = [a for a in self.args.extra_args if a.key != "--metrics"]
 
         # Bundled ASH stargrep rules — picked up by both scanners.
         ash_stargrep_rules = [
@@ -173,9 +171,7 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         self.args.extra_args.append(ToolExtraArg(key="--config", value=cache_dir))
         # Use the rule's own id rather than path-derived prefix — keeps
         # rule IDs stable between online and offline runs.
-        self.args.extra_args.append(
-            ToolExtraArg(key="--no-rewrite-rule-ids", value="")
-        )
+        self.args.extra_args.append(ToolExtraArg(key="--no-rewrite-rule-ids", value=""))
 
     def _configure_online_mode(self) -> None:
         opts = self.config.options  # type: ignore[union-attr]

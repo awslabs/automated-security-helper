@@ -436,7 +436,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             scannable = [
                 str(item)
                 for item in (
-                    [item for item in self.context.work_dir.glob("**/*.*")]
+                    list(self.context.work_dir.glob("**/*.*"))
                     if target_type == "converted"
                     else scan_set(
                         source=self.context.source_dir,
@@ -495,9 +495,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     for file_path in scannable
                     if not any(
                         path_matches_pattern(
-                            file_path[len(source_prefix) :]
-                            if file_path.startswith(source_prefix)
-                            else file_path,
+                            file_path.removeprefix(source_prefix),
                             ignore_path.path,
                         )
                         for ignore_path in global_ignore_paths

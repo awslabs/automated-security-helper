@@ -662,9 +662,12 @@ def _assemble_run_command(
     # Environment variables
     cmd.extend(
         [
-            "-e", f"ASH_ACTUAL_SOURCE_DIR={source_dir}",
-            "-e", f"ASH_ACTUAL_OUTPUT_DIR={output_dir}",
-            "-e", f"ASH_DEBUG={'YES' if debug else 'NO'}",
+            "-e",
+            f"ASH_ACTUAL_SOURCE_DIR={source_dir}",
+            "-e",
+            f"ASH_ACTUAL_OUTPUT_DIR={output_dir}",
+            "-e",
+            f"ASH_DEBUG={'YES' if debug else 'NO'}",
         ]
     )
 
@@ -751,7 +754,9 @@ def _assemble_run_command(
         ash_args.append("--no-fail-on-incomplete-scanners")
 
     for phase in phases:
-        ash_args.extend(["--phases", phase.value if hasattr(phase, "value") else str(phase)])
+        ash_args.extend(
+            ["--phases", phase.value if hasattr(phase, "value") else str(phase)]
+        )
 
     for scanner in scanners:
         ash_args.extend(["--scanners", scanner])
@@ -760,7 +765,9 @@ def _assemble_run_command(
         ash_args.extend(["--exclude-scanners", scanner])
 
     for fmt in output_formats:
-        ash_args.extend(["--output-formats", fmt.value if hasattr(fmt, "value") else str(fmt)])
+        ash_args.extend(
+            ["--output-formats", fmt.value if hasattr(fmt, "value") else str(fmt)]
+        )
 
     if config:
         ash_args.extend(["--config", config])
@@ -769,14 +776,43 @@ def _assemble_run_command(
         ash_args.extend(["--config-overrides", override])
 
     if existing_results:
-        ash_args.extend(["--existing-results", existing_results])
+        # Truthiness here and truthiness in _discard_prior_run_artifacts, which grants the
+        # matching exemption from the pre-run cleanup. The two have to agree on the empty
+        # string or it falls between them: the host would keep a previous run's results
+        # file for an inner scan that was never asked to read it, and then read that file
+        # back as this invocation's own.
+        #
+        # `--use-existing`, not `--existing-results`. The latter is not declared anywhere
+        # on the CLI -- it exists only as a local variable in cli/scan.py, where
+        # --use-existing is resolved into the path this parameter carries -- and the
+        # container entrypoint is that same CLI, so the flag is a usage error inside.
+        # Worse, a usage error exits 2, which is also ASH's code for actionable findings,
+        # so the host's read-back could not tell the rejected invocation from a dirty scan.
+        #
+        # The value would be wrong in the container regardless: it is a host path, and the
+        # output directory is bind-mounted at /out. --use-existing resolves
+        # ash_aggregated_results.json from the inner --output-dir, which is the same file
+        # through that mount, so this reproduces the host's own resolution rather than
+        # re-sending a path the container cannot reach.
+        expected = Path(output_dir).joinpath("ash_aggregated_results.json")
+        if Path(existing_results).resolve() != expected.resolve():
+            ASH_LOGGER.warning(
+                f"--existing-results was given {existing_results}, which is not "
+                f"{expected.as_posix()}. The container mounts only the output directory, "
+                "and the in-container scan reads that directory's own "
+                "ash_aggregated_results.json, so the named file will not be the one used."
+            )
+        ash_args.append("--use-existing")
 
     for module in ash_plugin_modules:
         ash_args.extend(["--ash-plugin-modules", module])
 
     if strategy:
         ash_args.extend(
-            ["--strategy", strategy.value if hasattr(strategy, "value") else str(strategy)]
+            [
+                "--strategy",
+                strategy.value if hasattr(strategy, "value") else str(strategy),
+            ]
         )
 
     # Both or neither, and not via the ASH_SHARD_* environment variables: this
@@ -811,7 +847,9 @@ def _execute_container(cmd: List[str], debug: bool):
     try:
         result = run_cmd_direct(cmd, debug=debug)
         if debug:
-            print(f"Container execution completed with return code: {result.returncode}")
+            print(
+                f"Container execution completed with return code: {result.returncode}"
+            )
         return result
     except CalledProcessError as e:
         if debug:
@@ -936,7 +974,10 @@ def run_ash_container(
         if not container_uid.isdigit():
             typer.secho("Container UID must be a numeric value", fg=typer.colors.RED)
             return create_completed_process(
-                args=[], returncode=1, stdout="", stderr="Container UID must be a numeric value",
+                args=[],
+                returncode=1,
+                stdout="",
+                stderr="Container UID must be a numeric value",
             )
     else:
         container_uid = str(host_uid)
@@ -945,7 +986,10 @@ def run_ash_container(
         if not container_gid.isdigit():
             typer.secho("Container GID must be a numeric value", fg=typer.colors.RED)
             return create_completed_process(
-                args=[], returncode=1, stdout="", stderr="Container GID must be a numeric value",
+                args=[],
+                returncode=1,
+                stdout="",
+                stderr="Container GID must be a numeric value",
             )
     else:
         container_gid = str(host_gid)
@@ -955,15 +999,15 @@ def run_ash_container(
         resolved_oci_runner = _resolve_oci_runner(oci_runner)
     except RuntimeError as e:
         typer.secho(str(e), fg=typer.colors.RED)
-        return create_completed_process(
-            args=[], returncode=1, stdout="", stderr=str(e)
-        )
+        return create_completed_process(args=[], returncode=1, stdout="", stderr=str(e))
 
     oci_command_prefix = _get_oci_wrapper_prefix()
 
     # Resolve ASH revision
     rev = get_ash_revision()
-    resolved_revision = ash_revision_to_install if ash_revision_to_install is not None else rev
+    resolved_revision = (
+        ash_revision_to_install if ash_revision_to_install is not None else rev
+    )
 
     if resolved_revision is not None and resolved_revision != "LOCAL":
         if not _validate_ash_revision(resolved_revision):
@@ -974,7 +1018,10 @@ def run_ash_container(
                 fg=typer.colors.RED,
             )
             return create_completed_process(
-                args=[], returncode=1, stdout="", stderr=f"Invalid ASH revision value: {resolved_revision!r}",
+                args=[],
+                returncode=1,
+                stdout="",
+                stderr=f"Invalid ASH revision value: {resolved_revision!r}",
             )
 
     # Resolve Dockerfile path
@@ -982,9 +1029,7 @@ def run_ash_container(
         dockerfile_path = _find_dockerfile(resolved_revision)
     except FileNotFoundError as e:
         typer.secho(str(e), fg=typer.colors.RED)
-        return create_completed_process(
-            args=[], returncode=1, stdout="", stderr=str(e)
-        )
+        return create_completed_process(args=[], returncode=1, stdout="", stderr=str(e))
 
     # Resolve build target
     resolved_build_target = (
@@ -1076,7 +1121,9 @@ def run_ash_container(
                 output_dir.mkdir(parents=True, exist_ok=True)
                 output_dir = output_dir.resolve()
             except Exception as e:
-                typer.secho(f"Error creating output directory: {e}", fg=typer.colors.RED)
+                typer.secho(
+                    f"Error creating output directory: {e}", fg=typer.colors.RED
+                )
                 return create_completed_process(
                     args=[], returncode=1, stdout="", stderr=str(e)
                 )

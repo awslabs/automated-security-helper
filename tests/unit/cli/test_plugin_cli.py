@@ -171,10 +171,10 @@ class TestShowVersionsColumns:
             (_StubScanner,),
             {
                 "_name": "disabled_one",
-                "__init__": lambda self, context=None, config=None: setattr(
-                    self, "config", _DisabledConfig()
-                )
-                or setattr(self, "tool_version", None),
+                "__init__": lambda self, context=None, config=None: (
+                    setattr(self, "config", _DisabledConfig())
+                    or setattr(self, "tool_version", None)
+                ),
             },
         )
         result = _run_list(["--no-color"], [disabled])

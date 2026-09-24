@@ -464,7 +464,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
             # Find all files to scan from the scan set
             orig_scannable = (
-                [item for item in self.context.work_dir.glob("**/*.*")]
+                list(self.context.work_dir.glob("**/*.*"))
                 if target_type == "converted"
                 else scan_set(
                     source=self.context.source_dir,

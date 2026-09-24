@@ -279,12 +279,15 @@ class TestTheRefusalReachesTheOperator:
 
         # Patched where it is defined, not on the run_ash_scan module: the import is
         # inside _run_local_mode, so the name never exists as a module attribute.
-        with patch(
-            "automated_security_helper.core.orchestrator.ASHScanOrchestrator.create",
-            side_effect=ScannerSelectionError(
-                "None of the requested scanners exist: detect_secrets."
+        with (
+            patch(
+                "automated_security_helper.core.orchestrator.ASHScanOrchestrator.create",
+                side_effect=ScannerSelectionError(
+                    "None of the requested scanners exist: detect_secrets."
+                ),
             ),
-        ), pytest.raises(SystemExit) as excinfo:
+            pytest.raises(SystemExit) as excinfo,
+        ):
             mod._run_local_mode(opts, MagicMock())
 
         assert excinfo.value.code == 1, (

@@ -5,7 +5,13 @@ import logging
 from pathlib import Path
 from typing import Annotated, List, Optional
 import typer
-from rich import print, print_json
+
+# `print` shadows the builtin on purpose: this is rich's documented import
+# idiom, so every print() below renders markup and respects the console. The
+# fix A004 wants is an alias, which would mean rewriting every call in this
+# module for no behavior change -- and tests/unit/cli/mcp/test_stdout_jsonrpc_safety.py
+# reasons about this exact import form.
+from rich import print, print_json  # noqa: A004
 from rich.markdown import Markdown
 
 from automated_security_helper.base.plugin_context import PluginContext

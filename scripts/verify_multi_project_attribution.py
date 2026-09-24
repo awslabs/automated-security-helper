@@ -516,8 +516,10 @@ def check_results_shape(results: Any) -> List[str]:
     """
     if not isinstance(results, Mapping):
         return [
-            f"results is not a JSON object (got {type(results).__name__}); expected "
-            f"the parsed contents of {RESULTS_FILENAME}"
+            (
+                f"results is not a JSON object (got {type(results).__name__}); expected "
+                f"the parsed contents of {RESULTS_FILENAME}"
+            )
         ]
 
     violations: List[str] = []
@@ -1075,9 +1077,11 @@ def check_suppression_is_project_scoped(runs: Sequence[RunEvidence]) -> List[str
 
     if not suppressing_rules and not any(other_rules.values()):
         return [
-            f"neither '{SUPPRESSING_PROJECT}' nor any of {others} produced any "
-            "rule, so the suppression assertion could not be evaluated. bandit "
-            "probably did not run"
+            (
+                f"neither '{SUPPRESSING_PROJECT}' nor any of {others} produced any "
+                "rule, so the suppression assertion could not be evaluated. bandit "
+                "probably did not run"
+            )
         ]
 
     for key in others:
@@ -1134,8 +1138,10 @@ def check_thresholds_are_per_project(
 
     if strict is None or lax is None:
         return [
-            f"cannot compare thresholds: '{strict_key}' or '{lax_key}' is missing "
-            f"from workspace.projects (present: {sorted(by_key)})"
+            (
+                f"cannot compare thresholds: '{strict_key}' or '{lax_key}' is missing "
+                f"from workspace.projects (present: {sorted(by_key)})"
+            )
         ]
 
     if strict.threshold == lax.threshold:
@@ -1425,15 +1431,19 @@ def check_exit_code(exit_code: int) -> List[str]:
         return []
     if exit_code == WORKSPACE_ERROR_EXIT_CODE:
         return [
-            f"the workspace scan exited {exit_code} -- a workspace definition or "
-            "policy error, meaning no project was scanned. The generated fixture "
-            "should always resolve, so this points at the fixture or at "
-            "resolution, not at the projects"
+            (
+                f"the workspace scan exited {exit_code} -- a workspace definition or "
+                "policy error, meaning no project was scanned. The generated fixture "
+                "should always resolve, so this points at the fixture or at "
+                "resolution, not at the projects"
+            )
         ]
     return [
-        f"the workspace scan exited {exit_code}; expected one of "
-        f"{list(TOLERATED_EXIT_CODES)} (0 success, 2 actionable findings). "
-        "1 is an internal error and 3 is an invalid project config"
+        (
+            f"the workspace scan exited {exit_code}; expected one of "
+            f"{list(TOLERATED_EXIT_CODES)} (0 success, 2 actionable findings). "
+            "1 is an internal error and 3 is an invalid project config"
+        )
     ]
 
 

@@ -79,7 +79,7 @@ def analyze_sarif_file(
                 )
 
         # Use provided scanner name if available, otherwise use detected name
-        final_scanner_name = scanner_name if scanner_name else detected_scanner
+        final_scanner_name = scanner_name or detected_scanner
 
         # Extract field paths
         field_paths: Dict[str, Dict[str, Set[str]]] = {}
@@ -248,9 +248,7 @@ def validate_sarif_aggregation(
 # ---------------------------------------------------------------------------
 
 
-def find_matching_result(
-    original_result: Dict, aggregated_results: List[Dict]
-) -> Dict:
+def find_matching_result(original_result: Dict, aggregated_results: List[Dict]) -> Dict:
     """
     Find a matching result in the aggregated report using rule ID and location.
 

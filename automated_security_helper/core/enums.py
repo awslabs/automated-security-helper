@@ -25,7 +25,6 @@ class ScannerStatus(str, Enum):
     SKIPPED = "SKIPPED"
 
 
-
 class AshLogLevel(str, Enum):
     QUIET = "QUIET"
     SIMPLE = "SIMPLE"
@@ -82,8 +81,6 @@ class OfflineStrategy(str, Enum):
 class BuildTarget(str, Enum):
     NON_ROOT = "non-root"
     CI = "ci"
-
-
 
 
 class RunMode(str, Enum):

@@ -43,6 +43,7 @@ third pass. The generic-skill twin is structurally validated and is rendered fro
 the same `_base/skill.md` through the same `SkillConfig` fields, so a content
 regression would surface there.
 """
+
 from __future__ import annotations
 
 from dataclasses import replace

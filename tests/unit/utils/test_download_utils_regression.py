@@ -6,8 +6,6 @@ PR#274 Bug #1: code injection via f-string in create_url_download_command.
 import shutil
 import tempfile
 
-import pytest
-
 
 class TestDownloadUtilsCodeInjection:
     """A single quote in url/destination must not escape the Python string."""
@@ -31,9 +29,11 @@ class TestDownloadUtilsCodeInjection:
                     idx = cmd.args.index(arg)
                     if idx + 1 < len(cmd.args):
                         script = cmd.args[idx + 1]
-                        assert "'" + "injection" not in script or "sys.argv" in script or "os.environ" in script, (
-                            "URL interpolated raw into python -c script"
-                        )
+                        assert (
+                            "'" + "injection" not in script
+                            or "sys.argv" in script
+                            or "os.environ" in script
+                        ), "URL interpolated raw into python -c script"
         finally:
             shutil.rmtree(dest, ignore_errors=True)
 

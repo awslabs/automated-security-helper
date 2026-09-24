@@ -11,8 +11,8 @@ The fix wraps scan_files in a ThreadPoolExecutor with a configurable
 scan_timeout. When the timeout expires the future is cancelled and the
 scanner continues with whatever partial results it collected.
 """
+
 import time
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -70,19 +70,21 @@ def test_scan_timeout_does_not_hang(detect_secrets_scanner, tmp_path):
     #  - scan_set to return one fake file
     #  - SecretsCollection constructor (scan() creates a fresh one at line 374)
     #  - _resolve_arguments to skip real argument resolution
-    with patch.object(scanner, "_pre_scan", return_value=True), \
-         patch.object(scanner, "_post_scan"), \
-         patch.object(scanner, "_resolve_arguments"), \
-         patch(
-             "automated_security_helper.plugin_modules.ash_builtin.scanners"
-             ".detect_secrets_scanner.scan_set",
-             return_value=[str(target_dir / "app.py")],
-         ), \
-         patch(
-             "automated_security_helper.plugin_modules.ash_builtin.scanners"
-             ".detect_secrets_scanner.SecretsCollection",
-             return_value=mock_collection,
-         ):
+    with (
+        patch.object(scanner, "_pre_scan", return_value=True),
+        patch.object(scanner, "_post_scan"),
+        patch.object(scanner, "_resolve_arguments"),
+        patch(
+            "automated_security_helper.plugin_modules.ash_builtin.scanners"
+            ".detect_secrets_scanner.scan_set",
+            return_value=[str(target_dir / "app.py")],
+        ),
+        patch(
+            "automated_security_helper.plugin_modules.ash_builtin.scanners"
+            ".detect_secrets_scanner.SecretsCollection",
+            return_value=mock_collection,
+        ),
+    ):
         start = time.monotonic()
         result = scanner.scan(target=target_dir, target_type="source")
         elapsed = time.monotonic() - start

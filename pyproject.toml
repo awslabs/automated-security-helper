@@ -137,6 +137,20 @@ dev = [
  "hatchling>=1.32",
  "mcp>=2.2.0",
  "commitizen>=4.18.1",
+ # A prerequisite, not a convenience. pre-commit builds every `language: python` hook
+ # environment with the interpreter pre-commit is itself running under, so the hook set
+ # in .pre-commit-config.yaml is installable only if THAT interpreter satisfies each
+ # hook's own requires-python. An unmanaged pre-commit on PATH need not: the config pins
+ # commitizen-tools/commitizen at v4.18.1, and commitizen declares ">=3.10" from 4.11.0
+ # onward (4.10.1 still declared ">=3.9"). Reproduced against a pre-commit 4.3.0 running
+ # under Python 3.9.25, where `pre-commit install-hooks` exits 3 on
+ #   ERROR: Package 'commitizen' requires a different Python: 3.9.25 not in '<4.0,>=3.10'
+ # and no edit to .pre-commit-config.yaml repairs it. Declaring pre-commit in this group
+ # takes it under the project's own requires-python (>=3.10,<3.15), so the pinned hook
+ # set is installable by construction instead of by whatever a contributor has on PATH.
+ # The floor is the version verified against that hook set; the cap is this group's
+ # major.minor-floor / next-major-cap convention.
+ "pre-commit>=4.3,<5.0.0",
  "httpx>=0.28,<1.0.0",
  # The [server] extra, not bare moto: tests/unit/deploy exercises the deploy
  # trees' helpers as SUBPROCESSES, the way a buildspec runs them. moto's in-process
@@ -244,6 +258,326 @@ legacy_tag_formats = [
     "v$version-$prerelease",
 ]
 
+[tool.ruff]
+# Both values restate what ruff already infers, so neither changes today's output.
+# They are written down so a future ruff release cannot move them silently:
+# line-length was resolving to ruff's built-in 88 (confirmed via
+# `ruff check --show-settings`: `formatter.line_width = 88`), and target-version was
+# being inferred as py310 from `requires-python = ">=3.10,<3.15"`. The stale
+# ruff-pre-commit pin at v0.11.8 also formatted at 88, so 88 is the width every
+# already-formatted file in the tree was written to.
+line-length = 88
+target-version = "py310"
+
+# Floor matches the `ruff>=0.16.7` in [dependency-groups].dev. It is here because the
+# select below is only meaningful against a ruff that knows these rules, and this
+# repository had TWO ruffs when that select was written: .pre-commit-config.yaml pinned
+# astral-sh/ruff-pre-commit at v0.11.8, five minor versions behind the dev floor. Ruff's
+# default rule set changed across that range, so the commit hook and CI disagreed about
+# what an error IS -- a contributor would see a clean hook, then a red build. That pin
+# was moved to v0.16.7 in this same pull request, so the two agree again as of now; this
+# line is what keeps them from drifting apart a second time, by making the mismatch fail
+# loudly ("Required version `>=0.16.7` does not match the running version", exit 2)
+# instead of silently linting with a different rule set.
+# No upper bound: [dependency-groups].dev already caps at <1.0.0, and duplicating the
+# cap here would mean editing two places to adopt a new ruff.
+required-version = ">=0.16.7"
+
+# tests/test_data/ is SCANNER INPUT, not source. ASH is a security scanner and these
+# files exist to be analyzed: their content IS the test oracle. A linter that edits them
+# is not tidying code, it is silently editing the thing under test.
+#
+# This is not hypothetical. `ruff check --fix` rewrote a cell of both
+# tests/test_data/jupyter/test.ipynb and tests/test_data/finding_samples/ipynb.ipynb from
+#
+#     output = [json.loads(line.strip()) for line in f.readlines()]
+#   to
+#     output = [json.loads(line.strip()) for line in f]
+#
+# under FURB129, and because rewriting one cell makes ruff re-emit the notebook JSON, each
+# fixture came back as a 618-insertion / 618-deletion diff. Two further consequences make
+# the mutation worse than the diff size suggests. ASH scans the notebook as
+# `ipynb.ipynb-converted.py`, and the RECORDED scanner output for it is committed with
+# absolute offsets into that converted file -- tests/test_data/scanners/bandit/src.json
+# holds line_number 198, 203, 208, 222, 227 and 232 across 7 references, and
+# scanners/semgrep/semgrep.src.json holds 11 more -- so any cell edit, INCLUDING merely
+# adding a `# noqa`, shifts the numbering those golden values were captured against. And
+# the resulting failure is silent: a fixture that a linter has modernized may no longer
+# exercise the pattern it was written to catch, while the suite stays green because the
+# assertion now matches the reformatted input.
+#
+# Excluded rather than ignored rule-by-rule because a per-rule ignore only closes the one
+# rule that has already bitten. FURB129 was the second rule to fire in this directory
+# (NPY002 was the first, and its per-file-ignore was removed in favour of this exclude);
+# the next family anyone ratchets on could mutate a fixture again. Exclusion closes the
+# class instead of chasing it.
+#
+# Scoped to tests/test_data only. tests/ itself is real, maintained code and stays fully
+# linted: this drops the linted file count from 743 to 741, which is exactly the two
+# notebooks and nothing else.
+extend-exclude = ["tests/test_data"]
+
+# force-exclude is what makes the line above actually hold, and it is load-bearing rather
+# than belt-and-braces. Ruff does NOT apply exclusions to paths passed explicitly on the
+# command line unless this is set, and passing paths explicitly is precisely how
+# pre-commit invokes a hook. Measured both ways on tests/test_data/jupyter/test.ipynb:
+# with extend-exclude alone, `ruff check <that path>` still reported FURB129 and offered
+# the fix; with force-exclude, the same command reports "No Python files found under the
+# given path(s)". Since .pre-commit-config.yaml runs `ruff-check` with `args: [--fix]`
+# and neither ruff hook sets pass_filenames: false, without this line a contributor who
+# merely stages one of these fixtures would have it rewritten by the hook -- the exact
+# mutation the exclude exists to prevent, arriving through the one path the exclude
+# would not have covered.
+force-exclude = true
+
+# There is deliberately NO [tool.ruff.format] exclude, and in particular the generated
+# Python under automated_security_helper/schemas/ and
+# ash-agent-plugins/agentic-coding/transpiler/generated_models/ IS formatted by
+# `ruff format` like everything else. That was a real fork, so the reasoning is recorded.
+#
+# It is safe because nothing byte-compares those files. Checked rather than assumed:
+# `agentic-plugins check` (the Agent Plugins Drift gate) rebuilds the plugin backends into
+# a temporary directory and compares THOSE outputs against _base/; generated_models/ is
+# not among them -- it is IMPORTED as code by transpiler/validate.py, which maps
+# "mcpb/manifest.json" to generated_models.mcpb_manifest and "amazonq/agent.json" to
+# generated_models.amazonq_agent for Pydantic validation. And the schemas gate is
+# JSON-scoped, as noted against the per-file-ignores below. Formatting was verified
+# AST-identical to the committed content, so it is quote style and line breaks only; the
+# models validate exactly as before.
+#
+# The alternative -- excluding the generated paths from the formatter -- was rejected. It
+# would leave a permanent hole in a gate that otherwise covers the whole tree, freeze four
+# files in a style nothing else uses, and have to be widened by hand every time a new
+# model is generated. The exclusion above earns its keep because fixture BYTES are the
+# test oracle; generated model bytes are not load-bearing to anything.
+#
+# The cost is a two-step regeneration: run the generator, then `ruff format`, then commit.
+# Skipping the second step turns `ruff format --check .` red, and it also makes the regen
+# diff unreadable -- codegen emits single quotes, so the whole file churns and a real
+# schema change hides in the noise. Folding a `ruff format` call into
+# tools/generate_models.py (and the schemas generator) would remove that footgun; it is
+# not done here only because this change is scoped to pyproject.toml.
+
+[tool.ruff.lint]
+# HOW TO READ THE NUMBERS IN THIS SECTION. Every count below is a point-in-time
+# measurement taken with ruff 0.16.7 against commit 671784a6 -- the state of the tree
+# BEFORE the lint fixes in this same pull request. None of them describes the tree you
+# are looking at now, and they are not meant to: their job is to record what each choice
+# cost at the moment it was made, so a later reader can judge the choice rather than
+# re-derive it. 671784a6 is named rather than "today" because it is reproducible; any
+# figure here can be checked with
+#
+#   git stash && git checkout 671784a6
+#   ruff check . --isolated --select <FAMILY> --statistics
+#
+# Do not "correct" these to current values. Anchored history stays useful; a running
+# total does not, and this file had exactly that problem once already -- the cheap-tier
+# counts were written as live figures and went stale within the hour as the fixes landed.
+# If you need a current number, measure it; do not trust a comment for it.
+#
+# Ruff's default select is 413 rules across 38 prefixes -- NOT the `E4,E7,E9,F` that
+# older documentation suggests -- and at 671784a6 this tree violated 79 of them 6,853
+# times. So this list is not "adding linting to an unlinted repo"; it is replacing an
+# implicit, version-dependent rule set with an explicit one.
+#
+# THE TRAP THIS LIST IS BUILT AROUND. A prefix in `select` enables every rule in that
+# family, including the ones ruff does not enable by default. That makes per-family
+# violation counts taken from a default run useless for choosing a select. At 671784a6:
+#
+#   select = ["D","E","FA","INT","N","PGH","PLE","PT","PTH","T","YTT"]
+#
+# was believed to be the largest zero-error prefix select, because those families
+# contributed 0 of the 6,853 default violations. As an actual config value it reported
+# 13,097 errors -- nearly double the default -- because it enables 205 rules rather than
+# the 62 default-enabled ones. `D` alone was 6,496, `E` 5,085 (it pulls in E501
+# line-too-long, which is not a default rule), `N` 655, `PT` 261, `PTH` 206, and `T` 394
+# (`T` is both T10 and T20, and only T10 is clean). Every count in this file was
+# therefore measured by selecting the family in isolation -- `ruff check . --isolated
+# --select <FAMILY> --statistics` -- not read off a default run.
+select = [
+    # --- Clean at 671784a6: 0 violations at FULL-family select, and they check this
+    # --- code. These were free to turn on -- no fix work was needed for any of them.
+    "PLE",   # 0 -- all 33 pylint *error* rules. The single best entry here: genuine
+             #      defect class (bad string format, invalid __slots__, return outside
+             #      function), whole family already clean, zero cost to enforce.
+    "PGH",   # 0 -- blanket `# noqa` and blanket `# type: ignore`. Relevant: the tree
+             #      already carries 13 stale noqa comments (RUF100), so suppression rot
+             #      is a demonstrated problem here, not a hypothetical one.
+    "T10",   # 0 -- a `breakpoint()`/`pdb` import left in shipped code.
+    "YTT",   # 0 -- incorrect sys.version checks. Load-bearing: this package supports
+             #      3.10 through 3.14, so version branching is real.
+    "FA",    # 0 -- missing `from __future__ import annotations`.
+    "ICN",   # 0 -- import naming conventions.
+    "INT",   # 0 -- gettext f-string misuse.
+    "SLOT",  # 0 -- subclasses of str/tuple/namedtuple without __slots__.
+    "S101",  # 0 in automated_security_helper/. Selected as a single rule rather than
+             #      via `S`, because full `S` is 12,932 and 12,716 of that is S101 in
+             #      test files. `assert` is stripped under `python -O`, so an assert
+             #      used as a security check in shipped code is a real defect; in a
+             #      test it is the point. See per-file-ignores below.
+
+    # --- Cheap at 671784a6: 465 violations total, 334 of them safely auto-fixable.
+    # --- These were ALL FIXED inside this same pull request -- that is why they are
+    # --- affordable to enable, and it is also why the per-family numbers below are
+    # --- history rather than a live worklist. The figure against each family is what
+    # --- admitting that family cost when it was admitted, which is the thing a future
+    # --- reader needs in order to judge where the line was drawn.
+    "FLY",   # 1    static `str.join` that should be an f-string
+    "NPY",   # 2    numpy-legacy-random
+    "LOG",   # 3    root-logger calls
+    "RSE",   # 3    unnecessary parens on `raise X()`
+    "A",     # 14   shadowing a Python builtin
+    "ASYNC", # 15   blocking open/path calls inside async functions -- real defect class
+    "FURB",  # 18   refurb modernizations
+    "PYI",   # 18   type-stub and union hygiene
+    "ISC",   # 29   implicit string concatenation (see ISC001 in `ignore`)
+    "PIE",   # 34   unnecessary pass/placeholder, multiple startswith
+    "C4",    # 41   comprehension and collection-call hygiene. Note C4 only, not `C`:
+             #      `C` also means C90 (mccabe complexity), which is 147.
+    "F",     # 287  pyflakes. Worth more than everything above it combined: F821
+             #      undefined-name is a NameError that ships. 264 of the 287 are
+             #      SAFELY auto-fixable (`ruff check --fix`), leaving a residue of 23 --
+             #      19 F841 unused-variable (auto-fixable only under --unsafe-fixes),
+             #      2 F821 undefined-name, 2 F401 in __init__.py where removing the
+             #      import would change the public surface. 265 of the 287 are F401,
+             #      229 of those in tests/.
+]
+
+# Left out deliberately. Each cost is this family selected in isolation at 671784a6, the
+# same anchor as everything above, so the whole section is one consistent snapshot.
+#
+# These are the actionable numbers in this file -- the ones someone reads before planning
+# the next ratchet -- so RE-MEASURE the family you intend to enable rather than trusting
+# the figure here. They are the least likely to have drifted, because the lint fixes in
+# this pull request only touched families that are SELECTED, and these are not; spot-
+# checked after those fixes landed, the largest movers were single digits (I 479->475,
+# PL 2750->2737, UP 4873->4866). Ascending:
+#   W 6        FIX 7      TD 15      EXE 47     TC 61      ERA 70     PERF 81
+#   RET 94     B 104      DTZ 121    TID 136    C90 147    SIM 158    INP 194
+#   G 195      PTH 206    Q 219      PT 261     BLE 283    EM 372     T20 394
+#   I 479      TRY 509    RUF 516    FBT 549    N 655      CPY 740    SLF 1064
+#   ARG 1105   PL 2750    UP 4873    E 5085     COM 6255   D 6496     S 12932
+#   ANN 17077
+#
+# Five of those deserve their reason recorded rather than just a number:
+#
+#   UP 4,873 is the whole backlog in one family and it is ~99% auto-fixable (UP045
+#     2,412 and UP006 1,947 are both 100% fixable). It is excluded not because it is
+#     hard but because a 4,800-line mechanical diff would bury every reviewable change
+#     in this PR. It is the obvious next ratchet step and should be its own commit.
+#   I 479 (import sorting) is likewise ~100% auto-fixable and likewise wants to be its
+#     own commit, because it touches 350 files and conflicts with everything.
+#   BLE 283 is one rule, BLE001 blind-except, and none of it is auto-fixable. It is the
+#     most interesting exclusion on this list for a security tool: every entry is an
+#     `except Exception` that may be swallowing a real failure. Worth a reading pass,
+#     not a bulk edit.
+#   S 12,932 is the family a security scanner most wants on, and 216 of it is NOT
+#     S101 -- S603 subprocess, S108 hardcoded-temp, S607 partial-path, S311 non-crypto
+#     random, S105/S106 hardcoded-password, S301 pickle. None are auto-fixable and each
+#     needs a human call between "real finding" and "intended behavior of a tool that
+#     shells out to scanners". Highest value per violation of anything on this list.
+#   COM (trailing commas) and ISC001 are documented by ruff as conflicting with
+#     ruff-format; enabling either buys a fight between the formatter and the linter.
+#
+# Families reporting 0 that are NOT selected, so the count above is not mistaken for
+# coverage: AIR (Airflow), DJ (Django), FAST (FastAPI), PD (pandas) are 0 because this
+# repository contains none of those frameworks, and DOC is 0 because every DOC rule is
+# preview-gated and preview is off. Selecting them would raise the rule count without
+# checking one additional line, which is the opposite of the point.
+ignore = [
+    # Zero violations at 671784a6 and still zero when last checked, so this suppresses
+    # nothing -- if it ever becomes non-zero this line starts hiding real findings, so
+    # re-measure `--select ISC001` before assuming it is inert. Present because ruff documents
+    # ISC001 as conflicting with the formatter: ruff-format joins implicitly
+    # concatenated strings onto one line and ISC001 then flags the result, which is a
+    # loop neither tool can win. Selected `ISC` for ISC003/ISC004 and dropped this one.
+    "ISC001",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Two exemptions, both because the rule is inapplicable to the file -- not to buy a
+# passing run. Everything else in `select` is enforced everywhere, including tests.
+#
+# `assert` is what a test is written out of; S101 exists to catch asserts used as
+# control flow in shipped code, which is why S101 is selected repo-wide and waived only
+# here. Measured: 12,716 S101 sites, all of them test files, and 0 in
+# automated_security_helper/. Three globs because the test files live in three places --
+# tests/ (12,585), ash-agent-plugins/**/tests/ (35), and four
+# docs/content/docs/testing/examples/test_example_*.py illustrations (96).
+"tests/**/*.py" = ["S101"]
+"**/tests/**/*.py" = ["S101"]
+"**/test_*.py" = ["S101"]
+
+# Generated code, named file by file and rule by rule. Hand-fixing any of it would be
+# reverted by the next generator run, so the rule is genuinely inapplicable -- but only
+# to the machine-written files, which is why these are exact paths rather than directory
+# globs. `automated_security_helper/schemas/` is NOT all generated: it holds 5
+# datamodel-codegen modules alongside 4 hand-written files, including
+# generate_schemas.py, which is the generator (it emits .json, not .py). An earlier
+# revision of this entry globbed that whole directory and so waived A001 and PIE790 in
+# the generator itself. Those four files measured clean for both rules, so nothing was
+# actually being hidden when the glob was narrowed, but a
+# glob that quietly covers hand-written code is how a per-file-ignore list turns into a
+# baseline. Each line below is one file that actually violates one rule.
+#
+# Adding a generated module later means adding a line here. That is deliberate: the
+# person who runs the generator sees the new violation immediately and decides, rather
+# than inheriting a pre-granted exemption.
+#
+# A word on the CI freshness gate, because it is easy to over-credit and an earlier
+# revision of this comment did: the `lint` job in ash-unified-ci.yml does regenerate
+# schemas and fail on a dirty tree, but its pathspec is
+# `'automated_security_helper/schemas/*.json'` and the step it runs
+# (`python -m automated_security_helper.schemas.generate_schemas`) emits .json, not .py.
+# So that gate is JSON-scoped and would NOT notice a hand-edit to the two .py files
+# above. The reason not to edit them is the regen revert on its own; there is no second
+# line of defence here.
+"automated_security_helper/schemas/sarif_schema_model.py" = ["A001"]
+"automated_security_helper/schemas/ocsf/ocsf_vulnerability_finding.py" = ["PIE790"]
+
+# transpiler/generated_models/ is different from schemas/ above: every file in it is
+# machine-written, so a directory glob is accurate here rather than over-broad. The three
+# models carry `# generated by datamodel-codegen:` headers, and __init__.py is written by
+# tools/generate_models.py itself (`init = MODELS_DIR / "__init__.py"`), which is why it
+# has no codegen header. ash-agent-plugins/README.md:66 documents the directory as
+# "generated from those schemas (committed)".
+#
+# The three rules listed are what the GENERATOR EMITS, not what the working tree happens
+# to contain -- which is the distinction that matters here, and it was measured rather
+# than assumed. Run against the committed continue_config.py (from
+# continue-config.schema.json), `ruff check --isolated --select PYI` reports 17
+# violations: PYI051 12, PYI030 4, PYI016 1. datamodel-codegen writes
+# `Literal['tool_use'] | Literal['image_input'] | Literal['next_edit'] | str` at four
+# sites (lines 206, 285, 399, 476), which is 3 PYI051 each because the `str` arm makes
+# every Literal arm redundant, plus one PYI030 each for the un-collapsed Literals; and
+# `list[list[str | str | float]]` once, which is the PYI016 duplicate union member.
+#
+# PYI030 and PYI016 are listed even though they do not fire right now. Someone hand-
+# collapsed those five unions in the working tree, which cleared them -- but this file is
+# regenerated output, so the next `tools/generate_models.py` run restores the generator's
+# form and both rules come back. Listing only the currently-failing rule would make the
+# gate depend on an edit that a regen is guaranteed to undo. PYI051 survived that edit
+# because collapsing to `Literal['a','b','c'] | str` is still a Literal union with `str`.
+#
+# The two sibling models (amazonq_agent.py, mcpb_manifest.py) measured clean for all
+# three rules; the directory glob keeps them covered if a regen gives them the same union
+# shapes.
+#
+# Unlike schemas/ there is no CI freshness gate here -- generate_models.py notes the
+# output is committed so CI does not need datamodel-codegen -- so the failure mode this
+# prevents is a silent revert on the next local regen, not a red build.
+"ash-agent-plugins/agentic-coding/transpiler/generated_models/**/*.py" = [
+    "PYI016",
+    "PYI030",
+    "PYI051",
+]
+
+# NOTE: there is deliberately no entry here for tests/test_data/. That directory is
+# excluded outright via extend-exclude + force-exclude in [tool.ruff] above, because its
+# contents are scanner input rather than source. A per-file-ignore for it (there was one,
+# for NPY002) would imply the directory is linted and would leave the next enabled rule
+# free to rewrite a fixture. Do not add one back; widen nothing here to cover it.
+
 [tool.mypy]
 plugins = [ "pydantic.mypy",]
 follow_imports = "silent"
@@ -257,6 +591,909 @@ disallow_untyped_defs = true
 init_forbid_extra = true
 init_typed = true
 warn_required_dynamic_aliases = true
+
+# ---------------------------------------------------------------------------------
+# mypy baseline. READ THIS BEFORE ADDING AN ENTRY.
+#
+# Every block below is a DEBT MARKER, not a decision. `uv run mypy
+# automated_security_helper/` reported 1,590 errors in 132 files (of 187 source files
+# checked) at commit 671784a6, and this repository had a strict mypy configuration that
+# nothing in CI had ever run -- config presence and gate enforcement were separate
+# facts. These overrides exist so the gate can start blocking NEW type errors instead of
+# waiting for 1,590 fixes; they are meant to be deleted module by module.
+#
+# Like the [tool.ruff.lint] section above, every figure here is anchored to 671784a6
+# rather than described as current, because a count written as "today" rots. To re-derive
+# the raw baseline against whatever the tree looks like when you read this, strip the
+# override blocks into a scratch config and point mypy at it with --config-file; the
+# blocks are contiguous and nothing else depends on them. Measured that way after this
+# pull request's lint fixes landed, the baseline had moved by one error (1,590 -> 1,589),
+# with the same 132 failing files and the same 187 checked, so the shape below is intact.
+#
+# THE ONE RULE: a new mypy failure is NOT resolved by adding a module here, and an
+# existing entry is not to be widened with another error code. Doing either converts a
+# ratchet into a rubber stamp -- the baseline only ever shrinks. If a new module
+# genuinely cannot be typed yet, that is a conversation in review, not a quiet edit.
+#
+# WHY THIS SHAPE. Four baseline shapes were considered and three rejected:
+#   - Globally disabling the top error codes (union-attr 428, no-untyped-def 258,
+#     type-arg 215 -- 901 of 1,590 in three codes) is a two-line change and the worst
+#     option: it turns those checks off for new code too, and no-untyped-def on new
+#     code is most of the value of running mypy at all.
+#   - Weakening the existing flags (dropping disallow_untyped_defs removes the 258
+#     no-untyped-def; dropping disallow_any_generics removes the 215 type-arg) drops
+#     the count to ~1,117 for two deleted lines, but it is repository-wide and
+#     invisible. No flag in [tool.mypy] was touched for this reason.
+#   - `ignore_errors = true` per module is the usual baseline and is not used here for
+#     even one module: it is unnecessary, because per-code exemption was sufficient
+#     everywhere. A module exempted for no-untyped-def is still fully checked for
+#     arg-type, union-attr, and everything else.
+#   - `follow_imports = "skip"` was rejected: it suppresses by import relationship, so
+#     what it hides shifts as imports change. `follow_imports = "silent"` (already set)
+#     is the correct setting.
+#
+# WHAT THIS GATE ACTUALLY BUYS ON DAY ONE, stated plainly so nobody overreads it:
+# 55 of the 187 checked modules carry no exemption at all and are fully checked. The
+# other 132 are checked for every error code except the ones listed against them.
+# Blocks are ordered by how many modules share an identical exemption set, so the
+# cheapest wins are at the top -- the first block is 16 modules that need only
+# no-untyped-def, i.e. 16 modules that become fully checked as soon as someone
+# annotates their function signatures.
+#
+# One caveat on how much "fully checked" means, worth knowing before trusting the 55:
+# check_untyped_defs is NOT set, so mypy does not type-check the BODIES of unannotated
+# functions. The 258 no-untyped-def errors therefore also mark 258 function bodies whose
+# contents are not being checked at all. Annotating a signature does not just clear one
+# error; it turns that body on. Expect the count to rise as the baseline shrinks.
+#
+# Good places to start, measured: `assets` (4 errors), `models` (14), `config` (27) and
+# `interactions` (29) are 74 errors combined across the whole package and could be made
+# clean almost immediately. At the other end, five files hold 438 of the 1,590 (28%):
+# plugin_modules/ash_aws_plugins/bedrock_summary_reporter.py 156, base/uv_tool_mixin.py
+# 122, utils/log.py 68, plugin_modules/ash_builtin/scanners/npm_audit_scanner.py 50,
+# core/phases/scan_phase.py 42.
+#
+# Full code histogram at baseline: union-attr 428, no-untyped-def 258, type-arg 215,
+# arg-type 198, attr-defined 173, assignment 80, call-arg 78, var-annotated 29,
+# unused-ignore 23, return-value 21, operator 21, override 18, misc 13, index 12,
+# import-untyped 5, call-overload 5, import-not-found 4, no-redef 3, return 3,
+# list-item 2, prop-decorator 1.
+#
+# One note on call-arg: it is 78 here and 1,330 with the pydantic.mypy plugin disabled.
+# The plugin is load-bearing, not decorative -- 1,252 of those are stock mypy misreading
+# pydantic model constructors. Do not drop it to simplify this file.
+# ---------------------------------------------------------------------------------
+
+[[tool.mypy.overrides]]
+module = [
+    "automated_security_helper.base.converter_plugin",
+    "automated_security_helper.cli.entrypoint",
+    "automated_security_helper.cli.merge",
+    "automated_security_helper.config.default_config",
+    "automated_security_helper.core.resource_management.scan_registry",
+    "automated_security_helper.models.core",
+    "automated_security_helper.plugin_modules.ash_builtin",
+    "automated_security_helper.plugin_modules.ash_builtin.event_handlers.scan_completion_logger",
+    "automated_security_helper.plugin_modules.ash_builtin.event_handlers.suppression_expiration_checker",
+    "automated_security_helper.plugin_modules.ash_builtin.reporters.csv_reporter",
+    "automated_security_helper.plugin_modules.ash_builtin.reporters.spdx_reporter",
+    "automated_security_helper.plugin_modules.ash_builtin.reporters.yaml_reporter",
+    "automated_security_helper.plugins.decorators",
+    "automated_security_helper.utils.get_ash_version",
+    "automated_security_helper.utils.get_shortest_name",
+    "automated_security_helper.utils.secret_masking",
+]
+disable_error_code = [
+    "no-untyped-def",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "automated_security_helper.base.reporter_plugin",
+    "automated_security_helper.cli.inspect.compare_result_fields",
+    "automated_security_helper.cli.mcp.profile_registry",
+    "automated_security_helper.config.config_linter",
+    "automated_security_helper.core.phases.scan_result_processor",
+    "automated_security_helper.core.resource_management.exceptions",
+    "automated_security_helper.interactions.run_ash_nix",
+    "automated_security_helper.models.scanner_validation",
+    "automated_security_helper.schemas.gitlab.sast",
+    "automated_security_helper.utils.workspace_paths",
+]
+disable_error_code = [
+    "type-arg",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "automated_security_helper.plugin_modules.ash_aws_plugins.security_hub_reporter",
+    "automated_security_helper.plugin_modules.ash_builtin.reporters.cyclonedx_reporter",
+    "automated_security_helper.plugin_modules.ash_builtin.reporters.flatjson_reporter",
+    "automated_security_helper.plugin_modules.ash_builtin.reporters.markdown_reporter",
+    "automated_security_helper.plugin_modules.ash_builtin.reporters.sarif_reporter",
+    "automated_security_helper.plugin_modules.ash_builtin.reporters.text_reporter",
+]
+disable_error_code = [
+    "no-untyped-def",
+    "union-attr",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "automated_security_helper.core.scanner_inventory",
+    "automated_security_helper.plugins.plugin_manager",
+    "automated_security_helper.utils.get_scan_set",
+    "automated_security_helper.workspace.reporting",
+]
+disable_error_code = [
+    "no-untyped-def",
+    "type-arg",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "automated_security_helper.core.sharding",
+    "automated_security_helper.models.scan_results_container",
+    "automated_security_helper.workspace.policy",
+]
+disable_error_code = [
+    "arg-type",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "automated_security_helper.base.plugin_context",
+    "automated_security_helper.cli.image",
+    "automated_security_helper.cli.scan",
+]
+disable_error_code = [
+    "assignment",
+    "no-untyped-def",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "automated_security_helper.plugins.discovery",
+    "automated_security_helper.utils.offline_mode_validator",
+    "automated_security_helper.utils.rich_log_handler",
+]
+disable_error_code = [
+    "no-untyped-def",
+    "var-annotated",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "automated_security_helper.plugin_modules.ash_ferret_plugins",
+    "automated_security_helper.plugin_modules.ash_snyk_plugins",
+    "automated_security_helper.plugin_modules.ash_trivy_plugins",
+]
+disable_error_code = [
+    "var-annotated",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "automated_security_helper.core.metrics_table",
+    "automated_security_helper.workspace.aggregation",
+]
+disable_error_code = [
+    "arg-type",
+    "assignment",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "automated_security_helper.cli.report",
+    "automated_security_helper.plugin_modules.ash_builtin.reporters.ocsf_reporter",
+]
+disable_error_code = [
+    "arg-type",
+    "assignment",
+    "no-untyped-def",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "automated_security_helper.plugin_modules.ash_builtin.reporters.gitlab_cyclonedx_reporter",
+    "automated_security_helper.schemas.sarif_schema_model",
+]
+disable_error_code = [
+    "arg-type",
+    "assignment",
+    "no-untyped-def",
+    "type-arg",
+    "union-attr",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "automated_security_helper.cli.main",
+    "automated_security_helper.core.resource_management.scan_tracking",
+]
+disable_error_code = [
+    "arg-type",
+    "no-untyped-def",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter",
+    "automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_converter",
+]
+disable_error_code = [
+    "arg-type",
+    "no-untyped-def",
+    "override",
+    "union-attr",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "automated_security_helper.cli.dependencies",
+    "automated_security_helper.utils.uv_tool_runner",
+]
+disable_error_code = [
+    "arg-type",
+    "no-untyped-def",
+    "type-arg",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "automated_security_helper.interactions.run_ash_container",
+    "automated_security_helper.utils.download_utils",
+]
+disable_error_code = [
+    "assignment",
+    "attr-defined",
+    "no-untyped-def",
+    "type-arg",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "automated_security_helper.assets.install-pinned-tool",
+    "automated_security_helper.base.engine_phase",
+]
+disable_error_code = [
+    "assignment",
+    "no-untyped-def",
+    "type-arg",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "automated_security_helper.schemas.cyclonedx_bom_1_6_schema",
+    "automated_security_helper.utils.meta_analysis.field_mapping",
+]
+disable_error_code = [
+    "assignment",
+    "type-arg",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "automated_security_helper.config.runtime_patch",
+    "automated_security_helper.utils.version_management",
+]
+disable_error_code = [
+    "import-untyped",
+    "type-arg",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "automated_security_helper.plugin_modules.ash_builtin.reporters.html_reporter",
+    "automated_security_helper.plugins.loader",
+]
+disable_error_code = [
+    "no-untyped-def",
+    "type-arg",
+    "var-annotated",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "automated_security_helper.cli.mcp_tools",
+    "automated_security_helper.core.scanner_statistics_calculator",
+]
+disable_error_code = [
+    "type-arg",
+    "union-attr",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner"
+disable_error_code = [
+    "arg-type",
+    "assignment",
+    "attr-defined",
+    "call-arg",
+    "misc",
+    "no-untyped-def",
+    "override",
+    "type-arg",
+    "union-attr",
+    "unused-ignore",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner"
+disable_error_code = [
+    "arg-type",
+    "assignment",
+    "attr-defined",
+    "call-arg",
+    "no-untyped-def",
+    "override",
+    "type-arg",
+    "union-attr",
+    "unused-ignore",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.utils.sarif_utils"
+disable_error_code = [
+    "arg-type",
+    "assignment",
+    "attr-defined",
+    "call-arg",
+    "no-untyped-def",
+    "type-arg",
+    "union-attr",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.utils.meta_analysis.reporting"
+disable_error_code = [
+    "arg-type",
+    "assignment",
+    "attr-defined",
+    "call-overload",
+    "operator",
+    "type-arg",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.plugin_modules.ash_builtin.reporters.gitlab_sast_reporter"
+disable_error_code = [
+    "arg-type",
+    "assignment",
+    "attr-defined",
+    "index",
+    "no-untyped-def",
+    "return",
+    "union-attr",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.core.phases.scan_phase"
+disable_error_code = [
+    "arg-type",
+    "assignment",
+    "attr-defined",
+    "no-untyped-def",
+    "operator",
+    "override",
+    "type-arg",
+    "union-attr",
+    "var-annotated",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.cli.mcp_server"
+disable_error_code = [
+    "arg-type",
+    "assignment",
+    "attr-defined",
+    "no-untyped-def",
+    "operator",
+    "type-arg",
+    "var-annotated",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.cli.config"
+disable_error_code = [
+    "arg-type",
+    "assignment",
+    "attr-defined",
+    "no-untyped-def",
+    "type-arg",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner"
+disable_error_code = [
+    "arg-type",
+    "assignment",
+    "attr-defined",
+    "no-untyped-def",
+    "type-arg",
+    "union-attr",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.cli.mcp"
+# "unused-ignore" here is a consequence of the line above it, not independent debt.
+# This module has `MCPServer = None  # type: ignore[assignment]` in an ImportError
+# fallback (lines 35-36). Those inline ignores are correct and must stay -- they are
+# what lets the optional-MCP import degrade -- but disabling `assignment` module-wide
+# makes them redundant, and warn_unused_ignores then reports them. So when `assignment`
+# comes off this list, `unused-ignore` comes off with it, in the same edit. It is the
+# only module in this baseline where the two are coupled this way.
+disable_error_code = [
+    "arg-type",
+    "assignment",
+    "misc",
+    "no-untyped-def",
+    "unused-ignore",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.base.scanner_plugin"
+disable_error_code = [
+    "arg-type",
+    "assignment",
+    "misc",
+    "no-untyped-def",
+    "type-arg",
+    "union-attr",
+    "unused-ignore",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.core.progress"
+disable_error_code = [
+    "arg-type",
+    "assignment",
+    "no-untyped-def",
+    "return-value",
+    "var-annotated",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.cli.plugin"
+disable_error_code = [
+    "arg-type",
+    "assignment",
+    "no-untyped-def",
+    "type-arg",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.config.resolve_config"
+disable_error_code = [
+    "arg-type",
+    "assignment",
+    "return-value",
+    "union-attr",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner"
+disable_error_code = [
+    "arg-type",
+    "attr-defined",
+    "call-arg",
+    "no-untyped-def",
+    "override",
+    "type-arg",
+    "union-attr",
+    "unused-ignore",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scanner"
+disable_error_code = [
+    "arg-type",
+    "attr-defined",
+    "call-arg",
+    "no-untyped-def",
+    "override",
+    "union-attr",
+    "unused-ignore",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner"
+disable_error_code = [
+    "arg-type",
+    "attr-defined",
+    "call-arg",
+    "no-untyped-def",
+    "type-arg",
+    "union-attr",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner"
+disable_error_code = [
+    "arg-type",
+    "attr-defined",
+    "call-arg",
+    "no-untyped-def",
+    "union-attr",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.core.phases.report_phase"
+disable_error_code = [
+    "arg-type",
+    "attr-defined",
+    "no-untyped-def",
+    "operator",
+    "override",
+    "union-attr",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner"
+disable_error_code = [
+    "arg-type",
+    "attr-defined",
+    "no-untyped-def",
+    "override",
+    "return-value",
+    "type-arg",
+    "union-attr",
+    "unused-ignore",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.cli.inspect.inspect_findings_app"
+disable_error_code = [
+    "arg-type",
+    "attr-defined",
+    "no-untyped-def",
+    "type-arg",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.base.uv_tool_mixin"
+disable_error_code = [
+    "arg-type",
+    "attr-defined",
+    "return-value",
+    "type-arg",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.utils.cdk_nag_wrapper"
+disable_error_code = [
+    "arg-type",
+    "call-arg",
+    "import-not-found",
+    "import-untyped",
+    "no-redef",
+    "no-untyped-def",
+    "type-arg",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner"
+disable_error_code = [
+    "arg-type",
+    "call-arg",
+    "list-item",
+    "no-untyped-def",
+    "override",
+    "union-attr",
+    "unused-ignore",
+    "var-annotated",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner"
+disable_error_code = [
+    "arg-type",
+    "call-arg",
+    "list-item",
+    "no-untyped-def",
+    "type-arg",
+    "union-attr",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.models.asharp_model"
+disable_error_code = [
+    "arg-type",
+    "call-arg",
+    "no-untyped-def",
+    "type-arg",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner"
+disable_error_code = [
+    "arg-type",
+    "call-arg",
+    "no-untyped-def",
+    "type-arg",
+    "union-attr",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.workspace.resolver"
+disable_error_code = [
+    "arg-type",
+    "call-arg",
+    "union-attr",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter"
+disable_error_code = [
+    "arg-type",
+    "call-overload",
+    "no-untyped-def",
+    "type-arg",
+    "union-attr",
+    "unused-ignore",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.utils.log"
+disable_error_code = [
+    "arg-type",
+    "no-untyped-def",
+    "override",
+    "type-arg",
+    "unused-ignore",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.base.plugin_base"
+disable_error_code = [
+    "arg-type",
+    "no-untyped-def",
+    "type-arg",
+    "union-attr",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.base.plugin_config"
+disable_error_code = [
+    "assignment",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.utils.meta_analysis.sarif_analysis"
+disable_error_code = [
+    "assignment",
+    "attr-defined",
+    "index",
+    "no-redef",
+    "return-value",
+    "type-arg",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.core.resource_management.event_manager"
+disable_error_code = [
+    "assignment",
+    "attr-defined",
+    "misc",
+    "no-untyped-def",
+    "operator",
+    "type-arg",
+    "union-attr",
+    "var-annotated",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.schemas.generate_schemas"
+disable_error_code = [
+    "assignment",
+    "attr-defined",
+    "no-untyped-def",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.interactions.run_ash_scan"
+disable_error_code = [
+    "assignment",
+    "misc",
+    "no-untyped-def",
+    "type-arg",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.config.ash_config"
+disable_error_code = [
+    "assignment",
+    "no-redef",
+    "no-untyped-def",
+    "type-arg",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.utils.sarif_field_analysis"
+disable_error_code = [
+    "assignment",
+    "no-untyped-def",
+    "var-annotated",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.utils.subprocess_utils"
+disable_error_code = [
+    "assignment",
+    "type-arg",
+    "union-attr",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.core.execution_engine"
+disable_error_code = [
+    "assignment",
+    "type-arg",
+    "var-annotated",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner"
+disable_error_code = [
+    "attr-defined",
+    "call-arg",
+    "no-untyped-def",
+    "override",
+    "return",
+    "return-value",
+    "type-arg",
+    "union-attr",
+    "unused-ignore",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner"
+disable_error_code = [
+    "attr-defined",
+    "no-untyped-def",
+    "override",
+    "return",
+    "return-value",
+    "type-arg",
+    "union-attr",
+    "unused-ignore",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.plugin_modules.ash_builtin.reporters.github_ghas_reporter"
+disable_error_code = [
+    "attr-defined",
+    "no-untyped-def",
+    "type-arg",
+    "var-annotated",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.plugin_modules.ash_aws_plugins.cloudwatch_logs_reporter"
+disable_error_code = [
+    "call-arg",
+    "call-overload",
+    "no-untyped-def",
+    "union-attr",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.plugin_modules.ash_aws_plugins.s3_reporter"
+disable_error_code = [
+    "call-arg",
+    "no-untyped-def",
+    "union-attr",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.core.unified_metrics"
+disable_error_code = [
+    "call-arg",
+    "prop-decorator",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.workspace.execution"
+disable_error_code = [
+    "call-arg",
+    "type-arg",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.utils.cfn_template_model"
+disable_error_code = [
+    "import-untyped",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.plugin_modules.ash_builtin.reporters.junitxml_reporter"
+disable_error_code = [
+    "import-untyped",
+    "index",
+    "no-untyped-def",
+    "operator",
+    "union-attr",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.core.orchestrator"
+disable_error_code = [
+    "misc",
+    "no-untyped-def",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.cli.mcp.progress_monitor"
+disable_error_code = [
+    "misc",
+    "type-arg",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.core.phases.convert_phase"
+disable_error_code = [
+    "no-untyped-def",
+    "operator",
+    "union-attr",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.core.phases.inspect_phase"
+disable_error_code = [
+    "no-untyped-def",
+    "override",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.utils.meta_analysis.locations_match"
+disable_error_code = [
+    "no-untyped-def",
+    "return-value",
+    "type-arg",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.plugin_modules.ash_builtin.scanners._grep_scanner_base"
+disable_error_code = [
+    "no-untyped-def",
+    "type-arg",
+    "unused-ignore",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.plugin_modules.ash_builtin.reporters.unused_suppressions_reporter"
+disable_error_code = [
+    "no-untyped-def",
+    "union-attr",
+    "var-annotated",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter"
+disable_error_code = [
+    "return-value",
+    "var-annotated",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.core.phases.scanner_executor"
+disable_error_code = [
+    "type-arg",
+    "unused-ignore",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.config.config_validator"
+disable_error_code = [
+    "type-arg",
+    "var-annotated",
+]
+
+[[tool.mypy.overrides]]
+module = "automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_section"
+disable_error_code = [
+    "union-attr",
+]
 
 [tool.uv.workspace]
 members = [ ".",]

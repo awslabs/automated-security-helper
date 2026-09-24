@@ -631,9 +631,7 @@ class TestTheGateReadsTheRealRollup:
         """
         listed = dict(
             incomplete_scanners(
-                _rollup_model(
-                    {"cdk-nag": {"source": _target_report("PASSED", 10, 4)}}
-                )
+                _rollup_model({"cdk-nag": {"source": _target_report("PASSED", 10, 4)}})
             )
         )
 

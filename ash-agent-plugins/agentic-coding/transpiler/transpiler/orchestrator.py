@@ -3,10 +3,9 @@
 The CLI is a thin Click wrapper around these functions. Direct callers (tests,
 embedders) can use the orchestrator API without going through Click.
 """
+
 from __future__ import annotations
 
-import json
-import shutil
 import tempfile
 from pathlib import Path
 
@@ -15,11 +14,11 @@ from .core import BuildContext, Manifest, OutputAnchors, resolve_output_dir
 from .jinja_renderer import render
 from .registry import BackendRegistry
 
-HERE = Path(__file__).resolve().parent              # transpiler/transpiler/
-TRANSPILER_DIR = HERE.parent                         # transpiler/
+HERE = Path(__file__).resolve().parent  # transpiler/transpiler/
+TRANSPILER_DIR = HERE.parent  # transpiler/
 BASE_DIR = TRANSPILER_DIR / "_base"
 SCHEMAS_DIR = TRANSPILER_DIR / "schemas"
-OUTPUT_ROOT = TRANSPILER_DIR.parent / "plugins"      # agentic-coding/plugins/
+OUTPUT_ROOT = TRANSPILER_DIR.parent / "plugins"  # agentic-coding/plugins/
 
 
 def find_repository_root(start: Path = TRANSPILER_DIR) -> Path:
@@ -67,8 +66,7 @@ def _load_manifest() -> Manifest:
 
 def _references_concatenated() -> str:
     return "\n\n".join(
-        ref.read_text()
-        for ref in sorted((BASE_DIR / "references").glob("*.md"))
+        ref.read_text() for ref in sorted((BASE_DIR / "references").glob("*.md"))
     )
 
 
@@ -111,8 +109,9 @@ def build_all(anchors: OutputAnchors | None = None) -> None:
         build_one(name, anchors=anchors)
 
 
-def release_one(backend_name: str, dist_dir: Path,
-                anchors: OutputAnchors | None = None) -> None:
+def release_one(
+    backend_name: str, dist_dir: Path, anchors: OutputAnchors | None = None
+) -> None:
     anchors = anchors or default_anchors()
     m = _load_manifest()
     BackendCls = BackendRegistry.get(backend_name)
@@ -144,9 +143,7 @@ def _files_in(path: Path) -> dict[str, bytes]:
     if not path.exists():
         return {}
     return {
-        str(p.relative_to(path)): p.read_bytes()
-        for p in path.rglob("*")
-        if p.is_file()
+        str(p.relative_to(path)): p.read_bytes() for p in path.rglob("*") if p.is_file()
     }
 
 
@@ -196,7 +193,8 @@ def check_drift(anchors: OutputAnchors | None = None) -> int:
                 added = sorted(set(generated) - set(on_disk))
                 removed = sorted(set(on_disk) - set(generated))
                 changed = sorted(
-                    k for k in generated.keys() & on_disk.keys()
+                    k
+                    for k in generated.keys() & on_disk.keys()
                     if generated[k] != on_disk[k]
                 )
                 drift.append((name, added, removed, changed))
@@ -213,5 +211,7 @@ def check_drift(anchors: OutputAnchors | None = None) -> int:
             for f in changed:
                 print(f"    ~ {f}")
         return 1
-    print(f"OK: AGENTS.md + {len(BackendRegistry.names())} platform outputs match _base/ source.")
+    print(
+        f"OK: AGENTS.md + {len(BackendRegistry.names())} platform outputs match _base/ source."
+    )
     return 0

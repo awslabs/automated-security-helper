@@ -15,7 +15,6 @@ import argparse
 import inspect
 import re
 import sys
-import textwrap
 from pathlib import Path
 from typing import Any, get_args, get_origin
 
@@ -34,6 +33,7 @@ def _get_type_name(annotation: Any) -> str:
     # Handle Annotated - extract the base type
     try:
         import typing
+
         if hasattr(typing, "get_args") and hasattr(typing, "get_origin"):
             if typing.get_origin(annotation) is typing.Annotated:
                 args = typing.get_args(annotation)
@@ -55,6 +55,7 @@ def _get_type_name(annotation: Any) -> str:
         return "None"
     try:
         import types as builtin_types
+
         if isinstance(annotation, builtin_types.UnionType):
             inner = [a for a in get_args(annotation) if a is not type(None)]
             if len(inner) == 1:
@@ -66,6 +67,7 @@ def _get_type_name(annotation: Any) -> str:
     # typing.Union
     try:
         import typing
+
         if origin is typing.Union:
             inner = [a for a in get_args(annotation) if a is not type(None)]
             if len(inner) == 1:
@@ -84,6 +86,7 @@ def _get_type_name(annotation: Any) -> str:
     # Handle Optional[X] via typing
     try:
         import typing
+
         if origin is typing.Optional:
             args = get_args(annotation)
             if args:
@@ -93,6 +96,7 @@ def _get_type_name(annotation: Any) -> str:
 
     # Enum types
     import enum
+
     if isinstance(annotation, type) and issubclass(annotation, enum.Enum):
         values = [e.value for e in annotation]
         if len(values) <= 6:
@@ -133,6 +137,7 @@ def _format_default(default: Any) -> str:
         return "[]"
     # Enum values
     import enum
+
     if isinstance(default, enum.Enum):
         return f"`{default.value}`"
     return str(default)
@@ -172,9 +177,12 @@ def extract_typer_params(func) -> list[dict]:
 
             # Find the typer.Option or typer.Argument in metadata
             import typer.models
+
             option_info = None
             for meta in metadata:
-                if isinstance(meta, (typer.models.OptionInfo, typer.models.ArgumentInfo)):
+                if isinstance(
+                    meta, (typer.models.OptionInfo, typer.models.ArgumentInfo)
+                ):
                     option_info = meta
                     break
 
@@ -213,15 +221,17 @@ def extract_typer_params(func) -> list[dict]:
             # Resolve type name
             type_name = _get_type_name(base_type)
 
-            params.append({
-                "flags": flags,
-                "type": type_name,
-                "default": _format_default(actual_default),
-                "envvar": envvar,
-                "help": help_text,
-                "is_argument": is_argument,
-                "param_name": name,
-            })
+            params.append(
+                {
+                    "flags": flags,
+                    "type": type_name,
+                    "default": _format_default(actual_default),
+                    "envvar": envvar,
+                    "help": help_text,
+                    "is_argument": is_argument,
+                    "param_name": name,
+                }
+            )
         else:
             # Non-Annotated parameters (simple typer.Option defaults in main.py wrapper)
             if default is inspect.Parameter.empty:
@@ -233,6 +243,7 @@ def extract_typer_params(func) -> list[dict]:
 
             # Check if default is a typer.Option instance
             import typer.models
+
             if isinstance(default, typer.models.OptionInfo):
                 option_info = default
                 help_text = option_info.help or ""
@@ -243,15 +254,17 @@ def extract_typer_params(func) -> list[dict]:
                 actual_default = option_info.default
                 if option_info.param_decls:
                     flags = list(option_info.param_decls)
-                params.append({
-                    "flags": flags,
-                    "type": type_name,
-                    "default": _format_default(actual_default),
-                    "envvar": envvar,
-                    "help": help_text,
-                    "is_argument": False,
-                    "param_name": name,
-                })
+                params.append(
+                    {
+                        "flags": flags,
+                        "type": type_name,
+                        "default": _format_default(actual_default),
+                        "envvar": envvar,
+                        "help": help_text,
+                        "is_argument": False,
+                        "param_name": name,
+                    }
+                )
             elif isinstance(default, typer.models.ArgumentInfo):
                 help_text = default.help or ""
                 envvar = ""
@@ -259,15 +272,17 @@ def extract_typer_params(func) -> list[dict]:
                     ev = default.envvar
                     envvar = ", ".join(ev) if isinstance(ev, (list, tuple)) else str(ev)
                 actual_default = default.default
-                params.append({
-                    "flags": [],
-                    "type": type_name,
-                    "default": _format_default(actual_default),
-                    "envvar": envvar,
-                    "help": help_text,
-                    "is_argument": True,
-                    "param_name": name,
-                })
+                params.append(
+                    {
+                        "flags": [],
+                        "type": type_name,
+                        "default": _format_default(actual_default),
+                        "envvar": envvar,
+                        "help": help_text,
+                        "is_argument": True,
+                        "param_name": name,
+                    }
+                )
 
     return params
 
@@ -310,7 +325,11 @@ def render_command_section(command_name: str, func, description: str = "") -> st
         lines.append("| Flag | Type | Default | Env Var | Description |")
         lines.append("|------|------|---------|---------|-------------|")
         for p in options:
-            flag_str = ", ".join(f"`{f}`" for f in p["flags"]) if p["flags"] else f"`--{p['param_name'].replace('_', '-')}`"
+            flag_str = (
+                ", ".join(f"`{f}`" for f in p["flags"])
+                if p["flags"]
+                else f"`--{p['param_name'].replace('_', '-')}`"
+            )
             lines.append(
                 f"| {flag_str} | {p['type']} | {p['default']} | {_escape_md(p['envvar'])} | {_escape_md(p['help'])} |"
             )
@@ -335,7 +354,6 @@ def extract_mcp_tools() -> list[dict]:
     module = mcp_server
 
     # Get the mcp instance and its registered tools
-    mcp_instance = module.mcp
 
     # MCPServer stores tools internally - try to access them
     # But the simplest approach: scan module for async functions that we know are tools
@@ -362,7 +380,9 @@ def extract_mcp_tools() -> list[dict]:
         description = ""
         if doc:
             # Split at Args: or Returns: sections
-            parts = re.split(r"\n\s*(Args|Returns|Example|CRITICAL|IMPORTANT):", doc, maxsplit=1)
+            parts = re.split(
+                r"\n\s*(Args|Returns|Example|CRITICAL|IMPORTANT):", doc, maxsplit=1
+            )
             description = parts[0].strip()
             # Take only first paragraph
             description = description.split("\n\n")[0].strip()
@@ -394,18 +414,22 @@ def extract_mcp_tools() -> list[dict]:
             param_default = _format_default(param.default)
             param_desc = args_descriptions.get(param_name, "")
 
-            tool_params.append({
-                "name": param_name,
-                "type": param_type,
-                "default": param_default,
-                "description": param_desc,
-            })
+            tool_params.append(
+                {
+                    "name": param_name,
+                    "type": param_type,
+                    "default": param_default,
+                    "description": param_desc,
+                }
+            )
 
-        tools.append({
-            "name": tool_name,
-            "description": description,
-            "params": tool_params,
-        })
+        tools.append(
+            {
+                "name": tool_name,
+                "description": description,
+                "params": tool_params,
+            }
+        )
 
     # Sort tools by name for deterministic output
     tools.sort(key=lambda t: t["name"])
@@ -417,7 +441,9 @@ def render_mcp_section(tools: list[dict]) -> str:
     lines = []
     lines.append("## MCP Tools")
     lines.append("")
-    lines.append("The ASH MCP server exposes the following tools for integration with AI assistants via the Model Context Protocol.")
+    lines.append(
+        "The ASH MCP server exposes the following tools for integration with AI assistants via the Model Context Protocol."
+    )
     lines.append("")
 
     for tool in tools:
@@ -446,8 +472,6 @@ def generate_cli_docs() -> str:
     from automated_security_helper.cli.image import build_ash_image_cli_command
     from automated_security_helper.cli.report import report_command
     from automated_security_helper.cli.merge import merge_command
-    from automated_security_helper.cli.config import config_app
-    from automated_security_helper.cli.inspect import inspect_app
     from automated_security_helper.cli.main import _mcp_wrapper, get_genai_guide
 
     # Get config subcommand functions
@@ -462,7 +486,9 @@ def generate_cli_docs() -> str:
     )
 
     # Get inspect subcommand functions
-    from automated_security_helper.cli.inspect.inspect_findings_app import findings_command
+    from automated_security_helper.cli.inspect.inspect_findings_app import (
+        findings_command,
+    )
     from automated_security_helper.cli.inspect.sarif_fields import analyze_sarif_fields
 
     sections = []
@@ -470,8 +496,12 @@ def generate_cli_docs() -> str:
     # Header
     sections.append("# CLI Reference (Auto-Generated)")
     sections.append("")
-    sections.append("This document is auto-generated from the ASH CLI source code using introspection.")
-    sections.append("Do not edit manually. Regenerate with: `uv run python scripts/generate_cli_docs.py`")
+    sections.append(
+        "This document is auto-generated from the ASH CLI source code using introspection."
+    )
+    sections.append(
+        "Do not edit manually. Regenerate with: `uv run python scripts/generate_cli_docs.py`"
+    )
     sections.append("")
 
     # Main commands
@@ -479,23 +509,41 @@ def generate_cli_docs() -> str:
     sections.append("")
 
     # scan command
-    sections.append(render_command_section("scan", run_ash_scan_cli_command,
-        "Runs an ASH scan against the source-dir, outputting results to the output-dir."))
+    sections.append(
+        render_command_section(
+            "scan",
+            run_ash_scan_cli_command,
+            "Runs an ASH scan against the source-dir, outputting results to the output-dir.",
+        )
+    )
 
     # build-image command
-    sections.append(render_command_section("build-image", build_ash_image_cli_command,
-        "Builds the ASH container image then runs a scan with it."))
+    sections.append(
+        render_command_section(
+            "build-image",
+            build_ash_image_cli_command,
+            "Builds the ASH container image then runs a scan with it.",
+        )
+    )
 
     # report command
     sections.append(render_command_section("report", report_command))
 
     # merge command
-    sections.append(render_command_section("merge", merge_command,
-        "Merges the results of a sharded scan into one unified report."))
+    sections.append(
+        render_command_section(
+            "merge",
+            merge_command,
+            "Merges the results of a sharded scan into one unified report.",
+        )
+    )
 
     # mcp command
-    sections.append(render_command_section("mcp", _mcp_wrapper,
-        "Start the ASH MCP server (Model Context Protocol)."))
+    sections.append(
+        render_command_section(
+            "mcp", _mcp_wrapper, "Start the ASH MCP server (Model Context Protocol)."
+        )
+    )
 
     # get-genai-guide command
     sections.append(render_command_section("get-genai-guide", get_genai_guide))
@@ -506,7 +554,11 @@ def generate_cli_docs() -> str:
     sections.append(render_command_section("config init", config_init))
     sections.append(render_command_section("config get", config_get))
     sections.append(render_command_section("config update", config_update))
-    sections.append(render_command_section("config validate-plugin-dependencies", config_validate_deps))
+    sections.append(
+        render_command_section(
+            "config validate-plugin-dependencies", config_validate_deps
+        )
+    )
     sections.append(render_command_section("config lint", config_lint))
     sections.append(render_command_section("config wizard", config_wizard))
     sections.append(render_command_section("config validate", config_validate))
@@ -515,7 +567,9 @@ def generate_cli_docs() -> str:
     sections.append("## Inspect Subcommands")
     sections.append("")
     sections.append(render_command_section("inspect findings", findings_command))
-    sections.append(render_command_section("inspect sarif-fields", analyze_sarif_fields))
+    sections.append(
+        render_command_section("inspect sarif-fields", analyze_sarif_fields)
+    )
 
     # MCP Tools
     tools = extract_mcp_tools()

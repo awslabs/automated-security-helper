@@ -281,6 +281,7 @@ For advanced use cases, you can define custom installation commands:
 def _get_tool_version_constraint(self) -> str:
     return ">=1.7.0,<2.0.0"
 
+
 def _get_tool_package_extras(self) -> List[str]:
     return ["sarif", "toml", "yaml"]
 ```
@@ -304,6 +305,7 @@ For long-running installations, progress monitoring is automatically enabled:
 ```python
 def progress_callback(message: str):
     print(f"Installation progress: {message}")
+
 
 # Progress updates every 10 seconds for installations > 60 seconds
 ```

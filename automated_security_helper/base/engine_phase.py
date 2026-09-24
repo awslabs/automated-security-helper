@@ -20,9 +20,8 @@ class EnginePhase(ABC):
     def __init__(
         self,
         plugin_context: PluginContext,
-        plugins: List[
-            ConverterPluginBase | ScannerPluginBase | ReporterPluginBase
-        ] | None = None,
+        plugins: List[ConverterPluginBase | ScannerPluginBase | ReporterPluginBase]
+        | None = None,
         progress_display: Optional[Any] = None,
         asharp_model: Optional[AshAggregatedResults] = None,
     ):
@@ -45,7 +44,6 @@ class EnginePhase(ABC):
     @abstractmethod
     def phase_name(self) -> str:
         """Return the name of this phase."""
-        pass
 
     def notify_event(self, event_type, **kwargs):
         """Notify plugins of an event with the current context.
@@ -171,7 +169,6 @@ class EnginePhase(ABC):
         Returns:
             AshAggregatedResults: Phase-specific results
         """
-        pass
 
     def initialize_progress(self, description: str = None) -> None:
         """Initialize progress tracking for this phase.

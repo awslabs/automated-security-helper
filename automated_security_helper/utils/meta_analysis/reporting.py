@@ -426,7 +426,7 @@ def generate_html_report(
                 if path not in all_fields:
                     all_fields[path] = {
                         "type": set(),
-                        "scanners": set([scanner]),
+                        "scanners": {scanner},
                         "in_aggregate": False,
                     }
                 else:
@@ -589,7 +589,7 @@ def generate_html_report(
                 path = field_info["path"]
                 if path not in all_fields_by_path:
                     all_fields_by_path[path] = {
-                        "scanners": set([scanner]),
+                        "scanners": {scanner},
                         "type": set(),
                         "in_aggregate": False,
                     }

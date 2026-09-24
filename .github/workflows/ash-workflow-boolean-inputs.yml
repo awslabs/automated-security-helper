@@ -1,0 +1,84 @@
+name: ASH - Workflow Boolean Input Check
+# Fails when a `type: boolean` workflow input is consumed as if it were a string.
+#
+# WHY THIS WORKFLOW EXISTS
+#
+# run-ash-security-scan.yml selected its findings-enforcement flag with
+# `inputs.fail-on-findings == 'true'` against an input declared `type: boolean`.
+# GitHub casts mismatched operands to a number before comparing, so that test was
+# false for BOTH input values and the workflow passed `--no-fail-on-findings` on
+# every run it ever made -- including this repository's own pull request and merge
+# queue gate, and every external consumer of the reusable workflow.
+#
+# What makes this worth a gate rather than a two-line commit is that the same file
+# carried a second instance of the same root cause in a different disguise, ten
+# lines away: `verbose`, also `type: boolean`, was rendered bare into an env var
+# and then tested with `${VERBOSE:+--verbose}`, which asks whether the variable is
+# set and non-empty. A Boolean arrives in the environment as the STRING `false`,
+# which is both, so the flag was passed unconditionally.
+#
+# Neither instance is visible in review. Both read like ordinary string handling,
+# both leave the workflow green, and both perturb only the exit code -- which is
+# the entire contract for a CI gate. The class needs something that re-tests it,
+# because the next person to add a boolean input will reach for `== 'true'` for
+# the same reason the last two did.
+#
+# WHY THE SELF-TEST IS A SEPARATE STEP THAT RUNS FIRST
+#
+# The way a check like this really fails is by matching nothing and exiting 0 --
+# which is the same failure class as the defect it guards. The script carries
+# no-vacuous-pass guards for the census, and `--self-test` covers the remaining
+# gap: the detectors themselves silently stopping. Running it as its own step
+# before the census means a blinded detector reddens here with its own name on it,
+# rather than being reported as a clean repository.
+#
+# WHY THERE IS NO paths FILTER, AND NO SETUP STEP
+#
+# Same reasoning as ash-actions-pinned.yml. `merge_group` accepts no `paths`
+# filter, so a gate filtered on pull_request but unfiltered on merge_group would
+# run in one place and not the other, and a required check that cannot report for
+# a queued entry blocks the merge queue on a verdict that never arrives. The check
+# also censuses the whole tracked workflow tree rather than the diff, so it is
+# meaningful on every run regardless of what changed.
+#
+# The script is deliberately standard-library only -- no PyYAML, no uv, no node --
+# so this job is a checkout and one `python3` invocation. Confirmed to run on
+# Python 3.9 as well as current versions, so it does not depend on which
+# interpreter the runner image happens to ship.
+
+on:
+  pull_request:
+  merge_group:
+
+permissions:
+  contents: read
+
+concurrency:
+  # One in-flight run per pull request; pushing again supersedes the previous run.
+  #
+  # github.ref is refs/pull/<n>/merge on pull_request, and on merge_group it is the
+  # per-entry gh-readonly-queue/main/pr-<n>-<sha> branch, so every queue entry lands
+  # in its own group and entries never serialize behind one another.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Only pull_request runs may be cancelled. A merge_group run must finish or the
+  # queue loses its verdict.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  workflow-boolean-inputs:
+    name: Assert no boolean workflow input is treated as a string
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # First, that the detectors still fire. A check that has gone blind reports
+      # every workflow clean, so this failing is more informative than the census
+      # passing.
+      - name: Assert the boolean-input detectors still fire
+        run: python3 .github/scripts/assert-workflow-boolean-inputs.py --self-test
+
+      - name: Assert no boolean workflow input is compared against a string
+        run: python3 .github/scripts/assert-workflow-boolean-inputs.py

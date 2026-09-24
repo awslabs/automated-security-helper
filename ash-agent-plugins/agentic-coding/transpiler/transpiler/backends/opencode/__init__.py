@@ -2,6 +2,7 @@
 
 Emits opencode.json + .opencode/ directory of skills, commands, agents.
 """
+
 from __future__ import annotations
 
 import json

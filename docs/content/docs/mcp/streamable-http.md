@@ -123,7 +123,7 @@ sha = hashlib.sha256(zip_bytes).hexdigest()
 
 # Send in 1 MiB chunks
 chunk_size = 1024 * 1024
-chunks = [zip_bytes[i:i+chunk_size] for i in range(0, len(zip_bytes), chunk_size)]
+chunks = [zip_bytes[i : i + chunk_size] for i in range(0, len(zip_bytes), chunk_size)]
 for seq, chunk in enumerate(chunks):
     await mcp__ash__set_source_zip_chunk(
         upload_id=upload_id,

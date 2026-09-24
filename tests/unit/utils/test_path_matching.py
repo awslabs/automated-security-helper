@@ -3,8 +3,6 @@
 
 """Tests for the canonical _recursive_glob_match / _path_pattern_matches in utils/path_matching."""
 
-import pytest
-
 from automated_security_helper.utils.path_matching import (
     _path_pattern_matches,
     _recursive_glob_match,
@@ -65,15 +63,19 @@ class TestRecursiveGlobMatch:
         assert _recursive_glob_match("src/app.py", "src/app.py") is True
 
     def test_github_workflows_pattern(self):
-        assert _recursive_glob_match(
-            ".github/workflows/run-ash.yml", ".github/**/*.yml"
-        ) is True
+        assert (
+            _recursive_glob_match(".github/workflows/run-ash.yml", ".github/**/*.yml")
+            is True
+        )
 
     def test_deeply_nested_test_data_pattern(self):
-        assert _recursive_glob_match(
-            "tests/test_data/scanners/cdk/foo.yaml_results/cfn.json",
-            "tests/test_data/**",
-        ) is True
+        assert (
+            _recursive_glob_match(
+                "tests/test_data/scanners/cdk/foo.yaml_results/cfn.json",
+                "tests/test_data/**",
+            )
+            is True
+        )
 
 
 class TestPathPatternMatches:
@@ -142,7 +144,10 @@ class TestSingleCanonicalDefinition:
             except SyntaxError:
                 continue
             for node in ast.walk(tree):
-                if isinstance(node, ast.FunctionDef) and node.name == "_recursive_glob_match":
+                if (
+                    isinstance(node, ast.FunctionDef)
+                    and node.name == "_recursive_glob_match"
+                ):
                     definitions.append(str(py_file.relative_to(root.parent)))
 
         assert len(definitions) == 1, (

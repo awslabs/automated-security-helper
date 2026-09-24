@@ -760,7 +760,7 @@ def run_cdk_nag_against_cfn_template(
                 def __init__(
                     self,
                     scope: Construct | None = None,
-                    id: str | None = None,
+                    construct_id: str | None = None,
                     template_path: Path | None = None,
                 ):
                     if template_path is None:
@@ -769,7 +769,7 @@ def run_cdk_nag_against_cfn_template(
                         raise FileNotFoundError(
                             f"Template file does not exist: {template_path}"
                         )
-                    super().__init__(scope, id)
+                    super().__init__(scope, construct_id)
                     # Get the relative path to use as the logical ID
                     # CDK will replace path separators with
                     try:

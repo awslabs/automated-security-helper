@@ -249,7 +249,14 @@ async def cleanup_scan_resources(
         if remove_output and entry.output_directory:
             try:
                 output_dir = Path(entry.output_directory)
-                if output_dir.exists() and output_dir.is_dir():
+                # Deferred, and this site is the clearest case for deferring. Fixing the exists()
+                # and is_dir() calls flagged here would leave the shutil.rmtree() on the next
+                # line -- which blocks for as long as it takes to delete an entire scan output
+                # tree, far longer than two stats, and which ASYNC240 does not flag because it is
+                # not a pathlib method. Silencing the cheap half would make the rule green while
+                # the actual event-loop stall stayed exactly where it is. The whole block needs
+                # to move off the loop together.
+                if output_dir.exists() and output_dir.is_dir():  # noqa: ASYNC240
                     shutil.rmtree(output_dir)
                     removed_output = True
             except PermissionError as e:

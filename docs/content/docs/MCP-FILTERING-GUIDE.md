@@ -40,23 +40,16 @@ Filter out suppressed findings (false positives or accepted risks) to focus only
 **Examples:**
 ```python
 # Get only actionable findings
-actionable = await get_scan_results(
-    output_dir=".ash/ash_output",
-    actionable_only=True
-)
+actionable = await get_scan_results(output_dir=".ash/ash_output", actionable_only=True)
 
 # Combine with severity filter for high-priority actionable findings
 high_priority_actionable = await get_scan_results(
-    output_dir=".ash/ash_output",
-    actionable_only=True,
-    severities="critical,high"
+    output_dir=".ash/ash_output", actionable_only=True, severities="critical,high"
 )
 
 # Get actionable summary for dashboard
 actionable_summary = await get_scan_results(
-    output_dir=".ash/ash_output",
-    actionable_only=True,
-    filter_level="summary"
+    output_dir=".ash/ash_output", actionable_only=True, filter_level="summary"
 )
 ```
 
@@ -81,16 +74,16 @@ Filter results to include only specific security scanners.
 **Examples:**
 ```python
 # Single scanner
-scanners="bandit"
+scanners = "bandit"
 
 # Multiple scanners
-scanners="bandit,semgrep,checkov"
+scanners = "bandit,semgrep,checkov"
 
 # SAST tools only
-scanners="bandit,semgrep"
+scanners = "bandit,semgrep"
 
 # Dependency scanners only
-scanners="grype,npm-audit"
+scanners = "grype,npm-audit"
 ```
 
 ### 4. `severities` - Severity Level Filtering
@@ -112,16 +105,16 @@ Filter results to include only specific severity levels.
 **Examples:**
 ```python
 # Critical only
-severities="critical"
+severities = "critical"
 
 # High-priority findings
-severities="critical,high"
+severities = "critical,high"
 
 # Medium and below
-severities="medium,low,info"
+severities = "medium,low,info"
 
 # Include suppressed findings explicitly
-severities="critical,high,suppressed"
+severities = "critical,high,suppressed"
 ```
 
 ## Usage Examples
@@ -131,16 +124,11 @@ severities="critical,high,suppressed"
 #### Actionable Findings Only
 ```python
 # Get only actionable findings (exclude suppressed)
-actionable = await get_scan_results(
-    output_dir=".ash/ash_output",
-    actionable_only=True
-)
+actionable = await get_scan_results(output_dir=".ash/ash_output", actionable_only=True)
 
 # Actionable summary for dashboard
 actionable_summary = await get_scan_results(
-    output_dir=".ash/ash_output",
-    actionable_only=True,
-    filter_level="summary"
+    output_dir=".ash/ash_output", actionable_only=True, filter_level="summary"
 )
 
 # Fast check for actionable critical findings
@@ -148,71 +136,51 @@ actionable_critical = await get_scan_results(
     output_dir=".ash/ash_output",
     actionable_only=True,
     severities="critical",
-    filter_level="minimal"
+    filter_level="minimal",
 )
 ```
 
 #### Response Size Only
 ```python
 # Minimal response for fast status check
-status = await get_scan_results(
-    output_dir=".ash/ash_output",
-    filter_level="minimal"
-)
+status = await get_scan_results(output_dir=".ash/ash_output", filter_level="minimal")
 
 # Summary for dashboard
-summary = await get_scan_results(
-    output_dir=".ash/ash_output",
-    filter_level="summary"
-)
+summary = await get_scan_results(output_dir=".ash/ash_output", filter_level="summary")
 
 # Full results (default)
-results = await get_scan_results(
-    output_dir=".ash/ash_output",
-    filter_level="full"
-)
+results = await get_scan_results(output_dir=".ash/ash_output", filter_level="full")
 ```
 
 #### Scanner Filtering
 ```python
 # Only bandit results
-bandit_only = await get_scan_results(
-    output_dir=".ash/ash_output",
-    scanners="bandit"
-)
+bandit_only = await get_scan_results(output_dir=".ash/ash_output", scanners="bandit")
 
 # SAST tools only
 sast_results = await get_scan_results(
-    output_dir=".ash/ash_output",
-    scanners="bandit,semgrep,opengrep"
+    output_dir=".ash/ash_output", scanners="bandit,semgrep,opengrep"
 )
 
 # Infrastructure scanners
 iac_results = await get_scan_results(
-    output_dir=".ash/ash_output",
-    scanners="checkov,cdk-nag,cfn-nag"
+    output_dir=".ash/ash_output", scanners="checkov,cdk-nag,cfn-nag"
 )
 ```
 
 #### Severity Filtering
 ```python
 # Critical findings only
-critical = await get_scan_results(
-    output_dir=".ash/ash_output",
-    severities="critical"
-)
+critical = await get_scan_results(output_dir=".ash/ash_output", severities="critical")
 
 # High-priority findings
 high_priority = await get_scan_results(
-    output_dir=".ash/ash_output",
-    severities="critical,high"
+    output_dir=".ash/ash_output", severities="critical,high"
 )
 
 # Actionable high-priority (exclude suppressed)
 actionable_high_priority = await get_scan_results(
-    output_dir=".ash/ash_output",
-    actionable_only=True,
-    severities="critical,high"
+    output_dir=".ash/ash_output", actionable_only=True, severities="critical,high"
 )
 ```
 
@@ -225,7 +193,7 @@ critical_status = await get_scan_results(
     output_dir=".ash/ash_output",
     filter_level="minimal",
     actionable_only=True,
-    severities="critical"
+    severities="critical",
 )
 
 # Summary of actionable high/critical from SAST tools
@@ -234,7 +202,7 @@ sast_summary = await get_scan_results(
     filter_level="summary",
     scanners="bandit,semgrep",
     severities="critical,high",
-    actionable_only=True
+    actionable_only=True,
 )
 ```
 
@@ -246,7 +214,7 @@ bandit_critical = await get_scan_results(
     filter_level="full",
     scanners="bandit",
     severities="critical,high",
-    actionable_only=True
+    actionable_only=True,
 )
 
 # All actionable dependency scanner results (medium+)
@@ -255,7 +223,7 @@ dependency_findings = await get_scan_results(
     filter_level="full",
     scanners="grype,npm-audit",
     severities="critical,high,medium",
-    actionable_only=True
+    actionable_only=True,
 )
 ```
 
@@ -269,7 +237,7 @@ result = await get_scan_results(
     output_dir=".ash/ash_output",
     filter_level="minimal",
     actionable_only=True,
-    severities="critical"
+    severities="critical",
 )
 
 if result["summary_stats"]["critical"] > 0:
@@ -281,13 +249,15 @@ result = await get_scan_results(
     output_dir=".ash/ash_output",
     filter_level="summary",
     actionable_only=True,
-    severities="critical,high"
+    severities="critical,high",
 )
 
 if result["findings_summary"]["by_severity"]["critical"] > 0:
     sys.exit(1)
 elif result["findings_summary"]["by_severity"]["high"] > 5:
-    print(f"Too many HIGH actionable findings: {result['findings_summary']['by_severity']['high']}")
+    print(
+        f"Too many HIGH actionable findings: {result['findings_summary']['by_severity']['high']}"
+    )
     sys.exit(1)
 ```
 
@@ -299,7 +269,7 @@ status = await get_scan_results(
     output_dir=".ash/ash_output",
     filter_level="minimal",
     actionable_only=True,
-    severities="critical"
+    severities="critical",
 )
 
 if status["summary_stats"]["critical"] > 0:
@@ -308,21 +278,21 @@ if status["summary_stats"]["critical"] > 0:
         output_dir=".ash/ash_output",
         filter_level="summary",
         actionable_only=True,
-        severities="critical"
+        severities="critical",
     )
-    
+
     # 3. Get full details for the worst scanner
     worst_scanner = max(
         summary["scanner_summary"]["by_scanner"].items(),
-        key=lambda x: x[1]["by_severity"]["critical"]
+        key=lambda x: x[1]["by_severity"]["critical"],
     )[0]
-    
+
     details = await get_scan_results(
         output_dir=".ash/ash_output",
         filter_level="full",
         scanners=worst_scanner,
         severities="critical",
-        actionable_only=True
+        actionable_only=True,
     )
 ```
 
@@ -331,19 +301,17 @@ if status["summary_stats"]["critical"] > 0:
 ```python
 # Compare SAST vs dependency findings
 sast = await get_scan_results(
-    output_dir=".ash/ash_output",
-    filter_level="summary",
-    scanners="bandit,semgrep"
+    output_dir=".ash/ash_output", filter_level="summary", scanners="bandit,semgrep"
 )
 
 dependencies = await get_scan_results(
-    output_dir=".ash/ash_output",
-    filter_level="summary",
-    scanners="grype,npm-audit"
+    output_dir=".ash/ash_output", filter_level="summary", scanners="grype,npm-audit"
 )
 
 print(f"SAST findings: {sast['findings_summary']['by_severity']['total']}")
-print(f"Dependency findings: {dependencies['findings_summary']['by_severity']['total']}")
+print(
+    f"Dependency findings: {dependencies['findings_summary']['by_severity']['total']}"
+)
 ```
 
 ### Dashboard/Monitoring
@@ -354,7 +322,7 @@ dashboard_data = await get_scan_results(
     output_dir=".ash/ash_output",
     filter_level="summary",
     actionable_only=True,
-    severities="critical,high"
+    severities="critical,high",
 )
 
 # Display by scanner
@@ -370,9 +338,7 @@ for scanner, data in dashboard_data["scanner_summary"]["by_scanner"].items():
 ```python
 # Get full details for a specific scanner
 scanner_details = await get_scan_results(
-    output_dir=".ash/ash_output",
-    filter_level="full",
-    scanners="bandit"
+    output_dir=".ash/ash_output", filter_level="full", scanners="bandit"
 )
 
 # Analyze all findings from that scanner

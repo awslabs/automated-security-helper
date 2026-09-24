@@ -23,15 +23,15 @@ from automated_security_helper.core.exceptions import ScannerError
 
 
 def _make_scanner(test_plugin_context):
-    config = OpengrepScannerConfig(
-        options=OpengrepScannerConfigOptions(offline=True)
-    )
+    config = OpengrepScannerConfig(options=OpengrepScannerConfigOptions(offline=True))
     scanner = OpengrepScanner(context=test_plugin_context, config=config)
     scanner.dependencies_satisfied = True
     return scanner
 
 
-def test_opengrep_offline_missing_cache_raises_actionable_error(test_plugin_context, monkeypatch):
+def test_opengrep_offline_missing_cache_raises_actionable_error(
+    test_plugin_context, monkeypatch
+):
     """No OPENGREP_RULES_CACHE_DIR → ScannerError with guidance."""
     monkeypatch.delenv("OPENGREP_RULES_CACHE_DIR", raising=False)
 
@@ -43,7 +43,9 @@ def test_opengrep_offline_missing_cache_raises_actionable_error(test_plugin_cont
     assert "ash build-image --offline" in msg
 
 
-def test_opengrep_offline_empty_cache_raises_actionable_error(test_plugin_context, monkeypatch, tmp_path):
+def test_opengrep_offline_empty_cache_raises_actionable_error(
+    test_plugin_context, monkeypatch, tmp_path
+):
     """OPENGREP_RULES_CACHE_DIR set but empty → ScannerError with guidance."""
     monkeypatch.setenv("OPENGREP_RULES_CACHE_DIR", str(tmp_path))
 
@@ -55,7 +57,9 @@ def test_opengrep_offline_empty_cache_raises_actionable_error(test_plugin_contex
     assert "ash build-image --offline" in msg
 
 
-def test_opengrep_offline_with_cache_does_not_raise(test_plugin_context, monkeypatch, tmp_path):
+def test_opengrep_offline_with_cache_does_not_raise(
+    test_plugin_context, monkeypatch, tmp_path
+):
     """OPENGREP_RULES_CACHE_DIR set with a .yaml file → no error, --config appended."""
     rule_file = tmp_path / "rules.yaml"
     rule_file.write_text("rules: []")

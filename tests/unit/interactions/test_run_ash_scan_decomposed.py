@@ -12,11 +12,8 @@ Covers:
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -28,7 +25,9 @@ class TestScanOptionsNormalisesNoneToEmptyList:
     def test_scanners_none_becomes_empty_list(self):
         from automated_security_helper.interactions.run_ash_scan import ScanOptions
 
-        opts = ScanOptions(source_dir=Path("/src"), output_dir=Path("/out"), scanners=None)
+        opts = ScanOptions(
+            source_dir=Path("/src"), output_dir=Path("/out"), scanners=None
+        )
         assert opts.scanners == []
 
     def test_excluded_scanners_none_becomes_empty_list(self):
@@ -219,7 +218,10 @@ class TestComputeExitCode:
         mock_results = MagicMock()
         mock_metric = _ran_metric(0)
 
-        with patch("builtins.open", side_effect=AssertionError("disk read in _compute_exit_code")):
+        with patch(
+            "builtins.open",
+            side_effect=AssertionError("disk read in _compute_exit_code"),
+        ):
             with patch(
                 "automated_security_helper.interactions.run_ash_scan.get_unified_scanner_metrics",
                 return_value=[mock_metric],
@@ -251,6 +253,7 @@ class TestRunContainerMode:
         mock_container_result.returncode = 0
 
         from automated_security_helper.models.asharp_model import AshAggregatedResults
+
         dummy = AshAggregatedResults.__new__(AshAggregatedResults)
 
         mock_logger = MagicMock()
@@ -265,12 +268,19 @@ class TestRunContainerMode:
                 return_value=dummy,
             ):
                 with patch("pathlib.Path.exists", return_value=True):
-                    with patch("builtins.open", MagicMock(
-                        return_value=MagicMock(
-                            __enter__=MagicMock(return_value=MagicMock(read=MagicMock(return_value=fake_content))),
-                            __exit__=MagicMock(return_value=False),
-                        )
-                    )):
+                    with patch(
+                        "builtins.open",
+                        MagicMock(
+                            return_value=MagicMock(
+                                __enter__=MagicMock(
+                                    return_value=MagicMock(
+                                        read=MagicMock(return_value=fake_content)
+                                    )
+                                ),
+                                __exit__=MagicMock(return_value=False),
+                            )
+                        ),
+                    ):
                         result = _run_container_mode(opts, mock_logger)
 
         mock_rac.assert_called_once()
@@ -302,17 +312,23 @@ class TestRunLocalModeNoChdir:
         mock_orchestrator_class = MagicMock()
         mock_orchestrator_class.create.return_value = mock_orchestrator
 
-        with patch("os.chdir", side_effect=AssertionError("os.chdir must not be called")):
+        with patch(
+            "os.chdir", side_effect=AssertionError("os.chdir must not be called")
+        ):
             with patch(
                 "automated_security_helper.core.orchestrator.ASHScanOrchestrator",
                 mock_orchestrator_class,
             ):
-                with patch(
-                    "automated_security_helper.interactions.run_ash_scan._run_local_mode.__globals__",
-                    {},
-                ) if False else patch(
-                    "automated_security_helper.core.orchestrator.ASHScanOrchestrator.create",
-                    return_value=mock_orchestrator,
+                with (
+                    patch(
+                        "automated_security_helper.interactions.run_ash_scan._run_local_mode.__globals__",
+                        {},
+                    )
+                    if False
+                    else patch(
+                        "automated_security_helper.core.orchestrator.ASHScanOrchestrator.create",
+                        return_value=mock_orchestrator,
+                    )
                 ):
                     # _run_local_mode writes results to disk — patch open
                     with patch("builtins.open", MagicMock()):
@@ -334,7 +350,6 @@ class TestRunLocalModeTupleUnpacking:
         from automated_security_helper.interactions.run_ash_scan import (
             ScanOptions,
             _run_local_mode,
-            _compute_exit_code,
         )
         from automated_security_helper.models.asharp_model import AshAggregatedResults
 
@@ -361,7 +376,9 @@ class TestRunLocalModeTupleUnpacking:
         # config_fail_on_findings propagated correctly
         assert cfg_fof is False
 
-    def test_run_ash_scan_local_mode_passes_bare_results_to_compute_exit_code(self, tmp_path):
+    def test_run_ash_scan_local_mode_passes_bare_results_to_compute_exit_code(
+        self, tmp_path
+    ):
         """Integration: run_ash_scan in local mode must pass bare AshAggregatedResults
         (not a tuple) to _compute_exit_code."""
         from automated_security_helper.interactions.run_ash_scan import (
@@ -370,9 +387,9 @@ class TestRunLocalModeTupleUnpacking:
         )
         from automated_security_helper.models.asharp_model import AshAggregatedResults
 
-        captured_args: list = []
-
-        opts = ScanOptions(source_dir=tmp_path, output_dir=tmp_path / "out", fail_on_findings=False)
+        opts = ScanOptions(
+            source_dir=tmp_path, output_dir=tmp_path / "out", fail_on_findings=False
+        )
         mock_logger = MagicMock()
 
         mock_orchestrator = MagicMock()
@@ -390,7 +407,9 @@ class TestRunLocalModeTupleUnpacking:
                     result, _ = _run_local_mode(opts, mock_logger)
 
         # Verify that calling _compute_exit_code with result (not a tuple) does not raise
-        from automated_security_helper.interactions.run_ash_scan import _compute_exit_code
+        from automated_security_helper.interactions.run_ash_scan import (
+            _compute_exit_code,
+        )
 
         mock_metric = _ran_metric(0)
         with patch(

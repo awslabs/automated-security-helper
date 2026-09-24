@@ -24,7 +24,7 @@ convert_phase = ConvertPhase(
     work_dir=work_dir,
     config=config,
     progress_display=progress_display,
-    asharp_model=asharp_model
+    asharp_model=asharp_model,
 )
 
 # Execute the convert phase
@@ -37,7 +37,7 @@ scan_phase = ScanPhase(
     work_dir=work_dir,
     config=config,
     progress_display=progress_display,
-    asharp_model=asharp_model
+    asharp_model=asharp_model,
 )
 
 # Execute the scan phase
@@ -45,7 +45,7 @@ results = scan_phase.execute(
     scanner_factory=scanner_factory,
     plugin_registry=plugin_registry,
     enabled_scanners=enabled_scanners,
-    parallel=True
+    parallel=True,
 )
 
 # Create a report phase
@@ -55,7 +55,7 @@ report_phase = ReportPhase(
     work_dir=work_dir,
     config=config,
     progress_display=progress_display,
-    asharp_model=results
+    asharp_model=results,
 )
 
 # Execute the report phase
@@ -82,6 +82,7 @@ Example:
 
 ```python
 from automated_security_helper.base.engine_phase import EnginePhase
+
 
 class NewPhase(EnginePhase):
     @property

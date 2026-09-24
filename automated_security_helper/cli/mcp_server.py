@@ -606,7 +606,12 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
                         try:
                             # encoding explicit: see cli/report.py. ASH writes this
                             # file as UTF-8; the locale default is cp1252 on Windows.
-                            with open(result_file, "r", encoding="utf-8") as f:
+                            # Blocking open + json.load on the event loop, which stalls this MCP server for
+                            # every other in-flight request while a scan result is read. A correct fix moves
+                            # both calls into asyncio.to_thread together (reading in a thread and parsing on
+                            # the loop just relocates the stall), so it is a real change to this function
+                            # rather than a lint edit. Deferred deliberately.
+                            with open(result_file, "r", encoding="utf-8") as f:  # noqa: ASYNC230
                                 result_data = json.load(f)
 
                             scanner_results[scanner_name][target_type] = result_data
@@ -810,7 +815,8 @@ async def get_scan_result_paths(
 
         await ctx.info(f"Getting scan result paths from: {output_dir}")
 
-        if not output_path.exists():
+        # Blocking stat on the event loop. Deferred with the other MCP-server sites.
+        if not output_path.exists():  # noqa: ASYNC240
             return {
                 "success": False,
                 "error": f"Output directory does not exist: {output_dir}",

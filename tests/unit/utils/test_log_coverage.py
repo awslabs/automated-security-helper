@@ -2,11 +2,7 @@
 
 import json
 import logging
-import os
-import platform
-from pathlib import Path
-from unittest.mock import patch, MagicMock
-import pytest
+from unittest.mock import patch
 
 from automated_security_helper.utils.log import (
     addLoggingLevel,
@@ -30,7 +26,6 @@ class TestAddLoggingLevel:
         # If we try to add with a conflicting name it should return early
         addLoggingLevel("DEBUG", logging.DEBUG)
         # Should not raise
-
 
 
 class TestJsonFormatter:
@@ -113,7 +108,6 @@ class TestJsonFormatter:
         output = formatter.format(record)
         data = json.loads(output)
         assert "stack_info" in data
-
 
 
 class TestASHLogger:

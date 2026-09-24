@@ -31,7 +31,7 @@ To start a security scan, use the `scan_directory` tool:
 result = await mcp_scan_directory(
     directory_path="/path/to/your/code",
     severity_threshold="MEDIUM",  # Optional, default is "MEDIUM"
-    config_path=None  # Optional, path to ASH configuration file
+    config_path=None,  # Optional, path to ASH configuration file
 )
 ```
 
@@ -62,9 +62,7 @@ Example response:
 To check the progress of a running scan, use the `get_scan_progress` tool:
 
 ```python
-progress = await mcp_get_scan_progress(
-    scan_id="550e8400-e29b-41d4-a716-446655440000"
-)
+progress = await mcp_get_scan_progress(scan_id="550e8400-e29b-41d4-a716-446655440000")
 ```
 
 The tool returns a dictionary with:
@@ -125,9 +123,7 @@ Example response:
 Once a scan is complete, use the `get_scan_results` tool to retrieve the results:
 
 ```python
-results = await mcp_get_scan_results(
-    scan_id="550e8400-e29b-41d4-a716-446655440000"
-)
+results = await mcp_get_scan_results(scan_id="550e8400-e29b-41d4-a716-446655440000")
 ```
 
 The tool returns a dictionary with:
@@ -228,9 +224,7 @@ Example response:
 To cancel a running scan, use the `cancel_scan` tool:
 
 ```python
-result = await mcp_cancel_scan(
-    scan_id="550e8400-e29b-41d4-a716-446655440000"
-)
+result = await mcp_cancel_scan(scan_id="550e8400-e29b-41d4-a716-446655440000")
 ```
 
 The tool returns a dictionary with:

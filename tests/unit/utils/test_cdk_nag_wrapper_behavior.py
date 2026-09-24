@@ -236,7 +236,9 @@ def cdk_doubles(monkeypatch):
             self.children = []
 
     class Stack(Construct):
-        def __init__(self, scope=None, id=None):
+        # `id` mirrors aws_cdk.Stack(scope, id), the signature this fake stands in
+        # for. Renaming it would make the fake diverge from the real constructor.
+        def __init__(self, scope=None, id=None):  # noqa: A002
             self.scope = scope
             self.id = id
             self.node = _Node()
@@ -246,7 +248,10 @@ def cdk_doubles(monkeypatch):
             recorder.stacks.append(self)
 
     class CfnInclude:
-        def __init__(self, scope, id, template_file):
+        # `id` is required, not stylistic: the code under test calls
+        # CfnInclude(self, id=logical_id, template_file=...) with id as a KEYWORD,
+        # so renaming this parameter breaks the call this fake is here to receive.
+        def __init__(self, scope, id, template_file):  # noqa: A002
             self.scope = scope
             self.id = id
             self.template_file = template_file
@@ -1256,7 +1261,10 @@ class _FailingShortestName:
         self._exc = exc
         self.calls = 0
 
-    def __call__(self, input):
+    # `input` is required: this stands in for get_shortest_name, which the code
+    # under test calls as get_shortest_name(input=...). See the A002 note in
+    # utils/get_shortest_name.py for why that keyword cannot be renamed.
+    def __call__(self, input):  # noqa: A002
         self.calls += 1
         if self.calls <= self._failures:
             raise self._exc

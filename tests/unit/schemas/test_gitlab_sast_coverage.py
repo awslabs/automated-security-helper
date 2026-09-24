@@ -1,6 +1,5 @@
 """Comprehensive tests for schemas/gitlab/sast.py — instantiate all model classes to cover definitions."""
 
-import pytest
 import automated_security_helper.schemas.gitlab.sast as sast
 
 

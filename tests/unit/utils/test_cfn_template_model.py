@@ -1,8 +1,5 @@
 """Tests for cfn_template_model utilities."""
 
-from pathlib import Path
-from unittest.mock import patch, mock_open
-
 import pytest
 
 from automated_security_helper.utils.cfn_template_model import (
@@ -63,11 +60,7 @@ class TestGetModelFromTemplate:
     def test_valid_yaml_template(self, tmp_path):
         """A valid YAML CloudFormation template is parsed into a model."""
         template_file = tmp_path / "template.yaml"  # nosec B108
-        template_file.write_text(
-            "Resources:\n"
-            "  MyBucket:\n"
-            "    Type: AWS::S3::Bucket\n"
-        )
+        template_file.write_text("Resources:\n  MyBucket:\n    Type: AWS::S3::Bucket\n")
 
         result = get_model_from_template(template_file)
 
@@ -88,9 +81,7 @@ class TestGetModelFromTemplate:
         """A template with an invalid resource Type pattern returns None."""
         template_file = tmp_path / "bad_type.yaml"  # nosec B108
         template_file.write_text(
-            "Resources:\n"
-            "  Bad:\n"
-            "    Type: 'invalid type with spaces'\n"
+            "Resources:\n  Bad:\n    Type: 'invalid type with spaces'\n"
         )
 
         result = get_model_from_template(template_file)

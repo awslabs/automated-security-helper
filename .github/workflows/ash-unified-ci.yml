@@ -145,6 +145,99 @@ jobs:
       - name: Verify documentation freshness
         run: uv run python scripts/verify_docs_freshness.py
 
+      # ---------------------------------------------------------------------
+      # LINT AND TYPE GATES
+      #
+      # These steps are why this job's name stopped being a lie. Before them, `lint`
+      # installed Python, installed ASH, and ran no linter: the repository has had a
+      # ruff pre-commit hook and a full [tool.mypy] section with the pydantic plugin
+      # enabled for a long time, and nothing in CI ever executed either. Config
+      # presence and gate enforcement are separate facts, and this job had only the
+      # first -- which is exactly how a lint hook nobody ran could drift five minor
+      # versions behind the ruff the project declares without anyone noticing.
+      #
+      # Steps rather than a new job, deliberately. The required-checks job below
+      # asserts len(needs) == EXPECTED_UPSTREAM_JOBS, so a new job has to be added in
+      # two places and the constant bumped or the merge-queue gate goes red. Steps
+      # inside `lint` are covered by that gate the moment they land, with no constant
+      # to keep in sync. Cost is small: measured cold, ruff under 1s, ty 1s, mypy 14s,
+      # all inside this job's existing 15-minute budget.
+      #
+      # WHY `uv run --group dev` AND NOT A BARE `ruff`
+      #
+      # `--group dev` is load-bearing, not decoration. `uv run ruff` WITHOUT it falls
+      # back to whatever ruff is on PATH: measured locally, that ran ruff 0.16.3 while
+      # the project's own is 0.16.7, silently reproducing the
+      # hook-disagrees-with-gate defect one layer down. With the flag uv syncs the dev
+      # group from the committed uv.lock and the binary comes from .venv, so the
+      # version enforced is the version committed. Each step prints its tool version
+      # for the same reason: a failure log that does not say which ruff ran cannot be
+      # reproduced locally.
+      #
+      # No --select, --ignore or per-file scoping is passed here. Those decisions live
+      # in pyproject.toml so the hook and this gate read one source; a flag here would
+      # be a second, invisible one.
+      #
+      # mypy in particular cannot reuse the `uv pip install --system -e .` environment
+      # above, because [tool.mypy] enables the pydantic.mypy plugin and the plugin has
+      # to be importable by the mypy process itself. Stock mypy misreads pydantic
+      # model constructors badly enough to be useless on this codebase: 1,330 spurious
+      # call-arg errors without the plugin against 78 with it.
+      #
+      # WHY NOT `pre-commit run --all-files`
+      #
+      # The hooks already exist, so reusing them would mean less duplication. It is
+      # still wrong here. The ruff hook carries `args: [--fix]` and pretty-format-json
+      # carries `--autofix`, so the run MUTATES: measured on this tree, one
+      # `pre-commit run --all-files` rewrote 569 files (+23,283/-21,679) and exited 1,
+      # having reported its verdict over its own edits. It would also give zero type
+      # coverage, because mypy is not a hook, and it silently skips the commitizen
+      # hook entirely because that one is commit-msg staged. pre-commit stays the
+      # local convenience where --fix is a feature; CI runs the tools directly in
+      # check-only mode so a violation fails instead of being repaired.
+      # ---------------------------------------------------------------------
+      - name: ruff check
+        run: |
+          uv run --group dev ruff --version
+          uv run --group dev ruff check .
+
+      - name: ruff format --check
+        run: |
+          uv run --group dev ruff --version
+          uv run --group dev ruff format --check .
+
+      - name: mypy
+        run: |
+          uv run --group dev mypy --version
+          uv run --group dev mypy automated_security_helper/
+
+      # INFORMATIONAL ONLY. THIS STEP CANNOT BLOCK A MERGE, AND THAT IS ON PURPOSE.
+      #
+      # ty is Astral's type checker: 4-5x faster than mypy here, with native pydantic
+      # support rather than a plugin, and its findings on this tree look substantive
+      # -- 312 of its 756 unresolved-attribute diagnostics are "attribute not defined
+      # on None in union X | None", the same unguarded-Optional defect class as mypy's
+      # union-attr.
+      #
+      # It does not gate, and its version is pinned exactly, for a reason that is ty's
+      # own: "ty does not yet have a stable API; breaking changes, including changes to
+      # diagnostics, may occur between any two versions."
+      # (https://github.com/astral-sh/ty). At 0.0.x that makes a merge-blocking gate
+      # one that can go red on an unrelated bump, so `continue-on-error: true` is what
+      # keeps a 0.0.x diagnostic change out of the merge queue. Worth re-evaluating as
+      # a real gate once ty reaches a stable release; until then the value is the
+      # signal in the log, not a verdict.
+      #
+      # The step name says informational so nobody reads this job's green tick as ty
+      # having passed -- it exits 1 today. It runs through the project environment,
+      # not standalone, so ty resolves first- and third-party imports the way mypy
+      # does; standalone it cannot see pydantic and the diagnostics change meaning.
+      - name: "ty (informational only -- does not gate)"
+        continue-on-error: true
+        run: |
+          uv run --group dev --with 'ty==0.0.84' ty --version
+          uv run --group dev --with 'ty==0.0.84' ty check automated_security_helper/
+
   unit-test:
     name: "unit-test (${{ matrix.os }}, py${{ matrix.python-version }})"
     runs-on: ${{ matrix.os }}

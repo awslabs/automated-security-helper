@@ -132,9 +132,7 @@ def _check_op_paths(
 ) -> None:
     path = op.get("path", "")
     if not any(_path_matches(p, path) for p in allowlist.allowed_paths):
-        raise RuntimePatchDeniedError(
-            op, f"path {path!r} not in allowed_paths"
-        )
+        raise RuntimePatchDeniedError(op, f"path {path!r} not in allowed_paths")
     for denied in allowlist.denied_paths:
         if _path_matches(denied, path):
             raise RuntimePatchDeniedError(

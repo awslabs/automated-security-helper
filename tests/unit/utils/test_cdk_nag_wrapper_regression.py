@@ -14,10 +14,7 @@ Batch 2:
 """
 
 import inspect
-import os
 import re
-import sys
-from unittest.mock import patch, MagicMock
 
 import pytest
 
@@ -109,7 +106,7 @@ class TestBug128UnboundCleanTemplateFilename:
         )
 
         # Check that clean_template_filename is assigned before the try block
-        pre_try_lines = "\n".join(lines[max(0, try_idx - 5):try_idx])
+        pre_try_lines = "\n".join(lines[max(0, try_idx - 5) : try_idx])
         assert "clean_template_filename" in pre_try_lines, (
             "Bug #128: clean_template_filename must be initialized before "
             "the try block to prevent UnboundLocalError in the generic except path"
@@ -200,10 +197,10 @@ class TestBug132OutdirNoneCausesAttributeError:
         # The code should guard against None outdir. Check for either:
         # 1. A ValueError raise when outdir is None
         # 2. A default value assigned when outdir is None
-        has_guard = (
-            'outdir is None' in source
-            and ('raise ValueError' in source or 'raise TypeError' in source
-                 or 'outdir =' in source)
+        has_guard = "outdir is None" in source and (
+            "raise ValueError" in source
+            or "raise TypeError" in source
+            or "outdir =" in source
         )
         assert has_guard, (
             "Bug #132: outdir=None must be guarded with a ValueError or "

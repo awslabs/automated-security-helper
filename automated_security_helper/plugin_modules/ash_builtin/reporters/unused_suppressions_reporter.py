@@ -98,11 +98,7 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
             self.config = UnusedSuppressionsReporterConfig.model_validate(self.config)
 
         # Get all configured suppressions
-        all_suppressions = (
-            self.context.config.global_settings.suppressions
-            if self.context.config.global_settings.suppressions
-            else []
-        )
+        all_suppressions = self.context.config.global_settings.suppressions or []
 
         # Get used suppressions from the model
         used_suppressions = getattr(model, "used_suppressions", set())

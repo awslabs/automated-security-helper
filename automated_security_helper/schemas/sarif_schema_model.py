@@ -2397,9 +2397,7 @@ class SarifReport(BaseModel):
                 names.add(run.tool.driver.name)
         return sorted(names)
 
-    def filter_results_by_files(
-        self, file_set: set, source_dir: str | Path
-    ) -> None:
+    def filter_results_by_files(self, file_set: set, source_dir: str | Path) -> None:
         """Remove results whose primary location is not in *file_set*.
 
         Args:

@@ -2,7 +2,7 @@ import json
 import os
 from pathlib import Path
 import re
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from typing import Annotated, Any, List, Dict, Literal, Optional
 
 import yaml
@@ -13,7 +13,6 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
-from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
     ArchiveConverterConfig,
 )
@@ -21,10 +20,8 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_con
     JupyterConverterConfig,
 )
 from automated_security_helper.core.constants import (
-    ASH_CONFIG_FILE_NAMES,
     ASH_DEFAULT_SEVERITY_LEVEL,
 )
-from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.core import IgnorePathWithReason, AshSuppression
 from automated_security_helper.plugin_modules.ash_builtin.reporters.csv_reporter import (
@@ -1030,7 +1027,9 @@ def add_suppression_to_config(config_path: Path, suppression: AshSuppression) ->
     # Case D (last resort): a shape we cannot safely edit as text, e.g. an inline
     # `global_settings: {...}` mapping. Fall back to a full rewrite. This loses
     # comments, but only for a structure that essentially never occurs.
-    _rewrite_config_with_entry(config_path, data if isinstance(data, dict) else {}, entry)
+    _rewrite_config_with_entry(
+        config_path, data if isinstance(data, dict) else {}, entry
+    )
 
 
 def _serialize_entry_lines(entry: dict, item_indent: str) -> list[str]:

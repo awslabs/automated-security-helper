@@ -5,17 +5,16 @@ Contracts:
 - Parallel mode: each successful scanner appears exactly once in completed_scanners.
 - Failed scanners (exception from _safe_execute_scanner) are NOT in completed_scanners.
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
 
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.phases.scanner_executor import ScannerExecutor
 from automated_security_helper.models.asharp_model import AshAggregatedResults
-from automated_security_helper.models.scan_results_container import ScanResultsContainer
 
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()
@@ -127,7 +126,9 @@ class TestSequentialCompletedScanners:
         # DA r2 #1: scan() raises mid-target — _execute_scanner produces a container
         # with status=ERROR. Even though _safe_execute_scanner returns succeeded=True,
         # the ERROR-status container must exclude the scanner from completed_scanners.
-        executor = _make_executor(tmp_path, ["bandit", "grype"], fail_names=frozenset(["grype"]))
+        executor = _make_executor(
+            tmp_path, ["bandit", "grype"], fail_names=frozenset(["grype"])
+        )
         executor.run_sequential(AshAggregatedResults())
         names = [p.config.name for p in executor.completed_scanners]
         assert names == ["bandit"]
@@ -140,7 +141,11 @@ class TestSequentialCompletedScanners:
             tmp_path, ["bandit", "grype"], crash_names=frozenset(["grype"])
         )
         executor.run_sequential(AshAggregatedResults())
-        grype_plugins = [p for p in executor.completed_scanners if p.config is None or (hasattr(p, 'config') and p.config is None)]
+        [
+            p
+            for p in executor.completed_scanners
+            if p.config is None or (hasattr(p, "config") and p.config is None)
+        ]
         # bandit succeeds; grype crashed → only bandit in completed
         assert len(executor.completed_scanners) == 1
 
@@ -189,7 +194,10 @@ class TestParallelCompletedScanners:
         # DA r2 #1: scan() raises mid-target → ERROR-status container.
         # The append predicate must reject ERROR-status containers in parallel too.
         executor = _make_executor(
-            tmp_path, ["bandit", "grype"], fail_names=frozenset(["grype"]), max_workers=2
+            tmp_path,
+            ["bandit", "grype"],
+            fail_names=frozenset(["grype"]),
+            max_workers=2,
         )
         executor.run_parallel(AshAggregatedResults())
         names = [p.config.name for p in executor.completed_scanners]
@@ -200,7 +208,10 @@ class TestParallelCompletedScanners:
         # config=None → outer exception in _execute_scanner → _safe_execute_scanner catches
         # → scanner NOT in completed_scanners
         executor = _make_executor(
-            tmp_path, ["bandit", "grype"], crash_names=frozenset(["grype"]), max_workers=2
+            tmp_path,
+            ["bandit", "grype"],
+            crash_names=frozenset(["grype"]),
+            max_workers=2,
         )
         executor.run_parallel(AshAggregatedResults())
         assert len(executor.completed_scanners) == 1

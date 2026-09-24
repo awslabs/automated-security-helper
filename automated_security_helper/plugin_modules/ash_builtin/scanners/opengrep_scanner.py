@@ -270,5 +270,7 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         if self.config.options.patterns:
             results_file = results_file.parent / "opengrep_results.json"
             # Re-resolve final_args so output_arg uses the json path.
-            final_args = self._resolve_arguments(target=target, results_file=results_file)
+            final_args = self._resolve_arguments(
+                target=target, results_file=results_file
+            )
         return final_args, results_file, env

@@ -9,8 +9,12 @@ Reporter plugins generate reports from scan results in various formats. They tra
 Reporter plugins must implement the `ReporterPluginBase` interface:
 
 ```python
-from automated_security_helper.base.reporter_plugin import ReporterPluginBase, ReporterPluginConfigBase
+from automated_security_helper.base.reporter_plugin import (
+    ReporterPluginBase,
+    ReporterPluginConfigBase,
+)
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
+
 
 @ash_reporter_plugin
 class MyReporter(ReporterPluginBase):
@@ -29,14 +33,19 @@ Define a configuration class for your reporter:
 from typing import Literal
 from pydantic import Field
 
+
 class MyReporterConfig(ReporterPluginConfigBase):
     name: Literal["my-reporter"] = "my-reporter"
     extension: str = "my-report.txt"
     enabled: bool = True
 
     class Options:
-        include_details: bool = Field(default=True, description="Include detailed findings")
-        max_findings: int = Field(default=100, description="Maximum number of findings to include")
+        include_details: bool = Field(
+            default=True, description="Include detailed findings"
+        )
+        max_findings: int = Field(
+            default=100, description="Maximum number of findings to include"
+        )
 ```
 
 ## Reporter Plugin Example
@@ -63,6 +72,7 @@ from automated_security_helper.utils.log import ASH_LOGGER
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
 
+
 class S3ReporterConfigOptions(ReporterOptionsBase):
     aws_region: Annotated[
         str | None,
@@ -75,11 +85,13 @@ class S3ReporterConfigOptions(ReporterOptionsBase):
     key_prefix: str = "ash-reports/"
     file_format: Literal["json", "yaml"] = "json"
 
+
 class S3ReporterConfig(ReporterPluginConfigBase):
     name: Literal["s3"] = "s3"
     extension: str = "s3.json"
     enabled: bool = True
     options: S3ReporterConfigOptions = S3ReporterConfigOptions()
+
 
 @ash_reporter_plugin
 class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
@@ -93,7 +105,10 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
     def validate_plugin_dependencies(self) -> bool:
         """Validate reporter configuration and requirements."""
         self.dependencies_satisfied = False
-        if self.config.options.aws_region is None or self.config.options.bucket_name is None:
+        if (
+            self.config.options.aws_region is None
+            or self.config.options.bucket_name is None
+        ):
             return self.dependencies_satisfied
         try:
             session = boto3.Session(
@@ -121,12 +136,16 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
     def report(self, model: "AshAggregatedResults") -> str:
         """Format ASH model and upload to S3 bucket."""
         if isinstance(self.config, dict):
-            self.config = S3ReporterConfig.model_validate_plugin_dependencies(self.config)
+            self.config = S3ReporterConfig.model_validate_plugin_dependencies(
+                self.config
+            )
 
         # Create a unique key for the S3 object
         timestamp = model.scan_metadata.scan_time.strftime("%Y%m%d-%H%M%S")
         file_extension = "json" if self.config.options.file_format == "json" else "yaml"
-        s3_key = f"{self.config.options.key_prefix}ash-report-{timestamp}.{file_extension}"
+        s3_key = (
+            f"{self.config.options.key_prefix}ash-report-{timestamp}.{file_extension}"
+        )
 
         # Format the results based on the specified format
         if self.config.options.file_format == "json":
@@ -134,6 +153,7 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
             output_content = json.dumps(output_dict, default=str, indent=2)
         else:
             import yaml
+
             output_dict = model.to_simple_dict()
             output_content = yaml.dump(output_dict, default_flow_style=False)
 
@@ -150,14 +170,20 @@ class S3Reporter(ReporterPluginBase[S3ReporterConfig]):
                 Bucket=self.config.options.bucket_name,
                 Key=s3_key,
                 Body=output_content,
-                ContentType="application/json" if file_extension == "json" else "application/yaml"
+                ContentType="application/json"
+                if file_extension == "json"
+                else "application/yaml",
             )
 
             s3_url = f"s3://{self.config.options.bucket_name}/{s3_key}"
             ASH_LOGGER.info(f"Successfully uploaded report to {s3_url}")
 
             # Also write to local file if needed
-            output_path = Path(self.context.output_dir) / "reports" / f"s3-report.{file_extension}"
+            output_path = (
+                Path(self.context.output_dir)
+                / "reports"
+                / f"s3-report.{file_extension}"
+            )
             output_path.parent.mkdir(parents=True, exist_ok=True)
 
             with open(output_path, "w", encoding="utf-8") as f:
@@ -191,16 +217,23 @@ from automated_security_helper.base.reporter_plugin import (
 )
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 
+
 class SimpleReporterConfigOptions(ReporterOptionsBase):
     include_details: bool = Field(default=True, description="Include detailed findings")
-    max_findings: int = Field(default=100, description="Maximum number of findings to include")
-    output_file: str = Field(default="simple-report.txt", description="Output file name")
+    max_findings: int = Field(
+        default=100, description="Maximum number of findings to include"
+    )
+    output_file: str = Field(
+        default="simple-report.txt", description="Output file name"
+    )
+
 
 class SimpleReporterConfig(ReporterPluginConfigBase):
     name: Literal["simple"] = "simple"
     extension: str = "simple.txt"
     enabled: bool = True
     options: SimpleReporterConfigOptions = SimpleReporterConfigOptions()
+
 
 @ash_reporter_plugin
 class SimpleReporter(ReporterPluginBase[SimpleReporterConfig]):
@@ -242,7 +275,7 @@ class SimpleReporter(ReporterPluginBase[SimpleReporterConfig]):
             max_findings = min(len(vulnerabilities), self.config.options.max_findings)
 
             for i, vuln in enumerate(vulnerabilities[:max_findings]):
-                content.append(f"### Finding {i+1}")
+                content.append(f"### Finding {i + 1}")
                 content.append(f"Title: {vuln.title}")
                 content.append(f"Severity: {vuln.severity}")
                 content.append(f"File: {vuln.file_path}")
@@ -252,7 +285,9 @@ class SimpleReporter(ReporterPluginBase[SimpleReporterConfig]):
 
         # Write the report to a file
         report_text = "\n".join(content)
-        output_path = Path(self.context.output_dir) / "reports" / self.config.options.output_file
+        output_path = (
+            Path(self.context.output_dir) / "reports" / self.config.options.output_file
+        )
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         with open(output_path, "w", encoding="utf-8") as f:
@@ -297,11 +332,11 @@ from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from my_ash_plugins.reporters import SimpleReporter
 
+
 def test_simple_reporter():
     # Create a plugin context
     context = PluginContext(
-        source_dir=Path("test_data"),
-        output_dir=Path("test_output")
+        source_dir=Path("test_data"), output_dir=Path("test_output")
     )
 
     # Create reporter instance

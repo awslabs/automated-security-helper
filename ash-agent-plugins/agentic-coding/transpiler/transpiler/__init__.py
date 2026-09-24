@@ -4,6 +4,7 @@ Backends register themselves at import time via @register_backend. Importing
 ``transpiler.backends`` triggers all 15 platform modules and populates the
 BackendRegistry, which the CLI then iterates.
 """
+
 from .core import (
     AgentsConfig,
     BaseBackend,

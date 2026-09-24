@@ -34,6 +34,7 @@ Each violation is reported with a (path, message, hint) tuple. Hints point
 back at the `_base/` source file the user should edit, since most violations
 have a generated-file location but a hand-edited root cause.
 """
+
 from __future__ import annotations
 
 import json
@@ -174,7 +175,9 @@ def validate_external_schemas(plugins_root: Path, schemas_dir: Path) -> list[Err
     for rel_path, (schema_filename, ValidatorCls, hint) in EXTERNAL_SCHEMAS.items():
         target = plugins_root / rel_path
         if not target.exists():
-            errors.append(err(target, "missing file expected by external schema validation", hint))
+            errors.append(
+                err(target, "missing file expected by external schema validation", hint)
+            )
             continue
         try:
             instance = json.loads(target.read_text())
@@ -184,8 +187,13 @@ def validate_external_schemas(plugins_root: Path, schemas_dir: Path) -> list[Err
 
         schema_path = schemas_dir / schema_filename
         if not schema_path.exists():
-            errors.append(err(schema_path, "missing cached schema file",
-                              "Run `uv run --project agentic-coding/transpiler refresh-schemas`"))
+            errors.append(
+                err(
+                    schema_path,
+                    "missing cached schema file",
+                    "Run `uv run --project agentic-coding/transpiler refresh-schemas`",
+                )
+            )
             continue
         schema = json.loads(schema_path.read_text())
 
@@ -198,7 +206,11 @@ def validate_external_schemas(plugins_root: Path, schemas_dir: Path) -> list[Err
         # Pydantic pass: only for paths with a generated model
         if rel_path in PYDANTIC_MODELS:
             module_name, class_name = PYDANTIC_MODELS[rel_path]
-            errors.extend(_validate_via_pydantic(instance, rel_path, module_name, class_name, hint))
+            errors.extend(
+                _validate_via_pydantic(
+                    instance, rel_path, module_name, class_name, hint
+                )
+            )
 
     return errors
 
@@ -217,17 +229,26 @@ def _validate_via_pydantic(
     load — matters during refactors where models exist but might be stale."""
     try:
         import importlib
+
         module = importlib.import_module(module_name)
     except ImportError as e:
-        return [err(rel_path,
-                    f"generated Pydantic model missing: {e}",
-                    "Run `uv run --project agentic-coding/transpiler --extra refresh generate-models`")]
+        return [
+            err(
+                rel_path,
+                f"generated Pydantic model missing: {e}",
+                "Run `uv run --project agentic-coding/transpiler --extra refresh generate-models`",
+            )
+        ]
 
     Model = getattr(module, class_name, None)
     if Model is None:
-        return [err(rel_path,
-                    f"generated module {module_name} has no class {class_name}",
-                    "Regenerate models — schema may have changed shape")]
+        return [
+            err(
+                rel_path,
+                f"generated module {module_name} has no class {class_name}",
+                "Regenerate models — schema may have changed shape",
+            )
+        ]
 
     try:
         Model.model_validate(instance)
@@ -275,22 +296,44 @@ def validate_structural_sanity(plugins_root: Path) -> list[Error]:
             try:
                 json.loads(content)
             except json.JSONDecodeError as e:
-                errors.append(err(rel, f"invalid JSON: {e}", "Edit transpiler/_base/ or the backend's class vars; the transpiler emits malformed JSON."))
+                errors.append(
+                    err(
+                        rel,
+                        f"invalid JSON: {e}",
+                        "Edit transpiler/_base/ or the backend's class vars; the transpiler emits malformed JSON.",
+                    )
+                )
         elif path.suffix in {".yaml", ".yml"}:
             try:
                 yaml.safe_load(content)
             except yaml.YAMLError as e:
-                errors.append(err(rel, f"invalid YAML: {e}", "Edit transpiler/_base/ or the backend's class vars; the transpiler emits malformed YAML."))
+                errors.append(
+                    err(
+                        rel,
+                        f"invalid YAML: {e}",
+                        "Edit transpiler/_base/ or the backend's class vars; the transpiler emits malformed YAML.",
+                    )
+                )
         elif path.suffix in {".md", ".mdc"} and content.startswith("---"):
             try:
                 fm, _ = parse_frontmatter(content)
             except yaml.YAMLError as e:
-                errors.append(err(rel, f"invalid YAML frontmatter: {e}",
-                                  "Edit transpiler/templates/ or the backend's SKILL/COMMANDS/AGENTS frontmatter_fields."))
+                errors.append(
+                    err(
+                        rel,
+                        f"invalid YAML frontmatter: {e}",
+                        "Edit transpiler/templates/ or the backend's SKILL/COMMANDS/AGENTS frontmatter_fields.",
+                    )
+                )
                 continue
             if fm is None and _has_frontmatter_block(content):
-                errors.append(err(rel, "frontmatter delimiters present but block could not be parsed",
-                                  "Edit transpiler/templates/ — frontmatter is structurally broken."))
+                errors.append(
+                    err(
+                        rel,
+                        "frontmatter delimiters present but block could not be parsed",
+                        "Edit transpiler/templates/ — frontmatter is structurally broken.",
+                    )
+                )
     return errors
 
 
@@ -329,8 +372,13 @@ def validate_paths_exist(
         try:
             return template.format(**template_values)
         except KeyError as e:
-            errors.append(err(template, f"validator missing placeholder {e}; update validate_paths_exist",
-                              "This is a transpiler bug, not a content issue."))
+            errors.append(
+                err(
+                    template,
+                    f"validator missing placeholder {e}; update validate_paths_exist",
+                    "This is a transpiler bug, not a content issue.",
+                )
+            )
             return None
 
     anchor_roots: dict[str, Path | None] = {
@@ -341,47 +389,87 @@ def validate_paths_exist(
     for name, cfg in configs.items():
         anchor = getattr(cfg, "output_anchor", "plugins")
         if anchor not in anchor_roots:
-            errors.append(err(cfg.output_dir,
-                              f"platform {name} declares unknown output_anchor {anchor!r}",
-                              "Valid anchors are 'plugins' and 'repository'."))
+            errors.append(
+                err(
+                    cfg.output_dir,
+                    f"platform {name} declares unknown output_anchor {anchor!r}",
+                    "Valid anchors are 'plugins' and 'repository'.",
+                )
+            )
             continue
         anchor_root = anchor_roots[anchor]
         if anchor_root is None:
-            errors.append(err(cfg.output_dir,
-                              f"platform {name} is anchored at {anchor!r} but the "
-                              f"validator was not given that root",
-                              f"Pass {anchor}_root= to validate_all."))
+            errors.append(
+                err(
+                    cfg.output_dir,
+                    f"platform {name} is anchored at {anchor!r} but the "
+                    f"validator was not given that root",
+                    f"Pass {anchor}_root= to validate_all.",
+                )
+            )
             continue
 
         out = anchor_root / cfg.output_dir
         if not out.exists():
-            errors.append(err(out, f"platform {name} output directory missing", "Run the transpiler."))
+            errors.append(
+                err(
+                    out,
+                    f"platform {name} output directory missing",
+                    "Run the transpiler.",
+                )
+            )
             continue
 
         if cfg.plugin_manifest is not None:
             p = out / cfg.plugin_manifest.path
             if not p.exists():
-                errors.append(err(p, "declared plugin_manifest.path is missing", "Run the transpiler."))
+                errors.append(
+                    err(
+                        p,
+                        "declared plugin_manifest.path is missing",
+                        "Run the transpiler.",
+                    )
+                )
 
         if cfg.mcp is not None and cfg.mcp.path is not None:
             mcp_path = _safe_format(cfg.mcp.path)
             if mcp_path is not None and not (out / mcp_path).exists():
-                errors.append(err(out / mcp_path, "declared mcp.path is missing", "Run the transpiler."))
+                errors.append(
+                    err(
+                        out / mcp_path,
+                        "declared mcp.path is missing",
+                        "Run the transpiler.",
+                    )
+                )
 
         if cfg.skill is not None:
             skill_path = _safe_format(cfg.skill.path)
             if skill_path is not None and not (out / skill_path).exists():
-                errors.append(err(out / skill_path, "declared skill.path is missing", "Run the transpiler."))
+                errors.append(
+                    err(
+                        out / skill_path,
+                        "declared skill.path is missing",
+                        "Run the transpiler.",
+                    )
+                )
 
         if cfg.instruction_file is not None:
             instr_path = _safe_format(cfg.instruction_file.path)
             if instr_path is not None and not (out / instr_path).exists():
-                errors.append(err(out / instr_path, "declared instruction_file.path is missing", "Run the transpiler."))
+                errors.append(
+                    err(
+                        out / instr_path,
+                        "declared instruction_file.path is missing",
+                        "Run the transpiler.",
+                    )
+                )
 
         if cfg.mcpb_bundle is not None:
             archive_p = out / cfg.mcpb_bundle.archive_path
             if not archive_p.exists():
-                errors.append(err(archive_p, "MCPB archive missing", "Run the transpiler."))
+                errors.append(
+                    err(archive_p, "MCPB archive missing", "Run the transpiler.")
+                )
     return errors
 
 
@@ -406,8 +494,13 @@ def validate_claude_plugin_name(plugins_root: Path) -> list[Error]:
         return []
     name = data.get("name")
     if name and not CLAUDE_PLUGIN_NAME_RE.match(name):
-        return [err(p, f"plugin.json name '{name}' is not kebab-case (^[a-z0-9]+(-[a-z0-9]+)*$)",
-                    "Edit transpiler/_base/manifest.json `name` field — must be kebab-case.")]
+        return [
+            err(
+                p,
+                f"plugin.json name '{name}' is not kebab-case (^[a-z0-9]+(-[a-z0-9]+)*$)",
+                "Edit transpiler/_base/manifest.json `name` field — must be kebab-case.",
+            )
+        ]
     return []
 
 
@@ -423,8 +516,13 @@ def validate_roo_slug(plugins_root: Path) -> list[Error]:
     for mode in data.get("customModes", []) or []:
         slug = mode.get("slug", "")
         if not ROO_SLUG_RE.match(slug):
-            errors.append(err(p, f"roo customMode slug '{slug}' fails ^[a-zA-Z0-9-]+$",
-                              "Edit transpiler/_base/manifest.json `name` (used as slug)."))
+            errors.append(
+                err(
+                    p,
+                    f"roo customMode slug '{slug}' fails ^[a-zA-Z0-9-]+$",
+                    "Edit transpiler/_base/manifest.json `name` (used as slug).",
+                )
+            )
     return errors
 
 
@@ -442,9 +540,13 @@ def validate_windsurf_trigger(plugins_root: Path) -> list[Error]:
             continue
         trig = fm.get("trigger")
         if trig is not None and trig not in WINDSURF_TRIGGER_VALUES:
-            errors.append(err(rule_path,
-                              f"windsurf trigger '{trig}' not in {sorted(WINDSURF_TRIGGER_VALUES)}",
-                              "Edit transpiler/templates/windsurf/rule_frontmatter.j2."))
+            errors.append(
+                err(
+                    rule_path,
+                    f"windsurf trigger '{trig}' not in {sorted(WINDSURF_TRIGGER_VALUES)}",
+                    "Edit transpiler/templates/windsurf/rule_frontmatter.j2.",
+                )
+            )
     return errors
 
 
@@ -454,9 +556,13 @@ def validate_copilot_instructions_size(plugins_root: Path) -> list[Error]:
         return []
     chars = len(p.read_text())
     if chars > COPILOT_INSTRUCTIONS_MAX_CHARS:
-        return [err(p,
-                    f"copilot-instructions.md is {chars} chars > {COPILOT_INSTRUCTIONS_MAX_CHARS} (Code Review limit)",
-                    "Trim transpiler/_base/skill.md or lower truncate_chars in the `copilot` backend's INSTRUCTION_FILE class var.")]
+        return [
+            err(
+                p,
+                f"copilot-instructions.md is {chars} chars > {COPILOT_INSTRUCTIONS_MAX_CHARS} (Code Review limit)",
+                "Trim transpiler/_base/skill.md or lower truncate_chars in the `copilot` backend's INSTRUCTION_FILE class var.",
+            )
+        ]
     return []
 
 
@@ -468,8 +574,13 @@ def validate_windsurf_rule_size(plugins_root: Path) -> list[Error]:
     for rule_path in rules_dir.glob("*.md"):
         size = len(rule_path.read_bytes())
         if size > WINDSURF_RULE_MAX_BYTES:
-            errors.append(err(rule_path, f"windsurf rule is {size} bytes > {WINDSURF_RULE_MAX_BYTES}",
-                              "Trim transpiler/_base/skill.md or lower truncate_bytes in the `windsurf` backend's SKILL class var."))
+            errors.append(
+                err(
+                    rule_path,
+                    f"windsurf rule is {size} bytes > {WINDSURF_RULE_MAX_BYTES}",
+                    "Trim transpiler/_base/skill.md or lower truncate_bytes in the `windsurf` backend's SKILL class var.",
+                )
+            )
     return errors
 
 
@@ -499,9 +610,13 @@ def validate_cursor_mdc(plugins_root: Path) -> list[Error]:
         # description-driven attachment, so this is downgraded to a soft warning
         # — but we do report it so authors know the attachment mode.)
         if always_apply is False and not globs and not fm.get("description"):
-            errors.append(err(rule_path,
-                              "Cursor .mdc has alwaysApply: false but no globs or description — rule will never attach",
-                              "Set globs in transpiler/templates/cursor/mdc_frontmatter.j2 OR ensure description is set."))
+            errors.append(
+                err(
+                    rule_path,
+                    "Cursor .mdc has alwaysApply: false but no globs or description — rule will never attach",
+                    "Set globs in transpiler/templates/cursor/mdc_frontmatter.j2 OR ensure description is set.",
+                )
+            )
     return errors
 
 
@@ -521,9 +636,13 @@ def validate_opencode_agent_mode(plugins_root: Path) -> list[Error]:
             continue
         mode = fm.get("mode")
         if mode is not None and mode not in OPENCODE_AGENT_MODES:
-            errors.append(err(agent_path,
-                              f"OpenCode agent mode '{mode}' not in {sorted(OPENCODE_AGENT_MODES)}",
-                              "Edit transpiler/templates/opencode/agent_frontmatter.j2 to emit a valid mode."))
+            errors.append(
+                err(
+                    agent_path,
+                    f"OpenCode agent mode '{mode}' not in {sorted(OPENCODE_AGENT_MODES)}",
+                    "Edit transpiler/templates/opencode/agent_frontmatter.j2 to emit a valid mode.",
+                )
+            )
     return errors
 
 
@@ -550,9 +669,13 @@ def validate_goose_extension_type(plugins_root: Path) -> list[Error]:
             continue
         ext_type = ext_cfg.get("type")
         if ext_type is not None and ext_type not in GOOSE_EXTENSION_TYPES:
-            errors.append(err(p,
-                              f"goose extension '{ext_name}' type '{ext_type}' not in {sorted(GOOSE_EXTENSION_TYPES)}",
-                              "Edit transpiler/templates/goose/extension.yaml.j2."))
+            errors.append(
+                err(
+                    p,
+                    f"goose extension '{ext_name}' type '{ext_type}' not in {sorted(GOOSE_EXTENSION_TYPES)}",
+                    "Edit transpiler/templates/goose/extension.yaml.j2.",
+                )
+            )
     return errors
 
 
@@ -571,13 +694,20 @@ def validate_mcpb_archive(plugins_root: Path) -> list[Error]:
         with zipfile.ZipFile(archive, "r") as zf:
             names = zf.namelist()
             if "manifest.json" not in names:
-                errors.append(err(archive, "MCPB archive missing manifest.json at root",
-                                  "Run the transpiler — the archive build step is broken."))
+                errors.append(
+                    err(
+                        archive,
+                        "MCPB archive missing manifest.json at root",
+                        "Run the transpiler — the archive build step is broken.",
+                    )
+                )
                 return errors
             inner_manifest_bytes = zf.read("manifest.json")
             inner_manifest = json.loads(inner_manifest_bytes)
     except (zipfile.BadZipFile, json.JSONDecodeError, KeyError) as e:
-        errors.append(err(archive, f"MCPB archive unreadable: {e}", "Run the transpiler."))
+        errors.append(
+            err(archive, f"MCPB archive unreadable: {e}", "Run the transpiler.")
+        )
         return errors
 
     # Re-validate the embedded manifest against the cached MCPB schema
@@ -588,9 +718,13 @@ def validate_mcpb_archive(plugins_root: Path) -> list[Error]:
         validator = Draft7Validator(schema)
         for verr in validator.iter_errors(inner_manifest):
             ptr = "/".join(str(p) for p in verr.absolute_path)
-            errors.append(err(f"{archive}#manifest.json/{ptr}",
-                              f"MCPB archive manifest schema violation: {verr.message}",
-                              "Edit transpiler/_base/manifest.json or the `mcpb` backend's MCPB_BUNDLE class var."))
+            errors.append(
+                err(
+                    f"{archive}#manifest.json/{ptr}",
+                    f"MCPB archive manifest schema violation: {verr.message}",
+                    "Edit transpiler/_base/manifest.json or the `mcpb` backend's MCPB_BUNDLE class var.",
+                )
+            )
 
     # Verify the archive's manifest matches the on-disk source manifest.
     # Normalize both via json round-trip to ignore insignificant whitespace
@@ -602,9 +736,13 @@ def validate_mcpb_archive(plugins_root: Path) -> list[Error]:
         except json.JSONDecodeError:
             on_disk = None
         if on_disk is not None and on_disk != inner_manifest:
-            errors.append(err(archive,
-                              "MCPB archive's manifest.json differs from on-disk mcpb/manifest.json",
-                              "Run the transpiler — these should match exactly."))
+            errors.append(
+                err(
+                    archive,
+                    "MCPB archive's manifest.json differs from on-disk mcpb/manifest.json",
+                    "Run the transpiler — these should match exactly.",
+                )
+            )
     return errors
 
 
@@ -631,8 +769,13 @@ def validate_all(
     return [
         *validate_external_schemas(plugins_root, schemas_dir),
         *validate_structural_sanity(plugins_root),
-        *validate_paths_exist(plugins_root, configs, plugin_name, skill_name,
-                              repository_root=repository_root),
+        *validate_paths_exist(
+            plugins_root,
+            configs,
+            plugin_name,
+            skill_name,
+            repository_root=repository_root,
+        ),
         *validate_claude_plugin_name(plugins_root),
         *validate_roo_slug(plugins_root),
         *validate_windsurf_trigger(plugins_root),

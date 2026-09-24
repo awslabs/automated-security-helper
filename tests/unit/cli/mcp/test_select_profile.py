@@ -82,7 +82,9 @@ def _install_profile(name: str, cfg: AshConfig, tmp_path: Path) -> ProfileEntry:
     """
     import yaml
 
-    file = _write(tmp_path / f"{name}.yaml", yaml.safe_dump(cfg.model_dump(by_alias=True)))
+    file = _write(
+        tmp_path / f"{name}.yaml", yaml.safe_dump(cfg.model_dump(by_alias=True))
+    )
     registry = register_profiles([f"{name}={file}"])
     set_profile_registry(registry)
     return get_profile_registry()[name]
@@ -106,9 +108,7 @@ class TestStaticSelect:
         assert result["profile_name"] == "default"
         assert result["session_id"] == DEFAULT_SESSION_ID
 
-    def test_static_select_binds_profile_config_unchanged(
-        self, tmp_path: Path
-    ) -> None:
+    def test_static_select_binds_profile_config_unchanged(self, tmp_path: Path) -> None:
         cfg = _profile_with_runtime_overrides(
             project_name="static-fixture",
             allowed_paths=["/project_name"],
@@ -135,9 +135,7 @@ class TestInheritAndPatch:
             allowed_paths=["/project_name"],
         )
         _install_profile("default", cfg, tmp_path)
-        ops = [
-            {"op": "replace", "path": "/project_name", "value": "patched-name"}
-        ]
+        ops = [{"op": "replace", "path": "/project_name", "value": "patched-name"}]
         result = mcp_select_profile("default", patch_ops=ops)
         assert result["success"] is True
         assert result["mode"] == "inherit_and_patch"
@@ -147,9 +145,7 @@ class TestInheritAndPatch:
         assert state.bound_config.project_name == "patched-name"
         assert state.patch_ops == ops
 
-    def test_patch_targeting_disallowed_path_is_denied(
-        self, tmp_path: Path
-    ) -> None:
+    def test_patch_targeting_disallowed_path_is_denied(self, tmp_path: Path) -> None:
         # Allowlist only permits /project_name. A patch on /fail_on_findings
         # must hit ``apply_runtime_patch``'s "not in allowed_paths" rule.
         cfg = _profile_with_runtime_overrides(
@@ -157,25 +153,19 @@ class TestInheritAndPatch:
             allowed_paths=["/project_name"],
         )
         _install_profile("default", cfg, tmp_path)
-        ops = [
-            {"op": "replace", "path": "/fail_on_findings", "value": False}
-        ]
+        ops = [{"op": "replace", "path": "/fail_on_findings", "value": False}]
         result = mcp_select_profile("default", patch_ops=ops)
         assert result["success"] is False
         assert "denied" in result["error"]
         # No partial bind on rejection.
         assert get_session_state().bound_config is None
 
-    def test_patch_with_disabled_allowlist_is_denied(
-        self, tmp_path: Path
-    ) -> None:
+    def test_patch_with_disabled_allowlist_is_denied(self, tmp_path: Path) -> None:
         # The Track 10.4 master switch defaults to False — even an
         # otherwise-allowed path must be rejected.
         cfg = AshConfig(project_name="disabled-fixture")
         _install_profile("default", cfg, tmp_path)
-        ops = [
-            {"op": "replace", "path": "/project_name", "value": "x"}
-        ]
+        ops = [{"op": "replace", "path": "/project_name", "value": "x"}]
         result = mcp_select_profile("default", patch_ops=ops)
         assert result["success"] is False
         assert "denied" in result["error"]
@@ -307,9 +297,7 @@ class TestListProfiles:
 
 
 class TestSessionIsolation:
-    def test_distinct_session_ids_get_distinct_states(
-        self, tmp_path: Path
-    ) -> None:
+    def test_distinct_session_ids_get_distinct_states(self, tmp_path: Path) -> None:
         cfg = _profile_with_runtime_overrides(
             project_name="multi-session",
             allowed_paths=["/project_name"],

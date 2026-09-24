@@ -9,6 +9,7 @@ Backends can contribute additional subcommands by defining a class-level
 `agentic-plugins <backend-name>` so the backend can offer custom commands
 beyond the four lifecycle phases (e.g. `agentic-plugins mcpb verify-archive`).
 """
+
 from __future__ import annotations
 
 import sys
@@ -124,7 +125,9 @@ def release(name: str | None, dist: Path) -> None:
 
 
 @cli.command()
-@click.option("--drift-only", is_flag=True, help="Skip schema validation; check drift only.")
+@click.option(
+    "--drift-only", is_flag=True, help="Skip schema validation; check drift only."
+)
 @click.option("--validate-only", is_flag=True, help="Skip drift; run validation only.")
 def check(drift_only: bool, validate_only: bool) -> None:
     """Run drift detection + output validation.
@@ -141,6 +144,7 @@ def check(drift_only: bool, validate_only: bool) -> None:
     if not drift_only:
         # Lazy import keeps jsonschema and frontmatter out of the build hot path
         from validate import validate_all
+
         m = orchestrator._load_manifest()
         anchors = orchestrator.default_anchors()
         errors = validate_all(
@@ -242,10 +246,14 @@ def smoke_test(name: str | None) -> None:
             # from "15 passed" — silently passing skipped backends would hide
             # the fact that the strongest validator was bypassed.
             skipped.append(backend_name)
-            click.echo(f"  [skip]   {_label(backend_name, BackendCls)}: {result.get('detail', 'OK')}")
+            click.echo(
+                f"  [skip]   {_label(backend_name, BackendCls)}: {result.get('detail', 'OK')}"
+            )
         else:
             passed.append(backend_name)
-            click.echo(f"  [pass]   {_label(backend_name, BackendCls)}: {result.get('detail', 'OK')}")
+            click.echo(
+                f"  [pass]   {_label(backend_name, BackendCls)}: {result.get('detail', 'OK')}"
+            )
 
     click.echo()
     click.echo(
@@ -287,12 +295,20 @@ def formats_cmd() -> None:
     click.echo("Output formats:")
     for fmt in ALL_FORMATS:
         agents = fmt_to_backends.get(fmt.name, [])
-        agents_str = ", ".join(sorted(agents)) if agents else "(no backend points at this format)"
+        agents_str = (
+            ", ".join(sorted(agents))
+            if agents
+            else "(no backend points at this format)"
+        )
         click.echo(f"  {fmt.name}")
         click.echo(f"    consumed by: {agents_str}")
         if fmt.is_format_only_release:
-            click.echo(f"    format-only release: yes (standalone artifact at agentic-coding/plugins/{fmt.name.replace('agentskills', 'generic-skill')}/)")
-            click.echo(f"    natively consumed by: {', '.join(sorted(generic_skill_consumers)) or '(none)'}")
+            click.echo(
+                f"    format-only release: yes (standalone artifact at agentic-coding/plugins/{fmt.name.replace('agentskills', 'generic-skill')}/)"
+            )
+            click.echo(
+                f"    natively consumed by: {', '.join(sorted(generic_skill_consumers)) or '(none)'}"
+            )
         if fmt.spec_url:
             click.echo(f"    spec: {fmt.spec_url}")
         if fmt.schema_url:
@@ -336,8 +352,11 @@ def cli_tools_cmd() -> None:
 
 
 @cli.command(name="matrix")
-@click.option("--validators-only", is_flag=True,
-              help="Emit only (backend, validator-CLI) pairs (skip installer-only tools).")
+@click.option(
+    "--validators-only",
+    is_flag=True,
+    help="Emit only (backend, validator-CLI) pairs (skip installer-only tools).",
+)
 def matrix_cmd(validators_only: bool) -> None:
     """Print a JSON matrix for CI consumption.
 
@@ -357,14 +376,18 @@ def matrix_cmd(validators_only: bool) -> None:
         for tool in clis:
             if validators_only and tool.role == "installer":
                 continue
-            matrix.append({
-                "backend": backend_name,
-                "cli": tool.name,
-                "role": tool.role,
-                "install_cmd": tool.install_cmd,
-                "headless": tool.headless,
-                "format": getattr(BackendCls, "FORMAT", None).name if getattr(BackendCls, "FORMAT", None) else None,
-            })
+            matrix.append(
+                {
+                    "backend": backend_name,
+                    "cli": tool.name,
+                    "role": tool.role,
+                    "install_cmd": tool.install_cmd,
+                    "headless": tool.headless,
+                    "format": getattr(BackendCls, "FORMAT", None).name
+                    if getattr(BackendCls, "FORMAT", None)
+                    else None,
+                }
+            )
     click.echo(json.dumps({"include": matrix}, indent=2))
 
 
@@ -399,6 +422,7 @@ def _backend_to_platform_config(BackendCls):
     """Wrap a BaseBackend's class vars in a SimpleNamespace whose attribute
     paths match what validate.py's old PlatformConfig consumer expects."""
     from types import SimpleNamespace
+
     return SimpleNamespace(
         output_dir=BackendCls.OUTPUT_DIR,
         output_anchor=BackendCls.OUTPUT_ANCHOR,

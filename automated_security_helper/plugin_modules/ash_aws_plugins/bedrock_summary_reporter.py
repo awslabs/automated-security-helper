@@ -19,15 +19,12 @@ from automated_security_helper.base.reporter_plugin import (
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.plugin_modules.ash_aws_plugins.aws_utils import (
-    retry_with_backoff,
     get_fallback_model,
     validate_bedrock_model,
 )
 from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_pipeline import (
     BedrockModelClient,
     BedrockPromptBuilder,
-    BedrockReportPipeline,
-    ReportSection,
 )
 
 if TYPE_CHECKING:
@@ -581,13 +578,16 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         if "executive_summary" in included:
             ASH_LOGGER.info("Generating executive summary")
             report += "## Executive Summary\n\n"
-            report += _section_call(
-                builder.executive_summary(
-                    findings, secret_findings, list(model.scanner_results)
-                ),
-                "You are a security expert providing a concise executive summary of security scan results.",
-                "executive_summary",
-            ) + "\n\n"
+            report += (
+                _section_call(
+                    builder.executive_summary(
+                        findings, secret_findings, list(model.scanner_results)
+                    ),
+                    "You are a security expert providing a concise executive summary of security scan results.",
+                    "executive_summary",
+                )
+                + "\n\n"
+            )
 
         if "technical_analysis" in included:
             report += "## Findings by Severity\n\n"
@@ -603,40 +603,52 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
 
         if self._secret_findings_exist and "secret_findings" in included:
             report += "## Secret Findings\n\n"
-            report += _section_call(
-                builder.secret_advice(secret_findings),
-                "You are a security expert providing advice on handling secrets found in code.",
-                "secret_advice",
-            ) + "\n\n"
+            report += (
+                _section_call(
+                    builder.secret_advice(secret_findings),
+                    "You are a security expert providing advice on handling secrets found in code.",
+                    "secret_advice",
+                )
+                + "\n\n"
+            )
 
         if "remediation_guide" in included:
             ASH_LOGGER.info("Generating recommendations")
             report += "## Recommendations\n\n"
-            report += _section_call(
-                builder.recommendations(findings, opts.max_findings_to_analyze),
-                "You are a security expert providing actionable recommendations based on security scan findings.",
-                "recommendations",
-            ) + "\n\n"
+            report += (
+                _section_call(
+                    builder.recommendations(findings, opts.max_findings_to_analyze),
+                    "You are a security expert providing actionable recommendations based on security scan findings.",
+                    "recommendations",
+                )
+                + "\n\n"
+            )
 
         if "risk_assessment" in included:
             ASH_LOGGER.info("Generating risk assessment")
             report += "## Risk Assessment\n\n"
-            report += _section_call(
-                builder.risk_assessment(findings, opts.compliance_frameworks),
-                "You are a security expert providing risk assessment based on security scan findings.",
-                "risk_assessment",
-            ) + "\n\n"
+            report += (
+                _section_call(
+                    builder.risk_assessment(findings, opts.compliance_frameworks),
+                    "You are a security expert providing risk assessment based on security scan findings.",
+                    "risk_assessment",
+                )
+                + "\n\n"
+            )
 
         if "compliance_impact" in included and opts.compliance_frameworks:
             ASH_LOGGER.info("Generating compliance impact analysis")
             report += "## Compliance Impact\n\n"
-            report += _section_call(
-                builder.compliance_impact(
-                    findings, opts.compliance_frameworks, opts.industry_context
-                ),
-                "You are a compliance expert analyzing security findings against regulatory frameworks.",
-                "compliance_impact",
-            ) + "\n\n"
+            report += (
+                _section_call(
+                    builder.compliance_impact(
+                        findings, opts.compliance_frameworks, opts.industry_context
+                    ),
+                    "You are a compliance expert analyzing security findings against regulatory frameworks.",
+                    "compliance_impact",
+                )
+                + "\n\n"
+            )
 
         if "detailed_findings" not in opts.exclude_sections:
             report += self._render_finding_details(
@@ -673,13 +685,16 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             # capture loop variable
             _sev = severity
             _prompt = prompt
-            out += self._get_cached_or_generate(
-                f"severity_{severity}",
-                lambda: client.try_call(
-                    _prompt,
-                    f"You are a security expert analyzing {_sev} level findings from a security scan.",
-                ),
-            ) + "\n\n"
+            out += (
+                self._get_cached_or_generate(
+                    f"severity_{severity}",
+                    lambda: client.try_call(
+                        _prompt,
+                        f"You are a security expert analyzing {_sev} level findings from a security scan.",
+                    ),
+                )
+                + "\n\n"
+            )
         return out
 
     def _render_flat_findings(
@@ -759,17 +774,13 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
                 end = loc.get("endLine", start)
                 report += f"**Location**: {file_path} (lines {start}-{end})\n\n"
 
-            report += (
-                f"**Description**: {finding.get('message', 'No description available')}\n\n"
-            )
+            report += f"**Description**: {finding.get('message', 'No description available')}\n\n"
 
             original = raw_by_index.get(index)
             if self.config.options.include_code_snippets and original:
                 for loc in original.get("locations", []):
                     phys = loc.get("physicalLocation", {})
-                    snippet_text = (
-                        phys.get("region", {}).get("snippet", {}).get("text")
-                    )
+                    snippet_text = phys.get("region", {}).get("snippet", {}).get("text")
                     if snippet_text:
                         report += f"**Code Snippet**:\n```\n{snippet_text}\n```\n\n"
 
@@ -997,7 +1008,7 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
 
         batch_size = opts.max_findings_to_analyze
         batches = [
-            findings[i: i + batch_size] for i in range(0, len(findings), batch_size)
+            findings[i : i + batch_size] for i in range(0, len(findings), batch_size)
         ]
         batch_results = []
         for i, batch in enumerate(batches):
@@ -1195,7 +1206,9 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
         secret_findings: List[Dict[str, Any]],
     ) -> str:
         """Generate a summary of findings using Amazon Bedrock (legacy method)."""
-        return self._run_simple_report(bedrock_runtime, model, findings, secret_findings)
+        return self._run_simple_report(
+            bedrock_runtime, model, findings, secret_findings
+        )
 
     def _generate_technical_analysis(
         self,

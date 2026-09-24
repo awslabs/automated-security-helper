@@ -51,7 +51,7 @@ UNKNOWN_SEVERITY = "unknown"
 
 def empty_severity_counts() -> Dict[str, int]:
     """A zeroed severity breakdown, including the catch-all bucket."""
-    counts = {bucket: 0 for bucket in SEVERITY_BUCKETS}
+    counts = dict.fromkeys(SEVERITY_BUCKETS, 0)
     counts[UNKNOWN_SEVERITY] = 0
     return counts
 

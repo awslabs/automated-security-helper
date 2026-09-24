@@ -8,7 +8,10 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.core.enums import ExecutionPhase, ScannerStatus
-from automated_security_helper.models.asharp_model import AshAggregatedResults, ScannerSeverityCount
+from automated_security_helper.models.asharp_model import (
+    AshAggregatedResults,
+    ScannerSeverityCount,
+)
 from automated_security_helper.models.scan_results_container import ScanResultsContainer
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sarif_utils import (
@@ -16,7 +19,41 @@ from automated_security_helper.utils.sarif_utils import (
     sanitize_sarif_paths,
 )
 
-_ResultsFn = Callable[[ScanResultsContainer, AshAggregatedResults], AshAggregatedResults]
+_ResultsFn = Callable[
+    [ScanResultsContainer, AshAggregatedResults], AshAggregatedResults
+]
+
+# Statuses the severity re-grade must leave alone, because they were computed from
+# information the re-grade cannot see.
+#
+# A set rather than the single ``!= ERROR`` comparison this replaced, and MISSING is why.
+# ``determine_status`` has four return sites -- ERROR, SKIPPED, FAILED, PASSED -- so it
+# cannot reproduce MISSING even in principle, and re-grading a MISSING container did not
+# refine the verdict, it destroyed it: ``targets_attempted`` is None for a scanner that
+# does not count targets, both per-target guards are skipped, and the all-zero severity
+# counts resolve to PASSED. "This scanner could not run" was recorded and then overwritten
+# with "this scanner ran and found nothing" further down the same finally block, with only
+# bookkeeping in between.
+#
+# Holds the same members as ``interactions.run_ash_scan._INCOMPLETE_SCANNER_STATUSES``,
+# which is the set the completeness gate collects into the incomplete list and the exit
+# code reads -- a status preserved here and absent there is the drift that produced the
+# defect. Not imported from there: that module is the CLI layer and pulls in the container
+# and nix runners, so importing it from a core phase would invert the dependency direction.
+# ``test_preserved_statuses_match_the_completeness_gate`` holds the two in step instead.
+#
+# Narrow on purpose, and PASSED must never be added. It is the ``ScanResultsContainer``
+# default, so carving it out would leave every container ungraded and make FAILED
+# unreachable, since the severity gate is the only route to FAILED here. SKIPPED is
+# likewise excluded: it is a verdict the scanner reached about its own input, the
+# completeness gate counts it as complete because sharding records every scanner another
+# shard owns as SKIPPED, and nothing in this module assigns it ahead of the re-grade.
+_TERMINAL_SCANNER_STATUSES = frozenset(
+    {
+        ScannerStatus.ERROR,
+        ScannerStatus.MISSING,
+    }
+)
 
 
 def _target_count_attr(obj: Any, name: str) -> int | None:
@@ -180,14 +217,25 @@ class ScannerExecutor:
                 )
 
                 raw_results: Any = None
-                scanner_config_name: str = str(scanner_config.name) if scanner_config else scanner_plugin.__class__.__name__
+                scanner_config_name: str = (
+                    str(scanner_config.name)
+                    if scanner_config
+                    else scanner_plugin.__class__.__name__
+                )
                 try:
                     if scanner_config and scanner_config.enabled:
-                        ASH_LOGGER.debug(f"Executing {scanner_config_name}.scan() on {target_type}")
-                        if not hasattr(scanner_plugin, "context") or scanner_plugin.context is None:
+                        ASH_LOGGER.debug(
+                            f"Executing {scanner_config_name}.scan() on {target_type}"
+                        )
+                        if (
+                            not hasattr(scanner_plugin, "context")
+                            or scanner_plugin.context is None
+                        ):
                             scanner_plugin.context = self.plugin_context
                         scanner_plugin.results_dir = (
-                            self.plugin_context.output_dir.joinpath("scanners").joinpath(scanner_config_name)
+                            self.plugin_context.output_dir.joinpath(
+                                "scanners"
+                            ).joinpath(scanner_config_name)
                         )
                         raw_results = scanner_plugin.scan(
                             target=scan_target,
@@ -199,7 +247,9 @@ class ScannerExecutor:
                         ASH_LOGGER.warning(f"{scanner_config_name} is not enabled!")
                 except Exception as e:
                     stack_trace = traceback.format_exc()
-                    ASH_LOGGER.debug(f"Stack trace for scanner {scanner_name} failure:\n{stack_trace}")
+                    ASH_LOGGER.debug(
+                        f"Stack trace for scanner {scanner_name} failure:\n{stack_trace}"
+                    )
                     err_str = f"Failed to execute {scanner_config_name} scanner on {target_type}: {e}"
                     ASH_LOGGER.error(err_str)
                     raw_results = {
@@ -210,8 +260,16 @@ class ScannerExecutor:
                         "stack_trace": stack_trace,
                     }
                     try:
-                        from automated_security_helper.plugins.events import AshEventType
-                        self._notify(AshEventType.ERROR, message=err_str, scanner=scanner_name, exception=e)
+                        from automated_security_helper.plugins.events import (
+                            AshEventType,
+                        )
+
+                        self._notify(
+                            AshEventType.ERROR,
+                            message=err_str,
+                            scanner=scanner_name,
+                            exception=e,
+                        )
                     except Exception as notify_error:
                         # _notify already catches and error-logs anything the
                         # subscriber callback raises, so what reaches here is a
@@ -241,6 +299,14 @@ class ScannerExecutor:
                             "-- plugin is missing dependencies"
                         )
                         container.status = ScannerStatus.MISSING
+                        # The status is not the only channel this fact travels on, and the
+                        # two must not disagree. ScannerStatisticsCalculator derives
+                        # ``dependencies_missing`` from the status string when it reads a
+                        # scanner-level report, and from this field when it reads a
+                        # scanner_results entry, so a container that says MISSING while
+                        # still claiming satisfied dependencies reports one way or the
+                        # other depending on which of those a run happens to produce.
+                        container.dependencies_satisfied = False
 
                     container.start_time = scanner_plugin.start_time
                     container.end_time = scanner_plugin.end_time
@@ -258,20 +324,29 @@ class ScannerExecutor:
                         )
                     container.raw_results = raw_results
 
-                    from automated_security_helper.schemas.sarif_schema_model import SarifReport
+                    from automated_security_helper.schemas.sarif_schema_model import (
+                        SarifReport,
+                    )
 
                     if isinstance(raw_results, SarifReport):
-                        raw_results = sanitize_sarif_paths(raw_results, self.plugin_context.source_dir)
+                        raw_results = sanitize_sarif_paths(
+                            raw_results, self.plugin_context.source_dir
+                        )
                         if not self.plugin_context.ignore_suppressions:
                             raw_results = apply_suppressions_to_sarif(
                                 sarif_report=raw_results,
                                 plugin_context=self.plugin_context,
                             )
-                        severity_counts, finding_count = self._extract_metrics_from_sarif(raw_results)
+                        severity_counts, finding_count = (
+                            self._extract_metrics_from_sarif(raw_results)
+                        )
                         container.severity_counts = severity_counts
                         container.finding_count = finding_count
                     elif isinstance(raw_results, dict):
-                        if "status" in raw_results and raw_results["status"] == "failed":
+                        if (
+                            "status" in raw_results
+                            and raw_results["status"] == "failed"
+                        ):
                             container.status = ScannerStatus.ERROR
                         else:
                             if "severity_counts" in raw_results:
@@ -279,7 +354,9 @@ class ScannerExecutor:
                                 if isinstance(raw_counts, ScannerSeverityCount):
                                     container.severity_counts = raw_counts
                                 else:
-                                    container.severity_counts = ScannerSeverityCount.model_validate(raw_counts)
+                                    container.severity_counts = (
+                                        ScannerSeverityCount.model_validate(raw_counts)
+                                    )
                                 container.finding_count = sum(
                                     int(v)
                                     for v in (
@@ -288,17 +365,45 @@ class ScannerExecutor:
                                         else raw_counts.model_dump().values()
                                     )
                                 )
-                            elif "findings" in raw_results and isinstance(raw_results["findings"], list):
+                            elif "findings" in raw_results and isinstance(
+                                raw_results["findings"], list
+                            ):
                                 for finding in raw_results["findings"]:
                                     if "severity" in finding:
                                         severity = finding["severity"].lower()
                                         try:
-                                            container.severity_counts.increment(severity)
+                                            container.severity_counts.increment(
+                                                severity
+                                            )
                                         except ValueError:
                                             container.severity_counts.increment("info")
                                 container.finding_count = len(raw_results["findings"])
 
                     container.exit_code = getattr(scanner_plugin, "exit_code", 0)
+
+                    # Carried across the same way exit_code is, so the field is closed for
+                    # every container rather than only for the falsy-return branch above. A
+                    # scanner that overrides scan() can find its tool absent, record that on
+                    # itself and still return a report; without this copy that container
+                    # reached the statistics calculator claiming satisfied dependencies.
+                    #
+                    # Narrowing rather than assigning, because neither the plugin's flag nor
+                    # the getattr default may widen a MISSING container back to "dependencies
+                    # were fine". A scan() override is free to return falsy without touching
+                    # its own flag, and the template's empty-target guard returns before the
+                    # flag is recomputed at all, so a plain assignment would restore True over
+                    # the False recorded above.
+                    #
+                    # An absent attribute defaults to True because absence is not evidence of
+                    # a problem. bool() coerces at the boundary for the same reason
+                    # _target_count_attr does: the plugin is an arbitrary object, the field is
+                    # typed bool, and assignment is not validated.
+                    container.dependencies_satisfied = (
+                        container.dependencies_satisfied
+                        and bool(
+                            getattr(scanner_plugin, "dependencies_satisfied", True)
+                        )
+                    )
 
                     # Carry per-target outcome counts across, following the exit_code pattern
                     # above. This is what lets determine_status distinguish "scanned and found
@@ -320,7 +425,7 @@ class ScannerExecutor:
                         scanner_plugin, "targets_failed"
                     )
 
-                    if container.status != ScannerStatus.ERROR:
+                    if container.status not in _TERMINAL_SCANNER_STATUSES:
                         container.status = container.determine_status(
                             scanner_config.options.severity_threshold
                         )
@@ -333,7 +438,9 @@ class ScannerExecutor:
             return results
 
         except Exception as e:
-            ASH_LOGGER.error(f"Failed to execute {scanner_plugin.__class__.__name__} scanner: {e}")
+            ASH_LOGGER.error(
+                f"Failed to execute {scanner_plugin.__class__.__name__} scanner: {e}"
+            )
             raise
 
     def _extract_metrics_from_sarif(
@@ -373,12 +480,16 @@ class ScannerExecutor:
         decide whether to record the scanner in completed_scanners.
         """
         try:
-            return self._execute_scanner(scanner_name, scanner_plugin, scan_targets), True
+            return self._execute_scanner(
+                scanner_name, scanner_plugin, scan_targets
+            ), True
         except Exception as e:
             stack_trace = traceback.format_exc()
             error_msg = f"Unexpected error in scanner {scanner_name}: {str(e)}"
             ASH_LOGGER.error(error_msg)
-            ASH_LOGGER.debug(f"Stack trace for scanner {scanner_name} failure:\n{stack_trace}")
+            ASH_LOGGER.debug(
+                f"Stack trace for scanner {scanner_name} failure:\n{stack_trace}"
+            )
 
             failure_container = ScanResultsContainer.for_failure(
                 scanner_name, errors=[error_msg], exception=e
@@ -391,7 +502,13 @@ class ScannerExecutor:
             }
             try:
                 from automated_security_helper.plugins.events import AshEventType
-                self._notify(AshEventType.ERROR, message=error_msg, scanner=scanner_name, exception=e)
+
+                self._notify(
+                    AshEventType.ERROR,
+                    message=error_msg,
+                    scanner=scanner_name,
+                    exception=e,
+                )
             except Exception as notify_error:
                 # See the ERROR guard in _execute_scanner: _notify already handles
                 # a raising subscriber, so this only covers the local import and
@@ -407,7 +524,9 @@ class ScannerExecutor:
     # Sequential execution
     # ------------------------------------------------------------------
 
-    def run_sequential(self, aggregated_results: AshAggregatedResults) -> AshAggregatedResults:
+    def run_sequential(
+        self, aggregated_results: AshAggregatedResults
+    ) -> AshAggregatedResults:
         """Execute scanner_tasks one at a time."""
         total = len(self.scanner_tasks)
         completed = 0
@@ -434,6 +553,7 @@ class ScannerExecutor:
 
                 try:
                     from automated_security_helper.plugins.events import AshEventType
+
                     self._notify(
                         AshEventType.SCAN_START,
                         scanner=scanner_name,
@@ -457,14 +577,17 @@ class ScannerExecutor:
                 if results_list is None:
                     ASH_LOGGER.error(f"Scanner {scanner_name} returned None results")
                     failure_container = ScanResultsContainer.for_failure(
-                        scanner_name, errors=[f"Scanner {scanner_name} failed with no results"]
+                        scanner_name,
+                        errors=[f"Scanner {scanner_name} failed with no results"],
                     )
                     failure_container.raw_results = {
                         "errors": [f"Scanner {scanner_name} failed with no results"],
                         "status": "failed",
                         "exception": "Scanner returned None results",
                     }
-                    processed = self._process_results_fn(failure_container, aggregated_results)
+                    processed = self._process_results_fn(
+                        failure_container, aggregated_results
+                    )
                     aggregated_results = processed
                     self.progress_display.update_task(
                         phase=ExecutionPhase.SCAN,
@@ -478,7 +601,8 @@ class ScannerExecutor:
                         aggregated_results = processed
 
                     if scanner_succeeded and all(
-                        getattr(c, "status", None) != ScannerStatus.ERROR for c in results_list
+                        getattr(c, "status", None) != ScannerStatus.ERROR
+                        for c in results_list
                     ):
                         ASH_LOGGER.debug(
                             f"Appending {scanner_plugin.__class__.__name__} to completed_scanners"
@@ -495,9 +619,16 @@ class ScannerExecutor:
                         remaining_scanners.remove(scanner_name)
 
                     try:
-                        from automated_security_helper.plugins.events import AshEventType
+                        from automated_security_helper.plugins.events import (
+                            AshEventType,
+                        )
+
                         remaining_count = len(remaining_scanners)
-                        remaining_list = ", ".join(remaining_scanners) if remaining_scanners else "None"
+                        remaining_list = (
+                            ", ".join(remaining_scanners)
+                            if remaining_scanners
+                            else "None"
+                        )
                         self._notify(
                             AshEventType.SCAN_COMPLETE,
                             scanner=scanner_name,
@@ -518,7 +649,9 @@ class ScannerExecutor:
 
             except Exception as e:
                 stack_trace = traceback.format_exc()
-                ASH_LOGGER.debug(f"Stack trace for scanner {scanner_name} failure:\n{stack_trace}")
+                ASH_LOGGER.debug(
+                    f"Stack trace for scanner {scanner_name} failure:\n{stack_trace}"
+                )
                 self.progress_display.update_task(
                     phase=ExecutionPhase.SCAN,
                     task_id=scanner_task,
@@ -538,10 +671,14 @@ class ScannerExecutor:
                     "stack_trace": stack_trace,
                 }
                 try:
-                    processed = self._process_results_fn(failure_container, aggregated_results)
+                    processed = self._process_results_fn(
+                        failure_container, aggregated_results
+                    )
                     aggregated_results = processed
                 except Exception as process_error:
-                    ASH_LOGGER.error(f"Failed to process error results for {scanner_name}: {str(process_error)}")
+                    ASH_LOGGER.error(
+                        f"Failed to process error results for {scanner_name}: {str(process_error)}"
+                    )
             finally:
                 completed += 1
 
@@ -551,7 +688,9 @@ class ScannerExecutor:
     # Parallel execution
     # ------------------------------------------------------------------
 
-    def run_parallel(self, aggregated_results: AshAggregatedResults) -> AshAggregatedResults:
+    def run_parallel(
+        self, aggregated_results: AshAggregatedResults
+    ) -> AshAggregatedResults:
         """Execute scanner_tasks via a ThreadPoolExecutor."""
         import threading
 
@@ -586,13 +725,18 @@ class ScannerExecutor:
                 )
                 ASH_LOGGER.debug(f"Submitting {scanner_name} to thread pool")
                 future = executor.submit(
-                    self._safe_execute_scanner, scanner_name, scanner_plugin, scan_targets
+                    self._safe_execute_scanner,
+                    scanner_name,
+                    scanner_plugin,
+                    scan_targets,
                 )
                 future.scanner_name = scanner_name  # type: ignore[attr-defined]
                 future.scanner_task_key = task_key  # type: ignore[attr-defined]
                 futures.append(future)
 
-            self._update_progress(50, f"Running {len(futures)} scanner tasks in parallel...")
+            self._update_progress(
+                50, f"Running {len(futures)} scanner tasks in parallel..."
+            )
 
             completed_count = 0
             for future in as_completed(futures):
@@ -604,16 +748,23 @@ class ScannerExecutor:
                     results_list, scanner_succeeded = future.result()
 
                     if results_list is None:
-                        ASH_LOGGER.error(f"Scanner {scanner_name} returned None results")
+                        ASH_LOGGER.error(
+                            f"Scanner {scanner_name} returned None results"
+                        )
                         failure_container = ScanResultsContainer.for_failure(
-                            scanner_name, errors=[f"Scanner {scanner_name} failed with no results"]
+                            scanner_name,
+                            errors=[f"Scanner {scanner_name} failed with no results"],
                         )
                         failure_container.raw_results = {
-                            "errors": [f"Scanner {scanner_name} failed with no results"],
+                            "errors": [
+                                f"Scanner {scanner_name} failed with no results"
+                            ],
                             "status": "failed",
                             "exception": "Scanner returned None results",
                         }
-                        processed = self._process_results_fn(failure_container, aggregated_results)
+                        processed = self._process_results_fn(
+                            failure_container, aggregated_results
+                        )
                         aggregated_results = processed
                         if task_id is not None:
                             self.progress_display.update_task(
@@ -629,10 +780,16 @@ class ScannerExecutor:
                             aggregated_results = processed
 
                         if scanner_succeeded and all(
-                            getattr(c, "status", None) != ScannerStatus.ERROR for c in results_list
+                            getattr(c, "status", None) != ScannerStatus.ERROR
+                            for c in results_list
                         ):
                             plugin_inst = next(
-                                (t[1] for t in self.scanner_tasks if t[0] == scanner_name), None
+                                (
+                                    t[1]
+                                    for t in self.scanner_tasks
+                                    if t[0] == scanner_name
+                                ),
+                                None,
                             )
                             if plugin_inst is not None:
                                 ASH_LOGGER.debug(
@@ -652,9 +809,16 @@ class ScannerExecutor:
                             if scanner_name in remaining_scanners:
                                 remaining_scanners.remove(scanner_name)
                             try:
-                                from automated_security_helper.plugins.events import AshEventType
+                                from automated_security_helper.plugins.events import (
+                                    AshEventType,
+                                )
+
                                 remaining_count = len(remaining_scanners)
-                                remaining_list = ", ".join(remaining_scanners) if remaining_scanners else "None"
+                                remaining_list = (
+                                    ", ".join(remaining_scanners)
+                                    if remaining_scanners
+                                    else "None"
+                                )
                                 self._notify(
                                     AshEventType.SCAN_COMPLETE,
                                     scanner=scanner_name,
@@ -678,7 +842,9 @@ class ScannerExecutor:
 
                 except Exception as e:
                     stack_trace = traceback.format_exc()
-                    ASH_LOGGER.debug(f"Stack trace for scanner {scanner_name} thread failure:\n{stack_trace}")
+                    ASH_LOGGER.debug(
+                        f"Stack trace for scanner {scanner_name} thread failure:\n{stack_trace}"
+                    )
                     if task_id is not None:
                         self.progress_display.update_task(
                             phase=ExecutionPhase.SCAN,
@@ -686,23 +852,33 @@ class ScannerExecutor:
                             completed=100,
                             description=f"[red]({scanner_name}) Failed: {str(e)}",
                         )
-                    ASH_LOGGER.error(f"Scanner execution failed in thread pool: {scanner_name} - {str(e)}")
+                    ASH_LOGGER.error(
+                        f"Scanner execution failed in thread pool: {scanner_name} - {str(e)}"
+                    )
                     failure_container = ScanResultsContainer.for_failure(
                         scanner_name,
-                        errors=[f"Scanner {scanner_name} failed in thread pool: {str(e)}"],
+                        errors=[
+                            f"Scanner {scanner_name} failed in thread pool: {str(e)}"
+                        ],
                         exception=e,
                     )
                     failure_container.raw_results = {
-                        "errors": [f"Scanner {scanner_name} failed in thread pool: {str(e)}"],
+                        "errors": [
+                            f"Scanner {scanner_name} failed in thread pool: {str(e)}"
+                        ],
                         "status": "failed",
                         "exception": str(e),
                         "stack_trace": stack_trace,
                     }
                     try:
-                        processed = self._process_results_fn(failure_container, aggregated_results)
+                        processed = self._process_results_fn(
+                            failure_container, aggregated_results
+                        )
                         aggregated_results = processed
                     except Exception as process_error:
-                        ASH_LOGGER.error(f"Failed to process error results for {scanner_name}: {str(process_error)}")
+                        ASH_LOGGER.error(
+                            f"Failed to process error results for {scanner_name}: {str(process_error)}"
+                        )
 
                 finally:
                     completed_count += 1

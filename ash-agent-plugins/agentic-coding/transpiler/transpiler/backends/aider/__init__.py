@@ -9,10 +9,8 @@ parse the YAML config to confirm it loads. Aider doesn't have a "validate
 config" mode, so the YAML structural check + the existing AGENTS.md-pointer
 check is the highest-fidelity smoke test we can run without a paid LLM key.
 """
-from __future__ import annotations
 
-import shutil
-import subprocess
+from __future__ import annotations
 
 import yaml
 
@@ -78,7 +76,9 @@ class AiderBackend(BaseBackend):
         # before any chat starts. No LLM call. No provider key required.
         pins = self._load_cli_pins(ctx.base_dir)
         if "aider" in pins:
-            ver = self._assert_version_pin("aider", ["aider", "--version"], pins["aider"])
+            ver = self._assert_version_pin(
+                "aider", ["aider", "--version"], pins["aider"]
+            )
             if ver and ver.get("ok") is False:
                 return ver
         return self._invoke_validator(

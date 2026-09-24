@@ -156,7 +156,9 @@ class TestScannerStatisticsFlow:
 
         # Step 1: Extract statistics from the SARIF data
         # We need to add scanner entries to scanner_results for the statistics to be extracted
-        from automated_security_helper.models.asharp_model import ScannerTargetStatusInfo
+        from automated_security_helper.models.asharp_model import (
+            ScannerTargetStatusInfo,
+        )
 
         model.scanner_results["scanner1"] = ScannerTargetStatusInfo()
         model.scanner_results["scanner2"] = ScannerTargetStatusInfo()
@@ -250,10 +252,14 @@ class TestScannerStatisticsFlow:
         model = self.create_test_model()
 
         # Add scanner status info for edge cases
-        from automated_security_helper.models.asharp_model import ScannerTargetStatusInfo
+        from automated_security_helper.models.asharp_model import (
+            ScannerTargetStatusInfo,
+        )
 
         # Add an excluded scanner
-        model.scanner_results["excluded_scanner"] = ScannerTargetStatusInfo(excluded=True)
+        model.scanner_results["excluded_scanner"] = ScannerTargetStatusInfo(
+            excluded=True
+        )
 
         # Add a scanner with missing dependencies
         model.scanner_results["missing_deps_scanner"] = ScannerTargetStatusInfo(

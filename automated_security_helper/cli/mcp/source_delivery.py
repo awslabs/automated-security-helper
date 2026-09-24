@@ -325,7 +325,16 @@ def set_source_git(
     if ref:
         # ``--depth 1`` may not have fetched the requested ref. Fetch it
         # explicitly before checking out so non-default refs work reliably.
-        fetch_cmd = ["git", "-C", str(target), "fetch", "--depth", str(int(depth)), "origin", ref]
+        fetch_cmd = [
+            "git",
+            "-C",
+            str(target),
+            "fetch",
+            "--depth",
+            str(int(depth)),
+            "origin",
+            ref,
+        ]
         fetch_res = subprocess.run(  # nosec B603 - list-form argv, literal "git" executable, ref validated by _reject_option_like
             fetch_cmd, capture_output=True, text=True, env=env, check=False
         )
@@ -360,7 +369,12 @@ def _incoming_dir(session_dir: Path) -> Path:
 
 
 def _part_path(session_dir: Path, upload_id: str) -> Path:
-    if not upload_id or "/" in upload_id or "\\" in upload_id or upload_id in ("..", "."):
+    if (
+        not upload_id
+        or "/" in upload_id
+        or "\\" in upload_id
+        or upload_id in ("..", ".")
+    ):
         raise ValueError(f"upload_id contains path separators: {upload_id!r}")
     return _incoming_dir(session_dir) / f"{upload_id}.zip.part"
 
@@ -432,9 +446,7 @@ def set_source_zip_chunk(
         raise ValueError(f"invalid base64 payload: {exc}") from exc
 
     if len(decoded) > _MAX_CHUNK_BYTES:
-        raise ValueError(
-            f"chunk too large: {len(decoded)} > {_MAX_CHUNK_BYTES} bytes"
-        )
+        raise ValueError(f"chunk too large: {len(decoded)} > {_MAX_CHUNK_BYTES} bytes")
 
     # Append. Open in "ab" so successive chunks accumulate.
     with part.open("ab") as f:
@@ -541,9 +553,7 @@ def set_source_zip_finalize(
     actual_size = final.stat().st_size
     if actual_size > _MAX_ZIP_BYTES:
         final.unlink(missing_ok=True)
-        raise ValueError(
-            f"zip too large: {actual_size} > {_MAX_ZIP_BYTES} bytes"
-        )
+        raise ValueError(f"zip too large: {actual_size} > {_MAX_ZIP_BYTES} bytes")
 
     # Verify checksum before opening the archive.
     digest = hashlib.sha256()
@@ -568,9 +578,7 @@ def set_source_zip_finalize(
     with zipfile.ZipFile(final) as zf:
         infos = zf.infolist()
         if len(infos) > _MAX_FILES:
-            raise ValueError(
-                f"too many files in zip: {len(infos)} > {_MAX_FILES}"
-            )
+            raise ValueError(f"too many files in zip: {len(infos)} > {_MAX_FILES}")
 
         total_uncompressed = 0
         for info in infos:
@@ -614,9 +622,7 @@ def set_source_zip_finalize(
 # ---------------------------------------------------------------------------
 
 
-def clear_source(
-    session_id: str, *, workspace_root: Optional[Path] = None
-) -> None:
+def clear_source(session_id: str, *, workspace_root: Optional[Path] = None) -> None:
     """Wipe the session workspace and forget any recorded ``source_dir``.
 
     Idempotent: missing workspaces are silently ignored.

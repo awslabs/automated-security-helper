@@ -774,8 +774,12 @@ class TestExecutePhaseScannerStateTally:
         assert any("Scanner excluded-two: EXCLUDED" in d for d in debugs)
         assert any("Scanner missing-deps: MISSING DEPENDENCIES" in d for d in debugs)
         assert not any("Scanner missing-deps: EXCLUDED" in d for d in debugs)
-        assert not any("Scanner excluded-one: MISSING DEPENDENCIES" in d for d in debugs)
-        assert not any("Scanner excluded-two: MISSING DEPENDENCIES" in d for d in debugs)
+        assert not any(
+            "Scanner excluded-one: MISSING DEPENDENCIES" in d for d in debugs
+        )
+        assert not any(
+            "Scanner excluded-two: MISSING DEPENDENCIES" in d for d in debugs
+        )
 
         # No scanner survived filtering, so nothing was queued to run. This is
         # what keeps the assertions above about preparation rather than about

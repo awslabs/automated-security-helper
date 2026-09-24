@@ -28,7 +28,12 @@ def _require_cdk_nag():
     try:
         import cdk_nag  # noqa: F401
     except Exception as exc:  # pragma: no cover - environment-dependent
-        if os.environ.get("ASH_REQUIRE_CDK_EXTRA", "").strip() in ("1", "YES", "TRUE", "true"):
+        if os.environ.get("ASH_REQUIRE_CDK_EXTRA", "").strip() in (
+            "1",
+            "YES",
+            "TRUE",
+            "true",
+        ):
             pytest.fail(
                 "ASH_REQUIRE_CDK_EXTRA is set but the [cdk] extra is not importable "
                 f"({type(exc).__name__}: {exc}). This test must RUN in CI, not skip: a "
@@ -197,7 +202,9 @@ class TestRealNagPack:
             "wrapper returned None for a valid CloudFormation template"
         )
 
-        findings = [f for pack_findings in response.results.values() for f in pack_findings]
+        findings = [
+            f for pack_findings in response.results.values() for f in pack_findings
+        ]
         assert len(findings) > 0, (
             "cdk-nag produced zero findings on a deliberately non-compliant template. "
             "Either no rule was evaluated or the results were dropped."

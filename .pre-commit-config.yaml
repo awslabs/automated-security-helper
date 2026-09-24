@@ -52,16 +52,114 @@ repos:
           - "--autofix"
           - "--indent=2"
   - repo: https://github.com/commitizen-tools/commitizen
-    rev: v4.8.3
+    # Same reconciliation as the ruff pin below: the dev dependency group declares
+    # "commitizen>=4.18.1" and this was pinned at v4.8.3, so the `cz check` a
+    # contributor's commit-msg hook ran was ten minor versions behind the cz the
+    # project installs.
+    #
+    # THE BUMP HAS AN INTERPRETER PREREQUISITE, AND IT IS NOT FIXABLE IN THIS FILE
+    #
+    # commitizen dropped Python 3.9 at 4.11.0: 4.8.3 declares requires-python
+    # ">=3.9", and every release from 4.11.0 on declares ">=3.10". pre-commit builds a
+    # `language: python` hook environment with the interpreter pre-commit is itself
+    # running under, so a pre-commit installed against a system Python 3.9 fails this
+    # hook at install time with
+    #   ERROR: Package 'commitizen' requires a different Python: 3.9.x not in '<4.0,>=3.10'
+    # That is not a commitizen defect and no edit here repairs it. Running pre-commit
+    # out of the project environment -- which is why "pre-commit" is a declared dev
+    # dependency rather than something each contributor installs by unrecorded means
+    # -- pins the interpreter to this repo's own requires-python floor of 3.10.
+    rev: v4.18.1
     hooks:
       - id: commitizen
         stages: [commit-msg]
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    # Ruff version.
-    rev: v0.11.8
+    # This rev must ship the same ruff the project resolves, or the hook produces
+    # diffs CI cannot reproduce. ruff-pre-commit pins `ruff==<tag>` in its own
+    # pyproject.toml, so the tag IS the ruff version: v0.16.7 ships ruff 0.16.7,
+    # which is what uv.lock resolves for the "ruff>=0.16.7,<1.0.0" line in the dev
+    # dependency group.
+    #
+    # It was v0.11.8, five minor versions under that floor, and the two ruffs do not
+    # agree about what an error is, because ruff's DEFAULT rule set widened enormously
+    # in between. Measured on this branch, after the lint fixes in this same pull
+    # request, with
+    #
+    #   ruff check . --isolated
+    #
+    # that is 29 errors under 0.11.8 and 6,428 under the pinned 0.16.7. 0.16.8 reports
+    # the same 6,428, so the gap is the version span rather than an artifact of which
+    # patch release got measured.
+    #
+    # --isolated is not a stylistic choice in that command. It is the only way to get a
+    # number out of 0.11.8 at all: `required-version = ">=0.16.7"` in [tool.ruff] makes
+    # the old ruff exit 2 with "Required version `>=0.16.7` does not match the running
+    # version `0.11.8`" before it lints anything. It also means both figures count
+    # ruff's own defaults and NOT this repo's rule set -- a bare `ruff check .` reads
+    # [tool.ruff], whose explicit select this tree is clean under, and exits 0. Seeing
+    # "All checks passed!" from that command has not contradicted the two counts above.
+    # The pre-fix default-rule count is recorded with the other anchored figures under
+    # [tool.ruff.lint] in pyproject.toml.
+    #
+    # So the old hook was enforcing a small fraction of what the project's own ruff
+    # reports -- while looking like it enforced all of it.
+    # Reconciling this pin is a prerequisite for the lint steps in
+    # .github/workflows/ash-unified-ci.yml, not a tidy-up.
+    #
+    # One behavior change arrives with the bump and is deliberately NOT suppressed
+    # here: the ruff-format hook's `types_or` is [python, pyi, jupyter, markdown] at
+    # v0.16.7 and [python, pyi, jupyter] at v0.11.8, so `ruff format` now rewrites
+    # fenced python blocks in .md files too. Checked at the pinned tag by appending a
+    # `x  =  1` fence to DEVELOPMENT.md in a scratch export: the hook rewrote it to
+    # `x = 1` and reported "1 file reformatted, 916 files left unchanged", which is
+    # also the size of the formatter's file set here.
+    #
+    # The churn that scope produced is recorded as a commit rather than as a figure
+    # that goes stale: e3306d33 "style: apply ruff format across the repository" is
+    # 276 files -- 236 .py, 37 .md, and 3 .md.template that ruff does not discover and
+    # a human formatted through a temporary .md name. `git show --stat e3306d33`
+    # reproduces that breakdown at any later date. Because it landed, a run on the
+    # current tree reformats nothing; the scope is the durable claim, not the count.
+    #
+    # Narrowing it in this file alone would put the hook and the `ruff format --check`
+    # step back out of step with each other, which is the defect above in miniature.
+    # If markdown should be out of scope, the place for that is [tool.ruff] in
+    # pyproject.toml, which the hook and the gate both read.
+    rev: v0.16.7
     hooks:
-      # Run the linter.
-      - id: ruff
+      # `ruff-check` is the current id. `ruff` still resolves -- upstream keeps it as
+      # a documented legacy alias -- but the alias hides which ruff subcommand runs.
+      #
+      # --fix stays, and it is precisely why CI does not run `pre-commit run
+      # --all-files`. Repairing the file is right on a developer's machine and wrong
+      # in a gate, and the mechanism is plain: `ruff check --fix` exits 0 once it has
+      # repaired everything it found. An unused import appended to a source file comes
+      # back as "Found 1 error (1 fixed, 0 remaining)" and exit 0 -- the violation is
+      # gone, and so is the only record that it was there. Run the hook twice and the
+      # second run prints "Passed", because the tree it judges is the one the first run
+      # wrote. pre-commit does fail the first run, but on its own "files were modified
+      # by this hook" bookkeeping rather than on anything the tool reported, so a CI
+      # step invoking `ruff check --fix` directly just collects the 0.
+      #
+      # That is not hypothetical on this tree, and the population is no longer Python.
+      # Measured on a `git archive` export of fa98bcc4 with an isolated
+      # PRE_COMMIT_HOME, `pre-commit run --all-files` rewrote 27 files,
+      # +12,824/-12,786, every one of them JSON from the pretty-format-json --autofix
+      # above; two npm package-lock.json and four transpiler/schemas/*.schema.json are
+      # 12,412 of those 12,824 lines. ruff-check and ruff-format rewrote nothing there,
+      # because c02fc135 (177 .py files, +575/-685 of --fix output) and e3306d33 had
+      # already landed. To re-measure without mutating the repository:
+      #
+      #   d=$(mktemp -d); git archive fa98bcc4 | tar -x -C "$d"
+      #   git -C "$d" init -q && git -C "$d" add -A && git -C "$d" commit -qm base
+      #   (cd "$d" && PRE_COMMIT_HOME="$d/.pc" pre-commit run --all-files)
+      #   git -C "$d" diff --shortstat
+      #
+      # The residue being JSON rather than Python sharpens the argument instead of
+      # weakening it: the defect belongs to --fix-style hooks as a class, not to one
+      # hook. CI runs `ruff check` and `ruff format --check` directly, so a violation
+      # fails there instead of being quietly fixed.
+      - id: ruff-check
         args: [--fix]
       # Run the formatter.
       - id: ruff-format
@@ -70,6 +168,16 @@ repos:
   # local versions
   - repo: local
     hooks:
+      # `stages: [manual]` is what makes the "(manual)" in the name true. Without it
+      # this hook inherits pre-commit's default stage set, so a hook labeled manual
+      # ran a full ASH scan on every single commit and on every
+      # `pre-commit run --all-files`. Measured before the stage was added: 31.68s per
+      # invocation, and it exited non-zero, so the label was not merely cosmetic --
+      # it was describing behavior the config did not implement, and the only way
+      # past it was --no-verify, which disables every other hook here too.
+      #
+      # Manual-staged means it never fires from a git hook. Invoke it deliberately:
+      #   pre-commit run --hook-stage manual ash
       - id: ash
         name: (manual) ASH dev manual scan
         description: Runs various code scanners from Python directly
@@ -77,6 +185,7 @@ repos:
         pass_filenames: false
         verbose: true
         language: system
+        stages: [manual]
         args:
           - --output-dir=.ash/ash_output_precommit_local
   # - repo: https://github.com/awslabs/automated-security-helper

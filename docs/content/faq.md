@@ -189,9 +189,7 @@ from automated_security_helper.interactions.run_ash_scan import run_ash_scan
 from automated_security_helper.core.enums import RunMode
 
 results = run_ash_scan(
-    source_dir="/path/to/code",
-    output_dir="/path/to/output",
-    mode=RunMode.local
+    source_dir="/path/to/code", output_dir="/path/to/output", mode=RunMode.local
 )
 ```
 

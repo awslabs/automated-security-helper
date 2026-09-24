@@ -1,9 +1,6 @@
 """Tests for cli/dependencies.py — covers get_platform, get_architecture, run_command, install."""
 
-import platform
-from pathlib import Path
 from unittest.mock import patch, MagicMock
-import pytest
 
 from automated_security_helper.cli.dependencies import (
     get_platform,

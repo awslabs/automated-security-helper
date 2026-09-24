@@ -80,7 +80,9 @@ class TestScannerStateTrackerCRUD:
 class TestScannerStateTrackerNameValidation:
     def test_rejects_class_name_at_insert(self, tracker):
         with pytest.raises(ValueError, match="class name"):
-            tracker.update_scanner_state("BanditScanner", registration_status="registered")
+            tracker.update_scanner_state(
+                "BanditScanner", registration_status="registered"
+            )
 
     def test_rejects_empty_name_at_insert(self, tracker):
         with pytest.raises(ValueError):
@@ -110,5 +112,6 @@ class TestNoEndswithGuardsInSource:
     def test_class_name_helper_exists_and_rejects_suffix(self):
         """_is_class_name helper must exist and correctly identify class names."""
         from automated_security_helper.models.scanner_validation import _is_class_name
+
         assert _is_class_name("BanditScanner") is True
         assert _is_class_name("bandit") is False

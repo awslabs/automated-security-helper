@@ -32,6 +32,7 @@ def test_scanner_output():
     output_file = Path("/tmp/scanner_output.json")
     # This could conflict with other tests using the same path
 
+
 # GOOD: Using an isolated file path
 def test_scanner_output(ash_temp_path):
     output_file = ash_temp_path / "scanner_output.json"
@@ -44,6 +45,7 @@ The testing framework provides utilities to help write parallel-safe tests:
 
 ```python
 from tests.utils.parallel_test_utils import isolated_test_context, ParallelTestHelper
+
 
 def test_with_isolation():
     with isolated_test_context() as temp_dir:
@@ -142,6 +144,7 @@ For more advanced parallel test configuration, you can create a `conftest.py` fi
 def pytest_xdist_make_scheduler(config, log):
     """Custom test scheduler for parallel execution."""
     from xdist.scheduler import LoadScheduling
+
     return LoadScheduling(config, log)
 ```
 

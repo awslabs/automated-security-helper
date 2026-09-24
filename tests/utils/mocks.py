@@ -16,7 +16,6 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Region,
 )
-from tests.utils.helpers import get_ash_temp_path
 
 
 def create_mock_finding(
@@ -45,7 +44,9 @@ def create_mock_finding(
             Location.model_construct(
                 physicalLocation=PhysicalLocation.model_construct(
                     root=PhysicalLocation2.model_construct(
-                        artifactLocation=ArtifactLocation.model_construct(uri=file_path),
+                        artifactLocation=ArtifactLocation.model_construct(
+                            uri=file_path
+                        ),
                         region=Region.model_construct(
                             startLine=start_line,
                             endLine=end_line,

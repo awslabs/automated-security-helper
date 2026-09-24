@@ -7,10 +7,11 @@ import subprocess  # nosec B404
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-import pytest
 
 from automated_security_helper.utils.get_scan_set import get_changed_files
-from automated_security_helper.interactions.run_ash_scan import _filter_results_to_changed_files
+from automated_security_helper.interactions.run_ash_scan import (
+    _filter_results_to_changed_files,
+)
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
@@ -33,7 +34,10 @@ class TestGetChangedFiles:
     def test_returns_paths_on_success(self):
         fake_output = "src/app.py\nREADME.md\nlib/utils.js\n"
         mock_result = MagicMock(returncode=0, stdout=fake_output)
-        with patch("automated_security_helper.utils.get_scan_set.subprocess.run", return_value=mock_result) as mock_run:
+        with patch(
+            "automated_security_helper.utils.get_scan_set.subprocess.run",
+            return_value=mock_result,
+        ) as mock_run:
             result = get_changed_files("origin/main")
 
         mock_run.assert_called_once_with(
@@ -47,7 +51,10 @@ class TestGetChangedFiles:
 
     def test_returns_empty_list_when_no_changes(self):
         mock_result = MagicMock(returncode=0, stdout="\n")
-        with patch("automated_security_helper.utils.get_scan_set.subprocess.run", return_value=mock_result):
+        with patch(
+            "automated_security_helper.utils.get_scan_set.subprocess.run",
+            return_value=mock_result,
+        ):
             result = get_changed_files()
 
         assert result == []
@@ -72,14 +79,20 @@ class TestGetChangedFiles:
 
     def test_returns_none_on_nonzero_exit(self):
         mock_result = MagicMock(returncode=128, stdout="", stderr="fatal: bad ref")
-        with patch("automated_security_helper.utils.get_scan_set.subprocess.run", return_value=mock_result):
+        with patch(
+            "automated_security_helper.utils.get_scan_set.subprocess.run",
+            return_value=mock_result,
+        ):
             result = get_changed_files("nonexistent-branch")
 
         assert result is None
 
     def test_custom_base_ref(self):
         mock_result = MagicMock(returncode=0, stdout="file.txt\n")
-        with patch("automated_security_helper.utils.get_scan_set.subprocess.run", return_value=mock_result) as mock_run:
+        with patch(
+            "automated_security_helper.utils.get_scan_set.subprocess.run",
+            return_value=mock_result,
+        ) as mock_run:
             result = get_changed_files("origin/develop")
 
         mock_run.assert_called_once_with(
@@ -94,7 +107,10 @@ class TestGetChangedFiles:
     def test_strips_blank_lines(self):
         fake_output = "\n  a.py  \n\nb.py\n\n"
         mock_result = MagicMock(returncode=0, stdout=fake_output)
-        with patch("automated_security_helper.utils.get_scan_set.subprocess.run", return_value=mock_result):
+        with patch(
+            "automated_security_helper.utils.get_scan_set.subprocess.run",
+            return_value=mock_result,
+        ):
             result = get_changed_files()
 
         assert result == [Path("a.py"), Path("b.py")]
@@ -141,10 +157,12 @@ class TestFilterResultsToChangedFiles:
         source_dir.mkdir()
         changed = {(source_dir / "src" / "app.py").resolve()}
 
-        results = _make_results_with_sarif([
-            _make_result("src/app.py"),
-            _make_result("src/other.py"),
-        ])
+        results = _make_results_with_sarif(
+            [
+                _make_result("src/app.py"),
+                _make_result("src/other.py"),
+            ]
+        )
 
         filtered = _filter_results_to_changed_files(results, changed, source_dir)
         run_results = filtered.sarif.runs[0].results
@@ -158,9 +176,11 @@ class TestFilterResultsToChangedFiles:
         changed = {(source_dir / "lib" / "helper.js").resolve()}
 
         # Scanners sometimes emit file://relative/path (non-standard but real)
-        results = _make_results_with_sarif([
-            _make_result("file://lib/helper.js"),
-        ])
+        results = _make_results_with_sarif(
+            [
+                _make_result("file://lib/helper.js"),
+            ]
+        )
 
         filtered = _filter_results_to_changed_files(results, changed, source_dir)
         assert len(filtered.sarif.runs[0].results) == 1
@@ -184,10 +204,12 @@ class TestFilterResultsToChangedFiles:
         source_dir = tmp_path / "repo"
         source_dir.mkdir()
 
-        results = _make_results_with_sarif([
-            _make_result("src/app.py"),
-            _make_result("src/other.py"),
-        ])
+        results = _make_results_with_sarif(
+            [
+                _make_result("src/app.py"),
+                _make_result("src/other.py"),
+            ]
+        )
 
         filtered = _filter_results_to_changed_files(results, set(), source_dir)
         assert filtered.sarif.runs[0].results == []

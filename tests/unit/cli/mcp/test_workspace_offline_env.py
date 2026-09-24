@@ -131,7 +131,9 @@ def _run(plan, settings) -> Any:
     )
 
 
-def test_offline_true_sets_the_variable_the_scanners_read(observed, tmp_path, monkeypatch):
+def test_offline_true_sets_the_variable_the_scanners_read(
+    observed, tmp_path, monkeypatch
+):
     """The scanners consult ASH_OFFLINE, so offline=True must set it before they run."""
     monkeypatch.delenv("ASH_OFFLINE", raising=False)
 

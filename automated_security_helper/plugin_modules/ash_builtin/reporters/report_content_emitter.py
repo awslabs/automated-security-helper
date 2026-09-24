@@ -65,7 +65,7 @@ class ReportContentEmitter:
                 # Remove trailing Z (Zulu/UTC indicator)
                 cleaned = cleaned.rstrip("Z")
                 # Remove timezone offset (+HH:MM or -HH:MM) at the end
-                cleaned = _re.sub(r'[+-]\d{2}:\d{2}$', '', cleaned)
+                cleaned = _re.sub(r"[+-]\d{2}:\d{2}$", "", cleaned)
                 # Remove fractional seconds
                 cleaned = cleaned.split(".")[0]
 

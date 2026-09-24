@@ -248,4 +248,3 @@ class ReporterPluginBase(PluginBase, Generic[T]):
         Returns a string containing the report or the response from the remote
         receiving the report.
         """
-        pass

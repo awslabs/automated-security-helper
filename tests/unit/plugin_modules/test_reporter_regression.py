@@ -7,14 +7,10 @@ Each test targets a specific inventory bug and should fail before the fix
 is applied, then pass after.
 """
 
-import csv
-import html
 import json
 import re
-from io import StringIO
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
 
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.default_config import get_default_config
@@ -26,7 +22,6 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Message,
     Message1,
     PhysicalLocation,
-    PropertyBag,
     Region,
     Result,
     Run,
@@ -39,6 +34,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_result(
     rule_id: str = "TEST-001",
@@ -63,7 +59,9 @@ def _make_result(
     )
 
 
-def _make_run(results: list[Result] | None = None, tool_name: str = "test-scanner") -> Run:
+def _make_run(
+    results: list[Result] | None = None, tool_name: str = "test-scanner"
+) -> Run:
     """Build a minimal SARIF Run."""
     return Run(
         tool=Tool(driver=ToolComponent(name=tool_name)),
@@ -101,6 +99,7 @@ def _plugin_context(tmp_path):
 # ===================================================================
 # Bug #30 -- gitlab_sast_reporter.py: runs[0] only
 # ===================================================================
+
 
 class TestGitLabSASTMultiRun:
     """gitlab_sast_reporter must iterate ALL runs, not just runs[0]."""
@@ -141,6 +140,7 @@ class TestGitLabSASTMultiRun:
 # ===================================================================
 # Bug #42/#43 -- html_reporter.py: html.escape(None) crash
 # ===================================================================
+
 
 class TestHtmlReporterNoneDescription:
     """html_reporter must not pass None to html.escape()."""
@@ -193,6 +193,7 @@ class TestHtmlReporterNoneDescription:
 # Bug #105 -- markdown_reporter.py: pipe in table cells
 # ===================================================================
 
+
 class TestMarkdownPipeEscaping:
     """Pipe characters in finding text must be escaped in markdown tables."""
 
@@ -241,16 +242,15 @@ class TestMarkdownPipeEscaping:
             if "PIPE" in line and line.startswith("|"):
                 # The pipe in rule_id and title must be escaped
                 # Count unescaped pipes (not preceded by backslash)
-                unescaped = re.findall(r'(?<!\\)\|', line)
+                unescaped = re.findall(r"(?<!\\)\|", line)
                 # A well-formed row with 5 columns has exactly 6 unescaped pipes
-                assert len(unescaped) == 6, (
-                    f"Pipe in cell data not escaped: {line}"
-                )
+                assert len(unescaped) == 6, f"Pipe in cell data not escaped: {line}"
 
 
 # ===================================================================
 # Bug #106 -- text_reporter.py: header/data column mismatch
 # ===================================================================
+
 
 class TestTextReporterColumnAlignment:
     """Header and data rows must have consistent column alignment."""
@@ -293,6 +293,7 @@ class TestTextReporterColumnAlignment:
 # Bug #107 -- csv_reporter.py: nested field path separators
 # ===================================================================
 
+
 class TestCsvReporterFieldPaths:
     """CSV field path mappings must use consistent dot separators."""
 
@@ -305,16 +306,17 @@ class TestCsvReporterFieldPaths:
         for path, col_name in mappings.items():
             # Every `]` that's followed by a letter should have a `.` between
             # e.g. "results[]locations[]" is wrong, "results[].locations[]" is correct
-            bad = re.search(r'\][a-zA-Z]', path)
+            bad = re.search(r"\][a-zA-Z]", path)
             assert bad is None, (
                 f"Missing dot separator in field path '{path}' at position "
-                f"{bad.start()}: ...{path[max(0,bad.start()-5):bad.end()+5]}..."
+                f"{bad.start()}: ...{path[max(0, bad.start() - 5) : bad.end() + 5]}..."
             )
 
 
 # ===================================================================
 # Bug #108 -- flatjson_reporter.py: mixed index access
 # ===================================================================
+
 
 class TestFlatJsonFieldMappingConsistency:
     """sarif_field_mappings must use consistent index notation."""
@@ -328,14 +330,14 @@ class TestFlatJsonFieldMappingConsistency:
         for path, field_name in mappings.items():
             # Check: all `runs` access should use the same bracket style
             # Find all bracket expressions for 'runs'
-            runs_brackets = re.findall(r'runs(\[[^\]]*\])', path)
+            runs_brackets = re.findall(r"runs(\[[^\]]*\])", path)
             if len(runs_brackets) > 1:
                 assert len(set(runs_brackets)) == 1, (
                     f"Mixed index access for 'runs' in '{path}': {runs_brackets}"
                 )
 
             # Check: all `results` access should use the same bracket style
-            results_brackets = re.findall(r'results(\[[^\]]*\])', path)
+            results_brackets = re.findall(r"results(\[[^\]]*\])", path)
             if len(results_brackets) > 1:
                 assert len(set(results_brackets)) == 1, (
                     f"Mixed index access for 'results' in '{path}': {results_brackets}"
@@ -352,9 +354,9 @@ class TestFlatJsonFieldMappingConsistency:
         all_runs_styles = set()
         all_results_styles = set()
         for path in mappings.keys():
-            for m in re.finditer(r'runs(\[[^\]]*\])', path):
+            for m in re.finditer(r"runs(\[[^\]]*\])", path):
                 all_runs_styles.add(m.group(1))
-            for m in re.finditer(r'results(\[[^\]]*\])', path):
+            for m in re.finditer(r"results(\[[^\]]*\])", path):
                 all_results_styles.add(m.group(1))
 
         # Should be consistent -- either all [] or all [0], not a mix
@@ -373,15 +375,14 @@ class TestFlatJsonFieldMappingConsistency:
 
         mappings = FlatJSONReporter.sarif_field_mappings()
         for path, field_name in mappings.items():
-            bad = re.search(r'\][a-zA-Z]', path)
-            assert bad is None, (
-                f"Missing dot separator in field path '{path}'"
-            )
+            bad = re.search(r"\][a-zA-Z]", path)
+            assert bad is None, f"Missing dot separator in field path '{path}'"
 
 
 # ===================================================================
 # Bug #109 -- report_content_emitter.py: timezone parse
 # ===================================================================
+
 
 class TestReportContentEmitterTimezoneParse:
     """Timezone offsets with minus sign must be handled, not just plus."""

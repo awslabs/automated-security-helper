@@ -11,6 +11,7 @@ Backends with multi-step builds (e.g. MCPB: emit-manifest then build-archive)
 declare a PHASES tuple and implement phase_<name> methods. The CLI runs
 phases in dependency order.
 """
+
 from __future__ import annotations
 
 import json
@@ -151,8 +152,12 @@ class Marketplace:
 @dataclass(frozen=True)
 class MCPConfig:
     format: Literal[
-        "mcpServers", "servers", "opencode_embedded",
-        "continue_yaml", "goose_yaml", "amazonq",
+        "mcpServers",
+        "servers",
+        "opencode_embedded",
+        "continue_yaml",
+        "goose_yaml",
+        "amazonq",
     ]
     path: str | None = None
     template: str | None = None
@@ -260,10 +265,10 @@ class BuildContext:
     """Passed to phase_<name>(self, ctx) and to release()."""
 
     manifest: Manifest
-    out: Path                    # this backend's output directory
-    plugins_root: Path           # agentic-coding/plugins/
-    base_dir: Path               # transpiler/_base/
-    schemas_dir: Path            # transpiler/schemas/
+    out: Path  # this backend's output directory
+    plugins_root: Path  # agentic-coding/plugins/
+    base_dir: Path  # transpiler/_base/
+    schemas_dir: Path  # transpiler/schemas/
     dist_dir: Path | None = None  # set during release stage
 
 
@@ -513,14 +518,24 @@ class BaseBackend:
     def setup(self, ctx: BuildContext) -> None:
         self._run_phases_for_stage(ctx, "setup")
 
-    def build(self, manifest: Manifest, out: Path,
-              plugins_root: Path, base_dir: Path, schemas_dir: Path) -> None:
+    def build(
+        self,
+        manifest: Manifest,
+        out: Path,
+        plugins_root: Path,
+        base_dir: Path,
+        schemas_dir: Path,
+    ) -> None:
         # Default build path: run section emitters, then any build-stage phases.
         from . import emitters
+
         emitters.run_section_emitters(self, manifest, out, base_dir)
         ctx = BuildContext(
-            manifest=manifest, out=out, plugins_root=plugins_root,
-            base_dir=base_dir, schemas_dir=schemas_dir,
+            manifest=manifest,
+            out=out,
+            plugins_root=plugins_root,
+            base_dir=base_dir,
+            schemas_dir=schemas_dir,
         )
         self._run_phases_for_stage(ctx, "build")
 
@@ -573,13 +588,24 @@ class BaseBackend:
         if shutil.which(binary) is None:
             return None
         try:
-            r = subprocess.run(version_argv, check=True, capture_output=True, timeout=timeout)
-        except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+            r = subprocess.run(
+                version_argv, check=True, capture_output=True, timeout=timeout
+            )
+        except (
+            FileNotFoundError,
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+        ) as e:
             return {"ok": False, "reason": f"{' '.join(version_argv)} failed: {e}"}
-        out = (r.stdout or b"").decode("utf-8", errors="replace") + (r.stderr or b"").decode("utf-8", errors="replace")
+        out = (r.stdout or b"").decode("utf-8", errors="replace") + (
+            r.stderr or b""
+        ).decode("utf-8", errors="replace")
         m = re.search(r"\b(\d+)\.(\d+)(?:\.(\d+))?\b", out)
         if not m:
-            return {"ok": False, "reason": f"{binary} version output unparseable: {out[:120]!r}"}
+            return {
+                "ok": False,
+                "reason": f"{binary} version output unparseable: {out[:120]!r}",
+            }
         actual = f"{m.group(1)}.{m.group(2)}"
         if actual != pinned:
             return {
@@ -611,25 +637,31 @@ class BaseBackend:
         binary = argv[0]
         if shutil.which(binary) is None:
             return {
-                "ok": True, "skipped": True,
+                "ok": True,
+                "skipped": True,
                 "detail": f"{binary} not on PATH; CLI invocation skipped",
             }
         try:
             subprocess.run(argv, check=True, capture_output=True, timeout=timeout)
         except FileNotFoundError:
             return {
-                "ok": True, "skipped": True,
+                "ok": True,
+                "skipped": True,
                 "detail": f"{binary} resolved binary missing; CLI invocation skipped",
             }
         except subprocess.TimeoutExpired:
-            return {"ok": False, "reason": f"{' '.join(argv)} timed out after {timeout}s"}
+            return {
+                "ok": False,
+                "reason": f"{' '.join(argv)} timed out after {timeout}s",
+            }
         except subprocess.CalledProcessError as e:
             stderr = (e.stderr or b"").decode("utf-8", errors="replace").strip()
             # Stale wrapper detection — narrow this only because we know
             # the argv is a `--version`-style probe with no file inputs.
             if "no such file or directory" in stderr.lower():
                 return {
-                    "ok": True, "skipped": True,
+                    "ok": True,
+                    "skipped": True,
                     "detail": f"{binary} wrapper present but target missing; CLI invocation skipped",
                 }
             tail = stderr[-200:] if stderr else f"exit code {e.returncode}"
@@ -663,18 +695,25 @@ class BaseBackend:
         binary = argv[0]
         if shutil.which(binary) is None:
             return {
-                "ok": True, "skipped": True,
+                "ok": True,
+                "skipped": True,
                 "detail": f"{binary} not on PATH; validator invocation skipped",
             }
         try:
-            result = subprocess.run(argv, check=True, capture_output=True, timeout=timeout)
+            result = subprocess.run(
+                argv, check=True, capture_output=True, timeout=timeout
+            )
         except FileNotFoundError:
             return {
-                "ok": True, "skipped": True,
+                "ok": True,
+                "skipped": True,
                 "detail": f"{binary} resolved binary missing; validator invocation skipped",
             }
         except subprocess.TimeoutExpired:
-            return {"ok": False, "reason": f"{' '.join(argv)} timed out after {timeout}s"}
+            return {
+                "ok": False,
+                "reason": f"{' '.join(argv)} timed out after {timeout}s",
+            }
         except subprocess.CalledProcessError as e:
             stderr = (e.stderr or b"").decode("utf-8", errors="replace").strip()
             stdout = (e.stdout or b"").decode("utf-8", errors="replace").strip()
@@ -691,17 +730,24 @@ class BaseBackend:
             )
             if wrapper_target_missing:
                 return {
-                    "ok": True, "skipped": True,
+                    "ok": True,
+                    "skipped": True,
                     "detail": f"{binary} wrapper present but target missing; validator invocation skipped",
                 }
             # Prefer stderr; some CLIs (notably claude plugin validate)
             # put actionable error detail on stdout, so fall back there.
-            tail = (stderr or stdout)[-300:] if (stderr or stdout) else f"exit code {e.returncode}"
+            tail = (
+                (stderr or stdout)[-300:]
+                if (stderr or stdout)
+                else f"exit code {e.returncode}"
+            )
             return {"ok": False, "reason": f"{' '.join(argv)} failed: {tail}"}
         return {
             "ok": True,
             "detail": f"{' '.join(argv)} OK",
-            "stdout": result.stdout.decode("utf-8", errors="replace") if result.stdout else "",
+            "stdout": result.stdout.decode("utf-8", errors="replace")
+            if result.stdout
+            else "",
         }
 
     # Back-compat alias — _invoke_cli used to be the only helper. New code

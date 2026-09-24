@@ -591,18 +591,13 @@ scanners:
         config_path = tmp_path / ".ash" / ".ash.yaml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(
-            "project_name: t\n"
-            "scanners:\n"
-            "  cdk_nag:\n"
-            "    enabled: true\n"
+            "project_name: t\nscanners:\n  cdk_nag:\n    enabled: true\n"
         )
 
         result = ConfigLinter.lint(config_path)
 
         legacy_issues = [
-            i
-            for i in result.issues
-            if i.category == LintCategory.LEGACY_NAME_VARIANT
+            i for i in result.issues if i.category == LintCategory.LEGACY_NAME_VARIANT
         ]
         assert len(legacy_issues) == 1
         assert "cdk_nag" in legacy_issues[0].message
@@ -615,18 +610,13 @@ scanners:
         config_path = tmp_path / ".ash" / ".ash.yaml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(
-            "project_name: t\n"
-            "scanners:\n"
-            "  cdk-nag:\n"
-            "    enabled: true\n"
+            "project_name: t\nscanners:\n  cdk-nag:\n    enabled: true\n"
         )
 
         result = ConfigLinter.lint(config_path)
 
         legacy_issues = [
-            i
-            for i in result.issues
-            if i.category == LintCategory.LEGACY_NAME_VARIANT
+            i for i in result.issues if i.category == LintCategory.LEGACY_NAME_VARIANT
         ]
         assert legacy_issues == []
 
@@ -635,18 +625,13 @@ scanners:
         config_path = tmp_path / ".ash" / ".ash.yaml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(
-            "project_name: t\n"
-            "scanners:\n"
-            "  my-org-custom-scanner:\n"
-            "    enabled: true\n"
+            "project_name: t\nscanners:\n  my-org-custom-scanner:\n    enabled: true\n"
         )
 
         result = ConfigLinter.lint(config_path)
 
         legacy_issues = [
-            i
-            for i in result.issues
-            if i.category == LintCategory.LEGACY_NAME_VARIANT
+            i for i in result.issues if i.category == LintCategory.LEGACY_NAME_VARIANT
         ]
         assert legacy_issues == []
 
@@ -684,18 +669,13 @@ scanners:
         config_path = tmp_path / ".ash" / ".ash.yaml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(
-            "project_name: t\n"
-            "reporters:\n"
-            "  gitlab_cyclonedx:\n"
-            "    enabled: true\n"
+            "project_name: t\nreporters:\n  gitlab_cyclonedx:\n    enabled: true\n"
         )
 
         result = ConfigLinter.lint(config_path)
 
         legacy_issues = [
-            i
-            for i in result.issues
-            if i.category == LintCategory.LEGACY_NAME_VARIANT
+            i for i in result.issues if i.category == LintCategory.LEGACY_NAME_VARIANT
         ]
         assert len(legacy_issues) == 1
         assert "gitlab_cyclonedx" in legacy_issues[0].message
@@ -725,9 +705,7 @@ scanners:
 
         # A LEGACY_NAME_CONFLICT issue must be emitted (ERROR-severity, not fixable)
         conflict_issues = [
-            i
-            for i in result.issues
-            if i.category == LintCategory.LEGACY_NAME_CONFLICT
+            i for i in result.issues if i.category == LintCategory.LEGACY_NAME_CONFLICT
         ]
         assert len(conflict_issues) == 1
         assert conflict_issues[0].severity == LintSeverity.ERROR
@@ -757,9 +735,7 @@ scanners:
 
         # No legacy-variant fix should have been applied
         legacy_fixes = [
-            i
-            for i in fixed_issues
-            if i.category == LintCategory.LEGACY_NAME_VARIANT
+            i for i in fixed_issues if i.category == LintCategory.LEGACY_NAME_VARIANT
         ]
         assert legacy_fixes == []
 
@@ -803,9 +779,7 @@ scanners:
         assert scanners["cdk-nag"]["enabled"] is True
         assert scanners["cdk-nag"]["options"]["severity_threshold"] == "MEDIUM"
         # Issue was reported as fixed
-        assert any(
-            i.category == LintCategory.LEGACY_NAME_VARIANT for i in fixed_issues
-        )
+        assert any(i.category == LintCategory.LEGACY_NAME_VARIANT for i in fixed_issues)
 
 
 class TestConfigLintCLI:

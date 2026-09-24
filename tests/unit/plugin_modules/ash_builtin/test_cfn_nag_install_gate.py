@@ -30,7 +30,9 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scann
     CfnNagScanner,
 )
 
-_SCANNER = "automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scanner"
+_SCANNER = (
+    "automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scanner"
+)
 GEM_PROBE = f"{_SCANNER}.find_executable"
 PLATFORM_PROBE = f"{_SCANNER}.platform.system"
 
@@ -67,7 +69,10 @@ def _commands(context, *, gem=None, compiler=None, system="Linux"):
             return compiler
         return f"/usr/bin/{command}"
 
-    with patch(GEM_PROBE, side_effect=probe), patch(PLATFORM_PROBE, return_value=system):
+    with (
+        patch(GEM_PROBE, side_effect=probe),
+        patch(PLATFORM_PROBE, return_value=system),
+    ):
         scanner = CfnNagScanner(context=context)
     return scanner.get_installation_commands("linux", "amd64")
 
@@ -106,11 +111,7 @@ def test_windows_without_a_devkit_declares_nothing(context, monkeypatch):
 
     monkeypatch.setenv("RI_DEVKIT", "C:/Ruby/msys64")
     assert (
-        len(
-            _commands(
-                context, gem="C:/Ruby/bin/gem", compiler=None, system="Windows"
-            )
-        )
+        len(_commands(context, gem="C:/Ruby/bin/gem", compiler=None, system="Windows"))
         == 1
     )
 
@@ -153,15 +154,13 @@ def test_the_pinned_version_is_the_one_the_gemfile_declares(context):
     from automated_security_helper.utils.tool_downloads import CFN_NAG_GEM_VERSION
 
     gemfile = (
-        Path(__file__).parents[4]
-        / "automated_security_helper"
-        / "assets"
-        / "Gemfile"
+        Path(__file__).parents[4] / "automated_security_helper" / "assets" / "Gemfile"
     ).read_text(encoding="utf-8")
     assert f'"{CFN_NAG_GEM_VERSION}"' in gemfile, (
         f"CFN_NAG_GEM_VERSION is {CFN_NAG_GEM_VERSION} but assets/Gemfile pins "
         "something else"
     )
-    assert CFN_NAG_GEM_VERSION in _commands(
-        context, gem="/usr/bin/gem", compiler="/usr/bin/cc"
-    )[0]
+    assert (
+        CFN_NAG_GEM_VERSION
+        in _commands(context, gem="/usr/bin/gem", compiler="/usr/bin/cc")[0]
+    )

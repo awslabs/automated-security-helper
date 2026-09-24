@@ -1,4 +1,5 @@
 """MCP config shape variants — dispatched by MCPConfig.format."""
+
 from __future__ import annotations
 
 import json
@@ -37,6 +38,7 @@ def mcp_opencode_embedded(m: Manifest, base_dir: Path) -> dict:
 
 def mcp_amazonq(m: Manifest, base_dir: Path) -> dict:
     from .manifest_builders import amazonq_agent
+
     return amazonq_agent(m, base_dir)
 
 

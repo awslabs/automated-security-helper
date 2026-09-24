@@ -145,9 +145,7 @@ class TestRunCommandAssembly:
             tmp_path, tmp_path / "out", workspace_relative_file="dev.code-workspace"
         )
         mounts = [
-            command[index + 1]
-            for index, arg in enumerate(command)
-            if arg == "--mount"
+            command[index + 1] for index, arg in enumerate(command) if arg == "--mount"
         ]
         source_mounts = [m for m in mounts if "destination=/src" in m]
         assert len(source_mounts) == 1

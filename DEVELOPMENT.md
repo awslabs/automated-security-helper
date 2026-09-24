@@ -245,9 +245,13 @@ When developing custom scanner plugins for ASH, follow these guidelines:
 All scanner plugins should inherit from `ScannerPluginBase` and implement the required methods:
 
 ```python
-from automated_security_helper.base.scanner_plugin import ScannerPluginBase, ScannerPluginConfigBase
+from automated_security_helper.base.scanner_plugin import (
+    ScannerPluginBase,
+    ScannerPluginConfigBase,
+)
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from typing import Optional
+
 
 @ash_scanner_plugin
 class MyCustomScanner(ScannerPluginBase[MyCustomScannerConfig]):

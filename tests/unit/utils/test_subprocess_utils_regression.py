@@ -14,7 +14,10 @@ import pytest
 class TestBug4TimeoutExpiredReturnType:
     """PR#274 Bug #3: run_command must return CompletedProcess when TimeoutExpired is caught."""
 
-    @patch("automated_security_helper.utils.subprocess_utils.find_executable", return_value=None)
+    @patch(
+        "automated_security_helper.utils.subprocess_utils.find_executable",
+        return_value=None,
+    )
     @patch("subprocess.run")
     def test_timeout_returns_completed_process(self, mock_run, _mock_find):
         """When subprocess.run raises TimeoutExpired, run_command should
@@ -31,7 +34,10 @@ class TestBug4TimeoutExpiredReturnType:
             f"Expected CompletedProcess, got {type(result).__name__}"
         )
 
-    @patch("automated_security_helper.utils.subprocess_utils.find_executable", return_value=None)
+    @patch(
+        "automated_security_helper.utils.subprocess_utils.find_executable",
+        return_value=None,
+    )
     @patch("subprocess.run")
     def test_timeout_has_returncode_attribute(self, mock_run, _mock_find):
         """The CompletedProcess from a timeout must expose .returncode
@@ -47,7 +53,10 @@ class TestBug4TimeoutExpiredReturnType:
         assert hasattr(result, "returncode")
         assert result.returncode == -1
 
-    @patch("automated_security_helper.utils.subprocess_utils.find_executable", return_value=None)
+    @patch(
+        "automated_security_helper.utils.subprocess_utils.find_executable",
+        return_value=None,
+    )
     @patch("subprocess.run")
     def test_timeout_preserves_stderr_message(self, mock_run, _mock_find):
         """stderr should contain the timeout duration."""
@@ -61,7 +70,10 @@ class TestBug4TimeoutExpiredReturnType:
 
         assert "5" in result.stderr
 
-    @patch("automated_security_helper.utils.subprocess_utils.find_executable", return_value=None)
+    @patch(
+        "automated_security_helper.utils.subprocess_utils.find_executable",
+        return_value=None,
+    )
     @patch("subprocess.run")
     def test_timeout_preserves_stdout_from_exception(self, mock_run, _mock_find):
         """If the TimeoutExpired has partial stdout, it should be carried over."""
@@ -77,7 +89,10 @@ class TestBug4TimeoutExpiredReturnType:
         assert result.stdout == "partial output"
         assert result.stderr == "partial err"
 
-    @patch("automated_security_helper.utils.subprocess_utils.find_executable", return_value=None)
+    @patch(
+        "automated_security_helper.utils.subprocess_utils.find_executable",
+        return_value=None,
+    )
     @patch("subprocess.run")
     def test_timeout_still_raises_when_check_true(self, mock_run, _mock_find):
         """When check=True, TimeoutExpired should still propagate."""
@@ -94,7 +109,10 @@ class TestBug4TimeoutExpiredReturnType:
 class TestBug5CalledProcessErrorReturnType:
     """PR#274 Bug #4: run_command must return CompletedProcess when CalledProcessError is caught."""
 
-    @patch("automated_security_helper.utils.subprocess_utils.find_executable", return_value=None)
+    @patch(
+        "automated_security_helper.utils.subprocess_utils.find_executable",
+        return_value=None,
+    )
     @patch("subprocess.run")
     def test_called_process_error_returns_completed_process(self, mock_run, _mock_find):
         """When subprocess.run raises CalledProcessError and check=False,
@@ -111,7 +129,10 @@ class TestBug5CalledProcessErrorReturnType:
             f"Expected CompletedProcess, got {type(result).__name__}"
         )
 
-    @patch("automated_security_helper.utils.subprocess_utils.find_executable", return_value=None)
+    @patch(
+        "automated_security_helper.utils.subprocess_utils.find_executable",
+        return_value=None,
+    )
     @patch("subprocess.run")
     def test_called_process_error_preserves_returncode(self, mock_run, _mock_find):
         """The returncode from the CalledProcessError should be preserved."""
@@ -125,7 +146,10 @@ class TestBug5CalledProcessErrorReturnType:
 
         assert result.returncode == 42
 
-    @patch("automated_security_helper.utils.subprocess_utils.find_executable", return_value=None)
+    @patch(
+        "automated_security_helper.utils.subprocess_utils.find_executable",
+        return_value=None,
+    )
     @patch("subprocess.run")
     def test_called_process_error_preserves_output(self, mock_run, _mock_find):
         """stdout and stderr from the CalledProcessError should carry over."""
@@ -140,7 +164,10 @@ class TestBug5CalledProcessErrorReturnType:
         assert result.stdout == "captured out"
         assert result.stderr == "captured err"
 
-    @patch("automated_security_helper.utils.subprocess_utils.find_executable", return_value=None)
+    @patch(
+        "automated_security_helper.utils.subprocess_utils.find_executable",
+        return_value=None,
+    )
     @patch("subprocess.run")
     def test_called_process_error_handles_none_output(self, mock_run, _mock_find):
         """When output/stderr are None on the exception, use empty strings."""
@@ -156,9 +183,14 @@ class TestBug5CalledProcessErrorReturnType:
         assert result.stdout == ""
         assert result.stderr == ""
 
-    @patch("automated_security_helper.utils.subprocess_utils.find_executable", return_value=None)
+    @patch(
+        "automated_security_helper.utils.subprocess_utils.find_executable",
+        return_value=None,
+    )
     @patch("subprocess.run")
-    def test_called_process_error_still_raises_when_check_true(self, mock_run, _mock_find):
+    def test_called_process_error_still_raises_when_check_true(
+        self, mock_run, _mock_find
+    ):
         """When check=True, CalledProcessError should still propagate."""
         from automated_security_helper.utils.subprocess_utils import run_command
 
@@ -174,12 +206,17 @@ class TestBug48PopenOrphanedOnException:
     """PR#274 Bug #38: Popen must be killed and waited on if an exception occurs
     during stream reading in run_command_stream_output."""
 
-    @patch("automated_security_helper.utils.subprocess_utils.find_executable", return_value=None)
+    @patch(
+        "automated_security_helper.utils.subprocess_utils.find_executable",
+        return_value=None,
+    )
     @patch("subprocess.Popen")
     def test_popen_killed_on_exception_during_read(self, mock_popen_cls, _mock_find):
         """If an exception is raised while iterating stdout, the process
         must be killed and waited on."""
-        from automated_security_helper.utils.subprocess_utils import run_command_stream_output
+        from automated_security_helper.utils.subprocess_utils import (
+            run_command_stream_output,
+        )
 
         mock_process = MagicMock()
         mock_process.stdout.__iter__ = MagicMock(side_effect=OSError("read failed"))
@@ -192,11 +229,16 @@ class TestBug48PopenOrphanedOnException:
         mock_process.wait.assert_called()
         assert result == 1
 
-    @patch("automated_security_helper.utils.subprocess_utils.find_executable", return_value=None)
+    @patch(
+        "automated_security_helper.utils.subprocess_utils.find_executable",
+        return_value=None,
+    )
     @patch("subprocess.Popen")
     def test_popen_not_killed_if_already_exited(self, mock_popen_cls, _mock_find):
         """If the process already exited before cleanup, kill should not be called."""
-        from automated_security_helper.utils.subprocess_utils import run_command_stream_output
+        from automated_security_helper.utils.subprocess_utils import (
+            run_command_stream_output,
+        )
 
         mock_process = MagicMock()
         mock_process.stdout.__iter__ = MagicMock(side_effect=OSError("read failed"))
@@ -208,15 +250,22 @@ class TestBug48PopenOrphanedOnException:
         mock_process.kill.assert_not_called()
         assert result == 1
 
-    @patch("automated_security_helper.utils.subprocess_utils.find_executable", return_value=None)
+    @patch(
+        "automated_security_helper.utils.subprocess_utils.find_executable",
+        return_value=None,
+    )
     @patch("subprocess.Popen")
     def test_popen_cleaned_up_on_normal_exit(self, mock_popen_cls, _mock_find):
         """On a normal exit (no exception), the process should still be
         properly waited on via the finally block."""
-        from automated_security_helper.utils.subprocess_utils import run_command_stream_output
+        from automated_security_helper.utils.subprocess_utils import (
+            run_command_stream_output,
+        )
 
         mock_process = MagicMock()
-        mock_process.stdout.__iter__ = MagicMock(return_value=iter(["line1\n", "line2\n"]))
+        mock_process.stdout.__iter__ = MagicMock(
+            return_value=iter(["line1\n", "line2\n"])
+        )
         mock_process.wait.return_value = None
         mock_process.returncode = 0
         mock_process.poll.return_value = 0  # already exited after normal iteration

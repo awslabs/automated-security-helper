@@ -29,19 +29,17 @@ def mock_secrets_collection():
     with patch("detect_secrets.SecretsCollection") as mock_collection:
         mock_instance = MagicMock()
         mock_data = {
-            "test_file.py": set(
-                [
-                    PotentialSecret(
-                        type="Base64 High Entropy String",
-                        filename="test_file.py",
-                        # pragma: allowlist nextline secret - This is a fake value for testing Secrets Detection in unit/integration tests
-                        secret="abcd1234",  # nosec B106 - This is a fake value for testing Secrets Detection in unit/integration tests
-                        line_number=10,
-                        is_secret=True,
-                        is_verified=True,
-                    )
-                ]
-            )
+            "test_file.py": {
+                PotentialSecret(
+                    type="Base64 High Entropy String",
+                    filename="test_file.py",
+                    # pragma: allowlist nextline secret - This is a fake value for testing Secrets Detection in unit/integration tests
+                    secret="abcd1234",  # nosec B106 - This is a fake value for testing Secrets Detection in unit/integration tests
+                    line_number=10,
+                    is_secret=True,
+                    is_verified=True,
+                )
+            }
         }
         mock_instance.data = mock_data
 
@@ -147,19 +145,17 @@ def test_detect_secrets_scanner_sarif_output(
     from detect_secrets.core.potential_secret import PotentialSecret
 
     mock_secrets_collection.return_value.data = {
-        "test_file.py": set(
-            [
-                PotentialSecret(
-                    type="Base64 High Entropy String",
-                    filename="test_file.py",
-                    # pragma: allowlist nextline secret - This is a fake value for testing Secrets Detection in unit/integration tests
-                    secret="abcd1234",  # nosec B106 - This is a fake value for testing Secrets Detection in unit/integration tests
-                    line_number=10,
-                    is_secret=True,
-                    is_verified=True,
-                )
-            ]
-        )
+        "test_file.py": {
+            PotentialSecret(
+                type="Base64 High Entropy String",
+                filename="test_file.py",
+                # pragma: allowlist nextline secret - This is a fake value for testing Secrets Detection in unit/integration tests
+                secret="abcd1234",  # nosec B106 - This is a fake value for testing Secrets Detection in unit/integration tests
+                line_number=10,
+                is_secret=True,
+                is_verified=True,
+            )
+        }
     }
 
     target_dir = ash_temp_path / "target"
@@ -195,31 +191,27 @@ def test_detect_secrets_scanner_with_multiple_files(
     from detect_secrets.core.potential_secret import PotentialSecret
 
     mock_secrets_collection.return_value.data = {
-        "file1.py": set(
-            [
-                PotentialSecret(
-                    type="Secret1",
-                    filename="test_file.py",
-                    # pragma: allowlist nextline secret - This is a fake value for testing Secrets Detection in unit/integration tests
-                    secret="hash1",  # nosec B106 - This is a fake value for testing Secrets Detection in unit/integration tests
-                    line_number=81,
-                    is_secret=True,
-                    is_verified=True,
-                ),
-            ]
-        ),
-        "file2.py": set(
-            [
-                PotentialSecret(
-                    type="AWSSecretKey",
-                    filename="test_file.py",
-                    secret="1239491230230912",  # nosec B106 - This is a fake value for testing Secrets Detection in unit/integration tests
-                    line_number=4,
-                    is_secret=True,
-                    is_verified=True,
-                )
-            ]
-        ),
+        "file1.py": {
+            PotentialSecret(
+                type="Secret1",
+                filename="test_file.py",
+                # pragma: allowlist nextline secret - This is a fake value for testing Secrets Detection in unit/integration tests
+                secret="hash1",  # nosec B106 - This is a fake value for testing Secrets Detection in unit/integration tests
+                line_number=81,
+                is_secret=True,
+                is_verified=True,
+            ),
+        },
+        "file2.py": {
+            PotentialSecret(
+                type="AWSSecretKey",
+                filename="test_file.py",
+                secret="1239491230230912",  # nosec B106 - This is a fake value for testing Secrets Detection in unit/integration tests
+                line_number=4,
+                is_secret=True,
+                is_verified=True,
+            )
+        },
     }
 
     target_dir = ash_temp_path / "target"

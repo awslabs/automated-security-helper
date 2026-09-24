@@ -5,17 +5,25 @@ import json
 import logging
 import os
 import platform
+import shutil
 import sys
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional, Union, cast
+from typing import TYPE_CHECKING, List, Optional, cast
 
 import typer
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from rich import print
+
+# `print` shadows the builtin on purpose: this is rich's documented import
+# idiom, so every print() below renders markup and respects the console. The
+# fix A004 wants is an alias, which would mean rewriting every call in this
+# module for no behavior change -- and tests/unit/cli/mcp/test_stdout_jsonrpc_safety.py
+# reasons about this exact import form.
+from rich import print  # noqa: A004
 
 from automated_security_helper.core.constants import (
     ASH_CONFIG_FILE_NAMES,
+    ASH_EXIT_CODES,
     ASH_WORK_DIR_NAME,
     is_offline_mode,
 )
@@ -218,9 +226,9 @@ _COMPLETE_SCANNER_STATUSES = frozenset(
 
 #: Every remaining ScannerStatus member: today ERROR (ran and failed) and MISSING
 #: (selected, dependencies unavailable, never ran).
-_INCOMPLETE_SCANNER_STATUSES = frozenset(
-    {member.value for member in ScannerStatus}
-) - _COMPLETE_SCANNER_STATUSES
+_INCOMPLETE_SCANNER_STATUSES = (
+    frozenset({member.value for member in ScannerStatus}) - _COMPLETE_SCANNER_STATUSES
+)
 
 # The statuses that mean "this scanner executed and reached a verdict".
 #
@@ -805,6 +813,113 @@ def _workspace_relative_file(opts: ScanOptions) -> Optional[str]:
     )
 
 
+# The output-directory entries a local scan clears before it starts, copied from the two
+# places the orchestrator clears them: ``ensure_directories`` rmtrees these four working
+# directories (core/orchestrator.py:418-425) and ``initialize`` unlinks these three files
+# (core/orchestrator.py:280-293). Both are gated there on ``existing_results_path is
+# None``, which is the exemption in ``_discard_prior_run_artifacts`` below.
+#
+# Named here rather than inlined because the point of the list is that it matches that
+# other list; a reader checking the claim needs to see the whole of both.
+_PRIOR_RUN_OUTPUT_DIRECTORIES = ("analysis", "reports", "scanners", "converted")
+_PRIOR_RUN_OUTPUT_FILES = (
+    "ash_aggregated_results.json",
+    "ash-ignore-report.txt",
+    "ash-scan-set-files-list.txt",
+)
+
+
+def _discard_prior_run_artifacts(opts: ScanOptions, logger) -> None:
+    """Clear the output directory the way a local scan does, before an outer mode starts.
+
+    Container mode and Nix mode both re-execute ASH somewhere else and then read
+    ``ash_aggregated_results.json`` back out of the output directory, so the file's mere
+    presence is what stands in for "the scan ran". On its own it does not mean that. Every
+    pre-run refusal in ``run_ash_container`` -- a non-numeric ``--container-uid``, a
+    rejected revision, an OCI runner that cannot be resolved, an image build that failed --
+    reports the same status the in-container CLI uses for an error during execution, and
+    leaves whatever an earlier run wrote: possibly of a different repository, possibly with
+    a different scanner set. Removing it beforehand is what makes ``exists()`` afterwards
+    mean "this invocation produced this".
+
+    The exit code is not the only thing a stale tree corrupts, and it is not the worst.
+    ``reports/`` is what gets published: a caller that runs its publish steps on failure as
+    well as success -- which is the usual shape, so that a failed scan still explains
+    itself -- will post a previous run's ``ash.summary.md`` as its comment, upload a
+    previous ``ash.junit.xml`` as check results and a previous ``ash.ghas.sarif`` to code
+    scanning. An honest exit code beside a stale clean report is the same false negative
+    this function exists to prevent, just moved somewhere a reviewer trusts more.
+
+    So this clears what a local scan clears, in full: the four working directories
+    ``ensure_directories`` rmtrees and the three files ``initialize`` unlinks
+    (``_PRIOR_RUN_OUTPUT_DIRECTORIES`` and ``_PRIOR_RUN_OUTPUT_FILES``). Two entries earn a
+    note:
+
+    - ``reports/ash.sarif`` is not redundant with the results file. ``_compute_exit_code``
+      re-reads that SARIF and lets its count REPLACE the one taken from the model, so a
+      stale report decides the exit code by itself.
+    - ``projects/`` is deliberately NOT in either list. Workspace mode writes a complete
+      single-project tree per project under ``projects/<key>/`` and only the unified
+      top-level files are rewritten by the outer run, so a workspace scan that removed
+      ``projects/`` would delete the per-project reports it is about to summarize.
+    """
+    if opts.existing_results:
+        # The one shape that legitimately consumes a file from before this invocation.
+        # --use-existing resolves to a path in this directory and the inner scan is asked
+        # to read it, so removing it would delete the run's only input. --phases report
+        # and --phases inspect do NOT need this exemption: with existing_results unset the
+        # orchestrator unlinks the results file itself, so the inner run discards it
+        # whether or not the host did.
+        #
+        # Truthiness, not `is not None`, and the empty string is why: run_ash_container
+        # appends --use-existing under `if existing_results:`, so an empty value asks the
+        # inner scan to read nothing. Exempting it here on `is not None` would keep the
+        # stale file AND leave it unread by the container -- the read-back then answers
+        # from it, which is the exact failure this function closes.
+        return
+
+    stale_paths = [
+        opts.output_dir / name
+        for name in (*_PRIOR_RUN_OUTPUT_DIRECTORIES, *_PRIOR_RUN_OUTPUT_FILES)
+    ]
+    for stale in stale_paths:
+        try:
+            if stale.is_dir():
+                shutil.rmtree(stale)
+            else:
+                # Also the branch a non-directory `reports` takes: removing it as a file
+                # is what lets the inner run create the directory it expects.
+                stale.unlink(missing_ok=True)
+        except OSError as e:
+            if not stale.exists():
+                # The call failed but the artifact is gone -- another process removed it,
+                # or a partial rmtree finished the job. Refusing here would fail on the
+                # condition "the call raised" when the property that matters is "the
+                # artifact is still there". On Windows that distinction is the difference
+                # between refusing a scan and running one.
+                logger.debug(
+                    f"{stale.as_posix()} is already gone despite {type(e).__name__}: {e}"
+                )
+                continue
+            # Fail closed. Continuing here would leave the read-back unable to tell a run
+            # that never started from one that finished clean, which is the whole failure
+            # this function exists to prevent -- and a false clean report is worse than a
+            # refusal an operator can see and fix.
+            logger.error(
+                f"Could not remove {stale.as_posix()} from a previous run: {e}. ASH "
+                "cannot tell that output apart from output this scan produced, so it "
+                "will not read it back or publish it. Remove it, or point --output-dir "
+                "somewhere ASH can write."
+            )
+            sys.exit(1)
+
+
+# The statuses the in-container CLI reaches from a results file, and therefore the only
+# ones the host can re-derive its own verdict from. Deliberately narrower than
+# ASH_EXIT_CODES -- see the guard in _run_container_mode for which two are excluded and why.
+_CONTAINER_VERDICT_EXIT_CODES = frozenset({0, 1, 2})
+
+
 def _run_container_mode(
     opts: ScanOptions,
     logger,
@@ -847,6 +962,12 @@ def _run_container_mode(
         if opts.fail_on_incomplete_scanners is not None
         else resolved_fail_on_incomplete_scanners
     )
+
+    if opts.run:
+        # Only when a scan is actually being asked for. --no-run builds an image and
+        # stops; it never claims to have scanned anything, so it has no business
+        # discarding a report from a run that did.
+        _discard_prior_run_artifacts(opts, logger)
 
     container_result = run_ash_container(
         source_dir=opts.source_dir,
@@ -936,6 +1057,57 @@ def _run_container_mode(
             sys.exit(container_result.returncode)
         sys.exit(0)
 
+    # A status that is not a verdict did not come from a results file, so there is no
+    # verdict for the host to re-derive and nothing below should try.
+    #
+    # NOT "any non-zero status", and the difference matters: the container entrypoint is
+    # this same CLI, so 0, 1 and 2 are verdicts that _compute_exit_code reached from a
+    # results file, and the host deliberately recomputes them, because it applies
+    # --min-severity and --ignore-suppressions, neither of which is forwarded inward.
+    # Exiting on 2 here would report findings the operator asked to filter out.
+    #
+    # NOT ASH_EXIT_CODES either, which is the wider table of every status the CLI can
+    # return and includes two that assert the opposite of a verdict. 3 is an invalid
+    # config, raised by _run_local_mode before it writes the results file, and 4 is a
+    # workspace definition or policy error, which models/workspace.py defines precisely so
+    # that "nothing was scanned" is distinguishable from 2's "a scan completed and found
+    # something". Falling through on either sends the caller to the read-back, which finds
+    # no file and reports 1 with a message about a missing report rather than about the
+    # config -- losing the code that said which of the two it was.
+    #
+    # Everything outside the set is either one of those two or the runner's own
+    # vocabulary: 125 for a `docker run` that failed before the entrypoint, 126 and 127 for
+    # an entrypoint that could not be executed, 137 for a container the kernel killed. Each
+    # of the latter can leave a partially written report behind, which the pre-run cleanup
+    # cannot catch because the file is then genuinely this invocation's -- just not a
+    # complete account of it.
+    #
+    # Default 1, not 0, for a result object without the attribute: this guard exists to
+    # fail closed and "assume success" is the wrong posture inside it.
+    container_returncode = getattr(container_result, "returncode", 1)
+    if container_returncode not in _CONTAINER_VERDICT_EXIT_CODES:
+        verdict_codes = ", ".join(
+            str(code) for code in sorted(_CONTAINER_VERDICT_EXIT_CODES)
+        )
+        ash_meaning = ASH_EXIT_CODES.get(container_returncode)
+        if ash_meaning is not None:
+            # One of ASH's own non-verdict codes. Name what it means, because the status
+            # is the whole diagnostic -- there is no report to point the operator at.
+            logger.error(
+                f"The container exited with {container_returncode} ({ash_meaning}), which "
+                "means nothing was scanned. Only "
+                f"{verdict_codes} are verdicts ASH reaches from a results file, so there "
+                "is nothing in the output directory to read back."
+            )
+        else:
+            logger.error(
+                f"The container exited with {container_returncode}, which is not a status "
+                f"an ASH scan can return ({verdict_codes} are the verdicts it reaches "
+                "from a results file). The scan did not run to completion, so any report "
+                "in the output directory is incomplete and is not being read back."
+            )
+        sys.exit(container_returncode)
+
     output_file = opts.output_dir / "ash_aggregated_results.json"
     if output_file.exists():
         with open(output_file, mode="r", encoding="utf-8") as f:
@@ -963,14 +1135,25 @@ def _run_nix_mode(opts: ScanOptions, logger) -> AshAggregatedResults:
     since a development shell changes PATH but not the filesystem, so there is no mount
     translation and none of that path-mapping logic belongs here.
     """
+    # The shell writes into the output directory this process was given, so a report left
+    # by an earlier run sits exactly where a successful one would. run_ash_nix returns a
+    # bare status and requests no capture -- stdout and stderr are both None -- so a `nix`
+    # that exists on PATH and fails is otherwise indistinguishable from a scan that ran.
+    _discard_prior_run_artifacts(opts, logger)
+
     nix_result = run_ash_nix(debug=opts.debug)
 
     if nix_result.returncode != 0:
-        # Logged rather than fatal. A scan that finds something exits non-zero by design,
+        # Reported rather than fatal. A scan that finds something exits non-zero by design,
         # so treating any non-zero status as a failure here would turn a working scan into
         # an error. Whether findings should fail the run is decided from the loaded
         # results, exactly as in container mode.
-        logger.debug(f"Nix shell exited with code {nix_result.returncode}")
+        #
+        # At warning rather than debug because this is the only diagnostic the path has
+        # for a shell that never opened, and the console handler plus both file handlers
+        # sit at INFO -- a debug record is emitted nowhere, neither to the terminal nor to
+        # ash.log.
+        logger.warning(f"Nix shell exited with code {nix_result.returncode}")
 
     # The inner scan wrote to the same output directory this process was given, so unlike
     # container mode there is no path to translate back.
