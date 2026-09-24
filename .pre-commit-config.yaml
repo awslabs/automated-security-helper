@@ -107,12 +107,24 @@ repos:
     # .github/workflows/ash-unified-ci.yml, not a tidy-up.
     #
     # One behavior change arrives with the bump and is deliberately NOT suppressed
-    # here: at 0.16.x the ruff-format hook's `types_or` includes `markdown`, and
-    # `ruff format` rewrites fenced python blocks. On this tree that is 37 .md files
-    # on top of 208 .py files. Narrowing it in this file alone would put the hook and
-    # the `ruff format --check` step back out of step with each other, which is the
-    # defect above in miniature. If markdown should be out of scope, the place for
-    # that is [tool.ruff] in pyproject.toml, which the hook and the gate both read.
+    # here: the ruff-format hook's `types_or` is [python, pyi, jupyter, markdown] at
+    # v0.16.7 and [python, pyi, jupyter] at v0.11.8, so `ruff format` now rewrites
+    # fenced python blocks in .md files too. Checked at the pinned tag by appending a
+    # `x  =  1` fence to DEVELOPMENT.md in a scratch export: the hook rewrote it to
+    # `x = 1` and reported "1 file reformatted, 916 files left unchanged", which is
+    # also the size of the formatter's file set here.
+    #
+    # The churn that scope produced is recorded as a commit rather than as a figure
+    # that goes stale: e3306d33 "style: apply ruff format across the repository" is
+    # 276 files -- 236 .py, 37 .md, and 3 .md.template that ruff does not discover and
+    # a human formatted through a temporary .md name. `git show --stat e3306d33`
+    # reproduces that breakdown at any later date. Because it landed, a run on the
+    # current tree reformats nothing; the scope is the durable claim, not the count.
+    #
+    # Narrowing it in this file alone would put the hook and the `ruff format --check`
+    # step back out of step with each other, which is the defect above in miniature.
+    # If markdown should be out of scope, the place for that is [tool.ruff] in
+    # pyproject.toml, which the hook and the gate both read.
     rev: v0.16.7
     hooks:
       # `ruff-check` is the current id. `ruff` still resolves -- upstream keeps it as
@@ -120,10 +132,33 @@ repos:
       #
       # --fix stays, and it is precisely why CI does not run `pre-commit run
       # --all-files`. Repairing the file is right on a developer's machine and wrong
-      # in a gate: measured on this tree, one full run rewrote 569 files
-      # (+23,283/-21,679) and then reported its verdict over its own edits. CI runs
-      # `ruff check` and `ruff format --check` directly, so a violation fails there
-      # instead of being quietly fixed.
+      # in a gate, and the mechanism is plain: `ruff check --fix` exits 0 once it has
+      # repaired everything it found. An unused import appended to a source file comes
+      # back as "Found 1 error (1 fixed, 0 remaining)" and exit 0 -- the violation is
+      # gone, and so is the only record that it was there. Run the hook twice and the
+      # second run prints "Passed", because the tree it judges is the one the first run
+      # wrote. pre-commit does fail the first run, but on its own "files were modified
+      # by this hook" bookkeeping rather than on anything the tool reported, so a CI
+      # step invoking `ruff check --fix` directly just collects the 0.
+      #
+      # That is not hypothetical on this tree, and the population is no longer Python.
+      # Measured on a `git archive` export of fa98bcc4 with an isolated
+      # PRE_COMMIT_HOME, `pre-commit run --all-files` rewrote 27 files,
+      # +12,824/-12,786, every one of them JSON from the pretty-format-json --autofix
+      # above; two npm package-lock.json and four transpiler/schemas/*.schema.json are
+      # 12,412 of those 12,824 lines. ruff-check and ruff-format rewrote nothing there,
+      # because c02fc135 (177 .py files, +575/-685 of --fix output) and e3306d33 had
+      # already landed. To re-measure without mutating the repository:
+      #
+      #   d=$(mktemp -d); git archive fa98bcc4 | tar -x -C "$d"
+      #   git -C "$d" init -q && git -C "$d" add -A && git -C "$d" commit -qm base
+      #   (cd "$d" && PRE_COMMIT_HOME="$d/.pc" pre-commit run --all-files)
+      #   git -C "$d" diff --shortstat
+      #
+      # The residue being JSON rather than Python sharpens the argument instead of
+      # weakening it: the defect belongs to --fix-style hooks as a class, not to one
+      # hook. CI runs `ruff check` and `ruff format --check` directly, so a violation
+      # fails there instead of being quietly fixed.
       - id: ruff-check
         args: [--fix]
       # Run the formatter.

@@ -141,7 +141,7 @@ dev = [
  # environment with the interpreter pre-commit is itself running under, so the hook set
  # in .pre-commit-config.yaml is installable only if THAT interpreter satisfies each
  # hook's own requires-python. An unmanaged pre-commit on PATH need not: the config pins
- # commitizen-tools/commitizen at v4.19.0, and commitizen declares ">=3.10" from 4.11.0
+ # commitizen-tools/commitizen at v4.18.1, and commitizen declares ">=3.10" from 4.11.0
  # onward (4.10.1 still declared ">=3.9"). Reproduced against a pre-commit 4.3.0 running
  # under Python 3.9.25, where `pre-commit install-hooks` exits 3 on
  #   ERROR: Package 'commitizen' requires a different Python: 3.9.25 not in '<4.0,>=3.10'
