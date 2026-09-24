@@ -126,6 +126,36 @@ describe('AgentCore runtime contract', () => {
     expect(buildSpec).toContain('--no-stateless-http');
   });
 
+  test('the runtime resolves the contradiction between its own two defaults', () => {
+    /*
+     * AshVersion defaults to a release whose `ash mcp` has no --stateless-http,
+     * and McpStatelessHttp defaults to true. The entrypoint refuses that pair and
+     * exits 65, so this template could not deploy with the values it ships --
+     * the symptom being a health-check timeout that names no cause.
+     *
+     * Both defaults are individually correct, so the resolution is a third value.
+     * Asserted here rather than in the entrypoint's own default because only this
+     * target has measured evidence that stateful works: see the header of
+     * ash-agentcore-stack.ts. The behavioral proof that the pair now starts is in
+     * ash-container-scripts.test.ts, which runs the real entrypoint against a fake
+     * ash with v3.7.0's option set.
+     */
+    template.hasResourceProperties('AWS::BedrockAgentCore::Runtime', {
+      EnvironmentVariables: Match.objectLike({
+        ASH_MCP_STATELESS_FALLBACK: 'warn',
+      }),
+    });
+  });
+
+  test('the parameter defaults this stack ships are the ones that needed resolving', () => {
+    // Pinned so the fallback above cannot become decorative without anyone
+    // noticing: if either default moves, this fails and whoever moved it has to
+    // decide whether the fallback is still needed.
+    const parameters = template.toJSON().Parameters;
+    expect(parameters[ASH_PARAMETER_NAMES.ashVersion].Default).toBe('v3.7.0');
+    expect(parameters[ASH_PARAMETER_NAMES.mcpStatelessHttp].Default).toBe('true');
+  });
+
   test('the runtime name contains no hyphens', () => {
     // AgentRuntimeName is matched against [a-zA-Z][a-zA-Z0-9_]{0,47}. Stack names
     // routinely contain hyphens, so they must be stripped rather than passed on.

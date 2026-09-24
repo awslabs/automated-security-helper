@@ -1478,6 +1478,165 @@ class TestArchiveReading:
         assert "1 of them symlink/hardlink members" in out
 
 
+class TestTheContainerMustBeginAtByteZero:
+    """`zipfile.is_zipfile` does not answer "is this file a zip".
+
+    A zip's structure is at the END of the file: `_EndRecData` finds the end-of-
+    central-directory record by reading the last 64 KiB and searching backwards. So
+    `is_zipfile` is True for anything with a zip appended, whatever precedes it --
+    the property self-extracting archives are built on.
+
+    `read_members` asked it first and unconditionally, so a zip concatenated onto a
+    real sdist took the wheel arm. `read_sdist_members` was never called, every rule
+    was applied to the appended zip's members instead of the tarball's, and the
+    member count the gate prints as its evidence described the decoy. The tarball's
+    own members -- which could be anything at all -- were never classified.
+    """
+
+    @staticmethod
+    def _decoy_zip_bytes(tmp_path: Path) -> bytes:
+        """A wheel whose every member is legitimate. It is the bait, not the payload.
+
+        Deliberately clean: the point is not that the appended half contains
+        something bad, it is that the appended half is what got checked. A dirty
+        decoy would be caught by a member rule and the dispatch defect would be
+        invisible.
+        """
+        decoy = _write_wheel(tmp_path / "decoy.whl", dict(CLEAN_MEMBERS))
+        return decoy.read_bytes()
+
+    @staticmethod
+    def _sdist(path: Path) -> Path:
+        with tarfile.open(path, "w") as archive:
+            for name in gate.LEGITIMATE_SDIST_MEMBERS:
+                info = tarfile.TarInfo(name)
+                info.size = len(b"# ash\n")
+                archive.addfile(info, io.BytesIO(b"# ash\n"))
+        return path
+
+    def test_a_zip_appended_to_an_sdist_is_refused(self, tmp_path):
+        """The reproduced attack. Both halves are clean; only the dispatch is wrong."""
+        poisoned = self._sdist(tmp_path / "automated_security_helper-3.7.0.tar")
+        with poisoned.open("ab") as handle:
+            handle.write(self._decoy_zip_bytes(tmp_path))
+
+        # Both sniffs accept it, which is the fact the guard is built on.
+        assert zipfile.is_zipfile(str(poisoned))
+        assert tarfile.is_tarfile(str(poisoned))
+
+        with pytest.raises(ValueError, match="accepted as BOTH a zip and a tar"):
+            gate.check_artifact(str(poisoned))
+        assert gate.main(["assert-artifact-contents.py", str(poisoned)]) == 2
+
+    def test_a_zip_appended_to_non_archive_bytes_is_refused(self, tmp_path):
+        """The case the ambiguity check cannot see.
+
+        Leading bytes that are not a valid tar either, so `is_tarfile` is False and
+        only the leading-magic requirement stands between this and exit 0.
+        """
+        poisoned = tmp_path / "poisoned.whl"
+        poisoned.write_bytes(
+            b"not an archive of any kind\n" * 8 + self._decoy_zip_bytes(tmp_path)
+        )
+
+        assert zipfile.is_zipfile(str(poisoned))
+        assert not tarfile.is_tarfile(str(poisoned))
+
+        with pytest.raises(ValueError, match="does not begin with a zip"):
+            gate.check_artifact(str(poisoned))
+        assert gate.main(["assert-artifact-contents.py", str(poisoned)]) == 2
+
+    def test_a_real_wheel_and_a_real_sdist_are_still_accepted(self, tmp_path):
+        """The acceptance control. A guard that rejects the real artifacts is no use."""
+        wheel = _write_wheel(tmp_path / "clean.whl", dict(CLEAN_MEMBERS))
+        assert gate.check_artifact(str(wheel)).violations == []
+
+        sdist = self._sdist(tmp_path / "clean-3.7.0.tar")
+        assert gate.check_artifact(str(sdist)).violations == []
+
+        gzipped = tmp_path / "clean-3.7.0.tar.gz"
+        with tarfile.open(gzipped, "w:gz") as archive:
+            for name in gate.LEGITIMATE_SDIST_MEMBERS:
+                info = tarfile.TarInfo(name)
+                info.size = len(b"# ash\n")
+                archive.addfile(info, io.BytesIO(b"# ash\n"))
+        # A gzip stream begins \x1f\x8b, so the leading-magic rule must not be
+        # reached for it at all -- it is not zip-shaped.
+        assert not zipfile.is_zipfile(str(gzipped))
+        assert gate.check_artifact(str(gzipped)).violations == []
+
+    def test_an_empty_zip_is_refused_by_the_vacuity_rule_not_by_this_one(
+        self, tmp_path
+    ):
+        """The two guards must stay distinct, so each keeps its own message.
+
+        An empty zip is nothing but its end-of-archive record, which is why
+        `PK\\x05\\x06` is on ZIP_LEADING_MAGICS. It is still refused -- by the
+        zero-member rule, which is what says why -- and if the leading check caught
+        it first the reader would be told the container was appended to something,
+        which is not what happened.
+        """
+        empty = _write_wheel(tmp_path / "empty.whl", {})
+        assert gate.leading_bytes(str(empty)).startswith(b"PK\x05\x06")
+        with pytest.raises(ValueError, match="zero file members"):
+            gate.check_artifact(str(empty))
+
+    def test_neutering_the_leading_check_leaves_the_ambiguity_check(
+        self, tmp_path, monkeypatch
+    ):
+        """Single-variable: the two guards overlap on this fixture, deliberately."""
+        poisoned = self._sdist(tmp_path / "automated_security_helper-3.7.0.tar")
+        with poisoned.open("ab") as handle:
+            handle.write(self._decoy_zip_bytes(tmp_path))
+
+        monkeypatch.setattr(gate, "ZIP_LEADING_MAGICS", (b"",))
+        with pytest.raises(ValueError, match="accepted as BOTH"):
+            gate.check_artifact(str(poisoned))
+
+    def test_neutering_the_ambiguity_check_leaves_the_leading_check(
+        self, tmp_path, monkeypatch
+    ):
+        poisoned = self._sdist(tmp_path / "automated_security_helper-3.7.0.tar")
+        with poisoned.open("ab") as handle:
+            handle.write(self._decoy_zip_bytes(tmp_path))
+
+        monkeypatch.setattr(gate.tarfile, "is_tarfile", lambda path: False)
+        with pytest.raises(ValueError, match="does not begin with a zip"):
+            gate.check_artifact(str(poisoned))
+
+    def test_neutering_both_restores_the_defect(self, tmp_path, monkeypatch):
+        """The mutation control: with both off, the decoy is checked in its place.
+
+        The member count is the assertion, not just the exit code. 30 is the decoy
+        wheel's member total; the tarball carries the 32 sdist-shaped members and
+        none of them was classified. A gate reporting on the wrong half is the
+        defect, and this is what it looked like.
+        """
+        poisoned = self._sdist(tmp_path / "automated_security_helper-3.7.0.tar")
+        with poisoned.open("ab") as handle:
+            handle.write(self._decoy_zip_bytes(tmp_path))
+
+        monkeypatch.setattr(gate, "ZIP_LEADING_MAGICS", (b"",))
+        monkeypatch.setattr(gate.tarfile, "is_tarfile", lambda path: False)
+
+        report = gate.check_artifact(str(poisoned))
+        assert report.violations == []
+        assert report.count == len(gate.LEGITIMATE_WHEEL_MEMBERS)
+        assert report.count != len(gate.LEGITIMATE_SDIST_MEMBERS), (
+            "the two halves must have different member totals, or this control "
+            "cannot tell which one was examined"
+        )
+
+    def test_the_self_test_covers_the_dispatch(self):
+        """`--self-test` is the only check the packaging workflow runs before the
+        real one, so the dispatch guard has to be provable there too."""
+        stream = io.StringIO()
+        assert gate.run_self_test(stream) == 0, stream.getvalue()
+        output = stream.getvalue()
+        assert "tar with an appended zip rejected" in output, output
+        assert "zip appended to non-archive bytes rejected" in output, output
+
+
 class TestAllowlistsAreCheckedInBothDirections:
     """A pin that outlives the file it pins is a standing permission.
 

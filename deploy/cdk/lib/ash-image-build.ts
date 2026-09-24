@@ -784,8 +784,18 @@ export class AshImageBuild extends Construct {
           // Deliberately TypeScript comments, not Dockerfile `#` ones: this body is
           // copied verbatim into the synthesized template, and AshCodeCommitGate is
           // launched inline against CloudFormation's 51,200-byte TemplateBody cap.
+          //
+          // The three cache variables are read off the stage rather than written
+          // out: the ASH stage sets them (Dockerfile:210-212) and an offline build
+          // fills them, so expanding them here records what this build actually
+          // produced. Without them the handler's redirect points grype at an empty
+          // directory, and grype with no database reports PASSED with zero
+          // findings -- a clean verdict over an unscanned tree.
           'ENV ASH_IMAGE_PATH="${PATH}"',
           'ENV ASH_BAKED_UV_TOOL_DIR="/root/.local/share/uv/tools"',
+          'ENV ASH_BAKED_GRYPE_DB_DIR="${GRYPE_DB_CACHE_DIR}"',
+          'ENV ASH_BAKED_SEMGREP_RULES_DIR="${SEMGREP_RULES_CACHE_DIR}"',
+          'ENV ASH_BAKED_OPENGREP_RULES_DIR="${OPENGREP_RULES_CACHE_DIR}"',
           'COPY ash_gate_handler.py /var/task/ash_gate_handler.py',
           'WORKDIR /var/task',
           'ENTRYPOINT ["/usr/local/bin/python3", "-m", "awslambdaric"]',
