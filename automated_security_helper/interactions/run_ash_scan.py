@@ -9,7 +9,7 @@ import shutil
 import sys
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional, cast
+from typing import TYPE_CHECKING, Dict, List, Optional, cast
 
 import typer
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -42,6 +42,9 @@ from automated_security_helper.core.exceptions import (
     WorkspaceDefinitionError,
 )
 from automated_security_helper.core.progress import ExecutionPhaseType
+from automated_security_helper.core.scanner_statistics_calculator import (
+    ScannerStatisticsCalculator,
+)
 from automated_security_helper.core.unified_metrics import (
     format_duration,
     get_unified_scanner_metrics,
@@ -51,6 +54,12 @@ from automated_security_helper.interactions.run_ash_nix import run_ash_nix
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.workspace import WorkspaceExitCode
 from automated_security_helper.utils.log import NO_MARKUP, escape_markup
+from automated_security_helper.utils.sarif_utils import _resolve_result_severity
+from automated_security_helper.utils.severity_ladder import (
+    SEVERITIES,
+    sarif_level_fails_threshold,
+    severity_fails_threshold,
+)
 from automated_security_helper.workspace.plan import WorkspacePlan
 
 if TYPE_CHECKING:
@@ -176,8 +185,18 @@ class ScanOptions(BaseModel):
 # Severity helpers (module-level so _compute_exit_code can be patched cleanly)
 # ---------------------------------------------------------------------------
 
+# The --min-severity scale, which is not the severity ladder's: it has no `info`,
+# and `critical` and `high` share a rank because SARIF's `error` covers both.
+# `workspace.aggregation._MIN_SEVERITY_RANK` mirrors this table for the same gate
+# on the workspace path.
+#
+# There is no `_SARIF_LEVEL_TO_SEVERITY` beside it any more. That table spelled
+# `error -> high` where `utils.sarif_utils` spells `error -> critical`, and
+# `_severity_filters_finding` was the only severity resolver in ASH that read a
+# result's SARIF level while ignoring `properties.issue_severity` -- the field
+# every other resolver treats as authoritative. Both are now routed through
+# `utils.sarif_utils._resolve_result_severity`.
 _SEVERITY_RANK = {"critical": 3, "high": 3, "medium": 2, "low": 1, "none": 0}
-_SARIF_LEVEL_TO_SEVERITY = {"error": "high", "warning": "medium", "note": "low"}
 
 # ---------------------------------------------------------------------------
 # Scanner completeness
@@ -675,14 +694,27 @@ def _resolve_fail_on_incomplete_scanners(
 
 
 def _severity_filters_finding(result, min_sev_rank: int) -> bool:
-    """Return True when *result* meets the minimum severity threshold."""
+    """Return True when *result* meets the minimum severity threshold.
+
+    Severity is resolved by ``utils.sarif_utils._resolve_result_severity``, the
+    resolver the rest of ASH uses, rather than from ``result.level`` alone. Reading
+    the level alone ignored ``properties.issue_severity``, which is the field
+    scanners use to state a severity SARIF cannot express -- grype reports a
+    CRITICAL vulnerability at ``level: warning`` -- so ``--min-severity high``
+    zeroed the whole actionable count and the scan exited 0 over it. The same
+    substitution removes the ``error -> high`` spelling here that disagreed with
+    ``error -> critical`` there.
+
+    ``info`` is deliberately absent from ``_SEVERITY_RANK``, so a result the
+    resolver grades ``info`` falls back to the ``low`` rank. That preserves the
+    outcome for a missing or ``none`` level, which the deleted level table also
+    graded ``low`` through its own default -- adding an ``info`` rank of 0 would
+    change what ``--min-severity low`` accepts and would have to be mirrored in
+    ``workspace.aggregation`` to keep the two paths answering alike.
+    """
     if result.suppressions:
         return False
-    level = getattr(result, "level", "note")
-    if isinstance(level, str):
-        level = level.lower()
-    mapped = _SARIF_LEVEL_TO_SEVERITY.get(level, "low")
-    return _SEVERITY_RANK.get(mapped, 1) >= min_sev_rank
+    return _SEVERITY_RANK.get(_resolve_result_severity(result), 1) >= min_sev_rank
 
 
 # ---------------------------------------------------------------------------
@@ -1632,16 +1664,30 @@ def _print_workspace_summary(
 
 
 # ---------------------------------------------------------------------------
-# _compute_exit_code — pure function from in-memory results; no disk reads
+# _compute_exit_code
 #
-# The prior implementation re-read ash.sarif from disk to work around a
-# concern that Pydantic in-memory suppression state wasn't reliable. That
-# read unconditionally overwrote the in-memory actionable count.
-# Root-cause investigation: get_unified_scanner_metrics() already re-derives
-# all counts from the final SARIF model in memory via ScannerStatisticsCalculator,
-# which reads result.suppressions reliably through the Pydantic field accessor
-# (not a stale __dict__ key). The disk-re-read was masking the issue rather
-# than fixing it. Using in-memory results only is both correct and faster.
+# This comment used to open "pure function from in-memory results; no disk reads"
+# and go on to say the ash.sarif re-read had been deleted as a workaround for a
+# Pydantic suppression-state concern that root-cause investigation had disproved.
+# The re-read was still there, below, overwriting the in-memory actionable count
+# exactly as described -- so the file argued against its own code, and a reader who
+# trusted the comment would conclude the exit code and the summary table could not
+# disagree. They could, and about more than suppressions: the re-read applied
+# global_settings.severity_threshold to every result, while
+# get_unified_scanner_metrics resolves a per-scanner options.severity_threshold and
+# records threshold_source "config". A scanner configured away from the global
+# setting had its findings counted one way in the report and the other way in the
+# exit code, which is the whole contract for a CI gate.
+#
+# The re-read now resolves the threshold per result's owning scanner, through the
+# same ScannerStatisticsCalculator.get_scanner_threshold_info the metrics use, so
+# both counts answer from one threshold model. Deleting the re-read outright was
+# the other option and is what the original comment claimed had happened; it was
+# not taken here because the re-read counts every result in the file whereas the
+# metrics only count results whose scanner name resolves, so deleting it would drop
+# an unattributable finding from the verdict -- a false negative, which is the worse
+# failure for a gate. Whether that superset is real on any shipped scanner is
+# unmeasured; the conservative change does not depend on the answer.
 #
 # Two independent questions, in this order:
 #
@@ -1828,55 +1874,58 @@ def _compute_exit_code(
     scanner_metrics = get_unified_scanner_metrics(asharp_model=results)
     actionable_findings = sum(item.actionable for item in scanner_metrics)
 
-    # Count actionable findings from the persisted SARIF report file, honouring
-    # global_settings.severity_threshold (#329). The SARIF reporter serializes all
-    # suppressions, including the final pass, while in-memory model access has a
-    # Pydantic mutation bug where result.suppressions is not reliably set.
+    # Count actionable findings from the persisted SARIF report file, honouring the
+    # threshold that governs each result's own scanner (#329). The SARIF reporter
+    # serializes all suppressions, including the final pass, while in-memory model
+    # access has a Pydantic mutation bug where result.suppressions is not reliably
+    # set.
+    #
+    # The threshold is resolved per result rather than once for the whole file. It
+    # used to be read once from global_settings.severity_threshold, which silently
+    # discarded every per-scanner options.severity_threshold -- so a scanner the
+    # operator had tightened or relaxed was judged by the global setting here and by
+    # its own setting in the report and the summary table.
+    #
+    # The comparison is utils.severity_ladder's, replacing the two tables that used
+    # to be inlined here. They agreed with the ladder on all five real thresholds
+    # and diverged off-table, reading an unrecognised threshold as MEDIUM where
+    # every other consumer reads it as CRITICAL. One consequence is worth naming:
+    # the ladder treats a falsy threshold as "no gate at all" rather than as
+    # MEDIUM, which is how the operator turns the gate off and how
+    # calculate_actionable_count already reads it, so the two counts agree on that
+    # input too. No validated config route produces one -- global_settings is a
+    # Literal and ScannerOptionsBase.severity_threshold is Literal | None whose None
+    # means "defer to global" -- so this is parity rather than a new behaviour.
     sarif_file = Path(opts.output_dir).joinpath("reports", "ash.sarif")
     if sarif_file.exists():
         try:
             with open(sarif_file, encoding="utf-8") as f:
                 sarif_json = json.load(f)  # nosec
 
-            _severity_threshold = "MEDIUM"  # default
-            if results is not None and hasattr(results, "ash_config"):
-                _cfg = results.ash_config
-                if (
-                    _cfg
-                    and hasattr(_cfg, "global_settings")
-                    and hasattr(_cfg.global_settings, "severity_threshold")
-                    and _cfg.global_settings.severity_threshold
-                ):
-                    _severity_threshold = (
-                        _cfg.global_settings.severity_threshold.upper()
-                    )
+            # Memoised because get_scanner_threshold_info dumps the whole scanners
+            # config on every call, and a large ash.sarif carries one result per
+            # finding.
+            _threshold_cache: Dict[str, str] = {}
 
-            # SARIF levels: error -> critical/high, warning -> medium, note -> low, none -> info
-            _THRESHOLD_QUALIFYING_LEVELS = {
-                "ALL": {"error", "warning", "note", "none"},
-                "LOW": {"error", "warning", "note"},
-                "MEDIUM": {"error", "warning"},
-                "HIGH": {"error"},
-                "CRITICAL": {"error"},
-            }
-            _qualifying_levels = _THRESHOLD_QUALIFYING_LEVELS.get(
-                _severity_threshold, {"error", "warning"}
-            )
-            _SEVERITY_RANK_FOR_THRESHOLD = {
-                "CRITICAL": 4,
-                "HIGH": 3,
-                "MEDIUM": 2,
-                "LOW": 1,
-                "INFO": 0,
-            }
-            _THRESHOLD_MIN_RANK = {
-                "ALL": 0,
-                "LOW": 1,
-                "MEDIUM": 2,
-                "HIGH": 3,
-                "CRITICAL": 4,
-            }
-            _min_rank = _THRESHOLD_MIN_RANK.get(_severity_threshold, 2)
+            def _threshold_for(scanner_name: object) -> str:
+                """The threshold governing *scanner_name*, global when it has none.
+
+                An empty name is passed through to the same resolver rather than
+                short-circuited: it matches no scanner config key, so the resolver
+                answers with the global threshold. That keeps one threshold
+                resolution site for both cases, and it means a result whose scanner
+                cannot be identified is judged exactly as every result was judged
+                before this change instead of being skipped -- dropping it would
+                remove a finding from the verdict.
+                """
+                key = scanner_name if isinstance(scanner_name, str) else ""
+                if key not in _threshold_cache:
+                    _threshold_cache[key] = (
+                        ScannerStatisticsCalculator.get_scanner_threshold_info(
+                            results, key
+                        )[0]
+                    )
+                return _threshold_cache[key]
 
             sarif_active = 0
             for sarif_run in sarif_json.get("runs", []):
@@ -1884,14 +1933,19 @@ def _compute_exit_code(
                     if r.get("suppressions"):
                         continue
                     props = r.get("properties", {}) or {}
-                    issue_severity = (props.get("issue_severity") or "").upper()
-                    if issue_severity in _SEVERITY_RANK_FOR_THRESHOLD:
-                        if _SEVERITY_RANK_FOR_THRESHOLD[issue_severity] >= _min_rank:
+                    threshold = _threshold_for(
+                        props.get("scanner_name") if isinstance(props, dict) else None
+                    )
+                    issue_severity = (
+                        (props.get("issue_severity") or "").upper()
+                        if isinstance(props, dict)
+                        else ""
+                    )
+                    if issue_severity in SEVERITIES:
+                        if severity_fails_threshold(issue_severity, threshold):
                             sarif_active += 1
-                    else:
-                        level = (r.get("level") or "note").lower()
-                        if level in _qualifying_levels:
-                            sarif_active += 1
+                    elif sarif_level_fails_threshold(r.get("level"), threshold):
+                        sarif_active += 1
             actionable_findings = sarif_active
         except Exception:  # nosec B110
             pass  # Fall through to the unified-metrics count

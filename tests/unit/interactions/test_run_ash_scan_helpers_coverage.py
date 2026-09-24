@@ -186,17 +186,23 @@ def _sarif_with_uris(*uris: str) -> SarifReport:
 
 
 class TestSeverityFiltersFinding:
+    """``properties=None`` is on every stand-in because the real SARIF ``Result``
+    always carries the field, and the severity resolver now reads it -- a stand-in
+    without it was modelling a shape that cannot reach this function."""
+
     def test_a_suppressed_finding_never_qualifies(self):
         """Suppression outranks severity: an error-level suppression is not actionable."""
-        result = SimpleNamespace(suppressions=[{"kind": "external"}], level="error")
+        result = SimpleNamespace(
+            suppressions=[{"kind": "external"}], level="error", properties=None
+        )
         assert _severity_filters_finding(result, 1) is False
 
     def test_an_error_qualifies_at_the_high_threshold(self):
-        result = SimpleNamespace(suppressions=[], level="error")
+        result = SimpleNamespace(suppressions=[], level="error", properties=None)
         assert _severity_filters_finding(result, 3) is True
 
     def test_a_note_does_not_qualify_at_the_high_threshold(self):
-        result = SimpleNamespace(suppressions=[], level="note")
+        result = SimpleNamespace(suppressions=[], level="note", properties=None)
         assert _severity_filters_finding(result, 3) is False
 
 
