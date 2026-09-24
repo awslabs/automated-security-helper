@@ -25,6 +25,7 @@ from automated_security_helper.core.resource_management.exceptions import (
 from automated_security_helper.core.resource_management.scan_tracking import (
     check_scan_completion,
     create_scan_progress_from_files,
+    summarize_scanner_statuses,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -616,25 +617,57 @@ class ScanRegistry:
             try:
                 # Check if scan has completed based on file existence
                 is_complete = check_scan_completion(output_dir)
-                if is_complete and entry.status != MCScanStatus.COMPLETED:
-                    # Update scan status to completed
-                    entry.mark_completed()
 
-                # Create scan progress object from files
+                # Built before the completion decision, not after it.
+                # check_scan_completion() only tests that
+                # ash_aggregated_results.json exists; this parses it, so it is
+                # the only thing here that can tell a finished scan from a poll
+                # that landed midway through the writer.
                 scan_progress = create_scan_progress_from_files(scan_id, output_dir)
 
-                # If scan is marked as completed in the registry, ensure it's also completed in the progress object
-                if (
-                    entry.status == MCScanStatus.COMPLETED
-                    and scan_progress.status != "completed"
-                ):
-                    scan_progress.mark_completed()
+                # A present-but-unparseable results file used to mark the entry
+                # COMPLETED on the strength of its existence, after which a
+                # status-forcing block overwrote the failed ScanProgress with
+                # "completed" as well -- reporting a finished scan, is_complete
+                # true, no error message and zero scanners. Propagate the failure
+                # instead: a scan that measured nothing must not read as a scan
+                # that found nothing. This does turn some previously-succeeding
+                # polls into failures, which is the correction.
+                if scan_progress.status == "failed":
+                    if entry.status != MCScanStatus.FAILED:
+                        entry.mark_failed(
+                            scan_progress.error_message
+                            or "Scan results could not be parsed"
+                        )
+                elif is_complete and entry.status != MCScanStatus.COMPLETED:
+                    # Update scan status to completed
+                    entry.mark_completed()
 
                 # Convert scan progress to dictionary
                 progress_dict = scan_progress.to_dict()
 
+                # Which scanners did not run, and why. The `scanners` map below
+                # now carries a per-scanner status, but only as one of
+                # MCScannerStatus' five values: it cannot separate a tool that is
+                # not installed from one the configuration excluded, and both
+                # arrive there as "skipped". This list carries that reason, which
+                # is the difference between "install it" and "you turned it off".
+                #
+                # Computed here even though cli/mcp_server.py recomputes it from
+                # the same file, because that is not the only consumer:
+                # mcp_tools.mcp_get_scan_progress and
+                # scan_management.check_scan_progress both hand this payload
+                # straight back to their callers.
+                status_summary = summarize_scanner_statuses(output_dir)
+
                 # Combine registry entry information with progress info
                 result = {
+                    # Set explicitly on the path where the call worked. Only
+                    # create_error_response had ever set this key, always to
+                    # False, so a consumer testing `not
+                    # progress_info.get("success")` got the same answer on both
+                    # branches and its guard returned unconditionally.
+                    "success": True,
                     "scan_id": scan_id,
                     "directory_path": entry.directory_path,
                     "output_directory": str(output_dir),
@@ -652,6 +685,7 @@ class ScanRegistry:
                     "total_findings": scan_progress.total_findings,
                     "severity_counts": scan_progress.severity_counts,
                     "scanners": progress_dict.get("scanners", {}),
+                    "skipped_scanners": status_summary["skipped_scanners"],
                 }
 
                 return result

@@ -329,6 +329,30 @@ async def _run_scan_async(
         registry.update_scan_status(scan_id, MCScanStatus.COMPLETED)
         _logger.info(f"Scan {scan_id} completed successfully")
 
+    except SystemExit as e:
+        # SystemExit derives from BaseException, so the handler below does not
+        # catch it. run_ash_scan's local branch converts every failure into
+        # sys.exit, and run_in_executor re-raises whatever the worker raised, so
+        # this arm is reached on any failing scan. fail_on_findings=False does not
+        # make it unreachable: the results-is-None arm of _compute_exit_code runs
+        # before fail_on_findings is resolved, deliberately, so an incomplete scan
+        # still exits non-zero.
+        #
+        # Recorded and not re-raised. This coroutine is launched with a bare
+        # asyncio.create_task, and asyncio re-raises a BaseException out of
+        # Task.__step into the event loop: letting it through stops the MCP server
+        # and takes every other session's in-flight scan with it, while the client
+        # sees only a dropped connection. Without this arm neither status update
+        # ran at all and the entry was stranded at RUNNING, so a client following
+        # the documented five-second poll loop never terminated.
+        #
+        # Narrower than `except BaseException` on purpose: that would also
+        # swallow KeyboardInterrupt and asyncio.CancelledError, both of which have
+        # to reach the loop.
+        error_message = f"Scan exited with code {e.code}"
+        registry.update_scan_status(scan_id, MCScanStatus.FAILED, error_message)
+        _logger.error(f"Scan {scan_id} failed: {error_message}")
+
     except Exception as e:
         error_message = f"Error executing scan: {str(e)}"
         registry.update_scan_status(scan_id, MCScanStatus.FAILED, error_message)
