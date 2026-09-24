@@ -175,12 +175,12 @@ would move the per-project scan out of ``core/orchestrator.py``.
 
 The changed-files gate is per project, per repository
 ----------------------------------------------------
-``--mode precommit`` and ``--changed-files-only`` are evaluated against each
-project's own git repository, because projects in a workspace are independently
-versioned and one diff cannot answer for all of them. A project with no changed
-files is skipped with ``no-changes``, which is a successful optimisation and does
-not colour the exit status; the skip is in the results payload, not only in the
-log, because nothing downstream reads stderr.
+``--changed-files-only`` is evaluated against each project's own git repository,
+because projects in a workspace are independently versioned and one diff cannot
+answer for all of them. A project with no changed files is skipped with
+``no-changes``, which is a successful optimisation and does not colour the exit
+status; the skip is in the results payload, not only in the log, because nothing
+downstream reads stderr.
 
 Diff paths are resolved against ``git rev-parse --show-toplevel`` rather than
 against the project directory. ``git diff --name-only`` prints repository-relative
@@ -188,10 +188,15 @@ paths regardless of the directory it runs in, so joining them onto the project
 directory is wrong whenever a project sits below a larger repository -- and it
 silently produces paths that match nothing, which reads as "no changes".
 
-A project that is not a git repository at all is an error under ``precommit``
-(exit 2, unless ``--allow-missing-projects``), because precommit's entire premise
-is a diff. Under ``--changed-files-only`` it falls back to a full scan, matching
-that flag's documented behaviour.
+``--mode precommit`` does not arm this gate. It selects a fast scanner set and
+nothing else, which is what it means for a single project, and a workspace that
+read it as "diff-scoped" gave one flag two meanings. The diff it would have used
+is the wrong one besides: ``<base_ref>...HEAD`` cannot see the staged content a
+pre-commit hook is called about. A diff-scoped precommit needs its own flag and
+``git diff --cached``.
+
+A project that is not a git repository falls back to a full scan, matching
+``--changed-files-only``'s documented behaviour.
 
 Failure modes and known limitations
 -----------------------------------
@@ -296,6 +301,13 @@ class ProjectScanSettings:
     fail_on_incomplete_scanners: Optional[bool] = None
     changed_files_only: bool = False
     base_ref: str = "origin/main"
+    #: Recorded from ``--mode precommit`` and read by nothing here. It used to arm
+    #: the diff gate, which is now ``changed_files_only`` alone -- see
+    #: ``changed_file_set``. Workspace mode has never applied the fast scanner set
+    #: that the mode selects for a single project (``run_ash_scan._run_local_mode``
+    #: does that, and only there), so the mode currently has no workspace effect at
+    #: all. Kept because the field is what a caller sets, and porting the scanner
+    #: set is a separate change to the scanner selection, not to this gate.
     precommit: bool = False
     cleanup: bool = False
     verbose: bool = False
@@ -465,32 +477,27 @@ def changed_file_set(
 ) -> Optional[Set[Path]]:
     """The changed files inside *project*, or None when no gate applies.
 
+    Gated on ``changed_files_only`` alone, and deliberately not on ``precommit``.
+    Single-project mode reads the same one flag, so arming it from the mode made
+    one invocation mean "diff-scoped" for a workspace and "fast scanners only" for
+    a single project. It was also the wrong diff: ``<base_ref>...HEAD`` cannot see
+    the staged content a pre-commit hook is called about, so a project unchanged
+    since the base ref was skipped however much was staged in it. A diff-scoped
+    precommit needs its own flag and ``git diff --cached``.
+
     Returns:
         ``None`` when the gate does not apply -- either it was not requested, or
         git could not answer and the documented fallback is a full scan. An empty
         set when the project is a repository with nothing changed inside it, which
         is the skip signal. Otherwise the absolute paths of the changed files that
         lie within the project.
-
-    Raises:
-        WorkspaceDefinitionError: Under ``precommit``, when the project is not a
-            git repository and ``--allow-missing-projects`` was not passed.
-            Precommit's premise is a diff, so silently scanning everything would
-            turn a fast pre-commit hook into a full scan without saying so.
     """
-    if not (settings.precommit or settings.changed_files_only):
+    if not settings.changed_files_only:
         return None
 
     project_path = Path(project.path)
     repository_root = git_repository_root(project_path)
     if repository_root is None:
-        if settings.precommit and not settings.allow_missing_projects:
-            raise WorkspaceDefinitionError(
-                f"project '{project.key}' at '{project.path}' is not a git "
-                f"repository, and '--mode precommit' selects files from a git "
-                f"diff. Pass '--allow-missing-projects' to scan it in full "
-                f"instead, or drop '--mode precommit'."
-            )
         ASH_LOGGER.warning(
             f"Project '{project.key}' is not a git repository; scanning it in "
             f"full rather than by diff."
@@ -901,11 +908,10 @@ def execute_workspace(
         The unified results path, the process exit code, and the payload.
 
     Raises:
-        WorkspaceDefinitionError: When a project is not a git repository under
-            ``precommit`` without ``--allow-missing-projects``, or when an enabled
-            reporter declares itself unsupported in workspace mode. Raised rather
-            than recorded because nothing has been scanned yet -- that is an
-            exit-4 refusal, not a project failure.
+        WorkspaceDefinitionError: When an enabled reporter declares itself
+            unsupported in workspace mode. Raised rather than recorded because
+            nothing has been scanned yet -- that is an exit-4 refusal, not a
+            project failure.
     """
     if orchestrator_factory is None:
         from automated_security_helper.core.orchestrator import ASHScanOrchestrator
@@ -929,13 +935,6 @@ def execute_workspace(
             )
 
     active = plan.active_projects
-
-    # The gate can refuse the whole run, and it must do so before any project is
-    # scanned: reporting a partial workspace and then refusing is worse than
-    # refusing outright.
-    if settings.precommit or settings.changed_files_only:
-        for project in active:
-            changed_file_set(project, settings)
 
     # The pool is sized down to the project count -- no point starting four
     # workers for two projects -- but the payload records the *configured* bound,

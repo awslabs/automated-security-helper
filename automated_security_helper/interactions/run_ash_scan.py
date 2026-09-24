@@ -1297,13 +1297,53 @@ def _run_local_mode(
 
     _changed_file_set = None
     if opts.changed_files_only:
-        from automated_security_helper.utils.get_scan_set import get_changed_files
+        from automated_security_helper.utils.get_scan_set import (
+            get_changed_files,
+            git_repository_root,
+        )
 
-        changed_paths = get_changed_files(base_ref=opts.base_ref, cwd=opts.source_dir)
-        if changed_paths is not None:
-            _changed_file_set = {
-                opts.source_dir.joinpath(p).resolve() for p in changed_paths
-            }
+        # The diff is anchored on the repository root, never on source_dir.
+        # get_changed_files wraps `git diff --name-only`, which prints
+        # repository-root-relative paths whatever directory it ran in, so joining
+        # them onto source_dir is only correct when the two coincide. Under
+        # `--source-dir services/api` inside a larger repository it produced
+        # <source_dir>/services/api/app.py, while the consumer below resolves the
+        # SARIF side's source-relative URIs (made so by sanitize_sarif_paths) to
+        # <source_dir>/app.py -- two sets that cannot intersect, so the filter
+        # discarded every finding. workspace/execution.py:changed_file_set has
+        # always anchored on the root; this is the same resolution.
+        repository_root = git_repository_root(opts.source_dir)
+        if repository_root is None:
+            # The root is the only anchor, so there is nothing to resolve against.
+            # Fall back to the full scan get_changed_files already documents for
+            # its own unanswerable cases, rather than guessing a root.
+            logger.warning(
+                f"--changed-files-only was requested but "
+                f"{opts.source_dir.as_posix()} is not inside a git repository, or "
+                f"its root could not be read; scanning it in full."
+            )
+        else:
+            changed_paths = get_changed_files(
+                base_ref=opts.base_ref, cwd=opts.source_dir
+            )
+            if changed_paths is not None:
+                # Entries outside source_dir are dropped because --source-dir and
+                # --changed-files-only are two scopings and the operator asked for
+                # both, so what gets reported is their intersection. Only one input
+                # notices: a scanner that escapes the scan root with a `../` URI
+                # sanitize_sarif_paths did not make source-relative is not revived
+                # by its file being in the diff. An empty result here is a filter
+                # that matches nothing, which is the honest answer when nothing in
+                # the diff is in scope -- see the consumer below, which
+                # distinguishes that from None.
+                resolved_source = opts.source_dir.resolve()
+                _changed_file_set = {
+                    candidate
+                    for candidate in (
+                        (repository_root / p).resolve() for p in changed_paths
+                    )
+                    if candidate.is_relative_to(resolved_source)
+                }
 
     try:
         if not opts.quiet and not opts.simple:
@@ -1427,7 +1467,13 @@ def _run_local_mode(
         if opts.simple and not opts.quiet:
             typer.echo("\nASH scan completed.")
 
-        if _changed_file_set and results is not None:
+        # `is not None`, not truthiness: an empty changed set is a filter that
+        # matches nothing, and None is the absence of one. Treating empty as absent
+        # reported the whole tree whenever the diff fell entirely outside
+        # source_dir, which ignores the flag the operator passed -- and it
+        # disagreed with workspace mode, where an empty set from
+        # workspace.execution.changed_file_set is the signal to skip the project.
+        if _changed_file_set is not None and results is not None:
             results = _filter_results_to_changed_files(
                 results, _changed_file_set, opts.source_dir
             )

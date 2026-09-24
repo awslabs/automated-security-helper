@@ -24,10 +24,7 @@ from typing import Any, Dict, List
 
 import pytest
 
-from automated_security_helper.core.exceptions import (
-    ASHConfigValidationError,
-    WorkspaceDefinitionError,
-)
+from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.models.workspace import (
     ProjectRunStatus,
     SkippedProjectReason,
@@ -1261,7 +1258,7 @@ class TestChangedFilesGate:
             pytest.skip("git is not available on PATH")
         root, plan = _make_workspace(tmp_path, ("unchanged", "MEDIUM"))
         _init_repo(root / "unchanged", commit_extra=False)
-        outcome = _run(tmp_path, plan, precommit=True, base_ref="base-ref")
+        outcome = _run(tmp_path, plan, changed_files_only=True, base_ref="base-ref")
         entry = outcome.payload.projects[0]
         assert entry.status is ProjectRunStatus.SKIPPED
         assert entry.skip_reason is SkippedProjectReason.NO_CHANGES
@@ -1274,7 +1271,7 @@ class TestChangedFilesGate:
             pytest.skip("git is not available on PATH")
         root, plan = _make_workspace(tmp_path, ("unchanged", "MEDIUM"))
         _init_repo(root / "unchanged", commit_extra=False)
-        outcome = _run(tmp_path, plan, precommit=True, base_ref="base-ref")
+        outcome = _run(tmp_path, plan, changed_files_only=True, base_ref="base-ref")
         payload = outcome.payload.skipped_projects
         assert [(e.project, e.reason.value) for e in payload] == [
             ("unchanged", "no-changes")
@@ -1290,28 +1287,28 @@ class TestChangedFilesGate:
         )
         _init_repo(root / "unchanged", commit_extra=False)
         _init_repo(root / "changed", commit_extra=True)
-        outcome = _run(tmp_path, plan, precommit=True, base_ref="base-ref")
+        outcome = _run(tmp_path, plan, changed_files_only=True, base_ref="base-ref")
         assert outcome.exit_code == WorkspaceExitCode.SUCCESS
 
     def test_a_workspace_where_every_project_is_unchanged_exits_zero(
         self, tmp_path, git_available
     ):
-        """The precommit no-op, end to end.
+        """The diff-scoped no-op, end to end.
 
         In a monorepo the common case is an edit outside every project directory
         -- a README at the workspace root -- so every project skips no-changes.
-        This used to exit 4, failing a clean hook run on a workspace where
-        nothing needed scanning. Single-project mode exits 0 for exactly this.
+        This used to exit 4, failing a clean run on a workspace where nothing
+        needed scanning. Single-project mode exits 0 for exactly this.
         """
         if not git_available:
             pytest.skip("git is not available on PATH")
         root, plan = _make_workspace(tmp_path, ("api", "MEDIUM"), ("web", "MEDIUM"))
         for key in ("api", "web"):
             _init_repo(root / key, commit_extra=False)
-        # The edit that triggered the hook lands outside every project.
+        # The edit that prompted the scan lands outside every project.
         (root / "README.md").write_text("docs only\n", encoding="utf-8")
 
-        outcome = _run(tmp_path, plan, precommit=True, base_ref="base-ref")
+        outcome = _run(tmp_path, plan, changed_files_only=True, base_ref="base-ref")
 
         assert outcome.exit_code == WorkspaceExitCode.SUCCESS
         assert all(
@@ -1328,7 +1325,7 @@ class TestChangedFilesGate:
             pytest.skip("git is not available on PATH")
         root, plan = _make_workspace(tmp_path, ("changed", "MEDIUM"))
         _init_repo(root / "changed", commit_extra=True)
-        outcome = _run(tmp_path, plan, precommit=True, base_ref="base-ref")
+        outcome = _run(tmp_path, plan, changed_files_only=True, base_ref="base-ref")
         assert outcome.payload.projects[0].status is ProjectRunStatus.COMPLETED
         assert [o.key for o in FakeOrchestrator.built] == ["changed"]
 
@@ -1343,31 +1340,51 @@ class TestChangedFilesGate:
         )
         _init_repo(root / "changed", commit_extra=True)
         _init_repo(root / "still", commit_extra=False)
-        outcome = _run(tmp_path, plan, precommit=True, base_ref="base-ref")
+        outcome = _run(tmp_path, plan, changed_files_only=True, base_ref="base-ref")
         statuses = {p.project: p.status for p in outcome.payload.projects}
         assert statuses["changed"] is ProjectRunStatus.COMPLETED
         assert statuses["still"] is ProjectRunStatus.SKIPPED
 
-    def test_a_non_repository_under_precommit_is_a_workspace_error(self, tmp_path):
-        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
-        with pytest.raises(WorkspaceDefinitionError) as excinfo:
-            _run(tmp_path, plan, precommit=True)
-        assert "api" in str(excinfo.value)
-
-    def test_allow_missing_projects_downgrades_a_non_repository_to_a_full_scan(
-        self, tmp_path
+    def test_precommit_alone_does_not_scope_the_scan_to_a_diff(
+        self, tmp_path, git_available
     ):
+        """``--mode precommit`` selects fast scanners; it does not select files.
+
+        Single-project mode reads ``--changed-files-only`` alone for the diff
+        gate, so arming it from the mode here meant the same invocation scanned
+        a diff in one mode and the whole tree in the other. It was also diffing
+        the wrong thing: ``<base_ref>...HEAD`` cannot see the staged content a
+        pre-commit hook is called about, so an unchanged-since-base project was
+        skipped however much was staged in it.
+        """
+        if not git_available:
+            pytest.skip("git is not available on PATH")
+        root, plan = _make_workspace(tmp_path, ("unchanged", "MEDIUM"))
+        _init_repo(root / "unchanged", commit_extra=False)
+        outcome = _run(tmp_path, plan, precommit=True, base_ref="base-ref")
+        assert outcome.payload.projects[0].status is ProjectRunStatus.COMPLETED
+        assert [o.key for o in FakeOrchestrator.built] == ["unchanged"]
+
+    def test_a_non_repository_under_precommit_is_not_an_error(self, tmp_path):
+        """Inverted with the gate change above.
+
+        This refusal existed because precommit armed the diff gate and a diff
+        needs a repository. Precommit no longer scopes by diff, so a project that
+        is not a repository is no longer a contradiction -- and refusing here
+        would reject a whole workspace over a mode flag that now only picks
+        scanners.
+        """
         _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
-        outcome = _run(tmp_path, plan, precommit=True, allow_missing_projects=True)
+        outcome = _run(tmp_path, plan, precommit=True)
         assert outcome.payload.projects[0].status is ProjectRunStatus.COMPLETED
 
-    def test_the_gate_is_off_without_precommit_or_changed_files_only(self, tmp_path):
+    def test_the_gate_is_off_without_changed_files_only(self, tmp_path):
         """A plain workspace scan must not care whether a project is a repository."""
         _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
         outcome = _run(tmp_path, plan)
         assert outcome.payload.projects[0].status is ProjectRunStatus.COMPLETED
 
-    def test_changed_files_only_applies_the_same_gate(self, tmp_path, git_available):
+    def test_changed_files_only_applies_the_gate(self, tmp_path, git_available):
         if not git_available:
             pytest.skip("git is not available on PATH")
         root, plan = _make_workspace(tmp_path, ("unchanged", "MEDIUM"))
@@ -1379,6 +1396,22 @@ class TestChangedFilesGate:
         """--changed-files-only already documents a full-scan fallback; keep it."""
         _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
         outcome = _run(tmp_path, plan, changed_files_only=True)
+        assert outcome.payload.projects[0].status is ProjectRunStatus.COMPLETED
+
+    def test_allow_missing_projects_does_not_change_the_non_repository_fallback(
+        self, tmp_path
+    ):
+        """Carried over from when the fallback was conditional on this flag.
+
+        The flag used to be what separated a refused workspace from a full scan,
+        because the refusal only existed for precommit. With the refusal gone the
+        downgrade is unconditional, and this pins that the flag neither restores a
+        refusal nor changes the outcome.
+        """
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        outcome = _run(
+            tmp_path, plan, changed_files_only=True, allow_missing_projects=True
+        )
         assert outcome.payload.projects[0].status is ProjectRunStatus.COMPLETED
 
 
