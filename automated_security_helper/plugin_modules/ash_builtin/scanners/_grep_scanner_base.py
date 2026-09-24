@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import ClassVar, Generic, List, Literal, Optional, Tuple, TypeVar
+from typing import ClassVar, Generic, List, Literal, Optional, Tuple, TypeVar, final
 
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
@@ -103,11 +103,19 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         """
         return super().validate_plugin_dependencies()
 
+    @final
     def validate_plugin_dependencies(self) -> bool:
         """Final for this family: the offline-cache verdict, then the tool check.
 
         Subclasses customise ``_validate_tool_dependencies`` instead of this method.
         Overriding this one restores the bypass it exists to close.
+
+        ``@final`` rather than a docstring asking not to override. The prose said
+        "final" for a while with nothing enforcing it, and a sibling docstring in
+        ``base/scanner_plugin.py`` told readers this family was structurally
+        protected -- so the one place a reviewer would not look was the one place
+        the protection was missing. mypy runs in this repository, so the decorator
+        makes the claim checkable instead of aspirational.
         """
         if self.dependency_unavailable_reason:
             # Not re-logged. `_configure_offline_mode` already emitted this at
