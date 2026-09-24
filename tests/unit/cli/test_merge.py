@@ -104,6 +104,42 @@ FINDINGS: Dict[str, List[Tuple[str, str]]] = {
 SHARED_COMPONENT = ("ash-core", "ASH core rules", "test")
 
 
+@pytest.fixture
+def capture(caplog):
+    """Route the module's logger at WARNING into caplog.
+
+    ASH's configured handler renders to a console and leaves nothing in
+    ``caplog.records``, so its handlers are swapped for pytest's capture handlers
+    for the duration.
+
+    At module scope rather than on one class because two disclosures are asserted
+    from it now: the scanners no shard intended to run, and the never-attempted
+    orphans ``_verify_scanner_union`` exempts from its refusal. A second copy of
+    this handler swap would be two fixtures that have to stay in step.
+    """
+    import logging
+
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    saved_handlers = ASH_LOGGER.handlers
+    saved_propagate = ASH_LOGGER.propagate
+    capture_handlers = [
+        handler
+        for handler in saved_handlers
+        if isinstance(handler, type(caplog.handler))
+    ]
+    if caplog.handler not in capture_handlers:
+        capture_handlers.append(caplog.handler)
+    ASH_LOGGER.handlers = capture_handlers
+    ASH_LOGGER.propagate = False
+    caplog.set_level(logging.WARNING, logger=ASH_LOGGER.name)
+    try:
+        yield caplog
+    finally:
+        ASH_LOGGER.handlers = saved_handlers
+        ASH_LOGGER.propagate = saved_propagate
+
+
 def _build_config(fail_on_findings=None, suppressions=None):
     """A minimal real AshConfig.
 
@@ -684,6 +720,55 @@ class TestCoverageIsRefused:
             "exempting the row from the coverage refusal must not drop it: the whole "
             "point is that it survives to be reported through the gated path"
         )
+
+    @pytest.mark.parametrize("status", ["ERROR", "MISSING"])
+    def test_an_exempted_orphan_is_named_at_warning(self, status, capture):
+        """The exemption has to leave a trace that no flag can switch off.
+
+        Before the narrowing, an unclaimed ERROR or MISSING row refused the merge
+        whatever flags were passed, because ``_verify_scanner_union`` is called
+        unconditionally. The exemption moves the signal onto
+        ``--fail-on-incomplete-scanners`` -- and ``--no-fail-on-incomplete-scanners``
+        turns that off, taking the refusal and the exit code with it. This line is
+        then the only record that a scanner appeared in the results which no shard
+        was ever assigned, so it is emitted from inside the check rather than left
+        to the gate.
+
+        Asserted on the scanner name and its status, not merely on some warning
+        being present: a message that does not name which scanner it is about
+        cannot be acted on.
+        """
+        shards = self._orphan_grype_with_status(build_shards(3), status)
+
+        merge_shard_results(as_loaded(shards))
+
+        notices = [
+            record.getMessage()
+            for record in capture.records
+            if "no shard was assigned" in record.getMessage()
+        ]
+        assert notices, (
+            f"a {status} scanner appeared in shard results that no shard was "
+            f"assigned, and the merge continued without saying so"
+        )
+        assert any("grype" in message for message in notices), (
+            f"no notice named the scanner: {notices}"
+        )
+        assert any(status in message for message in notices), (
+            f"no notice named the status, so a reader cannot tell why the merge was "
+            f"not refused: {notices}"
+        )
+
+    def test_a_clean_shard_set_is_not_warned_about(self, capture):
+        """The disclosure is conditional. A merge with nothing unclaimed must be
+        quiet, or the line becomes noise and stops being read."""
+        merge_shard_results(as_loaded(build_shards(3)))
+
+        assert [
+            record.getMessage()
+            for record in capture.records
+            if "no shard was assigned" in record.getMessage()
+        ] == []
 
     def test_a_failed_plugin_module_row_is_not_a_shard_coverage_failure(self):
         """The other row shape, keyed by a dotted module path.
@@ -1762,36 +1847,6 @@ class TestScannersNoShardIntendedToRunAreNamed:
     every merge on a host where a scanner's config disables it, which is the trap
     narrowing ``assigned_scanners`` would also have walked into.
     """
-
-    @pytest.fixture
-    def capture(self, caplog):
-        """Route the module's logger at WARNING into caplog.
-
-        ASH's configured handler renders to a console and leaves nothing in
-        ``caplog.records``, so its handlers are swapped for pytest's capture
-        handlers for the duration.
-        """
-        import logging
-
-        from automated_security_helper.utils.log import ASH_LOGGER
-
-        saved_handlers = ASH_LOGGER.handlers
-        saved_propagate = ASH_LOGGER.propagate
-        capture_handlers = [
-            handler
-            for handler in saved_handlers
-            if isinstance(handler, type(caplog.handler))
-        ]
-        if caplog.handler not in capture_handlers:
-            capture_handlers.append(caplog.handler)
-        ASH_LOGGER.handlers = capture_handlers
-        ASH_LOGGER.propagate = False
-        caplog.set_level(logging.WARNING, logger=ASH_LOGGER.name)
-        try:
-            yield caplog
-        finally:
-            ASH_LOGGER.handlers = saved_handlers
-            ASH_LOGGER.propagate = saved_propagate
 
     @staticmethod
     def _select(shards, selections):

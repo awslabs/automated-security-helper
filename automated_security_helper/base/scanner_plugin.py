@@ -202,9 +202,21 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         verdict is not silently outvoted by a PATH probe: a grep-family scanner in
         offline mode with no rule cache has its binary on PATH and would otherwise
         answer True, run, and report an offline scan against online defaults.
-        Subclasses that override this method and do not chain to it are still
-        covered, because ``ScanPhase`` reads the field directly -- but a subclass
-        that does chain gets the right answer for free.
+
+        A subclass that chains to this method gets that check for free. One that
+        overrides without chaining does NOT, and nothing outside the scanner plugins
+        restores it: the field is read only here and in the plugin modules, never by
+        the phases. ``ScanPhase`` reads the sibling ``unsupported_platform_reason``,
+        which is a different question, so this method's return value is the only
+        route a recorded reason has to a caller.
+
+        For the grep family the gap is closed at the other end instead.
+        ``GrepScannerBase`` declares this method final and pushes customisation into
+        ``_validate_tool_dependencies``, and ``_execute_scan`` raises
+        ``ScannerError`` on a recorded reason -- so a scanner of that family which
+        reached execution anyway fails closed rather than reporting an offline scan
+        against online defaults. A scanner outside that family which overrides this
+        method without chaining has neither guard.
         """
         if self.dependency_unavailable_reason:
             return False

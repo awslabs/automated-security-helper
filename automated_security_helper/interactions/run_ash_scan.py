@@ -53,7 +53,7 @@ from automated_security_helper.interactions.run_ash_container import run_ash_con
 from automated_security_helper.interactions.run_ash_nix import run_ash_nix
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.workspace import WorkspaceExitCode
-from automated_security_helper.utils.log import NO_MARKUP, escape_markup
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP, escape_markup
 from automated_security_helper.utils.sarif_utils import _resolve_result_severity
 from automated_security_helper.utils.severity_ladder import (
     SEVERITIES,
@@ -1936,16 +1936,24 @@ def _compute_exit_code(
         # reports PASSED on the targets it was handed, so no scanner-side signal can
         # see it.
         #
-        # Behind fail_on_incomplete_scanners rather than behind a flag of its own, and
-        # this is the decision the flag placement makes. It is the same question --
-        # did what I asked for actually run -- and reusing the existing opt-in means
-        # no run that passes today changes verdict without an operator having asked
-        # for it anywhere. A dedicated default-on gate would be the alternative and is
-        # rejected here: converters are more likely than scanners to be legitimately
-        # absent on a given host, so it would turn currently-green runs red on
-        # upgrade. The cost of this choice is that the default leaves a crashed
-        # converter invisible to the exit code, which is what the recorded
-        # converter_results row exists for.
+        # Behind fail_on_incomplete_scanners rather than behind a flag of its own,
+        # and that placement is the decision worth recording. It is the same question
+        # the two arms above ask -- did what I asked for actually run -- so it belongs
+        # on the same switch. An operator who has settled how much an incomplete run
+        # matters to them has settled it once, and gets one escape hatch covering
+        # both halves instead of a second flag to discover.
+        #
+        # The consequence they will actually meet is that converters are more likely
+        # than scanners to be legitimately absent on a given host, so this is the arm
+        # that fires on a setup nobody thinks is broken. That is stated as a
+        # consequence rather than as a reason to soften the gate: a converter that did
+        # not run leaves its inputs unscanned whether or not anything is watching, and
+        # the recorded converter_results row is what names which one it was.
+        #
+        # The argument above deliberately does not turn on which way
+        # fail_on_incomplete_scanners defaults. That polarity is a separate decision,
+        # made at the field and the flag rather than here, and a rationale leaning on
+        # it would need rewriting every time it moves.
         #
         # 1 rather than 2, matching the two arms above: the reported findings are
         # real but the set is known to be partial, so clearing them does not clear
@@ -2204,6 +2212,7 @@ def _filter_results_to_changed_files(
     """Remove SARIF results whose primary location is not in *changed_files*."""
     if not results or not results.sarif or not results.sarif.runs:
         return results
+    discarded = 0
     for run in results.sarif.runs:
         if not run.results:
             continue
@@ -2227,7 +2236,44 @@ def _filter_results_to_changed_files(
             resolved = Path(source_dir).joinpath(uri).resolve()
             if resolved in changed_files:
                 filtered.append(result)
+        discarded += len(run.results) - len(filtered)
         run.results = filtered
+
+    # An empty *changed_files* is a filter that matches nothing, so it discards
+    # every located result and the run reports zero findings at exit 0 --
+    # indistinguishable from a clean tree. Said at WARNING, with the count, because
+    # a filter that quietly empties a result set is how a filter becomes a false
+    # negative; the same reasoning as the output-path exclusion in
+    # `utils.sarif_utils.apply_suppressions_to_sarif`, which counts for this reason.
+    #
+    # Both routes here are reachable without operator error. `--changed-files-only`
+    # against a base ref that resolves to an empty diff produces an empty set, and
+    # so does a diff falling entirely outside `--source-dir` once the caller
+    # intersects the two scopings. The caller passes the empty set deliberately --
+    # `is not None` there distinguishes a filter matching nothing from no filter --
+    # so this reports the consequence rather than refusing it.
+    #
+    # Conditional on something actually being lost. An empty set over an empty
+    # result set costs nothing, and a count printed on every such run is noise.
+    # Workspace mode never reaches this branch: `workspace.execution` guards its
+    # call with a truthiness check, because there an empty set means skip the
+    # project.
+    #
+    # On ASH_LOGGER rather than `logging.getLogger(__name__)`, which is what the
+    # exit-code gates in this module use. Those emit at ERROR for a caller that
+    # reads the exit code; this one has to reach the operator's console, and
+    # ASH_LOGGER is the logger ASH configures and renders. It is also the logger
+    # every comparable disclosure already uses -- `apply_suppressions_to_sarif`'s
+    # exclusion count, `cli.merge`'s coverage notices.
+    if not changed_files and discarded:
+        ASH_LOGGER.warning(
+            "Discarded %d finding(s): the changed-file set is empty, so it matched "
+            "no location and every located finding was removed. This report is "
+            "therefore not evidence that the tree is clean. Either the diff against "
+            "--base-ref is empty, or none of the paths it names are inside "
+            "--source-dir.",
+            discarded,
+        )
     return results
 
 

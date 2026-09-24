@@ -290,10 +290,19 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
         # and the scan reported clean at exit 0 with no detectors configured.
         #
         # Merged into the existing object rather than replacing it. Replacing
-        # discarded the operator's ``version`` and ``generated_at``, any
-        # ``filters_used`` loaded from a baseline immediately above, and any extra
-        # keys the model accepts -- a second silent loss on the way to fixing the
-        # first.
+        # discarded the operator's ``version`` and ``generated_at``, any extra keys
+        # the model accepts, and -- on the one path that has any -- the
+        # ``filters_used`` the baseline block above loaded. A second silent loss on
+        # the way to fixing the first.
+        #
+        # The ``filters_used`` clause is scoped that way deliberately, because it is
+        # not true of every run that reaches this line. The baseline block is gated
+        # on ``version is None`` as well as an empty ``plugins_used``, and only the
+        # second of those two conditions is repeated here. So an operator who names
+        # a detect-secrets version and supplies a baseline arrives with neither the
+        # baseline's plugins nor its filters loaded, and there are no baseline
+        # filters for this merge to preserve. That narrower gate is a separate
+        # question from the merge, and is not addressed here.
         #
         # The class mapping is reached through ``_detect_secrets_api()`` rather than
         # a module-level import, so a missing detect-secrets records a reason and

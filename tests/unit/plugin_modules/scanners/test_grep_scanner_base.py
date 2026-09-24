@@ -376,6 +376,46 @@ class TestMissingResultsDirGuard:
             )
 
 
+class TestExecuteScanFailsClosedOnARecordedReason:
+    """The backstop for this family, and the only one there is.
+
+    ``ScannerPluginBase.validate_plugin_dependencies`` carries the offline-cache
+    verdict, but a recorded reason reaches a caller only through that method's
+    return value -- nothing in ``core`` reads the field, so a caller that does not
+    ask has no way to learn of it. ``ScanPhase`` does ask and never dispatches such
+    a scanner, but that is a property of one caller; a second one (an installer
+    probe, a plugin inventory, an out-of-tree orchestrator) would not inherit it.
+
+    This is the guard that covers that case for the grep family, and the docstring
+    on ``validate_plugin_dependencies`` now cites it as such. Untested until this
+    class existed, which is why removing it would have been silent.
+    """
+
+    def test_a_recorded_reason_raises_instead_of_scanning(
+        self, test_plugin_context, monkeypatch, tmp_path
+    ):
+        from automated_security_helper.core.exceptions import ScannerError
+
+        monkeypatch.delenv("SEMGREP_RULES_CACHE_DIR", raising=False)
+        scanner = SemgrepScanner(
+            context=test_plugin_context,
+            config=SemgrepScannerConfig(
+                options=SemgrepScannerConfigOptions(offline=True)
+            ),
+        )
+
+        assert scanner.dependency_unavailable_reason, (
+            "premise: offline with no rule cache records a reason during construction"
+        )
+
+        with pytest.raises(ScannerError, match="SEMGREP_RULES_CACHE_DIR"):
+            scanner._execute_scan(
+                target=tmp_path,
+                target_type="source",
+                global_ignore_paths=[],
+            )
+
+
 def test_semgrep_inherits_from_grep_base():
     assert issubclass(SemgrepScanner, GrepScannerBase)
 

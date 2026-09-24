@@ -165,7 +165,45 @@ class TestNullRuleId:
 
         report = json.loads(reporter.report(_model(good, bad)))
 
-        assert "B101" in [vuln["name"] for vuln in report["vulnerabilities"]]
+        # `.get`, not `[...]`: the null-rule-id sibling emits no `name` key at all
+        # -- see test_a_null_rule_id_omits_the_name_key. Subscripting would make
+        # this test fail on a KeyError about the *other* vulnerability, which says
+        # nothing about whether B101 survived.
+        assert "B101" in [vuln.get("name") for vuln in report["vulnerabilities"]]
+
+    def test_a_null_rule_id_omits_the_name_key(self, reporter):
+        """``name`` is absent, not present-and-null.
+
+        The schema types ``vulnerability.name`` as a string and does not require
+        it, which leaves exactly two honest states: a name, or no key. ``null`` is
+        a third that the type does not describe, and it is the one that claims the
+        vulnerability is named and blank. Every other optional field on this object
+        is emitted the same way -- ``severity`` and the rule identifier are both
+        omitted rather than nulled.
+
+        This cannot be asserted through ``GitlabSastReport``: the model is
+        generated from the schema by a tool that renders a non-required string as
+        ``Optional[str]``, so it accepts ``None`` and
+        ``test_a_null_rule_id_report_is_schema_valid`` above passes either way. The
+        assertion has to be on the emitted key.
+        """
+        result = Result.model_validate({"message": {"text": "finding with no rule"}})
+
+        vuln = json.loads(reporter.report(_model(result)))["vulnerabilities"][0]
+
+        assert "name" not in vuln, (
+            f"emitted name={vuln.get('name')!r} for a result with no rule id -- a "
+            f"present-and-null name is not the absent name the schema allows"
+        )
+
+    def test_a_rule_id_is_still_the_name(self, reporter):
+        """The omission is conditional. Dropping ``name`` outright would pass the
+        test above and lose the field for every named finding."""
+        result = Result(ruleId="B101", message=Message(text="assert used"))
+
+        vuln = json.loads(reporter.report(_model(result)))["vulnerabilities"][0]
+
+        assert vuln["name"] == "B101"
 
 
 # --------------------------------------------------------------------------- #

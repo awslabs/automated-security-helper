@@ -469,12 +469,21 @@ def _verify_scanner_union(
     #
     # The harm stated below is that merging "would report them as deliberately
     # skipped rather than never attempted". A row already recording ERROR or MISSING
-    # says never-attempted outright, so exempting it loses nothing: the scanner is
-    # still reported as not having run, through `incomplete_scanners` and the
-    # `fail_on_incomplete_scanners` gate, which is the channel that exists for
-    # exactly this and the channel an operator can reason about. Refusing the merge
-    # instead put a correct finding through a channel no flag reaches, and attributed
-    # it to a partitioning disagreement that had not happened.
+    # says never-attempted outright, so the merged report does not lose that: the
+    # scanner is still listed by `incomplete_scanners`, and the
+    # `fail_on_incomplete_scanners` gate is what turns the listing into a non-zero
+    # exit code. Refusing the merge instead put a correct finding through a channel
+    # no flag reaches, and attributed it to a partitioning disagreement that had not
+    # happened.
+    #
+    # WHAT THE EXEMPTION DOES GIVE UP, stated because the sentence above used to
+    # claim it gave up nothing. The refusal applied whatever flags were passed --
+    # this function is called unconditionally -- and the channel replacing it does
+    # not. `--no-fail-on-incomplete-scanners` removes the exit code as well as the
+    # refusal, and then no automated reader sees that a scanner appeared in the
+    # results which no shard was ever assigned. That is why the exempted names are
+    # emitted at WARNING below instead of being passed over in silence: a disclosure
+    # no flag can switch off is what is left once the refusal is gone.
     #
     # Two row shapes reach this, both written by ScanPhase: a scanner whose
     # constructor raised, keyed by its resolved config name, and a plugin module that
@@ -496,11 +505,33 @@ def _verify_scanner_union(
     # name recorded PASSED by one shard and ERROR by another is the original defect,
     # and taking the ERROR as permission would hide it. A name with no readable status
     # at all is not exempt either.
-    unclaimed = sorted(
+    orphans = set(seen) - set(owner_by_scanner)
+    exempted = sorted(
         name
-        for name in set(seen) - set(owner_by_scanner)
-        if not (statuses.get(name) and statuses[name] <= _NEVER_ATTEMPTED_STATUSES)
+        for name in orphans
+        if statuses.get(name) and statuses[name] <= _NEVER_ATTEMPTED_STATUSES
     )
+    unclaimed = sorted(orphans - set(exempted))
+
+    # Ahead of the refusal below so the disclosure is emitted whether or not this
+    # call goes on to raise. Both sets are drawn from `orphans`, so a merge can
+    # legitimately produce one, the other, or both.
+    if exempted:
+        exempt_detail = ", ".join(
+            f"{name} ({', '.join(sorted(statuses[name]))}, "
+            f"seen in {seen[name].as_posix()})"
+            for name in exempted
+        )
+        ASH_LOGGER.warning(
+            f"{len(exempted)} scanner(s) appear in shard results that no shard was "
+            f"assigned: {exempt_detail}. Each row records the scanner as never "
+            f"attempted, which is why this is not refused as a partitioning "
+            f"disagreement and the merge continues. The coverage is still short: "
+            f"--fail-on-incomplete-scanners is what turns that into a non-zero exit "
+            f"code, and under --no-fail-on-incomplete-scanners this line is the only "
+            f"record of it."
+        )
+
     if unclaimed:
         listed = ", ".join(
             f"{name} ({', '.join(sorted(statuses.get(name) or {'no status'}))}, "

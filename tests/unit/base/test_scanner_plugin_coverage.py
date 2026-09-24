@@ -842,3 +842,96 @@ def test_the_module_exposes_the_stderr_excerpt_limit(plugin_context):
 
 def test_optional_typing_import_is_used_for_the_config_annotation():
     assert Optional is not None
+
+
+# ---------------------------------------------------------------------------
+# validate_plugin_dependencies and the reach of dependency_unavailable_reason
+# ---------------------------------------------------------------------------
+#
+# These two pin the premises the method's docstring states, which is the only
+# reason they exist: the docstring claimed a subclass that overrides without
+# chaining was "still covered, because ScanPhase reads the field directly", and
+# nothing in the phases reads that field. Neither test failed before that
+# sentence was corrected -- they characterize behavior that was already there --
+# so their value is in reddening if the claim drifts again, or if the one guard
+# that does exist is removed.
+
+
+def test_chaining_to_the_base_gate_carries_the_recorded_reason(plugin_context):
+    """The premise of the docstring's first half.
+
+    ``find_executable`` is patched to succeed, and that is what makes the assertion
+    mean anything. Without it, ``stub-tool`` is absent from PATH and the method
+    returns False on the tool probe -- so the test passed with the recorded-reason
+    branch deleted, measuring a second mechanism that happens to give the same
+    answer. Making the tool resolvable leaves the recorded reason as the only thing
+    that can produce False.
+    """
+
+    class ChainingScanner(ScannerPluginBase):
+        offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+
+        def model_post_init(self, context):
+            self.command = "stub-tool"
+            self.tool_type = ScannerToolType.SAST
+            super().model_post_init(context)
+
+        def _execute_scan(self, target, target_type, global_ignore_paths):
+            raise NotImplementedError
+
+    scanner = ChainingScanner(config=StubConfig(), context=plugin_context)
+
+    with patch(
+        "automated_security_helper.base.scanner_plugin.find_executable",
+        return_value="/usr/bin/stub-tool",
+    ):
+        assert scanner.validate_plugin_dependencies() is True, (
+            "control: with no reason recorded and the tool resolvable, the method "
+            "has to answer True, or the assertion below proves nothing"
+        )
+
+        scanner.dependency_unavailable_reason = "no rule cache in offline mode"
+
+        assert scanner.validate_plugin_dependencies() is False
+
+
+def test_a_non_chaining_override_does_not_inherit_the_recorded_reason(plugin_context):
+    """The limitation the docstring now names, rather than denies.
+
+    A recorded reason reaches a caller only through this method's return value.
+    Nothing in ``core`` reads ``dependency_unavailable_reason`` -- ``ScanPhase``
+    reads the sibling ``unsupported_platform_reason``, a different question -- so
+    an override that answers without consulting the field leaves the construction
+    time verdict with no route out. Asserted as True on purpose: this is the gap,
+    and a future change that closes it should have to come past this test and its
+    name rather than silently making the docstring right again.
+    """
+
+    class NonChainingScanner(ScannerPluginBase):
+        offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+
+        def model_post_init(self, context):
+            self.command = "stub-tool"
+            self.tool_type = ScannerToolType.SAST
+            super().model_post_init(context)
+
+        def validate_plugin_dependencies(self) -> bool:
+            return True
+
+        def _execute_scan(self, target, target_type, global_ignore_paths):
+            raise NotImplementedError
+
+    scanner = NonChainingScanner(config=StubConfig(), context=plugin_context)
+    scanner.dependency_unavailable_reason = "no rule cache in offline mode"
+
+    assert scanner.validate_plugin_dependencies() is True
+
+    from automated_security_helper.core.phases import scan_phase
+
+    source = Path(scan_phase.__file__).read_text(encoding="utf-8")
+    assert "dependency_unavailable_reason" not in source, (
+        "ScanPhase now reads dependency_unavailable_reason, so the docstring on "
+        "ScannerPluginBase.validate_plugin_dependencies -- which says the phases "
+        "do not, and that a non-chaining subclass is therefore uncovered -- has "
+        "gone stale in the other direction"
+    )
