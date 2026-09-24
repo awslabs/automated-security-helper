@@ -82,8 +82,11 @@ class RichLogPanel:
                 message,  # No styling applied to message, respects any markup in the message
             )
 
-        # If we have fewer logs than max_lines, add empty rows
-        while len(log_list) < self.max_lines:
+        # Pad to a fixed height so the panel does not change size as records
+        # arrive. The count comes from the snapshot taken above rather than from
+        # the table, because add_row mutates only the table: a loop conditioned
+        # on len(log_list) would never advance and never return.
+        for _ in range(self.max_lines - len(log_list)):
             table.add_row("", "")
 
         return table
