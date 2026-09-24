@@ -31,7 +31,10 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Tool,
     ToolComponent,
 )
-from automated_security_helper.utils.cfn_template_model import get_model_from_template
+from automated_security_helper.utils.cfn_template_model import (
+    CloudFormationTemplateModelError,
+    get_model_from_template,
+)
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -71,10 +74,54 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                 key="--print-suppression",
                 value=None,
             ),
+            # --isolate-custom-rule-exceptions bounds the damage a defect in one of the
+            # four rules under --rule-directory can do. cfn_nag's CustomRuleLoader wraps
+            # each rule in `rescue ScriptError, StandardError` and then immediately
+            # re-raises unless this flag is set; the exception matches none of the
+            # rescue clauses in CfnNag#audit and the executor has none at all, so it
+            # reaches the top of the process, which exits before rendering any output.
+            # The cost is therefore not the broken rule's verdict but every rule's
+            # verdict on that template. That is not hypothetical: two of the four rules
+            # in this directory shipped a call that raised ArgumentError on every
+            # invocation, and the measurements for it are in the docstrings of
+            # tests/integration/scanners/test_cfn_nag_custom_rules.py, which is also
+            # where the argv that reproduces both failure modes lives.
+            #
+            # This changes cfn_nag's failure mode for every rule it loads, not only for
+            # the ones ASH ships, which is the intended trade: a rule that raises should
+            # cost its own verdict and nothing else.
             ToolExtraArg(
-                key="--ignore-fatal",
+                key="--isolate-custom-rule-exceptions",
                 value=None,
             ),
+            # --ignore-fatal is deliberately absent, and its absence is load-bearing.
+            #
+            # cfn-model raises when it cannot parse a template -- an unresolved Ref or
+            # GetAtt to a logical id not declared in that file is the common case -- and
+            # cfn_nag turns that into a violation with id FATAL. A FATAL violation
+            # carries no logical resource ids, and the SARIF renderer emits one result
+            # per id, so FATAL renders as nothing whether or not this flag is passed.
+            # What the flag additionally does is prune FATAL before the failure count is
+            # computed, which drops the process exit status to 0.
+            #
+            # That leaves a template no rule was ever evaluated against reporting a
+            # complete SARIF document, a fully populated rule driver, zero results, zero
+            # bytes of stderr, and exit 0 -- identical in every observable respect to a
+            # compliant template. Measured against cfn-nag 0.8.10 and cfn-model 0.6.6 --
+            # the versions assets/Gemfile.lock pins and CFN_NAG_GEM_VERSION installs --
+            # over four template shapes with
+            #
+            #   cfn_nag_scan --print-suppression [--ignore-fatal] \
+            #       --output-format sarif --input-path <template>
+            #
+            # an unresolved-Ref template and a clean template both give exit 0 with zero
+            # results when the flag is passed, and the two SARIF documents are the same
+            # size. Without the flag the unresolved-Ref template gives exit 1 with zero
+            # results while the clean template gives exit 0, and a template with real
+            # findings gives a non-zero exit with a non-empty result set. So the pair
+            # (exit status, result count) separates all three, and _evaluated_no_rule
+            # below reads it. A suppressed violation is removed before the count, so a
+            # fully suppressed template still exits 0 and is not mistaken for a failure.
             ToolExtraArg(
                 key="--rule-directory",
                 value=self.rule_directory.as_posix(),
@@ -255,6 +302,39 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         # the configuration directly from the self.config object.
         return super()._process_config_options()
 
+    @staticmethod
+    def _evaluated_no_rule(file_sarif: SarifReport, returncode) -> bool:
+        """Whether this per-file run failed without rendering a single result.
+
+        cfn_nag's exit status is its count of failing violations, and every violation a
+        rule produces carries at least one logical resource id -- ``BaseRule#audit``
+        returns nil when the id list is empty, so a rule cannot report a violation
+        against nothing. The SARIF renderer emits one result per id. Put together, a
+        rule violation always renders at least one SARIF result.
+
+        The one failing violation that renders nothing is FATAL, which cfn_nag
+        manufactures when cfn-model raises during parsing and which has no ids at all.
+        So a non-zero exit with an empty result set means the count came from something
+        SARIF could not represent, and the only thing in that category is a template
+        that was never evaluated. That is why this reads the exit status rather than
+        re-running the template: with ``--ignore-fatal`` withheld the signal is already
+        on the first invocation, so no second invocation is needed.
+
+        Deliberately not gated on the rule driver being populated. An empty driver
+        alongside a non-zero exit is a stronger reason to distrust the run, not a
+        reason to exempt it.
+        """
+        if returncode is None:
+            return False
+        try:
+            code = int(returncode)
+        except (TypeError, ValueError):
+            # An exit status ASH cannot read is not evidence that rules ran.
+            return True
+        if code == 0:
+            return False
+        return not any(run.results for run in (file_sarif.runs or []))
+
     def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
         """Abstract stub — CfnNag overrides scan() directly; this is unreachable."""
         raise NotImplementedError(
@@ -398,6 +478,11 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
             sarif_tool = Tool(driver=tool_component)
             sarif_output_file = target_results_dir.joinpath("cfn_nag.sarif")
             sarif_output_file.parent.mkdir(exist_ok=True, parents=True)
+            # Templates for which cfn_nag_scan wrote nothing at all. Collected rather
+            # than raised on immediately so that every template is still attempted and
+            # named, and the partial report still reaches disk; the raise happens once,
+            # below, after the report is written.
+            unrendered: List[str] = []
             for cfn_file in scannable:
                 try:
                     self._plugin_log(
@@ -418,7 +503,32 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                             target_type=target_type,
                             level=logging.DEBUG,
                         )
+                except CloudFormationTemplateModelError as e:
+                    # A document carrying a Resources mapping is CloudFormation, so
+                    # failing to model it is an ASH-side limitation rather than a
+                    # property of the file. Counted as a failed target, which is the
+                    # whole point of splitting this out of the skip below: the skip sits
+                    # above `targets_attempted += 1`, so a scan set in which every
+                    # template tripped the model ended at zero attempts and the
+                    # container reported SKIPPED with exit code 0. Counting it also
+                    # makes a single occurrence visible to
+                    # --fail-on-incomplete-scanners, which reads targets_failed.
+                    self.targets_attempted += 1
+                    self.targets_failed += 1
+                    reason = (
+                        "the template carries a Resources mapping but could not be "
+                        f"modeled as CloudFormation: {type(e.error).__name__}"
+                    )
+                    self._plugin_log(
+                        f"cfn_nag did not evaluate {cfn_file}: {reason}",
+                        target_type=target_type,
+                        level=logging.ERROR,
+                    )
+                    self.errors.append(f"{cfn_file}: {reason}")
+                    continue
                 except Exception as e:
+                    # Everything else here comes out of load_yaml, i.e. the file is not
+                    # parseable as YAML or JSON and so was never a candidate template.
                     self._plugin_log(
                         f"Not a CloudFormation file: {cfn_file}. Exception: {e}",
                         target_type=target_type,
@@ -461,8 +571,22 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                         ASH_LOGGER.error(f"CFN Nag returned no stdout for {cfn_file}")
                         self.targets_failed += 1
                         self.errors.append(f"{cfn_file}: {reason}")
+                        unrendered.append(cfn_file)
                         continue
                     file_sarif = SarifReport.model_validate_json(json_data=stdout)
+                    if self._evaluated_no_rule(file_sarif, proc_resp.get("returncode")):
+                        reason = (
+                            "cfn_nag reported a failure it could not render "
+                            f"(exit code {proc_resp.get('returncode', '?')} with an "
+                            "empty result set), which means no rule was evaluated "
+                            "against this template"
+                        )
+                        ASH_LOGGER.error(
+                            f"CFN Nag did not evaluate {cfn_file}: {reason}"
+                        )
+                        self.targets_failed += 1
+                        self.errors.append(f"{cfn_file}: {reason}")
+                        continue
                     if sarif_report is None and file_sarif is not None:
                         sarif_report = file_sarif
                     elif file_sarif is not None:
@@ -529,6 +653,29 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
                     exclude_unset=True,
                 )
                 fp.write(report_str)
+
+            if unrendered:
+                # A hard scanner failure rather than one failed target among many, and
+                # the distinction is the whole reason this raises. cfn_nag_scan is
+                # invoked once per template and always writes a document, so an
+                # invocation that produced zero bytes did not fail to find anything --
+                # it failed to run, and the process dying before rendering is a property
+                # of the tool rather than of one template. Left as a target counter, one
+                # crashed template among nine clean ones keeps targets_failed below
+                # targets_attempted, determine_status falls through to the severity gate
+                # over the surviving findings, and the scanner reports PASSED with the
+                # crashed template's findings absent and one ERROR line as the only
+                # record.
+                #
+                # Raised here, after _post_scan and after the report is on disk, so the
+                # timings are recorded and the findings from the templates that did scan
+                # are not thrown away with the verdict.
+                raise ScannerError(
+                    "cfn_nag_scan produced no output for "
+                    f"{len(unrendered)} of {self.targets_attempted} template(s), so "
+                    "no rule was evaluated against them and this run is not a clean "
+                    f"scan: {', '.join(unrendered)}"
+                )
 
             return sarif_report
 
