@@ -692,9 +692,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         all_results = model.sarif.get_all_results()
 
         if not all_results:
-            ASH_LOGGER.info(
-                "No SARIF results found in any run - returning empty array"
-            )
+            ASH_LOGGER.info("No SARIF results found in any run - returning empty array")
             return json.dumps([], indent=2)
 
         total_results_count = len(all_results)

@@ -65,10 +65,12 @@ You can create custom event handlers:
 from automated_security_helper.plugins.events import AshEventType
 from automated_security_helper.plugins import ash_plugin_manager
 
+
 def my_custom_callback(**kwargs):
     scanner = kwargs.get("scanner", "unknown")
     print(f"Scanner {scanner} completed!")
     return True
+
 
 ash_plugin_manager.subscribe(AshEventType.SCAN_COMPLETE, my_custom_callback)
 ```

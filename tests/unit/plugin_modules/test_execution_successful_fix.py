@@ -37,11 +37,17 @@ class TestBanditExecutionSuccessful:
             BanditScannerConfig,
         )
 
-        scanner = BanditScanner(context=test_plugin_context, config=BanditScannerConfig())
+        scanner = BanditScanner(
+            context=test_plugin_context, config=BanditScannerConfig()
+        )
         return scanner
 
-    @pytest.mark.parametrize("exit_code,expected", [(0, True), (1, True), (2, False), (127, False)])
-    def test_execution_successful_reflects_exit_code(self, bandit_scanner, exit_code, expected, tmp_path):
+    @pytest.mark.parametrize(
+        "exit_code,expected", [(0, True), (1, True), (2, False), (127, False)]
+    )
+    def test_execution_successful_reflects_exit_code(
+        self, bandit_scanner, exit_code, expected, tmp_path
+    ):
         """executionSuccessful must be True only when exit_code is 0 or 1."""
         # Minimal valid SARIF that bandit would produce
         minimal_sarif = {
@@ -69,7 +75,11 @@ class TestBanditExecutionSuccessful:
 
         # Patch _run_subprocess to avoid actually running bandit, and
         # patch the SARIF file reading path so it reads our fixture
-        with patch.object(bandit_scanner, "_run_subprocess", return_value={"stdout": "", "returncode": exit_code}):
+        with patch.object(
+            bandit_scanner,
+            "_run_subprocess",
+            return_value={"stdout": "", "returncode": exit_code},
+        ):
             # Directly test the SARIF construction by simulating what scan() does
             # after calling the subprocess
             from automated_security_helper.schemas.sarif_schema_model import (
@@ -77,7 +87,9 @@ class TestBanditExecutionSuccessful:
                 Invocation,
                 SarifReport,
             )
-            from automated_security_helper.utils.get_shortest_name import get_shortest_name
+            from automated_security_helper.utils.get_shortest_name import (
+                get_shortest_name,
+            )
 
             content = sarif_file.read_text()
             bandit_results = json.loads(content)
@@ -90,7 +102,9 @@ class TestBanditExecutionSuccessful:
                     arguments=final_args[1:],
                     startTimeUtc=bandit_scanner.start_time,
                     endTimeUtc=bandit_scanner.end_time,
-                    executionSuccessful=(bandit_scanner.exit_code == 0 or bandit_scanner.exit_code == 1),
+                    executionSuccessful=(
+                        bandit_scanner.exit_code == 0 or bandit_scanner.exit_code == 1
+                    ),
                     exitCode=bandit_scanner.exit_code,
                     exitCodeDescription="\n".join(bandit_scanner.errors),
                     workingDirectory=ArtifactLocation(
@@ -109,8 +123,12 @@ class TestBanditExecutionSuccessful:
 class TestCheckovExecutionSuccessful:
     """Checkov: exit 0/1 = success, exit >=2 = failure."""
 
-    @pytest.mark.parametrize("exit_code,expected", [(0, True), (1, True), (2, False), (3, False)])
-    def test_execution_successful_reflects_exit_code(self, test_plugin_context, exit_code, expected, tmp_path):
+    @pytest.mark.parametrize(
+        "exit_code,expected", [(0, True), (1, True), (2, False), (3, False)]
+    )
+    def test_execution_successful_reflects_exit_code(
+        self, test_plugin_context, exit_code, expected, tmp_path
+    ):
         from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
             CheckovScanner,
             CheckovScannerConfig,
@@ -122,7 +140,9 @@ class TestCheckovExecutionSuccessful:
         )
         from automated_security_helper.utils.get_shortest_name import get_shortest_name
 
-        scanner = CheckovScanner(context=test_plugin_context, config=CheckovScannerConfig())
+        scanner = CheckovScanner(
+            context=test_plugin_context, config=CheckovScannerConfig()
+        )
         scanner.exit_code = exit_code
         scanner.start_time = "2024-01-01T00:00:00Z"
         scanner.end_time = "2024-01-01T00:01:00Z"
@@ -130,7 +150,12 @@ class TestCheckovExecutionSuccessful:
 
         minimal_sarif = {
             "version": "2.1.0",
-            "runs": [{"tool": {"driver": {"name": "Checkov", "version": "1.0.0"}}, "results": []}],
+            "runs": [
+                {
+                    "tool": {"driver": {"name": "Checkov", "version": "1.0.0"}},
+                    "results": [],
+                }
+            ],
         }
         sarif_report = SarifReport.model_validate(minimal_sarif)
         final_args = ["checkov", "--directory", str(tmp_path)]
@@ -144,7 +169,9 @@ class TestCheckovExecutionSuccessful:
                 executionSuccessful=(scanner.exit_code == 0 or scanner.exit_code == 1),
                 exitCode=scanner.exit_code,
                 exitCodeDescription="\n".join(scanner.errors),
-                workingDirectory=ArtifactLocation(uri=get_shortest_name(input=tmp_path)),
+                workingDirectory=ArtifactLocation(
+                    uri=get_shortest_name(input=tmp_path)
+                ),
             )
         ]
         assert _extract_execution_successful(sarif_report) is expected
@@ -158,8 +185,12 @@ class TestCheckovExecutionSuccessful:
 class TestGrypeExecutionSuccessful:
     """Grype: exit 0 = success, exit 1 = error, exit 2 = findings (success)."""
 
-    @pytest.mark.parametrize("exit_code,expected", [(0, True), (1, False), (2, True), (127, True)])
-    def test_execution_successful_reflects_exit_code(self, test_plugin_context, exit_code, expected, tmp_path):
+    @pytest.mark.parametrize(
+        "exit_code,expected", [(0, True), (1, False), (2, True), (127, True)]
+    )
+    def test_execution_successful_reflects_exit_code(
+        self, test_plugin_context, exit_code, expected, tmp_path
+    ):
         from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (
             GrypeScanner,
             GrypeScannerConfig,
@@ -179,7 +210,12 @@ class TestGrypeExecutionSuccessful:
 
         minimal_sarif = {
             "version": "2.1.0",
-            "runs": [{"tool": {"driver": {"name": "Grype", "version": "1.0.0"}}, "results": []}],
+            "runs": [
+                {
+                    "tool": {"driver": {"name": "Grype", "version": "1.0.0"}},
+                    "results": [],
+                }
+            ],
         }
         sarif_report = SarifReport.model_validate(minimal_sarif)
         final_args = ["grype", str(tmp_path)]
@@ -193,7 +229,9 @@ class TestGrypeExecutionSuccessful:
                 executionSuccessful=(scanner.exit_code != 1),
                 exitCode=scanner.exit_code,
                 exitCodeDescription="\n".join(scanner.errors),
-                workingDirectory=ArtifactLocation(uri=get_shortest_name(input=tmp_path)),
+                workingDirectory=ArtifactLocation(
+                    uri=get_shortest_name(input=tmp_path)
+                ),
             )
         ]
         assert _extract_execution_successful(sarif_report) is expected
@@ -208,7 +246,9 @@ class TestSemgrepExecutionSuccessful:
     """Semgrep: exit 0/1 = success, exit >=2 = failure."""
 
     @pytest.mark.parametrize("exit_code,expected", [(0, True), (1, True), (2, False)])
-    def test_execution_successful_reflects_exit_code(self, test_plugin_context, exit_code, expected, tmp_path):
+    def test_execution_successful_reflects_exit_code(
+        self, test_plugin_context, exit_code, expected, tmp_path
+    ):
         from automated_security_helper.schemas.sarif_schema_model import (
             ArtifactLocation,
             Invocation,
@@ -218,7 +258,12 @@ class TestSemgrepExecutionSuccessful:
 
         minimal_sarif = {
             "version": "2.1.0",
-            "runs": [{"tool": {"driver": {"name": "Semgrep", "version": "1.0.0"}}, "results": []}],
+            "runs": [
+                {
+                    "tool": {"driver": {"name": "Semgrep", "version": "1.0.0"}},
+                    "results": [],
+                }
+            ],
         }
         sarif_report = SarifReport.model_validate(minimal_sarif)
         final_args = ["semgrep", "--config", "auto"]
@@ -233,7 +278,9 @@ class TestSemgrepExecutionSuccessful:
                 executionSuccessful=(exit_code_val == 0 or exit_code_val == 1),
                 exitCode=exit_code_val,
                 exitCodeDescription="",
-                workingDirectory=ArtifactLocation(uri=get_shortest_name(input=tmp_path)),
+                workingDirectory=ArtifactLocation(
+                    uri=get_shortest_name(input=tmp_path)
+                ),
             )
         ]
         assert _extract_execution_successful(sarif_report) is expected
@@ -248,7 +295,9 @@ class TestOpengrepExecutionSuccessful:
     """Opengrep: exit 0/1 = success, exit >=2 = failure."""
 
     @pytest.mark.parametrize("exit_code,expected", [(0, True), (1, True), (2, False)])
-    def test_execution_successful_reflects_exit_code(self, test_plugin_context, exit_code, expected, tmp_path):
+    def test_execution_successful_reflects_exit_code(
+        self, test_plugin_context, exit_code, expected, tmp_path
+    ):
         from automated_security_helper.schemas.sarif_schema_model import (
             ArtifactLocation,
             Invocation,
@@ -258,7 +307,12 @@ class TestOpengrepExecutionSuccessful:
 
         minimal_sarif = {
             "version": "2.1.0",
-            "runs": [{"tool": {"driver": {"name": "Opengrep", "version": "1.0.0"}}, "results": []}],
+            "runs": [
+                {
+                    "tool": {"driver": {"name": "Opengrep", "version": "1.0.0"}},
+                    "results": [],
+                }
+            ],
         }
         sarif_report = SarifReport.model_validate(minimal_sarif)
         final_args = ["opengrep", "--config", "auto"]
@@ -273,7 +327,9 @@ class TestOpengrepExecutionSuccessful:
                 executionSuccessful=(exit_code_val == 0 or exit_code_val == 1),
                 exitCode=exit_code_val,
                 exitCodeDescription="",
-                workingDirectory=ArtifactLocation(uri=get_shortest_name(input=tmp_path)),
+                workingDirectory=ArtifactLocation(
+                    uri=get_shortest_name(input=tmp_path)
+                ),
             )
         ]
         assert _extract_execution_successful(sarif_report) is expected
@@ -288,7 +344,9 @@ class TestNpmAuditExecutionSuccessful:
     """npm audit: exit 0/1 = success, exit >=2 = failure."""
 
     @pytest.mark.parametrize("exit_code,expected", [(0, True), (1, True), (2, False)])
-    def test_execution_successful_reflects_exit_code(self, test_plugin_context, exit_code, expected, tmp_path):
+    def test_execution_successful_reflects_exit_code(
+        self, test_plugin_context, exit_code, expected, tmp_path
+    ):
         from automated_security_helper.schemas.sarif_schema_model import (
             ArtifactLocation,
             Invocation,
@@ -316,7 +374,9 @@ class TestNpmAuditExecutionSuccessful:
                     invocations=[
                         Invocation(
                             commandLine="npm audit --json",
-                            executionSuccessful=(exit_code_val == 0 or exit_code_val == 1),
+                            executionSuccessful=(
+                                exit_code_val == 0 or exit_code_val == 1
+                            ),
                             exitCode=exit_code_val,
                             workingDirectory=ArtifactLocation(
                                 uri=get_shortest_name(input=tmp_path)
@@ -338,7 +398,9 @@ class TestCfnNagExecutionSuccessful:
     """cfn-nag: exit 0/1 = success, exit >=2 = failure."""
 
     @pytest.mark.parametrize("exit_code,expected", [(0, True), (1, True), (2, False)])
-    def test_execution_successful_reflects_exit_code(self, test_plugin_context, exit_code, expected, tmp_path):
+    def test_execution_successful_reflects_exit_code(
+        self, test_plugin_context, exit_code, expected, tmp_path
+    ):
         from automated_security_helper.schemas.sarif_schema_model import (
             ArtifactLocation,
             Invocation,
@@ -348,7 +410,12 @@ class TestCfnNagExecutionSuccessful:
 
         minimal_sarif = {
             "version": "2.1.0",
-            "runs": [{"tool": {"driver": {"name": "cfn_nag", "version": "1.0.0"}}, "results": []}],
+            "runs": [
+                {
+                    "tool": {"driver": {"name": "cfn_nag", "version": "1.0.0"}},
+                    "results": [],
+                }
+            ],
         }
         sarif_report = SarifReport.model_validate(minimal_sarif)
         exit_code_val = exit_code
@@ -362,7 +429,9 @@ class TestCfnNagExecutionSuccessful:
                 executionSuccessful=(exit_code_val == 0 or exit_code_val == 1),
                 exitCode=exit_code_val,
                 exitCodeDescription="",
-                workingDirectory=ArtifactLocation(uri=get_shortest_name(input=tmp_path)),
+                workingDirectory=ArtifactLocation(
+                    uri=get_shortest_name(input=tmp_path)
+                ),
             )
         ]
         assert _extract_execution_successful(sarif_report) is expected
@@ -377,7 +446,9 @@ class TestTrivyExecutionSuccessful:
     """Trivy: exit 0/1 = success, exit >=2 = failure."""
 
     @pytest.mark.parametrize("exit_code,expected", [(0, True), (1, True), (2, False)])
-    def test_execution_successful_reflects_exit_code(self, test_plugin_context, exit_code, expected, tmp_path):
+    def test_execution_successful_reflects_exit_code(
+        self, test_plugin_context, exit_code, expected, tmp_path
+    ):
         from automated_security_helper.schemas.sarif_schema_model import (
             ArtifactLocation,
             Invocation,
@@ -387,7 +458,12 @@ class TestTrivyExecutionSuccessful:
 
         minimal_sarif = {
             "version": "2.1.0",
-            "runs": [{"tool": {"driver": {"name": "Trivy", "version": "1.0.0"}}, "results": []}],
+            "runs": [
+                {
+                    "tool": {"driver": {"name": "Trivy", "version": "1.0.0"}},
+                    "results": [],
+                }
+            ],
         }
         sarif_report = SarifReport.model_validate(minimal_sarif)
         final_args = ["trivy", "fs", str(tmp_path)]
@@ -402,7 +478,9 @@ class TestTrivyExecutionSuccessful:
                 executionSuccessful=(exit_code_val == 0 or exit_code_val == 1),
                 exitCode=exit_code_val,
                 exitCodeDescription="",
-                workingDirectory=ArtifactLocation(uri=get_shortest_name(input=tmp_path)),
+                workingDirectory=ArtifactLocation(
+                    uri=get_shortest_name(input=tmp_path)
+                ),
             )
         ]
         assert _extract_execution_successful(sarif_report) is expected
@@ -427,9 +505,17 @@ class TestSourceCodeUsesCorrectExpression:
         "trivy": "automated_security_helper/plugin_modules/ash_trivy_plugins/trivy_repo_scanner.py",
     }
 
-    @pytest.mark.parametrize("scanner_name", [
-        "bandit", "checkov", "semgrep", "opengrep", "cfn_nag", "trivy",
-    ])
+    @pytest.mark.parametrize(
+        "scanner_name",
+        [
+            "bandit",
+            "checkov",
+            "semgrep",
+            "opengrep",
+            "cfn_nag",
+            "trivy",
+        ],
+    )
     def test_standard_scanners_use_exit_code_expression(self, scanner_name):
         """Standard scanners (0/1 = success) must use self.exit_code in executionSuccessful."""
         src = Path(self.SCANNER_FILES[scanner_name]).read_text()

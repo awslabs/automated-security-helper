@@ -3,6 +3,7 @@
 Emits agent.json (Amazon Q agent definition) and an install.sh that copies
 it into ~/.aws/amazonq/cli-agents/.
 """
+
 from __future__ import annotations
 
 import json

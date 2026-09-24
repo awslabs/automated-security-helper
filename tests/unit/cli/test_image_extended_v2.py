@@ -306,9 +306,12 @@ def test_columns_lines_passthrough_when_tty():
     import shutil as _shutil
 
     fake_size = _shutil.os.terminal_size((160, 50))
-    with patch("sys.stdout") as mock_stdout, patch(
-        "automated_security_helper.interactions.run_ash_container.shutil.get_terminal_size",
-        return_value=fake_size,
+    with (
+        patch("sys.stdout") as mock_stdout,
+        patch(
+            "automated_security_helper.interactions.run_ash_container.shutil.get_terminal_size",
+            return_value=fake_size,
+        ),
     ):
         mock_stdout.isatty.return_value = True
         cmd = _assemble_run_command(**_base_assemble_kwargs(color=True))

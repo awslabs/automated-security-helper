@@ -15,11 +15,11 @@ These tests verify:
    what the host computes.
 3. Local mode is unaffected (still resolves via orchestrator).
 """
+
 from __future__ import annotations
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-
 
 
 # ---------------------------------------------------------------------------
@@ -180,5 +180,9 @@ class TestLocalModeUnaffected:
         call_args = mock_exit.call_args
         assert call_args is not None
         # config_fail_on_findings is the third positional or keyword arg
-        config_fof = call_args.args[2] if len(call_args.args) > 2 else call_args.kwargs.get("config_fail_on_findings")
+        config_fof = (
+            call_args.args[2]
+            if len(call_args.args) > 2
+            else call_args.kwargs.get("config_fail_on_findings")
+        )
         assert config_fof is False

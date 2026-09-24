@@ -60,7 +60,14 @@ def _make_aggregated_json(vulns: list[FlatVulnerability]) -> dict:
         "metadata": {
             "scan_id": "test-scan",
             "scan_timestamp": "2026-01-01T00:00:00+00:00",
-            "summary_stats": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0, "suppressed": 0},
+            "summary_stats": {
+                "critical": 0,
+                "high": 0,
+                "medium": 0,
+                "low": 0,
+                "info": 0,
+                "suppressed": 0,
+            },
         },
         "sarif": {"version": "2.1.0", "runs": []},
         "additional_reports": {_SCANNER: findings} if vulns else {},
@@ -209,7 +216,9 @@ class TestDiffScanResultsMissingFile:
         before_f = tmp_path / "before.json"
         _write_results(before_f, [])
 
-        result = mcp_diff_scan_results(str(before_f), str(tmp_path / "nonexistent.json"))
+        result = mcp_diff_scan_results(
+            str(before_f), str(tmp_path / "nonexistent.json")
+        )
 
         assert result.get("success") is False
         assert "error" in result

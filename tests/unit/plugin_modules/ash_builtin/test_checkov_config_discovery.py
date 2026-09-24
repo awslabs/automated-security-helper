@@ -51,9 +51,7 @@ def _scanner(source_dir: Path, output_dir: Path, **opts) -> CheckovScanner:
 
 
 def _config_args(scanner: CheckovScanner) -> list[str]:
-    return [
-        ea.value for ea in scanner.args.extra_args if ea.key == "--config-file"
-    ]
+    return [ea.value for ea in scanner.args.extra_args if ea.key == "--config-file"]
 
 
 @pytest.fixture

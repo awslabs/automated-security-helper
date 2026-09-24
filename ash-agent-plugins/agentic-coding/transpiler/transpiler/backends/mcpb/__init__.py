@@ -4,6 +4,7 @@ Emits a .mcpb ZIP archive (manifest.json + bundled assets) for one-click
 install in Claude Desktop. The archive is committed; the release phase
 copies it into dist/ for GitHub release attachment.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -82,7 +83,10 @@ class MCPBBackend(BaseBackend):
             with zipfile.ZipFile(archive) as zf:
                 names = zf.namelist()
                 if "manifest.json" not in names:
-                    return {"ok": False, "reason": "manifest.json missing from archive root"}
+                    return {
+                        "ok": False,
+                        "reason": "manifest.json missing from archive root",
+                    }
                 with zf.open("manifest.json") as f:
                     manifest = json.loads(f.read().decode("utf-8"))
         except zipfile.BadZipFile as e:
@@ -104,6 +108,7 @@ class MCPBBackend(BaseBackend):
         # manifest from the archive and validate it directly — `mcpb
         # validate` does not accept .mcpb archives.
         import tempfile
+
         pins = self._load_cli_pins(ctx.base_dir)
         if "mcpb" in pins:
             ver = self._assert_version_pin("mcpb", ["mcpb", "--version"], pins["mcpb"])

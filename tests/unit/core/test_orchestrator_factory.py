@@ -34,7 +34,9 @@ class TestConstructorNoIO:
 
         with patch(
             "automated_security_helper.core.orchestrator.resolve_config",
-            side_effect=RuntimeError("resolve_config must not be called during construction"),
+            side_effect=RuntimeError(
+                "resolve_config must not be called during construction"
+            ),
         ):
             # Should not raise — model_post_init no longer calls resolve_config
             orch = ASHScanOrchestrator(**kwargs)
@@ -50,7 +52,9 @@ class TestConstructorNoIO:
 
         ASHScanOrchestrator(**kwargs)
 
-        assert not out.exists(), ".ash output dir must not be created during construction"
+        assert not out.exists(), (
+            ".ash output dir must not be created during construction"
+        )
 
     def test_constructor_does_not_instantiate_execution_engine(self, tmp_path):
         """After plain construction, execution_engine is None."""
@@ -180,4 +184,6 @@ class TestInitializeIdempotent:
             second_engine = orch.execution_engine
 
         assert call_count["n"] == 1, "resolve_config should only be called once"
-        assert first_engine is second_engine, "execution_engine must not be replaced on second initialize()"
+        assert first_engine is second_engine, (
+            "execution_engine must not be replaced on second initialize()"
+        )

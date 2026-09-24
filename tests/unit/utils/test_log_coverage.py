@@ -28,7 +28,6 @@ class TestAddLoggingLevel:
         # Should not raise
 
 
-
 class TestJsonFormatter:
     """Tests for JsonFormatter."""
 
@@ -109,7 +108,6 @@ class TestJsonFormatter:
         output = formatter.format(record)
         data = json.loads(output)
         assert "stack_info" in data
-
 
 
 class TestASHLogger:

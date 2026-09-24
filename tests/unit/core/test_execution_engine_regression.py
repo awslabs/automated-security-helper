@@ -10,7 +10,6 @@ import os
 from unittest.mock import patch
 
 
-
 # ---------------------------------------------------------------------------
 # PR#274 Bug #5 -- execution_engine.py: operator precedence on _max_workers
 # ---------------------------------------------------------------------------

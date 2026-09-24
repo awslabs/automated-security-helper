@@ -3,6 +3,7 @@
 Emits .vscode/mcp.json (servers format) + .github/copilot-instructions.md +
 .github/prompts/*.prompt.md + .github/agents/*.agent.md.
 """
+
 from __future__ import annotations
 
 import json
@@ -72,6 +73,12 @@ class CopilotBackend(BaseBackend):
             return {"ok": False, "reason": ".github/copilot-instructions.md missing"}
         char_count = len(instructions.read_text())
         if char_count > 4000:
-            return {"ok": False, "reason": f"copilot-instructions.md exceeds 4000-char cap ({char_count} chars)"}
+            return {
+                "ok": False,
+                "reason": f"copilot-instructions.md exceeds 4000-char cap ({char_count} chars)",
+            }
 
-        return {"ok": True, "detail": "mcp.json + copilot-instructions valid (no CLI to invoke)"}
+        return {
+            "ok": True,
+            "detail": "mcp.json + copilot-instructions valid (no CLI to invoke)",
+        }

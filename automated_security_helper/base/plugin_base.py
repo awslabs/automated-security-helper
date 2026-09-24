@@ -128,8 +128,7 @@ class PluginBase(UVToolMixin, BaseModel):
         ASH_LOGGER._log(
             level,
             f"([yellow]{self.config.name or self.__class__.__name__}[/yellow]{tt})"
-             "\t"
-            + "\n".join(msg),
+            "\t" + "\n".join(msg),
             args=(),
         )
         if level == logging.ERROR or append_to_stream == "stderr":

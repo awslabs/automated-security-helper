@@ -23,15 +23,15 @@ from automated_security_helper.core.exceptions import ScannerError
 
 
 def _make_scanner(test_plugin_context):
-    config = SemgrepScannerConfig(
-        options=SemgrepScannerConfigOptions(offline=True)
-    )
+    config = SemgrepScannerConfig(options=SemgrepScannerConfigOptions(offline=True))
     scanner = SemgrepScanner(context=test_plugin_context, config=config)
     scanner.dependencies_satisfied = True
     return scanner
 
 
-def test_semgrep_offline_missing_cache_raises_actionable_error(test_plugin_context, monkeypatch):
+def test_semgrep_offline_missing_cache_raises_actionable_error(
+    test_plugin_context, monkeypatch
+):
     """No SEMGREP_RULES_CACHE_DIR → ScannerError with guidance."""
     monkeypatch.delenv("SEMGREP_RULES_CACHE_DIR", raising=False)
 
@@ -43,7 +43,9 @@ def test_semgrep_offline_missing_cache_raises_actionable_error(test_plugin_conte
     assert "ash build-image --offline" in msg
 
 
-def test_semgrep_offline_empty_cache_raises_actionable_error(test_plugin_context, monkeypatch, tmp_path):
+def test_semgrep_offline_empty_cache_raises_actionable_error(
+    test_plugin_context, monkeypatch, tmp_path
+):
     """SEMGREP_RULES_CACHE_DIR set but empty → ScannerError with guidance."""
     monkeypatch.setenv("SEMGREP_RULES_CACHE_DIR", str(tmp_path))
 
@@ -55,7 +57,9 @@ def test_semgrep_offline_empty_cache_raises_actionable_error(test_plugin_context
     assert "ash build-image --offline" in msg
 
 
-def test_semgrep_offline_with_cache_does_not_raise(test_plugin_context, monkeypatch, tmp_path):
+def test_semgrep_offline_with_cache_does_not_raise(
+    test_plugin_context, monkeypatch, tmp_path
+):
     """SEMGREP_RULES_CACHE_DIR set with a .yaml file → no error, --config appended."""
     rule_file = tmp_path / "rules.yaml"
     rule_file.write_text("rules: []")

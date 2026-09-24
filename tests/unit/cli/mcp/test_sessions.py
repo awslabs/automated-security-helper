@@ -47,17 +47,13 @@ class TestGetOrCreate:
         s2 = registry.get_or_create("conn-a")
         assert s1 is s2
 
-    def test_distinct_ids_get_distinct_sessions(
-        self, registry: MCPSessionRegistry
-    ):
+    def test_distinct_ids_get_distinct_sessions(self, registry: MCPSessionRegistry):
         s1 = registry.get_or_create("conn-a")
         s2 = registry.get_or_create("conn-b")
         assert s1 is not s2
         assert s1.lock is not s2.lock
 
-    def test_lock_identity_preserved_across_calls(
-        self, registry: MCPSessionRegistry
-    ):
+    def test_lock_identity_preserved_across_calls(self, registry: MCPSessionRegistry):
         s1 = registry.get_or_create("conn-a")
         s2 = registry.get_or_create("conn-a")
         # Identical lock object — critical for serialization correctness.
@@ -78,17 +74,13 @@ class TestWorkspaceRoot:
         assert s_a.workspace_root.parent == parent
         assert s_b.workspace_root.parent == parent
 
-    def test_workspace_id_matches_session_id(
-        self, registry: MCPSessionRegistry
-    ):
+    def test_workspace_id_matches_session_id(self, registry: MCPSessionRegistry):
         s = registry.get_or_create("conn-a")
         assert s.workspace_root.name == "conn-a"
 
 
 class TestDisconnect:
-    def test_disconnect_removes_from_registry(
-        self, registry: MCPSessionRegistry
-    ):
+    def test_disconnect_removes_from_registry(self, registry: MCPSessionRegistry):
         registry.get_or_create("conn-a")
         assert "conn-a" in registry
         registry.disconnect("conn-a")
@@ -104,9 +96,7 @@ class TestDisconnect:
         assert not s.workspace_root.exists()
         assert not marker.exists()
 
-    def test_disconnect_unknown_id_is_noop(
-        self, registry: MCPSessionRegistry
-    ):
+    def test_disconnect_unknown_id_is_noop(self, registry: MCPSessionRegistry):
         # Must not raise.
         registry.disconnect("never-existed")
         assert len(registry) == 0
@@ -327,9 +317,7 @@ class TestDefaultRegistry:
 
 
 class TestSessionFieldDefaults:
-    def test_optional_fields_default_to_none(
-        self, registry: MCPSessionRegistry
-    ):
+    def test_optional_fields_default_to_none(self, registry: MCPSessionRegistry):
         s = registry.get_or_create("conn-a")
         assert s.source_dir is None
         assert s.config is None

@@ -1027,7 +1027,9 @@ def add_suppression_to_config(config_path: Path, suppression: AshSuppression) ->
     # Case D (last resort): a shape we cannot safely edit as text, e.g. an inline
     # `global_settings: {...}` mapping. Fall back to a full rewrite. This loses
     # comments, but only for a structure that essentially never occurs.
-    _rewrite_config_with_entry(config_path, data if isinstance(data, dict) else {}, entry)
+    _rewrite_config_with_entry(
+        config_path, data if isinstance(data, dict) else {}, entry
+    )
 
 
 def _serialize_entry_lines(entry: dict, item_indent: str) -> list[str]:

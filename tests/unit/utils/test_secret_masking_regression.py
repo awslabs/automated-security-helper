@@ -6,7 +6,6 @@ PR#274 Bug #88: B106 and B107 are not dispatched
 """
 
 
-
 class TestSecretMasking:
     """Tests for secret masking deficiencies."""
 
@@ -78,6 +77,6 @@ class TestSecretMasking:
         """Secret in double quotes should be masked."""
         from automated_security_helper.utils.secret_masking import mask_secret_in_text
 
-        text = 'Possible hardcoded ' + 'password: "MySecret99"'
+        text = "Possible hardcoded " + 'password: "MySecret99"'
         result = mask_secret_in_text(text, rule_id="B105")
         assert "MySecret99" not in result

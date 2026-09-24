@@ -17,12 +17,15 @@ class TestOrchestratorInit:
         output = tmp_path / "out"
         output.mkdir()
 
-        with patch(
-            "automated_security_helper.core.orchestrator.resolve_config",
-            return_value=AshConfig(project_name="test"),
-        ), patch(
-            "automated_security_helper.core.orchestrator.scan_set",
-            return_value=set(),
+        with (
+            patch(
+                "automated_security_helper.core.orchestrator.resolve_config",
+                return_value=AshConfig(project_name="test"),
+            ),
+            patch(
+                "automated_security_helper.core.orchestrator.scan_set",
+                return_value=set(),
+            ),
         ):
             orch = ASHScanOrchestrator(
                 source_dir=source,
@@ -43,12 +46,15 @@ class TestOrchestratorInit:
         output = tmp_path / "out"
         output.mkdir()
 
-        with patch(
-            "automated_security_helper.core.orchestrator.resolve_config",
-            return_value=AshConfig(project_name="test"),
-        ), patch(
-            "automated_security_helper.core.orchestrator.scan_set",
-            return_value=set(),
+        with (
+            patch(
+                "automated_security_helper.core.orchestrator.resolve_config",
+                return_value=AshConfig(project_name="test"),
+            ),
+            patch(
+                "automated_security_helper.core.orchestrator.scan_set",
+                return_value=set(),
+            ),
         ):
             orch = ASHScanOrchestrator(
                 source_dir=source,
@@ -68,12 +74,15 @@ class TestOrchestratorInit:
         output = tmp_path / "out"
         output.mkdir()
 
-        with patch(
-            "automated_security_helper.core.orchestrator.resolve_config",
-            return_value=AshConfig(project_name="test"),
-        ), patch(
-            "automated_security_helper.core.orchestrator.scan_set",
-            return_value=set(),
+        with (
+            patch(
+                "automated_security_helper.core.orchestrator.resolve_config",
+                return_value=AshConfig(project_name="test"),
+            ),
+            patch(
+                "automated_security_helper.core.orchestrator.scan_set",
+                return_value=set(),
+            ),
         ):
             orch = ASHScanOrchestrator(
                 source_dir=source,
@@ -93,12 +102,15 @@ class TestOrchestratorInit:
         output = tmp_path / "out"
         output.mkdir()
 
-        with patch(
-            "automated_security_helper.core.orchestrator.resolve_config",
-            return_value=AshConfig(project_name="test"),
-        ), patch(
-            "automated_security_helper.core.orchestrator.scan_set",
-            return_value=set(),
+        with (
+            patch(
+                "automated_security_helper.core.orchestrator.resolve_config",
+                return_value=AshConfig(project_name="test"),
+            ),
+            patch(
+                "automated_security_helper.core.orchestrator.scan_set",
+                return_value=set(),
+            ),
         ):
             orch = ASHScanOrchestrator(
                 source_dir=source,
@@ -118,12 +130,15 @@ class TestOrchestratorInit:
         output = tmp_path / "out"
         output.mkdir()
 
-        with patch(
-            "automated_security_helper.core.orchestrator.resolve_config",
-            return_value=AshConfig(project_name="test"),
-        ), patch(
-            "automated_security_helper.core.orchestrator.scan_set",
-            return_value=set(),
+        with (
+            patch(
+                "automated_security_helper.core.orchestrator.resolve_config",
+                return_value=AshConfig(project_name="test"),
+            ),
+            patch(
+                "automated_security_helper.core.orchestrator.scan_set",
+                return_value=set(),
+            ),
         ):
             orch = ASHScanOrchestrator(
                 source_dir=source,
@@ -143,12 +158,15 @@ class TestOrchestratorInit:
         output = tmp_path / "out"
         output.mkdir()
 
-        with patch(
-            "automated_security_helper.core.orchestrator.resolve_config",
-            return_value=AshConfig(project_name="test"),
-        ), patch(
-            "automated_security_helper.core.orchestrator.scan_set",
-            return_value=set(),
+        with (
+            patch(
+                "automated_security_helper.core.orchestrator.resolve_config",
+                return_value=AshConfig(project_name="test"),
+            ),
+            patch(
+                "automated_security_helper.core.orchestrator.scan_set",
+                return_value=set(),
+            ),
         ):
             orch = ASHScanOrchestrator(
                 source_dir=source,

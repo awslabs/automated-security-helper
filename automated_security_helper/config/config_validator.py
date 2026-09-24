@@ -14,7 +14,6 @@ class ConfigValidationError(Exception):
     """Raised when configuration validation fails."""
 
 
-
 class ConfigValidator:
     """Validates ASH configuration files for common issues."""
 

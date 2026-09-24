@@ -22,7 +22,9 @@ from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP
 from automated_security_helper.utils.normalizers import get_normalized_filename
-from automated_security_helper.utils.suppression_matcher import file_path_matches as path_matches_pattern
+from automated_security_helper.utils.suppression_matcher import (
+    file_path_matches as path_matches_pattern,
+)
 
 
 class JupyterConverterConfigOptions(ConverterOptionsBase):

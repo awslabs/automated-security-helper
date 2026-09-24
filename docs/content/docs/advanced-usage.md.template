@@ -50,25 +50,37 @@ ASH v3 supports custom plugins for extending functionality:
 ```python
 # my_ash_plugins/scanners.py
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
-from automated_security_helper.base.scanner_plugin import ScannerPluginBase, ScannerPluginConfigBase
+from automated_security_helper.base.scanner_plugin import (
+    ScannerPluginBase,
+    ScannerPluginConfigBase,
+)
 from pydantic import Field
 from pathlib import Path
 from typing import List, Literal
 
+
 class MyCustomScannerConfig(ScannerPluginConfigBase):
     """Configuration for MyCustomScanner"""
+
     class Options:
         custom_option: str = Field(default="default", description="Custom option")
+
 
 @ash_scanner_plugin
 class MyCustomScanner(ScannerPluginBase):
     """Custom scanner implementation"""
+
     name = "my-custom-scanner"
     description = "My custom security scanner"
     version = "1.0.0"
 
-    def scan(self, target: Path, target_type: Literal["source", "converted"],
-             global_ignore_paths: List = [], config=None):
+    def scan(
+        self,
+        target: Path,
+        target_type: Literal["source", "converted"],
+        global_ignore_paths: List = [],
+        config=None,
+    ):
         # Implement your scanning logic here
         results = self._run_subprocess(["my-scanner", "--target", str(target)])
         return results
@@ -206,7 +218,9 @@ recommended.
 
 ```python
 # Suppress a specific rule on the same line:
-password = os.environ["DB_PASS"]  # ash-ignore: CKV-SEC-001 loaded from env, not hardcoded
+password = os.environ[
+    "DB_PASS"
+]  # ash-ignore: CKV-SEC-001 loaded from env, not hardcoded
 
 # Suppress a specific rule on the next line:
 # ash-ignore-next-line: BANDIT-B105 password variable is a placeholder
@@ -252,7 +266,7 @@ results = run_ash_scan(
     mode=RunMode.local,
     strategy=Strategy.parallel,
     scanners=["bandit", "semgrep"],
-    config_overrides=["scanners.bandit.enabled=true"]
+    config_overrides=["scanners.bandit.enabled=true"],
 )
 
 # Access scan results

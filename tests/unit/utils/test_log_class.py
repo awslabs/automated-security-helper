@@ -36,8 +36,13 @@ def test_windows_safe_filter_passthrough_on_ascii(monkeypatch):
     f = WindowsSafeFilter()
     f._active = False
     record = logging.LogRecord(
-        name="ash", level=logging.INFO, pathname="", lineno=0,
-        msg="hello world", args=(), exc_info=None
+        name="ash",
+        level=logging.INFO,
+        pathname="",
+        lineno=0,
+        msg="hello world",
+        args=(),
+        exc_info=None,
     )
     assert f.filter(record) is True
     assert record.msg == "hello world"
@@ -47,8 +52,13 @@ def test_windows_safe_filter_replaces_emoji_when_active():
     f = WindowsSafeFilter()
     f._active = True
     record = logging.LogRecord(
-        name="ash", level=logging.INFO, pathname="", lineno=0,
-        msg="status: ✅ done", args=(), exc_info=None
+        name="ash",
+        level=logging.INFO,
+        pathname="",
+        lineno=0,
+        msg="status: ✅ done",
+        args=(),
+        exc_info=None,
     )
     assert f.filter(record) is True
     assert "✅" not in record.msg
@@ -60,8 +70,13 @@ def test_windows_safe_filter_handles_unicode_encode_error(monkeypatch):
     f._active = True
     # Inject a character that survives emoji substitution but fails ascii encode
     record = logging.LogRecord(
-        name="ash", level=logging.INFO, pathname="", lineno=0,
-        msg="café report", args=(), exc_info=None
+        name="ash",
+        level=logging.INFO,
+        pathname="",
+        lineno=0,
+        msg="café report",
+        args=(),
+        exc_info=None,
     )
     result = f.filter(record)
     assert result is True
@@ -72,6 +87,7 @@ def test_windows_safe_filter_handles_unicode_encode_error(monkeypatch):
 def test_no_module_level_monkey_patches_remain():
     """ASH_LOGGER._log must be the standard Logger._log, not a closure patched at module level."""
     import inspect
+
     # A monkey-patched closure would not be a bound method of Logger
     assert inspect.ismethod(ASH_LOGGER._log)
     assert ASH_LOGGER._log.__func__ is logging.Logger._log
@@ -83,5 +99,6 @@ def test_windows_safe_filter_attached_to_ash_logger():
 
 def test_new_get_logger_attaches_windows_safe_filter():
     from automated_security_helper.utils.log import get_logger
+
     logger = get_logger("ash.test_filter_attach")
     assert any(isinstance(f, WindowsSafeFilter) for f in logger.filters)

@@ -248,9 +248,7 @@ def validate_sarif_aggregation(
 # ---------------------------------------------------------------------------
 
 
-def find_matching_result(
-    original_result: Dict, aggregated_results: List[Dict]
-) -> Dict:
+def find_matching_result(original_result: Dict, aggregated_results: List[Dict]) -> Dict:
     """
     Find a matching result in the aggregated report using rule ID and location.
 

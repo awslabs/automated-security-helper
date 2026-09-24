@@ -1,7 +1,6 @@
 """Tests for utils/sarif_field_analysis.py — verify move from cli/inspect."""
 
 
-
 class TestImportLocation:
     def test_import_from_utils(self):
         from automated_security_helper.utils.sarif_field_analysis import (
@@ -36,7 +35,10 @@ class TestImportLocation:
                 func = node.func
                 if isinstance(func, ast.Attribute) and func.attr == "warn":
                     for arg in node.args:
-                        if isinstance(arg, ast.Constant) and "deprecated" in str(arg.value).lower():
+                        if (
+                            isinstance(arg, ast.Constant)
+                            and "deprecated" in str(arg.value).lower()
+                        ):
                             found = True
         assert found, "shim must call warnings.warn with 'deprecated'"
 

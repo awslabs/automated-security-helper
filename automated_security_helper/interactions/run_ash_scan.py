@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, List, Optional, cast
 
 import typer
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
 # `print` shadows the builtin on purpose: this is rich's documented import
 # idiom, so every print() below renders markup and respects the console. The
 # fix A004 wants is an alias, which would mean rewriting every call in this
@@ -225,9 +226,9 @@ _COMPLETE_SCANNER_STATUSES = frozenset(
 
 #: Every remaining ScannerStatus member: today ERROR (ran and failed) and MISSING
 #: (selected, dependencies unavailable, never ran).
-_INCOMPLETE_SCANNER_STATUSES = frozenset(
-    {member.value for member in ScannerStatus}
-) - _COMPLETE_SCANNER_STATUSES
+_INCOMPLETE_SCANNER_STATUSES = (
+    frozenset({member.value for member in ScannerStatus}) - _COMPLETE_SCANNER_STATUSES
+)
 
 # The statuses that mean "this scanner executed and reached a verdict".
 #

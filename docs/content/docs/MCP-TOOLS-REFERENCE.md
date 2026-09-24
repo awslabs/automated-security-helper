@@ -148,21 +148,16 @@ async def get_scan_results(
 ### Example Usage
 ```python
 # Get full results (backward compatible - default behavior)
-results = await get_scan_results(
-    output_dir="/path/to/.ash/ash_output"
-)
+results = await get_scan_results(output_dir="/path/to/.ash/ash_output")
 
 # Get only actionable findings (exclude suppressed)
 actionable_results = await get_scan_results(
-    output_dir="/path/to/.ash/ash_output",
-    actionable_only=True
+    output_dir="/path/to/.ash/ash_output", actionable_only=True
 )
 
 # Get summary with only actionable findings
 actionable_summary = await get_scan_results(
-    output_dir="/path/to/.ash/ash_output",
-    filter_level="summary",
-    actionable_only=True
+    output_dir="/path/to/.ash/ash_output", filter_level="summary", actionable_only=True
 )
 
 # Filter by specific scanners and severities
@@ -170,13 +165,12 @@ filtered_results = await get_scan_results(
     output_dir="/path/to/.ash/ash_output",
     scanners="bandit,semgrep",
     severities="critical,high",
-    actionable_only=True
+    actionable_only=True,
 )
 
 # Get summary only (lightweight)
 summary = await get_scan_results(
-    output_dir="/path/to/.ash/ash_output",
-    filter_level="summary"
+    output_dir="/path/to/.ash/ash_output", filter_level="summary"
 )
 
 # Check for critical findings
@@ -184,16 +178,16 @@ if summary["findings_summary"]["by_severity"]["critical"] > 0:
     print("CRITICAL findings detected!")
     # Now get full results for detailed analysis
     full_results = await get_scan_results(
-        output_dir="/path/to/.ash/ash_output",
-        filter_level="full"
+        output_dir="/path/to/.ash/ash_output", filter_level="full"
     )
 
 # Get minimal status (smallest response)
 status = await get_scan_results(
-    output_dir="/path/to/.ash/ash_output",
-    filter_level="minimal"
+    output_dir="/path/to/.ash/ash_output", filter_level="minimal"
 )
-print(f"Scan status: {status['status']}, Total findings: {status['summary_stats']['total']}")
+print(
+    f"Scan status: {status['status']}, Total findings: {status['summary_stats']['total']}"
+)
 ```
 
 ---
@@ -286,14 +280,12 @@ async def get_scan_summary(
 ### Example Usage
 ```python
 # Get lightweight summary
-summary = await get_scan_summary(
-    output_dir="/Users/user/project/.ash/ash_output"
-)
+summary = await get_scan_summary(output_dir="/Users/user/project/.ash/ash_output")
 
 # Check for critical findings
 if summary["findings_summary"]["by_severity"]["critical"] > 0:
     print("CRITICAL findings detected!")
-    
+
 # Display scanner results
 for scanner, info in summary["scanner_summary"]["by_scanner"].items():
     print(f"{scanner}: {info['findings_count']} findings")
@@ -426,15 +418,13 @@ async def get_scan_result_paths(
 ### Example Usage
 ```python
 # Get all result file paths
-paths = await get_scan_result_paths(
-    output_dir="/Users/user/project/.ash/ash_output"
-)
+paths = await get_scan_result_paths(output_dir="/Users/user/project/.ash/ash_output")
 
 # Check if SARIF report exists
 if paths["files"]["sarif"]["exists"]:
     sarif_path = paths["files"]["sarif"]["path"]
     print(f"SARIF report: {sarif_path} ({paths['files']['sarif']['size_bytes']} bytes)")
-    
+
     # Read SARIF file directly
     with open(sarif_path) as f:
         sarif_data = json.load(f)
@@ -442,7 +432,7 @@ if paths["files"]["sarif"]["exists"]:
 # Find the smallest report for quick viewing
 smallest = min(
     paths["files"].items(),
-    key=lambda x: x[1]["size_bytes"] if x[1]["exists"] else float('inf')
+    key=lambda x: x[1]["size_bytes"] if x[1]["exists"] else float("inf"),
 )
 print(f"Smallest report: {smallest[0]} ({smallest[1]['size_bytes']} bytes)")
 
@@ -474,17 +464,14 @@ Use `actionable_only=True` to exclude suppressed findings (false positives or ac
 
 ```python
 # Get only findings that require action
-actionable = await get_scan_results(
-    output_dir=".ash/ash_output",
-    actionable_only=True
-)
+actionable = await get_scan_results(output_dir=".ash/ash_output", actionable_only=True)
 
 # Combine with other filters
 critical_actionable = await get_scan_results(
     output_dir=".ash/ash_output",
     severities="critical,high",
     actionable_only=True,
-    filter_level="summary"
+    filter_level="summary",
 )
 ```
 
@@ -494,8 +481,7 @@ Use `scanners` parameter to include only specific scanners:
 ```python
 # Get results from specific scanners only
 sast_results = await get_scan_results(
-    output_dir=".ash/ash_output",
-    scanners="bandit,semgrep"
+    output_dir=".ash/ash_output", scanners="bandit,semgrep"
 )
 ```
 
@@ -505,8 +491,7 @@ Use `severities` parameter to include only specific severity levels:
 ```python
 # Get only high-priority findings
 high_priority = await get_scan_results(
-    output_dir=".ash/ash_output",
-    severities="critical,high"
+    output_dir=".ash/ash_output", severities="critical,high"
 )
 ```
 
@@ -520,7 +505,7 @@ results = await get_scan_results(
     scanners="bandit,semgrep",
     severities="critical,high",
     actionable_only=True,
-    filter_level="summary"
+    filter_level="summary",
 )
 ```
 
@@ -535,25 +520,18 @@ scan = await run_ash_scan(source_dir="/path/to/code")
 # Progress updates arrive every 5-15 seconds
 
 # 3. Get minimal status first (1-2KB)
-status = await get_scan_results(
-    output_dir=scan["output_dir"],
-    filter="minimal"
-)
+status = await get_scan_results(output_dir=scan["output_dir"], filter="minimal")
 
 # 4. Check if scan completed successfully
 if status["status"] == "completed":
     # 5. Get summary for decision making (5-15KB)
-    summary = await get_scan_results(
-        output_dir=scan["output_dir"],
-        filter="summary"
-    )
-    
+    summary = await get_scan_results(output_dir=scan["output_dir"], filter="summary")
+
     # 6. Decide next steps based on summary
     if summary["findings_summary"]["by_severity"]["critical"] > 0:
         # Critical findings - get full results
         full_results = await get_scan_results(
-            output_dir=scan["output_dir"],
-            filter="full"
+            output_dir=scan["output_dir"], filter="full"
         )
         # Analyze detailed findings...
     else:
@@ -573,16 +551,13 @@ summary = await get_scan_summary(output_dir=scan["output_dir"])
 # 4. If detailed analysis needed, get file paths
 if summary["findings_summary"]["by_severity"]["high"] > 10:
     paths = await get_scan_result_paths(output_dir=scan["output_dir"])
-    
+
     # Read specific format directly
     with open(paths["files"]["sarif"]["path"]) as f:
         sarif_data = json.load(f)
-    
+
     # Or get full results via MCP
-    full_results = await get_scan_results(
-        output_dir=scan["output_dir"],
-        filter="full"
-    )
+    full_results = await get_scan_results(output_dir=scan["output_dir"], filter="full")
 ```
 
 ### Workflow 3: CI/CD Pipeline
@@ -590,9 +565,7 @@ if summary["findings_summary"]["by_severity"]["high"] > 10:
 # Minimal data transfer for fast CI/CD checks
 # Get only actionable findings (exclude suppressed)
 summary = await get_scan_results(
-    output_dir=".ash/ash_output",
-    filter_level="summary",
-    actionable_only=True
+    output_dir=".ash/ash_output", filter_level="summary", actionable_only=True
 )
 
 # Fail pipeline on critical/high actionable findings
@@ -611,20 +584,16 @@ else:
 ```python
 # Get only findings that require action (exclude suppressed)
 actionable = await get_scan_results(
-    output_dir=".ash/ash_output",
-    actionable_only=True,
-    filter_level="summary"
+    output_dir=".ash/ash_output", actionable_only=True, filter_level="summary"
 )
 
 # Check actionable findings count
 if actionable["findings_summary"]["by_severity"]["actionable"] > 0:
     # Get full details for actionable findings only
     full_actionable = await get_scan_results(
-        output_dir=".ash/ash_output",
-        actionable_only=True,
-        filter_level="full"
+        output_dir=".ash/ash_output", actionable_only=True, filter_level="full"
     )
-    
+
     # Process actionable findings...
     for run in full_actionable["raw_results"]["sarif"]["runs"]:
         for result in run["results"]:
@@ -658,10 +627,7 @@ Add the filter parameter to reduce response size:
 results = await get_scan_results(output_dir=".ash/ash_output")
 
 # After (summary only, ~5-15KB)
-summary = await get_scan_results(
-    output_dir=".ash/ash_output",
-    filter="summary"
-)
+summary = await get_scan_results(output_dir=".ash/ash_output", filter="summary")
 
 # Or use dedicated tool
 summary = await get_scan_summary(output_dir=".ash/ash_output")

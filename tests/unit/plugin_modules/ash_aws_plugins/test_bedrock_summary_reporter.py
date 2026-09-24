@@ -315,7 +315,9 @@ class TestValidatePluginDependencies:
 
         reporter = BedrockSummaryReporter(context=mock_context)
         # Primary model not in list, but the fallback (claude-3-5-sonnet) is
-        reporter.config.options.model_id = "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+        reporter.config.options.model_id = (
+            "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+        )
         reporter.config.options.enable_fallback_models = True
 
         assert reporter.validate_plugin_dependencies() is True
@@ -1072,9 +1074,7 @@ class TestBatchProcessing:
         model = MagicMock()
         model.scanner_results = {}
         # 12 findings should create 3 batches of 5, 5, 2
-        findings = [
-            {"level": "error", "message": {"text": f"f{i}"}} for i in range(12)
-        ]
+        findings = [{"level": "error", "message": {"text": f"f{i}"}} for i in range(12)]
 
         result = reporter._process_findings_by_batch(
             bedrock_runtime_ok, model, findings

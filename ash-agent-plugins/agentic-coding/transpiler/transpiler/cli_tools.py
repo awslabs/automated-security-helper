@@ -8,6 +8,7 @@ list to generate one job per (backend, validator) pair.
 Versions here are major.minor; the actual pinned version string lives
 in `_base/cli_versions.json`. The `pin_key` defaults to the tool name.
 """
+
 from __future__ import annotations
 
 from .core import CliTool
@@ -30,8 +31,13 @@ CLI_CODEX = CliTool(
     # Codex has no `validate` verb; `marketplace add <local-dir>` is the
     # CI lever. We isolate via env CODEX_HOME to keep the runner clean.
     validate_argv_template=(
-        "env", "CODEX_HOME={codex_home}",
-        "codex", "plugin", "marketplace", "add", "{out}",
+        "env",
+        "CODEX_HOME={codex_home}",
+        "codex",
+        "plugin",
+        "marketplace",
+        "add",
+        "{out}",
     ),
 )
 
@@ -174,10 +180,23 @@ CLI_KIRO_IDE = CliTool(
 # ---------------------------------------------------------------------------
 
 ALL_CLI_TOOLS = (
-    CLI_CLAUDE, CLI_CODEX, CLI_GEMINI, CLI_MCPB, CLI_Q, CLI_KIRO_CLI,
-    CLI_AIDER, CLI_GOOSE, CLI_OPENCODE, CLI_SKILLS_REF,
-    CLI_VSCODE, CLI_CURSOR, CLI_CLINE, CLI_CONTINUE, CLI_WINDSURF,
-    CLI_ROO, CLI_KIRO_IDE,
+    CLI_CLAUDE,
+    CLI_CODEX,
+    CLI_GEMINI,
+    CLI_MCPB,
+    CLI_Q,
+    CLI_KIRO_CLI,
+    CLI_AIDER,
+    CLI_GOOSE,
+    CLI_OPENCODE,
+    CLI_SKILLS_REF,
+    CLI_VSCODE,
+    CLI_CURSOR,
+    CLI_CLINE,
+    CLI_CONTINUE,
+    CLI_WINDSURF,
+    CLI_ROO,
+    CLI_KIRO_IDE,
 )
 
 CLI_TOOLS_BY_NAME = {t.name: t for t in ALL_CLI_TOOLS}

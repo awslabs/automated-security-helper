@@ -119,7 +119,9 @@ def _junit_steps_under_github():
     for path in sorted(GITHUB_DIR.rglob("*.yml")) + sorted(GITHUB_DIR.rglob("*.yaml")):
         try:
             document = yaml.safe_load(path.read_text())
-        except yaml.YAMLError as exc:  # pragma: no cover - a parse error is its own test
+        except (
+            yaml.YAMLError
+        ) as exc:  # pragma: no cover - a parse error is its own test
             pytest.fail(f"{path} is not parseable YAML: {exc}")
         for step in _iter_steps(document):
             if step["uses"].startswith(JUNIT_ACTION):

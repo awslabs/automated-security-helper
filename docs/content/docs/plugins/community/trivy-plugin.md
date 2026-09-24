@@ -403,34 +403,35 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
+
 class TrivyPerformanceMonitor:
     def __init__(self):
         self.metrics = []
-    
+
     def run_monitored_scan(self):
         start_time = time.time()
         start_memory = psutil.virtual_memory().used
-        
+
         # Run ASH with Trivy
         process = subprocess.Popen(
             ["ash", "--scanners", "trivy-repo", "--reporters", "json"],
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
+            stderr=subprocess.PIPE,
         )
-        
+
         # Monitor resource usage
         max_memory = start_memory
         while process.poll() is None:
             current_memory = psutil.virtual_memory().used
             max_memory = max(max_memory, current_memory)
             time.sleep(1)
-        
+
         end_time = time.time()
-        
+
         # Collect metrics
         duration = end_time - start_time
         memory_used = max_memory - start_memory
-        
+
         # Count results
         results_file = Path(".ash/ash_output/reports/ash_aggregated_results.json")
         finding_count = 0
@@ -438,31 +439,31 @@ class TrivyPerformanceMonitor:
             with open(results_file) as f:
                 data = json.load(f)
                 finding_count = sum(
-                    len(run.get("results", []))
-                    for run in data.get("runs", [])
+                    len(run.get("results", [])) for run in data.get("runs", [])
                 )
-        
+
         # Store metrics
         metric = {
             "timestamp": datetime.now().isoformat(),
             "duration_seconds": duration,
             "memory_mb": memory_used / (1024 * 1024),
             "finding_count": finding_count,
-            "exit_code": process.returncode
+            "exit_code": process.returncode,
         }
-        
+
         self.metrics.append(metric)
         return metric
-    
+
     def save_metrics(self, filename="trivy_performance.json"):
         with open(filename, "w") as f:
             json.dump(self.metrics, f, indent=2)
+
 
 if __name__ == "__main__":
     monitor = TrivyPerformanceMonitor()
     metric = monitor.run_monitored_scan()
     monitor.save_metrics()
-    
+
     print(f"Scan completed in {metric['duration_seconds']:.1f}s")
     print(f"Memory used: {metric['memory_mb']:.1f}MB")
     print(f"Findings: {metric['finding_count']}")
@@ -1655,22 +1656,25 @@ import json
 import requests
 from pathlib import Path
 
+
 def send_trivy_results():
     results_file = Path(".ash/ash_output/reports/ash_aggregated_results.json")
-    
+
     if results_file.exists():
         with open(results_file) as f:
             results = json.load(f)
-        
+
         # Filter Trivy results
         trivy_results = [
-            r for r in results.get("runs", [])
+            r
+            for r in results.get("runs", [])
             if r.get("tool", {}).get("driver", {}).get("name") == "trivy-repo"
         ]
-        
+
         # Send to webhook
         webhook_url = "https://security-dashboard.company.com/webhook"
         requests.post(webhook_url, json={"trivy_results": trivy_results})
+
 
 if __name__ == "__main__":
     send_trivy_results()
@@ -1685,9 +1689,10 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
+
 def store_trivy_results():
     conn = sqlite3.connect("security_results.db")
-    
+
     # Create table if not exists
     conn.execute("""
         CREATE TABLE IF NOT EXISTS trivy_findings (
@@ -1700,33 +1705,42 @@ def store_trivy_results():
             fixed_version TEXT
         )
     """)
-    
+
     # Load and store results
     results_file = Path(".ash/ash_output/reports/ash_aggregated_results.json")
     if results_file.exists():
         with open(results_file) as f:
             data = json.load(f)
-        
+
         scan_date = datetime.now().isoformat()
-        
+
         for run in data.get("runs", []):
             if run.get("tool", {}).get("driver", {}).get("name") == "trivy-repo":
                 for result in run.get("results", []):
-                    conn.execute("""
+                    conn.execute(
+                        """
                         INSERT INTO trivy_findings 
                         (scan_date, rule_id, severity, file_path, message, fixed_version)
                         VALUES (?, ?, ?, ?, ?, ?)
-                    """, (
-                        scan_date,
-                        result.get("ruleId"),
-                        result.get("level"),
-                        result.get("locations", [{}])[0].get("physicalLocation", {}).get("artifactLocation", {}).get("uri"),
-                        result.get("message", {}).get("text"),
-                        result.get("fixes", [{}])[0].get("description", {}).get("text")
-                    ))
-    
+                    """,
+                        (
+                            scan_date,
+                            result.get("ruleId"),
+                            result.get("level"),
+                            result.get("locations", [{}])[0]
+                            .get("physicalLocation", {})
+                            .get("artifactLocation", {})
+                            .get("uri"),
+                            result.get("message", {}).get("text"),
+                            result.get("fixes", [{}])[0]
+                            .get("description", {})
+                            .get("text"),
+                        ),
+                    )
+
     conn.commit()
     conn.close()
+
 
 if __name__ == "__main__":
     store_trivy_results()
@@ -1826,39 +1840,42 @@ import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 from pathlib import Path
 
+
 def analyze_security_trends():
     # Load historical data
     history_dir = Path("security-history")
-    
+
     dates = []
     vuln_counts = []
-    
+
     for result_file in sorted(history_dir.glob("*.json")):
         with open(result_file) as f:
             data = json.load(f)
-        
+
         date = datetime.fromisoformat(result_file.stem)
         dates.append(date)
-        
+
         # Count vulnerabilities by severity
         vuln_count = sum(
-            1 for run in data.get("runs", [])
+            1
+            for run in data.get("runs", [])
             for result in run.get("results", [])
             if result.get("level") in ["error", "warning"]
         )
         vuln_counts.append(vuln_count)
-    
+
     # Generate trend chart
     plt.figure(figsize=(12, 6))
-    plt.plot(dates, vuln_counts, marker='o')
+    plt.plot(dates, vuln_counts, marker="o")
     plt.title("Security Findings Trend")
     plt.xlabel("Date")
     plt.ylabel("Number of Findings")
     plt.xticks(rotation=45)
     plt.tight_layout()
     plt.savefig("security-trend.png")
-    
+
     return dates, vuln_counts
+
 
 if __name__ == "__main__":
     analyze_security_trends()

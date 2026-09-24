@@ -93,11 +93,13 @@ Example:
 ```python
 import pytest
 
+
 @pytest.mark.unit
 @pytest.mark.scanner
 def test_bandit_scanner_initialization():
     # Test code here
     pass
+
 
 @pytest.mark.integration
 @pytest.mark.slow
@@ -148,6 +150,7 @@ Custom assertions are available in `tests.utils.assertions`:
 ```python
 from tests.utils.assertions import assert_sarif_report_valid, assert_has_finding
 
+
 def test_scanner_output(scanner_result):
     assert_sarif_report_valid(scanner_result.sarif_report)
     assert_has_finding(scanner_result.sarif_report, "test.py", "Test finding")
@@ -160,10 +163,12 @@ Mocking utilities are available in `tests.utils.mocks`:
 ```python
 from tests.utils.mocks import create_mock_sarif_report, create_mock_scanner
 
+
 def test_reporter_with_mock_scanner():
-    mock_scanner = create_mock_scanner("bandit", findings=[
-        {"file": "test.py", "message": "Test finding", "severity": "HIGH"}
-    ])
+    mock_scanner = create_mock_scanner(
+        "bandit",
+        findings=[{"file": "test.py", "message": "Test finding", "severity": "HIGH"}],
+    )
 
     reporter = SarifReporter()
     report = reporter.generate_report(mock_scanner.scan())
@@ -178,6 +183,7 @@ Test data utilities are available in `tests.utils.test_data`:
 
 ```python
 from tests.utils.test_data import load_test_data, create_test_file
+
 
 def test_scanner_with_test_data():
     test_data = load_test_data("scanners/bandit/vulnerable_code.py")
@@ -198,6 +204,7 @@ The `IntegrationTestEnvironment` class provides utilities for setting up integra
 ```python
 from tests.utils.integration_test_utils import integration_test_environment
 
+
 def test_end_to_end_scan():
     with integration_test_environment() as env:
         env.create_config_file({"scanners": {"bandit": {"enabled": True}}})
@@ -215,6 +222,7 @@ The `ComponentInteractionTester` class provides utilities for testing interactio
 
 ```python
 from tests.utils.integration_test_utils import component_interaction_tester
+
 
 def test_scanner_reporter_interaction():
     with component_interaction_tester() as tester:
@@ -234,6 +242,7 @@ Resource management utilities are available in `tests.utils.resource_management`
 ```python
 from tests.utils.resource_management import temp_directory, managed_process
 
+
 def test_with_external_process():
     with temp_directory() as temp_dir:
         config_file = temp_dir / "config.yaml"
@@ -251,6 +260,7 @@ Mock external services are available in `tests.utils.external_service_mocks`:
 ```python
 from tests.utils.external_service_mocks import mock_http_server, mock_api_server
 
+
 def test_with_mock_http_server():
     with mock_http_server() as server:
         server.add_file("test.json", {"key": "value"})
@@ -260,10 +270,16 @@ def test_with_mock_http_server():
         response = requests.get(url)
         assert response.json() == {"key": "value"}
 
+
 def test_with_mock_api_server():
     with mock_api_server() as server:
+
         def handle_hello(method, path, query, headers, body):
-            return 200, {"Content-Type": "application/json"}, {"message": "Hello, world!"}
+            return (
+                200,
+                {"Content-Type": "application/json"},
+                {"message": "Hello, world!"},
+            )
 
         server.add_route("/hello", handle_hello)
         url = server.get_url("hello")
@@ -372,6 +388,7 @@ Test selection utilities are available in `tests.utils.test_selection`:
 ```python
 from tests.utils.test_selection import get_changed_files, get_related_test_files
 
+
 def test_selection():
     changed_files = get_changed_files("main")
     related_test_files = get_related_test_files(changed_files)
@@ -400,11 +417,15 @@ def test_selection():
 import pytest
 from automated_security_helper.scanners.bandit_scanner import BanditScanner
 
-@pytest.mark.parametrize("code,expected_findings", [
-    ("import pickle\npickle.loads(b'')", 1),  # Unsafe pickle usage
-    ("import hashlib\nhashlib.md5(b'')", 1),  # Weak hash algorithm
-    ("print('Hello, world!')", 0),  # No security issues
-])
+
+@pytest.mark.parametrize(
+    "code,expected_findings",
+    [
+        ("import pickle\npickle.loads(b'')", 1),  # Unsafe pickle usage
+        ("import hashlib\nhashlib.md5(b'')", 1),  # Weak hash algorithm
+        ("print('Hello, world!')", 0),  # No security issues
+    ],
+)
 def test_bandit_scanner_findings(temp_project_dir, code, expected_findings):
     # Arrange
     test_file = temp_project_dir / "test.py"

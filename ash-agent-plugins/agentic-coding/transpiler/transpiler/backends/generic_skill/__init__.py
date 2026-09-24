@@ -18,6 +18,7 @@ CLIs (claude plugin validate, etc.) because the format is the contract;
 agent-level validation only applies when the skill is embedded in a
 per-platform plugin tree, which is the job of the per-agent backends.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -106,7 +107,9 @@ class GenericSkillBackend(BaseBackend):
             try:
                 subprocess.run(
                     [skills_ref, "validate", str(ctx.out.resolve())],
-                    check=True, capture_output=True, timeout=30,
+                    check=True,
+                    capture_output=True,
+                    timeout=30,
                 )
             except subprocess.CalledProcessError as e:
                 stderr = (e.stderr or b"").decode("utf-8", errors="replace").strip()
@@ -115,9 +118,13 @@ class GenericSkillBackend(BaseBackend):
                     "reason": f"skills-ref validate failed: {stderr[-300:]}",
                 }
             except subprocess.TimeoutExpired:
-                return {"ok": False, "reason": "skills-ref validate timed out after 30s"}
+                return {
+                    "ok": False,
+                    "reason": "skills-ref validate timed out after 30s",
+                }
             return {"ok": True, "detail": f"skills-ref validate {ctx.out} OK"}
         return {
-            "ok": True, "skipped": True,
+            "ok": True,
+            "skipped": True,
             "detail": "skills-ref not on PATH; structural check OK (frontmatter `name` matches dir for every skill)",
         }

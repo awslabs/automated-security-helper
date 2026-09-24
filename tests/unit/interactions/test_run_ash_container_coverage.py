@@ -1,7 +1,6 @@
 """Tests for interactions/run_ash_container.py — covers container command building and execution."""
 
 
-
 class TestContainerModuleImport:
     """Tests that the container module can be imported and key functions exist."""
 

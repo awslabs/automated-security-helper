@@ -209,11 +209,11 @@ class TestUriNormalizationSynthetic:
 
         result = uri_normalized
         if uri_normalized.startswith(source_prefix):
-            result = uri_normalized[len(source_prefix):]
+            result = uri_normalized[len(source_prefix) :]
         elif uri_normalized.startswith(prefix_with_slash):
-            result = uri_normalized[len(prefix_with_slash):]
+            result = uri_normalized[len(prefix_with_slash) :]
         elif prefix_no_drive and uri_normalized.startswith(prefix_no_drive):
-            result = uri_normalized[len(prefix_no_drive):]
+            result = uri_normalized[len(prefix_no_drive) :]
 
         assert result == expected_relative, (
             f"URI {uri!r} with prefix {source_prefix!r} "
@@ -241,11 +241,11 @@ class TestUriNormalizationSynthetic:
 
         result = uri_normalized
         if uri_normalized.startswith(source_prefix):
-            result = uri_normalized[len(source_prefix):]
+            result = uri_normalized[len(source_prefix) :]
         elif uri_normalized.startswith(prefix_with_slash):
-            result = uri_normalized[len(prefix_with_slash):]
+            result = uri_normalized[len(prefix_with_slash) :]
         elif prefix_no_drive and uri_normalized.startswith(prefix_no_drive):
-            result = uri_normalized[len(prefix_no_drive):]
+            result = uri_normalized[len(prefix_no_drive) :]
 
         assert result == uri_normalized, (
             f"URI {uri!r} should NOT be stripped (different root)"

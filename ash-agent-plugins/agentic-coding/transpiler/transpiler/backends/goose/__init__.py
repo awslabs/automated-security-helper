@@ -2,6 +2,7 @@
 
 Emits a Goose extension with extension.yaml + .goosehints instruction file.
 """
+
 from __future__ import annotations
 
 import yaml

@@ -44,7 +44,7 @@ def _mask_bandit_password_secret(text: str) -> str:
 
     def mask_replacement(match):
         prefix = match.group(1)  # "Possible hardcoded password: "
-        quote = match.group(2)   # The quote character (' or ")
+        quote = match.group(2)  # The quote character (' or ")
         secret = match.group(3)  # The actual secret
 
         masked_secret = _mask_secret_value(secret)

@@ -2,15 +2,12 @@ class ScannerError(Exception):
     """Exception raised when scanner execution fails."""
 
 
-
 class ASHValidationError(Exception):
     """Exception raised when an ASH component fails to validate."""
 
 
-
 class ASHConfigValidationError(ASHValidationError):
     """Exception raised when an AshConfig is invalid."""
-
 
 
 class WorkspacePatternError(ASHValidationError):
@@ -21,7 +18,6 @@ class WorkspacePatternError(ASHValidationError):
     the workspace definition error exit code rather than reporting it as a
     general configuration failure.
     """
-
 
 
 class ScannerSelectionError(ASHValidationError):
@@ -46,7 +42,6 @@ class ScannerSelectionError(ASHValidationError):
     """
 
 
-
 class ShardSelectionError(ASHValidationError):
     """Exception raised when ``--shard-index``/``--shard-count`` cannot be used as given.
 
@@ -60,7 +55,6 @@ class ShardSelectionError(ASHValidationError):
     shard would make a pipeline with an off-by-one in its matrix expression scan
     one shard twice and another never, and the reports would look healthy.
     """
-
 
 
 class ShardCoverageError(ASHValidationError):
@@ -80,7 +74,6 @@ class ShardCoverageError(ASHValidationError):
     """
 
 
-
 class ToolDownloadIntegrityError(ASHValidationError):
     """Exception raised when a downloaded tool's bytes do not match its pinned digest.
 
@@ -95,7 +88,6 @@ class ToolDownloadIntegrityError(ASHValidationError):
     is recorded but never compared is not a check, so this is raised on every
     mismatch and never downgraded to a warning.
     """
-
 
 
 class ToolNotProvisionableError(ASHValidationError):
@@ -115,7 +107,6 @@ class ToolNotProvisionableError(ASHValidationError):
     """
 
 
-
 class WorkspaceDefinitionError(ASHValidationError):
     """Exception raised when a workspace definition cannot be used as given.
 
@@ -132,4 +123,3 @@ class WorkspaceDefinitionError(ASHValidationError):
     The message is expected to name every offending entry rather than the first,
     so an operator with three typos fixes three in one pass.
     """
-

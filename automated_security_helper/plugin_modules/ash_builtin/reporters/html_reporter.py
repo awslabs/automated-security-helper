@@ -474,9 +474,7 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
                 reason = ""
                 if finding.suppressions:
                     reasons = [
-                        s.justification
-                        for s in finding.suppressions
-                        if s.justification
+                        s.justification for s in finding.suppressions if s.justification
                     ]
                     reason = "; ".join(reasons) if reasons else ""
 
@@ -499,10 +497,7 @@ class HtmlReporter(ReporterPluginBase[HTMLReporterConfig]):
         """Extract a human-readable location string from a Result."""
         if finding.locations and finding.locations[0].physicalLocation:
             phys_loc = finding.locations[0].physicalLocation
-            if (
-                phys_loc.root.artifactLocation
-                and phys_loc.root.artifactLocation.uri
-            ):
+            if phys_loc.root.artifactLocation and phys_loc.root.artifactLocation.uri:
                 location = phys_loc.root.artifactLocation.uri
                 if phys_loc.root.region:
                     location += f":{phys_loc.root.region.startLine or 'N/A'}"

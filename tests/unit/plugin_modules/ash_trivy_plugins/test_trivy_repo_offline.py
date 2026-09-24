@@ -27,6 +27,7 @@ AshConfig.model_rebuild()
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_context(tmp_path: Path) -> MagicMock:
     ctx = MagicMock(spec=PluginContext)
     ctx.source_dir = tmp_path / "source"
@@ -55,6 +56,7 @@ OFFLINE_FLAGS = [
 # Flag injection tests
 # ---------------------------------------------------------------------------
 
+
 class TestTrivyOfflineFlagInjection:
     def test_offline_appends_flags(self, tmp_path):
         scanner = _make_scanner(offline=True, tmp_path=tmp_path)
@@ -74,6 +76,7 @@ class TestTrivyOfflineFlagInjection:
 # ---------------------------------------------------------------------------
 # Subprocess env passthrough test
 # ---------------------------------------------------------------------------
+
 
 class TestTrivySubprocessEnvPassthrough:
     def test_subprocess_receives_merged_env(self, tmp_path):
@@ -110,6 +113,7 @@ class TestTrivySubprocessEnvPassthrough:
 # ---------------------------------------------------------------------------
 # validate_trivy_offline_mode tests
 # ---------------------------------------------------------------------------
+
 
 class TestValidateTrivyOfflineMode:
     def test_missing_cache_env_returns_false(self, monkeypatch):

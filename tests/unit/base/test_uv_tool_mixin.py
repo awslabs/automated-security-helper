@@ -333,26 +333,28 @@ class TestValidateToolAvailabilityWithPreInstalled:
     def test_attempts_install_when_not_available(self):
         plugin = FakePlugin(command="bandit", use_uv_tool=True)
 
-        with patch.object(
-            plugin,
-            "_get_tool_installation_info",
-            side_effect=[
-                {
-                    "available": False,
-                    "preferred_source": "none",
-                    "is_uv_installed": False,
-                    "is_pre_installed": False,
-                },
-                {
-                    "available": True,
-                    "preferred_source": "uv",
-                    "uv_version": "1.7.0",
-                    "is_uv_installed": True,
-                    "is_pre_installed": False,
-                },
-            ],
-        ), patch.object(plugin, "_should_install_tool", return_value=True), patch.object(
-            plugin, "_install_uv_tool", return_value=True
+        with (
+            patch.object(
+                plugin,
+                "_get_tool_installation_info",
+                side_effect=[
+                    {
+                        "available": False,
+                        "preferred_source": "none",
+                        "is_uv_installed": False,
+                        "is_pre_installed": False,
+                    },
+                    {
+                        "available": True,
+                        "preferred_source": "uv",
+                        "uv_version": "1.7.0",
+                        "is_uv_installed": True,
+                        "is_pre_installed": False,
+                    },
+                ],
+            ),
+            patch.object(plugin, "_should_install_tool", return_value=True),
+            patch.object(plugin, "_install_uv_tool", return_value=True),
         ):
             result = plugin._validate_tool_availability_with_pre_installed()
             assert result["available"] is True
@@ -395,9 +397,12 @@ class TestInstallUvTool:
     def test_returns_false_when_uv_unavailable(self):
         plugin = FakePlugin(command="bandit", use_uv_tool=True)
 
-        with patch.object(plugin, "_is_offline_mode", return_value=False), patch(
-            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner"
-        ) as mock_get_runner:
+        with (
+            patch.object(plugin, "_is_offline_mode", return_value=False),
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner"
+            ) as mock_get_runner,
+        ):
             mock_runner = MagicMock()
             mock_runner.is_uv_available.return_value = False
             mock_get_runner.return_value = mock_runner
@@ -407,9 +412,12 @@ class TestInstallUvTool:
     def test_returns_true_when_already_installed_and_functional(self):
         plugin = FakePlugin(command="bandit", use_uv_tool=True)
 
-        with patch.object(plugin, "_is_offline_mode", return_value=False), patch(
-            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner"
-        ) as mock_get_runner:
+        with (
+            patch.object(plugin, "_is_offline_mode", return_value=False),
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner"
+            ) as mock_get_runner,
+        ):
             mock_runner = MagicMock()
             mock_runner.is_uv_available.return_value = True
             mock_runner.get_cache_info.return_value = {"cache_available": True}
@@ -425,10 +433,14 @@ class TestInstallUvTool:
     def test_successful_installation(self):
         plugin = FakePlugin(command="bandit", use_uv_tool=True)
 
-        with patch.object(plugin, "_is_offline_mode", return_value=False), patch(
-            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner"
-        ) as mock_get_runner, patch(
-            "automated_security_helper.utils.subprocess_utils.clear_find_executable_cache"
+        with (
+            patch.object(plugin, "_is_offline_mode", return_value=False),
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner"
+            ) as mock_get_runner,
+            patch(
+                "automated_security_helper.utils.subprocess_utils.clear_find_executable_cache"
+            ),
         ):
             mock_runner = MagicMock()
             mock_runner.is_uv_available.return_value = True
@@ -443,9 +455,12 @@ class TestInstallUvTool:
     def test_failed_installation(self):
         plugin = FakePlugin(command="bandit", use_uv_tool=True)
 
-        with patch.object(plugin, "_is_offline_mode", return_value=False), patch(
-            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner"
-        ) as mock_get_runner:
+        with (
+            patch.object(plugin, "_is_offline_mode", return_value=False),
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner"
+            ) as mock_get_runner,
+        ):
             mock_runner = MagicMock()
             mock_runner.is_uv_available.return_value = True
             mock_runner.get_cache_info.return_value = {"cache_available": False}
@@ -458,9 +473,12 @@ class TestInstallUvTool:
     def test_returns_false_on_runner_error(self):
         plugin = FakePlugin(command="bandit", use_uv_tool=True)
 
-        with patch.object(plugin, "_is_offline_mode", return_value=False), patch(
-            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner"
-        ) as mock_get_runner:
+        with (
+            patch.object(plugin, "_is_offline_mode", return_value=False),
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner"
+            ) as mock_get_runner,
+        ):
             from automated_security_helper.utils.uv_tool_runner import UVToolRunnerError
 
             mock_get_runner.side_effect = UVToolRunnerError("broken")
@@ -470,18 +488,24 @@ class TestInstallUvTool:
     def test_returns_false_on_import_error(self):
         plugin = FakePlugin(command="bandit", use_uv_tool=True)
 
-        with patch.object(plugin, "_is_offline_mode", return_value=False), patch(
-            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
-            side_effect=ImportError("no module"),
+        with (
+            patch.object(plugin, "_is_offline_mode", return_value=False),
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner",
+                side_effect=ImportError("no module"),
+            ),
         ):
             assert plugin._install_uv_tool() is False
 
     def test_returns_false_on_unexpected_error(self):
         plugin = FakePlugin(command="bandit", use_uv_tool=True)
 
-        with patch.object(plugin, "_is_offline_mode", return_value=False), patch(
-            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner"
-        ) as mock_get_runner:
+        with (
+            patch.object(plugin, "_is_offline_mode", return_value=False),
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner"
+            ) as mock_get_runner,
+        ):
             mock_get_runner.side_effect = RuntimeError("boom")
 
             assert plugin._install_uv_tool() is False
@@ -489,10 +513,14 @@ class TestInstallUvTool:
     def test_with_custom_retry_config(self):
         plugin = FakePlugin(command="bandit", use_uv_tool=True)
 
-        with patch.object(plugin, "_is_offline_mode", return_value=False), patch(
-            "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner"
-        ) as mock_get_runner, patch(
-            "automated_security_helper.utils.subprocess_utils.clear_find_executable_cache"
+        with (
+            patch.object(plugin, "_is_offline_mode", return_value=False),
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner"
+            ) as mock_get_runner,
+            patch(
+                "automated_security_helper.utils.subprocess_utils.clear_find_executable_cache"
+            ),
         ):
             mock_runner = MagicMock()
             mock_runner.is_uv_available.return_value = True
@@ -674,9 +702,12 @@ class TestSetupUvToolInstallCommands:
     def test_install_with_version_constraint(self):
         plugin = FakePlugin(command="bandit", use_uv_tool=True)
 
-        with patch.object(
-            plugin, "_get_tool_version_constraint", return_value=">=1.7.0"
-        ), patch.object(plugin, "_is_offline_mode", return_value=False):
+        with (
+            patch.object(
+                plugin, "_get_tool_version_constraint", return_value=">=1.7.0"
+            ),
+            patch.object(plugin, "_is_offline_mode", return_value=False),
+        ):
             plugin._setup_uv_tool_install_commands()
 
         assert ">=1.7.0" in plugin.uv_tool_install_commands[0]
@@ -684,9 +715,12 @@ class TestSetupUvToolInstallCommands:
     def test_install_with_extras(self):
         plugin = FakePlugin(command="bandit", use_uv_tool=True)
 
-        with patch.object(
-            plugin, "_get_tool_package_extras", return_value=["sarif", "toml"]
-        ), patch.object(plugin, "_is_offline_mode", return_value=False):
+        with (
+            patch.object(
+                plugin, "_get_tool_package_extras", return_value=["sarif", "toml"]
+            ),
+            patch.object(plugin, "_is_offline_mode", return_value=False),
+        ):
             plugin._setup_uv_tool_install_commands()
 
         assert "bandit[sarif,toml]" in plugin.uv_tool_install_commands[0]
@@ -716,12 +750,14 @@ class TestIsOfflineMode:
         plugin = FakePlugin()
 
         with patch(
-            "automated_security_helper.core.constants.is_offline_mode", return_value=True
+            "automated_security_helper.core.constants.is_offline_mode",
+            return_value=True,
         ):
             assert plugin._is_offline_mode() is True
 
         with patch(
-            "automated_security_helper.core.constants.is_offline_mode", return_value=False
+            "automated_security_helper.core.constants.is_offline_mode",
+            return_value=False,
         ):
             assert plugin._is_offline_mode() is False
 

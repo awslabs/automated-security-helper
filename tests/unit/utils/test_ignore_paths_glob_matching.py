@@ -50,8 +50,7 @@ def _make_plugin_context(
     ctx.config = MagicMock()
     ctx.config.global_settings = MagicMock()
     ctx.config.global_settings.ignore_paths = [
-        IgnorePathWithReason(path=p, reason="test ignore")
-        for p in ignore_paths
+        IgnorePathWithReason(path=p, reason="test ignore") for p in ignore_paths
     ]
     ctx.config.global_settings.suppressions = []
     return ctx

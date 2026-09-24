@@ -6,6 +6,7 @@ marketplace.json so the plugin is discoverable through the Codex marketplace.
 Codex does not consume slash commands, agents, or instruction files in this
 layout, so those sections are intentionally absent.
 """
+
 from __future__ import annotations
 
 import json
@@ -94,12 +95,22 @@ class CodexBackend(BaseBackend):
 
         pins = self._load_cli_pins(ctx.base_dir)
         if "codex" in pins:
-            ver = self._assert_version_pin("codex", ["codex", "--version"], pins["codex"])
+            ver = self._assert_version_pin(
+                "codex", ["codex", "--version"], pins["codex"]
+            )
             if ver and ver.get("ok") is False:
                 return ver
         # Use isolated CODEX_HOME so CI runs are reproducible.
         import tempfile
+
         with tempfile.TemporaryDirectory() as codex_home:
-            env_argv = ["env", f"CODEX_HOME={codex_home}", "codex", "plugin",
-                        "marketplace", "add", str(ctx.out.resolve())]
+            env_argv = [
+                "env",
+                f"CODEX_HOME={codex_home}",
+                "codex",
+                "plugin",
+                "marketplace",
+                "add",
+                str(ctx.out.resolve()),
+            ]
             return self._invoke_validator(env_argv)

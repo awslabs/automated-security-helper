@@ -83,12 +83,16 @@ def project_with_venv_gitignore(tmp_path):
 class TestScanSetIgnoredDirectories:
     """Tests that .gitignore files inside ignored directories don't pollute the global spec."""
 
-    def test_venv_gitignore_does_not_cause_zero_files(self, project_with_venv_gitignore):
+    def test_venv_gitignore_does_not_cause_zero_files(
+        self, project_with_venv_gitignore
+    ):
         """The '*' rule in .venv/.gitignore should NOT cause 0 files to be found."""
         result = scan_set(source=str(project_with_venv_gitignore))
 
         # Should find at least app.py, config.yaml, deploy.yml
-        assert len(result) >= 3, f"Expected at least 3 files, got {len(result)}: {result}"
+        assert len(result) >= 3, (
+            f"Expected at least 3 files, got {len(result)}: {result}"
+        )
 
         # Verify specific files are included
         filenames = [Path(f).name for f in result]
@@ -105,17 +109,22 @@ class TestScanSetIgnoredDirectories:
         # Should only find the root .gitignore, not the ones in .venv/, .ruff_cache/, etc.
         ignore_basenames = [Path(f).parent.name for f in ignore_files]
         assert "project" in ignore_basenames or any(
-            f.endswith("project/.gitignore") or f == str(project_with_venv_gitignore / ".gitignore")
+            f.endswith("project/.gitignore")
+            or f == str(project_with_venv_gitignore / ".gitignore")
             for f in ignore_files
         )
 
         # Should NOT contain .venv/.gitignore
         venv_ignores = [f for f in ignore_files if ".venv" in f]
-        assert len(venv_ignores) == 0, f"Found .venv/.gitignore that should be skipped: {venv_ignores}"
+        assert len(venv_ignores) == 0, (
+            f"Found .venv/.gitignore that should be skipped: {venv_ignores}"
+        )
 
         # Should NOT contain .ruff_cache/.gitignore
         ruff_ignores = [f for f in ignore_files if ".ruff_cache" in f]
-        assert len(ruff_ignores) == 0, f"Found .ruff_cache/.gitignore that should be skipped: {ruff_ignores}"
+        assert len(ruff_ignores) == 0, (
+            f"Found .ruff_cache/.gitignore that should be skipped: {ruff_ignores}"
+        )
 
     def test_ignored_dir_files_not_in_all_files(self, project_with_venv_gitignore):
         """Files inside ignored directories should not be collected at all."""
@@ -125,7 +134,9 @@ class TestScanSetIgnoredDirectories:
 
         # Should NOT contain files from .venv/
         venv_files = [f for f in all_files if ".venv" in f]
-        assert len(venv_files) == 0, f"Found .venv files that should be skipped: {venv_files}"
+        assert len(venv_files) == 0, (
+            f"Found .venv files that should be skipped: {venv_files}"
+        )
 
     def test_scan_set_excludes_venv_files(self, project_with_venv_gitignore):
         """scan_set should not include files from .venv/ in the result."""
@@ -139,7 +150,9 @@ class TestScanSetIgnoredDirectories:
         result = scan_set(source=str(project_with_venv_gitignore))
 
         ruff_files = [f for f in result if ".ruff_cache" in f]
-        assert len(ruff_files) == 0, f"Found .ruff_cache files in scan set: {ruff_files}"
+        assert len(ruff_files) == 0, (
+            f"Found .ruff_cache files in scan set: {ruff_files}"
+        )
 
     def test_non_ignored_subdirs_still_walked(self, project_with_venv_gitignore):
         """Directories NOT in .gitignore should still be walked normally."""
@@ -169,11 +182,12 @@ class TestExcludeKeyValidation:
     def test_exclude_equals_pattern_is_valid(self):
         """The --exclude='...' pattern should pass the key validation regex."""
         import re
+
         pattern = re.compile(r"^-{1,2}[A-Za-z][A-Za-z0-9_\-]*(=.*)?$")
 
         # These should all be valid
-        assert pattern.match("--exclude=\".venv/**\"")
-        assert pattern.match("--skip-path=\".venv/\"")
+        assert pattern.match('--exclude=".venv/**"')
+        assert pattern.match('--skip-path=".venv/"')
         assert pattern.match("--config=p/ci")
         assert pattern.match("--format")
         assert pattern.match("-f")

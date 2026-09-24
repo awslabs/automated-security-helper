@@ -146,7 +146,9 @@ class TestWizardCommand:
 
     def test_wizard_disables_reporter(self, cli_runner, config_path):
         """Disabling a reporter sets its enabled field to false."""
-        reporter_answers = {python_name: True for python_name, _ in _get_reporter_names()}
+        reporter_answers = {
+            python_name: True for python_name, _ in _get_reporter_names()
+        }
         reporter_answers["html"] = False
 
         user_input = self._build_input(reporter_answers=reporter_answers)
@@ -203,9 +205,7 @@ class TestWizardCommand:
         with open(config_path) as f:
             data = yaml.safe_load(f)
 
-        assert "my_company.ash_plugins.scanners" in data.get(
-            "ash_plugin_modules", []
-        )
+        assert "my_company.ash_plugins.scanners" in data.get("ash_plugin_modules", [])
 
     def test_wizard_reads_existing_config(self, cli_runner, config_path):
         """Wizard loads an existing config and preserves unchanged values."""

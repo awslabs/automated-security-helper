@@ -219,12 +219,8 @@ class TestUnknownStatusesFailClosed:
     """
 
     @pytest.mark.parametrize("status", ["PARTIALLY_COMPLETED", "TIMED_OUT", "Passed"])
-    def test_a_status_this_version_does_not_know_fails(
-        self, tmp_path, status, capsys
-    ):
-        path = _write(
-            tmp_path, {"bandit": _entry("PASSED"), "semgrep": _entry(status)}
-        )
+    def test_a_status_this_version_does_not_know_fails(self, tmp_path, status, capsys):
+        path = _write(tmp_path, {"bandit": _entry("PASSED"), "semgrep": _entry(status)})
         assert _run(path) == 1
         assert "semgrep" in capsys.readouterr().out
 

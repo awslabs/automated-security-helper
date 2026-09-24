@@ -42,6 +42,7 @@ class TestPluginBaseInit:
 
     def test_init_with_config(self, plugin_context):
         from automated_security_helper.base.plugin_config import PluginConfigBase
+
         config = MagicMock(spec=PluginConfigBase)
         config.name = "test"
         plugin = ConcretePlugin(context=plugin_context, config=config)

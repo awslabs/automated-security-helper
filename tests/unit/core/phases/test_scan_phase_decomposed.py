@@ -10,7 +10,9 @@ import pytest
 from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.phases.scanner_executor import ScannerExecutor
-from automated_security_helper.core.phases.scan_result_processor import ScanResultProcessor
+from automated_security_helper.core.phases.scan_result_processor import (
+    ScanResultProcessor,
+)
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.scan_results_container import ScanResultsContainer
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
@@ -24,7 +26,9 @@ AshAggregatedResults.model_rebuild()
 # ---------------------------------------------------------------------------
 
 
-def _make_plugin(name="test_scanner", enabled=True, deps_satisfied=True, python_only=True):
+def _make_plugin(
+    name="test_scanner", enabled=True, deps_satisfied=True, python_only=True
+):
     """Return (plugin_class_mock, plugin_instance_mock)."""
     plugin_cls = MagicMock()
     plugin_cls.__name__ = name
@@ -129,7 +133,9 @@ class TestFilterEnabledPlugins:
 
     def test_filter_python_only_excludes_non_python(self, phase):
         """When python_only=True, non-Python plugins are excluded."""
-        _, instance = _make_plugin(name="scanner_d", enabled=True, deps_satisfied=True, python_only=False)
+        _, instance = _make_plugin(
+            name="scanner_d", enabled=True, deps_satisfied=True, python_only=False
+        )
         result = phase.filter_enabled_plugins(
             [instance], plugin_context=phase.plugin_context, python_only=True
         )
@@ -137,14 +143,18 @@ class TestFilterEnabledPlugins:
 
     def test_filter_python_only_passes_python_plugin(self, phase):
         """When python_only=True, Python plugins are included."""
-        _, instance = _make_plugin(name="scanner_e", enabled=True, deps_satisfied=True, python_only=True)
+        _, instance = _make_plugin(
+            name="scanner_e", enabled=True, deps_satisfied=True, python_only=True
+        )
         result = phase.filter_enabled_plugins(
             [instance], plugin_context=phase.plugin_context, python_only=True
         )
         assert instance in result
 
     def test_filter_empty_list_returns_empty(self, phase):
-        result = phase.filter_enabled_plugins([], plugin_context=phase.plugin_context, python_only=False)
+        result = phase.filter_enabled_plugins(
+            [], plugin_context=phase.plugin_context, python_only=False
+        )
         assert result == []
 
     def test_filter_preserves_order(self, phase):
@@ -153,7 +163,9 @@ class TestFilterEnabledPlugins:
         _, inst_b = _make_plugin(name="bbb")
         _, inst_c = _make_plugin(name="ccc")
         result = phase.filter_enabled_plugins(
-            [inst_a, inst_b, inst_c], plugin_context=phase.plugin_context, python_only=False
+            [inst_a, inst_b, inst_c],
+            plugin_context=phase.plugin_context,
+            python_only=False,
         )
         assert result == [inst_a, inst_b, inst_c]
 
@@ -196,20 +208,28 @@ class TestScannerExecutorRunSequential:
         container = ScanResultsContainer.for_failure("scan_seq", errors=[])
         container.raw_results = {"status": "ok"}
 
-        tasks = [("scan_seq", inst, [{"path": executor_ctx.source_dir, "type": "source"}])]
+        tasks = [
+            ("scan_seq", inst, [{"path": executor_ctx.source_dir, "type": "source"}])
+        ]
         executor = _make_executor(executor_ctx, progress, tasks)
 
-        with patch.object(executor, "_safe_execute_scanner", return_value=[container]) as mock_safe:
+        with patch.object(
+            executor, "_safe_execute_scanner", return_value=[container]
+        ) as mock_safe:
             with patch.object(executor, "_process_results_fn", return_value=aggregated):
                 result = executor.run_sequential(aggregated)
 
         assert isinstance(result, AshAggregatedResults)
         mock_safe.assert_called_once()
 
-    def test_none_results_creates_failure_container(self, executor_ctx, progress, aggregated):
+    def test_none_results_creates_failure_container(
+        self, executor_ctx, progress, aggregated
+    ):
         """When _safe_execute_scanner returns None, a failure container is created."""
         _, inst = _make_plugin(name="scan_none")
-        tasks = [("scan_none", inst, [{"path": executor_ctx.source_dir, "type": "source"}])]
+        tasks = [
+            ("scan_none", inst, [{"path": executor_ctx.source_dir, "type": "source"}])
+        ]
         executor = _make_executor(executor_ctx, progress, tasks)
 
         with patch.object(executor, "_safe_execute_scanner", return_value=None):
@@ -218,7 +238,9 @@ class TestScannerExecutorRunSequential:
 
         assert isinstance(result, AshAggregatedResults)
 
-    def test_sequential_failure_continues_other_scanners(self, executor_ctx, progress, aggregated):
+    def test_sequential_failure_continues_other_scanners(
+        self, executor_ctx, progress, aggregated
+    ):
         """A scanner exception does not stop subsequent scanners."""
         _, inst_a = _make_plugin(name="scan_a")
         _, inst_b = _make_plugin(name="scan_b")
@@ -251,7 +273,9 @@ class TestScannerExecutorRunSequential:
 class TestScannerExecutorRunParallel:
     """ScannerExecutor.run_parallel handles N scanners with timeouts/failures."""
 
-    def test_parallel_submits_multiple_scanners(self, executor_ctx, progress, aggregated):
+    def test_parallel_submits_multiple_scanners(
+        self, executor_ctx, progress, aggregated
+    ):
         _, inst_a = _make_plugin(name="par_a")
         _, inst_b = _make_plugin(name="par_b")
 
@@ -275,26 +299,42 @@ class TestScannerExecutorRunParallel:
 
         assert isinstance(result, AshAggregatedResults)
 
-    def test_parallel_falls_back_to_sequential_for_single_scanner(self, executor_ctx, progress, aggregated):
+    def test_parallel_falls_back_to_sequential_for_single_scanner(
+        self, executor_ctx, progress, aggregated
+    ):
         """With only one scanner task, parallel delegates to sequential."""
         _, inst = _make_plugin(name="single")
-        tasks = [("single", inst, [{"path": executor_ctx.source_dir, "type": "source"}])]
+        tasks = [
+            ("single", inst, [{"path": executor_ctx.source_dir, "type": "source"}])
+        ]
         executor = _make_executor(executor_ctx, progress, tasks)
 
-        with patch.object(executor, "run_sequential", return_value=aggregated) as mock_seq:
+        with patch.object(
+            executor, "run_sequential", return_value=aggregated
+        ) as mock_seq:
             result = executor.run_parallel(aggregated)
 
         mock_seq.assert_called_once_with(aggregated)
         assert result is aggregated
 
-    def test_parallel_handles_future_exception(self, executor_ctx, progress, aggregated):
+    def test_parallel_handles_future_exception(
+        self, executor_ctx, progress, aggregated
+    ):
         """Exceptions from futures are caught and create failure containers."""
         _, inst_a = _make_plugin(name="fail_par_a")
         _, inst_b = _make_plugin(name="fail_par_b")
 
         tasks = [
-            ("fail_par_a", inst_a, [{"path": executor_ctx.source_dir, "type": "source"}]),
-            ("fail_par_b", inst_b, [{"path": executor_ctx.source_dir, "type": "source"}]),
+            (
+                "fail_par_a",
+                inst_a,
+                [{"path": executor_ctx.source_dir, "type": "source"}],
+            ),
+            (
+                "fail_par_b",
+                inst_b,
+                [{"path": executor_ctx.source_dir, "type": "source"}],
+            ),
         ]
         executor = _make_executor(executor_ctx, progress, tasks, max_workers=2)
 
@@ -322,7 +362,9 @@ def proc_ctx(tmp_path):
 
 @pytest.fixture
 def processor(proc_ctx):
-    with patch("automated_security_helper.core.phases.scan_result_processor.ScannerValidationManager"):
+    with patch(
+        "automated_security_helper.core.phases.scan_result_processor.ScannerValidationManager"
+    ):
         return ScanResultProcessor(plugin_context=proc_ctx)
 
 
@@ -354,18 +396,23 @@ class TestScanResultProcessorPopulatesSeverityCounts:
 
         merge_calls: list = []
 
-        with patch(
-            "automated_security_helper.core.phases.scan_result_processor.sanitize_sarif_paths",
-            return_value=real_sarif,
-        ), patch(
-            "automated_security_helper.core.phases.scan_result_processor.apply_suppressions_to_sarif",
-            return_value=real_sarif,
-        ), patch(
-            "automated_security_helper.schemas.sarif_schema_model.SarifReport.merge_sarif_report",
-            lambda self, s: merge_calls.append(s),
-        ), patch(
-            "automated_security_helper.schemas.sarif_schema_model.SarifReport.attach_scanner_details",
-            lambda self, **kw: None,
+        with (
+            patch(
+                "automated_security_helper.core.phases.scan_result_processor.sanitize_sarif_paths",
+                return_value=real_sarif,
+            ),
+            patch(
+                "automated_security_helper.core.phases.scan_result_processor.apply_suppressions_to_sarif",
+                return_value=real_sarif,
+            ),
+            patch(
+                "automated_security_helper.schemas.sarif_schema_model.SarifReport.merge_sarif_report",
+                lambda self, s: merge_calls.append(s),
+            ),
+            patch(
+                "automated_security_helper.schemas.sarif_schema_model.SarifReport.attach_scanner_details",
+                lambda self, **kw: None,
+            ),
         ):
             processor.process_container(container, aggregated)
 
@@ -374,7 +421,9 @@ class TestScanResultProcessorPopulatesSeverityCounts:
     def test_missing_scanner_handled_without_crash(self, processor):
         """A container with failure raw_results is handled gracefully."""
         aggregated = AshAggregatedResults()
-        container = ScanResultsContainer.for_failure("missing_scanner", errors=["not found"])
+        container = ScanResultsContainer.for_failure(
+            "missing_scanner", errors=["not found"]
+        )
         container.raw_results = {"errors": ["not found"], "status": "failed"}
         result = processor.process_container(container, aggregated)
         assert isinstance(result, AshAggregatedResults)

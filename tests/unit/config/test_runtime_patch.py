@@ -23,7 +23,9 @@ def _base_config() -> AshConfig:
 class TestAllowlistDisabled:
     def test_disabled_allowlist_denies_all_patches(self) -> None:
         base = _base_config()
-        allowlist = RuntimeOverridesConfig(enabled=False, allowed_paths=["/project_name"])
+        allowlist = RuntimeOverridesConfig(
+            enabled=False, allowed_paths=["/project_name"]
+        )
         ops = [{"op": "replace", "path": "/project_name", "value": "new"}]
         with pytest.raises(RuntimePatchDeniedError) as excinfo:
             apply_runtime_patch(base, ops, allowlist=allowlist)
@@ -75,7 +77,11 @@ class TestAllowedPaths:
             denied_paths=[],
         )
         ops = [
-            {"op": "replace", "path": "/global_settings/severity_threshold", "value": "HIGH"}
+            {
+                "op": "replace",
+                "path": "/global_settings/severity_threshold",
+                "value": "HIGH",
+            }
         ]
         result = apply_runtime_patch(base, ops, allowlist=allowlist)
         assert result.global_settings.severity_threshold == "HIGH"
@@ -88,7 +94,11 @@ class TestAllowedPaths:
             denied_paths=[],
         )
         ops = [
-            {"op": "replace", "path": "/global_settings/severity_threshold", "value": "HIGH"}
+            {
+                "op": "replace",
+                "path": "/global_settings/severity_threshold",
+                "value": "HIGH",
+            }
         ]
         result = apply_runtime_patch(base, ops, allowlist=allowlist)
         assert result.global_settings.severity_threshold == "HIGH"
@@ -164,7 +174,13 @@ class TestForbiddenOps:
             allowed_paths=["/**"],
             denied_paths=[],
         )
-        ops = [{"op": "move", "from": "/project_name", "path": "/external_reports_to_include"}]
+        ops = [
+            {
+                "op": "move",
+                "from": "/project_name",
+                "path": "/external_reports_to_include",
+            }
+        ]
         with pytest.raises(RuntimePatchDeniedError) as excinfo:
             apply_runtime_patch(base, ops, allowlist=allowlist)
         assert "move" in excinfo.value.rule.lower()
@@ -330,7 +346,9 @@ class TestDefaults:
         cfg = AshConfig.model_validate(
             {
                 "reporters": {
-                    "bedrock-summary-reporter": {"options": {"aws_region": "us-east-1"}},
+                    "bedrock-summary-reporter": {
+                        "options": {"aws_region": "us-east-1"}
+                    },
                     "cloudwatch-logs": {"options": {"aws_region": "us-east-1"}},
                 }
             }

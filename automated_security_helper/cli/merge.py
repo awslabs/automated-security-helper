@@ -139,6 +139,7 @@ from typing import Annotated, Any, Dict, List, Optional, Sequence, Tuple
 
 import typer
 from pydantic import ValidationError
+
 # `print` shadows the builtin on purpose: this is rich's documented import
 # idiom, so every print() below renders markup and respects the console. The
 # fix A004 wants is an alias, which would mean rewriting every call in this

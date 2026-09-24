@@ -1,7 +1,6 @@
 """Tests for core/metrics_table.py — covers metrics table generation functions."""
 
 
-
 class TestMetricsTableModule:
     """Tests for metrics_table module."""
 

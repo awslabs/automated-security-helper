@@ -192,7 +192,10 @@ class TestFilterActionableOnly:
 
     def test_total_equals_actionable(self, full_results):
         result = filter_actionable_only(full_results)
-        assert result["summary_stats"]["total"] == full_results["summary_stats"]["actionable"]
+        assert (
+            result["summary_stats"]["total"]
+            == full_results["summary_stats"]["actionable"]
+        )
 
     def test_zeros_scanner_suppressed_counts(self, full_results):
         result = filter_actionable_only(full_results)
@@ -236,17 +239,24 @@ class TestApplyContentFilters:
 
     def test_severity_filter_preserves_non_severity_stats(self, full_results):
         result = apply_content_filters(full_results, severities="critical")
-        assert result["summary_stats"]["total"] == full_results["summary_stats"]["total"]
+        assert (
+            result["summary_stats"]["total"] == full_results["summary_stats"]["total"]
+        )
 
     def test_combined_scanner_and_severity_filter(self, full_results):
-        result = apply_content_filters(full_results, scanners="bandit", severities="high")
+        result = apply_content_filters(
+            full_results, scanners="bandit", severities="high"
+        )
         scanner_data = result["raw_results"]["scanner_results"]["bandit"]
         assert "high" in scanner_data["severity_counts"]
         assert "medium" not in scanner_data["severity_counts"]
 
     def test_no_filters_returns_equivalent_data(self, full_results):
         result = apply_content_filters(full_results)
-        assert result["raw_results"]["scanner_results"] == full_results["raw_results"]["scanner_results"]
+        assert (
+            result["raw_results"]["scanner_results"]
+            == full_results["raw_results"]["scanner_results"]
+        )
 
     def test_does_not_modify_original(self, full_results):
         original = copy.deepcopy(full_results)
@@ -254,7 +264,9 @@ class TestApplyContentFilters:
         assert full_results == original
 
     def test_sets_filter_metadata(self, full_results):
-        result = apply_content_filters(full_results, scanners="bandit", severities="high")
+        result = apply_content_filters(
+            full_results, scanners="bandit", severities="high"
+        )
         assert result["_content_filters"]["scanners"] == ["bandit"]
         assert result["_content_filters"]["severities"] == ["high"]
 

@@ -709,9 +709,7 @@ class ScannerPluginBase(PluginBase, Generic[T]):
 
         if stderr_text:
             if len(stderr_text) > _STDERR_EXCERPT_LIMIT:
-                stderr_text = (
-                    stderr_text[:_STDERR_EXCERPT_LIMIT] + " ...[truncated]"
-                )
+                stderr_text = stderr_text[:_STDERR_EXCERPT_LIMIT] + " ...[truncated]"
             detail += f". Stderr: {stderr_text}"
         elif log_path is not None:
             detail += f". No stderr captured; checked {log_path.as_posix()}"

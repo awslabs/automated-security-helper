@@ -9,7 +9,6 @@ import inspect
 from unittest.mock import MagicMock
 
 
-
 # ---------------------------------------------------------------------------
 # PR#274 Bug #24 -- bandit excluded_paths accumulates across calls
 # ---------------------------------------------------------------------------

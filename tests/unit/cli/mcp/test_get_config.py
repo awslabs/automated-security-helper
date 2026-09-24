@@ -123,7 +123,10 @@ class TestSchemaResource:
         content = _read_ash_config_schema()
         parsed = json.loads(content)
         # Valid JSON Schema: either top-level markers or a $ref into $defs
-        assert any(k in parsed for k in ("$schema", "title", "properties", "$ref", "$defs", "type"))
+        assert any(
+            k in parsed
+            for k in ("$schema", "title", "properties", "$ref", "$defs", "type")
+        )
 
     def test_schema_resource_contains_global_settings(self):
         from automated_security_helper.cli.mcp_server import _read_ash_config_schema

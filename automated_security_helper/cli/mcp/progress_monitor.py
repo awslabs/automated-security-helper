@@ -253,9 +253,7 @@ async def _process_scanner_result(
         # `exc` raises NameError rather than reporting the original error if it is
         # ever called after the handler unwinds. It happens to work today only
         # because _safe_send invokes the callable before returning.
-        warning_message = (
-            f"Error processing scanner results for {scanner_name}/{target_type}: {str(exc)}"
-        )
+        warning_message = f"Error processing scanner results for {scanner_name}/{target_type}: {str(exc)}"
         logger.warning(warning_message)
         connection_alive = await _safe_send(
             connection_alive,
@@ -300,9 +298,7 @@ def _sleep_interval_for(completed_count: int) -> int:
     return 10
 
 
-def _update_scanner_estimate(
-    scanner_results: list, current_estimate: int
-) -> int:
+def _update_scanner_estimate(scanner_results: list, current_estimate: int) -> int:
     """Infer scanner count from result paths; never shrink below current estimate."""
     if not scanner_results:
         return current_estimate

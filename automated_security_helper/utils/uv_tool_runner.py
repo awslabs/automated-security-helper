@@ -21,7 +21,6 @@ class UVToolRunnerError(Exception):
     """Exception raised for UV tool runner errors."""
 
 
-
 @dataclass
 class UVToolRetryConfig:
     """Configuration for UV tool operation retry logic."""

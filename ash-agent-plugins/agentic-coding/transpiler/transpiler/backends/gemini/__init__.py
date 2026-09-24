@@ -4,6 +4,7 @@ Emits a Gemini extension with gemini-extension.json manifest + GEMINI.md
 instruction file. MCP install is delegated to a generated install.sh that
 calls `gemini extensions install` after the user clones the repo.
 """
+
 from __future__ import annotations
 
 import json
@@ -68,7 +69,11 @@ class GeminiBackend(BaseBackend):
 
         pins = self._load_cli_pins(ctx.base_dir)
         if "gemini" in pins:
-            ver = self._assert_version_pin("gemini", ["gemini", "--version"], pins["gemini"])
+            ver = self._assert_version_pin(
+                "gemini", ["gemini", "--version"], pins["gemini"]
+            )
             if ver and ver.get("ok") is False:
                 return ver
-        return self._invoke_validator(["gemini", "extensions", "validate", str(ctx.out.resolve())])
+        return self._invoke_validator(
+            ["gemini", "extensions", "validate", str(ctx.out.resolve())]
+        )

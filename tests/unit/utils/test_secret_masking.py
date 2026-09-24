@@ -19,7 +19,9 @@ class TestSecretMasking:
 
     def test_mask_secret_value_medium(self):
         """Test masking of medium-length secrets (>= 75% masked for short)."""
-        assert _mask_secret_value("test1234") == "t******4"  # 8 chars: show first + last
+        assert (
+            _mask_secret_value("test1234") == "t******4"
+        )  # 8 chars: show first + last
         assert _mask_secret_value("secret") == "s*****"  # 6 chars: show first only
         assert _mask_secret_value("pass") == "p***"  # 4 chars: show first only
 

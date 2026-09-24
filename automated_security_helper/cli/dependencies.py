@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Annotated, List, Optional
 
 import typer
+
 # `print` shadows the builtin on purpose: this is rich's documented import
 # idiom, so every print() below renders markup and respects the console. The
 # fix A004 wants is an alias, which would mean rewriting every call in this
@@ -339,7 +340,7 @@ def install_dependencies(
                 if not construction_failures
                 else (
                     "\n[yellow]Note:[/yellow] "
-                     f"{len(construction_failures)} plugin(s) failed to load and are "
+                    f"{len(construction_failures)} plugin(s) failed to load and are "
                     "absent from that list: "
                     + ", ".join(sorted(o.name for o in construction_failures))
                 )
@@ -478,7 +479,9 @@ def _report_and_exit(
     commands_attempted = sum(o.commands_attempted for o in outcomes)
     commands_failed = sum(o.commands_failed for o in outcomes)
     plugins_with_errors = [o.name for o in outcomes if o.errors]
-    verified = sorted(o.name for o in outcomes if o.needs_external_tool and o.executable)
+    verified = sorted(
+        o.name for o in outcomes if o.needs_external_tool and o.executable
+    )
     # Named whether or not the tool happens to be present. "npm is on PATH" and
     # "ASH cannot install npm" are different facts, and a reader planning a CI image
     # needs the second one even when the first is currently true.

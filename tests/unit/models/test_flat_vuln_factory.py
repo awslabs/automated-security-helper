@@ -205,9 +205,7 @@ class TestFromSarifResultScannerName:
 
     def test_prefers_properties_scanner_name_over_tool_name(self):
         result = _make_result(scanner_name="bandit-real")
-        vuln = FlatVulnerability.from_sarif_result(
-            result, "Unknown Tool", "SAST"
-        )
+        vuln = FlatVulnerability.from_sarif_result(result, "Unknown Tool", "SAST")
         assert vuln.scanner == "bandit-real"
 
     def test_falls_back_to_tool_name_when_no_scanner_property(self):
@@ -306,16 +304,12 @@ class TestExtractScannerNameHelper:
 
     def test_prefers_properties_scanner_name(self):
         result = _make_result(scanner_name="semgrep")
-        name = _extract_scanner_name_from_result(
-            result, "fallback-tool", tags=None
-        )
+        name = _extract_scanner_name_from_result(result, "fallback-tool", tags=None)
         assert name == "semgrep"
 
     def test_falls_back_to_run_tool_name(self):
         result = _make_result()
-        name = _extract_scanner_name_from_result(
-            result, "fallback-tool", tags=None
-        )
+        name = _extract_scanner_name_from_result(result, "fallback-tool", tags=None)
         assert name == "fallback-tool"
 
     def test_handles_none_tags(self):

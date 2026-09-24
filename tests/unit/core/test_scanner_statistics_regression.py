@@ -32,7 +32,9 @@ class TestTotalDoesNotDoubleCountSuppressed:
                     f"total formula must not include suppressed: {stripped}"
                 )
                 return
-        pytest.fail("Could not find 'total = ...' line in scanner_statistics_calculator")
+        pytest.fail(
+            "Could not find 'total = ...' line in scanner_statistics_calculator"
+        )
 
 
 # ---------------------------------------------------------------------------

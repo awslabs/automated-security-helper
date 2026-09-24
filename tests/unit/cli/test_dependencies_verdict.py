@@ -137,7 +137,9 @@ class TestVerdictIsDerivedFromCounts:
         state already holds is a false alarm, and the docstring of the verdict
         function commits to treating this as a constraint rather than a malfunction.
         """
-        outcomes = [_outcome(name="npm-audit", command="npm", executable="/usr/bin/npm")]
+        outcomes = [
+            _outcome(name="npm-audit", command="npm", executable="/usr/bin/npm")
+        ]
         assert _report_and_exit(outcomes, requested_tools=["npm-audit"]) == EXIT_OK
 
     def test_requesting_an_unprovisionable_tool_that_is_absent_fails(self):
@@ -271,9 +273,9 @@ class TestEmptyArgvIsSkipped:
         monkeypatch.setattr(
             "automated_security_helper.cli.dependencies.ash_plugin_manager",
             SimpleNamespace(
-                plugin_modules=lambda kind: [lambda **_kw: fake]
-                if kind == "scanner"
-                else []
+                plugin_modules=lambda kind: (
+                    [lambda **_kw: fake] if kind == "scanner" else []
+                )
             ),
         )
         ran = []
@@ -334,9 +336,9 @@ class TestToolSelectionScopesFailures:
         monkeypatch.setattr(
             "automated_security_helper.cli.dependencies.ash_plugin_manager",
             SimpleNamespace(
-                plugin_modules=lambda kind: [lambda **_kw: good, Broken]
-                if kind == "scanner"
-                else []
+                plugin_modules=lambda kind: (
+                    [lambda **_kw: good, Broken] if kind == "scanner" else []
+                )
             ),
         )
         monkeypatch.setattr(

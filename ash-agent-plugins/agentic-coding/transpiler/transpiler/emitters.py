@@ -5,6 +5,7 @@ backend's class-level config and dispatches each declared section to its
 emitter. Backends that need fully custom build behavior override build()
 entirely; backends with multi-step builds use PHASES instead.
 """
+
 from __future__ import annotations
 
 import json
@@ -49,8 +50,7 @@ def _read_base(base_dir: Path, *parts: str) -> str:
 
 def _references_concatenated(base_dir: Path) -> str:
     return "\n\n".join(
-        ref.read_text()
-        for ref in sorted((base_dir / "references").glob("*.md"))
+        ref.read_text() for ref in sorted((base_dir / "references").glob("*.md"))
     )
 
 
@@ -147,14 +147,18 @@ def _agent_frontmatter_values(agent: dict, tools: list[str] | None) -> dict[str,
 # ---------------------------------------------------------------------------
 
 
-def emit_plugin_manifest(b: BaseBackend, m: Manifest, out: Path, base_dir: Path) -> None:
+def emit_plugin_manifest(
+    b: BaseBackend, m: Manifest, out: Path, base_dir: Path
+) -> None:
     if b.PLUGIN_MANIFEST is None:
         return
     builder = PLUGIN_MANIFEST_BUILDERS[b.PLUGIN_MANIFEST.format]
     _write_json(out / b.PLUGIN_MANIFEST.path, builder(m, base_dir))
 
 
-def emit_extension_manifest(b: BaseBackend, m: Manifest, out: Path, base_dir: Path) -> None:
+def emit_extension_manifest(
+    b: BaseBackend, m: Manifest, out: Path, base_dir: Path
+) -> None:
     if b.EXTENSION_MANIFEST is None:
         return
     builder = EXTENSION_MANIFEST_BUILDERS[b.EXTENSION_MANIFEST.format]
@@ -248,7 +252,9 @@ def emit_skill(b: BaseBackend, m: Manifest, out: Path, base_dir: Path) -> None:
 
     if b.SKILL.include_references == "separate_files":
         if b.SKILL.references_path is None:
-            raise ValueError("SKILL.references_path required when include_references=separate_files")
+            raise ValueError(
+                "SKILL.references_path required when include_references=separate_files"
+            )
         for ref in sorted((base_dir / "references").glob("*.md")):
             ref_path = _interpolate_path(
                 b.SKILL.references_path,
@@ -296,7 +302,9 @@ def emit_agents(b: BaseBackend, m: Manifest, out: Path, base_dir: Path) -> None:
         _write_text(out / agent_path, rendered)
 
 
-def emit_instruction_file(b: BaseBackend, m: Manifest, out: Path, base_dir: Path) -> None:
+def emit_instruction_file(
+    b: BaseBackend, m: Manifest, out: Path, base_dir: Path
+) -> None:
     if b.INSTRUCTION_FILE is None:
         return
     instr = b.INSTRUCTION_FILE
@@ -320,11 +328,7 @@ def emit_instruction_file(b: BaseBackend, m: Manifest, out: Path, base_dir: Path
 
     if instr.truncate_chars is not None and len(rendered) > instr.truncate_chars:
         keep = instr.truncate_chars - 50
-        footer = (
-            f"\n\n{instr.truncation_footer}\n"
-            if instr.truncation_footer
-            else ""
-        )
+        footer = f"\n\n{instr.truncation_footer}\n" if instr.truncation_footer else ""
         rendered = rendered[:keep].rstrip() + footer
 
     _write_text(out / instr.path, rendered)
@@ -381,7 +385,8 @@ def emit_mcpb_bundle(b: BaseBackend, m: Manifest, out: Path, base_dir: Path) -> 
         return
     bundle = b.MCPB_BUNDLE
     manifest_obj = mcpb_manifest(
-        m, base_dir,
+        m,
+        base_dir,
         manifest_version=bundle.manifest_version,
         server_type=bundle.server_type,
         server_entry_point=bundle.server_entry_point,
@@ -421,7 +426,9 @@ def reset(out: Path) -> None:
         shutil.rmtree(out)
 
 
-def run_section_emitters(b: BaseBackend, m: Manifest, out: Path, base_dir: Path) -> None:
+def run_section_emitters(
+    b: BaseBackend, m: Manifest, out: Path, base_dir: Path
+) -> None:
     """Default build entry: reset output dir, dispatch all section emitters."""
     reset(out)
     for emit in SECTION_EMITTERS:

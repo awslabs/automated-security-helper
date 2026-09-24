@@ -102,7 +102,9 @@ def test_convert_phase_uses_filter_enabled_plugins(
     args, kwargs = spy.call_args
     # plugin_instances should contain the pre-created instance
     plugin_instances = kwargs.get("plugin_instances") or (args[0] if args else None)
-    assert plugin_instances is not None, "filter_enabled_plugins called without plugin_instances"
+    assert plugin_instances is not None, (
+        "filter_enabled_plugins called without plugin_instances"
+    )
     assert len(plugin_instances) == 1
 
 
@@ -135,7 +137,9 @@ def test_report_phase_uses_filter_enabled_plugins(
     spy.assert_called_once()
     args, kwargs = spy.call_args
     plugin_instances = kwargs.get("plugin_instances") or (args[0] if args else None)
-    assert plugin_instances is not None, "filter_enabled_plugins called without plugin_instances"
+    assert plugin_instances is not None, (
+        "filter_enabled_plugins called without plugin_instances"
+    )
     assert len(plugin_instances) == 1
 
 

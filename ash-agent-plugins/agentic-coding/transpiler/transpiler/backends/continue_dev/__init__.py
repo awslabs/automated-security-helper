@@ -1,4 +1,5 @@
 """Continue.dev backend."""
+
 from __future__ import annotations
 
 import yaml
@@ -51,4 +52,7 @@ class ContinueBackend(BaseBackend):
         if not rules_dir.exists() or not list(rules_dir.glob("*.md")):
             return {"ok": False, "reason": ".continue/rules/*.md missing"}
 
-        return {"ok": True, "detail": "mcpServers yaml + rules valid (Continue is VS Code-only)"}
+        return {
+            "ok": True,
+            "detail": "mcpServers yaml + rules valid (Continue is VS Code-only)",
+        }

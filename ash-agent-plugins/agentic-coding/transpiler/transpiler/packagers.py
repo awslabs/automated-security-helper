@@ -7,6 +7,7 @@ Reproducibility: zipfile entries use fixed mtime (1980-01-01) and explicit
 external_attr so the archive is byte-identical across runs/machines —
 required so the committed .mcpb can be drift-checked.
 """
+
 from __future__ import annotations
 
 import io
@@ -17,9 +18,14 @@ from pathlib import Path
 from .core import Manifest
 
 
-def mcpb_manifest(m: Manifest, base_dir: Path,
-                  manifest_version: str, server_type: str,
-                  server_entry_point: str, long_description: str | None) -> dict:
+def mcpb_manifest(
+    m: Manifest,
+    base_dir: Path,
+    manifest_version: str,
+    server_type: str,
+    server_entry_point: str,
+    long_description: str | None,
+) -> dict:
     """The MCPB manifest.json content. Embeds the canonical _base/mcp.json
     server invocation so users get one-click install via uvx."""
     base_mcp = json.loads((base_dir / "mcp.json").read_text())["mcpServers"]
@@ -63,10 +69,12 @@ def mcpb_archive(manifest_obj: dict) -> bytes:
     ).encode("utf-8")
 
     buf = io.BytesIO()
-    with zipfile.ZipFile(buf, mode="w",
-                         compression=zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
-        info = zipfile.ZipInfo(filename="manifest.json",
-                               date_time=(1980, 1, 1, 0, 0, 0))
+    with zipfile.ZipFile(
+        buf, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=6
+    ) as zf:
+        info = zipfile.ZipInfo(
+            filename="manifest.json", date_time=(1980, 1, 1, 0, 0, 0)
+        )
         info.external_attr = 0o644 << 16
         info.compress_type = zipfile.ZIP_DEFLATED
         zf.writestr(info, manifest_bytes)

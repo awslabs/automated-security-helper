@@ -38,7 +38,9 @@ from automated_security_helper.utils.sarif_utils import (
 )
 
 
-def _build_sarif_report(results: list[Result], tool_name: str = "bandit") -> SarifReport:
+def _build_sarif_report(
+    results: list[Result], tool_name: str = "bandit"
+) -> SarifReport:
     return SarifReport(
         version="2.1.0",
         runs=[
@@ -156,9 +158,7 @@ class TestExtractSarifCountsForScanner:
         assert suppressed == 0
 
     def test_issue_severity_critical_counted(self):
-        model = self._wrap(
-            [_build_result(level="warning", issue_severity="CRITICAL")]
-        )
+        model = self._wrap([_build_result(level="warning", issue_severity="CRITICAL")])
         _, critical, _, medium, _, _ = (
             ScannerStatisticsCalculator.extract_sarif_counts_for_scanner(
                 model, "bandit"

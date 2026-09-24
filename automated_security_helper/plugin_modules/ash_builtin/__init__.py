@@ -9,7 +9,9 @@ from automated_security_helper.plugins.events import AshEventType
 def _load_module(module_path: str):
     """Import a module by its dotted path and return it."""
     # nosec
-    return importlib.import_module(module_path)  # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
+    return importlib.import_module(
+        module_path
+    )  # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
 
 
 def _load_builtin_plugins():
@@ -37,14 +39,10 @@ def _load_builtin_plugins():
     SyftScanner = scanners_mod.SyftScanner
     OpengrepScanner = scanners_mod.OpengrepScanner
 
-    npm_mod = _load_module(
-        f"{_base}.scanners.npm_audit_scanner"
-    )
+    npm_mod = _load_module(f"{_base}.scanners.npm_audit_scanner")
     NpmAuditScanner = npm_mod.NpmAuditScanner
 
-    semgrep_mod = _load_module(
-        f"{_base}.scanners.semgrep_scanner"
-    )
+    semgrep_mod = _load_module(f"{_base}.scanners.semgrep_scanner")
     SemgrepScanner = semgrep_mod.SemgrepScanner
 
     # -- Reporters --
@@ -66,7 +64,9 @@ def _load_builtin_plugins():
     # -- Event Handlers --
     event_handlers_mod = _load_module(f"{_base}.event_handlers")
     handle_scan_completion_logging = event_handlers_mod.handle_scan_completion_logging
-    handle_suppression_expiration_check = event_handlers_mod.handle_suppression_expiration_check
+    handle_suppression_expiration_check = (
+        event_handlers_mod.handle_suppression_expiration_check
+    )
 
     return (
         [ArchiveConverter, JupyterConverter],

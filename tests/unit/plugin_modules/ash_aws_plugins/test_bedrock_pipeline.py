@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 """Tests for BedrockReportPipeline, BedrockPromptBuilder, BedrockModelClient, ReportSection."""
+
 from collections import defaultdict
 from unittest.mock import MagicMock
 
@@ -19,7 +20,9 @@ from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_pipeline i
 # ---------------------------------------------------------------------------
 
 
-def _make_finding(rule_id: str = "RULE-1", level: str = "error", message: str = "desc") -> dict:
+def _make_finding(
+    rule_id: str = "RULE-1", level: str = "error", message: str = "desc"
+) -> dict:
     return {
         "rule": {"id": rule_id},
         "level": level,
@@ -106,7 +109,9 @@ class TestBedrockPromptBuilder:
         findings = [_make_finding(level="error"), _make_finding(level="warning")]
         scanner_results = ["semgrep", "bandit"]
         secret_findings: list = []
-        prompt = self.builder.executive_summary(findings, secret_findings, scanner_results)
+        prompt = self.builder.executive_summary(
+            findings, secret_findings, scanner_results
+        )
         assert "2" in prompt  # total count
         assert "semgrep" in prompt
         assert "bandit" in prompt
@@ -148,7 +153,9 @@ class TestBedrockPromptBuilder:
 
     def test_technical_analysis_includes_rule_id(self):
         findings = [_make_finding(rule_id="BANDIT-101")]
-        prompt = self.builder.technical_analysis(findings, max_findings=10, include_code_snippets=False)
+        prompt = self.builder.technical_analysis(
+            findings, max_findings=10, include_code_snippets=False
+        )
         assert "BANDIT-101" in prompt
 
     def test_prepare_prompt_prepends_custom_prompt(self):
@@ -188,7 +195,9 @@ class TestBedrockPromptBuilder:
 
 
 class TestBedrockModelClient:
-    def _make_client(self, runtime=None, model_id="claude-3", **kwargs) -> BedrockModelClient:
+    def _make_client(
+        self, runtime=None, model_id="claude-3", **kwargs
+    ) -> BedrockModelClient:
         if runtime is None:
             runtime = MagicMock()
         return BedrockModelClient(
@@ -228,9 +237,7 @@ class TestBedrockModelClient:
         runtime = MagicMock()
         runtime.converse.return_value = {
             "output": {
-                "message": {
-                    "content": [{"text": "Part A. "}, {"text": "Part B."}]
-                }
+                "message": {"content": [{"text": "Part A. "}, {"text": "Part B."}]}
             }
         }
         client = self._make_client(runtime)
@@ -288,7 +295,10 @@ class TestBedrockModelClient:
             {"Error": {"Code": "ThrottlingException", "Message": "slow"}},
             "Converse",
         )
-        runtime.converse.side_effect = [throttle_error, _ok_converse_response("retried ok")]
+        runtime.converse.side_effect = [
+            throttle_error,
+            _ok_converse_response("retried ok"),
+        ]
         # Patch retry_with_backoff to actually retry by calling the function again
         # We simulate retry by having the client call converse twice
         client = self._make_client(runtime)
@@ -316,7 +326,9 @@ class TestBedrockModelClient:
 
 
 class TestBedrockReportPipeline:
-    def _make_pipeline(self, sections=None, client=None, prompt_builder=None, cache=None):
+    def _make_pipeline(
+        self, sections=None, client=None, prompt_builder=None, cache=None
+    ):
         if client is None:
             client = MagicMock()
             client.try_call.return_value = "section content"
@@ -473,9 +485,15 @@ class TestBedrockPipelineIntegration:
         builder = BedrockPromptBuilder()
 
         sections = [
-            ReportSection(title="Executive Summary", cache_key="exec", system_prompt="sys exec"),
-            ReportSection(title="Risk Assessment", cache_key="risk", system_prompt="sys risk"),
-            ReportSection(title="Technical Analysis", cache_key="tech", system_prompt="sys tech"),
+            ReportSection(
+                title="Executive Summary", cache_key="exec", system_prompt="sys exec"
+            ),
+            ReportSection(
+                title="Risk Assessment", cache_key="risk", system_prompt="sys risk"
+            ),
+            ReportSection(
+                title="Technical Analysis", cache_key="tech", system_prompt="sys tech"
+            ),
         ]
         pipeline = BedrockReportPipeline(
             client=client,

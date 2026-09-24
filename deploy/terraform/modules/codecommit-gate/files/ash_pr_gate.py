@@ -206,7 +206,9 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return raw in TRUE_VALUES
 
 
-def _run(argv: list[str], cwd: pathlib.Path | None = None) -> subprocess.CompletedProcess:
+def _run(
+    argv: list[str], cwd: pathlib.Path | None = None
+) -> subprocess.CompletedProcess:
     """Run a subprocess, capturing output, without raising on a non-zero exit."""
     LOGGER.info("running: %s", " ".join(argv))
     return subprocess.run(  # noqa: S603 - argv is a list, never a shell string
@@ -284,7 +286,9 @@ def parse_event(event: dict) -> dict:
     required = ("pullRequestId", "sourceCommit", "destinationCommit", "sourceReference")
     missing = [key for key in required if not detail.get(key)]
     if missing:
-        raise ValueError(f"event detail is missing required fields: {', '.join(missing)}")
+        raise ValueError(
+            f"event detail is missing required fields: {', '.join(missing)}"
+        )
 
     source_reference = detail["sourceReference"]
     branch = source_reference.removeprefix("refs/heads/")
@@ -301,7 +305,9 @@ def parse_event(event: dict) -> dict:
     }
 
 
-def clone_source(repository_name: str, branch: str, commit: str, region: str) -> pathlib.Path:
+def clone_source(
+    repository_name: str, branch: str, commit: str, region: str
+) -> pathlib.Path:
     """Clone the pull request's source branch and check out its tip commit.
 
     Uses git-remote-codecommit (the `codecommit::` remote helper), which signs
@@ -339,7 +345,9 @@ def clone_source(repository_name: str, branch: str, commit: str, region: str) ->
 
     checkout = _run(["git", "checkout", "--detach", commit], cwd=source_dir)
     if checkout.returncode != 0:
-        raise RuntimeError(f"git checkout {commit} failed: {checkout.stderr.strip()[-2000:]}")
+        raise RuntimeError(
+            f"git checkout {commit} failed: {checkout.stderr.strip()[-2000:]}"
+        )
 
     return source_dir
 
@@ -448,7 +456,9 @@ def read_severity_counts(output_dir: pathlib.Path) -> dict[str, int] | None:
         counts[severity] = value
 
     if not counts:
-        LOGGER.error("results file at %s carries no recognizable severity counts", results_path)
+        LOGGER.error(
+            "results file at %s carries no recognizable severity counts", results_path
+        )
         return None
 
     return counts
@@ -469,11 +479,22 @@ def build_comment(
         lines += [
             "**The scan did not complete, so this pull request has not been assessed.**",
             "",
-            (f"This is not a pass. `ash scan` exited {scan_exit}; treat the result as "
-            "unknown and check the Lambda logs."),
+            (
+                f"This is not a pass. `ash scan` exited {scan_exit}; treat the result as "
+                "unknown and check the Lambda logs."
+            ),
         ]
         if log_tail:
-            lines += ["", "<details><summary>Scan log tail</summary>", "", "```", log_tail, "```", "", "</details>"]
+            lines += [
+                "",
+                "<details><summary>Scan log tail</summary>",
+                "",
+                "```",
+                log_tail,
+                "```",
+                "",
+                "</details>",
+            ]
     else:
         verdict = (
             f"found actionable findings at or above {min_severity}"
@@ -483,14 +504,19 @@ def build_comment(
         lines += [f"Scanned `{source_commit[:12]}` and {verdict}.", ""]
 
         if counts:
-            reported = [s for s in ("critical", "high", "medium", "low", "info") if s in counts]
+            reported = [
+                s for s in ("critical", "high", "medium", "low", "info") if s in counts
+            ]
             if reported:
                 lines += ["| Severity | Count |", "| --- | --- |"]
                 for severity in reported:
                     lines.append(f"| {severity.capitalize()} | {counts[severity]} |")
                 lines.append("")
             if counts.get("suppressed"):
-                lines += [f"{counts['suppressed']} finding(s) suppressed by configuration.", ""]
+                lines += [
+                    f"{counts['suppressed']} finding(s) suppressed by configuration.",
+                    "",
+                ]
 
         # The threshold is stated, not applied here: ASH decided the verdict above.
         lines.append(
@@ -501,7 +527,10 @@ def build_comment(
     comment = "\n".join(lines)
     if len(comment) > max_chars:
         keep = max(0, max_chars - 200)
-        comment = comment[:keep] + "\n\n_Comment truncated. See the Lambda logs for the full report._"
+        comment = (
+            comment[:keep]
+            + "\n\n_Comment truncated. See the Lambda logs for the full report._"
+        )
     return comment
 
 
@@ -530,9 +559,14 @@ def handler(event: dict, context: object) -> dict:  # noqa: ARG001 - Lambda sign
     scan_exit = -1
     try:
         source_dir = clone_source(
-            parsed["repository_name"], parsed["source_branch"], parsed["source_commit"], region
+            parsed["repository_name"],
+            parsed["source_branch"],
+            parsed["source_commit"],
+            region,
         )
-        scan_exit, output_dir, log_tail = run_scan(source_dir, min_severity, fail_on_findings)
+        scan_exit, output_dir, log_tail = run_scan(
+            source_dir, min_severity, fail_on_findings
+        )
         counts = read_severity_counts(output_dir)
     except Exception as exc:  # noqa: BLE001 - any failure here is an error outcome
         LOGGER.exception("scan failed")
@@ -549,7 +583,13 @@ def handler(event: dict, context: object) -> dict:  # noqa: ARG001 - Lambda sign
         outcome = "error"
 
     comment = build_comment(
-        outcome, counts, min_severity, scan_exit, parsed["source_commit"], log_tail, max_chars
+        outcome,
+        counts,
+        min_severity,
+        scan_exit,
+        parsed["source_commit"],
+        log_tail,
+        max_chars,
     )
 
     codecommit.post_comment_for_pull_request(
@@ -559,7 +599,9 @@ def handler(event: dict, context: object) -> dict:  # noqa: ARG001 - Lambda sign
         afterCommitId=parsed["source_commit"],
         content=comment,
     )
-    LOGGER.info("posted %s comment on pull request %s", outcome, parsed["pull_request_id"])
+    LOGGER.info(
+        "posted %s comment on pull request %s", outcome, parsed["pull_request_id"]
+    )
 
     # APPROVE on a clean scan, REVOKE on anything else. The CDK gate does the same
     # (deploy/cdk/lib/ash-container-scripts.ts), and the two have to agree: an operator
@@ -594,7 +636,11 @@ def handler(event: dict, context: object) -> dict:  # noqa: ARG001 - Lambda sign
         except Exception:  # noqa: BLE001 - approval is advisory, the comment is the record
             LOGGER.exception("could not set approval state to %s", desired_state)
 
-    return {"outcome": outcome, "scanExitCode": scan_exit, "severityCounts": counts or {}}
+    return {
+        "outcome": outcome,
+        "scanExitCode": scan_exit,
+        "severityCounts": counts or {},
+    }
 
 
 if __name__ == "__main__":  # pragma: no cover - local smoke test

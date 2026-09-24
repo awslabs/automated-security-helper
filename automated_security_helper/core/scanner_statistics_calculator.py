@@ -353,7 +353,9 @@ class ScannerStatisticsCalculator:
                 result_scanner = (
                     ScannerStatisticsCalculator._get_scanner_name_from_result(result)
                 )
-                if not (result_scanner and result_scanner.lower() == scanner_name.lower()):
+                if not (
+                    result_scanner and result_scanner.lower() == scanner_name.lower()
+                ):
                     continue
 
                 if result.suppressions and len(result.suppressions) > 0:
@@ -361,7 +363,14 @@ class ScannerStatisticsCalculator:
                 else:
                     counts.increment(_resolve_result_severity(result))
 
-        return counts.suppressed, counts.critical, counts.high, counts.medium, counts.low, counts.info
+        return (
+            counts.suppressed,
+            counts.critical,
+            counts.high,
+            counts.medium,
+            counts.low,
+            counts.info,
+        )
 
     @staticmethod
     def _get_scanner_name_from_result(result: Any) -> Optional[str]:

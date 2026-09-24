@@ -50,7 +50,6 @@ def get_version_from_pyproject() -> str:
     text = read_text(PYPROJECT_TOML)
 
     if tomllib:
-
         data = tomllib.loads(text)
         return data["project"]["version"]
 
@@ -106,7 +105,9 @@ def check_cli_flags() -> list[str]:
         if flag.lower() not in docs_lower:
             # Also try with backtick wrapping
             if f"`{flag}`".lower() not in docs_lower:
-                failures.append(f"CLI flag {flag} found in source but missing from cli-reference.md")
+                failures.append(
+                    f"CLI flag {flag} found in source but missing from cli-reference.md"
+                )
 
     return failures
 

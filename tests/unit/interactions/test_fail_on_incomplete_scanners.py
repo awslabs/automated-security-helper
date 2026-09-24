@@ -512,7 +512,9 @@ class TestAScanThatRanNothingIsNotACleanScan:
             ],
         ):
             with patch.object(
-                logging.getLogger("automated_security_helper.interactions.run_ash_scan"),
+                logging.getLogger(
+                    "automated_security_helper.interactions.run_ash_scan"
+                ),
                 "error",
             ) as logged:
                 code = _compute_exit_code(results, opts)
@@ -940,7 +942,9 @@ class TestReadsTheAuthoritativeSignals:
         # Each status contributed exactly one scanner, so each counter must read 1.
         # Without this the sum could be reached by one counter absorbing another's
         # scanners.
-        assert {bucket: getattr(stats, bucket) for bucket in buckets} == dict.fromkeys(buckets, 1)
+        assert {bucket: getattr(stats, bucket) for bucket in buckets} == dict.fromkeys(
+            buckets, 1
+        )
 
         model = self._model_with("grype", ScannerStatus.ERROR, "PASSED")
 

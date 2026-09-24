@@ -119,7 +119,10 @@ class TestCancelScanNoPID:
             # Should have logged a warning about missing PID
             mock_logger.warning.assert_called()
             warning_text = mock_logger.warning.call_args[0][0]
-            assert "no process id" in warning_text.lower() or "process id" in warning_text.lower()
+            assert (
+                "no process id" in warning_text.lower()
+                or "process id" in warning_text.lower()
+            )
 
     def test_cancel_scan_returns_success_with_warning_in_response(self, tmp_path):
         """The higher-level cancel_scan management function should include
@@ -177,13 +180,18 @@ class TestPluginLoaderNamespaceValidation:
             load_additional_plugin_modules,
         )
 
-        with patch("automated_security_helper.plugins.loader.ASH_LOGGER") as mock_logger:
+        with patch(
+            "automated_security_helper.plugins.loader.ASH_LOGGER"
+        ) as mock_logger:
             load_additional_plugin_modules(["evil_package.backdoor"])
             # Should log a warning about unexpected namespace
             warning_calls = [
-                call for call in mock_logger.warning.call_args_list
-                if "namespace" in str(call).lower() or "unexpected" in str(call).lower()
-                or "not match" in str(call).lower() or "skipping" in str(call).lower()
+                call
+                for call in mock_logger.warning.call_args_list
+                if "namespace" in str(call).lower()
+                or "unexpected" in str(call).lower()
+                or "not match" in str(call).lower()
+                or "skipping" in str(call).lower()
             ]
             assert len(warning_calls) > 0, (
                 "Expected a warning about unexpected module namespace. "
@@ -199,13 +207,16 @@ class TestPluginLoaderNamespaceValidation:
 
         # These will fail at import (module doesn't exist), but should NOT
         # be rejected by namespace validation.
-        with patch("automated_security_helper.plugins.loader.ASH_LOGGER") as mock_logger:
+        with patch(
+            "automated_security_helper.plugins.loader.ASH_LOGGER"
+        ) as mock_logger:
             load_additional_plugin_modules(
                 ["automated_security_helper.plugin_modules.ash_builtin"]
             )
             # Check that no "namespace" warnings were emitted for this module
             namespace_warnings = [
-                call for call in mock_logger.warning.call_args_list
+                call
+                for call in mock_logger.warning.call_args_list
                 if "namespace" in str(call).lower() or "unexpected" in str(call).lower()
             ]
             assert len(namespace_warnings) == 0, (
@@ -227,11 +238,15 @@ class TestPluginDiscoveryPrefixTightening:
 
         # Mock pkgutil.iter_modules to return a spoofed package
         fake_module = MagicMock()
-        with patch("automated_security_helper.plugins.discovery.pkgutil.iter_modules") as mock_iter:
+        with patch(
+            "automated_security_helper.plugins.discovery.pkgutil.iter_modules"
+        ) as mock_iter:
             mock_iter.return_value = [
                 (None, "ash_plugins_evil", True),
             ]
-            with patch("automated_security_helper.plugins.discovery.importlib.import_module") as mock_import:
+            with patch(
+                "automated_security_helper.plugins.discovery.importlib.import_module"
+            ) as mock_import:
                 mock_import.return_value = fake_module
                 discover_plugins(["ash_plugins"])
                 # import_module should NOT have been called for the evil package
@@ -246,11 +261,15 @@ class TestPluginDiscoveryPrefixTightening:
         fake_module.ASH_SCANNERS = []
         fake_module.ASH_REPORTERS = []
 
-        with patch("automated_security_helper.plugins.discovery.pkgutil.iter_modules") as mock_iter:
+        with patch(
+            "automated_security_helper.plugins.discovery.pkgutil.iter_modules"
+        ) as mock_iter:
             mock_iter.return_value = [
                 (None, "ash_plugins", True),
             ]
-            with patch("automated_security_helper.plugins.discovery.importlib.import_module") as mock_import:
+            with patch(
+                "automated_security_helper.plugins.discovery.importlib.import_module"
+            ) as mock_import:
                 mock_import.return_value = fake_module
                 discover_plugins(["ash_plugins"])
                 mock_import.assert_called_once_with("ash_plugins")
@@ -265,11 +284,15 @@ class TestPluginDiscoveryPrefixTightening:
         fake_module.ASH_SCANNERS = []
         fake_module.ASH_REPORTERS = []
 
-        with patch("automated_security_helper.plugins.discovery.pkgutil.iter_modules") as mock_iter:
+        with patch(
+            "automated_security_helper.plugins.discovery.pkgutil.iter_modules"
+        ) as mock_iter:
             mock_iter.return_value = [
                 (None, "ash_plugins.my_scanner", True),
             ]
-            with patch("automated_security_helper.plugins.discovery.importlib.import_module") as mock_import:
+            with patch(
+                "automated_security_helper.plugins.discovery.importlib.import_module"
+            ) as mock_import:
                 mock_import.return_value = fake_module
                 discover_plugins(["ash_plugins"])
                 mock_import.assert_called_once_with("ash_plugins.my_scanner")
@@ -286,7 +309,6 @@ class TestTarFilterDataKwarg:
         """On Python >= 3.12, tar.extractall should receive filter='data'."""
         if sys.version_info < (3, 12):
             pytest.skip("Test only relevant on Python 3.12+")
-
 
         # Create a minimal tar archive
         tar_path = tmp_path / "test.tar"
@@ -398,9 +420,7 @@ class TestDockerBuildArgRevisionValidation:
             "some_branch_name",
         ]
         for val in valid_values:
-            assert _validate_ash_revision(val), (
-                f"Revision '{val}' should be accepted"
-            )
+            assert _validate_ash_revision(val), f"Revision '{val}' should be accepted"
 
 
 # ---------------------------------------------------------------------------
@@ -475,9 +495,7 @@ class TestYAMLSafeLoader:
         source = inspect.getsource(ash_config)
 
         # Should contain _AshConfigLoader subclassing SafeLoader
-        assert "SafeLoader" in source, (
-            "ash_config module should reference SafeLoader"
-        )
+        assert "SafeLoader" in source, "ash_config module should reference SafeLoader"
         assert "_AshConfigLoader" in source, (
             "ash_config module should define _AshConfigLoader subclass"
         )
@@ -489,12 +507,8 @@ class TestYAMLSafeLoader:
 
         source = inspect.getsource(ash_config)
 
-        assert "FullLoader" not in source, (
-            "ash_config must not use yaml.FullLoader"
-        )
-        assert "UnsafeLoader" not in source, (
-            "ash_config must not use yaml.UnsafeLoader"
-        )
+        assert "FullLoader" not in source, "ash_config must not use yaml.FullLoader"
+        assert "UnsafeLoader" not in source, "ash_config must not use yaml.UnsafeLoader"
 
 
 # ---------------------------------------------------------------------------
@@ -507,26 +521,31 @@ class TestHardeningImports:
         from automated_security_helper.core.resource_management.error_handling import (
             validate_directory_path,
         )
+
         assert callable(validate_directory_path)
 
     def test_import_plugin_loader(self):
         from automated_security_helper.plugins.loader import (
             load_additional_plugin_modules,
         )
+
         assert callable(load_additional_plugin_modules)
 
     def test_import_plugin_discovery(self):
         from automated_security_helper.plugins.discovery import discover_plugins
+
         assert callable(discover_plugins)
 
     def test_import_archive_converter(self):
         from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
             ArchiveConverter,
         )
+
         assert ArchiveConverter is not None
 
     def test_import_validate_ash_revision(self):
         from automated_security_helper.interactions.run_ash_container import (
             _validate_ash_revision,
         )
+
         assert callable(_validate_ash_revision)

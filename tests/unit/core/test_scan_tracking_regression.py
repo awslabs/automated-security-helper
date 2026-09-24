@@ -4,7 +4,6 @@ PR#274 Bug #8: severity key case mismatch in extract_findings_summary.
 """
 
 
-
 class TestSeverityKeyCaseMismatch:
     """extract_findings_summary must handle uppercase severity values."""
 

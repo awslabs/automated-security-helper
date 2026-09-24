@@ -23,6 +23,7 @@ from automated_security_helper.interactions.run_ash_container import (
 
 def test_resolve_oci_runner_finch_first():
     """When multiple runners are on PATH, the first discovered wins (finch before docker)."""
+
     def fake_find(name):
         return {
             "finch": "/usr/local/bin/finch",
@@ -41,6 +42,7 @@ def test_resolve_oci_runner_finch_first():
 
 def test_resolve_oci_runner_docker_when_no_finch():
     """Falls back to docker when finch is not available."""
+
     def fake_find(name):
         return {
             "docker": "/usr/bin/docker",
@@ -66,6 +68,7 @@ def test_resolve_oci_runner_raises_when_none_available():
 
 def test_resolve_oci_runner_respects_explicit_arg():
     """Explicit oci_runner bypasses discovery and returns the found path."""
+
     def fake_find(name):
         return "/usr/bin/podman" if name == "podman" else None
 
@@ -79,6 +82,7 @@ def test_resolve_oci_runner_respects_explicit_arg():
 
 def test_resolve_oci_runner_respects_env_wrapper():
     """OCI_RUNNER_WRAPPER env var is returned as a prefix list via the helper."""
+
     # _resolve_oci_runner returns just the runner path; the wrapper is read
     # separately via _get_oci_wrapper_prefix. Verify _resolve_oci_runner itself
     # still returns just the resolved runner path even when the env var is set.
@@ -109,12 +113,15 @@ def test_find_dockerfile_uses_repo_dockerfile(tmp_path):
     empty_dir = tmp_path / "notarepo"
     empty_dir.mkdir()
 
-    with patch(
-        "automated_security_helper.interactions.run_ash_container.ASH_ASSETS_DIR",
-        tmp_path,
-    ), patch(
-        "automated_security_helper.interactions.run_ash_container.Path.cwd",
-        return_value=empty_dir,
+    with (
+        patch(
+            "automated_security_helper.interactions.run_ash_container.ASH_ASSETS_DIR",
+            tmp_path,
+        ),
+        patch(
+            "automated_security_helper.interactions.run_ash_container.Path.cwd",
+            return_value=empty_dir,
+        ),
     ):
         result = _find_dockerfile(resolved_revision="abc123")
     assert result == fake_dockerfile
@@ -168,9 +175,9 @@ def test_assemble_run_command_mounts():
     # "/src/code" elsewhere. Derive the expectation from the same object rather
     # than hardcoding forward slashes.
     expected_source = str(kwargs["source_dir"])
-    assert any(
-        expected_source in m and "destination=/src" in m for m in mount_args
-    ), mount_args
+    assert any(expected_source in m and "destination=/src" in m for m in mount_args), (
+        mount_args
+    )
     assert any("destination=/out" in m for m in mount_args), mount_args
 
 

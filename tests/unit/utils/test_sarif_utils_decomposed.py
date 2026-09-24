@@ -92,12 +92,16 @@ class TestNormalizeSarifUri:
 
     def test_strips_source_dir_prefix(self):
         """Case 1: URI starts with source_dir_prefix directly."""
-        result = self._call("/home/runner/work/repo/src/foo.py", "/home/runner/work/repo/src/")
+        result = self._call(
+            "/home/runner/work/repo/src/foo.py", "/home/runner/work/repo/src/"
+        )
         assert result == "foo.py"
 
     def test_strips_prefix_with_trailing_slash(self):
         """Case 2: URI starts with /+source_dir_prefix (Windows leading slash)."""
-        result = self._call("//home/runner/work/repo/src/foo.py", "/home/runner/work/repo/src/")
+        result = self._call(
+            "//home/runner/work/repo/src/foo.py", "/home/runner/work/repo/src/"
+        )
         assert result == "foo.py"
 
     def test_handles_windows_drive_leading_slash(self):
@@ -197,7 +201,9 @@ class TestApplyConfigSuppression:
         )
 
     def test_matching_rule_and_path_returns_true_and_mutates(self):
-        from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+        from automated_security_helper.models.flat_vulnerability import (
+            FlatVulnerability,
+        )
 
         result = Result(
             ruleId="B108",
@@ -222,7 +228,9 @@ class TestApplyConfigSuppression:
         assert suppression.id in used
 
     def test_expired_suppression_not_applied(self):
-        from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+        from automated_security_helper.models.flat_vulnerability import (
+            FlatVulnerability,
+        )
 
         result = Result(
             ruleId="B108",
@@ -245,7 +253,9 @@ class TestApplyConfigSuppression:
         assert not result.suppressions
 
     def test_no_matching_suppression_returns_false(self):
-        from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+        from automated_security_helper.models.flat_vulnerability import (
+            FlatVulnerability,
+        )
 
         result = Result(
             ruleId="B108",
@@ -311,7 +321,9 @@ class TestApplyInlineSuppression:
 class TestTopLevelDispatchOrder:
     """Integration tests verifying ignore > config > inline precedence."""
 
-    def _make_context(self, source_dir: Path, output_dir: Path, suppressions=None, ignore_paths=None):
+    def _make_context(
+        self, source_dir: Path, output_dir: Path, suppressions=None, ignore_paths=None
+    ):
         from automated_security_helper.base.plugin_context import PluginContext
         from automated_security_helper.config.ash_config import AshConfig
 
@@ -341,7 +353,9 @@ class TestTopLevelDispatchOrder:
             reason="config rule",
         )
         ignore_path = IgnorePathWithReason(path="tests/**", reason="ignore tests")
-        ctx = self._make_context(src, out, suppressions=[suppression], ignore_paths=[ignore_path])
+        ctx = self._make_context(
+            src, out, suppressions=[suppression], ignore_paths=[ignore_path]
+        )
 
         sarif = _make_sarif([_make_result("B108", str(src / "tests/foo.py"))])
         result_sarif = apply_suppressions_to_sarif(sarif, ctx)

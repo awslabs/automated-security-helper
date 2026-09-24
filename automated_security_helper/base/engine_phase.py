@@ -20,9 +20,8 @@ class EnginePhase(ABC):
     def __init__(
         self,
         plugin_context: PluginContext,
-        plugins: List[
-            ConverterPluginBase | ScannerPluginBase | ReporterPluginBase
-        ] | None = None,
+        plugins: List[ConverterPluginBase | ScannerPluginBase | ReporterPluginBase]
+        | None = None,
         progress_display: Optional[Any] = None,
         asharp_model: Optional[AshAggregatedResults] = None,
     ):

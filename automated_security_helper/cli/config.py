@@ -8,6 +8,7 @@ import sys
 from typing import Annotated, Dict, List
 import yaml
 import typer
+
 # `print` shadows the builtin on purpose: this is rich's documented import
 # idiom, so every print() below renders markup and respects the console. The
 # fix A004 wants is an alias, which would mean rewriting every call in this
@@ -102,9 +103,15 @@ def init(
     # Exclude internal-only fields that should not appear in user configs.
     # These are used at runtime but are not valid in user-facing config files.
     internal_scanner_fields = {"name", "extension", "tool_version", "install_timeout"}
-    scanner_exclusions = dict.fromkeys(ScannerConfigSegment.model_fields, internal_scanner_fields)
-    reporter_exclusions = dict.fromkeys(ReporterConfigSegment.model_fields, internal_scanner_fields)
-    converter_exclusions = dict.fromkeys(ConverterConfigSegment.model_fields, internal_scanner_fields)
+    scanner_exclusions = dict.fromkeys(
+        ScannerConfigSegment.model_fields, internal_scanner_fields
+    )
+    reporter_exclusions = dict.fromkeys(
+        ReporterConfigSegment.model_fields, internal_scanner_fields
+    )
+    converter_exclusions = dict.fromkeys(
+        ConverterConfigSegment.model_fields, internal_scanner_fields
+    )
 
     config_strings = [
         "# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/automated_security_helper/schemas/AshConfig.json",
@@ -898,9 +905,15 @@ def wizard(
             )
 
     internal_scanner_fields = {"name", "extension", "tool_version", "install_timeout"}
-    scanner_exclusions = dict.fromkeys(ScannerConfigSegment.model_fields, internal_scanner_fields)
-    reporter_exclusions = dict.fromkeys(ReporterConfigSegment.model_fields, internal_scanner_fields)
-    converter_exclusions = dict.fromkeys(ConverterConfigSegment.model_fields, internal_scanner_fields)
+    scanner_exclusions = dict.fromkeys(
+        ScannerConfigSegment.model_fields, internal_scanner_fields
+    )
+    reporter_exclusions = dict.fromkeys(
+        ReporterConfigSegment.model_fields, internal_scanner_fields
+    )
+    converter_exclusions = dict.fromkeys(
+        ConverterConfigSegment.model_fields, internal_scanner_fields
+    )
 
     config_strings = [
         "# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/automated-security-helper/refs/heads/main/automated_security_helper/schemas/AshConfig.json",

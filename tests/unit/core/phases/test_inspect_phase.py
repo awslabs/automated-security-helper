@@ -39,9 +39,7 @@ class TestInspectPhase:
         """phase_name returns 'inspect'."""
         assert inspect_phase.phase_name == "inspect"
 
-    @patch(
-        "automated_security_helper.utils.sarif_field_analysis.analyze_sarif_fields"
-    )
+    @patch("automated_security_helper.utils.sarif_field_analysis.analyze_sarif_fields")
     def test_execute_phase_success(self, mock_analyze, inspect_phase):
         """Successful execution calls analyze_sarif_fields and returns results."""
         model = AshAggregatedResults()
@@ -54,9 +52,7 @@ class TestInspectPhase:
         call_kwargs = mock_analyze.call_args[1]
         assert "analysis" in call_kwargs["output_dir"]
 
-    @patch(
-        "automated_security_helper.utils.sarif_field_analysis.analyze_sarif_fields"
-    )
+    @patch("automated_security_helper.utils.sarif_field_analysis.analyze_sarif_fields")
     def test_execute_phase_creates_analysis_dir(self, mock_analyze, inspect_phase):
         """The analysis subdirectory is created during execution."""
         model = AshAggregatedResults()
@@ -87,9 +83,7 @@ class TestInspectPhase:
             100, "Inspection phase complete"
         )
 
-    @patch(
-        "automated_security_helper.utils.sarif_field_analysis.analyze_sarif_fields"
-    )
+    @patch("automated_security_helper.utils.sarif_field_analysis.analyze_sarif_fields")
     def test_progress_updates_on_success(self, mock_analyze, inspect_phase):
         """Progress updates are called in sequence during success."""
         model = AshAggregatedResults()

@@ -68,7 +68,9 @@ def mock_aggregated_results(tmp_path):
     return AshAggregatedResults()
 
 
-def _make_scanner_plugin(name="test_scanner", enabled=True, deps_satisfied=True, python_only=True):
+def _make_scanner_plugin(
+    name="test_scanner", enabled=True, deps_satisfied=True, python_only=True
+):
     """Factory for scanner plugin mocks."""
     plugin_cls = MagicMock()
     plugin_cls.__name__ = name
@@ -96,9 +98,13 @@ def _make_scanner_plugin(name="test_scanner", enabled=True, deps_satisfied=True,
     return plugin_cls, plugin_instance
 
 
-def _make_scanner_class(name="test_scanner", enabled=True, deps_satisfied=True, python_only=True):
+def _make_scanner_class(
+    name="test_scanner", enabled=True, deps_satisfied=True, python_only=True
+):
     """Create a callable scanner class mock that returns an instance when called."""
-    plugin_cls, plugin_instance = _make_scanner_plugin(name, enabled, deps_satisfied, python_only)
+    plugin_cls, plugin_instance = _make_scanner_plugin(
+        name, enabled, deps_satisfied, python_only
+    )
     plugin_cls.return_value = plugin_instance
     plugin_cls.__name__ = name
     return plugin_cls
@@ -178,7 +184,11 @@ class TestExecutePhaseLoop:
         assert isinstance(result, AshAggregatedResults)
 
     def test_scanner_excluded_via_excluded_scanners_param(
-        self, scan_phase, mock_plugin_context, mock_aggregated_results, mock_progress_display
+        self,
+        scan_phase,
+        mock_plugin_context,
+        mock_aggregated_results,
+        mock_progress_display,
     ):
         """Scanner in excluded_scanners list is marked SKIPPED."""
         scanner_cls = _make_scanner_class("bandit", enabled=True)
@@ -223,7 +233,9 @@ class TestExecutePhaseLoop:
         )
 
         assert "disabled_scanner" in result.scanner_results
-        assert result.scanner_results["disabled_scanner"].status == ScannerStatus.SKIPPED
+        assert (
+            result.scanner_results["disabled_scanner"].status == ScannerStatus.SKIPPED
+        )
 
     def test_enabled_scanner_filter_narrows_execution(
         self, scan_phase, mock_aggregated_results
@@ -234,7 +246,9 @@ class TestExecutePhaseLoop:
         scan_phase.plugins = [scanner_a, scanner_b]
 
         # Mock the execution to prevent actual scanning
-        scan_phase._execute_scanners_sequential = MagicMock(return_value=mock_aggregated_results)
+        scan_phase._execute_scanners_sequential = MagicMock(
+            return_value=mock_aggregated_results
+        )
 
         result = scan_phase._execute_phase(
             aggregated_results=mock_aggregated_results,
@@ -251,10 +265,14 @@ class TestExecutePhaseLoop:
     ):
         """python_based_plugins_only=True excludes non-python scanners."""
         py_scanner = _make_scanner_class("pyscan", enabled=True, python_only=True)
-        shell_scanner = _make_scanner_class("shellscan", enabled=True, python_only=False)
+        shell_scanner = _make_scanner_class(
+            "shellscan", enabled=True, python_only=False
+        )
         scan_phase.plugins = [py_scanner, shell_scanner]
 
-        scan_phase._execute_scanners_sequential = MagicMock(return_value=mock_aggregated_results)
+        scan_phase._execute_scanners_sequential = MagicMock(
+            return_value=mock_aggregated_results
+        )
 
         result = scan_phase._execute_phase(
             aggregated_results=mock_aggregated_results,
@@ -274,7 +292,9 @@ class TestExecutePhaseLoop:
 class TestErrorHandling:
     """Tests for error handling paths."""
 
-    def test_execute_phase_propagates_exception(self, scan_phase, mock_aggregated_results):
+    def test_execute_phase_propagates_exception(
+        self, scan_phase, mock_aggregated_results
+    ):
         """Unhandled exceptions in _execute_phase are re-raised."""
         scan_phase.plugins = []
         # Force an error by making progress_display.add_task raise
@@ -297,7 +317,9 @@ class TestErrorHandling:
         good_cls = _make_scanner_class("good_scanner", enabled=True)
         scan_phase.plugins = [bad_cls, good_cls]
 
-        scan_phase._execute_scanners_sequential = MagicMock(return_value=mock_aggregated_results)
+        scan_phase._execute_scanners_sequential = MagicMock(
+            return_value=mock_aggregated_results
+        )
 
         # Should not raise, just log the error and continue
         result = scan_phase._execute_phase(
@@ -316,7 +338,9 @@ class TestErrorHandling:
         scan_phase._completed_scanners = []
 
         # Make _execute_scanner raise
-        scan_phase._execute_scanner = MagicMock(side_effect=RuntimeError("scanner crash"))
+        scan_phase._execute_scanner = MagicMock(
+            side_effect=RuntimeError("scanner crash")
+        )
 
         results = scan_phase._safe_execute_scanner(
             scanner_name="exploder",
@@ -333,8 +357,16 @@ class TestErrorHandling:
     ):
         """In sequential mode, one scanner failing does not stop subsequent scanners."""
         scan_phase._scanner_tasks = [
-            ("failing_scanner", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),  # nosec B108
-            ("passing_scanner", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),  # nosec B108
+            (
+                "failing_scanner",
+                MagicMock(),
+                [{"path": Path("/tmp"), "type": "source"}],
+            ),  # nosec B108
+            (
+                "passing_scanner",
+                MagicMock(),
+                [{"path": Path("/tmp"), "type": "source"}],
+            ),  # nosec B108
         ]
 
         call_order = []
@@ -343,7 +375,11 @@ class TestErrorHandling:
             call_order.append(scanner_name)
             if scanner_name == "failing_scanner":
                 raise RuntimeError("fail")
-            return [ScanResultsContainer(scanner_name=scanner_name, status=ScannerStatus.PASSED)]
+            return [
+                ScanResultsContainer(
+                    scanner_name=scanner_name, status=ScannerStatus.PASSED
+                )
+            ]
 
         scan_phase._safe_execute_scanner = side_effect_fn
         scan_phase._process_results = MagicMock(return_value=mock_aggregated_results)
@@ -387,11 +423,15 @@ class TestProgressTracking:
             ("scanner_b", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),  # nosec B108
         ]
         scan_phase._safe_execute_scanner = MagicMock(
-            return_value=[ScanResultsContainer(scanner_name="x", status=ScannerStatus.PASSED)]
+            return_value=[
+                ScanResultsContainer(scanner_name="x", status=ScannerStatus.PASSED)
+            ]
         )
         scan_phase._process_results = MagicMock(return_value=mock_aggregated_results)
 
-        scan_phase._execute_scanners_sequential(aggregated_results=mock_aggregated_results)
+        scan_phase._execute_scanners_sequential(
+            aggregated_results=mock_aggregated_results
+        )
 
         # add_task called once per scanner
         assert mock_progress_display.add_task.call_count >= 2
@@ -427,7 +467,13 @@ class TestExecuteScanner:
         _, plugin = _make_scanner_plugin("trivy")
         plugin.scan.return_value = {
             "status": "success",
-            "severity_counts": {"critical": 1, "high": 2, "medium": 0, "low": 0, "info": 0},
+            "severity_counts": {
+                "critical": 1,
+                "high": 2,
+                "medium": 0,
+                "low": 0,
+                "info": 0,
+            },
         }
 
         scan_phase._global_ignore_paths = []
@@ -437,7 +483,9 @@ class TestExecuteScanner:
         results = scan_phase._execute_scanner(
             scanner_name="trivy",
             scanner_plugin=plugin,
-            scan_targets=[{"path": scan_phase.plugin_context.source_dir, "type": "source"}],
+            scan_targets=[
+                {"path": scan_phase.plugin_context.source_dir, "type": "source"}
+            ],
         )
 
         assert len(results) == 1
@@ -456,7 +504,9 @@ class TestExecuteScanner:
         results = scan_phase._execute_scanner(
             scanner_name="broken",
             scanner_plugin=plugin,
-            scan_targets=[{"path": scan_phase.plugin_context.source_dir, "type": "source"}],
+            scan_targets=[
+                {"path": scan_phase.plugin_context.source_dir, "type": "source"}
+            ],
         )
 
         assert len(results) == 1
@@ -492,7 +542,9 @@ class TestExecuteScanner:
         results = scan_phase._execute_scanner(
             scanner_name="timed",
             scanner_plugin=plugin,
-            scan_targets=[{"path": scan_phase.plugin_context.source_dir, "type": "source"}],
+            scan_targets=[
+                {"path": scan_phase.plugin_context.source_dir, "type": "source"}
+            ],
         )
 
         assert len(results) == 1
@@ -501,13 +553,41 @@ class TestExecuteScanner:
     @pytest.mark.parametrize(
         "severity_counts,threshold,expected_status",
         [
-            ({"critical": 1, "high": 0, "medium": 0, "low": 0, "info": 0}, "HIGH", ScannerStatus.FAILED),
-            ({"critical": 0, "high": 1, "medium": 0, "low": 0, "info": 0}, "HIGH", ScannerStatus.FAILED),
-            ({"critical": 0, "high": 0, "medium": 1, "low": 0, "info": 0}, "HIGH", ScannerStatus.PASSED),
-            ({"critical": 0, "high": 0, "medium": 1, "low": 0, "info": 0}, "MEDIUM", ScannerStatus.FAILED),
-            ({"critical": 0, "high": 0, "medium": 0, "low": 1, "info": 0}, "LOW", ScannerStatus.FAILED),
-            ({"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 1}, "ALL", ScannerStatus.FAILED),
-            ({"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}, "HIGH", ScannerStatus.PASSED),
+            (
+                {"critical": 1, "high": 0, "medium": 0, "low": 0, "info": 0},
+                "HIGH",
+                ScannerStatus.FAILED,
+            ),
+            (
+                {"critical": 0, "high": 1, "medium": 0, "low": 0, "info": 0},
+                "HIGH",
+                ScannerStatus.FAILED,
+            ),
+            (
+                {"critical": 0, "high": 0, "medium": 1, "low": 0, "info": 0},
+                "HIGH",
+                ScannerStatus.PASSED,
+            ),
+            (
+                {"critical": 0, "high": 0, "medium": 1, "low": 0, "info": 0},
+                "MEDIUM",
+                ScannerStatus.FAILED,
+            ),
+            (
+                {"critical": 0, "high": 0, "medium": 0, "low": 1, "info": 0},
+                "LOW",
+                ScannerStatus.FAILED,
+            ),
+            (
+                {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 1},
+                "ALL",
+                ScannerStatus.FAILED,
+            ),
+            (
+                {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+                "HIGH",
+                ScannerStatus.PASSED,
+            ),
         ],
     )
     def test_status_determined_by_threshold(
@@ -516,7 +596,10 @@ class TestExecuteScanner:
         """Scanner status is FAILED or PASSED based on severity threshold."""
         _, plugin = _make_scanner_plugin("threshold_test")
         plugin.config.options.severity_threshold = threshold
-        plugin.scan.return_value = {"status": "success", "severity_counts": severity_counts}
+        plugin.scan.return_value = {
+            "status": "success",
+            "severity_counts": severity_counts,
+        }
 
         scan_phase._global_ignore_paths = []
         scan_phase._completed_scanners = []
@@ -524,7 +607,9 @@ class TestExecuteScanner:
         results = scan_phase._execute_scanner(
             scanner_name="threshold_test",
             scanner_plugin=plugin,
-            scan_targets=[{"path": scan_phase.plugin_context.source_dir, "type": "source"}],
+            scan_targets=[
+                {"path": scan_phase.plugin_context.source_dir, "type": "source"}
+            ],
         )
 
         assert results[0].status == expected_status
@@ -546,7 +631,9 @@ class TestParallelExecution:
             ("solo", MagicMock(), [{"path": Path("/tmp"), "type": "source"}]),  # nosec B108
         ]
         scan_phase._max_workers = 4
-        scan_phase._execute_scanners_sequential = MagicMock(return_value=mock_aggregated_results)
+        scan_phase._execute_scanners_sequential = MagicMock(
+            return_value=mock_aggregated_results
+        )
 
         scan_phase._execute_scanners_parallel(
             aggregated_results=mock_aggregated_results
@@ -567,7 +654,9 @@ class TestParallelExecution:
 
         # Make _safe_execute_scanner return passing results
         scan_phase._safe_execute_scanner = MagicMock(
-            return_value=[ScanResultsContainer(scanner_name="x", status=ScannerStatus.PASSED)]
+            return_value=[
+                ScanResultsContainer(scanner_name="x", status=ScannerStatus.PASSED)
+            ]
         )
         scan_phase._process_results = MagicMock(return_value=mock_aggregated_results)
 
@@ -583,7 +672,10 @@ class TestParallelExecution:
             mock_future.result.return_value = [
                 ScanResultsContainer(scanner_name="x", status=ScannerStatus.PASSED)
             ]
-            mock_future.scanner_info = {"name": "scanner_1", "task_key": "scanner_1_task"}
+            mock_future.scanner_info = {
+                "name": "scanner_1",
+                "task_key": "scanner_1_task",
+            }
             mock_executor.submit.return_value = mock_future
 
             with patch(
@@ -617,13 +709,21 @@ class TestParallelExecution:
 
             failing_future = MagicMock()
             failing_future.result.side_effect = RuntimeError("thread crash")
-            failing_future.scanner_info = {"name": "crash_scan", "task_key": "crash_scan_task"}
+            failing_future.scanner_info = {
+                "name": "crash_scan",
+                "task_key": "crash_scan_task",
+            }
 
             passing_future = MagicMock()
             passing_future.result.return_value = [
-                ScanResultsContainer(scanner_name="good_scan", status=ScannerStatus.PASSED)
+                ScanResultsContainer(
+                    scanner_name="good_scan", status=ScannerStatus.PASSED
+                )
             ]
-            passing_future.scanner_info = {"name": "good_scan", "task_key": "good_scan_task"}
+            passing_future.scanner_info = {
+                "name": "good_scan",
+                "task_key": "good_scan_task",
+            }
 
             mock_executor.submit.side_effect = [failing_future, passing_future]
 
@@ -801,7 +901,9 @@ class TestSequentialExecution:
 
         # _process_results should have been called with a FAILED container
         call_args = scan_phase._process_results.call_args
-        container = call_args[1]["results"] if "results" in call_args[1] else call_args[0][0]
+        container = (
+            call_args[1]["results"] if "results" in call_args[1] else call_args[0][0]
+        )
         assert container.status == ScannerStatus.FAILED
 
     def test_completed_count_increments_for_each_scanner(
@@ -820,12 +922,18 @@ class TestSequentialExecution:
             call_order.append(scanner_name)
             if scanner_name == "s2":
                 raise RuntimeError("s2 failed")
-            return [ScanResultsContainer(scanner_name=scanner_name, status=ScannerStatus.PASSED)]
+            return [
+                ScanResultsContainer(
+                    scanner_name=scanner_name, status=ScannerStatus.PASSED
+                )
+            ]
 
         scan_phase._safe_execute_scanner = mock_safe_exec
         scan_phase._process_results = MagicMock(return_value=mock_aggregated_results)
 
-        scan_phase._execute_scanners_sequential(aggregated_results=mock_aggregated_results)
+        scan_phase._execute_scanners_sequential(
+            aggregated_results=mock_aggregated_results
+        )
 
         # All three scanners should have been attempted
         assert call_order == ["s1", "s2", "s3"]
@@ -881,7 +989,9 @@ class TestWorkDirHandling:
 
         scanner_cls = _make_scanner_class("tf_scan", enabled=True)
         scan_phase.plugins = [scanner_cls]
-        scan_phase._execute_scanners_sequential = MagicMock(return_value=mock_aggregated_results)
+        scan_phase._execute_scanners_sequential = MagicMock(
+            return_value=mock_aggregated_results
+        )
 
         scan_phase._execute_phase(
             aggregated_results=mock_aggregated_results,

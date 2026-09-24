@@ -49,7 +49,9 @@ def _make_sarif_result(scanner_name: str, level: Level, suppressed: bool) -> Res
         level=level,
         message=Message(root=Message1(text="test finding")),
         properties=PropertyBag(scanner_name=scanner_name),
-        suppressions=[{"kind": "external", "justification": "test"}] if suppressed else None,
+        suppressions=[{"kind": "external", "justification": "test"}]
+        if suppressed
+        else None,
     )
 
 
@@ -115,7 +117,11 @@ class TestInMemorySuppressionStateIsReliable:
             fail_on_findings=True,
         )
 
-        with pytest.raises(Exception) if False else __import__("contextlib").nullcontext():
+        with (
+            pytest.raises(Exception)
+            if False
+            else __import__("contextlib").nullcontext()
+        ):
             code = _compute_exit_code(results, opts)
 
         assert code == 0, (
@@ -175,7 +181,9 @@ class TestInMemorySuppressionStateIsReliable:
 
         # Now suppress the finding in memory.
         run = results.sarif.runs[0]
-        run.results[0].suppressions = [{"kind": "external", "justification": "added in test"}]
+        run.results[0].suppressions = [
+            {"kind": "external", "justification": "added in test"}
+        ]
 
         # After in-memory mutation: 0 unsuppressed → exit 0.
         code_after = _compute_exit_code(results, opts)
@@ -268,4 +276,6 @@ class TestComputeExitCodeDoesNotMutateResults:
         )
 
         code = _compute_exit_code(results, opts)
-        assert code == 2, "Finding with empty suppressions list must be counted as actionable."
+        assert code == 2, (
+            "Finding with empty suppressions list must be counted as actionable."
+        )

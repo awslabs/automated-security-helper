@@ -106,7 +106,9 @@ class ScannerValidationState:
     name: str
     plugin_class: Optional[type] = None
     registration_status: str = "unknown"  # "registered", "failed", "missing"
-    enablement_status: str = "unknown"    # "enabled", "disabled", "excluded", "missing_deps"
+    enablement_status: str = (
+        "unknown"  # "enabled", "disabled", "excluded", "missing_deps"
+    )
     enablement_reason: str = ""
     dependency_errors: List[str] = field(default_factory=list)
     queued_for_execution: bool = False
@@ -257,7 +259,9 @@ The Scanner Validation System integrates with the existing `ScanPhase` class at 
 
 ```python
 class ScanPhase(EnginePhase):
-    def __init__(self, plugin_context, plugins=None, progress_display=None, asharp_model=None):
+    def __init__(
+        self, plugin_context, plugins=None, progress_display=None, asharp_model=None
+    ):
         """Initialize the ScanPhase with validation manager.
 
         Args:
@@ -326,7 +330,9 @@ The Scanner Validation System is fully integrated with the existing `ScanPhase` 
 
 ```python
 class ScanPhase(EnginePhase):
-    def __init__(self, plugin_context, plugins=None, progress_display=None, asharp_model=None):
+    def __init__(
+        self, plugin_context, plugins=None, progress_display=None, asharp_model=None
+    ):
         """Initialize the ScanPhase with validation manager."""
         super().__init__(plugin_context, plugins or [], progress_display, asharp_model)
         self.validation_manager = ScannerValidationManager(plugin_context)
@@ -582,7 +588,7 @@ validation_report = validation_manager.generate_validation_report()
 print(validation_report)
 
 # Save validation report to file
-with open('.ash/ash_output/validation_report.txt', 'w') as f:
+with open(".ash/ash_output/validation_report.txt", "w") as f:
     f.write(validation_report)
 ```
 

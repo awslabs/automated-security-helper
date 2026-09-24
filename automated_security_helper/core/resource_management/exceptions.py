@@ -21,12 +21,9 @@ class TaskManagementError(MCPResourceError):
     """Exception for task management failures."""
 
 
-
 class StateManagementError(MCPResourceError):
     """Exception for state management failures."""
 
 
-
 class ResourceExhaustionError(MCPResourceError):
     """Exception for resource exhaustion conditions."""
-

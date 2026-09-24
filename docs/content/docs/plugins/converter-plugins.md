@@ -9,8 +9,12 @@ Converter plugins transform files before scanning to make them compatible with s
 Converter plugins must implement the `ConverterPluginBase` interface:
 
 ```python
-from automated_security_helper.base.converter_plugin import ConverterPluginBase, ConverterPluginConfigBase
+from automated_security_helper.base.converter_plugin import (
+    ConverterPluginBase,
+    ConverterPluginConfigBase,
+)
 from automated_security_helper.plugins.decorators import ash_converter_plugin
+
 
 @ash_converter_plugin
 class MyConverter(ConverterPluginBase):
@@ -29,13 +33,18 @@ Define a configuration class for your converter:
 from typing import List
 from pydantic import Field
 
+
 class MyConverterConfig(ConverterPluginConfigBase):
     name: str = "my-converter"
     enabled: bool = True
 
     class Options:
-        file_extensions: List[str] = Field(default=[".ipynb"], description="File extensions to convert")
-        preserve_line_numbers: bool = Field(default=True, description="Preserve line numbers in converted files")
+        file_extensions: List[str] = Field(
+            default=[".ipynb"], description="File extensions to convert"
+        )
+        preserve_line_numbers: bool = Field(
+            default=True, description="Preserve line numbers in converted files"
+        )
 ```
 
 ## Converter Plugin Example
@@ -50,18 +59,30 @@ from typing import List
 
 from pydantic import Field
 
-from automated_security_helper.base.converter_plugin import ConverterPluginBase, ConverterPluginConfigBase
+from automated_security_helper.base.converter_plugin import (
+    ConverterPluginBase,
+    ConverterPluginConfigBase,
+)
 from automated_security_helper.plugins.decorators import ash_converter_plugin
+
 
 class JupyterConverterConfig(ConverterPluginConfigBase):
     """Configuration for JupyterConverter"""
+
     name: str = "jupyter"
     enabled: bool = True
 
     class Options:
-        file_extensions: List[str] = Field(default=[".ipynb"], description="File extensions to convert")
-        preserve_line_numbers: bool = Field(default=True, description="Preserve line numbers in converted files")
-        include_markdown: bool = Field(default=False, description="Include markdown cells in output")
+        file_extensions: List[str] = Field(
+            default=[".ipynb"], description="File extensions to convert"
+        )
+        preserve_line_numbers: bool = Field(
+            default=True, description="Preserve line numbers in converted files"
+        )
+        include_markdown: bool = Field(
+            default=False, description="Include markdown cells in output"
+        )
+
 
 @ash_converter_plugin
 class JupyterConverter(ConverterPluginBase):
@@ -190,12 +211,13 @@ from pathlib import Path
 from automated_security_helper.base.plugin_context import PluginContext
 from my_ash_plugins.converters import JupyterConverter
 
+
 def test_jupyter_converter():
     # Create a plugin context
     context = PluginContext(
         source_dir=Path("test_data"),
         output_dir=Path("test_output"),
-        converted_dir=Path("test_output/converted")
+        converted_dir=Path("test_output/converted"),
     )
 
     # Create converter instance
@@ -204,7 +226,9 @@ def test_jupyter_converter():
     # Create a test notebook
     notebook_path = Path("test_data/test.ipynb")
     with open(notebook_path, "w") as f:
-        f.write('{"cells": [{"cell_type": "code", "source": ["print(\\"Hello, world!\\")\\n"]}]}')
+        f.write(
+            '{"cells": [{"cell_type": "code", "source": ["print(\\"Hello, world!\\")\\n"]}]}'
+        )
 
     # Convert the notebook
     converted_path = converter.convert(notebook_path)
@@ -214,5 +238,5 @@ def test_jupyter_converter():
     assert converted_path.exists()
     with open(converted_path, "r") as f:
         content = f.read()
-        assert "print(\"Hello, world!\")" in content
+        assert 'print("Hello, world!")' in content
 ```

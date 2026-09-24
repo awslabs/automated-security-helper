@@ -107,7 +107,9 @@ class OfflineTestStack(cdk.Stack):
                 f"{svc}-endpoint",
                 service=ec2.InterfaceVpcEndpointAwsService(svc),
                 security_groups=[sg],
-                subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_ISOLATED),
+                subnets=ec2.SubnetSelection(
+                    subnet_type=ec2.SubnetType.PRIVATE_ISOLATED
+                ),
             )
 
         # CloudWatch Logs endpoint -- required for CodeBuild log streaming

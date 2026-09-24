@@ -23,22 +23,32 @@ from automated_security_helper.utils.sarif_utils import (
 )
 
 
-def _make_sarif(uri: str, rule_id: str = "python.lang.security.audit.exec-detected") -> SarifReport:
+def _make_sarif(
+    uri: str, rule_id: str = "python.lang.security.audit.exec-detected"
+) -> SarifReport:
     """Create minimal SARIF with one finding at the given URI."""
-    return SarifReport(runs=[Run(
-        tool={"driver": {"name": "opengrep", "version": "1.0.0"}},
-        results=[{
-            "ruleId": rule_id,
-            "message": {"text": "Use of exec detected"},
-            "level": "warning",
-            "locations": [{
-                "physicalLocation": {
-                    "artifactLocation": {"uri": uri},
-                    "region": {"startLine": 10, "endLine": 15},
-                }
-            }],
-        }],
-    )])
+    return SarifReport(
+        runs=[
+            Run(
+                tool={"driver": {"name": "opengrep", "version": "1.0.0"}},
+                results=[
+                    {
+                        "ruleId": rule_id,
+                        "message": {"text": "Use of exec detected"},
+                        "level": "warning",
+                        "locations": [
+                            {
+                                "physicalLocation": {
+                                    "artifactLocation": {"uri": uri},
+                                    "region": {"startLine": 10, "endLine": 15},
+                                }
+                            }
+                        ],
+                    }
+                ],
+            )
+        ]
+    )
 
 
 def _make_context(source_dir: str | Path, suppressions=None):
@@ -54,7 +64,12 @@ def _make_context(source_dir: str | Path, suppressions=None):
     return ctx
 
 
-def _suppression(path: str, rule_id: str = "python.lang.security.audit.exec-detected", line_start=10, line_end=15):
+def _suppression(
+    path: str,
+    rule_id: str = "python.lang.security.audit.exec-detected",
+    line_start=10,
+    line_end=15,
+):
     """Create an AshSuppression with required fields."""
     return AshSuppression(
         path=path,
@@ -134,7 +149,9 @@ class TestContainerSrcPathCollision:
             f"ignore_paths 'src/**' should match 'src/app.py', but {len(remaining)} findings remain"
         )
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="Unix absolute paths not valid on Windows")
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="Unix absolute paths not valid on Windows"
+    )
     def test_sanitize_then_suppress_with_collision(self, tmp_path):
         """Full flow: sanitize absolute path, then suppress — with collision."""
         source = tmp_path / "src"
@@ -147,7 +164,12 @@ class TestContainerSrcPathCollision:
 
         # sanitize_sarif_paths strips the source prefix → "src/app.py"
         sanitized = sanitize_sarif_paths(sarif, str(source))
-        uri = sanitized.runs[0].results[0].locations[0].physicalLocation.root.artifactLocation.uri
+        uri = (
+            sanitized.runs[0]
+            .results[0]
+            .locations[0]
+            .physicalLocation.root.artifactLocation.uri
+        )
         assert uri == "src/app.py", f"sanitize produced: {uri}"
 
         # Now suppression should match (no further stripping due to collision)
@@ -155,7 +177,9 @@ class TestContainerSrcPathCollision:
         result = apply_suppressions_to_sarif(sanitized, ctx)
 
         remaining = [r for r in result.runs[0].results if not r.suppressions]
-        assert len(remaining) == 0, "Suppression should match after sanitize with collision"
+        assert len(remaining) == 0, (
+            "Suppression should match after sanitize with collision"
+        )
 
     def test_codebuild_src_directory(self, tmp_path):
         """CodeBuild /codebuild/output/srcNNN/src — same collision pattern."""

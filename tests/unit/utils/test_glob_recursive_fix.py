@@ -29,8 +29,5 @@ def test_nested_dotignore_found_recursively():
 
         lines = get_ash_ignorespec_lines(tmpdir)
 
-        found = any(
-            "a/b/.ignore" in line or "a\\b\\.ignore" in line
-            for line in lines
-        )
+        found = any("a/b/.ignore" in line or "a\\b\\.ignore" in line for line in lines)
         assert found, f"Nested .ignore not found in lines: {lines}"

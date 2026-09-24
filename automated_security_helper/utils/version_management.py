@@ -29,7 +29,6 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10
             return toml.load(fh)
 
 
-
 def get_project_root() -> Path:
     """Get the project root directory."""
     current_file = Path(__file__)

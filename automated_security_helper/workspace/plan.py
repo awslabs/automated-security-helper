@@ -403,10 +403,14 @@ class WorkspacePlan(BaseModel):
             "Workspace execution plan",
             f"{_INDENT}{'file:':<{_FIELD_WIDTH}}{self.workspace_file}",
             f"{_INDENT}{'root:':<{_FIELD_WIDTH}}{self.workspace_root}",
-            (f"{_INDENT}{'projects:':<{_FIELD_WIDTH}}"
-            f"{len(self.active_projects)} to scan, {len(skipped)} skipped"),
-            (f"{_INDENT}{'missing ok:':<{_FIELD_WIDTH}}"
-            f"{'yes' if self.allow_missing_projects else 'no'}"),
+            (
+                f"{_INDENT}{'projects:':<{_FIELD_WIDTH}}"
+                f"{len(self.active_projects)} to scan, {len(skipped)} skipped"
+            ),
+            (
+                f"{_INDENT}{'missing ok:':<{_FIELD_WIDTH}}"
+                f"{'yes' if self.allow_missing_projects else 'no'}"
+            ),
         ]
         # Only shown when there is policy. A "policy: none" line on every plan
         # would train the reader to skip the line that matters.

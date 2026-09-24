@@ -1,6 +1,5 @@
 """Tests for core/unified_metrics.py — covers metric functions."""
 
-
 from automated_security_helper.core.unified_metrics import (
     ScannerMetrics,
     format_duration,

@@ -115,7 +115,9 @@ class TestTemplateScanEmptyTarget:
         result = scanner.scan(target=nonexistent, target_type="source")
         assert result is True
 
-    def test_returns_true_on_empty_directory(self, plugin_context, scanner_config, tmp_path):
+    def test_returns_true_on_empty_directory(
+        self, plugin_context, scanner_config, tmp_path
+    ):
         empty_dir = tmp_path / "empty"
         empty_dir.mkdir()
         scanner = _make_scanner(plugin_context, scanner_config)
@@ -129,7 +131,9 @@ class TestTemplateScanEmptyTarget:
 
 
 class TestTemplateScanPreScanFailure:
-    def test_returns_false_when_pre_scan_fails(self, plugin_context, scanner_config, tmp_path):
+    def test_returns_false_when_pre_scan_fails(
+        self, plugin_context, scanner_config, tmp_path
+    ):
         target = tmp_path / "src"
         target.mkdir()
         (target / "file.py").write_text("x = 1")
@@ -170,7 +174,9 @@ class TestTemplateScanDependenciesNotSatisfied:
 
 
 class TestTemplateScanExecuteScanHook:
-    def test_calls_execute_scan_hook_with_target(self, plugin_context, scanner_config, tmp_path):
+    def test_calls_execute_scan_hook_with_target(
+        self, plugin_context, scanner_config, tmp_path
+    ):
         target = tmp_path / "src"
         target.mkdir()
         (target / "file.py").write_text("x = 1")
@@ -236,7 +242,9 @@ class TestTemplateScanExecuteScanHook:
 
 
 class TestTemplateScanInjectsInvocation:
-    def test_injects_invocation_into_sarif_runs(self, plugin_context, scanner_config, tmp_path):
+    def test_injects_invocation_into_sarif_runs(
+        self, plugin_context, scanner_config, tmp_path
+    ):
         target = tmp_path / "src"
         target.mkdir()
         (target / "file.py").write_text("x = 1")
@@ -265,7 +273,9 @@ class TestTemplateScanInjectsInvocation:
         assert inv.commandLine == "stub-tool --arg val"
         assert inv.arguments == ["--arg", "val"]
 
-    def test_invocation_exit_code_recorded(self, plugin_context, scanner_config, tmp_path):
+    def test_invocation_exit_code_recorded(
+        self, plugin_context, scanner_config, tmp_path
+    ):
         target = tmp_path / "src"
         target.mkdir()
         (target / "file.py").write_text("x = 1")
@@ -295,7 +305,9 @@ class TestTemplateScanInjectsInvocation:
 
 
 class TestTemplateScanCallsPostScan:
-    def test_post_scan_called_on_success(self, plugin_context, scanner_config, tmp_path):
+    def test_post_scan_called_on_success(
+        self, plugin_context, scanner_config, tmp_path
+    ):
         target = tmp_path / "src"
         target.mkdir()
         (target / "file.py").write_text("x = 1")
@@ -463,7 +475,9 @@ class TestInjectInvocationHelper:
         inv = report.runs[0].invocations[0]
         assert inv.arguments == ["--flag", "val"]
 
-    def test_execution_successful_for_success_exit_codes(self, plugin_context, scanner_config):
+    def test_execution_successful_for_success_exit_codes(
+        self, plugin_context, scanner_config
+    ):
         scanner = _make_scanner(plugin_context, scanner_config)
         report = SarifReport(
             version="2.1.0",
@@ -486,7 +500,9 @@ class TestInjectInvocationHelper:
             scanner._inject_invocation(report, ["stub-tool"], plugin_context.source_dir)
             assert report.runs[0].invocations[0].executionSuccessful is True
 
-    def test_execution_unsuccessful_for_other_exit_codes(self, plugin_context, scanner_config):
+    def test_execution_unsuccessful_for_other_exit_codes(
+        self, plugin_context, scanner_config
+    ):
         scanner = _make_scanner(plugin_context, scanner_config)
         report = SarifReport(
             version="2.1.0",
@@ -504,9 +520,7 @@ class TestInjectInvocationHelper:
         scanner.errors = []
         scanner.exit_code = 2
 
-        scanner._inject_invocation(
-            report, ["stub-tool"], plugin_context.source_dir
-        )
+        scanner._inject_invocation(report, ["stub-tool"], plugin_context.source_dir)
         assert report.runs[0].invocations[0].executionSuccessful is False
 
     def test_custom_success_codes(self, plugin_context, scanner_config):

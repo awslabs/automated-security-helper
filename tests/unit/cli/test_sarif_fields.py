@@ -154,9 +154,7 @@ class TestFlattenObject:
             "automated_security_helper.utils.sarif_field_analysis.should_include_field",
             return_value=True,
         ):
-            _flatten_object(
-                [{"item": "val"}], "prefix", result, None
-            )
+            _flatten_object([{"item": "val"}], "prefix", result, None)
         assert "prefix[].item" in result
 
     def test_empty_list(self):
@@ -260,7 +258,8 @@ class TestDeprecatedShim:
         deprecations = [
             c
             for c in mock_warn.call_args_list
-            if DeprecationWarning in c.args or c.kwargs.get("category") is DeprecationWarning
+            if DeprecationWarning in c.args
+            or c.kwargs.get("category") is DeprecationWarning
         ]
         assert deprecations, mock_warn.call_args_list
         assert "sarif_field_analysis" in str(deprecations[0].args[0])

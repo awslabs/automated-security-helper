@@ -33,22 +33,22 @@ class HookCommands(RootModel[list[HookCommand]]):
 
 
 class TransportType(StrEnum):
-    stdio = 'stdio'
+    stdio = "stdio"
     """
     Standard input/output transport (default)
     """
-    http = 'http'
+    http = "http"
     """
     HTTP transport for web-based communication
     """
 
 
 class McpServers(BaseModel):
-    type: TransportType | None = 'stdio'
+    type: TransportType | None = "stdio"
     """
     The type of transport the mcp server is expecting. For http transport, only url (for now) is taken into account
     """
-    url: str | None = ''
+    url: str | None = ""
     """
     The URL endpoint for HTTP-based MCP servers
     """
@@ -56,7 +56,7 @@ class McpServers(BaseModel):
     """
     HTTP headers to include when communicating with HTTP-based MCP servers
     """
-    oauthScopes: list[str] | None = ['openid', 'email', 'profile', 'offline_access']
+    oauthScopes: list[str] | None = ["openid", "email", "profile", "offline_access"]
     """
     Scopes with which oauth is done
     """
@@ -101,9 +101,9 @@ class Agent(BaseModel):
     """
 
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
-    field_schema: str | None = Field(default=None, alias='$schema')
+    field_schema: str | None = Field(default=None, alias="$schema")
     """
     The schema to use for validating the agent
     """
@@ -139,7 +139,7 @@ class Agent(BaseModel):
     """
     List of tools the agent is explicitly allowed to use
     """
-    resources: list[constr(pattern=r'^(file://)')] | None = []
+    resources: list[constr(pattern=r"^(file://)")] | None = []
     """
     Files to include in the agent's context
     """

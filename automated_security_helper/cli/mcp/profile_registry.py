@@ -73,13 +73,9 @@ def parse_profile_spec(spec: str) -> Tuple[str, Path]:
     name = name.strip()
     raw_path = raw_path.strip()
     if not name:
-        raise ProfileRegistryError(
-            f"--profile spec missing name before '=': {spec!r}"
-        )
+        raise ProfileRegistryError(f"--profile spec missing name before '=': {spec!r}")
     if not raw_path:
-        raise ProfileRegistryError(
-            f"--profile spec missing path after '=': {spec!r}"
-        )
+        raise ProfileRegistryError(f"--profile spec missing path after '=': {spec!r}")
     return name, Path(raw_path)
 
 

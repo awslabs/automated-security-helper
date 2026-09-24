@@ -205,7 +205,7 @@ command -v jq && echo "✓ jq available (recommended)" || echo "✗ jq not found
 import os
 import json
 
-results_file = 'ash_aggregated_results.json'
+results_file = "ash_aggregated_results.json"
 file_size_mb = os.path.getsize(results_file) / (1024 * 1024)
 
 if file_size_mb > 5:
@@ -231,10 +231,10 @@ else:
 import shutil
 
 # Check for jq (PREFERRED)
-has_jq = shutil.which('jq') is not None
+has_jq = shutil.which("jq") is not None
 
 # Check for Python (almost always available)
-has_python = shutil.which('python3') is not None or shutil.which('python') is not None
+has_python = shutil.which("python3") is not None or shutil.which("python") is not None
 
 # Use best available method (PREFER jq)
 if has_jq:
@@ -381,9 +381,9 @@ grep -o '"critical": [0-9]*' ash_aggregated_results.json | head -1
 import ijson
 
 # Stream parse - memory efficient
-with open('ash_aggregated_results.json', 'rb') as f:
+with open("ash_aggregated_results.json", "rb") as f:
     # Extract just summary stats without loading entire file
-    parser = ijson.items(f, 'metadata.summary_stats')
+    parser = ijson.items(f, "metadata.summary_stats")
     summary_stats = next(parser)
     print(f"Actionable findings: {summary_stats['actionable']}")
 ```
@@ -393,11 +393,11 @@ with open('ash_aggregated_results.json', 'rb') as f:
 import json
 
 # Load and extract only what you need
-with open('ash_aggregated_results.json') as f:
+with open("ash_aggregated_results.json") as f:
     data = json.load(f)
-    
+
 # Immediately extract and discard the rest
-summary = data['metadata']['summary_stats']
+summary = data["metadata"]["summary_stats"]
 del data  # Free memory
 
 print(f"Actionable: {summary['actionable']}")
@@ -411,12 +411,12 @@ print(f"Critical: {summary['critical']}")
 # reports/ash.flat.json is much smaller and easier to parse
 import json
 
-with open('reports/ash.flat.json') as f:
+with open("reports/ash.flat.json") as f:
     findings = json.load(f)
 
 # Simpler structure, direct access to findings
 for finding in findings:
-    if finding['severity'] in ['CRITICAL', 'HIGH']:
+    if finding["severity"] in ["CRITICAL", "HIGH"]:
         print(f"{finding['file_path']}: {finding['message']}")
 ```
 
@@ -532,23 +532,25 @@ python3 -c "import json; print(json.load(open('ash_aggregated_results.json'))['m
 ```python
 import json
 
-with open('ash_aggregated_results.json') as f:
+with open("ash_aggregated_results.json") as f:
     data = json.load(f)
 
-for scanner, results in data['scanner_results'].items():
-    for finding in results.get('findings', []):
-        if finding['severity'] in ['CRITICAL', 'HIGH']:
-            print(f"{scanner}: {finding['file_path']}:{finding['line_start']} - {finding['message']}")
+for scanner, results in data["scanner_results"].items():
+    for finding in results.get("findings", []):
+        if finding["severity"] in ["CRITICAL", "HIGH"]:
+            print(
+                f"{scanner}: {finding['file_path']}:{finding['line_start']} - {finding['message']}"
+            )
 ```
 
 **Get findings by scanner**:
 ```python
 import json
 
-with open('ash_aggregated_results.json') as f:
+with open("ash_aggregated_results.json") as f:
     data = json.load(f)
 
-bandit_findings = data['scanner_results']['bandit']['findings']
+bandit_findings = data["scanner_results"]["bandit"]["findings"]
 print(json.dumps(bandit_findings, indent=2))
 ```
 
@@ -557,13 +559,13 @@ print(json.dumps(bandit_findings, indent=2))
 import json
 from collections import Counter
 
-with open('ash_aggregated_results.json') as f:
+with open("ash_aggregated_results.json") as f:
     data = json.load(f)
 
 severities = []
-for scanner, results in data['scanner_results'].items():
-    for finding in results.get('findings', []):
-        severities.append(finding['severity'])
+for scanner, results in data["scanner_results"].items():
+    for finding in results.get("findings", []):
+        severities.append(finding["severity"])
 
 counts = Counter(severities)
 for severity, count in counts.items():
@@ -594,36 +596,42 @@ grep -o '"severity": "[A-Z]*"' ash_aggregated_results.json | sort -u
 import subprocess
 import shutil
 
+
 def get_actionable_count(results_file):
     """Get actionable findings count using best available method."""
-    
+
     # Method 1: Try jq (fastest - PREFERRED)
-    if shutil.which('jq'):
+    if shutil.which("jq"):
         try:
             result = subprocess.run(
-                ['jq', '.metadata.summary_stats.actionable', results_file],
-                capture_output=True, text=True, check=True
+                ["jq", ".metadata.summary_stats.actionable", results_file],
+                capture_output=True,
+                text=True,
+                check=True,
             )
             return int(result.stdout.strip())
         except Exception:
             pass
-    
+
     # Method 2: Use Python (most reliable fallback)
     try:
         import json
+
         with open(results_file) as f:
             data = json.load(f)
-        return data['metadata']['summary_stats']['actionable']
+        return data["metadata"]["summary_stats"]["actionable"]
     except Exception:
         pass
-    
+
     # Method 3: Fallback to grep (always available)
     try:
         result = subprocess.run(
-            ['grep', '-o', '"actionable": [0-9]*', results_file],
-            capture_output=True, text=True, check=True
+            ["grep", "-o", '"actionable": [0-9]*', results_file],
+            capture_output=True,
+            text=True,
+            check=True,
         )
-        return int(result.stdout.strip().split(':')[1].strip())
+        return int(result.stdout.strip().split(":")[1].strip())
     except Exception:
         return None
 ```
@@ -631,11 +639,11 @@ def get_actionable_count(results_file):
 **2. Use the flat JSON format when possible**:
 ```python
 # Simpler, smaller, easier to parse
-with open('reports/ash.flat.json') as f:
+with open("reports/ash.flat.json") as f:
     findings = json.load(f)
 
-actionable = [f for f in findings if not f.get('suppressed', False)]
-critical_high = [f for f in actionable if f['severity'] in ['CRITICAL', 'HIGH']]
+actionable = [f for f in findings if not f.get("suppressed", False)]
+critical_high = [f for f in actionable if f["severity"] in ["CRITICAL", "HIGH"]]
 ```
 
 ## Working with CycloneDX SBOM
@@ -749,10 +757,10 @@ jq --arg pkg "pkg:pypi/requests@2.31.0" '.dependencies[] | select(.ref == $pkg)'
 ```python
 import json
 
-with open('reports/ash.cdx.json') as f:
+with open("reports/ash.cdx.json") as f:
     sbom = json.load(f)
 
-for component in sbom.get('components', []):
+for component in sbom.get("components", []):
     print(f"{component['name']} {component['version']} ({component['type']})")
 ```
 
@@ -760,13 +768,13 @@ for component in sbom.get('components', []):
 ```python
 import json
 
-with open('reports/ash.cdx.json') as f:
+with open("reports/ash.cdx.json") as f:
     sbom = json.load(f)
 
 vulnerable_refs = set()
-for vuln in sbom.get('vulnerabilities', []):
-    for affect in vuln.get('affects', []):
-        vulnerable_refs.add(affect['ref'])
+for vuln in sbom.get("vulnerabilities", []):
+    for affect in vuln.get("affects", []):
+        vulnerable_refs.add(affect["ref"])
 
 for ref in sorted(vulnerable_refs):
     print(ref)
@@ -776,14 +784,16 @@ for ref in sorted(vulnerable_refs):
 ```python
 import json
 
-with open('reports/ash.cdx.json') as f:
+with open("reports/ash.cdx.json") as f:
     sbom = json.load(f)
 
-for vuln in sbom.get('vulnerabilities', []):
-    for rating in vuln.get('ratings', []):
-        if rating.get('severity') in ['high', 'critical']:
-            print(f"{vuln['id']}: {rating['severity']} (score: {rating.get('score', 'N/A')})")
-            for affect in vuln.get('affects', []):
+for vuln in sbom.get("vulnerabilities", []):
+    for rating in vuln.get("ratings", []):
+        if rating.get("severity") in ["high", "critical"]:
+            print(
+                f"{vuln['id']}: {rating['severity']} (score: {rating.get('score', 'N/A')})"
+            )
+            for affect in vuln.get("affects", []):
                 print(f"  Affects: {affect['ref']}")
             break
 ```
@@ -792,14 +802,14 @@ for vuln in sbom.get('vulnerabilities', []):
 ```python
 import json
 
-with open('reports/ash.cdx.json') as f:
+with open("reports/ash.cdx.json") as f:
     sbom = json.load(f)
 
 licenses = set()
-for component in sbom.get('components', []):
-    for license_info in component.get('licenses', []):
-        if 'license' in license_info and 'id' in license_info['license']:
-            licenses.add(license_info['license']['id'])
+for component in sbom.get("components", []):
+    for license_info in component.get("licenses", []):
+        if "license" in license_info and "id" in license_info["license"]:
+            licenses.add(license_info["license"]["id"])
 
 for license_id in sorted(licenses):
     print(license_id)
@@ -1067,18 +1077,18 @@ import json
 import sys
 
 # Read results
-with open('.ash/ash_output/ash_aggregated_results.json') as f:
+with open(".ash/ash_output/ash_aggregated_results.json") as f:
     results = json.load(f)
 
-stats = results['metadata']['summary_stats']
+stats = results["metadata"]["summary_stats"]
 
 # Fail on actionable critical/high findings
 # Note: Use actionable count to exclude suppressed findings (false positives)
-if stats['critical'] > 0:
+if stats["critical"] > 0:
     print(f"FAILED: {stats['critical']} critical actionable findings")
     sys.exit(1)
 
-if stats['high'] > 5:
+if stats["high"] > 5:
     print(f"FAILED: {stats['high']} high actionable findings (threshold: 5)")
     sys.exit(1)
 
@@ -1093,7 +1103,7 @@ result = await get_scan_results(
     output_dir=".ash/ash_output",
     actionable_only=True,
     severities="critical,high",
-    filter_level="minimal"
+    filter_level="minimal",
 )
 
 if result["summary_stats"]["critical"] > 0:
@@ -1107,25 +1117,27 @@ if result["summary_stats"]["critical"] > 0:
 import json
 
 # Read results
-with open('.ash/ash_output/ash_aggregated_results.json') as f:
+with open(".ash/ash_output/ash_aggregated_results.json") as f:
     results = json.load(f)
 
 # Get all actionable high/critical findings
 actionable_findings = []
-for scanner, data in results['scanner_results'].items():
-    for finding in data.get('findings', []):
-        if not finding['suppressed'] and finding['severity'] in ['HIGH', 'CRITICAL']:
-            actionable_findings.append({
-                'scanner': scanner,
-                'rule_id': finding['rule_id'],
-                'severity': finding['severity'],
-                'file': finding['file_path'],
-                'line': finding['line_start'],
-                'message': finding['message']
-            })
+for scanner, data in results["scanner_results"].items():
+    for finding in data.get("findings", []):
+        if not finding["suppressed"] and finding["severity"] in ["HIGH", "CRITICAL"]:
+            actionable_findings.append(
+                {
+                    "scanner": scanner,
+                    "rule_id": finding["rule_id"],
+                    "severity": finding["severity"],
+                    "file": finding["file_path"],
+                    "line": finding["line_start"],
+                    "message": finding["message"],
+                }
+            )
 
 # Sort by severity
-actionable_findings.sort(key=lambda x: 0 if x['severity'] == 'CRITICAL' else 1)
+actionable_findings.sort(key=lambda x: 0 if x["severity"] == "CRITICAL" else 1)
 
 # Generate remediation plan
 for finding in actionable_findings:
@@ -1142,7 +1154,7 @@ results = await get_scan_results(
     output_dir=".ash/ash_output",
     actionable_only=True,
     severities="critical,high",
-    filter_level="full"
+    filter_level="full",
 )
 
 # Process findings from SARIF
@@ -1158,21 +1170,23 @@ for run in results["raw_results"]["sarif"]["runs"]:
 import json
 
 # Read CycloneDX SBOM
-with open('.ash/ash_output/reports/ash.cdx.json') as f:
+with open(".ash/ash_output/reports/ash.cdx.json") as f:
     sbom = json.load(f)
 
 # Extract vulnerable components
 vulnerable_components = {}
-for vuln in sbom.get('vulnerabilities', []):
-    for affect in vuln.get('affects', []):
-        component_ref = affect['ref']
+for vuln in sbom.get("vulnerabilities", []):
+    for affect in vuln.get("affects", []):
+        component_ref = affect["ref"]
         if component_ref not in vulnerable_components:
             vulnerable_components[component_ref] = []
-        vulnerable_components[component_ref].append({
-            'cve': vuln['id'],
-            'severity': vuln['ratings'][0]['severity'],
-            'score': vuln['ratings'][0].get('score', 'N/A')
-        })
+        vulnerable_components[component_ref].append(
+            {
+                "cve": vuln["id"],
+                "severity": vuln["ratings"][0]["severity"],
+                "score": vuln["ratings"][0].get("score", "N/A"),
+            }
+        )
 
 # Generate report
 print("Vulnerable Dependencies:")
@@ -1204,7 +1218,7 @@ If using ASH via the Model Context Protocol (MCP) server, follow these guideline
 ```python
 # This will cause connection timeout!
 result = run_ash_scan(source_dir="/path/to/project")
-scan_id = result['scan_id']
+scan_id = result["scan_id"]
 
 # Sleeping for 60+ seconds causes MCP connection to close
 time.sleep(60)
@@ -1218,27 +1232,31 @@ summary = get_scan_summary()  # ERROR: Connection closed
 ```python
 # 1. Start scan (returns immediately with scan_id)
 result = run_ash_scan(source_dir="/path/to/project")
-scan_id = result['scan_id']
+scan_id = result["scan_id"]
 
 # 2. Poll progress periodically to keep connection alive
 while True:
     progress = get_scan_progress(scan_id=scan_id)
-    
+
     # Check if scan is complete
-    if progress.get('is_complete') or progress.get('status') in ['completed', 'failed', 'cancelled']:
+    if progress.get("is_complete") or progress.get("status") in [
+        "completed",
+        "failed",
+        "cancelled",
+    ]:
         break
-    
+
     # Wait 5 seconds before next check (keeps connection alive)
     time.sleep(5)
 
 # 3. Get results after completion
-if progress.get('status') == 'completed':
+if progress.get("status") == "completed":
     # Use filtered queries to reduce data transfer
     results = get_scan_results(
-        output_dir=progress['output_directory'],
+        output_dir=progress["output_directory"],
         filter_level="summary",
         actionable_only=True,
-        severities="critical,high"
+        severities="critical,high",
     )
 ```
 
@@ -1247,47 +1265,50 @@ if progress.get('status') == 'completed':
 ```python
 import time
 
+
 def run_ash_scan_with_monitoring(source_dir: str) -> dict:
     """Run ASH scan with proper progress monitoring."""
-    
+
     # Start scan
     result = run_ash_scan(source_dir=source_dir)
-    if not result.get('success'):
-        return {'error': result.get('error', 'Failed to start scan')}
-    
-    scan_id = result['scan_id']
+    if not result.get("success"):
+        return {"error": result.get("error", "Failed to start scan")}
+
+    scan_id = result["scan_id"]
     print(f"Scan started: {scan_id}")
-    
+
     # Monitor progress
     last_status = None
     while True:
         progress = get_scan_progress(scan_id=scan_id)
-        
+
         # Show status updates
-        current_status = progress.get('message', 'Running...')
+        current_status = progress.get("message", "Running...")
         if current_status != last_status:
             print(f"Status: {current_status}")
             last_status = current_status
-        
+
         # Check completion
-        if progress.get('is_complete'):
+        if progress.get("is_complete"):
             break
-        
-        if progress.get('status') in ['failed', 'cancelled']:
-            return {'error': f"Scan {progress['status']}: {progress.get('error', 'Unknown error')}"}
-        
+
+        if progress.get("status") in ["failed", "cancelled"]:
+            return {
+                "error": f"Scan {progress['status']}: {progress.get('error', 'Unknown error')}"
+            }
+
         # Wait before next poll (keeps connection alive)
         time.sleep(5)
-    
+
     # Get filtered results
-    output_dir = progress.get('output_directory', f"{source_dir}/.ash/ash_output")
+    output_dir = progress.get("output_directory", f"{source_dir}/.ash/ash_output")
     results = get_scan_results(
         output_dir=output_dir,
         filter_level="summary",
         actionable_only=True,
-        severities="critical,high,medium"
+        severities="critical,high,medium",
     )
-    
+
     return results
 ```
 
@@ -1310,22 +1331,13 @@ Use `filter_level` parameter to control response size:
 
 ```python
 # Minimal - fast status check (1-2KB)
-status = await get_scan_results(
-    output_dir=".ash/ash_output",
-    filter_level="minimal"
-)
+status = await get_scan_results(output_dir=".ash/ash_output", filter_level="minimal")
 
 # Summary - dashboard data (5-15KB)
-summary = await get_scan_results(
-    output_dir=".ash/ash_output",
-    filter_level="summary"
-)
+summary = await get_scan_results(output_dir=".ash/ash_output", filter_level="summary")
 
 # Full - complete results (50KB-2MB)
-results = await get_scan_results(
-    output_dir=".ash/ash_output",
-    filter_level="full"
-)
+results = await get_scan_results(output_dir=".ash/ash_output", filter_level="full")
 ```
 
 ### Content Filtering
@@ -1334,28 +1346,19 @@ Filter by scanner, severity, or actionable status:
 
 ```python
 # Only actionable findings (exclude suppressed)
-actionable = await get_scan_results(
-    output_dir=".ash/ash_output",
-    actionable_only=True
-)
+actionable = await get_scan_results(output_dir=".ash/ash_output", actionable_only=True)
 
 # Only critical findings
-critical = await get_scan_results(
-    output_dir=".ash/ash_output",
-    severities="critical"
-)
+critical = await get_scan_results(output_dir=".ash/ash_output", severities="critical")
 
 # Actionable critical findings only
 actionable_critical = await get_scan_results(
-    output_dir=".ash/ash_output",
-    actionable_only=True,
-    severities="critical"
+    output_dir=".ash/ash_output", actionable_only=True, severities="critical"
 )
 
 # Specific scanners
 sast_results = await get_scan_results(
-    output_dir=".ash/ash_output",
-    scanners="bandit,semgrep"
+    output_dir=".ash/ash_output", scanners="bandit,semgrep"
 )
 
 # Combined filtering - actionable high-priority SAST findings
@@ -1364,7 +1367,7 @@ high_priority_sast = await get_scan_results(
     filter_level="summary",
     scanners="bandit,semgrep",
     severities="critical,high",
-    actionable_only=True
+    actionable_only=True,
 )
 ```
 
@@ -1436,7 +1439,7 @@ high_priority_sast = await get_scan_results(
        output_dir=".ash/ash_output",
        filter_level="minimal",
        actionable_only=True,
-       severities="critical,high"
+       severities="critical,high",
    )
    ```
 

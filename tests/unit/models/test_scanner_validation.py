@@ -139,17 +139,13 @@ class TestScannerValidationManagerBasic:
         assert manager.get_scanner_state("unknown") is None
 
     def test_update_scanner_state_creates_new(self, manager):
-        state = manager.update_scanner_state(
-            "bandit", registration_status="registered"
-        )
+        state = manager.update_scanner_state("bandit", registration_status="registered")
         assert state.name == "bandit"
         assert state.registration_status == "registered"
 
     def test_update_scanner_state_updates_existing(self, manager):
         manager.update_scanner_state("bandit", registration_status="registered")
-        state = manager.update_scanner_state(
-            "bandit", enablement_status="enabled"
-        )
+        state = manager.update_scanner_state("bandit", enablement_status="enabled")
         assert state.registration_status == "registered"
         assert state.enablement_status == "enabled"
 
@@ -174,9 +170,7 @@ class TestScannerValidationManagerBasic:
         manager.update_scanner_state("checkov", registration_status="registered")
         manager.update_scanner_state("semgrep", registration_status="failed")
 
-        registered = manager.get_scanners_by_status(
-            "registration_status", "registered"
-        )
+        registered = manager.get_scanners_by_status("registration_status", "registered")
         assert registered == ["bandit", "checkov"]
 
     def test_get_scanners_by_status_empty(self, manager):
@@ -232,12 +226,8 @@ class TestScannerValidationManagerValidation:
         assert manager.scanner_states["bandit"].enablement_status == "disabled"
 
     def test_validate_execution_completion(self, manager):
-        manager.update_scanner_state(
-            "bandit", queued_for_execution=True
-        )
-        manager.update_scanner_state(
-            "checkov", queued_for_execution=True
-        )
+        manager.update_scanner_state("bandit", queued_for_execution=True)
+        manager.update_scanner_state("checkov", queued_for_execution=True)
 
         checkpoint = manager.validate_execution_completion(["bandit"])
 
@@ -345,20 +335,24 @@ class TestEnsureCompleteResults:
         aggregated_results = MagicMock()
         aggregated_results.scanner_results = {"bandit": MagicMock()}
 
-        with patch.object(
-            manager._checkpointer,
-            "_get_executed_scanners_from_validation_state",
-            return_value=["bandit"],
-        ), patch.object(
-            manager._checkpointer,
-            "_create_missing_scanner_result_entry",
-            return_value=MagicMock(status=ScannerStatus.ERROR),
+        with (
+            patch.object(
+                manager._checkpointer,
+                "_get_executed_scanners_from_validation_state",
+                return_value=["bandit"],
+            ),
+            patch.object(
+                manager._checkpointer,
+                "_create_missing_scanner_result_entry",
+                return_value=MagicMock(status=ScannerStatus.ERROR),
+            ),
         ):
             checkpoint = manager.ensure_complete_results(aggregated_results)
             # checkov was missing and should have been added
-            assert "checkov" in [
-                d for d in checkpoint.discrepancies if "checkov" in d
-            ] or len(checkpoint.discrepancies) > 0
+            assert (
+                "checkov" in [d for d in checkpoint.discrepancies if "checkov" in d]
+                or len(checkpoint.discrepancies) > 0
+            )
 
 
 class TestGetScannerStateSummary:
@@ -386,7 +380,10 @@ class TestGetScannerStateSummary:
     def test_skips_class_name_entries(self, manager):
         # Insert a class-name entry directly (bypassing insert-time validation) to
         # verify the summary filters it out even if one slipped in via legacy paths.
-        from automated_security_helper.models.scanner_validation import ScannerValidationState
+        from automated_security_helper.models.scanner_validation import (
+            ScannerValidationState,
+        )
+
         manager.scanner_states["BanditScanner"] = ScannerValidationState(
             name="BanditScanner", registration_status="registered"
         )

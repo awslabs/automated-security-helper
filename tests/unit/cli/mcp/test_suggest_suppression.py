@@ -49,23 +49,30 @@ def _make_aggregated_json(vulns: list) -> dict:
         entry_id = v.id.removeprefix(prefix)
         if scanner not in findings_by_scanner:
             findings_by_scanner[scanner] = []
-        findings_by_scanner[scanner].append({
-            "id": entry_id,
-            "title": v.title,
-            "description": v.description,
-            "severity": v.severity,
-            "type": v.scanner_type,
-            "rule_id": v.rule_id,
-            "file_path": v.file_path,
-            "line_start": v.line_start,
-            "line_end": v.line_end,
-        })
+        findings_by_scanner[scanner].append(
+            {
+                "id": entry_id,
+                "title": v.title,
+                "description": v.description,
+                "severity": v.severity,
+                "type": v.scanner_type,
+                "rule_id": v.rule_id,
+                "file_path": v.file_path,
+                "line_start": v.line_start,
+                "line_end": v.line_end,
+            }
+        )
     return {
         "metadata": {
             "scan_id": "test-scan",
             "scan_timestamp": "2026-01-01T00:00:00+00:00",
             "summary_stats": {
-                "critical": 0, "high": 0, "medium": 1, "low": 0, "info": 0, "suppressed": 0
+                "critical": 0,
+                "high": 0,
+                "medium": 1,
+                "low": 0,
+                "info": 0,
+                "suppressed": 0,
             },
         },
         "sarif": {"version": "2.1.0", "runs": []},

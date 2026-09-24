@@ -1506,9 +1506,10 @@ class TestRequireScannerCompletionResolution:
             shard.ash_config = MagicMock()
             shard.ash_config.fail_on_incomplete_scanners = "false"
 
-        assert _resolve_require_scanner_completion(as_loaded(shards), None) is AshConfig(
-            project_name="x"
-        ).fail_on_incomplete_scanners
+        assert (
+            _resolve_require_scanner_completion(as_loaded(shards), None)
+            is AshConfig(project_name="x").fail_on_incomplete_scanners
+        )
 
 
 class TestCompletedClassifiesUnknownStatusesAsIncomplete:

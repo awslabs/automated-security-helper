@@ -488,7 +488,10 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
             # compliant" from "cfn_nag never evaluated a rule"; the reports are otherwise
             # identical. The zero case stays a success, because a run with no CloudFormation
             # in it completed fine and carries that fact as a SKIPPED status instead.
-            if self.targets_attempted > 0 and self.targets_failed >= self.targets_attempted:
+            if (
+                self.targets_attempted > 0
+                and self.targets_failed >= self.targets_attempted
+            ):
                 ASH_LOGGER.error(
                     f"cfn_nag failed on all {self.targets_attempted} template(s) in "
                     f"{target}. No rules were evaluated, so this result is NOT a clean scan."

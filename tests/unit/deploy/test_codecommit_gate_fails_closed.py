@@ -292,7 +292,11 @@ _NARROWING_OPTIONS_WITH_VALUES = [
         "scanners.bandit.enabled=false",
         "reaches the same settings a replacement config would, one key at a time",
     ),
-    ("--shard-index", "0", "one shard runs a disjoint subset and nothing here recombines"),
+    (
+        "--shard-index",
+        "0",
+        "one shard runs a disjoint subset and nothing here recombines",
+    ),
     ("--shard-count", "4", "the same, from the other half of the pair"),
     (
         "--base-ref",
@@ -355,7 +359,9 @@ def test_no_reserved_option_with_a_value_can_be_set_from_extra_args(
 @pytest.mark.parametrize(
     "flag, why", _NARROWING_FLAGS, ids=[flag for flag, _ in _NARROWING_FLAGS]
 )
-def test_no_reserved_flag_can_be_set_from_extra_args(gate, monkeypatch, tmp_path, flag, why):
+def test_no_reserved_flag_can_be_set_from_extra_args(
+    gate, monkeypatch, tmp_path, flag, why
+):
     """The same class of option, in the spellings that take no value.
 
     Only the bare token is exercised. ``click`` would reject ``--python-only=true`` as a usage
@@ -375,7 +381,9 @@ def test_no_reserved_flag_can_be_set_from_extra_args(gate, monkeypatch, tmp_path
     "extra",
     ["-c /tmp/none.yaml", "-c=/tmp/none.yaml", "-c/tmp/none.yaml"],
 )
-def test_the_short_alias_of_a_reserved_option_is_refused(gate, monkeypatch, tmp_path, extra):
+def test_the_short_alias_of_a_reserved_option_is_refused(
+    gate, monkeypatch, tmp_path, extra
+):
     """``--config`` has a short alias, and an exact match on the long spelling cannot see it.
 
     ``click`` lets a short option's value be attached with no separator, so
@@ -392,7 +400,9 @@ def test_the_short_alias_of_a_reserved_option_is_refused(gate, monkeypatch, tmp_
     with pytest.raises(RuntimeError):
         gate.run_scan(tmp_path / "src", "low", True)
 
-    assert not captured, f"{extra} reached the scan, setting --config from the environment"
+    assert not captured, (
+        f"{extra} reached the scan, setting --config from the environment"
+    )
 
 
 @pytest.mark.parametrize(
@@ -457,7 +467,9 @@ def test_every_reserved_spelling_is_one_the_cli_actually_accepts():
         for spelling in (*param.opts, *param.secondary_opts)
     }
     gate_module = _load_gate()
-    reserved = gate_module.GATE_OWNED_SCAN_OPTIONS | gate_module.GATE_OWNED_SHORT_OPTIONS
+    reserved = (
+        gate_module.GATE_OWNED_SCAN_OPTIONS | gate_module.GATE_OWNED_SHORT_OPTIONS
+    )
 
     assert reserved <= declared, (
         "these reserved spellings are not options ASH declares, so refusing them protects "
@@ -600,9 +612,11 @@ def _drive_handler(gate, monkeypatch, tmp_path, scan_exit: int) -> _FakeCodeComm
     monkeypatch.setattr(
         gate.boto3,
         "client",
-        lambda service, *a, **k: client
-        if service == "codecommit"
-        else pytest.fail(f"unexpected boto3 client requested: {service}"),
+        lambda service, *a, **k: (
+            client
+            if service == "codecommit"
+            else pytest.fail(f"unexpected boto3 client requested: {service}")
+        ),
     )
     monkeypatch.setattr(gate, "WORK_ROOT", tmp_path / "ash-gate")
     monkeypatch.setattr(gate, "clone_source", lambda *a, **k: tmp_path / "src")
@@ -699,12 +713,18 @@ def test_a_refused_extra_arg_reaches_the_pull_request_as_error_and_revokes(
     "scan_exit, expected_state, why",
     [
         (0, "APPROVE", "a clean scan is the one outcome that may approve"),
-        (2, "REVOKE", "findings must withdraw an approval granted on earlier, cleaner code"),
+        (
+            2,
+            "REVOKE",
+            "findings must withdraw an approval granted on earlier, cleaner code",
+        ),
         (
             1,
             "REVOKE",
-            ("exit 1 is the incomplete-scanner failure: nothing was scanned, so nothing "
-            "supports an approval"),
+            (
+                "exit 1 is the incomplete-scanner failure: nothing was scanned, so nothing "
+                "supports an approval"
+            ),
         ),
         (70, "REVOKE", "an unrecognised failure is not evidence of cleanliness"),
     ],
@@ -721,7 +741,9 @@ def test_approval_state_follows_the_outcome(
     assert client.approval_calls[0]["approvalState"] == expected_state, why
 
 
-def test_a_non_pass_outcome_never_leaves_the_state_untouched(gate, monkeypatch, tmp_path):
+def test_a_non_pass_outcome_never_leaves_the_state_untouched(
+    gate, monkeypatch, tmp_path
+):
     """The specific regression: silence on a non-pass leaves a stale APPROVE standing.
 
     Asserted separately from the parametrized table because "no call was made" and "the wrong

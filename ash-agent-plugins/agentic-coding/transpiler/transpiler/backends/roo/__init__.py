@@ -1,4 +1,5 @@
 """Roo Code backend."""
+
 from __future__ import annotations
 
 import json
@@ -67,4 +68,7 @@ class RooBackend(BaseBackend):
         if not agents.exists():
             return {"ok": False, "reason": "AGENTS.md missing"}
 
-        return {"ok": True, "detail": ".roo/mcp.json + .roomodes + AGENTS.md valid (Roo is VS Code-only)"}
+        return {
+            "ok": True,
+            "detail": ".roo/mcp.json + .roomodes + AGENTS.md valid (Roo is VS Code-only)",
+        }

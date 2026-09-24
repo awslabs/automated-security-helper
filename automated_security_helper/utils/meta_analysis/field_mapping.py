@@ -160,9 +160,7 @@ def categorize_field_importance(path: str) -> str:
 EXPECTED_TRANSFORMATIONS: List[str] = []
 
 
-def compare_result_fields(
-    original_result: Dict, aggregated_result: Dict
-) -> List[Dict]:
+def compare_result_fields(original_result: Dict, aggregated_result: Dict) -> List[Dict]:
     """
     Compare fields between original and aggregated results.
 

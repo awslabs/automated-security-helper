@@ -56,17 +56,23 @@ class TestMinSeverityFiltering:
     def test_high_threshold_ignores_note_findings(self):
         results = _make_results(["note", "note"])
         count = _filter_actionable("high", actionable_findings=2, results=results)
-        assert count == 0, "note-level findings should not trigger exit code at high threshold"
+        assert count == 0, (
+            "note-level findings should not trigger exit code at high threshold"
+        )
 
     def test_low_threshold_keeps_note_findings(self):
         results = _make_results(["note"])
         count = _filter_actionable("low", actionable_findings=1, results=results)
-        assert count == 1, "note-level findings should trigger exit code at low threshold"
+        assert count == 1, (
+            "note-level findings should trigger exit code at low threshold"
+        )
 
     def test_high_threshold_keeps_error_findings(self):
         results = _make_results(["error"])
         count = _filter_actionable("high", actionable_findings=1, results=results)
-        assert count == 1, "error-level findings should trigger exit code at high threshold"
+        assert count == 1, (
+            "error-level findings should trigger exit code at high threshold"
+        )
 
     def test_medium_threshold_ignores_note_but_keeps_warning(self):
         results = _make_results(["note", "warning"])

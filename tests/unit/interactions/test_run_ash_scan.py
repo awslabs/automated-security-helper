@@ -139,7 +139,10 @@ def test_run_ash_scan_with_custom_phases(mock_orchestrator_class, mock_get_logge
             mode=RunMode.local,
             source_dir="/test/source",
             output_dir="/test/output",
-            phases=[ExecutionPhase.CONVERT, ExecutionPhase.REPORT],  # Only convert and report
+            phases=[
+                ExecutionPhase.CONVERT,
+                ExecutionPhase.REPORT,
+            ],  # Only convert and report
         )
 
     # Verify orchestrator was created

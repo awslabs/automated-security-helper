@@ -12,17 +12,13 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner 
 
 @pytest.fixture
 def syft_scanner_offline(test_plugin_context):
-    config = SyftScannerConfig(
-        options=SyftScannerConfigOptions(offline=True)
-    )
+    config = SyftScannerConfig(options=SyftScannerConfigOptions(offline=True))
     return SyftScanner(context=test_plugin_context, config=config)
 
 
 @pytest.fixture
 def syft_scanner_online(test_plugin_context):
-    config = SyftScannerConfig(
-        options=SyftScannerConfigOptions(offline=False)
-    )
+    config = SyftScannerConfig(options=SyftScannerConfigOptions(offline=False))
     return SyftScanner(context=test_plugin_context, config=config)
 
 

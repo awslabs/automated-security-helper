@@ -77,7 +77,9 @@ def test_should_use_metrics_flag_unknown_version(opengrep_scanner):
         assert opengrep_scanner._should_use_metrics_flag() is False
 
 
-def test_process_config_options_offline_old_version(test_plugin_context, monkeypatch, tmp_path):
+def test_process_config_options_offline_old_version(
+    test_plugin_context, monkeypatch, tmp_path
+):
     """Test offline mode with old version includes metrics flag."""
     (tmp_path / "rules.yaml").write_text("rules: []")
     monkeypatch.setenv("OPENGREP_RULES_CACHE_DIR", str(tmp_path))
@@ -101,7 +103,9 @@ def test_process_config_options_offline_old_version(test_plugin_context, monkeyp
         assert metrics_args[0].value == "off"
 
 
-def test_process_config_options_offline_new_version(test_plugin_context, monkeypatch, tmp_path):
+def test_process_config_options_offline_new_version(
+    test_plugin_context, monkeypatch, tmp_path
+):
     """Test offline mode with new version excludes metrics flag."""
     (tmp_path / "rules.yaml").write_text("rules: []")
     monkeypatch.setenv("OPENGREP_RULES_CACHE_DIR", str(tmp_path))

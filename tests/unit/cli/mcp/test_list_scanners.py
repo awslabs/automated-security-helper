@@ -24,7 +24,13 @@ KNOWN_SCANNERS = {
     "trivy_repo",
 }
 
-REQUIRED_KEYS = {"name", "version", "dependencies_satisfied", "offline_strategy", "enabled"}
+REQUIRED_KEYS = {
+    "name",
+    "version",
+    "dependencies_satisfied",
+    "offline_strategy",
+    "enabled",
+}
 VALID_OFFLINE_STRATEGIES = {s.value for s in OfflineStrategy}
 
 

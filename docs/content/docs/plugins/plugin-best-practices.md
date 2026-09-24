@@ -42,9 +42,13 @@ This guide provides best practices for developing ASH plugins.
 You can specify dependencies for your plugins:
 
 ```python
-from automated_security_helper.base.plugin_dependency import PluginDependency, CustomCommand
+from automated_security_helper.base.plugin_dependency import (
+    PluginDependency,
+    CustomCommand,
+)
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
+
 
 @ash_scanner_plugin
 class MyCustomScanner(ScannerPluginBase):
@@ -58,14 +62,14 @@ class MyCustomScanner(ScannerPluginBase):
                 CustomCommand(
                     platform="linux",
                     arch="amd64",
-                    command=["pip", "install", "my-scanner-tool"]
+                    command=["pip", "install", "my-scanner-tool"],
                 ),
                 CustomCommand(
                     platform="darwin",
                     arch="amd64",
-                    command=["pip", "install", "my-scanner-tool"]
-                )
-            ]
+                    command=["pip", "install", "my-scanner-tool"],
+                ),
+            ],
         )
     ]
 ```
@@ -78,11 +82,12 @@ ASH supports event subscribers for reacting to events during the scan process. E
 # my_ash_plugins/__init__.py
 from automated_security_helper.plugins.events import AshEventType
 
+
 def handle_scan_complete(**kwargs):
     """Handle scan complete event"""
-    scanner = kwargs.get('scanner', 'Unknown')
-    remaining_count = kwargs.get('remaining_count', 0)
-    remaining_scanners = kwargs.get('remaining_scanners', [])
+    scanner = kwargs.get("scanner", "Unknown")
+    remaining_count = kwargs.get("remaining_count", 0)
+    remaining_scanners = kwargs.get("remaining_scanners", [])
 
     print(f"Scanner '{scanner}' completed!")
     if remaining_count > 0:
@@ -92,11 +97,13 @@ def handle_scan_complete(**kwargs):
 
     return True
 
+
 def handle_report_complete(**kwargs):
     """Handle report complete event"""
-    phase = kwargs.get('phase', 'Unknown')
+    phase = kwargs.get("phase", "Unknown")
     print(f"Report phase '{phase}' completed!")
     return True
+
 
 # Event callback registry following the same pattern as ASH_SCANNERS, ASH_REPORTERS, etc.
 ASH_EVENT_HANDLERS = {

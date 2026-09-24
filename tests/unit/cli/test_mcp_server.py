@@ -151,9 +151,7 @@ class TestServerInitialization:
         """run_mcp_server handles KeyboardInterrupt gracefully."""
         from automated_security_helper.cli.mcp_server import run_mcp_server
 
-        with patch(
-            "automated_security_helper.cli.mcp_server.mcp"
-        ) as mock_mcp:
+        with patch("automated_security_helper.cli.mcp_server.mcp") as mock_mcp:
             mock_mcp.run.side_effect = KeyboardInterrupt()
             # Should not raise
             run_mcp_server()
@@ -162,9 +160,7 @@ class TestServerInitialization:
         """run_mcp_server logs warning for ClosedResourceError."""
         from automated_security_helper.cli.mcp_server import run_mcp_server
 
-        with patch(
-            "automated_security_helper.cli.mcp_server.mcp"
-        ) as mock_mcp:
+        with patch("automated_security_helper.cli.mcp_server.mcp") as mock_mcp:
             mock_mcp.run.side_effect = RuntimeError("ClosedResourceError in TaskGroup")
             # Should not raise
             run_mcp_server()
@@ -173,9 +169,7 @@ class TestServerInitialization:
         """run_mcp_server logs exception for unexpected errors."""
         from automated_security_helper.cli.mcp_server import run_mcp_server
 
-        with patch(
-            "automated_security_helper.cli.mcp_server.mcp"
-        ) as mock_mcp:
+        with patch("automated_security_helper.cli.mcp_server.mcp") as mock_mcp:
             mock_mcp.run.side_effect = ValueError("Something unexpected")
             # Should not raise
             run_mcp_server()
@@ -205,7 +199,9 @@ class TestRunAshScan:
                 new_callable=AsyncMock,
                 return_value=mock_result,
             ),
-            patch("automated_security_helper.cli.mcp_server.asyncio.create_task") as mock_task,
+            patch(
+                "automated_security_helper.cli.mcp_server.asyncio.create_task"
+            ) as mock_task,
             patch("pathlib.Path.cwd", return_value=Path("/tmp/project")),  # nosec B108
         ):
             mock_task.return_value = MagicMock()
@@ -236,7 +232,9 @@ class TestRunAshScan:
                 new_callable=AsyncMock,
                 return_value=mock_result,
             ) as mock_scan,
-            patch("automated_security_helper.cli.mcp_server.asyncio.create_task") as mock_task,
+            patch(
+                "automated_security_helper.cli.mcp_server.asyncio.create_task"
+            ) as mock_task,
             patch("pathlib.Path.cwd", return_value=Path("/home/user/myrepo")),
         ):
             mock_task.return_value = MagicMock()
@@ -262,7 +260,9 @@ class TestRunAshScan:
                 new_callable=AsyncMock,
                 return_value=mock_result,
             ) as mock_scan,
-            patch("automated_security_helper.cli.mcp_server.asyncio.create_task") as mock_task,
+            patch(
+                "automated_security_helper.cli.mcp_server.asyncio.create_task"
+            ) as mock_task,
             patch("pathlib.Path.cwd", return_value=Path("/workspace")),
         ):
             mock_task.return_value = MagicMock()
@@ -334,7 +334,9 @@ class TestRunAshScan:
                 new_callable=AsyncMock,
                 return_value=mock_result,
             ),
-            patch("automated_security_helper.cli.mcp_server.asyncio.create_task") as mock_task,
+            patch(
+                "automated_security_helper.cli.mcp_server.asyncio.create_task"
+            ) as mock_task,
             patch("pathlib.Path.cwd", return_value=tmp_path),
         ):
             mock_task.return_value = MagicMock()
@@ -690,7 +692,9 @@ class TestGetScanResults:
         assert result["error_type"] == "OSError"
 
     @pytest.mark.asyncio
-    async def test_results_relative_path_resolution(self, mock_ctx, sample_full_results):
+    async def test_results_relative_path_resolution(
+        self, mock_ctx, sample_full_results
+    ):
         """Relative output_dir is resolved against cwd."""
         from automated_security_helper.cli.mcp_server import get_scan_results
 
@@ -718,7 +722,9 @@ class TestGetScanSummary:
     """Tests for the get_scan_summary tool function."""
 
     @pytest.mark.asyncio
-    async def test_summary_returns_lightweight_data(self, mock_ctx, sample_full_results):
+    async def test_summary_returns_lightweight_data(
+        self, mock_ctx, sample_full_results
+    ):
         """Summary returns metadata, findings, and scanner info but not raw data."""
         from automated_security_helper.cli.mcp_server import get_scan_summary
 
@@ -981,9 +987,7 @@ class TestGetScanResultPaths:
         from automated_security_helper.cli.mcp_server import get_scan_result_paths
 
         with patch("pathlib.Path.exists", side_effect=PermissionError("No access")):
-            result = await get_scan_result_paths(
-                ctx=mock_ctx, output_dir="/some/path"
-            )
+            result = await get_scan_result_paths(ctx=mock_ctx, output_dir="/some/path")
 
         assert result["success"] is False
         assert result["error_type"] == "PermissionError"
@@ -1133,9 +1137,7 @@ class TestFilterHelpers:
             assert scanner_data["suppressed_finding_count"] == 0
             assert scanner_data["severity_counts"]["suppressed"] == 0
 
-    def test_filter_actionable_only_does_not_modify_original(
-        self, sample_full_results
-    ):
+    def test_filter_actionable_only_does_not_modify_original(self, sample_full_results):
         """_filter_actionable_only does not mutate the input."""
         from automated_security_helper.cli.mcp_server import _filter_actionable_only
 
@@ -1171,7 +1173,9 @@ class TestFilterHelpers:
         from automated_security_helper.cli.mcp_server import _apply_content_filters
 
         original = copy.deepcopy(sample_full_results)
-        _apply_content_filters(sample_full_results, scanners="bandit", severities="high")
+        _apply_content_filters(
+            sample_full_results, scanners="bandit", severities="high"
+        )
 
         assert sample_full_results == original
 

@@ -36,19 +36,25 @@ class TestPathMatchesPattern:
 
     def test_glob_pattern_matches_subpath(self):
         """Pattern 'src/foo/**' matches path 'src/foo/bar.py'."""
-        from automated_security_helper.utils.suppression_matcher import file_path_matches
+        from automated_security_helper.utils.suppression_matcher import (
+            file_path_matches,
+        )
 
         assert file_path_matches("src/foo/bar.py", "src/foo/**") is True
 
     def test_path_does_not_match_longer_pattern(self):
         """Path 'foo' must NOT match pattern 'src/foo/bar.py'."""
-        from automated_security_helper.utils.suppression_matcher import file_path_matches
+        from automated_security_helper.utils.suppression_matcher import (
+            file_path_matches,
+        )
 
         assert file_path_matches("foo", "src/foo/bar.py") is False
 
     def test_exact_match_still_works(self):
         """Exact match should still return True."""
-        from automated_security_helper.utils.suppression_matcher import file_path_matches
+        from automated_security_helper.utils.suppression_matcher import (
+            file_path_matches,
+        )
 
         assert file_path_matches("src/foo.py", "src/foo.py") is True
 
@@ -109,6 +115,7 @@ class TestAttachScannerDetailsNoMutableDefault:
 # Helpers for multi-run SARIF tests
 # ===========================================================================
 
+
 def _make_run(scanner_name: str, results: list[Result] | None = None) -> Run:
     """Build a minimal Run with the given scanner name and results."""
     return Run(
@@ -148,6 +155,7 @@ def _two_run_sarif() -> SarifReport:
 # ===========================================================================
 # Sub-batch 6a: Scanner invocation-setting on empty runs
 # ===========================================================================
+
 
 class TestEmptyRunsInvocationGuard:
     """Accessing runs[0].invocations on a SARIF with runs=[] must not raise."""
@@ -222,6 +230,7 @@ class TestEmptyRunsInvocationGuard:
 # Sub-batch 6b: apply_suppressions_to_sarif loop-variable bug
 # ===========================================================================
 
+
 class TestSuppressionLoopVariable:
     """apply_suppressions_to_sarif must write to the loop variable `run`,
     not hardcoded `runs[0]`. Otherwise multi-run SARIF loses suppressions
@@ -230,7 +239,9 @@ class TestSuppressionLoopVariable:
 
     def test_multi_run_suppressions_applied_to_correct_runs(self):
         """Suppressions must be applied per-run, not all piled into runs[0]."""
-        from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
+        from automated_security_helper.utils.sarif_utils import (
+            apply_suppressions_to_sarif,
+        )
         from automated_security_helper.models.core import AshSuppression
 
         sarif = _two_run_sarif()
@@ -269,7 +280,9 @@ class TestSuppressionLoopVariable:
 
     def test_multi_run_results_not_clobbered(self):
         """runs[1].results must not be lost or overwritten into runs[0]."""
-        from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
+        from automated_security_helper.utils.sarif_utils import (
+            apply_suppressions_to_sarif,
+        )
 
         sarif = _two_run_sarif()
 
@@ -294,11 +307,14 @@ class TestSuppressionLoopVariable:
 # Sub-batch 6c: Reporters reading only runs[0]
 # ===========================================================================
 
+
 class TestGetSeverityMetricsAllRuns:
     """get_severity_metrics_from_sarif must count findings from all runs."""
 
     def test_counts_findings_from_all_runs(self):
-        from automated_security_helper.utils.sarif_utils import get_severity_metrics_from_sarif
+        from automated_security_helper.utils.sarif_utils import (
+            get_severity_metrics_from_sarif,
+        )
         from automated_security_helper.base.plugin_context import PluginContext
 
         sarif = _two_run_sarif()  # 2 results in each of 2 runs = 4 total
@@ -320,7 +336,9 @@ class TestGetSeverityMetricsAllRuns:
         assert total == 4, f"Expected 4 findings counted, got {total}"
 
     def test_empty_runs_returns_zero_counts(self):
-        from automated_security_helper.utils.sarif_utils import get_severity_metrics_from_sarif
+        from automated_security_helper.utils.sarif_utils import (
+            get_severity_metrics_from_sarif,
+        )
         from automated_security_helper.base.plugin_context import PluginContext
 
         sarif = SarifReport(version="2.1.0", runs=[])
@@ -468,7 +486,9 @@ class TestBug46PathResolveHotLoop:
     @patch("automated_security_helper.utils.sarif_utils.Path")
     def test_resolve_not_called_per_result(self, mock_path_cls):
         """Ensure resolve() is called a bounded number of times, not O(n) with results."""
-        from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
+        from automated_security_helper.utils.sarif_utils import (
+            apply_suppressions_to_sarif,
+        )
 
         # Build minimal mocks
         mock_path_instance = MagicMock()
@@ -483,7 +503,9 @@ class TestBug46PathResolveHotLoop:
         plugin_ctx.output_dir = MagicMock()
         plugin_ctx.output_dir.resolve.return_value = Path("/fake/output")
         plugin_ctx.output_dir.joinpath.return_value = MagicMock()
-        plugin_ctx.output_dir.joinpath.return_value.resolve.return_value = Path("/fake/output/work")
+        plugin_ctx.output_dir.joinpath.return_value.resolve.return_value = Path(
+            "/fake/output/work"
+        )
 
         # Create a mock sarif report with N results
         n_results = 50
@@ -537,7 +559,9 @@ class TestBug47FileUriHostSegment:
         from automated_security_helper.utils.sarif_utils import _sanitize_uri
 
         source = Path("/project")
-        result = _sanitize_uri("file://hostname/project/app.py", source, str(source) + "/")
+        result = _sanitize_uri(
+            "file://hostname/project/app.py", source, str(source) + "/"
+        )
         # Must NOT contain 'hostname' as a path segment
         assert "hostname" not in result
         # Should contain the actual path
@@ -547,6 +571,8 @@ class TestBug47FileUriHostSegment:
         from automated_security_helper.utils.sarif_utils import _sanitize_uri
 
         source = Path("/data")
-        result = _sanitize_uri("file://localhost/data/info.txt", source, str(source) + "/")
+        result = _sanitize_uri(
+            "file://localhost/data/info.txt", source, str(source) + "/"
+        )
         assert "localhost" not in result
         assert "info.txt" in result

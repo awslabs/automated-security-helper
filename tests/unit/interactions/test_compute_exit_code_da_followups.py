@@ -16,10 +16,10 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_opts(tmp_path, fail_on_findings=None, min_severity="low"):
     from automated_security_helper.interactions.run_ash_scan import ScanOptions
@@ -85,7 +85,9 @@ def _make_results_no_findings():
 class TestComputeExitCodeConfigFallback:
     def test_uses_config_fail_on_findings_false_when_cli_unset(self, tmp_path):
         """opts.fail_on_findings=None + config False → should return 0, not 2."""
-        from automated_security_helper.interactions.run_ash_scan import _compute_exit_code
+        from automated_security_helper.interactions.run_ash_scan import (
+            _compute_exit_code,
+        )
 
         opts = _make_opts(tmp_path, fail_on_findings=None)
 
@@ -105,7 +107,9 @@ class TestComputeExitCodeConfigFallback:
 
     def test_cli_true_overrides_config_false(self, tmp_path):
         """opts.fail_on_findings=True overrides config False → returns 2."""
-        from automated_security_helper.interactions.run_ash_scan import _compute_exit_code
+        from automated_security_helper.interactions.run_ash_scan import (
+            _compute_exit_code,
+        )
 
         opts = _make_opts(tmp_path, fail_on_findings=True)
 
@@ -123,7 +127,9 @@ class TestComputeExitCodeConfigFallback:
 
     def test_cli_false_overrides_config_true(self, tmp_path):
         """opts.fail_on_findings=False overrides config True → returns 0."""
-        from automated_security_helper.interactions.run_ash_scan import _compute_exit_code
+        from automated_security_helper.interactions.run_ash_scan import (
+            _compute_exit_code,
+        )
 
         opts = _make_opts(tmp_path, fail_on_findings=False)
 
@@ -141,7 +147,9 @@ class TestComputeExitCodeConfigFallback:
 
     def test_cli_none_config_none_defaults_true(self, tmp_path):
         """Both None → still defaults to True (existing behavior baseline)."""
-        from automated_security_helper.interactions.run_ash_scan import _compute_exit_code
+        from automated_security_helper.interactions.run_ash_scan import (
+            _compute_exit_code,
+        )
 
         opts = _make_opts(tmp_path, fail_on_findings=None)
 
@@ -159,7 +167,9 @@ class TestComputeExitCodeConfigFallback:
 
     def test_cli_none_config_true_returns_two(self, tmp_path):
         """opts.fail_on_findings=None + config True → returns 2."""
-        from automated_security_helper.interactions.run_ash_scan import _compute_exit_code
+        from automated_security_helper.interactions.run_ash_scan import (
+            _compute_exit_code,
+        )
 
         opts = _make_opts(tmp_path, fail_on_findings=None)
 
@@ -184,7 +194,9 @@ class TestComputeExitCodeConfigFallback:
 class TestComputeExitCodeResultsNone:
     def test_returns_1_when_results_none_fail_on_findings_false(self, tmp_path):
         """results=None → exit 1 regardless of fail_on_findings=False."""
-        from automated_security_helper.interactions.run_ash_scan import _compute_exit_code
+        from automated_security_helper.interactions.run_ash_scan import (
+            _compute_exit_code,
+        )
 
         opts = _make_opts(tmp_path, fail_on_findings=False)
         code = _compute_exit_code(None, opts)
@@ -193,7 +205,9 @@ class TestComputeExitCodeResultsNone:
 
     def test_returns_1_when_results_none_fail_on_findings_true(self, tmp_path):
         """results=None → exit 1 regardless of fail_on_findings=True."""
-        from automated_security_helper.interactions.run_ash_scan import _compute_exit_code
+        from automated_security_helper.interactions.run_ash_scan import (
+            _compute_exit_code,
+        )
 
         opts = _make_opts(tmp_path, fail_on_findings=True)
         code = _compute_exit_code(None, opts)
@@ -202,7 +216,9 @@ class TestComputeExitCodeResultsNone:
 
     def test_returns_1_when_results_none_config_false(self, tmp_path):
         """results=None → exit 1 even when config says fail_on_findings=False."""
-        from automated_security_helper.interactions.run_ash_scan import _compute_exit_code
+        from automated_security_helper.interactions.run_ash_scan import (
+            _compute_exit_code,
+        )
 
         opts = _make_opts(tmp_path, fail_on_findings=None)
         code = _compute_exit_code(None, opts, config_fail_on_findings=False)
@@ -213,7 +229,9 @@ class TestComputeExitCodeResultsNone:
         """results=None must log an error about scan failure."""
         import logging
 
-        from automated_security_helper.interactions.run_ash_scan import _compute_exit_code
+        from automated_security_helper.interactions.run_ash_scan import (
+            _compute_exit_code,
+        )
 
         opts = _make_opts(tmp_path, fail_on_findings=False)
 
@@ -224,4 +242,6 @@ class TestComputeExitCodeResultsNone:
             "scan" in record.message.lower() or "result" in record.message.lower()
             for record in caplog.records
             if record.levelno >= logging.ERROR
-        ), f"Expected an ERROR log about scan/result failure, got: {[r.message for r in caplog.records]}"
+        ), (
+            f"Expected an ERROR log about scan/result failure, got: {[r.message for r in caplog.records]}"
+        )

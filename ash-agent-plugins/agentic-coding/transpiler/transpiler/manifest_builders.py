@@ -2,6 +2,7 @@
 
 Each builder takes (Manifest, base_dir) and returns a dict ready for json.dumps.
 """
+
 from __future__ import annotations
 
 import json

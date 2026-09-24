@@ -4,11 +4,10 @@ Covers bugs: #145, #149, #150, #151, #152, #153
 """
 
 
-
-
 # ---------------------------------------------------------------------------
 # Bug #145 -- validation_results.py KeyError on severity keys
 # ---------------------------------------------------------------------------
+
 
 class TestBug145ValidationResultsKeyError:
     """validate_sarif_aggregation must not crash when severity keys are missing."""
@@ -36,13 +35,17 @@ class TestBug145ValidationResultsKeyError:
 
         original = {
             "test_scanner": {
-                "runs": [{
-                    "results": [{
-                        "ruleId": "R001",
-                        "message": {"text": "test"},
-                        "level": "error",
-                    }]
-                }]
+                "runs": [
+                    {
+                        "results": [
+                            {
+                                "ruleId": "R001",
+                                "message": {"text": "test"},
+                                "level": "error",
+                            }
+                        ]
+                    }
+                ]
             }
         }
         agg = {"runs": [{"results": []}]}
@@ -58,6 +61,7 @@ class TestBug145ValidationResultsKeyError:
 # ---------------------------------------------------------------------------
 # Bug #149 -- are_values_equivalent: None == "None" returns True
 # ---------------------------------------------------------------------------
+
 
 class TestBug149NoneStringEquivalence:
     """None and the string 'None' must NOT be considered equivalent."""
@@ -103,6 +107,7 @@ class TestBug149NoneStringEquivalence:
 # Bug #150 -- normalize_path returns extension leaf only
 # ---------------------------------------------------------------------------
 
+
 class TestBug150NormalizePathLeafOnly:
     """normalize_path must preserve enough path info to distinguish files."""
 
@@ -141,6 +146,7 @@ class TestBug150NormalizePathLeafOnly:
 # Bug #151 -- extract_field_paths.py hardcoded test keys
 # ---------------------------------------------------------------------------
 
+
 class TestBug151ExtractFieldPathsHardcoded:
     """extract_field_paths must work for real SARIF objects, not just test fixtures."""
 
@@ -152,9 +158,7 @@ class TestBug151ExtractFieldPathsHardcoded:
         sarif_result = {
             "ruleId": "SEC-001",
             "level": "error",
-            "message": {
-                "text": "SQL injection found"
-            },
+            "message": {"text": "SQL injection found"},
             "locations": [
                 {
                     "physicalLocation": {
@@ -196,6 +200,7 @@ class TestBug151ExtractFieldPathsHardcoded:
 # ---------------------------------------------------------------------------
 # Bug #152 -- locations_match _line_ranges_compatible rejects diff==1
 # ---------------------------------------------------------------------------
+
 
 class TestBug152LineRangesOffByOne:
     """A start-line difference of 1 should be accepted (off-by-one is common)."""
@@ -254,6 +259,7 @@ class TestBug152LineRangesOffByOne:
 # ---------------------------------------------------------------------------
 # Bug #153 -- find_matching_result returns match on message-only
 # ---------------------------------------------------------------------------
+
 
 class TestBug153FindMatchingResultMessageOnly:
     """find_matching_result must require locations_match for confident matches."""
