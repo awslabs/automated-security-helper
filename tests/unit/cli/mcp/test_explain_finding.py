@@ -4,7 +4,6 @@
 """Tests for mcp_explain_finding."""
 
 import json
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -14,15 +13,15 @@ from automated_security_helper.models.flat_vulnerability import FlatVulnerabilit
 
 
 def _make_vuln(**kwargs) -> FlatVulnerability:
-    defaults = dict(
-        id="bandit-B601-deadbeef",
-        title="B601",
-        description="SQL injection risk",
-        severity="HIGH",
-        scanner="bandit",
-        scanner_type="SAST",
-        rule_id="B601",
-    )
+    defaults = {
+        "id": "bandit-B601-deadbeef",
+        "title": "B601",
+        "description": "SQL injection risk",
+        "severity": "HIGH",
+        "scanner": "bandit",
+        "scanner_type": "SAST",
+        "rule_id": "B601",
+    }
     defaults.update(kwargs)
     return FlatVulnerability(**defaults)
 
@@ -151,7 +150,6 @@ class TestExplainUsesFromJsonValidation:
     def test_explain_uses_from_json_validation(self, tmp_path):
         """_load_flat_vulns_for_explain must use from_json so aliased camelCase fields are handled."""
         import json as _json
-        from automated_security_helper.models.asharp_model import AshAggregatedResults
 
         # Build a minimal aggregated results payload with a camelCase-aliased scanTimestamp
         payload = {
@@ -180,7 +178,7 @@ class TestExplainUsesFromJsonValidation:
         from automated_security_helper.cli.mcp_tools import _load_flat_vulns_for_explain
 
         flat = _load_flat_vulns_for_explain(str(tmp_path))
-        ids = [v.id for v in flat]
+        [v.id for v in flat]
         # Should have loaded one finding without dropping fields
         assert len(flat) == 1
         assert flat[0].title == "SQL injection"

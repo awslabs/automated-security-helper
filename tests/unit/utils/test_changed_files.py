@@ -7,7 +7,6 @@ import subprocess  # nosec B404
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-import pytest
 
 from automated_security_helper.utils.get_scan_set import get_changed_files
 from automated_security_helper.interactions.run_ash_scan import _filter_results_to_changed_files

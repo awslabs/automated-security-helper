@@ -20,7 +20,6 @@ _PROGRESS_UPDATE_INTERVAL_SECONDS = 10
 class UVToolRunnerError(Exception):
     """Exception raised for UV tool runner errors."""
 
-    pass
 
 
 @dataclass
@@ -299,8 +298,14 @@ class UVToolRunner:
 
         # Check if tool executable exists but is broken (e.g., broken symlink)
         # This can happen if UV tool was uninstalled but symlinks remain
-        import logging
-
+        # ASH_LOGGER rather than the root logger. These two were the only logging
+        # calls in this module and both went to the root logger, so they bypassed
+        # the "ash" logger entirely -- meaning they ignored ASH's configured level
+        # and handlers, and skipped the WindowsSafeFilter that log.py attaches.
+        # That filter matters here specifically: both messages interpolate a
+        # filesystem path. Imported inside the function, matching the two imports
+        # below; log.py pulls in only stdlib and rich, so there is no cycle.
+        from automated_security_helper.utils.log import ASH_LOGGER
         from automated_security_helper.utils.subprocess_utils import find_executable
 
         tool_path = find_executable(tool_name)
@@ -308,9 +313,13 @@ class UVToolRunner:
             # Broken symlink detected - remove it so UV can recreate
             try:
                 os.remove(tool_path)
-                logging.debug(f"Removed broken symlink for {tool_name} at {tool_path}")
+                ASH_LOGGER.debug(
+                    f"Removed broken symlink for {tool_name} at {tool_path}"
+                )
             except Exception as e:
-                logging.warning(f"Failed to remove broken symlink for {tool_name}: {e}")
+                ASH_LOGGER.warning(
+                    f"Failed to remove broken symlink for {tool_name}: {e}"
+                )
 
         # Check for offline mode
         from automated_security_helper.core.constants import is_offline_mode
@@ -513,7 +522,7 @@ class UVToolRunner:
     def run_tool(
         self,
         tool_name: str,
-        package_name: Optional[str] | None = None,
+        package_name: None | str = None,
         args: List[str] | None = None,
         cwd: Optional[Path] = None,
         capture_output: bool = True,

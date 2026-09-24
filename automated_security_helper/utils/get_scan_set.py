@@ -555,7 +555,7 @@ def report_ignore_file_exclusions(
         for rule_id in rule_ids
     }
 
-    counts: dict[str, int] = {marker: 0 for marker in rule_ids_by_marker}
+    counts: dict[str, int] = dict.fromkeys(rule_ids_by_marker, 0)
     counts[BUNDLED_CDK_MARKER] = 0
     paths_by_marker: dict[str, list[str]] = {}
     unattributed: list[str] = []

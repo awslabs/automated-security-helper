@@ -940,9 +940,7 @@ class TestReadsTheAuthoritativeSignals:
         # Each status contributed exactly one scanner, so each counter must read 1.
         # Without this the sum could be reached by one counter absorbing another's
         # scanners.
-        assert {bucket: getattr(stats, bucket) for bucket in buckets} == {
-            bucket: 1 for bucket in buckets
-        }
+        assert {bucket: getattr(stats, bucket) for bucket in buckets} == dict.fromkeys(buckets, 1)
 
         model = self._model_with("grype", ScannerStatus.ERROR, "PASSED")
 

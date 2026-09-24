@@ -4,9 +4,7 @@ Covers bugs: #94, #95, #96, #97
 """
 
 import inspect
-from unittest.mock import MagicMock, patch
 
-import pytest
 
 
 # ---------------------------------------------------------------------------

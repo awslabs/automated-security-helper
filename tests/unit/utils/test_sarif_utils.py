@@ -1,6 +1,4 @@
 from pathlib import Path
-import sys
-from unittest.mock import patch
 
 from automated_security_helper.utils.sarif_utils import (
     get_finding_id,

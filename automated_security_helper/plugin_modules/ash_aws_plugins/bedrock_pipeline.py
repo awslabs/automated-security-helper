@@ -9,10 +9,9 @@ Three focused classes replace the monolithic reporter internals:
   BedrockReportPipeline — iterates ReportSection configs, accumulates results
 """
 
-import logging
 import re
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import botocore.exceptions
@@ -316,9 +315,9 @@ class BedrockPromptBuilder:
 
         counts_str = ", ".join(f"{sev}: {cnt}" for sev, cnt in severity_counts.items())
         lines = [
-            f"Based on the security scan with the following results:\n\n"
+            (f"Based on the security scan with the following results:\n\n"
             f"FINDINGS BY SEVERITY:\n{counts_str}\n\n"
-            "Sample findings:\n"
+            "Sample findings:\n")
         ]
         for i, finding in enumerate(severe[:max_findings]):
             msg = self._extract_message(finding)
@@ -396,9 +395,9 @@ class BedrockPromptBuilder:
 
         counts_str = ", ".join(f"{sev}: {cnt}" for sev, cnt in severity_counts.items())
         lines = [
-            f"Generate a risk assessment based on the following security scan results:\n\n"
+            (f"Generate a risk assessment based on the following security scan results:\n\n"
             f"FINDINGS BY SEVERITY:\n{counts_str}\n\n"
-            "Sample findings:\n"
+            "Sample findings:\n")
         ]
         for i, finding in enumerate(findings[:5]):
             msg = self._extract_message(finding)
@@ -439,10 +438,10 @@ class BedrockPromptBuilder:
         counts_str = ", ".join(f"{sev}: {cnt}" for sev, cnt in severity_counts.items())
         fw_str = ", ".join(compliance_frameworks)
         lines = [
-            f"Generate a compliance impact analysis for the following security scan results:\n\n"
+            (f"Generate a compliance impact analysis for the following security scan results:\n\n"
             f"FINDINGS BY SEVERITY:\n{counts_str}\n\n"
             f"COMPLIANCE FRAMEWORKS TO ANALYZE:\n{fw_str}\n\n"
-            "Sample findings:\n"
+            "Sample findings:\n")
         ]
         for i, finding in enumerate(findings[:5]):
             msg = self._extract_message(finding)
@@ -472,12 +471,12 @@ class BedrockPromptBuilder:
         max_findings: int,
     ) -> str:
         lines = [
-            f"I need a security summary report for a codebase scan.\n\n"
+            (f"I need a security summary report for a codebase scan.\n\n"
             f"SCAN OVERVIEW:\n"
             f"- Total actionable findings: {len(findings)}\n"
             f"- Secret findings: {len(secret_findings)}\n"
             f"- Scanners used: {', '.join(scanner_results)}\n\n"
-            "FINDINGS SUMMARY:\n"
+            "FINDINGS SUMMARY:\n")
         ]
         for i, finding in enumerate(findings[:max_findings]):
             msg = self._extract_message(finding)

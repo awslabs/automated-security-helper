@@ -429,7 +429,13 @@ class TestActionHandlers:
         def query_side_effect(selector, *args, **kwargs):
             if selector == "#filters_container":
                 return mock_filters
-            raise MagicMock()
+            # Was `raise MagicMock()`. MagicMock is not a BaseException subclass,
+            # so that could only ever produce "exceptions must derive from
+            # BaseException" -- a TypeError naming neither the selector nor this
+            # test. The branch is unreached today (action_toggle_filters queries
+            # only #filters_container); this keeps it unreached but legible if a
+            # future selector arrives.
+            raise AssertionError(f"unexpected query_one selector: {selector!r}")
 
         app.query_one = query_side_effect
 

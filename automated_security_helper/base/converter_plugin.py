@@ -73,4 +73,3 @@ class ConverterPluginBase(PluginBase, Generic[T]):
         Returns the list of Path objects emitted by the `convert()` operation that
         correspond to scannable files emitted to the work_dir.
         """
-        pass

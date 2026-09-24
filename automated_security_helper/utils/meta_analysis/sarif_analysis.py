@@ -79,7 +79,7 @@ def analyze_sarif_file(
                 )
 
         # Use provided scanner name if available, otherwise use detected name
-        final_scanner_name = scanner_name if scanner_name else detected_scanner
+        final_scanner_name = scanner_name or detected_scanner
 
         # Extract field paths
         field_paths: Dict[str, Dict[str, Set[str]]] = {}

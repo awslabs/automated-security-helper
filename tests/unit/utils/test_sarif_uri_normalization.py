@@ -1,7 +1,6 @@
 """Tests for SARIF URI normalization in suppression matching."""
 
 import pytest
-from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig

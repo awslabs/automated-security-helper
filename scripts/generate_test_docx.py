@@ -206,18 +206,18 @@ def main():
 
     # Free-text narratives with embedded PII (generated to avoid hardcoded secrets)
     narratives = [
-        f"Customer {fake_name()} (SSN: {fake_ssn()}) reported unauthorized charges "
-        f"on Visa card {fake_visa()}. Contact at {fake_phone()}.",
-        f"Employee {fake_name()} submitted expense report. Corporate MasterCard "
-        f"{fake_mastercard()} used for travel. Phone: {fake_phone()}.",
-        f"Account holder {fake_name()} requested replacement AMEX card {fake_amex()}. "
-        f"Verified identity with SSN {fake_ssn()} and passport {fake_passport()}.",
-        f"HR record for {fake_name()}: SSN {fake_ssn()}, phone {fake_phone()}. "
-        f"Travel document: passport {fake_passport()}. Company Visa: {fake_visa()}.",
-        f"Please charge Visa card {fake_visa()} for the full amount. "
-        f"The MasterCard ending in 3020 ({fake_mastercard()}) has been approved.",
-        f"AMEX: {fake_amex()} - Expiration: 12/25. "
-        f"Discover card {fake_discover()} authorized for recurring payments.",
+        (f"Customer {fake_name()} (SSN: {fake_ssn()}) reported unauthorized charges "
+        f"on Visa card {fake_visa()}. Contact at {fake_phone()}."),
+        (f"Employee {fake_name()} submitted expense report. Corporate MasterCard "
+        f"{fake_mastercard()} used for travel. Phone: {fake_phone()}."),
+        (f"Account holder {fake_name()} requested replacement AMEX card {fake_amex()}. "
+        f"Verified identity with SSN {fake_ssn()} and passport {fake_passport()}."),
+        (f"HR record for {fake_name()}: SSN {fake_ssn()}, phone {fake_phone()}. "
+        f"Travel document: passport {fake_passport()}. Company Visa: {fake_visa()}."),
+        (f"Please charge Visa card {fake_visa()} for the full amount. "
+        f"The MasterCard ending in 3020 ({fake_mastercard()}) has been approved."),
+        (f"AMEX: {fake_amex()} - Expiration: 12/25. "
+        f"Discover card {fake_discover()} authorized for recurring payments."),
     ]
     for n in narratives:
         doc.add_paragraph(n)

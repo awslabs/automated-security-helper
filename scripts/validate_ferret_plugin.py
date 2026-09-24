@@ -214,7 +214,7 @@ def check_secret_keywords():
                     continue
                 # Skip comments that discuss the pattern
                 stripped = line.lstrip()
-                if stripped.startswith("#") or stripped.startswith("//"):
+                if stripped.startswith(("#", "//")):
                     # Allow comments that mention these as examples of what NOT to do
                     if (
                         "e.g." in line
@@ -275,7 +275,7 @@ def check_hardcoded_pii():
         for i, line in enumerate(lines, 1):
             stripped = line.lstrip()
             # Skip comments
-            if stripped.startswith("#") or stripped.startswith("//"):
+            if stripped.startswith(("#", "//")):
                 continue
             # Check for credit card patterns inside string literals
             if CREDIT_CARD_PATTERN.search(line):
@@ -316,7 +316,7 @@ def check_hex_entropy():
             continue
         for i, line in enumerate(lines, 1):
             stripped = line.lstrip()
-            if stripped.startswith("#") or stripped.startswith("//"):
+            if stripped.startswith(("#", "//")):
                 continue
             if HEX_ENTROPY_PATTERN.search(line):
                 fail(
@@ -612,7 +612,7 @@ def check_suppression_coverage():
             if any(allow in line for allow in SECRET_KEYWORD_ALLOWLIST):
                 continue
             stripped = line.lstrip()
-            if stripped.startswith("#") or stripped.startswith("//"):
+            if stripped.startswith(("#", "//")):
                 if (
                     "e.g." in line
                     or "example" in line.lower()

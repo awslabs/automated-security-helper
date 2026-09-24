@@ -12,11 +12,9 @@ Covers:
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -334,7 +332,6 @@ class TestRunLocalModeTupleUnpacking:
         from automated_security_helper.interactions.run_ash_scan import (
             ScanOptions,
             _run_local_mode,
-            _compute_exit_code,
         )
         from automated_security_helper.models.asharp_model import AshAggregatedResults
 
@@ -370,7 +367,6 @@ class TestRunLocalModeTupleUnpacking:
         )
         from automated_security_helper.models.asharp_model import AshAggregatedResults
 
-        captured_args: list = []
 
         opts = ScanOptions(source_dir=tmp_path, output_dir=tmp_path / "out", fail_on_findings=False)
         mock_logger = MagicMock()

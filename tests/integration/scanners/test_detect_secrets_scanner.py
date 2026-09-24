@@ -29,8 +29,7 @@ def mock_secrets_collection():
     with patch("detect_secrets.SecretsCollection") as mock_collection:
         mock_instance = MagicMock()
         mock_data = {
-            "test_file.py": set(
-                [
+            "test_file.py": {
                     PotentialSecret(
                         type="Base64 High Entropy String",
                         filename="test_file.py",
@@ -40,8 +39,7 @@ def mock_secrets_collection():
                         is_secret=True,
                         is_verified=True,
                     )
-                ]
-            )
+                }
         }
         mock_instance.data = mock_data
 
@@ -147,8 +145,7 @@ def test_detect_secrets_scanner_sarif_output(
     from detect_secrets.core.potential_secret import PotentialSecret
 
     mock_secrets_collection.return_value.data = {
-        "test_file.py": set(
-            [
+        "test_file.py": {
                 PotentialSecret(
                     type="Base64 High Entropy String",
                     filename="test_file.py",
@@ -158,8 +155,7 @@ def test_detect_secrets_scanner_sarif_output(
                     is_secret=True,
                     is_verified=True,
                 )
-            ]
-        )
+            }
     }
 
     target_dir = ash_temp_path / "target"
@@ -195,8 +191,7 @@ def test_detect_secrets_scanner_with_multiple_files(
     from detect_secrets.core.potential_secret import PotentialSecret
 
     mock_secrets_collection.return_value.data = {
-        "file1.py": set(
-            [
+        "file1.py": {
                 PotentialSecret(
                     type="Secret1",
                     filename="test_file.py",
@@ -206,10 +201,8 @@ def test_detect_secrets_scanner_with_multiple_files(
                     is_secret=True,
                     is_verified=True,
                 ),
-            ]
-        ),
-        "file2.py": set(
-            [
+            },
+        "file2.py": {
                 PotentialSecret(
                     type="AWSSecretKey",
                     filename="test_file.py",
@@ -218,8 +211,7 @@ def test_detect_secrets_scanner_with_multiple_files(
                     is_secret=True,
                     is_verified=True,
                 )
-            ]
-        ),
+            },
     }
 
     target_dir = ash_temp_path / "target"

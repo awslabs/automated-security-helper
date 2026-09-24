@@ -5,7 +5,6 @@ PR#274 Bug #14: re.sub replaces all occurrences without count=1.
 
 import re
 
-import pytest
 
 
 class TestVersionReSubCount:

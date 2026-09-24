@@ -164,7 +164,7 @@ def _write_wheel(path: Path, members: dict) -> Path:
 # a version-stamped wrapper has two distribution roots and check_artifact refuses
 # it before any rule runs. gate.LEGITIMATE_MEMBERS is the union, usable for
 # per-member classification but not as one fixture.
-CLEAN_MEMBERS = {name: b"# ash\n" for name in gate.LEGITIMATE_WHEEL_MEMBERS}
+CLEAN_MEMBERS = dict.fromkeys(gate.LEGITIMATE_WHEEL_MEMBERS, b"# ash\n")
 
 # automated_security_helper/schemas/AshAggregatedResults.json, the largest member
 # of the wheel and sdist built by `uv build` at the commit that added the size
@@ -1072,7 +1072,7 @@ class TestOnlyOneDistributionRoot:
         wheel = _write_wheel(
             tmp_path / f"two-roots-{version}.whl",
             {
-                **{n: b"# ash\n" for n in gate.LEGITIMATE_WHEEL_MEMBERS},
+                **dict.fromkeys(gate.LEGITIMATE_WHEEL_MEMBERS, b"# ash\n"),
                 f"automated_security_helper-{version}/upstream_semgrep_rules.yaml": b"rules: []\n",
             },
         )
@@ -1083,7 +1083,7 @@ class TestOnlyOneDistributionRoot:
         wheel = _write_wheel(
             tmp_path / "two-wrappers.whl",
             {
-                **{n: b"# ash\n" for n in gate.LEGITIMATE_SDIST_MEMBERS},
+                **dict.fromkeys(gate.LEGITIMATE_SDIST_MEMBERS, b"# ash\n"),
                 "automated_security_helper-9.9.9/upstream_semgrep_rules.yaml": b"rules: []\n",
             },
         )

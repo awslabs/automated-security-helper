@@ -1,29 +1,22 @@
 """Implementation of the Scan phase."""
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
-import json
 from typing import Dict, List, Any, Tuple
-from pathlib import Path
 
 from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.core.enums import ExecutionPhase, ScannerStatus
 from automated_security_helper.core.exceptions import ScannerSelectionError
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
-    ScannerSeverityCount,
     ScannerTargetStatusInfo,
 )
 from automated_security_helper.models.scan_results_container import ScanResultsContainer
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
-from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.sarif_utils import (
     get_severity_metrics_from_sarif,
-    sanitize_sarif_paths,
-    apply_suppressions_to_sarif,
 )
 from automated_security_helper.models.scanner_validation import ScannerValidationManager
 from automated_security_helper.core.phases.scanner_executor import ScannerExecutor
@@ -1832,7 +1825,7 @@ class ScanPhase(EnginePhase):
                     completed_scanner_names.append(scanner_name)
 
             # Remove duplicates and sort for consistent output
-            completed_scanner_names = sorted(list(set(completed_scanner_names)))
+            completed_scanner_names = sorted(set(completed_scanner_names))
 
             ASH_LOGGER.debug(
                 f"Extracted {len(completed_scanner_names)} completed scanner names: {completed_scanner_names}"

@@ -13,10 +13,7 @@ in broader contexts.
 import os
 import re
 import sys
-import tempfile
-from pathlib import Path
 from unittest.mock import patch, MagicMock
-import logging
 
 import pytest
 
@@ -181,7 +178,7 @@ class TestPluginLoaderNamespaceValidation:
         )
 
         with patch("automated_security_helper.plugins.loader.ASH_LOGGER") as mock_logger:
-            result = load_additional_plugin_modules(["evil_package.backdoor"])
+            load_additional_plugin_modules(["evil_package.backdoor"])
             # Should log a warning about unexpected namespace
             warning_calls = [
                 call for call in mock_logger.warning.call_args_list
@@ -236,7 +233,7 @@ class TestPluginDiscoveryPrefixTightening:
             ]
             with patch("automated_security_helper.plugins.discovery.importlib.import_module") as mock_import:
                 mock_import.return_value = fake_module
-                result = discover_plugins(["ash_plugins"])
+                discover_plugins(["ash_plugins"])
                 # import_module should NOT have been called for the evil package
                 mock_import.assert_not_called()
 
@@ -290,9 +287,6 @@ class TestTarFilterDataKwarg:
         if sys.version_info < (3, 12):
             pytest.skip("Test only relevant on Python 3.12+")
 
-        from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
-            ArchiveConverter,
-        )
 
         # Create a minimal tar archive
         tar_path = tmp_path / "test.tar"
@@ -417,9 +411,6 @@ class TestArgumentInjectionValidation:
 
     def test_rejects_non_flag_keys(self):
         """Keys that don't look like CLI flags should be rejected or skipped."""
-        from automated_security_helper.base.scanner_plugin import (
-            ScannerPluginBase,
-        )
 
         # The _validate_extra_arg_key function should exist after the fix
         valid_pattern = re.compile(r"^-{1,2}[A-Za-z][A-Za-z0-9_\-]*$")

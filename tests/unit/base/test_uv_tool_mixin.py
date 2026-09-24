@@ -1,8 +1,7 @@
 """Tests for base/uv_tool_mixin.py — covers version detection, execution, validation, and installation."""
 
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 from pathlib import Path
-import pytest
 
 from automated_security_helper.base.uv_tool_mixin import UVToolMixin
 

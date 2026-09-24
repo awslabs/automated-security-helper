@@ -11,8 +11,8 @@ Covers:
 
 import json
 from pathlib import Path
-from typing import ClassVar, List, Literal, Set
-from unittest.mock import MagicMock, patch
+from typing import ClassVar, Literal
+from unittest.mock import patch
 
 import pytest
 
@@ -27,7 +27,6 @@ from automated_security_helper.core.enums import OfflineStrategy, ScannerToolTyp
 from automated_security_helper.models.core import IgnorePathWithReason
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
-    Invocation,
     Run,
     SarifReport,
     Tool,
@@ -362,7 +361,6 @@ class TestInjectInvocationHelper:
         # attach reaches it.
         from datetime import datetime, timezone
         from automated_security_helper.schemas.sarif_schema_model import (
-            ArtifactLocation,
             Location,
             Message,
             PhysicalLocation,

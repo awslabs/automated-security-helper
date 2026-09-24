@@ -6,7 +6,6 @@ by severity.  Now ``_is_suppressed`` detects the ``suppressions`` list and
 "SUPPRESSED" bucket instead of inflating the active severity counts.
 """
 
-import pytest
 
 from automated_security_helper.plugin_modules.ash_builtin.reporters.html_reporter import (
     HtmlReporter,

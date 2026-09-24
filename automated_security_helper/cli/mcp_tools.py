@@ -90,8 +90,8 @@ async def mcp_scan_directory(
             error=target_error,
             operation="scan_directory",
             suggestions=[
-                f"Add the directory to {ASH_MCP_ALLOWED_ROOTS_ENV} if the MCP "
-                "server should be able to scan it",
+                (f"Add the directory to {ASH_MCP_ALLOWED_ROOTS_ENV} if the MCP "
+                "server should be able to scan it"),
                 "Verify that the path is correct",
             ],
         )
@@ -438,8 +438,8 @@ async def mcp_get_scan_results(output_dir: str) -> Dict[str, Any]:
                 error=target_error,
                 operation="get_scan_results",
                 suggestions=[
-                    f"Add the directory to {ASH_MCP_ALLOWED_ROOTS_ENV} if the "
-                    "MCP server should be able to read results from it",
+                    (f"Add the directory to {ASH_MCP_ALLOWED_ROOTS_ENV} if the "
+                    "MCP server should be able to read results from it"),
                     "Verify that the path is correct",
                 ],
             )
@@ -712,8 +712,8 @@ def mcp_explain_finding(
                 error=target_error,
                 operation="explain_finding",
                 suggestions=[
-                    f"Add the directory to {ASH_MCP_ALLOWED_ROOTS_ENV} if the "
-                    "MCP server should be able to read results from it",
+                    (f"Add the directory to {ASH_MCP_ALLOWED_ROOTS_ENV} if the "
+                    "MCP server should be able to read results from it"),
                     "Verify that the path is correct",
                 ],
             )

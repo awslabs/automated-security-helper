@@ -4,9 +4,8 @@
 """Unit tests for decomposed helpers in run_ash_container."""
 
 import os
-import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -127,34 +126,34 @@ def test_find_dockerfile_uses_repo_dockerfile(tmp_path):
 
 
 def _base_assemble_kwargs(**overrides):
-    base = dict(
-        oci_command_prefix=[],
-        resolved_oci_runner="/usr/bin/docker",
-        image_name="automated-security-helper:non-root",
-        source_dir=Path("/src/code"),
-        output_dir=Path("/src/code/ash_output"),
-        offline=False,
-        debug=False,
-        color=True,
-        quiet=False,
-        progress=True,
-        verbose=False,
-        simple=False,
-        python_based_plugins_only=False,
-        cleanup=False,
-        inspect=False,
-        fail_on_findings=None,
-        phases=[],
-        scanners=[],
-        exclude_scanners=[],
-        output_formats=[],
-        config=None,
-        config_overrides=[],
-        existing_results=None,
-        ash_plugin_modules=[],
-        strategy=None,
-        ctx=None,
-    )
+    base = {
+        "oci_command_prefix": [],
+        "resolved_oci_runner": "/usr/bin/docker",
+        "image_name": "automated-security-helper:non-root",
+        "source_dir": Path("/src/code"),
+        "output_dir": Path("/src/code/ash_output"),
+        "offline": False,
+        "debug": False,
+        "color": True,
+        "quiet": False,
+        "progress": True,
+        "verbose": False,
+        "simple": False,
+        "python_based_plugins_only": False,
+        "cleanup": False,
+        "inspect": False,
+        "fail_on_findings": None,
+        "phases": [],
+        "scanners": [],
+        "exclude_scanners": [],
+        "output_formats": [],
+        "config": None,
+        "config_overrides": [],
+        "existing_results": None,
+        "ash_plugin_modules": [],
+        "strategy": None,
+        "ctx": None,
+    }
     base.update(overrides)
     return base
 

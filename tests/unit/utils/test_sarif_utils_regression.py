@@ -10,12 +10,9 @@ Sub-batch 6c: Reporters/utils must iterate all runs (from test_sarif_runs_fix)
 
 import html
 import inspect
-import json
-import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
@@ -235,7 +232,6 @@ class TestSuppressionLoopVariable:
         """Suppressions must be applied per-run, not all piled into runs[0]."""
         from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
         from automated_security_helper.models.core import AshSuppression
-        from automated_security_helper.base.plugin_context import PluginContext
 
         sarif = _two_run_sarif()
 
@@ -274,7 +270,6 @@ class TestSuppressionLoopVariable:
     def test_multi_run_results_not_clobbered(self):
         """runs[1].results must not be lost or overwritten into runs[0]."""
         from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
-        from automated_security_helper.base.plugin_context import PluginContext
 
         sarif = _two_run_sarif()
 
@@ -455,7 +450,6 @@ class TestBug45SanitizeUriSeparator:
 
     def test_windows_sep_does_not_break_sarif_path_prefix(self):
         """Even when os.sep is backslash, source_dir_str should use '/' for SARIF paths."""
-        from automated_security_helper.utils.sarif_utils import sanitize_sarif_paths
 
         # Verify that sanitize_sarif_paths builds source_dir_str with "/" not os.sep
         # by checking the actual function constructs the str correctly.

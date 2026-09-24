@@ -8,14 +8,12 @@ Contracts:
 from __future__ import annotations
 
 from typing import Any, Dict, List
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
 
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.phases.scanner_executor import ScannerExecutor
 from automated_security_helper.models.asharp_model import AshAggregatedResults
-from automated_security_helper.models.scan_results_container import ScanResultsContainer
 
 AshConfig.model_rebuild()
 AshAggregatedResults.model_rebuild()
@@ -140,7 +138,7 @@ class TestSequentialCompletedScanners:
             tmp_path, ["bandit", "grype"], crash_names=frozenset(["grype"])
         )
         executor.run_sequential(AshAggregatedResults())
-        grype_plugins = [p for p in executor.completed_scanners if p.config is None or (hasattr(p, 'config') and p.config is None)]
+        [p for p in executor.completed_scanners if p.config is None or (hasattr(p, 'config') and p.config is None)]
         # bandit succeeds; grype crashed → only bandit in completed
         assert len(executor.completed_scanners) == 1
 

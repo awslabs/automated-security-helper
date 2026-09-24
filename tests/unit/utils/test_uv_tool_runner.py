@@ -5,7 +5,6 @@ import subprocess  # nosec B404
 import threading
 import time
 from contextlib import contextmanager
-from pathlib import Path
 from unittest.mock import patch, MagicMock
 import pytest
 

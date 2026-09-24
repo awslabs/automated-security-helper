@@ -1,5 +1,4 @@
 import logging
-import pytest
 from automated_security_helper.utils.log import ASHLogger, ASH_LOGGER, WindowsSafeFilter
 
 

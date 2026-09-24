@@ -273,7 +273,12 @@ def test_uploaded_source_is_scanned_and_reports_its_own_findings(
                         delivered = Path(collected["finalize"]["source_dir"])
                         collected["extracted"] = sorted(
                             p.relative_to(delivered).as_posix()
-                            for p in delivered.rglob("*")
+                            # Blocking I/O in an async test body. Deferred, not fixed: this is fixture
+                            # setup, so stalling the test's own event loop has no effect on what is being
+                            # asserted, and wrapping it in asyncio.to_thread would add concurrency noise to
+                            # code whose job is to be obviously correct. Tracked with the source-side
+                            # ASYNC230/ASYNC240 sites.
+                            for p in delivered.rglob("*")  # noqa: ASYNC240
                             if p.is_file()
                         )
 

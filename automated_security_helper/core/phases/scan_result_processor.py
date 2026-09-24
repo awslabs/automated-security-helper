@@ -114,7 +114,7 @@ class ScanResultProcessor:
             sanitized_sarif.attach_scanner_details(
                 scanner_name=results.scanner_name,
                 scanner_version=scanner_version or get_ash_version(),
-                invocation_details=invocation_details if invocation_details else {},
+                invocation_details=invocation_details or {},
             )
 
             if aggregated_results.sarif is not None:

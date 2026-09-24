@@ -9,11 +9,16 @@ import shutil
 import sys
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional, Union, cast
+from typing import TYPE_CHECKING, List, Optional, cast
 
 import typer
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from rich import print
+# `print` shadows the builtin on purpose: this is rich's documented import
+# idiom, so every print() below renders markup and respects the console. The
+# fix A004 wants is an alias, which would mean rewriting every call in this
+# module for no behavior change -- and tests/unit/cli/mcp/test_stdout_jsonrpc_safety.py
+# reasons about this exact import form.
+from rich import print  # noqa: A004
 
 from automated_security_helper.core.constants import (
     ASH_CONFIG_FILE_NAMES,

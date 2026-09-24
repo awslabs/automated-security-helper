@@ -15,11 +15,10 @@ The bug: somewhere between steps 3 and 6, findings reappear or aren't suppressed
 import sys
 from pathlib import Path
 
-import pytest
 from unittest.mock import MagicMock
 
 from automated_security_helper.models.core import IgnorePathWithReason
-from automated_security_helper.schemas.sarif_schema_model import SarifReport, Run, Result
+from automated_security_helper.schemas.sarif_schema_model import SarifReport, Run
 from automated_security_helper.utils.sarif_utils import (
     apply_suppressions_to_sarif,
     sanitize_sarif_paths,

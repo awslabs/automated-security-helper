@@ -70,7 +70,7 @@ class AmazonqBackend(BaseBackend):
         # WARNING / Error prefixes that indicate validation failure.
         output = result.get("stdout", "")
         for line in output.splitlines():
-            if line.startswith("WARNING ") or line.startswith("Error: "):
+            if line.startswith(("WARNING ", "Error: ")):
                 return {
                     "ok": False,
                     "reason": f"q agent validate flagged: {line.strip()[:200]}",

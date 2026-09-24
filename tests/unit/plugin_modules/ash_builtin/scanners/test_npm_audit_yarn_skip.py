@@ -14,7 +14,6 @@ asserts that:
 - the log contains "<binary> is not installed"
 """
 
-import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 

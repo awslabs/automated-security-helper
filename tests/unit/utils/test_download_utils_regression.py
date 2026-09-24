@@ -6,7 +6,6 @@ PR#274 Bug #1: code injection via f-string in create_url_download_command.
 import shutil
 import tempfile
 
-import pytest
 
 
 class TestDownloadUtilsCodeInjection:

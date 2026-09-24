@@ -139,7 +139,7 @@ class TestMonitorScanProgress:
             call_count += 1
             if call_count == 1:
                 return {"success": True, "directory_path": str(tmp_path)}
-            raise asyncio.CancelledError()
+            raise asyncio.CancelledError
 
         with patch(
             "automated_security_helper.cli.mcp.progress_monitor.mcp_get_scan_progress",

@@ -214,7 +214,12 @@ class TestOneRegistryEntryPerProject:
         await _tool("mcp_scan_workspace")(workspace_file=str(workspace))
 
         registered = {
-            Path(entry["directory_path"]).resolve()
+            # Blocking I/O in an async test body. Deferred, not fixed: this is fixture
+            # setup, so stalling the test's own event loop has no effect on what is being
+            # asserted, and wrapping it in asyncio.to_thread would add concurrency noise to
+            # code whose job is to be obviously correct. Tracked with the source-side
+            # ASYNC230/ASYNC240 sites.
+            Path(entry["directory_path"]).resolve()  # noqa: ASYNC240
             for entry in isolated_registry.list_scans()
         }
         assert registered == {directory.resolve() for directory in directories.values()}

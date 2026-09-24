@@ -8,7 +8,6 @@ PR#274 Bug #31: Duplicate "xml" in KNOWN_SCANNABLE_EXTENSIONS (from low)
 import inspect
 from unittest.mock import MagicMock
 
-import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -24,7 +23,7 @@ class TestBanditExcludedPathsNotAccumulated:
             BanditScanner,
         )
 
-        scanner = MagicMock(spec=BanditScanner)
+        MagicMock(spec=BanditScanner)
         # Access the real scan method's logic by reading the source behavior:
         # We need to test that config.options.excluded_paths doesn't grow.
         # Build a minimal mock that exposes the relevant attribute.

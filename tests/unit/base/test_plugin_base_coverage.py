@@ -1,7 +1,6 @@
 """Extended tests for base/plugin_base.py — covers PluginBase methods."""
 
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 import pytest
 
 from automated_security_helper.base.plugin_base import PluginBase

@@ -1,7 +1,5 @@
 """Tests for core/execution_engine.py — covers ScanExecutionEngine initialization."""
 
-from pathlib import Path
-from unittest.mock import MagicMock, patch
 import pytest
 
 from automated_security_helper.core.execution_engine import ScanExecutionEngine

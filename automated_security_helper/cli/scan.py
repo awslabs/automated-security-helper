@@ -2,7 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import os
-from rich import print
+# `print` shadows the builtin on purpose: this is rich's documented import
+# idiom, so every print() below renders markup and respects the console. The
+# fix A004 wants is an alias, which would mean rewriting every call in this
+# module for no behavior change -- and tests/unit/cli/mcp/test_stdout_jsonrpc_safety.py
+# reasons about this exact import form.
+from rich import print  # noqa: A004
 from typing import Annotated, List, NoReturn, Optional
 import typer
 from pathlib import Path
@@ -525,7 +530,7 @@ def run_ash_scan_cli_command(
 
     if version:
         typer.echo(f"awslabs/automated-security-helper v{get_ash_version()}")
-        raise typer.Exit()
+        raise typer.Exit
 
     _validate_shard_options(shard_index, shard_count, workspace)
 

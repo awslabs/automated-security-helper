@@ -20,16 +20,13 @@ class MCPResourceError(Exception):
 class TaskManagementError(MCPResourceError):
     """Exception for task management failures."""
 
-    pass
 
 
 class StateManagementError(MCPResourceError):
     """Exception for state management failures."""
 
-    pass
 
 
 class ResourceExhaustionError(MCPResourceError):
     """Exception for resource exhaustion conditions."""
 
-    pass

@@ -2,7 +2,6 @@
 
 import os
 import pytest
-from unittest.mock import MagicMock, patch
 
 from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner import (
     SyftScanner,

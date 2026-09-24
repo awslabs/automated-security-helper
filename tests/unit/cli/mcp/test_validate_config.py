@@ -3,10 +3,8 @@
 
 """Tests for mcp_validate_config tool."""
 
-import textwrap
 from pathlib import Path
 
-import pytest
 import yaml
 
 from automated_security_helper.cli.mcp_tools import mcp_validate_config

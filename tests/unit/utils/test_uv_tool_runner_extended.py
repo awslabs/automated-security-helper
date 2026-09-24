@@ -295,5 +295,11 @@ class TestResetUvToolRunner:
         runner1 = get_uv_tool_runner()
         reset_uv_tool_runner()
         runner2 = get_uv_tool_runner()
-        # After reset, should still be a valid UVToolRunner but potentially different instance
+        # Identity, not just type. reset_uv_tool_runner() rebinds the module
+        # global to `UVToolRunner()` unconditionally, so a new instance is the
+        # contract rather than a possibility -- the earlier "potentially
+        # different instance" wording undersold it. Asserting only isinstance
+        # here passed even if reset_uv_tool_runner() did nothing at all, which
+        # is the one thing this test exists to rule out.
+        assert runner2 is not runner1
         assert isinstance(runner2, UVToolRunner)

@@ -224,7 +224,7 @@ class TestScannerValidationManagerValidation:
     def test_validate_scanner_enablement_disabled_unknown(self, manager):
         manager.update_scanner_state("bandit", registration_status="registered")
 
-        checkpoint = manager.validate_scanner_enablement(
+        manager.validate_scanner_enablement(
             enabled_scanners=[],
             excluded_scanners=[],
         )

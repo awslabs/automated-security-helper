@@ -1,8 +1,7 @@
 """Tests for utils/version_management.py — covers version detection and update logic."""
 
 from pathlib import Path
-from unittest.mock import patch, MagicMock
-import pytest
+from unittest.mock import patch
 
 from automated_security_helper.utils.version_management import (
     get_project_root,

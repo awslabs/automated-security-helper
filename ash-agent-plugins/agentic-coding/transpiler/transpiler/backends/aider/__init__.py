@@ -11,9 +11,6 @@ check is the highest-fidelity smoke test we can run without a paid LLM key.
 """
 from __future__ import annotations
 
-import shutil
-import subprocess
-
 import yaml
 
 from ...core import BaseBackend, BuildContext, ConfigFile, InstructionFile

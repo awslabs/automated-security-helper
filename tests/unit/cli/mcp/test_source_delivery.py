@@ -8,7 +8,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
-import os
 import zipfile
 from pathlib import Path
 from unittest.mock import patch, MagicMock

@@ -1,14 +1,11 @@
 """Tests for core/unified_metrics.py — covers metric functions."""
 
-from unittest.mock import MagicMock
-import pytest
 
 from automated_security_helper.core.unified_metrics import (
     ScannerMetrics,
     format_duration,
     get_unified_scanner_metrics,
 )
-from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
 AshAggregatedResults.model_rebuild()

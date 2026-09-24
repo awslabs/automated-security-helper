@@ -1,11 +1,9 @@
 """Tests for core/orchestrator.py — covers ASHScanOrchestrator initialization and configuration."""
 
-from pathlib import Path
-from unittest.mock import patch, MagicMock
-import pytest
+from unittest.mock import patch
 
 from automated_security_helper.core.orchestrator import ASHScanOrchestrator
-from automated_security_helper.core.enums import ExecutionStrategy, ExportFormat
+from automated_security_helper.core.enums import ExecutionStrategy
 from automated_security_helper.config.ash_config import AshConfig
 
 

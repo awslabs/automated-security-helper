@@ -2,20 +2,17 @@
 
 from __future__ import annotations
 
-import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from automated_security_helper.config.ash_config import AshConfig
-from automated_security_helper.core.enums import ExecutionPhase, ScannerStatus
+from automated_security_helper.core.enums import ScannerStatus
 from automated_security_helper.core.phases.scan_phase import ScanPhase
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
-    ScannerStatusInfo,
 )
 from automated_security_helper.models.scan_results_container import ScanResultsContainer
 from automated_security_helper.models.scanner_validation import (
@@ -351,7 +348,7 @@ class TestErrorHandling:
         scan_phase._safe_execute_scanner = side_effect_fn
         scan_phase._process_results = MagicMock(return_value=mock_aggregated_results)
 
-        result = scan_phase._execute_scanners_sequential(
+        scan_phase._execute_scanners_sequential(
             aggregated_results=mock_aggregated_results
         )
 
@@ -551,7 +548,7 @@ class TestParallelExecution:
         scan_phase._max_workers = 4
         scan_phase._execute_scanners_sequential = MagicMock(return_value=mock_aggregated_results)
 
-        result = scan_phase._execute_scanners_parallel(
+        scan_phase._execute_scanners_parallel(
             aggregated_results=mock_aggregated_results
         )
 
@@ -593,7 +590,7 @@ class TestParallelExecution:
                 "automated_security_helper.core.phases.scan_phase.as_completed",
                 return_value=[mock_future, mock_future, mock_future],
             ):
-                result = scan_phase._execute_scanners_parallel(
+                scan_phase._execute_scanners_parallel(
                     aggregated_results=mock_aggregated_results
                 )
 
@@ -634,7 +631,7 @@ class TestParallelExecution:
                 "automated_security_helper.core.phases.scan_phase.as_completed",
                 return_value=[failing_future, passing_future],
             ):
-                result = scan_phase._execute_scanners_parallel(
+                scan_phase._execute_scanners_parallel(
                     aggregated_results=mock_aggregated_results
                 )
 
@@ -660,44 +657,45 @@ class TestProcessResults:
         mock_sarif.runs = [MagicMock()]
         mock_sarif.runs[0].results = []
 
-        # Patch isinstance checks to recognize our mock as SarifReport
-        # and bypass model_dump which fails on mocks
-        original_process = scan_phase._process_results
+        # This body used to be wrapped in
+        #   patch("...core.phases.scan_phase.sanitize_sarif_paths")
+        #   patch("...core.phases.scan_phase.apply_suppressions_to_sarif")
+        # and both were dead. _process_results references neither name: the
+        # sanitize-then-suppress step lives in core/phases/scan_result_processor.py
+        # and core/phases/scanner_executor.py, which is where test_scan_phase_decomposed.py
+        # and test_scanner_executor_lifecycle.py patch it. What was left here was a
+        # module attribute that scan_phase imported but never looked up, so patching
+        # it could not affect any code path -- the assertion below was already
+        # measuring unpatched behavior. Removing the now-unused import from
+        # scan_phase.py is what surfaced it, by turning a silent no-op into an
+        # AttributeError from mock's patch-target resolution.
+        mock_sarif.attach_scanner_details = MagicMock()
 
-        with patch(
-            "automated_security_helper.core.phases.scan_phase.sanitize_sarif_paths",
-            return_value=mock_sarif,
-        ), patch(
-            "automated_security_helper.core.phases.scan_phase.apply_suppressions_to_sarif",
-            return_value=mock_sarif,
-        ):
-            mock_sarif.attach_scanner_details = MagicMock()
+        # Use a real AshAggregatedResults but mock its sarif attribute
+        mock_aggregated_results.sarif = MagicMock()
+        mock_aggregated_results.additional_reports = {}
 
-            # Use a real AshAggregatedResults but mock its sarif attribute
-            mock_aggregated_results.sarif = MagicMock()
-            mock_aggregated_results.additional_reports = {}
+        # Create container with mock sarif -- we need to bypass model_dump
+        # by patching the container's serialization
+        container = MagicMock()
+        container.scanner_name = "sarif_scanner"
+        container.target_type = "source"
+        container.raw_results = mock_sarif
+        container.metadata = {}
+        container.start_time = None
+        container.end_time = None
+        container.duration = None
+        container.exit_code = 0
+        container.model_dump.return_value = {
+            "scanner_name": "sarif_scanner",
+            "target_type": "source",
+            "status": "passed",
+        }
 
-            # Create container with mock sarif -- we need to bypass model_dump
-            # by patching the container's serialization
-            container = MagicMock()
-            container.scanner_name = "sarif_scanner"
-            container.target_type = "source"
-            container.raw_results = mock_sarif
-            container.metadata = {}
-            container.start_time = None
-            container.end_time = None
-            container.duration = None
-            container.exit_code = 0
-            container.model_dump.return_value = {
-                "scanner_name": "sarif_scanner",
-                "target_type": "source",
-                "status": "passed",
-            }
-
-            result = scan_phase._process_results(
-                results=container,
-                aggregated_results=mock_aggregated_results,
-            )
+        scan_phase._process_results(
+            results=container,
+            aggregated_results=mock_aggregated_results,
+        )
 
         mock_aggregated_results.sarif.merge_sarif_report.assert_called_once()
 
@@ -797,7 +795,7 @@ class TestSequentialExecution:
         scan_phase._safe_execute_scanner = MagicMock(return_value=None)
         scan_phase._process_results = MagicMock(return_value=mock_aggregated_results)
 
-        result = scan_phase._execute_scanners_sequential(
+        scan_phase._execute_scanners_sequential(
             aggregated_results=mock_aggregated_results
         )
 

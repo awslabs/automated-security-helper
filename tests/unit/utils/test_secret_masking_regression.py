@@ -5,7 +5,6 @@ PR#274 Bug #87: regex stops at internal quote
 PR#274 Bug #88: B106 and B107 are not dispatched
 """
 
-import pytest
 
 
 class TestSecretMasking:

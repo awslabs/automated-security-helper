@@ -842,8 +842,7 @@ class WorkspaceAggregator:
         try:
             with open(target, "w", encoding="utf-8") as handle:
                 handle.write("{\n")
-                for key, value in header.items():
-                    handle.write(f"{json.dumps(key)}: {json.dumps(value)},\n")
+                handle.writelines(f"{json.dumps(key)}: {json.dumps(value)},\n" for key, value in header.items())
                 handle.write('"sarif": {"version": "2.1.0", "runs": [')
                 for position, spool in enumerate(ordered_spools):
                     if position:

@@ -1,19 +1,16 @@
 class ScannerError(Exception):
     """Exception raised when scanner execution fails."""
 
-    pass
 
 
 class ASHValidationError(Exception):
     """Exception raised when an ASH component fails to validate."""
 
-    pass
 
 
 class ASHConfigValidationError(ASHValidationError):
     """Exception raised when an AshConfig is invalid."""
 
-    pass
 
 
 class WorkspacePatternError(ASHValidationError):
@@ -25,7 +22,6 @@ class WorkspacePatternError(ASHValidationError):
     general configuration failure.
     """
 
-    pass
 
 
 class ScannerSelectionError(ASHValidationError):
@@ -49,7 +45,6 @@ class ScannerSelectionError(ASHValidationError):
     runners load different plugin modules.
     """
 
-    pass
 
 
 class ShardSelectionError(ASHValidationError):
@@ -66,7 +61,6 @@ class ShardSelectionError(ASHValidationError):
     one shard twice and another never, and the reports would look healthy.
     """
 
-    pass
 
 
 class ShardCoverageError(ASHValidationError):
@@ -85,7 +79,6 @@ class ShardCoverageError(ASHValidationError):
     specific gap instead of reporting what it happens to have.
     """
 
-    pass
 
 
 class ToolDownloadIntegrityError(ASHValidationError):
@@ -103,7 +96,6 @@ class ToolDownloadIntegrityError(ASHValidationError):
     mismatch and never downgraded to a warning.
     """
 
-    pass
 
 
 class ToolNotProvisionableError(ASHValidationError):
@@ -122,7 +114,6 @@ class ToolNotProvisionableError(ASHValidationError):
     asset is a real constraint and is reported as one.
     """
 
-    pass
 
 
 class WorkspaceDefinitionError(ASHValidationError):
@@ -142,4 +133,3 @@ class WorkspaceDefinitionError(ASHValidationError):
     so an operator with three typos fixes three in one pass.
     """
 
-    pass

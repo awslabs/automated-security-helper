@@ -131,7 +131,7 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             rule_level_from_results: Dict[str, str] = {}
             for result in run.results or []:
                 if result.ruleId and result.ruleId not in rule_level_from_results:
-                    level_val = result.level if result.level else "error"
+                    level_val = result.level or "error"
                     rule_level_from_results[result.ruleId] = str(level_val)
 
             # 3. Ensure every rule has security-severity

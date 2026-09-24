@@ -6,7 +6,6 @@
 import json
 from pathlib import Path
 
-import pytest
 
 from automated_security_helper.cli.mcp_tools import mcp_diff_scan_results
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability

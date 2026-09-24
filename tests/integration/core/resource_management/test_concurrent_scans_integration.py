@@ -46,7 +46,7 @@ SEVERITY_BUCKETS = ("critical", "high", "medium", "low", "info", "suppressed")
 
 def severity_counts(findings):
     """Bucket findings by severity the way extract_findings_summary does."""
-    counts = {bucket: 0 for bucket in SEVERITY_BUCKETS}
+    counts = dict.fromkeys(SEVERITY_BUCKETS, 0)
     for finding in findings:
         bucket = finding.get("severity", "").lower()
         if bucket in counts:
@@ -56,7 +56,7 @@ def severity_counts(findings):
 
 def write_aggregated_results(output_dir, scanner_results):
     """Write an ash_aggregated_results.json that AshAggregatedResults accepts."""
-    totals = {bucket: 0 for bucket in SEVERITY_BUCKETS}
+    totals = dict.fromkeys(SEVERITY_BUCKETS, 0)
     actionable = 0
     for info in scanner_results.values():
         actionable += info.get("finding_count", 0)
@@ -403,7 +403,12 @@ class TestConcurrentScansIntegration:
                 }
             ]
         }
-        with open(source_dir1 / "ASH.ScanResults.json", "w") as f:
+        # Blocking I/O in an async test body. Deferred, not fixed: this is fixture
+        # setup, so stalling the test's own event loop has no effect on what is being
+        # asserted, and wrapping it in asyncio.to_thread would add concurrency noise to
+        # code whose job is to be obviously correct. Tracked with the source-side
+        # ASYNC230/ASYNC240 sites.
+        with open(source_dir1 / "ASH.ScanResults.json", "w") as f:  # noqa: ASYNC230
             json.dump(result_data1, f)
 
         # Create results for second scan
@@ -425,7 +430,12 @@ class TestConcurrentScansIntegration:
                 }
             ]
         }
-        with open(source_dir2 / "ASH.ScanResults.json", "w") as f:
+        # Blocking I/O in an async test body. Deferred, not fixed: this is fixture
+        # setup, so stalling the test's own event loop has no effect on what is being
+        # asserted, and wrapping it in asyncio.to_thread would add concurrency noise to
+        # code whose job is to be obviously correct. Tracked with the source-side
+        # ASYNC230/ASYNC240 sites.
+        with open(source_dir2 / "ASH.ScanResults.json", "w") as f:  # noqa: ASYNC230
             json.dump(result_data2, f)
 
         # Create aggregated results for both scans. Both scans name their

@@ -17,12 +17,9 @@ These tests verify:
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
-from typing import Optional
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
-import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -147,9 +144,7 @@ class TestLocalModeUnaffected:
         not the pre-read file-based value."""
         from automated_security_helper.interactions.run_ash_scan import (
             run_ash_scan,
-            _compute_exit_code,
         )
-        from automated_security_helper.core.enums import RunMode
 
         src = tmp_path / "src"
         src.mkdir(parents=True, exist_ok=True)

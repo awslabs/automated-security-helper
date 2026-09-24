@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 from datetime import datetime
-from pathlib import Path
-from typing import Any, Dict, List
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from automated_security_helper.base.engine_phase import EnginePhase
 from automated_security_helper.config.ash_config import AshConfig
-from automated_security_helper.core.enums import ExecutionPhase, ScannerStatus
 from automated_security_helper.core.phases.scanner_executor import ScannerExecutor
 from automated_security_helper.core.phases.scan_result_processor import ScanResultProcessor
 from automated_security_helper.models.asharp_model import AshAggregatedResults

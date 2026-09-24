@@ -2,9 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for the BedrockSummaryReporter class."""
 
-import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import botocore.exceptions
 import pytest
@@ -140,7 +139,6 @@ def sample_sarif_model():
         ReportingDescriptorReference,
         PropertyBag,
     )
-    from pydantic import AnyUrl
 
     AshAggregatedResults.model_rebuild()
 

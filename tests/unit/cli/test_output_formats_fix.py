@@ -1,9 +1,7 @@
 """Tests for C2 bug fix: --output-formats CLI flag threading through to ReportPhase."""
 
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from automated_security_helper.core.enums import ExportFormat
 

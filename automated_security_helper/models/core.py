@@ -12,7 +12,6 @@ from datetime import datetime, date
 
 from automated_security_helper.utils.path_matching import (
     _path_pattern_matches,
-    _recursive_glob_match,
 )
 
 if TYPE_CHECKING:

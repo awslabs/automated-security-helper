@@ -52,7 +52,16 @@ def addLoggingLevel(levelName, levelNum, methodName=None):
             self._log(levelNum, message, args, **kwargs)
 
     def logToRoot(message, *args, **kwargs):
-        logging.log(levelNum, message, *args, **kwargs)
+        # The root logger is the point of this function, not an oversight.
+        # `setattr(logging, methodName, logToRoot)` below publishes it as
+        # `logging.trace()` / `logging.verbose()` -- the module-level convenience
+        # form that mirrors stdlib `logging.info()`, which is also a root-logger
+        # call. Both spellings are in this function's docstring (`logging.trace('so
+        # did this')`). Pointing this at a named logger would make
+        # `logging.trace()` write somewhere its stdlib counterparts do not, which
+        # is the opposite of the recipe's contract. Per-logger use goes through
+        # `logForLevel`, set on the logger class just above.
+        logging.log(levelNum, message, *args, **kwargs)  # noqa: LOG015
 
     logging.addLevelName(levelNum, levelName)
     setattr(logging, levelName, levelNum)

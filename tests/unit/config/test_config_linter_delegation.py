@@ -4,10 +4,8 @@
 """TDD tests for config_linter delegation to config_validator."""
 
 import textwrap
-from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 
 from automated_security_helper.config.config_linter import (
     ConfigLinter,

@@ -1,6 +1,5 @@
 """Tests for utils/sarif_field_analysis.py — verify move from cli/inspect."""
 
-import warnings
 
 
 class TestImportLocation:
@@ -85,14 +84,14 @@ class TestAnalyzeSarifFieldsLogic:
             "automated_security_helper.utils.sarif_field_analysis.generate_html_report"
         ):
             try:
-                result = analyze_sarif_fields(
+                analyze_sarif_fields(
                     sarif_dir=str(sarif_dir),
                     output_dir=str(output_dir),
                 )
             except typer.Exit:
                 # Exit(1) means unexpected-missing-fields — that's fine for this test;
                 # we just verify the output files were written correctly.
-                result = None
+                pass
 
         # Verify output was produced (JSON file contains the expected fields)
         import json as _json

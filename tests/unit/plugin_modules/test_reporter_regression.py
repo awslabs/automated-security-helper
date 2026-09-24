@@ -7,14 +7,10 @@ Each test targets a specific inventory bug and should fail before the fix
 is applied, then pass after.
 """
 
-import csv
-import html
 import json
 import re
-from io import StringIO
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
 
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.config.default_config import get_default_config
@@ -26,7 +22,6 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Message,
     Message1,
     PhysicalLocation,
-    PropertyBag,
     Region,
     Result,
     Run,

@@ -19,7 +19,6 @@ from automated_security_helper.models.flat_vulnerability import (
 )
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
-    Level,
     Location,
     Message,
     Message1,

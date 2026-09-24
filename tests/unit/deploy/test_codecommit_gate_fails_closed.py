@@ -703,8 +703,8 @@ def test_a_refused_extra_arg_reaches_the_pull_request_as_error_and_revokes(
         (
             1,
             "REVOKE",
-            "exit 1 is the incomplete-scanner failure: nothing was scanned, so nothing "
-            "supports an approval",
+            ("exit 1 is the incomplete-scanner failure: nothing was scanned, so nothing "
+            "supports an approval"),
         ),
         (70, "REVOKE", "an unrecognised failure is not evidence of cleanliness"),
     ],

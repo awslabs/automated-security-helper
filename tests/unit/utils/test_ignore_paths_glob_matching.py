@@ -6,7 +6,6 @@ because path_matches_pattern uses fnmatch differently than the suppression
 matcher's _recursive_glob_match.
 """
 
-import pytest
 from unittest.mock import MagicMock
 from pathlib import Path
 
@@ -14,12 +13,6 @@ from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sa
 from automated_security_helper.schemas.sarif_schema_model import (
     SarifReport,
     Run,
-    Result,
-    Tool,
-    ToolComponent,
-    Location,
-    PhysicalLocation,
-    ArtifactLocation,
 )
 from automated_security_helper.models.core import IgnorePathWithReason
 

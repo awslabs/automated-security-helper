@@ -2,10 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Tests for BedrockReportPipeline, BedrockPromptBuilder, BedrockModelClient, ReportSection."""
 from collections import defaultdict
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import botocore.exceptions
-import pytest
 
 from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_pipeline import (
     BedrockModelClient,

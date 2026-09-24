@@ -14,10 +14,7 @@ Batch 2:
 """
 
 import inspect
-import os
 import re
-import sys
-from unittest.mock import patch, MagicMock
 
 import pytest
 

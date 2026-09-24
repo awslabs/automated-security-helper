@@ -469,8 +469,8 @@ def build_comment(
         lines += [
             "**The scan did not complete, so this pull request has not been assessed.**",
             "",
-            f"This is not a pass. `ash scan` exited {scan_exit}; treat the result as "
-            "unknown and check the Lambda logs.",
+            (f"This is not a pass. `ash scan` exited {scan_exit}; treat the result as "
+            "unknown and check the Lambda logs."),
         ]
         if log_tail:
             lines += ["", "<details><summary>Scan log tail</summary>", "", "```", log_tail, "```", "", "</details>"]

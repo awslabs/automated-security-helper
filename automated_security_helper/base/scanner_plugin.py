@@ -178,7 +178,6 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         `self.args.extra_args` is processed. Use this method to populate additional
         argument key/value pairs where needed.
         """
-        pass
 
     def _resolve_arguments(
         self, target: str | Path, results_file: str | Path | None = None

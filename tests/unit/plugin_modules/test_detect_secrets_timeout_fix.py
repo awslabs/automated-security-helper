@@ -12,7 +12,6 @@ scan_timeout. When the timeout expires the future is cancelled and the
 scanner continues with whatever partial results it collected.
 """
 import time
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest

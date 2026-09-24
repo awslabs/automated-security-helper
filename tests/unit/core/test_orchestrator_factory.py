@@ -6,24 +6,22 @@ These tests verify:
 - .initialize() is idempotent
 """
 
-from pathlib import Path
-from unittest.mock import patch, MagicMock
-import pytest
+from unittest.mock import patch
 
 from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 from automated_security_helper.config.ash_config import AshConfig
 
 
 def _minimal_kwargs(tmp_path):
-    return dict(
-        source_dir=tmp_path / "src",
-        output_dir=tmp_path / "out",
-        config_path=None,
-        config_overrides=None,
-        no_cleanup=False,
-        metadata=None,
-        ash_plugin_modules=[],
-    )
+    return {
+        "source_dir": tmp_path / "src",
+        "output_dir": tmp_path / "out",
+        "config_path": None,
+        "config_overrides": None,
+        "no_cleanup": False,
+        "metadata": None,
+        "ash_plugin_modules": [],
+    }
 
 
 class TestConstructorNoIO:
@@ -154,7 +152,7 @@ class TestInitializeIdempotent:
         out = tmp_path / "out"
 
         call_count = {"n": 0}
-        real_resolve = __import__(
+        __import__(
             "automated_security_helper.config.resolve_config",
             fromlist=["resolve_config"],
         ).resolve_config

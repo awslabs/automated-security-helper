@@ -5,7 +5,6 @@ PR#274 Bug #33: debug_echo returns None, passes tuple to logger.
 
 from unittest.mock import patch
 
-import pytest
 
 
 class TestDebugEchoReturnValue:

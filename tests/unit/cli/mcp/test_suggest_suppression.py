@@ -5,9 +5,7 @@
 
 import json
 from datetime import date, timedelta
-from pathlib import Path
 
-import pytest
 import yaml
 
 from automated_security_helper.cli.mcp_tools import mcp_suggest_suppression
@@ -16,14 +14,14 @@ from automated_security_helper.models.flat_vulnerability import FlatVulnerabilit
 
 
 def _make_vuln(
-    id: str = "bandit-B101-abc12345",
+    finding_id: str = "bandit-B101-abc12345",
     file_path: str = "src/app.py",
     rule_id: str = "B101",
     line_start: int = 42,
     line_end: int = 42,
 ) -> FlatVulnerability:
     return FlatVulnerability(
-        id=id,
+        id=finding_id,
         title="Use of assert detected",
         description="Use of assert statement detected",
         severity="MEDIUM",
@@ -48,7 +46,7 @@ def _make_aggregated_json(vulns: list) -> dict:
         scanner = v.scanner
         prefix = f"{scanner}-"
         # Strip the scanner prefix that from_additional_report will re-add
-        entry_id = v.id[len(prefix):] if v.id.startswith(prefix) else v.id
+        entry_id = v.id.removeprefix(prefix)
         if scanner not in findings_by_scanner:
             findings_by_scanner[scanner] = []
         findings_by_scanner[scanner].append({

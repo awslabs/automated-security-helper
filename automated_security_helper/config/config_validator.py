@@ -13,7 +13,6 @@ import yaml
 class ConfigValidationError(Exception):
     """Raised when configuration validation fails."""
 
-    pass
 
 
 class ConfigValidator:

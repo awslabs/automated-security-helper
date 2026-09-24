@@ -113,7 +113,7 @@ def get_tests_by_marker(marker: str) -> List[str]:
                 if test_file.endswith(".py"):
                     test_files.add(test_file)
 
-        return sorted(list(test_files))
+        return sorted(test_files)
 
     except subprocess.CalledProcessError:
         # If the pytest command fails, return an empty list
@@ -146,7 +146,7 @@ def get_tests_by_keyword(keyword: str) -> List[str]:
                 if test_file.endswith(".py"):
                     test_files.add(test_file)
 
-        return sorted(list(test_files))
+        return sorted(test_files)
 
     except subprocess.CalledProcessError:
         # If the pytest command fails, return an empty list

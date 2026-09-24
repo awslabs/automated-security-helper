@@ -13,12 +13,9 @@ Covers:
 
 from __future__ import annotations
 
-import tempfile
-from contextlib import suppress
 from pathlib import Path, PurePosixPath
-from typing import List, Optional
+from typing import List
 
-import pytest
 
 from automated_security_helper.models.core import AshSuppression, IgnorePathWithReason
 from automated_security_helper.schemas.sarif_schema_model import (

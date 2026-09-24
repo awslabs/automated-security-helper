@@ -36,7 +36,6 @@ from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     ScannerSeverityCount,
 )
-from automated_security_helper.schemas.sarif_schema_model import PropertyBag
 from automated_security_helper.utils.log import ASH_LOGGER
 
 

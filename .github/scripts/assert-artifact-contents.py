@@ -2058,7 +2058,7 @@ def run_self_test(stream) -> int:
     with tempfile.TemporaryDirectory() as tmp:
         # (1) Every planted payload must be caught, by the detector meant for it.
         for label, (member, data, expected_rule) in PLANTED_MEMBERS.items():
-            clean = {name: b"# ash\n" for name in clean_members_for(member)}
+            clean = dict.fromkeys(clean_members_for(member), b"# ash\n")
             # Surface chosen from the member itself. Most fixtures go in a zip,
             # because that is the shape of the artifact that actually gets
             # published; the ones whose point is the raw bytes of a path go in a
@@ -2117,7 +2117,7 @@ def run_self_test(stream) -> int:
             ("sdist-shaped", LEGITIMATE_SDIST_MEMBERS, "tar", _write_fixture_sdist),
         ):
             fixture = os.path.join(tmp, f"clean-{shape}.{extension}")
-            write_fixture(fixture, {n: b"# ash\n" for n in legitimate})
+            write_fixture(fixture, dict.fromkeys(legitimate, b"# ash\n"))
             try:
                 report = check_artifact(fixture)
             except ValueError as err:  # pragma: no cover - fixture is well formed

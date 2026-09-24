@@ -12,7 +12,6 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-import yaml
 
 from .core import (
     BaseBackend,

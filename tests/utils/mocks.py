@@ -16,7 +16,6 @@ from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Region,
 )
-from tests.utils.helpers import get_ash_temp_path
 
 
 def create_mock_finding(

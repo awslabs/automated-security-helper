@@ -11,7 +11,12 @@ from pathlib import Path
 from typing import Annotated, List, Optional
 
 import typer
-from rich import print
+# `print` shadows the builtin on purpose: this is rich's documented import
+# idiom, so every print() below renders markup and respects the console. The
+# fix A004 wants is an alias, which would mean rewriting every call in this
+# module for no behavior change -- and tests/unit/cli/mcp/test_stdout_jsonrpc_safety.py
+# reasons about this exact import form.
+from rich import print  # noqa: A004
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -334,7 +339,7 @@ def install_dependencies(
                 if not construction_failures
                 else (
                     "\n[yellow]Note:[/yellow] "
-                    + f"{len(construction_failures)} plugin(s) failed to load and are "
+                     f"{len(construction_failures)} plugin(s) failed to load and are "
                     "absent from that list: "
                     + ", ".join(sorted(o.name for o in construction_failures))
                 )

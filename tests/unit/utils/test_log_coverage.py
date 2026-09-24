@@ -2,11 +2,7 @@
 
 import json
 import logging
-import os
-import platform
-from pathlib import Path
-from unittest.mock import patch, MagicMock
-import pytest
+from unittest.mock import patch
 
 from automated_security_helper.utils.log import (
     addLoggingLevel,

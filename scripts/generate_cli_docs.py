@@ -15,7 +15,6 @@ import argparse
 import inspect
 import re
 import sys
-import textwrap
 from pathlib import Path
 from typing import Any, get_args, get_origin
 
@@ -335,7 +334,6 @@ def extract_mcp_tools() -> list[dict]:
     module = mcp_server
 
     # Get the mcp instance and its registered tools
-    mcp_instance = module.mcp
 
     # MCPServer stores tools internally - try to access them
     # But the simplest approach: scan module for async functions that we know are tools
@@ -446,8 +444,6 @@ def generate_cli_docs() -> str:
     from automated_security_helper.cli.image import build_ash_image_cli_command
     from automated_security_helper.cli.report import report_command
     from automated_security_helper.cli.merge import merge_command
-    from automated_security_helper.cli.config import config_app
-    from automated_security_helper.cli.inspect import inspect_app
     from automated_security_helper.cli.main import _mcp_wrapper, get_genai_guide
 
     # Get config subcommand functions

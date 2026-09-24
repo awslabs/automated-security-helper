@@ -382,7 +382,7 @@ class UVToolMixin:
         package_extras = self._get_tool_package_extras()
 
         tool_name = (
-            self.uv_tool_package_name if self.uv_tool_package_name else self.command
+            self.uv_tool_package_name or self.command
         )
 
         if package_extras:
@@ -536,7 +536,7 @@ class UVToolMixin:
             with_dependencies = self._get_tool_with_dependencies()
 
             tool_name = (
-                self.uv_tool_package_name if self.uv_tool_package_name else self.command
+                self.uv_tool_package_name or self.command
             )
 
             if package_extras:
@@ -857,7 +857,6 @@ class UVToolMixin:
         Returns:
             Version constraint string (e.g., ">=1.7.0", "==3.2.0") or None for latest
         """
-        pass
 
     def _get_tool_package_extras(self) -> Optional[List[str]]:
         """Get package extras for tool installation.

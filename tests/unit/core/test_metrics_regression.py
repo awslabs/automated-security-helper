@@ -7,7 +7,6 @@ PR#274 Bug #21: print() calls in unified_metrics.py (from low)
 
 import inspect
 
-import pytest
 
 
 # ---------------------------------------------------------------------------

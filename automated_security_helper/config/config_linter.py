@@ -200,7 +200,7 @@ class ConfigLinter:
         for issue in issues:
             if not issue.fixable:
                 continue
-            if issue.category in (LintCategory.SUPPRESSION_EXPIRED,):
+            if issue.category == LintCategory.SUPPRESSION_EXPIRED:
                 removal_issues.append(issue)
             else:
                 modification_issues.append(issue)
@@ -964,7 +964,7 @@ class ConfigLinter:
             canonical_input_forms: set[str] = set()
             for fname, finfo in segment_cls.model_fields.items():
                 alias = getattr(finfo, "alias", None)
-                canonical_input_forms.add(alias if alias else fname)
+                canonical_input_forms.add(alias or fname)
 
             for key in list(segment_data):
                 if key in canonical_input_forms:

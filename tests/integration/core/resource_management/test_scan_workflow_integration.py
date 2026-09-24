@@ -73,7 +73,7 @@ LEGACY_RESULT_KEYS = (
 
 def severity_counts(findings):
     """Bucket findings by severity the way extract_findings_summary does."""
-    counts = {bucket: 0 for bucket in SEVERITY_BUCKETS}
+    counts = dict.fromkeys(SEVERITY_BUCKETS, 0)
     for finding in findings:
         bucket = finding.get("severity", "").lower()
         if bucket in counts:
@@ -87,7 +87,7 @@ def write_aggregated_results(output_dir, scanner_results, generated_at=None):
     Only scanners whose status is PASSED or FAILED count as completed, so a
     scanner recorded as ERROR or MISSING here stays out of ``total_scanners``.
     """
-    totals = {bucket: 0 for bucket in SEVERITY_BUCKETS}
+    totals = dict.fromkeys(SEVERITY_BUCKETS, 0)
     actionable = 0
     for info in scanner_results.values():
         actionable += info.get("finding_count", 0)
@@ -737,7 +737,12 @@ class TestScanWorkflowIntegration:
         # Create scanner with malformed results
         scanner2_source = output_directory / "scanners" / "scanner2" / "source"
         scanner2_source.mkdir(parents=True)
-        with open(scanner2_source / "ASH.ScanResults.json", "w") as handle:
+        # Blocking I/O in an async test body. Deferred, not fixed: this is fixture
+        # setup, so stalling the test's own event loop has no effect on what is being
+        # asserted, and wrapping it in asyncio.to_thread would add concurrency noise to
+        # code whose job is to be obviously correct. Tracked with the source-side
+        # ASYNC230/ASYNC240 sites.
+        with open(scanner2_source / "ASH.ScanResults.json", "w") as handle:  # noqa: ASYNC230
             handle.write("{invalid json")
 
         # Check progress with malformed file

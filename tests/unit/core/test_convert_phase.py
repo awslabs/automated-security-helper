@@ -1,11 +1,10 @@
 """Tests for core/phases/convert_phase.py — covers ConvertPhase initialization and execution logic."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 import pytest
 
 from automated_security_helper.core.phases.convert_phase import ConvertPhase
-from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 
 AshAggregatedResults.model_rebuild()

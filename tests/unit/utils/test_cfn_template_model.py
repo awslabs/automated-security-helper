@@ -1,7 +1,5 @@
 """Tests for cfn_template_model utilities."""
 
-from pathlib import Path
-from unittest.mock import patch, mock_open
 
 import pytest
 

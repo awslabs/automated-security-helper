@@ -8,11 +8,7 @@ namespace the implementation does not read from. TestDeprecatedShim below keeps
 the shim itself covered.
 """
 
-import json
-import os
-from pathlib import Path
-from unittest.mock import patch, MagicMock
-import pytest
+from unittest.mock import patch
 
 from automated_security_helper.utils.sarif_field_analysis import (
     flatten_sarif_results,

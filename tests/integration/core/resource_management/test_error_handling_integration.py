@@ -241,11 +241,21 @@ class TestErrorHandlingIntegration:
         source_dir.mkdir()
 
         # Create invalid JSON file
-        with open(source_dir / "ASH.ScanResults.json", "w") as f:
+        # Blocking I/O in an async test body. Deferred, not fixed: this is fixture
+        # setup, so stalling the test's own event loop has no effect on what is being
+        # asserted, and wrapping it in asyncio.to_thread would add concurrency noise to
+        # code whose job is to be obviously correct. Tracked with the source-side
+        # ASYNC230/ASYNC240 sites.
+        with open(source_dir / "ASH.ScanResults.json", "w") as f:  # noqa: ASYNC230
             f.write("{invalid json")
 
         # Create aggregated results file with invalid format
-        with open(output_directory / "ash_aggregated_results.json", "w") as f:
+        # Blocking I/O in an async test body. Deferred, not fixed: this is fixture
+        # setup, so stalling the test's own event loop has no effect on what is being
+        # asserted, and wrapping it in asyncio.to_thread would add concurrency noise to
+        # code whose job is to be obviously correct. Tracked with the source-side
+        # ASYNC230/ASYNC240 sites.
+        with open(output_directory / "ash_aggregated_results.json", "w") as f:  # noqa: ASYNC230
             f.write("{invalid json")
 
         # Try to get scan results. get_scan_results takes only the output
@@ -285,7 +295,12 @@ class TestErrorHandlingIntegration:
 
         # Neither "sarif" nor "scanner_results" is present, which is exactly what
         # validate_result_structure rejects when it is given the raw document.
-        with open(output_directory / "ash_aggregated_results.json", "w") as f:
+        # Blocking I/O in an async test body. Deferred, not fixed: this is fixture
+        # setup, so stalling the test's own event loop has no effect on what is being
+        # asserted, and wrapping it in asyncio.to_thread would add concurrency noise to
+        # code whose job is to be obviously correct. Tracked with the source-side
+        # ASYNC230/ASYNC240 sites.
+        with open(output_directory / "ash_aggregated_results.json", "w") as f:  # noqa: ASYNC230
             json.dump(
                 {
                     "name": "ASH Scan Report",
