@@ -59,8 +59,8 @@ repos:
     #
     # THE BUMP HAS AN INTERPRETER PREREQUISITE, AND IT IS NOT FIXABLE IN THIS FILE
     #
-    # commitizen dropped Python 3.9 at 4.12.0: 4.8.3 declares requires-python
-    # ">=3.9", and every release from 4.12.0 on declares ">=3.10". pre-commit builds a
+    # commitizen dropped Python 3.9 at 4.11.0: 4.8.3 declares requires-python
+    # ">=3.9", and every release from 4.11.0 on declares ">=3.10". pre-commit builds a
     # `language: python` hook environment with the interpreter pre-commit is itself
     # running under, so a pre-commit installed against a system Python 3.9 fails this
     # hook at install time with
