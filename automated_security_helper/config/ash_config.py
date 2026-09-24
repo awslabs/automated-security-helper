@@ -127,6 +127,14 @@ class ConverterConfigSegment(BaseModel):
         arbitrary_types_allowed=True,
         use_enum_values=True,
         extra="allow",
+        # populate_by_name is per-model in pydantic v2, so setting it on
+        # AshConfig does not reach this segment. No converter declares an alias
+        # today, which is exactly why it belongs here: combined with
+        # extra="allow", an alias added later would make this model reject the
+        # Python field name silently -- accepting it as an extra key and
+        # rebuilding the real field from defaults -- rather than erroring. That
+        # is what happened to the aliased scanner and reporter fields below.
+        populate_by_name=True,
     )
 
     __pydantic_extra__: Dict[str, Any | ConverterPluginConfigBase] = {}
@@ -147,6 +155,16 @@ class ScannerConfigSegment(BaseModel):
         arbitrary_types_allowed=True,
         use_enum_values=True,
         extra="allow",
+        # Accept the Python field name as well as the alias. Every path that
+        # dumps a config and revalidates it -- `ash config update`,
+        # apply_config_overrides, the MCP runtime JSON-Patch -- dumps without
+        # by_alias, so the keys coming back are cdk_nag, cfn_nag,
+        # detect_secrets, npm_audit. Without this, extra="allow" swallowed each
+        # of those as an unknown key and rebuilt the aliased field from its
+        # defaults: a scanner the operator had disabled came back enabled and a
+        # scanner-level severity_threshold came back None, while unaliased
+        # siblings such as bandit were unaffected.
+        populate_by_name=True,
     )
 
     __pydantic_extra__: Dict[str, Any | ScannerPluginConfigBase] = {}
@@ -196,6 +214,11 @@ class ReporterConfigSegment(BaseModel):
         arbitrary_types_allowed=True,
         use_enum_values=True,
         extra="allow",
+        # Same reason as ScannerConfigSegment: gitlab_cyclonedx, flat_json,
+        # gitlab_sast and github_ghas are aliased, so a dump keyed by field name
+        # landed in __pydantic_extra__ and the real reporter config reverted to
+        # defaults on revalidation.
+        populate_by_name=True,
     )
 
     __pydantic_extra__: Dict[str, Any | ReporterPluginConfigBase] = {}
