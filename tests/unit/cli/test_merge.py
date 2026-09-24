@@ -1287,6 +1287,89 @@ class TestMergeCli:
         # reads as a complete scan.
         assert not (tmp_path / "merged" / RESULTS_FILE_NAME).exists()
 
+    def test_an_output_dir_equal_to_the_cwd_is_relocated(self, tmp_path, monkeypatch):
+        """``ash merge --output-dir .`` must not write over the tree it reports on.
+
+        ``ash scan`` has relocated a colliding ``--output-dir`` since before this
+        command existed, and says so loudly (``cli/scan.py``). ``ash merge`` took the
+        operator's value verbatim and built its ``PluginContext`` with
+        ``source_dir=Path.cwd()``, so the two coincided and ASH wrote its reports
+        into the directory it was treating as the source tree.
+
+        Worse than untidy. ``apply_suppressions_to_sarif`` drops findings whose
+        location resolves inside ``output_dir`` and outside its work directory; with
+        ``output_dir`` equal to ``source_dir``, that is every finding. The merged
+        report came out empty at exit 0, which is what a clean scan looks like.
+        """
+        workdir = tmp_path / "collector"
+        workdir.mkdir()
+        shard_paths = write_shards(tmp_path / "artifacts", build_shards(3))
+        monkeypatch.chdir(workdir)
+
+        args = []
+        for path in shard_paths:
+            args += ["--results", path]
+        args += ["--output-dir", ".", "--output-formats", "sarif"]
+
+        result = self._invoke(args)
+
+        assert result.exit_code == 2, result.output
+        relocated = workdir / ".ash" / "ash_output"
+        assert (relocated / RESULTS_FILE_NAME).is_file(), result.output
+        assert not (workdir / RESULTS_FILE_NAME).exists()
+        assert "output-dir" in result.output
+
+        # The findings survived. Without the relocation the suppression pass would
+        # have excluded every one of them and this would be an empty report at
+        # exit 0.
+        reloaded = AshAggregatedResults.model_validate_json(
+            (relocated / RESULTS_FILE_NAME).read_text(encoding="utf-8")
+        )
+        assert finding_keys(reloaded) == finding_keys(build_unsharded())
+
+    def test_an_output_dir_containing_the_cwd_is_relocated(self, tmp_path, monkeypatch):
+        """Containment, which ``ash scan``'s equality check does not cover.
+
+        ``--output-dir ..`` from a subdirectory reaches the same destructive state
+        without the two paths ever being equal, so the check has to be "equal to or
+        an ancestor of" rather than "equal to".
+        """
+        workdir = tmp_path / "collector" / "nested"
+        workdir.mkdir(parents=True)
+        shard_paths = write_shards(tmp_path / "artifacts", build_shards(3))
+        monkeypatch.chdir(workdir)
+
+        args = []
+        for path in shard_paths:
+            args += ["--results", path]
+        args += ["--output-dir", "..", "--output-formats", "sarif"]
+
+        result = self._invoke(args)
+
+        assert result.exit_code == 2, result.output
+        relocated = tmp_path / "collector" / ".ash" / "ash_output"
+        assert (relocated / RESULTS_FILE_NAME).is_file(), result.output
+        assert not (tmp_path / "collector" / RESULTS_FILE_NAME).exists()
+
+    def test_an_ordinary_output_dir_is_left_alone(self, tmp_path, monkeypatch):
+        """The control. A relocation that always fires would move every merge."""
+        workdir = tmp_path / "collector"
+        workdir.mkdir()
+        shard_paths = write_shards(tmp_path / "artifacts", build_shards(3))
+        monkeypatch.chdir(workdir)
+        output_dir = tmp_path / "merged"
+
+        args = []
+        for path in shard_paths:
+            args += ["--results", path]
+        args += ["--output-dir", str(output_dir), "--output-formats", "sarif"]
+
+        result = self._invoke(args)
+
+        assert result.exit_code == 2, result.output
+        assert (output_dir / RESULTS_FILE_NAME).is_file()
+        assert not (output_dir / ".ash").exists()
+
     def test_the_same_shards_merge_by_default(self, tmp_path):
         """The default half of the pair, through the same CLI path.
 
@@ -1517,6 +1600,137 @@ class TestRequireScannerCompletionResolution:
             _resolve_require_scanner_completion(as_loaded(shards), None)
             is AshConfig(project_name="x").fail_on_incomplete_scanners
         )
+
+
+class TestScannersNoShardIntendedToRunAreNamed:
+    """A scanner assigned to a shard, selected by none, ran nowhere -- say so.
+
+    ``assigned_scanners`` is taken before the selection filters, so it names
+    scanners the shard never intended to run. Each such scanner is recorded SKIPPED,
+    which ``_completed`` counts as a known outcome, so the merged report presents it
+    as deliberately skipped. Sometimes it was: a config-disabled scanner is skipped
+    on every shard and that is the operator's choice. Sometimes it was not: two jobs
+    given different ``--scanners`` values resolve the same registered set, agree on
+    the candidate set, produce a partition that unions to it, and one of them
+    silently dropped a scanner the other kept.
+
+    The provenance cannot tell those apart -- a shard knows nothing about scanners it
+    does not own -- so this is a disclosure and not a refusal. Refusing would break
+    every merge on a host where a scanner's config disables it, which is the trap
+    narrowing ``assigned_scanners`` would also have walked into.
+    """
+
+    @pytest.fixture
+    def capture(self, caplog):
+        """Route the module's logger at WARNING into caplog.
+
+        ASH's configured handler renders to a console and leaves nothing in
+        ``caplog.records``, so its handlers are swapped for pytest's capture
+        handlers for the duration.
+        """
+        import logging
+
+        from automated_security_helper.utils.log import ASH_LOGGER
+
+        saved_handlers = ASH_LOGGER.handlers
+        saved_propagate = ASH_LOGGER.propagate
+        capture_handlers = [
+            handler
+            for handler in saved_handlers
+            if isinstance(handler, type(caplog.handler))
+        ]
+        if caplog.handler not in capture_handlers:
+            capture_handlers.append(caplog.handler)
+        ASH_LOGGER.handlers = capture_handlers
+        ASH_LOGGER.propagate = False
+        caplog.set_level(logging.WARNING, logger=ASH_LOGGER.name)
+        try:
+            yield caplog
+        finally:
+            ASH_LOGGER.handlers = saved_handlers
+            ASH_LOGGER.propagate = saved_propagate
+
+    @staticmethod
+    def _select(shards, selections):
+        """Record each shard's intended selection, keyed by shard index."""
+        from automated_security_helper.cli.merge import read_shard_assignment
+
+        for index, selected in selections.items():
+            read_shard_assignment(shards[index]).selected_scanners = list(selected)
+        return shards
+
+    @staticmethod
+    def _notices(capture):
+        return [
+            record.getMessage()
+            for record in capture.records
+            if "no shard intended to run" in record.getMessage()
+        ]
+
+    def test_a_scanner_selected_by_no_shard_is_named(self, capture):
+        from automated_security_helper.cli.merge import merge_shard_results
+
+        shards = build_shards(3)
+        dropped = partition_scanners(SCANNERS, 0, 3)[0]
+        selections = {
+            index: [
+                name
+                for name in partition_scanners(SCANNERS, index, 3)
+                if name != dropped
+            ]
+            for index in range(3)
+        }
+
+        merge_shard_results(as_loaded(self._select(shards, selections)))
+
+        notices = self._notices(capture)
+        assert notices, [r.getMessage() for r in capture.records]
+        assert dropped in notices[0]
+
+    def test_a_fully_selected_set_is_quiet(self, capture):
+        """The control. A notice on every merge is noise, and noise gets filtered."""
+        from automated_security_helper.cli.merge import merge_shard_results
+
+        shards = build_shards(3)
+        selections = {
+            index: partition_scanners(SCANNERS, index, 3) for index in range(3)
+        }
+
+        merge_shard_results(as_loaded(self._select(shards, selections)))
+
+        assert self._notices(capture) == []
+
+    def test_shards_without_the_record_are_quiet(self, capture):
+        """The fixtures and every pre-upgrade results file are in this state.
+
+        With no selection recorded anywhere there is nothing to compare, and
+        inferring a hole from the absence would name every scanner on every merge of
+        an older fan-out's artifacts.
+        """
+        from automated_security_helper.cli.merge import merge_shard_results
+
+        merge_shard_results(as_loaded(build_shards(3)))
+
+        assert self._notices(capture) == []
+
+    def test_the_merge_still_succeeds(self, capture):
+        """A disclosure, not a refusal -- asserted rather than left implied."""
+        from automated_security_helper.cli.merge import merge_shard_results
+
+        shards = build_shards(3)
+        dropped = partition_scanners(SCANNERS, 1, 3)[0]
+        selections = {
+            index: [
+                name
+                for name in partition_scanners(SCANNERS, index, 3)
+                if name != dropped
+            ]
+            for index in range(3)
+        }
+
+        merged = merge_shard_results(as_loaded(self._select(shards, selections)))
+
+        assert finding_keys(merged) == finding_keys(build_unsharded())
 
 
 class TestCompletedClassifiesUnknownStatusesAsIncomplete:

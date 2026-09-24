@@ -171,7 +171,7 @@ from automated_security_helper.core.unified_metrics import (
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.loader import load_plugins
-from automated_security_helper.utils.log import get_logger
+from automated_security_helper.utils.log import ASH_LOGGER, get_logger
 
 #: The filename every ASH scan writes its aggregated results to. A ``--results``
 #: directory is searched for this name.
@@ -516,6 +516,63 @@ def _completed(entry: Any) -> bool:
     return status_value in _COMPLETE_SCANNER_STATUSES
 
 
+def _report_scanners_no_shard_selected(
+    shards: Sequence[Tuple[Path, AshAggregatedResults, ShardAssignment]],
+) -> None:
+    """Name the scanners assigned to a shard and intended by none of them.
+
+    A disclosure rather than a refusal, and the distinction is the whole design of
+    this function. Such a scanner ran on no shard, and the merged report presents it
+    as SKIPPED -- which ``_completed`` reads as a known outcome, so nothing above
+    objects. Two quite different causes produce that state and the provenance cannot
+    separate them: a scanner every shard's config disables, which is the operator's
+    choice, and a scanner one job's ``--scanners`` value dropped while the others
+    kept it, which is a coverage hole no existing check can see. A shard knows
+    nothing about scanners it does not own, so no cross-shard comparison can tell
+    which it was.
+
+    Refusing would therefore break merges on any host where a scanner is legitimately
+    disabled, which is the same trap that narrowing ``assigned_scanners`` would have
+    walked into. WARNING is the compromise: the merged report says SKIPPED either way,
+    and this line is the only place that says no shard asked.
+
+    Silent when no shard recorded a selection, which is every results file written
+    before ``selected_scanners`` existed. Inferring a hole from that absence would
+    name every scanner on every merge of an older fan-out's artifacts.
+
+    Args:
+        shards: Verified shard results, with assignments.
+    """
+    if not any(assignment.selected_scanners is not None for _, _, assignment in shards):
+        return
+
+    # _normalized here takes one name, unlike sharding._normalized which takes an
+    # iterable. Two functions, one name, different arities.
+    assigned: dict[str, int] = {}
+    selected: set[str] = set()
+    for _, _, assignment in shards:
+        for scanner in assignment.assigned_scanners:
+            assigned[_normalized(scanner)] = assignment.shard_index
+        for scanner in assignment.selected_scanners or []:
+            selected.add(_normalized(scanner))
+
+    unselected = sorted(set(assigned) - selected)
+    if not unselected:
+        return
+
+    detail = ", ".join(
+        f"{name} (assigned to shard {assigned[name]})" for name in unselected
+    )
+    ASH_LOGGER.warning(
+        f"{len(unselected)} scanner(s) were assigned to a shard but no shard "
+        f"intended to run them: {detail}. The merged report shows them SKIPPED, "
+        f"which is correct if a config disables them everywhere and misleading if "
+        f"one job's --scanners or --exclude-scanners value differed from the others' "
+        f"-- nothing in the shard results can tell those apart. Check that every job "
+        f"in the matrix was given the same scanner selection."
+    )
+
+
 def _verify_shard_contributions(
     shards: Sequence[Tuple[Path, AshAggregatedResults, ShardAssignment]],
 ) -> None:
@@ -718,6 +775,7 @@ def merge_shard_results(
     # make the output impossible to diff across CI runs.
     shards.sort(key=lambda entry: entry[2].shard_index)
     owner_by_scanner = _verify_scanner_union(shards)
+    _report_scanners_no_shard_selected(shards)
     if require_scanner_completion:
         _verify_shard_contributions(shards)
 
@@ -1095,7 +1153,7 @@ def merge_command(
         print(f"[red]Refusing to merge: {exc}[/red]")
         raise typer.Exit(1)
 
-    output_dir_path = Path(output_dir)
+    output_dir_path = _relocate_colliding_output_dir(Path(output_dir))
     output_dir_path.mkdir(parents=True, exist_ok=True)
 
     # The scan's own configuration, carried through the shard results, rather
@@ -1151,6 +1209,59 @@ def merge_command(
     _print_merge_summary(merged, merged_file, exit_code)
     if exit_code != 0:
         raise typer.Exit(exit_code)
+
+
+def _relocate_colliding_output_dir(output_dir: Path) -> Path:
+    """Move *output_dir* out of the way when it contains the directory being reported on.
+
+    ``ash scan`` has done this for its own ``--output-dir`` since before this command
+    existed, and says so loudly (``cli/scan.py``). ``ash merge`` took the operator's
+    value verbatim, and it builds its ``PluginContext`` with
+    ``source_dir=Path.cwd()``, so ``ash merge --output-dir .`` made the two the same
+    directory and ASH wrote its reports into the tree it was treating as the source.
+
+    The consequence is not untidiness. ``utils.sarif_utils.apply_suppressions_to_sarif``
+    excludes findings whose location resolves inside ``output_dir`` and outside its
+    work directory, on the grounds that those are reports ASH wrote rather than
+    findings about the scanned tree. When ``output_dir`` is ``source_dir`` or an
+    ancestor of it, that describes every finding: on three shards carrying five
+    findings between them, the merged report came out ``Findings: 0 | Actionable: 0``
+    at exit 0, which is what a clean scan looks like. To reproduce, disable the
+    ancestor guard in ``apply_suppressions_to_sarif`` and run
+    ``TestMergeCli::test_an_output_dir_equal_to_the_cwd_is_relocated``. That function
+    now declines the exclusion in this configuration and says so, but declining a
+    guard is a second-best outcome -- relocating means the guard keeps working.
+
+    Equal-to OR an ancestor-of, where ``ash scan`` checks only equality.
+    ``--output-dir ..`` from a subdirectory reaches the same state without the paths
+    ever being equal, and an ancestor is worse than equality rather than milder.
+
+    Relocated to ``<given>/.ash/ash_output``, the same move and the same subpath
+    ``ash scan`` uses, which lands strictly inside the given directory and so is an
+    ancestor of nothing. Relocated rather than refused because the operator's intent
+    is unambiguous and recoverable -- they wanted the artifacts here -- and a refusal
+    would fail a pipeline over a path choice.
+
+    Args:
+        output_dir: The ``--output-dir`` value as given.
+
+    Returns:
+        The directory to write to: *output_dir* unchanged in the ordinary case.
+    """
+    resolved = output_dir.resolve()
+    cwd = Path.cwd().resolve()
+    # is_relative_to is true for equal paths, so this covers the collision case as
+    # well as containment.
+    if not cwd.is_relative_to(resolved):
+        return output_dir
+
+    relocated = output_dir.joinpath(".ash", "ash_output")
+    print(
+        f"[bold yellow]output-dir has been adjusted to the following to avoid "
+        f"collisions and potential impact to the reported tree: "
+        f"{Path(relocated).as_posix()}[/bold yellow]"
+    )
+    return relocated
 
 
 def _resolve_require_scanner_completion(

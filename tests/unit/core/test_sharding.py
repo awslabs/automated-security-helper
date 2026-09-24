@@ -409,3 +409,118 @@ class TestCandidateSetBackwardCompatibility:
             {"shard_index": 0, "shard_count": 1, "assigned_scanners": ["bandit"]}
         )
         assert restored.candidate_scanners is None
+
+
+class TestSelectedScannersIsVerified:
+    """The selection record, and the one thing about it that can be refused.
+
+    ``selected_scanners`` exists because ``assigned_scanners`` is taken before the
+    selection filters and so over-claims: ``--scanners bandit`` leaves grype
+    assigned to a shard that never intended to run it. Most of what that record
+    makes visible cannot be turned into a refusal, because a scanner assigned and
+    selected nowhere is equally a scanner every shard's config disables -- which is
+    legitimate, and indistinguishable from the provenance alone.
+
+    One thing can. A shard that selected a scanner it does not own means the shard
+    exclusion did not take effect on that executor, so the scanner ran on more than
+    one shard and its findings are counted twice. That is the harm the overlap check
+    exists to prevent, and the overlap check cannot see it: the overlap is in the
+    selections while the assignments are still disjoint.
+    """
+
+    def _shard(self, index, count, assigned, selected, candidates=SCANNERS):
+        return ShardAssignment(
+            shard_index=index,
+            shard_count=count,
+            assigned_scanners=list(assigned),
+            candidate_scanners=sorted(set(candidates)),
+            selected_scanners=list(selected),
+        )
+
+    def _healthy(self, count=2, **overrides):
+        shards = [
+            self._shard(
+                i,
+                count,
+                partition_scanners(SCANNERS, i, count),
+                partition_scanners(SCANNERS, i, count),
+            )
+            for i in range(count)
+        ]
+        for index, selected in overrides.items():
+            shards[int(index)].selected_scanners = list(selected)
+        return shards
+
+    def test_a_healthy_set_is_accepted(self):
+        """The control. Without it every assertion below could hold at always-raise."""
+        verify_shard_coverage(self._healthy())
+
+    def test_a_narrowed_selection_is_not_a_refusal(self):
+        """``--scanners`` and a config-disabled scanner must still merge.
+
+        The whole reason ``assigned_scanners`` was not narrowed instead: a selection
+        smaller than the assignment is the ordinary shape of a narrowed or partly
+        disabled run, and refusing it would break merges with nothing wrong.
+        """
+        verify_shard_coverage(self._healthy(**{"0": ["bandit"]}))
+
+    def test_an_empty_selection_is_not_a_refusal(self):
+        """A shard whose every scanner the config disables intends to run nothing."""
+        verify_shard_coverage(self._healthy(**{"0": []}))
+
+    def test_selecting_a_scanner_another_shard_owns_is_refused(self):
+        shards = self._healthy()
+        stolen = shards[1].assigned_scanners[0]
+        shards[0].selected_scanners = shards[0].assigned_scanners + [stolen]
+
+        with pytest.raises(ShardCoverageError) as excinfo:
+            verify_shard_coverage(shards)
+        assert stolen in str(excinfo.value)
+
+    def test_the_existing_checks_cannot_see_that_on_their_own(self):
+        """Proves the new check is what catches it, not a pre-existing one.
+
+        The same shards with the selections dropped: the assignments are disjoint,
+        the indices are complete and the candidate sets agree, so everything that
+        was already here passes.
+        """
+        shards = self._healthy()
+        stolen = shards[1].assigned_scanners[0]
+        shards[0].selected_scanners = shards[0].assigned_scanners + [stolen]
+        for shard in shards:
+            shard.selected_scanners = None
+
+        verify_shard_coverage(shards)
+
+    def test_a_mixed_set_is_not_refused_for_the_absence_alone(self):
+        """Unlike ``candidate_scanners``, a partial record here is tolerated.
+
+        The two fields carry different risks. A shard without a candidate set could
+        be hiding the union hole, so a mixed set is refused. A shard without a
+        selection record is only less informative: the subset check has nothing to
+        say about it, and refusing would stop a mid-upgrade fan-out merging at all
+        over a field that cannot hide anything.
+        """
+        shards = self._healthy()
+        shards[0].selected_scanners = None
+
+        verify_shard_coverage(shards)
+
+    def test_the_field_round_trips_through_json(self):
+        """``ash merge`` reads these back off disk, so serialization is the contract."""
+        original = ShardAssignment(
+            shard_index=0,
+            shard_count=2,
+            assigned_scanners=["bandit", "grype"],
+            candidate_scanners=["bandit", "grype"],
+            selected_scanners=["bandit"],
+        )
+        restored = ShardAssignment.model_validate_json(original.model_dump_json())
+        assert restored.selected_scanners == ["bandit"]
+
+    def test_an_absent_selection_key_validates_to_none(self):
+        """A results file written by an older ASH has no such key at all."""
+        restored = ShardAssignment.model_validate(
+            {"shard_index": 0, "shard_count": 1, "assigned_scanners": ["bandit"]}
+        )
+        assert restored.selected_scanners is None

@@ -17120,7 +17120,7 @@
     },
     "ShardAssignment": {
       "additionalProperties": false,
-      "description": "What one shard was actually asked to run.\n\nRecorded on each shard's results so ``ash merge`` can verify coverage from the\nresult files alone, without being told out of band how many shards to expect.\nTaking the expected count as a merge argument would mean an operator who\nchanged their matrix in one place and not the other gets a silently short\nmerge.\n\n``assigned_scanners`` is the assignment, not the outcome. A scanner listed\nhere that failed or was disabled by config still appears; the scanner's own\nstatus in the results says what became of it. Conflating the two would make a\nlegitimately-disabled scanner look like a coverage gap.\n\n``candidate_scanners`` is what makes coverage verifiable at all. Recording\nonly the assignment lets every shard be internally consistent while the union\nhas a hole: at ``shard_count=2``, executor 0 resolving ``{a,b,c,d}`` and\ntaking ``[a,c]`` alongside executor 1 resolving ``{a,b,c}`` and taking ``[b]``\nagrees on the count, has complete indices, no duplicates and no overlap. Every\ncheck in :func:`verify_shard_coverage` passed and ``d`` was never scanned,\nbecause nothing recorded what the partition was taken *from*.",
+      "description": "What one shard was actually asked to run.\n\nRecorded on each shard's results so ``ash merge`` can verify coverage from the\nresult files alone, without being told out of band how many shards to expect.\nTaking the expected count as a merge argument would mean an operator who\nchanged their matrix in one place and not the other gets a silently short\nmerge.\n\n``assigned_scanners`` is the assignment, not the outcome. A scanner listed\nhere that failed or was disabled by config still appears; the scanner's own\nstatus in the results says what became of it. Conflating the two would make a\nlegitimately-disabled scanner look like a coverage gap.\n\n``candidate_scanners`` is what makes coverage verifiable at all. Recording\nonly the assignment lets every shard be internally consistent while the union\nhas a hole: at ``shard_count=2``, executor 0 resolving ``{a,b,c,d}`` and\ntaking ``[a,c]`` alongside executor 1 resolving ``{a,b,c}`` and taking ``[b]``\nagrees on the count, has complete indices, no duplicates and no overlap. Every\ncheck in :func:`verify_shard_coverage` passed and ``d`` was never scanned,\nbecause nothing recorded what the partition was taken *from*.\n\n``selected_scanners`` closes the remaining gap, and it is a third field rather\nthan a narrowing of ``assigned_scanners`` for a reason that is easy to get\nbackwards. The partition is taken over every registered scanner, before the\nselection filters, so ``assigned_scanners`` names scanners the shard never\nintended to run -- ``--scanners bandit`` leaves grype assigned and SKIPPED. That\nbreadth reads like the defect, and narrowing it looks like the fix, but two\nreaders depend on it. ``verify_shard_coverage``'s ``uncovered`` check compares\nthe union of the assignments against the candidate set, so a narrowed assignment\nwould leave every config-disabled and platform-declined scanner uncovered and\nrefuse merges with nothing wrong with them. ``cli.merge._verify_shard_contributions``\nreads it as ownership, and would stop holding a shard to the scanners it was\ngiven. Recording intent alongside the assignment keeps both readers correct and\nmakes the over-claim recoverable: a scanner assigned, not selected here, and not\nselected on any other shard ran nowhere, and before this field there was nothing\nin the provenance that said so.",
       "properties": {
         "assigned_scanners": {
           "description": "Scanner names this shard was responsible for running.",
@@ -17145,6 +17145,22 @@
           "default": null,
           "description": "Every scanner this executor resolved before partitioning -- the set assigned_scanners was taken from. None on results written before this field existed, in which case the union check is skipped.",
           "title": "Candidate Scanners"
+        },
+        "selected_scanners": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The subset of assigned_scanners this shard actually intended to run, after the --scanners allowlist, --exclude-scanners and each scanner's own enabled flag. A third field rather than a narrowing of assigned_scanners, because that field's breadth is load-bearing for two existing readers -- see the class docstring. Intent and not outcome: a scanner whose tool is absent stays here, because 'nobody asked for it' and 'nobody could run it' route to different people. None on results written before this field existed.",
+          "title": "Selected Scanners"
         },
         "shard_count": {
           "description": "Total number of shards the scan was split across.",
@@ -21361,6 +21377,12 @@
           "title": "Invalid Config",
           "type": "boolean"
         },
+        "no_scanner_ran": {
+          "default": false,
+          "description": "Whether this project recorded scanners and not one of them reached a verdict -- every entry SKIPPED. A separate fact from incomplete_scanners rather than a member of it, because SKIPPED has to be tolerated one entry at a time: it is how --exclude-scanners and another shard's ownership are recorded. So the per-entry list is empty here while the project measured nothing. False for a project that recorded no scanners at all, which is what a convert-only run legitimately produces. Populated whether or not the completeness gate is on, for the same reason incomplete_scanners is.",
+          "title": "No Scanner Ran",
+          "type": "boolean"
+        },
         "output_path": {
           "description": "Where this project's own subtree lives, relative to the workspace output directory.",
           "minLength": 1,
@@ -21395,7 +21417,7 @@
         },
         "scan_incomplete": {
           "default": false,
-          "description": "Whether the incomplete scanners above fail this project. Stored rather than derived from the list for the same reason exceeds_threshold is: fail_on_incomplete_scanners can be off, in which case a project has scanners that did not run and still passes.",
+          "description": "Whether the two completeness facts above fail this project -- the incomplete scanners it names, or having run no scanner at all. Stored rather than derived from them for the same reason exceeds_threshold is: fail_on_incomplete_scanners can be off, in which case a project has scanners that did not run and still passes.",
           "title": "Scan Incomplete",
           "type": "boolean"
         },

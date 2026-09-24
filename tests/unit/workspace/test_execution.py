@@ -727,6 +727,106 @@ class TestScannerCompleteness:
         assert outcome.payload.projects[0].incomplete_scanners == []
         assert outcome.exit_code == WorkspaceExitCode.SUCCESS
 
+    def test_a_project_whose_every_scanner_was_skipped_does_not_report_success(
+        self, tmp_path
+    ):
+        """The set-level half of the same gate, which the per-entry pass cannot see.
+
+        SKIPPED has to be tolerated one entry at a time, because that is how an
+        exclusion and another shard's ownership are recorded. So a project whose
+        *every* entry is SKIPPED cleared the per-entry pass having measured nothing:
+        ``incomplete_scanners == []``, ``scan_incomplete == False``, COMPLETED, zero
+        actionable findings, workspace exit 0. ``ash --source-dir P`` on the same
+        project exits 1 through ``_compute_exit_code``'s own set-level check.
+
+        Reachable without sharding and without operator error beyond one misspelled
+        word: an allowlist that resolves to a scanner this platform declines leaves
+        every entry SKIPPED.
+        """
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        FakeOrchestrator.behaviour["api"] = {
+            "sarif": _sarif(count=0),
+            "scanner_results": {
+                "bandit": _scanner("SKIPPED", excluded=True),
+                "cfn-nag": _scanner("SKIPPED", excluded=True),
+            },
+        }
+        outcome = _run(tmp_path, plan)
+        entry = outcome.payload.projects[0]
+
+        # Control: nothing was found and no single entry is incomplete, so only the
+        # set-level question can move this verdict.
+        assert entry.actionable_finding_count == 0
+        assert entry.exceeds_threshold is False
+        assert entry.incomplete_scanners == []
+
+        assert entry.no_scanner_ran is True
+        assert entry.scan_incomplete is True
+        assert outcome.exit_code == WorkspaceExitCode.INTERNAL_ERROR
+
+    def test_one_scanner_that_ran_is_enough_to_keep_a_narrowed_project_passing(
+        self, tmp_path
+    ):
+        """The control for the case above, at the boundary that decides it.
+
+        ``ash scan --scanners bandit`` inside a workspace leaves every other entry
+        SKIPPED, and that is a scan which did what it was asked. Without this the
+        set-level gate could be stuck at always-fail -- which would fail every
+        narrowed workspace run -- and the test above would still pass.
+        """
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        FakeOrchestrator.behaviour["api"] = {
+            "sarif": _sarif(count=0),
+            "scanner_results": {
+                "bandit": _scanner("PASSED"),
+                "cfn-nag": _scanner("SKIPPED", excluded=True),
+            },
+        }
+        outcome = _run(tmp_path, plan)
+        entry = outcome.payload.projects[0]
+
+        assert entry.no_scanner_ran is False
+        assert entry.scan_incomplete is False
+        assert outcome.exit_code == WorkspaceExitCode.SUCCESS
+
+    def test_turning_the_gate_off_keeps_the_all_skipped_disclosure(self, tmp_path):
+        """Same shape as ``incomplete_scanners``: the fact stays, the verdict moves.
+
+        ``no_scanner_ran`` is recorded unconditionally so an operator who turned the
+        gate off can still see that the project measured nothing; only
+        ``scan_incomplete`` follows the flag.
+        """
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        FakeOrchestrator.behaviour["api"] = {
+            "sarif": _sarif(count=0),
+            "scanner_results": {"bandit": _scanner("SKIPPED", excluded=True)},
+        }
+        outcome = _run(tmp_path, plan, fail_on_incomplete_scanners=False)
+        entry = outcome.payload.projects[0]
+
+        assert entry.no_scanner_ran is True
+        assert entry.scan_incomplete is False
+        assert outcome.exit_code == WorkspaceExitCode.SUCCESS
+
+    def test_a_project_that_recorded_no_scanners_at_all_is_not_flagged(self, tmp_path):
+        """An empty scanner set is a different claim, and ``--phases convert`` makes one.
+
+        ``no_scanner_ran`` answers False for an empty set deliberately, so that a
+        phase-limited run does not become an error. Pinned here because a mirrored
+        implementation that tested emptiness would fail every convert-only project.
+        """
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        FakeOrchestrator.behaviour["api"] = {
+            "sarif": _sarif(count=0),
+            "scanner_results": {},
+        }
+        outcome = _run(tmp_path, plan)
+        entry = outcome.payload.projects[0]
+
+        assert entry.no_scanner_ran is False
+        assert entry.scan_incomplete is False
+        assert outcome.exit_code == WorkspaceExitCode.SUCCESS
+
     def test_the_incomplete_project_is_named_in_the_written_file(self, tmp_path):
         """A consumer reads the file, not the return value."""
         _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))

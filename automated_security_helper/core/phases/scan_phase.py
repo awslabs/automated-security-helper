@@ -388,6 +388,12 @@ class ScanPhase(EnginePhase):
             # Initialize lists to track scanner states for validation
             excluded_scanner_names = []
             dependency_error_scanners = {}
+            # Scanners this run INTENDED to execute, recorded for the shard
+            # provenance below. Collected here rather than derived from
+            # enabled_scanner_names because those two sets answer different
+            # questions: this one stops at the selection filters, so a scanner whose
+            # tool turned out to be absent is still in it.
+            selected_scanner_names: List[str] = []
 
             # Process scanners
             if scanner_instances:
@@ -510,6 +516,18 @@ class ScanPhase(EnginePhase):
                                 excluded_scanner_names,
                             )
                             continue
+
+                        # Past every filter that expresses what the operator asked
+                        # for -- the --exclude-scanners check above, the --scanners
+                        # allowlist and the scanner's own enabled flag -- so this is
+                        # the last point at which "intended to run" is still true of
+                        # a scanner whose tool may turn out to be missing. Recorded
+                        # here and not after the dependency, platform and
+                        # Python-only checks below for that reason: a selection that
+                        # dropped a MISSING scanner would make the merge-time
+                        # question "did any shard ask for this" indistinguishable
+                        # from "could any shard run it".
+                        selected_scanner_names.append(display_name)
 
                         # A scanner that declares this PLATFORM unsupported is SKIPPED,
                         # not MISSING, and this has to be asked before the dependency
@@ -711,6 +729,21 @@ class ScanPhase(EnginePhase):
                         ASH_LOGGER.debug(f"Stack trace: {traceback.format_exc()}")
             else:
                 ASH_LOGGER.warning("No scanner classes found!")
+
+            # Completed after the filter loop, because the selection is not known
+            # before it. The assignment itself has to be recorded before the loop --
+            # it is applied as an exclusion the loop reads -- so the two halves of
+            # the provenance are necessarily written at different points, and this is
+            # the second half rather than a second record.
+            #
+            # Mutated rather than rebuilt: the object is read by the execution engine
+            # only after this method returns, and rebuilding it would duplicate the
+            # shard_index/shard_count/candidate_scanners arguments, which is one more
+            # place for the two constructions to drift apart.
+            if self._shard_assignment is not None:
+                self._shard_assignment.selected_scanners = sorted(
+                    set(selected_scanner_names)
+                )
 
             # Every registered scanner has to leave this loop accounted for.
             #

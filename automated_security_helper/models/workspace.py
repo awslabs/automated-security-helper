@@ -385,13 +385,32 @@ class WorkspaceProjectResult(BaseModel):
             ),
         ),
     ]
+    no_scanner_ran: Annotated[
+        bool,
+        Field(
+            False,
+            description=(
+                "Whether this project recorded scanners and not one of them reached "
+                "a verdict -- every entry SKIPPED. A separate fact from "
+                "incomplete_scanners rather than a member of it, because SKIPPED has "
+                "to be tolerated one entry at a time: it is how --exclude-scanners "
+                "and another shard's ownership are recorded. So the per-entry list "
+                "is empty here while the project measured nothing. False for a "
+                "project that recorded no scanners at all, which is what a "
+                "convert-only run legitimately produces. Populated whether or not "
+                "the completeness gate is on, for the same reason "
+                "incomplete_scanners is."
+            ),
+        ),
+    ] = False
     scan_incomplete: Annotated[
         bool,
         Field(
             False,
             description=(
-                "Whether the incomplete scanners above fail this project. Stored "
-                "rather than derived from the list for the same reason "
+                "Whether the two completeness facts above fail this project -- the "
+                "incomplete scanners it names, or having run no scanner at all. "
+                "Stored rather than derived from them for the same reason "
                 "exceeds_threshold is: fail_on_incomplete_scanners can be off, in "
                 "which case a project has scanners that did not run and still "
                 "passes."
