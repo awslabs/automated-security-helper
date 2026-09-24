@@ -273,16 +273,33 @@ class TestResolveLogLevel:
 
 @pytest.fixture
 def container_result(monkeypatch):
-    """Install the CompletedProcess that run_ash_container will appear to return."""
+    """Install the CompletedProcess that run_ash_container will appear to return.
 
-    def install(returncode=0, stdout="", stderr=""):
+    ``results_content`` is written to ``<output_dir>/ash_aggregated_results.json`` while
+    the fake container "runs". It has to be written there rather than by the test before
+    the call, because ``_run_container_mode`` now removes any results file that predates
+    the invocation -- a pre-seeded file is exactly what a previous run leaves behind, and
+    the whole point of the removal is that the two cannot be told apart afterwards.
+    """
+
+    def install(returncode=0, stdout="", stderr="", results_content=None):
         result = create_completed_process(
             args=["docker", "run"],
             returncode=returncode,
             stdout=stdout,
             stderr=stderr,
         )
-        monkeypatch.setattr(ras, "run_ash_container", lambda **kwargs: result)
+
+        def fake_run_ash_container(**kwargs):
+            if results_content is not None:
+                output_dir = Path(kwargs["output_dir"])
+                output_dir.mkdir(parents=True, exist_ok=True)
+                output_dir.joinpath("ash_aggregated_results.json").write_text(
+                    results_content, encoding="utf-8"
+                )
+            return result
+
+        monkeypatch.setattr(ras, "run_ash_container", fake_run_ash_container)
         return result
 
     return install
@@ -293,11 +310,8 @@ class TestRunContainerModeChangedFiles:
         self, container_result, logger, tmp_path, capsys
     ):
         """The container has no git history for the host's base ref."""
-        container_result(returncode=0)
-        results_file = tmp_path / "out" / "ash_aggregated_results.json"
-        results_file.parent.mkdir(parents=True)
-        results_file.write_text(
-            AshAggregatedResults().model_dump_json(), encoding="utf-8"
+        container_result(
+            returncode=0, results_content=AshAggregatedResults().model_dump_json()
         )
         opts = _opts(tmp_path, tmp_path / "out", changed_files_only=True)
 
@@ -341,15 +355,14 @@ class TestRunContainerModeResultsFile:
     def test_a_valid_results_file_is_parsed_and_returned(
         self, container_result, logger, tmp_path
     ):
-        container_result(returncode=0)
-        output_dir = tmp_path / "out"
-        output_dir.mkdir()
-        (output_dir / "ash_aggregated_results.json").write_text(
-            AshAggregatedResults(
+        container_result(
+            returncode=0,
+            results_content=AshAggregatedResults(
                 additional_reports={"marker": "round-tripped"}
             ).model_dump_json(),
-            encoding="utf-8",
         )
+        output_dir = tmp_path / "out"
+        output_dir.mkdir()
         opts = _opts(tmp_path, output_dir)
 
         results = _run_container_mode(opts, logger)
@@ -360,12 +373,9 @@ class TestRunContainerModeResultsFile:
     def test_an_unparseable_results_file_exits_one(
         self, container_result, logger, tmp_path
     ):
-        container_result(returncode=0)
+        container_result(returncode=0, results_content="{ not valid json")
         output_dir = tmp_path / "out"
         output_dir.mkdir()
-        (output_dir / "ash_aggregated_results.json").write_text(
-            "{ not valid json", encoding="utf-8"
-        )
         opts = _opts(tmp_path, output_dir)
 
         with pytest.raises(SystemExit) as excinfo:
@@ -396,12 +406,13 @@ class TestRunContainerModeResultsFile:
     def test_debug_reports_the_container_command_and_stream_sizes(
         self, container_result, logger, tmp_path, capsys
     ):
-        container_result(returncode=0, stdout="abcde")
+        container_result(
+            returncode=0,
+            stdout="abcde",
+            results_content=AshAggregatedResults().model_dump_json(),
+        )
         output_dir = tmp_path / "out"
         output_dir.mkdir()
-        (output_dir / "ash_aggregated_results.json").write_text(
-            AshAggregatedResults().model_dump_json(), encoding="utf-8"
-        )
         opts = _opts(tmp_path, output_dir, debug=True)
 
         _run_container_mode(opts, logger)

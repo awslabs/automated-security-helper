@@ -68,6 +68,120 @@ DEFAULT_MAX_COMMENT_CHARS = 10000
 
 TRUE_VALUES = {"1", "true", "yes", "on"}
 
+#: Scan options an operator may not set through ASH_SCAN_EXTRA_ARGS. Each one can
+#: change this gate's verdict, so the gate decides them and the environment does not.
+#:
+#: Two kinds are listed together, because they produce the same failure:
+#:
+#: 1.  Options this gate passes itself, in `run_scan` below. ASH_SCAN_EXTRA_ARGS used
+#:     to be appended after the whole argv, and `click` resolves a repeated option to
+#:     its LAST occurrence -- so putting --no-fail-on-incomplete-scanners in that
+#:     variable turned off the one flag hardcoded precisely so that it could not be
+#:     turned off. Measured against the real CLI rather than reasoned about: with the
+#:     negation appended, ctx.params["fail_on_incomplete_scanners"] resolves to False.
+#:
+#: 2.  Options that narrow what gets scanned, or move where the verdict comes from.
+#:     These need no repetition to do damage, because the gate never passes them --
+#:     and they are the more dangerous half, because --fail-on-incomplete-scanners
+#:     covers only scanners that were SELECTED. A scanner left out of the selection is
+#:     recorded SKIPPED rather than MISSING, and SKIPPED is on the completeness
+#:     allowlist. The help text of --fail-on-incomplete-scanners in
+#:     automated_security_helper/cli/scan.py says so, and
+#:     automated_security_helper/core/phases/scan_phase.py is where an unselected
+#:     scanner is recorded that way.
+#:
+#:     So `--scanners bandit` switches the completeness gate off more thoroughly than
+#:     the negation in (1): checkov, semgrep and cdk-nag are not merely ungated, they
+#:     are absent from the severity table this handler comments, and the run exits 0.
+#:     Exit 0 is outcome "pass", and "pass" is the one outcome that APPROVEs.
+#:
+#: Both polarities are listed wherever ASH declares a negation. A redundant
+#: --fail-on-incomplete-scanners changes nothing today, but accepting it establishes
+#: this variable as a place these values get set, and the next edit to it is a
+#: negation nobody re-reviews. "The gate decides these" is also a rule an operator can
+#: check by reading; "the gate decides these unless you happen to agree with it" is
+#: not.
+#:
+#: Presentation and diagnostic flags are deliberately absent, so an operator keeps the
+#: extra args they have a real use for: --offline, --output-formats and its aliases,
+#: --strategy, --cleanup, --inspect, --verbose, --debug, --quiet, --log-level,
+#: --progress, --color, --show-summary, --simple, --compact-report. --offline was
+#: checked rather than assumed: it does not drop the npm/pnpm/yarn audit scanners, it
+#: passes `--offline` through to the tool and keeps going, so those scanners still run
+#: and still report a status the completeness gate covers. --ignore-suppressions is
+#: absent for the same kind of reason -- it makes suppressed findings actionable, so
+#: it can only report more, and its negation is ASH's own default.
+#:
+#: Every spelling ASH accepts is listed, enumerated from the real click command rather
+#: than derived by hand, because a near-miss reads like a closed hole and is not one.
+#: `ash scan` sets ignore_unknown_options, so a token this set does not name is
+#: collected into ctx.args instead of being refused, and `click` does not accept
+#: abbreviated long options -- verified against click 8.3.3 and typer 0.27.2, where
+#: --no-fail-on-incomplete leaves the parameter at its default. The --opt=value form
+#: is split on the first = in `_is_gate_owned_option`, because `click` accepts it for
+#: options that take a value, --min-severity among them.
+GATE_OWNED_SCAN_OPTIONS = frozenset(
+    {
+        # Passed by this gate, so a repeat here would resolve last and win.
+        "--source-dir",
+        "--output-dir",
+        "--min-severity",
+        "--fail-on-findings",
+        "--no-fail-on-findings",
+        "--fail-on-incomplete-scanners",
+        "--no-fail-on-incomplete-scanners",
+        # Narrow the scanner selection, which is what the completeness gate is scoped
+        # to. --mode is here for the same reason and not as a container switch: the
+        # 'precommit' preset replaces the selection with a fixed list of fast
+        # scanners.
+        "--scanners",
+        "--exclude-scanners",
+        "--python-only",
+        "--python-based-scanners-only",
+        "--python-based-plugins-only",
+        "--full",
+        "--all-enabled-scanners",
+        "--all-enabled-plugins",
+        "--mode",
+        # One shard of a split scan runs a disjoint subset of the scanners and records
+        # the others as excluded. Sharding is recombinable by `ash merge`; this gate
+        # does not merge, so a shard here is just a partial scan reporting itself as a
+        # whole one.
+        "--shard-index",
+        "--shard-count",
+        # Replace the configuration that the selection and the thresholds come from. A
+        # config file that disables every scanner is the same hole as --scanners with
+        # one name, and --config-overrides reaches the same settings key by key.
+        "--config",
+        "--config-overrides",
+        # Skip the scan phase, or answer from a results file rather than from a scan.
+        # --use-existing fails closed today only because `clone_source` clears
+        # WORK_ROOT on every invocation, so the file it would read cannot exist -- an
+        # accident of a cleanup that is there for an unrelated reason.
+        "--phases",
+        "--use-existing",
+        "--no-use-existing",
+        # Filter the findings down to a git diff before the exit code is computed, so
+        # findings elsewhere in the tree stop counting. The gate clones full branch
+        # history, so --base-ref has real refs to point at.
+        "--changed-files-only",
+        "--base-ref",
+    }
+)
+
+#: Short aliases of the options above, matched by PREFIX rather than by equality.
+#:
+#: `click` accepts a short option's value attached with no separator, which the exact
+#: match used for the long spellings cannot see: `-c/tmp/none.yaml` resolves --config
+#: to /tmp/none.yaml, and splitting that token on = leaves it whole. Measured against
+#: the real CLI, not assumed.
+#:
+#: -c is the only short alias any refused option has. The others ASH declares belong
+#: to options that are not refused, and no ASH option spelling other than --config's
+#: begins with the two characters "-c" -- so the prefix rule has nothing to collide
+#: with, and a long option is unaffected because "--config" does not start with "-c".
+GATE_OWNED_SHORT_OPTIONS = frozenset({"-c"})
+
 
 def _env_str(name: str, default: str) -> str:
     raw = os.environ.get(name, "").strip()
@@ -102,6 +216,56 @@ def _run(argv: list[str], cwd: pathlib.Path | None = None) -> subprocess.Complet
         text=True,
         check=False,
     )
+
+
+def _is_gate_owned_option(token: str) -> bool:
+    """Whether *token* sets one of the options this gate reserves.
+
+    Long spellings match exactly on the part before the first =, so an option that
+    merely shares a prefix with a reserved one is not refused: --min-severity-foo,
+    --output-directory and --source-dir-extra each split to themselves and none of
+    them is in the set. Short spellings match by prefix, because `click` lets a short
+    option's value be attached with no separator; see GATE_OWNED_SHORT_OPTIONS.
+
+    A reserved spelling appearing as another option's VALUE is refused too, since this
+    reads tokens rather than parsing them. That errs toward refusing a scan, which on a
+    gate is the direction to err in, and no ASH option takes a value that looks like an
+    option name.
+    """
+    if token.split("=", 1)[0] in GATE_OWNED_SCAN_OPTIONS:
+        return True
+    return any(token.startswith(short) for short in GATE_OWNED_SHORT_OPTIONS)
+
+
+def _reject_gate_owned_options(tokens: list[str]) -> None:
+    """Refuse extra args that set an option this gate owns.
+
+    Refusal rather than dropping the token with a warning. Dropping leaves the gate
+    running in a configuration nobody chose, with the operator's intent discarded and
+    nothing in the pull request saying so, which looks exactly like a gate doing what
+    its deployment asked. Raising is read by `handler` as outcome "error", which
+    comments that the pull request has not been assessed and REVOKEs any standing
+    approval -- fail-closed, and visible where the decision is read.
+
+    The cost is deliberate: a deployment that has been keeping a noisy gate green
+    through this variable stops scanning until someone removes the token. That is the
+    point. It was already not gating what it claimed to.
+    """
+    offending = [token for token in tokens if _is_gate_owned_option(token)]
+    if not offending:
+        return
+
+    reserved = sorted(GATE_OWNED_SCAN_OPTIONS | GATE_OWNED_SHORT_OPTIONS)
+    message = (
+        f"ASH_SCAN_EXTRA_ARGS sets options this gate reserves: {' '.join(offending)}. "
+        "Refusing to scan rather than letting the environment decide this gate's "
+        "verdict: these either repeat an option the gate passes -- which resolves to "
+        "its last occurrence -- or narrow what gets scanned, which switches off the "
+        "completeness check without switching off the gate's report of a pass. "
+        f"Reserved: {' '.join(reserved)}."
+    )
+    LOGGER.error(message)
+    raise RuntimeError(message)
 
 
 def parse_event(event: dict) -> dict:
@@ -191,9 +355,14 @@ def run_scan(
     output_dir = WORK_ROOT / "out"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    argv = [
-        "ash",
-        "scan",
+    # Held apart from the operator's extra args below and emitted after them, so that
+    # last-occurrence-wins resolution lands on the gate's value.
+    #
+    # GATE_OWNED_SCAN_OPTIONS is a superset of the spellings in this list, and not a
+    # mirror of it: most of what it refuses are options the gate never passes but which
+    # narrow the scan, and the ordering below does nothing about those. For them the
+    # refusal is the only defence, which is why it refuses rather than warns.
+    gate_owned = [
         "--source-dir",
         str(source_dir),
         "--output-dir",
@@ -223,12 +392,22 @@ def run_scan(
         # Hardcoded rather than exposed as an environment variable: a gate whose
         # fail-closed behaviour can be switched off by configuration is a gate whose
         # safety depends on deployment, and the failure is silent when it is wrong.
+        #
+        # Hardcoding it here is not by itself enough to make that true, which is what
+        # _reject_gate_owned_options and the ordering below are for. This flag was
+        # hardcoded and still negatable, because ASH_SCAN_EXTRA_ARGS was appended
+        # after it and the CLI resolves a repeated option to its last occurrence.
         "--fail-on-incomplete-scanners",
     ]
 
     extra = os.environ.get("ASH_SCAN_EXTRA_ARGS", "").strip()
-    if extra:
-        argv.extend(extra.split())
+    extra_tokens = extra.split() if extra else []
+    _reject_gate_owned_options(extra_tokens)
+
+    # Extras first, the gate's own options last. The refusal above is the guard; this
+    # ordering is what still holds if the guard is ever incomplete, since a spelling it
+    # does not know about then resolves before the gate's value rather than after it.
+    argv = ["ash", "scan", *extra_tokens, *gate_owned]
 
     result = _run(argv)
     log_tail = (result.stderr or result.stdout or "").strip()[-4000:]

@@ -81,12 +81,16 @@ class TestContainerReceivesResolvedFailOnFindings:
         fake_result = MagicMock()
         fake_result.returncode = 0
         results_file = opts.output_dir / "ash_aggregated_results.json"
-        results_file.write_text('{"sarif": null, "scanners": []}', encoding="utf-8")
 
         captured_kwargs: dict = {}
 
         def fake_run_ash_container(**kwargs):
             captured_kwargs.update(kwargs)
+            # Written here rather than before the call, because _run_container_mode now
+            # removes any results file that predates the invocation -- a file seeded by
+            # the test would be indistinguishable from one left by an earlier run. A
+            # real container writes it while running, which is what this models.
+            results_file.write_text('{"sarif": null, "scanners": []}', encoding="utf-8")
             return fake_result
 
         with (

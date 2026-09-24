@@ -18,6 +18,38 @@ from automated_security_helper.utils.sarif_utils import (
 
 _ResultsFn = Callable[[ScanResultsContainer, AshAggregatedResults], AshAggregatedResults]
 
+# Statuses the severity re-grade must leave alone, because they were computed from
+# information the re-grade cannot see.
+#
+# A set rather than the single ``!= ERROR`` comparison this replaced, and MISSING is why.
+# ``determine_status`` has four return sites -- ERROR, SKIPPED, FAILED, PASSED -- so it
+# cannot reproduce MISSING even in principle, and re-grading a MISSING container did not
+# refine the verdict, it destroyed it: ``targets_attempted`` is None for a scanner that
+# does not count targets, both per-target guards are skipped, and the all-zero severity
+# counts resolve to PASSED. "This scanner could not run" was recorded and then overwritten
+# with "this scanner ran and found nothing" further down the same finally block, with only
+# bookkeeping in between.
+#
+# Holds the same members as ``interactions.run_ash_scan._INCOMPLETE_SCANNER_STATUSES``,
+# which is the set the completeness gate collects into the incomplete list and the exit
+# code reads -- a status preserved here and absent there is the drift that produced the
+# defect. Not imported from there: that module is the CLI layer and pulls in the container
+# and nix runners, so importing it from a core phase would invert the dependency direction.
+# ``test_preserved_statuses_match_the_completeness_gate`` holds the two in step instead.
+#
+# Narrow on purpose, and PASSED must never be added. It is the ``ScanResultsContainer``
+# default, so carving it out would leave every container ungraded and make FAILED
+# unreachable, since the severity gate is the only route to FAILED here. SKIPPED is
+# likewise excluded: it is a verdict the scanner reached about its own input, the
+# completeness gate counts it as complete because sharding records every scanner another
+# shard owns as SKIPPED, and nothing in this module assigns it ahead of the re-grade.
+_TERMINAL_SCANNER_STATUSES = frozenset(
+    {
+        ScannerStatus.ERROR,
+        ScannerStatus.MISSING,
+    }
+)
+
 
 def _target_count_attr(obj: Any, name: str) -> int | None:
     """Read a target counter off a scanner plugin, or None when it makes no usable claim.
@@ -241,6 +273,14 @@ class ScannerExecutor:
                             "-- plugin is missing dependencies"
                         )
                         container.status = ScannerStatus.MISSING
+                        # The status is not the only channel this fact travels on, and the
+                        # two must not disagree. ScannerStatisticsCalculator derives
+                        # ``dependencies_missing`` from the status string when it reads a
+                        # scanner-level report, and from this field when it reads a
+                        # scanner_results entry, so a container that says MISSING while
+                        # still claiming satisfied dependencies reports one way or the
+                        # other depending on which of those a run happens to produce.
+                        container.dependencies_satisfied = False
 
                     container.start_time = scanner_plugin.start_time
                     container.end_time = scanner_plugin.end_time
@@ -300,6 +340,30 @@ class ScannerExecutor:
 
                     container.exit_code = getattr(scanner_plugin, "exit_code", 0)
 
+                    # Carried across the same way exit_code is, so the field is closed for
+                    # every container rather than only for the falsy-return branch above. A
+                    # scanner that overrides scan() can find its tool absent, record that on
+                    # itself and still return a report; without this copy that container
+                    # reached the statistics calculator claiming satisfied dependencies.
+                    #
+                    # Narrowing rather than assigning, because neither the plugin's flag nor
+                    # the getattr default may widen a MISSING container back to "dependencies
+                    # were fine". A scan() override is free to return falsy without touching
+                    # its own flag, and the template's empty-target guard returns before the
+                    # flag is recomputed at all, so a plain assignment would restore True over
+                    # the False recorded above.
+                    #
+                    # An absent attribute defaults to True because absence is not evidence of
+                    # a problem. bool() coerces at the boundary for the same reason
+                    # _target_count_attr does: the plugin is an arbitrary object, the field is
+                    # typed bool, and assignment is not validated.
+                    container.dependencies_satisfied = (
+                        container.dependencies_satisfied
+                        and bool(
+                            getattr(scanner_plugin, "dependencies_satisfied", True)
+                        )
+                    )
+
                     # Carry per-target outcome counts across, following the exit_code pattern
                     # above. This is what lets determine_status distinguish "scanned and found
                     # nothing" from "failed on everything it tried" and from "evaluated
@@ -320,7 +384,7 @@ class ScannerExecutor:
                         scanner_plugin, "targets_failed"
                     )
 
-                    if container.status != ScannerStatus.ERROR:
+                    if container.status not in _TERMINAL_SCANNER_STATUSES:
                         container.status = container.determine_status(
                             scanner_config.options.severity_threshold
                         )

@@ -506,15 +506,22 @@ class TestContainerMode:
     def test_run_ash_scan_hands_the_pair_to_the_container_runner(self, scan_dirs):
         source, output = scan_dirs
         results_file = output / "ash_aggregated_results.json"
-        results_file.write_text(
-            AshAggregatedResults().model_dump_json(by_alias=True), encoding="utf-8"
-        )
         completed = MagicMock()
         completed.returncode = 0
 
+        def fake_container(**kwargs):
+            # The results file is written here rather than before the call because
+            # container mode now removes any results file that predates the invocation:
+            # a file already on disk is what a previous run leaves behind, and the
+            # read-back can no longer tell that apart from output this run produced.
+            results_file.write_text(
+                AshAggregatedResults().model_dump_json(by_alias=True), encoding="utf-8"
+            )
+            return completed
+
         with patch(
             "automated_security_helper.interactions.run_ash_scan.run_ash_container",
-            return_value=completed,
+            side_effect=fake_container,
         ) as mock_container:
             run_ash_scan(
                 source_dir=source,

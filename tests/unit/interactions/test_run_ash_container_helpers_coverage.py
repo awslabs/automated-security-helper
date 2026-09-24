@@ -811,20 +811,171 @@ class TestAssembleRunCommandFlagPassthrough:
         assert "checkov" in cmd
         assert "my_plugin" in cmd
 
-    def test_config_and_existing_results_are_forwarded(self, tmp_path):
+    def test_config_is_forwarded(self, tmp_path):
+        cmd = _run_command(tmp_path, tmp_path / "out", config="ash.yaml")
+        assert cmd[cmd.index("--config") + 1] == "ash.yaml"
+
+    def test_existing_results_becomes_the_declared_flag(self, tmp_path):
+        """Inverted assertion.
+
+        This previously asserted that ``--existing-results <path>`` reaches the
+        container. No such option is declared anywhere on the CLI, and the container
+        entrypoint is that same CLI, so the flag is a usage error inside -- exit 2, which
+        the host's read-back cannot tell from a dirty scan. The path was wrong there
+        regardless: it is a host path, and the output directory is mounted at /out.
+
+        ``--use-existing`` is the declared option. It resolves
+        ash_aggregated_results.json from the inner ``--output-dir``, which is the same
+        file through the mount, so the host's own resolution is reproduced rather than
+        re-sent as an unreachable path.
+        """
+        out = tmp_path / "out"
+        cmd = _run_command(
+            tmp_path,
+            out,
+            existing_results=(out / "ash_aggregated_results.json").as_posix(),
+        )
+        assert "--use-existing" in cmd
+        assert "--existing-results" not in cmd
+
+    def test_an_unset_existing_results_sends_neither_flag(self, tmp_path):
+        cmd = _run_command(tmp_path, tmp_path / "out", existing_results=None)
+        assert "--use-existing" not in cmd
+        assert "--existing-results" not in cmd
+
+    def test_an_empty_existing_results_sends_neither_flag(self, tmp_path):
+        """Surrounding contract: the condition the host's cleanup exemption has to match.
+
+        ``if existing_results:`` means an empty string asks the inner scan to read nothing.
+        ``_discard_prior_run_artifacts`` tests the same way, so a caller passing "" cannot
+        get the cleanup skipped here and the read skipped there -- which would leave a
+        previous run's results file to be read back as this invocation's own. The
+        discriminating test for that pair lives on the host side, in
+        ``test_stale_results_provenance``; this one pins the half it has to agree with.
+        """
+        cmd = _run_command(tmp_path, tmp_path / "out", existing_results="")
+        assert "--use-existing" not in cmd
+        assert "--existing-results" not in cmd
+
+    def test_an_existing_results_path_the_container_cannot_reach_is_reported(
+        self, tmp_path, monkeypatch
+    ):
+        """The translation is exact only for the output directory's own results file.
+
+        ``run_ash_scan`` is importable, so a caller can pass any path. The container has
+        one output mount and ``--use-existing`` always reads that directory, so a path
+        elsewhere is silently substituted -- which is worth a warning rather than a
+        quiet swap.
+        """
+        warnings: List[str] = []
+        monkeypatch.setattr(
+            rac,
+            "ASH_LOGGER",
+            SimpleNamespace(
+                warning=lambda msg, *a, **k: warnings.append(str(msg)),
+                debug=lambda *a, **k: None,
+                info=lambda *a, **k: None,
+            ),
+        )
+
         cmd = _run_command(
             tmp_path,
             tmp_path / "out",
-            config="ash.yaml",
-            existing_results="prior.json",
+            existing_results=(tmp_path / "elsewhere" / "old.json").as_posix(),
         )
-        assert cmd[cmd.index("--config") + 1] == "ash.yaml"
-        assert cmd[cmd.index("--existing-results") + 1] == "prior.json"
+
+        assert "--use-existing" in cmd
+        assert any("old.json" in message for message in warnings), warnings
 
     def test_the_summary_is_always_suppressed_inside_the_container(self, tmp_path):
         """The host prints the summary; a second copy from inside is noise."""
         cmd = _run_command(tmp_path, tmp_path / "out")
         assert cmd[-1] == "--no-show-summary"
+
+
+# ---------------------------------------------------------------------------
+# The assembled argv against the CLI that will actually parse it
+# ---------------------------------------------------------------------------
+
+
+class TestTheInnerArgvIsAcceptedByTheInnerCli:
+    """Every flag in the container argv has to exist on the CLI that receives it.
+
+    This closes a class rather than an instance. ``--existing-results`` was emitted here
+    for as long as the file has existed and is declared nowhere; the in-container CLI
+    rejects an unknown option with a usage error, and a usage error exits 2, which is
+    also ASH's code for actionable findings -- so the host's read-back could not tell the
+    rejected invocation from a dirty scan, and the flag went unnoticed.
+
+    Asserting a flag is ``in cmd`` cannot catch that: presence in the list it was written
+    into is guaranteed by the writing. The question is whether the receiving parser
+    accepts it, so the assertion is on the parse, and on the value the flag resolves to.
+    The real ``click`` command is built from the real ``typer`` app to answer it.
+    """
+
+    def _inner_argv(self, tmp_path, **overrides) -> List[str]:
+        cmd = _run_command(tmp_path, tmp_path / "out", **overrides)
+        return cmd[cmd.index("ash") + 1 :]
+
+    def _parse(self, argv: List[str]):
+        import typer.main
+
+        from automated_security_helper.cli.scan import run_ash_scan_cli_command
+
+        app = typer.Typer()
+        app.command()(run_ash_scan_cli_command)
+        return typer.main.get_command(app).make_context("ash", list(argv))
+
+    def test_every_flag_a_fully_populated_invocation_emits_is_declared(self, tmp_path):
+        out = tmp_path / "out"
+        argv = self._inner_argv(
+            tmp_path,
+            quiet=True,
+            progress=False,
+            color=False,
+            debug=True,
+            verbose=True,
+            simple=True,
+            python_based_plugins_only=True,
+            cleanup=True,
+            inspect=True,
+            fail_on_findings=False,
+            fail_on_incomplete_scanners=True,
+            phases=[ExecutionPhase.SCAN],
+            scanners=["bandit"],
+            exclude_scanners=["checkov"],
+            output_formats=[ExportFormat.HTML],
+            config="ash.yaml",
+            config_overrides=["a=1"],
+            existing_results=(out / "ash_aggregated_results.json").as_posix(),
+            ash_plugin_modules=["m"],
+            strategy=ExecutionStrategy.PARALLEL,
+            shard_index=0,
+            shard_count=2,
+        )
+
+        with self._parse(argv) as ctx:
+            # The value, not the flag's presence: the defect this replaces was a flag
+            # that was present and meant nothing.
+            assert ctx.params["use_existing"] is True
+            assert ctx.params["fail_on_findings"] is False
+            assert ctx.params["fail_on_incomplete_scanners"] is True
+
+    def test_the_undeclared_flag_this_replaced_is_still_rejected(self):
+        """Guards the premise, and records why the rejection was invisible.
+
+        If --existing-results were ever declared, emitting --use-existing instead would
+        be a silent behavior change rather than a fix. The exit code is asserted because
+        it is the reason nobody noticed: a usage error exits 2, and 2 is also ASH's code
+        for actionable findings.
+        """
+        from typer.exceptions import TyperException
+
+        with pytest.raises(TyperException) as refusal:
+            self._parse(["--existing-results", "/host/path/results.json"])
+
+        assert "--existing-results" in str(refusal.value)
+        assert refusal.value.exit_code == 2
 
 
 # ---------------------------------------------------------------------------

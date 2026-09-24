@@ -769,7 +769,33 @@ def _assemble_run_command(
         ash_args.extend(["--config-overrides", override])
 
     if existing_results:
-        ash_args.extend(["--existing-results", existing_results])
+        # Truthiness here and truthiness in _discard_prior_run_artifacts, which grants the
+        # matching exemption from the pre-run cleanup. The two have to agree on the empty
+        # string or it falls between them: the host would keep a previous run's results
+        # file for an inner scan that was never asked to read it, and then read that file
+        # back as this invocation's own.
+        #
+        # `--use-existing`, not `--existing-results`. The latter is not declared anywhere
+        # on the CLI -- it exists only as a local variable in cli/scan.py, where
+        # --use-existing is resolved into the path this parameter carries -- and the
+        # container entrypoint is that same CLI, so the flag is a usage error inside.
+        # Worse, a usage error exits 2, which is also ASH's code for actionable findings,
+        # so the host's read-back could not tell the rejected invocation from a dirty scan.
+        #
+        # The value would be wrong in the container regardless: it is a host path, and the
+        # output directory is bind-mounted at /out. --use-existing resolves
+        # ash_aggregated_results.json from the inner --output-dir, which is the same file
+        # through that mount, so this reproduces the host's own resolution rather than
+        # re-sending a path the container cannot reach.
+        expected = Path(output_dir).joinpath("ash_aggregated_results.json")
+        if Path(existing_results).resolve() != expected.resolve():
+            ASH_LOGGER.warning(
+                f"--existing-results was given {existing_results}, which is not "
+                f"{expected.as_posix()}. The container mounts only the output directory, "
+                "and the in-container scan reads that directory's own "
+                "ash_aggregated_results.json, so the named file will not be the one used."
+            )
+        ash_args.append("--use-existing")
 
     for module in ash_plugin_modules:
         ash_args.extend(["--ash-plugin-modules", module])
