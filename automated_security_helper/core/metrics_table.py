@@ -181,10 +181,11 @@ def print_coverage_shortfalls(
     This rendering does not touch the status or the exit code, and neither claim generalizes past
     this function. A sibling change ORs ``any_target_errored`` into the ``error`` flag, so a tree
     that lost ALL its targets does now move the rolled-up status to ERROR -- see the CHANGELOG's
-    breaking-change entry. What is genuinely untouched by the whole change is the DEFAULT exit
-    code: ``_compute_exit_code`` reaches the coverage list only once
-    ``--fail-on-incomplete-scanners`` resolves true. Whether a partial scan should fail is a
-    policy question about pipelines, it is answered by that flag, and it is not one this rendering
+    breaking-change entry. ``_compute_exit_code`` reaches the coverage list once
+    ``--fail-on-incomplete-scanners`` resolves true, which since that flag's default became True
+    is the default path too -- so a partial-coverage scan does now move the default exit code.
+    That is the flag's doing rather than this rendering's: whether a partial scan should fail is a
+    policy question about pipelines, it is answered there, and it is not one this rendering
     decides.
     """
     shortfalls = coverage_shortfalls(asharp_model)

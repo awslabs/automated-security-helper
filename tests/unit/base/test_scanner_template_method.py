@@ -644,3 +644,172 @@ class TestInjectInvocationHelper:
         # that the pre-migration per-scanner _post_scan emitted).
         expected = "checkov -d /work/src --output sarif --output-file-path /work/out"
         assert inv.commandLine == expected
+
+
+# ---------------------------------------------------------------------------
+# A tool that failed hard, and wrote nothing
+# ---------------------------------------------------------------------------
+
+
+class TestNonZeroExitWithAnEmptyResultsFile:
+    """The empty-results branch reads the exit code and then discards it.
+
+    ``scan()`` at ``scanner_plugin.py:608-621`` handles an existing-but-empty
+    results file by interpolating ``self.exit_code`` into a warning string and
+    then ``return self._handle_empty_results()``. The exit code reaches human
+    -readable text and nothing else: the return is a normal one rather than a
+    raise, so ``_inject_invocation`` at ``:626`` -- the only place that computes
+    ``executionSuccessful=(self.exit_code in success_codes)`` -- is never reached
+    on this path.
+
+    Measured on grype with an empty-but-writable cache and its update endpoint
+    refused: grype logs ``failed to load vulnerability db``, exits 1 and writes a
+    zero-byte report, and ASH grades it ``PASSED ... 0 findings`` and exits 0
+    with ``--fail-on-incomplete-scanners`` already passed. The stub below
+    reproduces the shape with grype's own ``success_exit_codes = {0, 2}``, so
+    exit 1 is a failure code for it rather than the base class's accepted 1.
+
+    The consequence for the completeness gate is pinned separately, in
+    ``tests/unit/interactions/test_fail_on_incomplete_scanners.py``:
+    ``TestTheGateCannotSeeAHardFailureGradedPassed``.
+    """
+
+    @staticmethod
+    def _failed_tool_writing_an_empty_file(plugin_context, scanner_config, target):
+        """A scanner whose tool exits 1 and leaves a zero-byte results file."""
+
+        class FailedToolScanner(ScannerPluginBase):
+            offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.BUNDLED
+            # grype's own set, so 1 is genuinely not an accepted code here. With
+            # the base class default of {0, 1} an exit of 1 would be a success and
+            # the test would assert nothing.
+            success_exit_codes: ClassVar[set] = {0, 2}
+
+            def model_post_init(self, context):
+                self.command = "failing-tool"
+                self.tool_type = ScannerToolType.SAST
+                super().model_post_init(context)
+
+            def validate_plugin_dependencies(self) -> bool:
+                return True
+
+            def _execute_scan(self, target, target_type, global_ignore_paths):
+                results_dir = self.results_dir / target_type
+                results_dir.mkdir(parents=True, exist_ok=True)
+                results_file = results_dir / "failing.sarif"
+                results_file.write_text("", encoding="utf-8")
+                return ["failing-tool", "--scan"], results_file, None
+
+        scanner = FailedToolScanner(config=scanner_config, context=plugin_context)
+        scanner.exit_code = 1
+        scanner.errors = [
+            "ERROR failed to load vulnerability db: database does not exist"
+        ]
+        return scanner
+
+    def test_it_returns_a_report_rather_than_raising(
+        self, plugin_context, scanner_config, tmp_path
+    ):
+        """CHARACTERIZATION: asserts the CURRENT behavior, which is wrong.
+
+        A tool that exited with a code its own ``success_exit_codes`` excludes,
+        having written no output, yields a valid empty SARIF and no exception.
+        Asserted rather than corrected because correcting it is a change to the
+        shared template every scanner inherits, not to this phase's flag.
+
+        Reverse-reads as the alarm for the fix: when the empty-results branch
+        starts consulting the exit code, this test reddens, and whoever is
+        holding it should update it and drop the xfail below.
+        """
+        target = tmp_path / "src"
+        target.mkdir()
+        (target / "file.py").write_text("x = 1")
+        scanner = self._failed_tool_writing_an_empty_file(
+            plugin_context, scanner_config, target
+        )
+
+        with patch.object(scanner, "_pre_scan", return_value=True):
+            scanner.dependencies_satisfied = True
+            with patch.object(scanner, "_run_subprocess"):
+                report = scanner.scan(target=target, target_type="source")
+
+        assert isinstance(report, SarifReport), (
+            "the empty-results branch returns _handle_empty_results(), so a hard "
+            "tool failure produces a report rather than raising ScannerError"
+        )
+        assert report.runs == [], (
+            "_handle_empty_results builds SarifReport(runs=[]). Note for whoever "
+            "fixes this: moving _inject_invocation ahead of the early return is "
+            "not sufficient on its own, because it no-ops on an empty runs list. "
+            "There is no run to attach an invocation to. Grype overrides "
+            "_ensure_runs to synthesize one, and that override is also only on "
+            "the parse path."
+        )
+
+    def test_no_invocation_records_the_failure(
+        self, plugin_context, scanner_config, tmp_path
+    ):
+        """CHARACTERIZATION: the exit code survives only as log text.
+
+        Separate from the report-shape assertion above because this is the fact
+        that makes the failure invisible to every downstream reader rather than
+        merely unusual: ``executionSuccessful`` is the one field in the SARIF that
+        would carry it, and no invocation is emitted at all.
+        """
+        target = tmp_path / "src"
+        target.mkdir()
+        (target / "file.py").write_text("x = 1")
+        scanner = self._failed_tool_writing_an_empty_file(
+            plugin_context, scanner_config, target
+        )
+
+        with patch.object(scanner, "_pre_scan", return_value=True):
+            scanner.dependencies_satisfied = True
+            with patch.object(scanner, "_run_subprocess"):
+                report = scanner.scan(target=target, target_type="source")
+
+        invocations = [inv for run in report.runs for inv in (run.invocations or [])]
+        assert invocations == [], (
+            "if an invocation now appears here the early return was changed -- "
+            "check whether executionSuccessful is False, and drop the xfail on "
+            "test_a_failed_tool_is_not_reported_as_a_successful_execution"
+        )
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "scan() returns _handle_empty_results() for an empty results file "
+            "before reaching _inject_invocation, which is the only place "
+            "executionSuccessful is computed from the exit code. So a tool that "
+            "exited 1 with success_exit_codes={0, 2} produces a report that "
+            "asserts nothing about its own failure, determine_status derives "
+            "PASSED from its zero findings, and fail_on_incomplete_scanners has "
+            "no ERROR or MISSING status to find. Remove this xfail once the "
+            "empty-results branch consults the exit code."
+        ),
+    )
+    def test_a_failed_tool_is_not_reported_as_a_successful_execution(
+        self, plugin_context, scanner_config, tmp_path
+    ):
+        """The behavior this SHOULD have, recorded so the gap is not only prose.
+
+        Either outcome would do: raising, or emitting an invocation with
+        ``executionSuccessful=False``. This asserts the weaker of the two -- that
+        the run does not read as successful -- so that whichever way the fix goes,
+        this passes.
+        """
+        target = tmp_path / "src"
+        target.mkdir()
+        (target / "file.py").write_text("x = 1")
+        scanner = self._failed_tool_writing_an_empty_file(
+            plugin_context, scanner_config, target
+        )
+
+        with patch.object(scanner, "_pre_scan", return_value=True):
+            scanner.dependencies_satisfied = True
+            with patch.object(scanner, "_run_subprocess"):
+                report = scanner.scan(target=target, target_type="source")
+
+        invocations = [inv for run in report.runs for inv in (run.invocations or [])]
+        assert invocations, "a scan that ran a tool should record an invocation"
+        assert all(inv.executionSuccessful is False for inv in invocations)

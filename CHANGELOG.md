@@ -48,6 +48,56 @@
 
 ### Behavior changes
 
+- **`fail_on_incomplete_scanners` now defaults to `true`.** A scan in which a
+  selected scanner did not complete — status `ERROR` (it ran and failed) or `MISSING`
+  (its dependencies were unavailable, so it never ran) — exits 1 without anyone
+  having to ask for it. It defaulted to `false`, on the argument that a host
+  legitimately lacking a scanner's tool should keep its exit code.
+
+  **A scan on a host missing some scanners' tools was exiting 0 and now exits 1.**
+  Nothing about your code changed. A scanner recorded `MISSING` reports no findings,
+  so with the gate off such a scan returned the exit code of a clean one — and unlike
+  a crash, that outcome is invisible to whoever reads the result. The environments
+  affected are the ones where it mattered most: a container or air-gapped host that
+  can run one scanner out of ten was reporting success for scanning almost nothing.
+
+  **What this does not reach.** The gate selects on scanner status, so it covers a
+  failure only once that failure has reached the status. A tool that exits non-zero
+  and writes an empty report is still graded `PASSED` from its zero findings, and
+  this default is the same exit code on, off or unset for that case — the empty
+  results branch in `base/scanner_plugin.py` returns a successful empty report
+  without consulting the exit code. That is a separate defect, not fixed here, and
+  turning this default on should not be read as having fixed it.
+
+  To keep the previous exit codes, set `fail_on_incomplete_scanners: false` or pass
+  `--no-fail-on-incomplete-scanners`. Prefer `--exclude-scanners` for a tool you do
+  not have: an excluded scanner is recorded `SKIPPED` rather than `MISSING`, does not
+  trip the gate, and the report then says which scanners were not part of the run,
+  where `false` returns to a 0 that carries no such information.
+
+  `SKIPPED` never trips the gate, which is what keeps sharding working — each shard
+  excludes the scanners its siblings own — and means narrowing a run with
+  `--scanners` or `--exclude-scanners` does not fail it.
+
+  **This default switches on several independent rules, not one.** Everything below
+  was already written and already gated behind this field; all of it was previously
+  unreachable without opting in, and all of it is now on the default path:
+
+  - a selected scanner at `ERROR` or `MISSING` fails the scan (`incomplete_scanners`);
+  - a scanner that ran but could not evaluate part of its input fails it, reported as
+    `PASSED (n of m targets unevaluated)` — the partial-coverage arm of the same
+    function, and the arm most likely to be new to an existing scan;
+  - a run in which *every* scanner was `SKIPPED` fails, rather than reporting a tree
+    it never examined as clean (`no_scanner_ran`, skipped for a single shard of a
+    split scan, which legitimately can own nothing);
+  - `ash merge` refuses a union in which some shard completed none of the scanners it
+    owned, and applies both rules above to the merged model;
+  - in workspace mode, a project whose scanners did not complete sets
+    `scan_incomplete`, which fails the whole workspace run.
+
+  `--no-fail-on-incomplete-scanners`, or `fail_on_incomplete_scanners: false`, turns
+  off all of them together.
+
 - **`--fail-on-incomplete-scanners` now also fails a scan that lost only part of
   its input.** The flag selected on scanner status, and a scanner that failed on
   some of its targets keeps whatever status the severity gate gives it — `PASSED`
@@ -58,12 +108,12 @@
   silent on partial loss, which is the more common case and the one operators turn
   it on to catch.
 
-  **If you already pass `--fail-on-incomplete-scanners`, a build that was green
-  will now exit 1 with no diff of your own.** Nothing about your code changed and
-  nothing newly broke: the flag was blind to partial loss, and the coverage it was
-  silently accepting is now reported. Expect to hit this in CI without warning the
-  first time you upgrade. It affects only runs that pass the flag (or set
-  `fail_on_incomplete_scanners: true`); the default path is unchanged.
+  **A build that was green will now exit 1 with no diff of your own.** Nothing about
+  your code changed and nothing newly broke: the flag was blind to partial loss, and
+  the coverage it was silently accepting is now reported. Expect to hit this in CI
+  without warning the first time you upgrade. On its own this change affected only
+  runs that had the gate on, which was then opt-in; read it together with the default
+  flip above, which is what puts every run on that path.
 
   Measured on this repository's own tree, so the scale is concrete rather than
   hypothetical: cdk-nag **attempts 10 targets and cannot evaluate 4** of them, a
@@ -95,11 +145,10 @@
   breaking change below does change statuses, with no flag to opt into. Read the
   two together.
 
-  To restore the previous behavior, drop the flag (or set
-  `fail_on_incomplete_scanners: false`) to accept a partial scan. To keep the
-  flag and clear the failure, fix or exclude the targets the scanner could not
-  read; the failure message names each scanner with the counts, whatever its
-  status.
+  To restore the previous behavior, set `fail_on_incomplete_scanners: false` or pass
+  `--no-fail-on-incomplete-scanners` to accept a partial scan. To keep the gate and
+  clear the failure, fix or exclude the targets the scanner could not read; the
+  failure message names each scanner with the counts, whatever its status.
 
 - **A rule that could not be evaluated now fails the scan, under default config.**
   This one changes the default exit code, so read it even if you pass no flags.
@@ -218,17 +267,19 @@
 
   **What is not affected**, because the distinction is the useful part:
 
-  - **The default exit code, by either of the two changes described here.**
-    `_compute_exit_code` consults `incomplete_scanners` only once
-    `--fail-on-incomplete-scanners` resolves true, so neither lost-target change
-    moves a default run's exit code. A scanner rolling up to `ERROR` does affect
-    the exit code under that flag — but it did already, since `ERROR` was always a
-    status the flag selected on.
+  - **The exit code of a run with the completeness gate off, by either of the two
+    changes described here.** `_compute_exit_code` consults `incomplete_scanners`
+    only once `--fail-on-incomplete-scanners` resolves true, so neither lost-target
+    change moves the exit code of a run that set `fail_on_incomplete_scanners: false`.
+    A scanner rolling up to `ERROR` does affect the exit code under the gate — but it
+    did already, since `ERROR` was always a status the gate selected on.
 
-    Read that scope literally rather than as a statement about the release. A
-    separate entry below — "a rule that could not be evaluated now fails the scan"
-    — *does* change the default exit code, through a different signal and for a
-    different reason. Nothing about lost targets is what moves it.
+    Read that scope literally rather than as a statement about the release. This said
+    "the default exit code" while the gate was opt-in; the default flip above is what
+    puts a default run on the gated path, so lost targets now do reach a default run's
+    exit code — through that change rather than through these two. A separate entry
+    below — "a rule that could not be evaluated now fails the scan" — reaches it a
+    third way, through a different signal again.
   - **`ash merge`'s shard verification.** `_completed` reads the raw
     `ScannerTargetStatusInfo.status` off `scanner_results`, not the derived rollup,
     so a partial-coverage scanner still counts as having run and no healthy shard

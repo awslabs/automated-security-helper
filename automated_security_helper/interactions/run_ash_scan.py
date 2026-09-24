@@ -731,25 +731,36 @@ def _resolve_fail_on_incomplete_scanners(
     3. *config_value* -- read from the config file before the scan, which is what
        container mode has to fall back on and what ``ash merge`` passes from the
        config carried in the shard results.
-    4. Off, matching ``AshConfig.fail_on_incomplete_scanners``.
+    4. On, matching ``AshConfig.fail_on_incomplete_scanners``.
 
     Step 4 is reached only when no config model was available at all -- a results
     object built by hand, or a scan whose config failed to load. It agrees with the
     model default deliberately: the two are the same question answered twice, and
     when they disagreed the answer you got depended on how far the scan had got
     before it was asked, which is not a property anyone wants an exit code to have.
+    ``cli.merge._resolve_require_scanner_completion`` is a third copy and has to
+    move with these two.
 
-    OFF rather than on, and this was on by default for part of this branch's life.
-    The gate is correct and this repository does not currently pass it: cdk-nag
-    evaluates 6 of its 10 targets here, so `incomplete_scanners` reports
-    ``PASSED (4 of 10 targets unevaluated)`` and every scan leg in CI exits 1 --
-    measured on x86 Linux, arm64 and Windows alike, so it is not a platform
-    artifact. Turning a completeness gate on before the tree it gates is complete
-    makes the gate's first act a false alarm, and the two unscanned CloudFormation
-    templates behind that count are a real coverage gap that wants fixing rather
-    than defaulting past. Enabling it is therefore blocked on that fix, not on
-    anyone's appetite; until then the honest default is the one an operator opts
-    out of nothing to get.
+    ON rather than off, and this was off by default for part of this branch's life.
+    A scanner recorded ERROR or MISSING produces no findings, so deriving the exit
+    code from findings alone gives that scan the code of a clean one -- and step 4 in
+    particular is the least-attributable input there is, a results object whose
+    configuration could not be established. Defaulting the least trustworthy case to
+    the most trusting answer is backwards. The environment that genuinely cannot
+    provide a scanner's tool says so once, with
+    ``--no-fail-on-incomplete-scanners`` or ``fail_on_incomplete_scanners: false``,
+    and keeps its old exit codes; what it no longer gets is that outcome by saying
+    nothing.
+
+    What the default does NOT reach, because this gate selects on status: a tool
+    that failed hard without that failure reaching its status. ``scanner_plugin``'s
+    empty-results branch returns a successful empty report for a tool that exited
+    non-zero and wrote nothing, so ``determine_status`` grades it PASSED from its
+    zero findings and there is no ERROR or MISSING here to find. Pinned by
+    ``TestTheGateCannotSeeAHardFailureGradedPassed`` in
+    ``tests/unit/interactions/test_fail_on_incomplete_scanners.py``, which asserts
+    that this flag returns the same exit code in all three positions for that case.
+    Turning the default on does not fix it and is not a reason to think it fixed.
     """
     if opts.fail_on_incomplete_scanners is not None:
         return opts.fail_on_incomplete_scanners
@@ -761,7 +772,7 @@ def _resolve_fail_on_incomplete_scanners(
 
     if config_value is not None:
         return config_value
-    return False
+    return True
 
 
 def _severity_filters_finding(result, min_sev_rank: int) -> bool:
@@ -1809,10 +1820,10 @@ def _print_workspace_summary(
 # Two independent questions, in this order:
 #
 #   1. Did the scanners that were supposed to run actually run? Gated by
-#      fail_on_incomplete_scanners, default OFF, exit 1. Off by default because this
-#      repository cannot pass the gate until cfn-nag, grype and syft are provisioned
-#      on every leg, so CI relies on .github/scripts/assert_scanners_completed.py,
-#      which has no such flag, for the same assertion.
+#      fail_on_incomplete_scanners, default ON, exit 1. CI additionally runs
+#      .github/scripts/assert_scanners_completed.py, which asserts the same thing
+#      with no flag of its own, so a leg whose ASH invocation was edited to pass
+#      --no-fail-on-incomplete-scanners still fails rather than going quiet.
 #   2. Did they find anything actionable? Gated by fail_on_findings, default on,
 #      exit 2.
 #
@@ -1897,12 +1908,12 @@ def _compute_exit_code(
         # is MISSING, which measured nothing just as thoroughly as an all-SKIPPED
         # one. Making this one check unconditional would answer that same question
         # two different ways depending on which status the non-running scanners
-        # happened to land on. The flag defaults OFF, so the case above exits 0
-        # unless a config or an operator opts in -- which is precisely why
-        # .github/scripts/assert_scanners_completed.py asserts it unconditionally,
-        # and why that script rather than this function is what holds the line in
-        # CI. An operator who leaves the gate off, or turns it off, has said they
-        # accept a scan that did not run.
+        # happened to land on. The flag defaults ON, so the case above now exits 1
+        # unless a config or an operator turns the gate off -- but it can still be
+        # turned off, which is why .github/scripts/assert_scanners_completed.py
+        # asserts it unconditionally and why that script rather than this function
+        # is what holds the line in CI. An operator who turns the gate off has said
+        # they accept a scan that did not run.
         #
         # Skipped for one shard of a split scan, because a shard genuinely can own
         # nothing: core.sharding documents that a shard count above the scanner
@@ -1974,9 +1985,12 @@ def _compute_exit_code(
     # NOT behind fail_on_incomplete_scanners, and that is the whole point of it being
     # here. This condition has no honest reading under which the scan was clean: the
     # tool was asked to evaluate a rule, it tried, and it failed. That is different
-    # from the case the flag exists to keep quiet, which is an environment
+    # from the case the flag can be told to keep quiet, which is an environment
     # legitimately lacking a scanner's tool -- there the operator's setup explains the
-    # gap, so defaulting to silence is defensible. Nothing explains this one.
+    # gap, so letting them silence it is defensible. Nothing explains this one, so it
+    # is not silenceable at all. The flag now defaults on, which narrows the practical
+    # difference but not the reason: a gate that can be turned off and one that cannot
+    # are different guarantees whatever the default is.
     #
     # It also has to sit ahead of the fail_on_findings early return, for the reason
     # the block above states: an operator who turned findings-gating off said "do not

@@ -68,23 +68,22 @@ existed the two did disagree -- on a Windows run of this repository's own config
 exited 1 on the same file.
 
 One difference remains, and it is why this script carries the gate rather than sharing
-it: ASH puts both checks behind ``fail_on_incomplete_scanners``, which defaults to
-False, while this script has no equivalent and always fails. Both arms in
-``run_ash_scan._compute_exit_code`` sit inside that flag's ``if``, so with it off
-neither the per-scanner check nor the no-scanner-ran check runs at all. On a default
-run the two therefore disagree in the direction that matters: ``ash scan`` exits 0 on
-a results file carrying MISSING scanners, and this script exits 1 on that same file.
+it: ASH puts both checks behind ``fail_on_incomplete_scanners``, while this script has
+no equivalent and always fails. Both arms in ``run_ash_scan._compute_exit_code`` sit
+inside that flag's ``if``, so anything that turns the flag off -- a
+``--no-fail-on-incomplete-scanners`` added to a workflow, a scanned tree's own
+``.ash.yaml`` -- takes both of ASH's checks with it and leaves nothing behind. This
+script cannot be switched off that way, so it is what makes the assertion
+unconditional in CI.
 
-So in CI this script is the only thing gating on incompleteness. ASH's own exit code
-does not, by default. That is worth saying outright, because the paragraph above --
-that the guard and the exit code "answer from the same field, so they cannot
-disagree" -- is a claim about the field they read, not about the verdict they return.
+That is worth saying outright, because the paragraph above -- that the guard and the
+exit code "answer from the same field, so they cannot disagree" -- is a claim about
+the field they read, not about the verdict they return. The flag's default is now
+True, so on an unconfigured run the two verdicts do agree; the point of keeping this
+script is that they agree by policy rather than by construction.
 
-The default is False deliberately, and is not an oversight to correct here. This
-repository cannot pass its own completeness gate yet: cfn-nag, grype and syft are not
-provisioned on every leg, so flipping the default would fail every job rather than the
-ones with a real gap. An operator who opts in with ``--fail-on-incomplete-scanners``
-gets 1 from both, which is the flag converging the two rather than drifting them.
+Their overlap is deliberate and they fail for different reasons: ASH's exit code is
+ASH judging its own run, and this is CI judging whether that judgement still happens.
 """
 
 from __future__ import annotations

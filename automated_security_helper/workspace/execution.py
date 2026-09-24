@@ -831,20 +831,22 @@ def _resolve_fail_on_incomplete_scanners(
     ``run_ash_scan._resolve_fail_on_incomplete_scanners``: the CLI value, then the
     project's own config, then a fallback.
 
-    True as the fallback, and it does NOT match
-    ``AshConfig.fail_on_incomplete_scanners``, which is ``False``. This docstring
-    claimed it did, which was wrong about the model rather than about this code --
-    ``run_ash_scan``'s resolver falls back to ``False`` and says so. The two
-    fallbacks differ deliberately, and the difference is narrower than it reads:
-    step 2 accepts any ``bool`` the project's config carries, and every real
-    ``AshConfig`` carries one, so this step only decides a project for which no
-    config model was available at all. In workspace mode that means the
-    orchestrator returned results without a config, which is not a state to read as
-    "the operator opted out of the completeness gate" -- a project whose config
-    never loaded is exactly the project whose scanner statuses are least
-    trustworthy, so the gate stays on. Changing it to ``False`` here to match
-    single-project mode would be a fail-open change to a verdict, so it is left as
-    a maintainer's call rather than taken silently.
+    True as the fallback, and the reason does not depend on what
+    ``AshConfig.fail_on_incomplete_scanners`` defaults to. Step 2 accepts any
+    ``bool`` the project's config carries, and every real ``AshConfig`` carries one,
+    so step 3 only decides a project for which no config model was available at
+    all. In workspace mode that means the orchestrator returned results without a
+    config, which is not a state to read as "the operator opted out of the
+    completeness gate" -- a project whose config never loaded is exactly the
+    project whose scanner statuses are least trustworthy, so the gate stays on.
+
+    That argument is stated without reference to the model's polarity on purpose.
+    An earlier version of this docstring argued from the two fallbacks differing,
+    and named the model default as ``False``; when that default moved, every clause
+    resting on the comparison became false at once and the paragraph invited a
+    maintainer to adjudicate a divergence that no longer existed. The two happen to
+    agree at present. If the model default moves again, this fallback stays ``True``
+    for the reason above rather than for agreement with it.
 
     ``isinstance(..., bool)`` rather than a truthiness test on the config value,
     because this reaches into whatever object the orchestrator handed back: a

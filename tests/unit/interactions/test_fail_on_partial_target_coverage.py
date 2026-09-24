@@ -32,10 +32,13 @@ What is deliberately NOT changed
   break rather than a structural impossibility.
 * No new config key. This is the existing opt-in flag learning about a case it
   was always meant to cover.
-* The default path. ``TestDefaultPathIsUntouched`` asserts that a partial-coverage
-  run without the flag exits exactly as it did before -- because this change does
-  move existing opt-in users from 0 to 1, and the blast radius has to stay
-  confined to people who asked for the gate.
+* The opt-out. ``TestTheOptOutIsWhatUngatesPartialCoverage`` asserts that a
+  partial-coverage run gates on the default path and that
+  ``--no-fail-on-incomplete-scanners`` still turns it off. That class asserted the
+  default path was untouched while ``fail_on_incomplete_scanners`` defaulted to off,
+  which was the right guard for THIS change -- confining its blast radius to people
+  who had asked for the gate -- and was then inverted by the separate change that
+  made the flag default to on.
 
 What IS changed elsewhere, so this file is not read as a claim about the whole PR
 --------------------------------------------------------------------------------
@@ -227,14 +230,18 @@ class TestPartialCoverageTripsTheGate:
         assert code == 0
 
 
-class TestDefaultPathIsUntouched:
-    """This change moves existing opt-in users from 0 to 1. It must move nobody else."""
+class TestTheOptOutIsWhatUngatesPartialCoverage:
+    """Partial coverage gates the default path, and the opt-out is how you decline it."""
 
-    def test_partial_coverage_without_the_flag_exits_zero(self, tmp_path):
-        """Same input as the tripping case, flag absent, exit 0.
+    def test_partial_coverage_on_the_default_path_exits_one(self, tmp_path):
+        """Same input as the tripping case, flag absent, exit 1.
 
-        The gate is opt-in and stays opt-in. A repository whose cdk-nag loses 4
-        of 10 targets keeps exiting 0 unless it asked to be told.
+        This asserted 0 while ``fail_on_incomplete_scanners`` defaulted to off, under
+        a class named ``TestDefaultPathIsUntouched``: it was the blast-radius guard
+        for routing partial coverage into the gate, and it was correct about that
+        change. The default's own move is a different change and this is the test it
+        is supposed to redden. A repository whose cdk-nag loses 4 of 10 targets is
+        told so without having to ask.
         """
         code = _exit_code(
             tmp_path,
@@ -248,7 +255,7 @@ class TestDefaultPathIsUntouched:
             ],
         )
 
-        assert code == 0
+        assert code == 1
 
     def test_flag_explicitly_false_exits_zero(self, tmp_path):
         """``--no-fail-on-incomplete-scanners`` is honoured, not merely the default."""
@@ -698,14 +705,21 @@ class TestTheGateReadsTheRealRollup:
 
         assert incomplete_scanners(_rollup_model(reports)) == []
 
-    def test_the_default_exit_code_is_unchanged_through_the_real_rollup(self, tmp_path):
-        """The blast-radius guard, measured end to end rather than on injected rows.
+    def test_partial_coverage_gates_the_default_path_through_the_real_rollup(
+        self, tmp_path
+    ):
+        """Both directions end to end, rather than on injected rows.
 
-        ``_compute_exit_code`` reaches ``incomplete_scanners`` only once
-        ``_resolve_fail_on_incomplete_scanners`` returns true, so a partial-coverage run
-        that did not ask for the gate exits exactly as it did before. Asserted with the
-        real rollup so that a future change routing coverage into the default path is
-        caught here and not in somebody's pipeline.
+        ``_compute_exit_code`` reaches ``incomplete_scanners`` once
+        ``_resolve_fail_on_incomplete_scanners`` returns true, which since that
+        function's fallback became True is the default path. Asserted through the real
+        rollup rather than injected metrics, so that a change breaking the route from a
+        partial target report to the exit code is caught here and not in somebody's
+        pipeline -- which is what this test was for when it asserted the default path
+        was untouched, and is still what it is for.
+
+        ``fail_on_findings=False`` on both arms so the code under test is the
+        completeness gate and not the finding count.
         """
         model = _rollup_model({"cdk-nag": {"source": _target_report("PASSED", 10, 4)}})
 
@@ -714,9 +728,9 @@ class TestTheGateReadsTheRealRollup:
         )
 
         opts = _opts(tmp_path, fail_on_findings=False)
-        assert _compute_exit_code(model, opts) == 0
+        assert _compute_exit_code(model, opts) == 1
 
-        opted_in = _opts(
-            tmp_path, fail_on_findings=False, fail_on_incomplete_scanners=True
+        opted_out = _opts(
+            tmp_path, fail_on_findings=False, fail_on_incomplete_scanners=False
         )
-        assert _compute_exit_code(model, opted_in) == 1
+        assert _compute_exit_code(model, opted_out) == 0
