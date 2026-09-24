@@ -19,6 +19,7 @@ from automated_security_helper.models.flat_vulnerability import (
 )
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
+    Level,
     Location,
     Message,
     Message1,
@@ -361,6 +362,28 @@ class TestResolveSeverityHelper:
     def test_note_level_maps_to_low(self):
         result = _make_result(level="note")
         assert _resolve_severity(result) == "LOW"
+
+    def test_absent_level_key_maps_to_high_not_medium(self):
+        """A scanner that omits ``level`` gets the field default, which is error.
+
+        Every flattened reporter -- CSV, HTML, text, JUnit -- and
+        ``FlatVulnerability.is_actionable`` read this value, so resolving to the
+        unknown-level MEDIUM fallback moves the finding two bands down.
+        ``model_validate`` is the path third-party SARIF takes and the only one
+        that exercises the default.
+        """
+        result = Result.model_validate(
+            {"ruleId": "B105", "message": {"text": "hardcoded password string"}}
+        )
+
+        assert _resolve_severity(result) == "HIGH"
+
+    def test_level_held_as_an_enum_member_maps_to_high(self):
+        """Assignment is unvalidated too, so the reader must not trust the type."""
+        result = _make_result(level="warning")
+        result.level = Level.error
+
+        assert _resolve_severity(result) == "HIGH"
 
 
 class TestLocationDisplayProperty:

@@ -5,6 +5,41 @@
 #   filename:  sarif-schema-2.1.0.json
 #   timestamp: 2025-04-10T14:55:46+00:00
 
+# DELIBERATE DEVIATION FROM THE CODEGEN OUTPUT -- do not regenerate this away.
+#
+# Three enum-typed fields below default to a plain string where the generator
+# emitted an enum member: ReportingConfiguration.level, Result.kind and
+# Result.level. Each is marked at its declaration.
+#
+# Why: the models that own them set use_enum_values=True, which converts at
+# VALIDATION time, and pydantic does not validate an unprovided default. A
+# default written as Level.error therefore survives on the model as the member,
+# so result.level is a plain str when the scanner supplied the key and a Level
+# when it omitted it -- and SARIF makes level optional, so omitting it is the
+# normal way to inherit severity from rule.defaultConfiguration. Level and Kind
+# are (str, Enum) mixins rather than StrEnum, so Enum.__str__ wins over
+# str.__str__ and str(Level.error) renders "Level.error", which matches no SARIF
+# level and no lookup table. Two things hide it: Level.error == "error" is True,
+# so equality cannot tell the shapes apart, and the member is truthy, so a falsy
+# guard never fires.
+#
+# validate_default=True on each model_config would also coerce these, and was
+# not used: it re-validates every default on every construction of a model built
+# once per finding, to fix three fields. Spelling the three as strings costs
+# nothing at runtime and matches Notification.level, which the generator already
+# emitted as a string.
+#
+# This is not a complete defence and was not meant to be. Assignment is
+# unvalidated too, so anything that sets .level after construction reintroduces
+# the member; consumers read the value rather than the object, using the idiom in
+# utils/severity_ladder.py. Nor does it affect model_dump(exclude_unset=True) or
+# exclude_defaults=True, which drop a defaulted field from the dump whatever the
+# default is spelled as -- a defaulted level is absent from the SARIF written to
+# disk either way.
+#
+# tests/unit/schemas/test_sarif_enum_defaults.py walks every model in this module
+# and fails on any enum-member default, so a regeneration is caught here.
+
 from __future__ import annotations
 
 import re
@@ -127,8 +162,9 @@ class ReportingConfiguration(BaseModel):
         True,
         description="Specifies whether the report may be produced during the scan.",
     )
+    # Plain string, not Level.warning: see the deviation note in the module header.
     level: Optional[Level] = Field(
-        Level.warning, description="Specifies the failure level for the report."
+        "warning", description="Specifies the failure level for the report."
     )
     rank: Optional[float] = Field(
         -1.0,
@@ -1949,11 +1985,15 @@ class Result(BaseModel):
         None,
         description="A reference used to locate the rule descriptor relevant to this result.",
     )
+    # Plain strings, not Kind.fail / Level.error: see the deviation note in the
+    # module header. These two are the reachable case -- every third-party SARIF
+    # ASH ingests arrives through model_validate, so any result that omits the
+    # key lands on the default.
     kind: Optional[Kind] = Field(
-        Kind.fail, description="A value that categorizes results by evaluation state."
+        "fail", description="A value that categorizes results by evaluation state."
     )
     level: Optional[Level] = Field(
-        Level.error, description="A value specifying the severity level of the result."
+        "error", description="A value specifying the severity level of the result."
     )
     message: Message = Field(
         ...,

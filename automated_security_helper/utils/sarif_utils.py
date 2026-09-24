@@ -393,7 +393,14 @@ def _resolve_result_severity(result) -> str:
             return issue_sev.lower()
 
     if result.level:
-        match str(result.level).lower():
+        # Read `.value` before str(): Level is a (str, Enum) mixin, so
+        # str(Level.error) is "Level.error" and matches no arm below. The field
+        # holds a member whenever it was not validated -- an omitted key taking
+        # the default, or a post-construction assignment. Falling through here
+        # returns "info", which puts a real finding under every threshold above
+        # INFO, so the gate passes a report the SARIF on disk says is error.
+        level = getattr(result.level, "value", result.level)
+        match str(level).lower():
             case "error":
                 return "critical"
             case "warning":

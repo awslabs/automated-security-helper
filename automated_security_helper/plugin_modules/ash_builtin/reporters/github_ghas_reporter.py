@@ -76,6 +76,21 @@ _LEVEL_TO_SECURITY_SEVERITY: Dict[str, str] = {
 }
 
 
+def _level_value(level: Any) -> str:
+    """Render a SARIF level as its wire value.
+
+    ``Level`` is a ``(str, Enum)`` mixin, so ``Enum.__str__`` wins and
+    ``str(Level.error)`` is "Level.error" -- not a member of the SARIF 2.1.0
+    level enum, and not a key in ``_LEVEL_TO_SECURITY_SEVERITY``. The field holds
+    a member whenever it was not validated: a result or defaultConfiguration that
+    omits the optional ``level`` key takes the field default, and assignment is
+    unvalidated too. Writing that into the uploaded document hands GitHub a
+    schema-invalid value at the field it reads to set alert severity, and drops
+    the rule to the 6.0 Medium fallback on the way.
+    """
+    return str(getattr(level, "value", level))
+
+
 class GHASReporterConfigOptions(ReporterOptionsBase):
     exclude_suppressed: Annotated[
         bool,
@@ -132,7 +147,7 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             for result in run.results or []:
                 if result.ruleId and result.ruleId not in rule_level_from_results:
                     level_val = result.level or "error"
-                    rule_level_from_results[result.ruleId] = str(level_val)
+                    rule_level_from_results[result.ruleId] = _level_value(level_val)
 
             # 3. Ensure every rule has security-severity
             slim_rules = self._build_slim_rules(rules_map, rule_level_from_results)
@@ -195,7 +210,7 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             # Get the default level from the rule configuration
             default_level = None
             if rule.defaultConfiguration and rule.defaultConfiguration.level:
-                default_level = str(rule.defaultConfiguration.level)
+                default_level = _level_value(rule.defaultConfiguration.level)
 
             rules_map[rule.id] = {
                 "id": rule.id,
@@ -296,7 +311,7 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             # If this result references a rule we haven't seen, create a
             # synthetic entry so the rule list stays complete
             if result.ruleId and result.ruleId not in rules_map:
-                level_val = str(result.level) if result.level else "error"
+                level_val = _level_value(result.level) if result.level else "error"
                 rules_map[result.ruleId] = {
                     "id": result.ruleId,
                     "security_severity": None,
@@ -315,7 +330,7 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
                 result_dict["ruleId"] = result.ruleId
 
             # Map level
-            level_val = str(result.level) if result.level else "error"
+            level_val = _level_value(result.level) if result.level else "error"
             result_dict["level"] = level_val
 
             # Message
