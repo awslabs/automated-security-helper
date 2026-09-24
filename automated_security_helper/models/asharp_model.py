@@ -309,6 +309,30 @@ class ConverterStatusInfo(BaseModel):
     dependencies_satisfied: bool = True
     excluded: bool = False
 
+    # Declared rather than left to ride on extra="allow", so model_json_schema()
+    # carries it and the committed AshAggregatedResults.json documents the shape a
+    # consumer reads.
+    #
+    # Without it, three outcomes shared one representation -- an empty
+    # converted_paths. A converter that raised, one that was turned off, and one
+    # that legitimately found nothing all produced the same row, and the convert
+    # phase emitted the same "No files were converted" warning for all three.
+    failure: Annotated[
+        str | None,
+        Field(
+            default=None,
+            description=(
+                "Why this converter produced nothing, when the reason was that "
+                "something went wrong. For an exception out of convert() this is "
+                "'<type>: <message>'. None when nothing went wrong, which "
+                "includes a converter that ran and found nothing to convert. "
+                "Distinct from excluded, which means the run never intended to "
+                "use it, and from dependencies_satisfied, which reports an "
+                "absent external tool."
+            ),
+        ),
+    ] = None
+
     converted_paths: List[str] = []
 
 

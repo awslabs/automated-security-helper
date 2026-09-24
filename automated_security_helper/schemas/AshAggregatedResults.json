@@ -4599,6 +4599,19 @@
           "default": false,
           "title": "Excluded",
           "type": "boolean"
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Why this converter produced nothing, when the reason was that something went wrong. For an exception out of convert() this is '<type>: <message>'. None when nothing went wrong, which includes a converter that ran and found nothing to convert. Distinct from excluded, which means the run never intended to use it, and from dependencies_satisfied, which reports an absent external tool.",
+          "title": "Failure"
         }
       },
       "title": "ConverterStatusInfo",

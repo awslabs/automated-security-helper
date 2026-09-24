@@ -539,6 +539,57 @@ def incomplete_scanners(
     return listed
 
 
+def incomplete_converters(
+    results: Optional[AshAggregatedResults],
+) -> List[tuple[str, str]]:
+    """(name, reason) for every converter that was meant to run and did not.
+
+    Conversion produces the second set of targets the scanners are given: notebooks
+    become Python, archives become their contents. A converter that crashed or whose
+    tool was absent therefore costs scan coverage, and it did so with no effect on
+    any verdict -- the scanners that ran reported PASSED on the targets they were
+    handed, and nothing asked whether the targets that should have existed did.
+
+    Two conditions, read off the recorded row rather than re-derived:
+
+    1. ``failure`` is set -- the converter raised, or was dropped by the plugin
+       filter for a reason its own dependency check did not explain. ConvertPhase
+       records both.
+    2. ``dependencies_satisfied`` is False -- its external tool was not available.
+
+    ``excluded`` is checked first and wins over both. It is the converter-side
+    counterpart of a SKIPPED scanner: work the run was never meant to do, which is
+    what a config-disabled converter and one dropped by
+    ``--python-based-plugins-only`` are. A gate that failed on those would fail every
+    run that turns conversion off, which is a supported configuration.
+
+    Read with ``getattr`` because a results file written by an older version carries
+    rows without ``failure``, and ``ash merge`` reads shard results from whatever
+    ASH produced each one.
+
+    Args:
+        results: The aggregated results, or None when the scan produced none.
+
+    Returns:
+        Pairs in the order the rows were recorded, empty when every converter either
+        ran or was excluded. The second element is a display string, not a token;
+        the caller interpolates it into a message and does not parse it.
+    """
+    if results is None:
+        return []
+
+    listed: list[tuple[str, str]] = []
+    for name, row in (getattr(results, "converter_results", None) or {}).items():
+        if getattr(row, "excluded", False):
+            continue
+        failure = getattr(row, "failure", None)
+        if failure:
+            listed.append((name, str(failure)))
+        elif getattr(row, "dependencies_satisfied", True) is False:
+            listed.append((name, "dependencies unavailable, so it never ran"))
+    return listed
+
+
 def unevaluated_rules(results: Optional[AshAggregatedResults]) -> List[str]:
     """Every rule a scanner reported, at run level, that it could not evaluate.
 
@@ -1830,6 +1881,37 @@ def _compute_exit_code(
                 "--scanners name that matches no scanner on this platform, or an "
                 "allowlist wholly cancelled by --exclude-scanners.",
                 ", ".join(f"{name} ({status})" for name, status in observed),
+            )
+            return 1
+
+        # The same question asked of the convert phase, which produces the targets
+        # the scanners above were given. A converter that crashed or whose tool was
+        # absent leaves its inputs unscanned, and every scanner that did run still
+        # reports PASSED on the targets it was handed, so no scanner-side signal can
+        # see it.
+        #
+        # Behind fail_on_incomplete_scanners rather than behind a flag of its own, and
+        # this is the decision the flag placement makes. It is the same question --
+        # did what I asked for actually run -- and reusing the existing opt-in means
+        # no run that passes today changes verdict without an operator having asked
+        # for it anywhere. A dedicated default-on gate would be the alternative and is
+        # rejected here: converters are more likely than scanners to be legitimately
+        # absent on a given host, so it would turn currently-green runs red on
+        # upgrade. The cost of this choice is that the default leaves a crashed
+        # converter invisible to the exit code, which is what the recorded
+        # converter_results row exists for.
+        #
+        # 1 rather than 2, matching the two arms above: the reported findings are
+        # real but the set is known to be partial, so clearing them does not clear
+        # the scan.
+        incomplete_conversions = incomplete_converters(results)
+        if incomplete_conversions:
+            logging.getLogger(__name__).error(
+                "Conversion incomplete, so the scanners were given fewer targets "
+                "than this repository has: %s",
+                ", ".join(
+                    f"{name} ({reason})" for name, reason in incomplete_conversions
+                ),
             )
             return 1
 
