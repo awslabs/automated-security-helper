@@ -137,6 +137,20 @@ dev = [
  "hatchling>=1.32",
  "mcp>=2.2.0",
  "commitizen>=4.18.1",
+ # A prerequisite, not a convenience. pre-commit builds every `language: python` hook
+ # environment with the interpreter pre-commit is itself running under, so the hook set
+ # in .pre-commit-config.yaml is installable only if THAT interpreter satisfies each
+ # hook's own requires-python. An unmanaged pre-commit on PATH need not: the config pins
+ # commitizen-tools/commitizen at v4.19.0, and commitizen declares ">=3.10" from 4.11.0
+ # onward (4.10.1 still declared ">=3.9"). Reproduced against a pre-commit 4.3.0 running
+ # under Python 3.9.25, where `pre-commit install-hooks` exits 3 on
+ #   ERROR: Package 'commitizen' requires a different Python: 3.9.25 not in '<4.0,>=3.10'
+ # and no edit to .pre-commit-config.yaml repairs it. Declaring pre-commit in this group
+ # takes it under the project's own requires-python (>=3.10,<3.15), so the pinned hook
+ # set is installable by construction instead of by whatever a contributor has on PATH.
+ # The floor is the version verified against that hook set; the cap is this group's
+ # major.minor-floor / next-major-cap convention.
+ "pre-commit>=4.3,<5.0.0",
  "httpx>=0.28,<1.0.0",
  # The [server] extra, not bare moto: tests/unit/deploy exercises the deploy
  # trees' helpers as SUBPROCESSES, the way a buildspec runs them. moto's in-process
