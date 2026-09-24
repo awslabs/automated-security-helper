@@ -310,8 +310,24 @@ class TestEmptyAndErrorPaths:
         assert doc["runs"][0]["results"] == []
         assert doc["version"] == "2.1.0"
 
-    def test_unexpected_failure_degrades_to_empty_report(self, reporter, caplog):
-        """A reporter that raises aborts the run; this one must degrade instead."""
+    def test_unexpected_failure_produces_no_report_at_all(self, reporter, caplog):
+        """A failed transform must not emit a SARIF document claiming zero findings.
+
+        This assertion is the inversion of an earlier one that required the
+        handler to "degrade" to ``_empty_report()``. Degrading is what made the
+        failure invisible: the document is byte-identical to the legitimate-empty
+        case below, so ``ReportPhase`` took the write branch, logged at INFO,
+        wrote a schema-valid SARIF asserting zero findings, and painted the
+        reporter green. The only thing separating a crashed transform from a clean
+        repository was one ERROR line in a log nothing downstream reads.
+
+        A reporter that raises would abort the run, which is why the handler
+        stays. Returning None instead writes no file, so no analysis is uploaded
+        and whatever GitHub Code Scanning already holds for this tool and category
+        is left as it was. The coverage this inversion keeps -- that one broken
+        result does not propagate an exception out of ``report()`` -- is asserted
+        directly below.
+        """
 
         class ExplodingResults:
             def __iter__(self):
@@ -325,10 +341,66 @@ class TestEmptyAndErrorPaths:
         # the exact point report() iterates results.
         run.results = ExplodingResults()
 
-        doc = json.loads(reporter.report(_model(run)))
+        assert reporter.report(_model(run)) is None
 
-        assert doc["runs"][0]["results"] == []
-        assert doc["runs"][0]["tool"]["driver"]["rules"] == []
+    def test_unexpected_failure_still_does_not_raise(self, reporter):
+        """The coverage the inverted assertion above was protecting."""
+
+        class ExplodingResults:
+            def __iter__(self):
+                raise RuntimeError("iteration exploded")
+
+            def __bool__(self):
+                return True
+
+        run = Run(tool=Tool(driver=ToolComponent(name="ASH")), results=[])
+        run.results = ExplodingResults()
+
+        reporter.report(_model(run))  # must not propagate
+
+    def test_unexpected_failure_is_logged_where_quiet_cannot_hide_it(
+        self, reporter, caplog
+    ):
+        """Returning None is silent unless the reason is on the operator's log."""
+        import logging
+
+        class ExplodingResults:
+            def __iter__(self):
+                raise RuntimeError("iteration exploded")
+
+            def __bool__(self):
+                return True
+
+        run = Run(tool=Tool(driver=ToolComponent(name="ASH")), results=[])
+        run.results = ExplodingResults()
+
+        caplog.set_level(logging.ERROR)
+        reporter.report(_model(run))
+
+        assert [
+            record
+            for record in caplog.records
+            if record.levelno >= logging.ERROR
+            and "Failed to create GHAS SARIF report" in record.getMessage()
+        ]
+
+    def test_the_failure_path_is_not_the_legitimate_empty_path(self, reporter):
+        """The two outcomes were byte-identical, which is the whole defect."""
+
+        class ExplodingResults:
+            def __iter__(self):
+                raise RuntimeError("iteration exploded")
+
+            def __bool__(self):
+                return True
+
+        run = Run(tool=Tool(driver=ToolComponent(name="ASH")), results=[])
+        run.results = ExplodingResults()
+
+        empty_model = AshAggregatedResults()
+        empty_model.sarif = None
+
+        assert reporter.report(_model(run)) != reporter.report(empty_model)
 
 
 class TestCollectRules:

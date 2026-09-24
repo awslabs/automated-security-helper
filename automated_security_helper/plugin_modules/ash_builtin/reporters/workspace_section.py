@@ -41,6 +41,12 @@ Failure modes and known limitations
   omitting it would let a project the operator asked for vanish from the one
   table they read, which is the silent-omission failure this feature exists
   against.
+* ``Result`` states one reason, and where a project holds more than one the
+  precedence is ``workspace_exit_code``'s rather than a second one invented here.
+  So a project both over its threshold and missing a scanner reads ``FAILED``,
+  not ``FAILED (incomplete)``; the missing scanner is in ``detail`` instead. The
+  alternative -- ranking incompleteness first -- would have made the table name a
+  different cause than the exit code did for the same project.
 * ``display_label`` is not unique by construction (see ``ProjectPlan``), so the
   key is shown when the two differ. Showing only the label would make two
   projects indistinguishable in the table while the findings under them differ.
@@ -92,12 +98,37 @@ def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]
             result = "FAILED"
         elif project.exceeds_threshold:
             result = "FAILED"
+        elif project.scan_incomplete:
+            # Without this arm a COMPLETED project carrying scan_incomplete=True,
+            # no error and no threshold breach fell to the else and was emitted as
+            # PASSED with its counts -- the same row a clean scan produces -- while
+            # workspace_exit_code failed the run for that same project. The table
+            # was the optimistic half of two disagreeing verdicts.
+            #
+            # The suffix is not decoration: html_workspace_section derives its row
+            # class from result.startswith("FAILED"), so a state named anything
+            # else changes the text and leaves the row green. Renaming this string
+            # means changing that predicate in the same edit.
+            result = "FAILED (incomplete)"
         else:
             result = "PASSED"
 
         label = project.display_label
         if label != project.project:
             label = f"{label} ({project.project})"
+
+        detail = project.error or project.skip_detail or ""
+        if project.incomplete_scanners:
+            # Named whenever the list is populated, not only when the arm above
+            # won. A project over its threshold *and* missing a scanner reports
+            # the threshold breach in Result, because that is the precedence
+            # workspace_exit_code ratified -- a certainty must not be suppressed
+            # by an unknown -- and an operator who switched
+            # fail_on_incomplete_scanners off gets a PASSED row. In both cases the
+            # scanner that did not run is the one fact the rest of the row cannot
+            # convey.
+            unrun = "did not complete: " + ", ".join(project.incomplete_scanners)
+            detail = f"{detail}; {unrun}" if detail else unrun
 
         rows.append(
             {
@@ -108,7 +139,7 @@ def workspace_project_rows(model: "AshAggregatedResults") -> List[Dict[str, Any]
                 "actionable": project.actionable_finding_count,
                 "threshold": project.severity_threshold or "n/a",
                 "result": result,
-                "detail": project.error or project.skip_detail or "",
+                "detail": detail,
             }
         )
     return rows
