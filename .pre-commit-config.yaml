@@ -52,16 +52,61 @@ repos:
           - "--autofix"
           - "--indent=2"
   - repo: https://github.com/commitizen-tools/commitizen
-    rev: v4.8.3
+    # Same reconciliation as the ruff pin below: the dev dependency group declares
+    # "commitizen>=4.18.1" and this was pinned at v4.8.3, so the `cz check` a
+    # contributor's commit-msg hook ran was ten minor versions behind the cz the
+    # project installs.
+    #
+    # THE BUMP HAS AN INTERPRETER PREREQUISITE, AND IT IS NOT FIXABLE IN THIS FILE
+    #
+    # commitizen dropped Python 3.9 at 4.12.0: 4.8.3 declares requires-python
+    # ">=3.9", and every release from 4.12.0 on declares ">=3.10". pre-commit builds a
+    # `language: python` hook environment with the interpreter pre-commit is itself
+    # running under, so a pre-commit installed against a system Python 3.9 fails this
+    # hook at install time with
+    #   ERROR: Package 'commitizen' requires a different Python: 3.9.x not in '<4.0,>=3.10'
+    # That is not a commitizen defect and no edit here repairs it. Running pre-commit
+    # out of the project environment -- which is why "pre-commit" is a declared dev
+    # dependency rather than something each contributor installs by unrecorded means
+    # -- pins the interpreter to this repo's own requires-python floor of 3.10.
+    rev: v4.19.0
     hooks:
       - id: commitizen
         stages: [commit-msg]
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    # Ruff version.
-    rev: v0.11.8
+    # This rev must ship the same ruff the project resolves, or the hook produces
+    # diffs CI cannot reproduce. ruff-pre-commit pins `ruff==<tag>` in its own
+    # pyproject.toml, so the tag IS the ruff version: v0.16.7 ships ruff 0.16.7,
+    # which is what uv.lock resolves for the "ruff>=0.16.7,<1.0.0" line in the dev
+    # dependency group.
+    #
+    # It was v0.11.8, five minor versions under that floor, and the two ruffs do not
+    # agree about what an error is. Measured on this tree with `ruff check .`:
+    # 316 errors under 0.11.8, 6,853 under 0.16.8. Ruff's DEFAULT rule set widened
+    # enormously in between, so the old hook was enforcing a small fraction of what
+    # the project's own ruff reports -- while looking like it enforced all of it.
+    # Reconciling this pin is a prerequisite for the lint steps in
+    # .github/workflows/ash-unified-ci.yml, not a tidy-up.
+    #
+    # One behavior change arrives with the bump and is deliberately NOT suppressed
+    # here: at 0.16.x the ruff-format hook's `types_or` includes `markdown`, and
+    # `ruff format` rewrites fenced python blocks. On this tree that is 37 .md files
+    # on top of 208 .py files. Narrowing it in this file alone would put the hook and
+    # the `ruff format --check` step back out of step with each other, which is the
+    # defect above in miniature. If markdown should be out of scope, the place for
+    # that is [tool.ruff] in pyproject.toml, which the hook and the gate both read.
+    rev: v0.16.7
     hooks:
-      # Run the linter.
-      - id: ruff
+      # `ruff-check` is the current id. `ruff` still resolves -- upstream keeps it as
+      # a documented legacy alias -- but the alias hides which ruff subcommand runs.
+      #
+      # --fix stays, and it is precisely why CI does not run `pre-commit run
+      # --all-files`. Repairing the file is right on a developer's machine and wrong
+      # in a gate: measured on this tree, one full run rewrote 569 files
+      # (+23,283/-21,679) and then reported its verdict over its own edits. CI runs
+      # `ruff check` and `ruff format --check` directly, so a violation fails there
+      # instead of being quietly fixed.
+      - id: ruff-check
         args: [--fix]
       # Run the formatter.
       - id: ruff-format
@@ -70,6 +115,16 @@ repos:
   # local versions
   - repo: local
     hooks:
+      # `stages: [manual]` is what makes the "(manual)" in the name true. Without it
+      # this hook inherits pre-commit's default stage set, so a hook labeled manual
+      # ran a full ASH scan on every single commit and on every
+      # `pre-commit run --all-files`. Measured before the stage was added: 31.68s per
+      # invocation, and it exited non-zero, so the label was not merely cosmetic --
+      # it was describing behavior the config did not implement, and the only way
+      # past it was --no-verify, which disables every other hook here too.
+      #
+      # Manual-staged means it never fires from a git hook. Invoke it deliberately:
+      #   pre-commit run --hook-stage manual ash
       - id: ash
         name: (manual) ASH dev manual scan
         description: Runs various code scanners from Python directly
@@ -77,6 +132,7 @@ repos:
         pass_filenames: false
         verbose: true
         language: system
+        stages: [manual]
         args:
           - --output-dir=.ash/ash_output_precommit_local
   # - repo: https://github.com/awslabs/automated-security-helper
