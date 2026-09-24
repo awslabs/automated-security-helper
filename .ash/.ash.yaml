@@ -30,6 +30,32 @@ global_settings:
         environment variable the entrypoint reads to find the secret, not a
         secret. The value it names is an ARN resolved at runtime, and the header
         it eventually fetches is never written to this file.
+    # === detect-secrets on the CDK sources, scanned here for the first time ===
+    #
+    # The root .gitignore's Python packaging block carried a bare `lib/` rule,
+    # which matches a directory named lib at any depth and so also matched
+    # deploy/cdk/lib -- the CDK application's entire source directory. get_scan_set
+    # prunes on the root .gitignore alone, so the `!lib/` negation in
+    # deploy/cdk/.gitignore never applied and these eleven files were tracked but
+    # never scanned. Anchoring the rule to /lib/ adds them to the scan set, taking
+    # it from 1227 files to 1241 -- the 11 sources plus the 3 test files added in
+    # the same change. Reproduce with `scan_set(source=".")` from the repository
+    # root.
+    #
+    # One finding became visible. Measured over all eleven files with the default
+    # detect-secrets plugin set, not inferred from the rule name.
+    - rule_id: SECRET-SECRET-KEYWORD
+      path: deploy/cdk/lib/ash-runtime-config.ts
+      reason: >-
+        The match is `SECRET_PLACEHOLDER = 'ash-mcp-auth-disabled'`, the sentinel
+        value stored in Secrets Manager when ASH-level header auth is disabled. The
+        keyword heuristic fires on the constant's name; the string is a marker
+        meaning "no auth configured", and nothing reads it as a credential. The
+        same constant is already suppressed twice in this file for checkov's
+        CKV_SECRET_6, on the two generated templates it reaches
+        (AshCodeCommitGate and AshDistributedPipeline) -- this entry is the source
+        file those templates are synthesized from, which had no entry only because
+        it was outside the scan set.
     # === bandit: /tmp is the only writable path under a read-only rootfs ===
     - rule_id: B108
       path: deploy/terraform/modules/codecommit-gate/files/ash_pr_gate.py

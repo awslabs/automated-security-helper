@@ -1,1 +1,43 @@
+# grype configuration for ASH's scan of its own checkout.
+#
+# WHY only-fixed IS SET, AND WHY THAT IS A COVERAGE DECISION RATHER THAN A KNOB
+#
+# grype documents only-fixed as "ignore matches for vulnerabilities that are not
+# fixed" (https://oss.anchore.com/docs/reference/grype/configuration/). It is an
+# output filter, not a scan option: grype still detects a vulnerability with no
+# available fix and then drops it before writing the report. So this line removes
+# a whole category of finding from ASH's own dependency scan, and it is the only
+# exclusion under .ash/ that is not written as a suppression with a reason in
+# .ash/.ash.yaml.
+#
+# It is recorded here rather than removed because removing it and leaving the
+# result untriaged is the worse of the two failures. The set it unmasks is not a
+# function of this checkout: it is whatever the vulnerability database says on the
+# day the scan runs, so it changes without any commit here, and no count written
+# into this file would stay true. That also means the finding set cannot be
+# triaged once and suppressed with stable rule ids, the way the checkov, cfn-nag
+# and cdk-nag entries in .ash/.ash.yaml were.
+#
+# WHAT THIS COSTS, STATED PLAINLY
+#
+# A dependency with a known vulnerability and no released fix is exactly the case
+# a reader would want a security tool to tell them about, because the response is
+# pinning, vendoring or replacing the dependency rather than upgrading it. That
+# response is unavailable while this line is here. Anyone deciding whether ASH's
+# own dependencies are clean should read this file first.
+#
+# WHAT TO DO ABOUT IT
+#
+# Deleting the line is the right end state and is deliberately left as a
+# maintainer decision, because it will surface a backlog on the self-scan leg in
+# .github/workflows/ash-repo-scan.yml -- which installs grype and gates merges --
+# and that backlog has to be triaged in the same change that unmasks it. Removing
+# only-fixed without that triage turns the leg red and invites the next reader to
+# fix the red by restoring this line, which is how it became undocumented in the
+# first place.
+#
+# GrypeScanner now logs a WARNING naming any key in this file that restricts what
+# reaches the report, so the reduction is visible in every run rather than only
+# to whoever opens this file. See OUTPUT_RESTRICTING_GRYPE_KEYS in
+# automated_security_helper/plugin_modules/ash_builtin/scanners/grype_scanner.py.
 only-fixed: true
