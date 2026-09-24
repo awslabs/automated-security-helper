@@ -123,7 +123,17 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
                     # Determine severity
                     severity = None
                     if result.level:
-                        level_str = str(result.level).lower()
+                        # Read `.value` before str(): Level is a (str, Enum)
+                        # mixin, so str(Level.error) is "Level.error", no branch
+                        # below matches, severity stays None, and the `if
+                        # severity:` guard further down drops the key entirely --
+                        # the vulnerability reaches the GitLab Security Dashboard
+                        # with nothing to triage or gate on. The field holds a
+                        # member whenever it was not validated, which includes
+                        # every result that omitted the optional level key.
+                        level_str = str(
+                            getattr(result.level, "value", result.level)
+                        ).lower()
                         if level_str == "error":
                             severity = "High"
                         elif level_str == "warning":

@@ -372,6 +372,42 @@ def test_template_without_resources_returns_none(cdk_doubles, tmp_path, outdir):
     assert recorder_is_untouched(cdk_doubles)
 
 
+def test_a_template_the_model_rejects_returns_a_failure_not_a_skip(
+    cdk_doubles, tmp_path, outdir
+):
+    """A Resources mapping ASH cannot model is a fourth ``failure`` state.
+
+    The counterpart to the test above, and the reason the bare-None return needed a
+    companion rather than a wider net. This file is CloudFormation -- Resources holds a
+    mapping -- so cdk-nag was asked to evaluate a real template and evaluated nothing.
+    Returning None here made the scanner take its documented not-a-CloudFormation-file
+    branch, which *decrements* ``targets_attempted``; a scan set in which every template
+    tripped the model therefore ended at zero attempts and reported SKIPPED with exit
+    code 0.
+
+    The resource type here fails the model's own pattern rather than testing a charset
+    question: ``get_model_from_template`` now admits _, @ and - because CloudFormation
+    documents them, so a space is used to get a rejection that is unambiguous.
+    """
+    unmodelable = tmp_path / "unmodelable.yaml"
+    unmodelable.write_text(
+        "Resources:\n  Bad:\n    Type: 'invalid type with spaces'\n", encoding="utf-8"
+    )
+
+    response = _run(unmodelable, outdir)
+
+    assert response is not None, (
+        "a template ASH could not model must not arrive as the not-a-template skip"
+    )
+    assert response.failure is not None
+    assert "could not be modeled" in response.failure
+    # The reason, not just the fact: the scanner writes this string into its error list
+    # and that is the operator's only record of why the template went unevaluated.
+    assert "ValidationError" in response.failure
+    # Nothing was synthesized, so the empty results say nothing about compliance.
+    assert recorder_is_untouched(cdk_doubles)
+
+
 def recorder_is_untouched(recorder):
     return not recorder.apps and not recorder.stacks and recorder.synth_count == 0
 

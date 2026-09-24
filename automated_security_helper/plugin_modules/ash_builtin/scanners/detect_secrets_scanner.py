@@ -212,18 +212,28 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                     f"Falling back to default settings."
                 )
 
-        # If no existing baseline is identified then use all detect-secrets plugins
-        # This is the same as using the default_settings function provided by detect-secrets
-        if (
-            self.config.options.scan_settings.version is None
-            and len(self.config.options.scan_settings.plugins_used) == 0
-        ):
-            self.config.options.scan_settings = DetectSecretsScanSettings(
-                plugins_used=[
-                    DetectSecretsScanSettingsPluginsUsed(name=plugin_type.__name__)
-                    for plugin_type in get_mapping_from_secret_type_to_class().values()
-                ],
-            )
+        # If no plugins are configured then use all detect-secrets plugins. This is
+        # the same set the default_settings function provided by detect-secrets
+        # installs.
+        #
+        # ``plugins_used`` is the only condition, because it is the only one that
+        # decides whether there is anything to detect with. This was additionally
+        # gated on ``version is None``, which turned naming a detect-secrets
+        # version -- a compatibility knob -- into a way to switch every detector
+        # off: the dump below drops the still-default empty list, so
+        # ``transient_settings`` received ``{'version': ...}`` and nothing else,
+        # and the scan reported clean at exit 0 with no detectors configured.
+        #
+        # Merged into the existing object rather than replacing it. Replacing
+        # discarded the operator's ``version`` and ``generated_at``, any
+        # ``filters_used`` loaded from a baseline immediately above, and any extra
+        # keys the model accepts -- a second silent loss on the way to fixing the
+        # first.
+        if len(self.config.options.scan_settings.plugins_used) == 0:
+            self.config.options.scan_settings.plugins_used = [
+                DetectSecretsScanSettingsPluginsUsed(name=plugin_type.__name__)
+                for plugin_type in get_mapping_from_secret_type_to_class().values()
+            ]
             settings = self.config.options.scan_settings.model_dump(
                 exclude_defaults=True, exclude_none=True, exclude_unset=True
             )
@@ -432,19 +442,45 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             )
             self._secrets_collection.root = Path(scan_root).absolute()
 
-            # Find all files to scan from the scan set
+            # Find all files to scan from the scan set.
+            #
+            # The output-directory exclusion guards the SOURCE branch only. ASH
+            # writes its output underneath the source tree by default, so without
+            # it a source scan reads its own previous reports back in and
+            # attributes their contents to the repository. The converted branch
+            # enumerates ``work_dir``, which is itself inside ``output_dir``, so
+            # applying the same test there discards every file the converters
+            # produced.
+            #
+            # Expressed against the resolved ``output_dir`` rather than against the
+            # substring "/.ash/". That substring matches ``work_dir`` under the
+            # documented default layout, where ``output_dir`` is
+            # ``<source>/.ash/ash_output`` -- so the converted scan set was emptied
+            # in full and the scan still reported clean. It also never matched on
+            # Windows, where these paths are separated by "\", leaving the guard
+            # simultaneously dead on one platform and over-broad on the other.
+            #
+            # ``absolute()`` on both sides and not ``resolve()``, for the reason
+            # given for ``root`` above: the file list keeps whatever symlinked
+            # prefix it was walked with, and resolving one side of a containment
+            # test while leaving the other unresolved answers a different question.
+            candidates = (
+                list(self.context.work_dir.glob("**/*.*"))
+                if target_type == "converted"
+                else scan_set(
+                    source=self.context.source_dir,
+                    output=self.context.output_dir,
+                )
+            )
+            absolute_output_dir = Path(self.context.output_dir).absolute()
             scannable = [
                 str(item)
-                for item in (
-                    list(self.context.work_dir.glob("**/*.*"))
-                    if target_type == "converted"
-                    else scan_set(
-                        source=self.context.source_dir,
-                        output=self.context.output_dir,
-                    )
-                )
+                for item in candidates
                 if Path(item).name not in [*KNOWN_LOCKFILE_NAMES]
-                and "/.ash/" not in str(item)
+                and (
+                    target_type == "converted"
+                    or not Path(item).absolute().is_relative_to(absolute_output_dir)
+                )
             ]
 
             # Build the scan_settings dict for transient_settings, ensuring
@@ -532,6 +568,31 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             self._ensure_fork_multiprocessing()
 
             scan_timeout = self.config.options.scan_timeout
+
+            # Refuse to scan with no detectors rather than reporting clean.
+            #
+            # detect-secrets with an empty ``plugins_used`` finds nothing by
+            # construction, and what it hands back is indistinguishable from a
+            # genuinely clean tree everywhere ASH reports from. Measured against a
+            # two-file tree holding two real secrets: exit_code 0, errors [],
+            # zero SARIF results, and executionSuccessful true. detect-secrets does
+            # write "No plugins to scan with!" to its own stderr, so the condition
+            # is not literally unannounced -- but none of it reaches the exit code
+            # or the report, which is all a CI gate reads. A configuration that
+            # removes every detector has to be louder than the result it would
+            # otherwise produce, so it fails the scanner instead.
+            #
+            # Asserted on the dict that reaches ``transient_settings`` rather than
+            # on the model, because the dump above is where an empty list gets
+            # dropped and it is the dict that governs the scan.
+            if not scan_settings_dict.get("plugins_used"):
+                raise ScannerError(
+                    "detect-secrets was configured with no detect-secrets plugins, "
+                    "so the scan could only report clean. Set "
+                    "scanners.detect-secrets.options.scan_settings.plugins_used to "
+                    "the detectors you want, or leave it unset to get the full "
+                    "default plugin set."
+                )
 
             with transient_settings(scan_settings_dict) as settings:
                 ASH_LOGGER.debug(f"Settings: {settings}")

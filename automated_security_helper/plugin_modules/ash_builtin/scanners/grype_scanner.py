@@ -3,8 +3,9 @@
 import logging
 import os
 from pathlib import Path
-from typing import Annotated, ClassVar, List, Literal
+from typing import Annotated, ClassVar, Final, List, Literal
 
+import yaml
 from pydantic import Field, model_validator
 from automated_security_helper.base.options import ScannerOptionsBase
 from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBase
@@ -31,6 +32,42 @@ from automated_security_helper.utils.download_utils import (
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.subprocess_utils import find_executable
+
+#: grype configuration keys that remove matches from the report.
+#:
+#: A discovered grype config is passed straight through as ``--config``, so a key
+#: like ``only-fixed`` narrows ASH's own results. Until these keys were named here
+#: nothing in the run said the report had been filtered, and the only record was
+#: the config file itself -- which nobody opens while reading a clean scan.
+#: Warning on the key rather than fixing one config file is the general form: any
+#: adopter can point ASH at a config that quietly withholds their own findings.
+#:
+#: Key names and effects are from grype's configuration reference at
+#: https://oss.anchore.com/docs/reference/grype/configuration/ (generated for
+#: grype 0.110.0):
+#:
+#: * ``only-fixed`` -- "ignore matches for vulnerabilities that are not fixed"
+#: * ``only-notfixed`` -- "ignore matches for vulnerabilities that are fixed"
+#: * ``ignore-wontfix`` -- "ignore matches for vulnerabilities with specified
+#:   comma separated fix states"
+#: * ``ignore`` -- "A list of vulnerability ignore rules"
+#: * ``exclude`` -- "a list of globs to exclude from scanning"
+#: * ``vex-add`` -- "VEX statuses to consider as ignored rules"
+#:
+#: ``fail-on-severity`` is excluded deliberately: it sets the return code and
+#: removes nothing from the report, so warning about it would train a reader to
+#: ignore the warning. ``show-suppressed`` is the inverse of a filter -- it
+#: reveals matches that were dropped rather than dropping them.
+OUTPUT_RESTRICTING_GRYPE_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "only-fixed",
+        "only-notfixed",
+        "ignore-wontfix",
+        "ignore",
+        "exclude",
+        "vex-add",
+    }
+)
 
 
 class GrypeScannerConfigOptions(ScannerOptionsBase):
@@ -140,6 +177,38 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         except Exception as e:
             ASH_LOGGER.warning(f"Error processing Grype result: {e}")
 
+    @staticmethod
+    def _output_restricting_keys(config_path: Path | str) -> List[str]:
+        """Which keys in the grype config at *config_path* drop matches.
+
+        Returns the matching key names sorted, and an empty list when the file
+        removes nothing, cannot be read, or is not a YAML mapping.
+
+        Deliberately does not raise. grype owns the verdict on its own config
+        file, and turning a document ASH merely passes through into an ASH-side
+        failure would replace grype's precise parse error with a worse one, on a
+        scan grype itself might have run.
+
+        A key present with a falsy value is not reported: ``only-fixed: false``
+        is the documented default written out, and warning about it would train a
+        reader to ignore the warning.
+
+        Args:
+            config_path: The grype config file ASH is about to pass as
+                ``--config``.
+
+        Returns:
+            Sorted names of the keys that restrict grype's output.
+        """
+        try:
+            with open(config_path, "r", encoding="utf-8") as config_file:
+                document = yaml.safe_load(config_file)
+        except (OSError, yaml.YAMLError):
+            return []
+        if not isinstance(document, dict):
+            return []
+        return sorted(key for key in OUTPUT_RESTRICTING_GRYPE_KEYS if document.get(key))
+
     def _process_config_options(self):
         # Grype config path
         possible_config_paths = [
@@ -173,6 +242,19 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             if not candidate.is_absolute():
                 candidate = source_dir / candidate
             if candidate.exists():
+                # Say so when the config narrows the report. Without this the
+                # only record that matches were withheld is the config file
+                # itself, which nobody reads while looking at a clean scan.
+                restricting_keys = self._output_restricting_keys(candidate)
+                if restricting_keys:
+                    self._plugin_log(
+                        f"The grype config at {candidate} sets "
+                        f"{', '.join(restricting_keys)}, which restricts which "
+                        "matches reach the report. Vulnerabilities grype detected "
+                        "may be absent from these results, and the scan can pass "
+                        "with findings withheld.",
+                        level=logging.WARNING,
+                    )
                 self.args.extra_args.append(
                     ToolExtraArg(
                         key="--config",

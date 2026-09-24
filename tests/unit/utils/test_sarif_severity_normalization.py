@@ -10,6 +10,7 @@ from automated_security_helper.core.phases.scan_result_processor import (
 )
 from automated_security_helper.models.scan_results_container import ScanResultsContainer
 from automated_security_helper.schemas.sarif_schema_model import (
+    Level,
     Message,
     PropertyBag,
     ReportingDescriptor,
@@ -154,6 +155,65 @@ def test_non_canonical_issue_severity_does_not_block_the_rule_score():
     )
 
     assert report.runs[0].results[0].properties.issue_severity == "HIGH"
+
+
+def _unlevelled_report() -> SarifReport:
+    """A report whose only result omits the optional ``level`` key entirely.
+
+    Built through ``model_validate`` because that is the path every third-party
+    scanner's SARIF takes, and it is the only path that exercises the field
+    default. A ``Result(level=None)`` is a different shape: the field is set, so
+    the falsy guard catches it.
+    """
+    return SarifReport.model_validate(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {"driver": {"name": "bandit"}},
+                    "results": [
+                        {
+                            "ruleId": "B105",
+                            "message": {"text": "hardcoded password string"},
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+
+def test_result_with_no_level_key_resolves_to_critical_not_info():
+    """SARIF makes ``level`` optional; omitting it must not erase the severity.
+
+    The field default is ``error``, so the fallback owes this result CRITICAL.
+    Resolving it to "info" instead puts the finding below every threshold above
+    INFO, which turns a real finding into a passing scan.
+    """
+    result = _unlevelled_report().runs[0].results[0]
+
+    assert _resolve_result_severity(result) == "critical"
+
+
+def test_metrics_path_counts_an_unlevelled_result_as_critical():
+    """The per-scanner counter is what ``determine_status`` reads for the gate."""
+    counts = get_severity_metrics_from_sarif(_unlevelled_report(), MagicMock())
+
+    assert counts.critical == 1
+    assert counts.info == 0
+
+
+def test_level_held_as_an_enum_member_still_resolves():
+    """The resolver must not depend on the producer storing a plain string.
+
+    Pydantic does not validate on assignment either, so any code path that sets
+    ``result.level`` after construction reintroduces the enum member. Reading
+    ``.value`` first makes the resolver independent of how it got there.
+    """
+    result = Result(ruleId="B105", level="warning", message=Message(text="x"))
+    result.level = Level.error
+
+    assert _resolve_result_severity(result) == "critical"
 
 
 def test_scan_result_processor_preserves_grype_severity_through_aggregation(

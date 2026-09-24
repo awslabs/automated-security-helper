@@ -95,6 +95,17 @@ def _result(
     )
 
 
+def _unlevelled_result(rule_id="R", text="finding text"):
+    """A Result whose ``level`` key is absent, not set to None.
+
+    ``_result(level=None)`` sets the field, so the falsy guard catches it and the
+    "error" fallback runs. Omitting the key entirely applies the field default
+    instead, which is the shape every third-party scanner's SARIF produces and
+    the only one that can carry an unconverted enum member.
+    """
+    return Result.model_validate({"ruleId": rule_id, "message": {"text": text}})
+
+
 def _location(uri, **region_kwargs):
     return Location(
         physicalLocation=PhysicalLocation(
@@ -402,6 +413,27 @@ class TestCollectRules:
         assert info["help_uri"] == "https://example.test/rules/R"
         assert info["tags"] == ["security", "cwe-79"]
 
+    def test_default_configuration_with_an_absent_level_key_reads_as_warning(
+        self, reporter
+    ):
+        """ReportingConfiguration.level defaults to warning and is unvalidated too.
+
+        A rule that declares a defaultConfiguration without spelling out
+        ``level`` must read as "warning", so the security-severity lookup hits
+        6.0 by name rather than by falling off the end of the table.
+        """
+        rule = ReportingDescriptor.model_validate(
+            {"id": "R", "defaultConfiguration": {"enabled": True}}
+        )
+        rules_map = {}
+
+        reporter._collect_rules(
+            ToolComponent(name="ASH", rules=[rule]),
+            rules_map,
+        )
+
+        assert rules_map["R"]["default_level"] == "warning"
+
     def test_rule_without_properties_has_no_severity_or_tags(self, reporter):
         rules_map = {}
         reporter._collect_rules(ToolComponent(name="d", rules=[_rule("R")]), rules_map)
@@ -449,7 +481,12 @@ class TestResolveSecuritySeverity:
         )
 
     def test_unknown_level_string_falls_back_to_medium(self, reporter):
-        rules_map = {"R": {"security_severity": None, "default_level": "Level.warning"}}
+        # The example used to be "Level.warning", which was the stringified enum
+        # member this reporter was actually producing -- the fallback was
+        # absorbing a bug rather than an unrecognized SARIF level. _level_value
+        # now makes that string unreachable, so the coverage is kept against a
+        # level that really is foreign.
+        rules_map = {"R": {"security_severity": None, "default_level": "critical"}}
         assert reporter._resolve_security_severity("R", rules_map, {}) == "6.0"
 
     def test_unknown_rule_falls_back_to_medium(self, reporter):
@@ -573,6 +610,9 @@ class TestBuildSlimResults:
         assert len(doc["runs"][0]["results"]) == 1
 
     def test_missing_result_level_defaults_to_error(self, reporter):
+        # level=None sets the field, so this covers the explicit-None path only.
+        # The absent-key path is a different shape; see
+        # test_result_with_an_absent_level_key_emits_error below.
         run = Run(
             tool=Tool(driver=ToolComponent(name="ASH")),
             results=[_result("R", level=None)],
@@ -583,6 +623,72 @@ class TestBuildSlimResults:
         assert doc["runs"][0]["results"][0]["level"] == "error", (
             "an unlevelled finding must not silently downgrade"
         )
+
+    def test_result_with_an_absent_level_key_emits_error(self, reporter):
+        """The emitted value must be a SARIF level, not a stringified enum.
+
+        GitHub reads ``level`` to place the alert. "Level.error" is not a member
+        of the SARIF 2.1.0 level enum, so the upload carries a schema-invalid
+        value at the one field that decides alert severity.
+        """
+        run = Run(
+            tool=Tool(driver=ToolComponent(name="ASH")),
+            results=[_unlevelled_result("R")],
+        )
+
+        doc = json.loads(reporter.report(_model(run)))
+
+        assert doc["runs"][0]["results"][0]["level"] == "error"
+
+    def test_result_with_an_absent_level_key_keeps_error_security_severity(
+        self, reporter
+    ):
+        """8.0 is GitHub's High band; the unknown-level fallback 6.0 is Medium.
+
+        The rule is declared but carries neither a scanner security-severity nor
+        a defaultConfiguration, so _resolve_security_severity falls through to
+        the result level -- the value report() derived from ``result.level``.
+        """
+        run = Run(
+            tool=Tool(driver=ToolComponent(name="ASH", rules=[_rule("R")])),
+            results=[_unlevelled_result("R")],
+        )
+
+        doc = json.loads(reporter.report(_model(run)))
+
+        (rule,) = doc["runs"][0]["tool"]["driver"]["rules"]
+        assert rule["properties"]["security-severity"] == "8.0"
+
+    def test_level_held_as_an_enum_member_emits_error(self, reporter):
+        """Assignment is unvalidated, so the reporter cannot trust the type."""
+        result = _result("R", level=Level.warning)
+        result.level = Level.error
+        run = Run(tool=Tool(driver=ToolComponent(name="ASH")), results=[result])
+
+        doc = json.loads(reporter.report(_model(run)))
+
+        assert doc["runs"][0]["results"][0]["level"] == "error"
+
+    def test_no_emitted_level_contains_a_dot(self, reporter):
+        """A blanket shape check over every level the document carries.
+
+        Any "EnumName.member" leak shows up as a dot, whatever field or code
+        path produced it, so this catches sites a per-field test would miss.
+        """
+        run = Run(
+            tool=Tool(driver=ToolComponent(name="ASH")),
+            results=[
+                _unlevelled_result("ABSENT"),
+                _result("EXPLICIT", level=Level.warning),
+                _result("NONE", level=None),
+            ],
+        )
+
+        doc = json.loads(reporter.report(_model(run)))
+
+        levels = [r["level"] for r in doc["runs"][0]["results"]]
+        assert levels == ["error", "warning", "error"]
+        assert all("." not in level for level in levels), levels
 
     def test_result_level_is_carried_through(self, reporter):
         run = Run(

@@ -28,6 +28,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.cfn_template_model import (
     CloudFormationTemplateModel,
+    CloudFormationTemplateModelError,
     get_model_from_template,
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
@@ -45,13 +46,17 @@ class CdkNagWrapperResponse:
     ``failure`` set means no rule was evaluated -- so the empty ``results`` says nothing about
     the template's compliance.
 
-    Three states reach ``failure``, and they were not always three. The original one is a run
-    that produced no readable validation report. The other two used to return bare None and so
+    Four states reach ``failure``, and they were not always four. The original one is a run
+    that produced no readable validation report. Two more used to return bare None and so
     arrived at the scanner as the legitimate skip: cdk-nag failing to import, and no nag pack
-    being registered. Both mean a real template went unevaluated, which is the opposite of a
-    skip -- the scanner un-counted the attempt for each of them, and a scan where every
-    template hit one of the two ended at zero attempts and reported SKIPPED with exit code 0.
-    Only "this file is not a CloudFormation template" is a skip, so only it returns None.
+    being registered. The fourth is a template that carries a ``Resources`` mapping and that
+    ``get_model_from_template`` could not model, which used to be indistinguishable from a
+    file that is not CloudFormation at all because both answered None. Every one of them
+    means a real template went unevaluated, which is the opposite of a skip -- the scanner
+    un-counted the attempt for each, and a scan where every template hit one of them ended at
+    zero attempts and reported SKIPPED with exit code 0. Only "this file is not a
+    CloudFormation template", which now means "the document carries no ``Resources``
+    mapping", is a skip, so only it returns None.
 
     Before this field existed the caller could only see None-versus-response, and a report-less
     run arrived as an ordinary response holding an empty dict. The scanner counted the target
@@ -794,10 +799,33 @@ def run_cdk_nag_against_cfn_template(
                         }
                 return nag_packs
 
-            model = get_model_from_template(template_path)
+            try:
+                model = get_model_from_template(template_path)
+            except CloudFormationTemplateModelError as exc:
+                # The fourth state that reaches ``failure``, and it is here rather than
+                # in the None branch below because the two answers are different facts.
+                # A document carrying a ``Resources`` mapping is CloudFormation, so
+                # cdk-nag was pointed at a real template and evaluated nothing against
+                # it. Returned as a skip, the scanner takes the branch that *decrements*
+                # ``targets_attempted``, and a scan set in which every template tripped
+                # the model ended at zero attempts and reported SKIPPED with exit code
+                # 0 -- the same silent pass the other three states were converted to fix.
+                ASH_LOGGER.error(
+                    f"cdk-nag did not evaluate {template_path}: the template could not "
+                    f"be modeled as CloudFormation ({type(exc.error).__name__})"
+                )
+                return CdkNagWrapperResponse(
+                    results={},
+                    failure=(
+                        "the template carries a Resources mapping but could not be "
+                        "modeled as CloudFormation, so no rule was evaluated: "
+                        f"{type(exc.error).__name__}"
+                    ),
+                )
             if model is None:
                 ASH_LOGGER.debug(
-                    "No model validated from template, skipping CDK Nag. This does not seem to be a valid CloudFormation template"
+                    f"{template_path} carries no Resources mapping, so it is not a "
+                    "CloudFormation template and cdk-nag is skipped for it"
                 )
                 return None
 

@@ -6,7 +6,9 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import botocore.exceptions
+import botocore.session
 import pytest
+from botocore.stub import Stubber
 
 from automated_security_helper.plugin_modules.ash_aws_plugins.bedrock_summary_reporter import (
     BedrockSummaryReporter,
@@ -95,22 +97,6 @@ def sts_client_ok():
     client = MagicMock()
     client.get_caller_identity.return_value = {"Account": "123456789012"}
     return client
-
-
-@pytest.fixture
-def boto3_session(bedrock_client_ok, bedrock_runtime_ok, sts_client_ok):
-    """Mock boto3.Session wired to return appropriate clients."""
-    session = MagicMock()
-
-    def _client_factory(service, **kwargs):
-        return {
-            "bedrock": bedrock_client_ok,
-            "bedrock-runtime": bedrock_runtime_ok,
-            "sts": sts_client_ok,
-        }[service]
-
-    session.client.side_effect = _client_factory
-    return session
 
 
 @pytest.fixture
@@ -230,6 +216,68 @@ def sample_sarif_model_no_findings():
 
 
 # ---------------------------------------------------------------------------
+# Real-client scaffolding
+#
+# A MagicMock accepts every keyword it is given, so a call that names a parameter
+# the operation does not declare passes a mocked test and fails only against the
+# service. The helpers below build real botocore clients backed by a Stubber
+# instead: botocore validates each call against the service model, and the Stubber
+# answers it, so nothing is signed and no request leaves the process.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def no_ambient_aws_profile(monkeypatch):
+    """Make the real clients below independent of the machine running the tests.
+
+    ``create_client`` resolves the profile eagerly, so an ``AWS_PROFILE`` naming a
+    profile this machine does not have raises ProfileNotFound before any stub is
+    consulted. Credentials are set on the session instead of read from the
+    environment, for the same reason.
+    """
+    for var in ("AWS_PROFILE", "AWS_DEFAULT_PROFILE"):
+        monkeypatch.delenv(var, raising=False)
+
+
+def _stubbed_client(service_name):
+    """Return a real botocore client for `service_name` and its Stubber."""
+    session = botocore.session.Session()
+    # Positional, so the credential chain is never consulted. These are not
+    # secrets: the Stubber short-circuits before the request is signed.
+    session.set_credentials("testing", "testing")
+    client = session.create_client(service_name, region_name="us-east-1")
+    return client, Stubber(client)
+
+
+def _foundation_model_summary(model_id: str) -> dict:
+    """One ListFoundationModels entry, shaped the way the service declares it."""
+    return {
+        "modelArn": f"arn:aws:bedrock:us-east-1::foundation-model/{model_id}",
+        "modelId": model_id,
+        "modelName": model_id,
+        "providerName": "Anthropic",
+        "inputModalities": ["TEXT"],
+        "outputModalities": ["TEXT"],
+        "inferenceTypesSupported": ["ON_DEMAND"],
+        "modelLifecycle": {"status": "ACTIVE"},
+    }
+
+
+class _FixedClientSession:
+    """Stands in for boto3.Session, handing out prepared clients by service name.
+
+    Deliberately not a MagicMock: asking for a service this test did not prepare
+    should fail loudly rather than return an object that accepts anything.
+    """
+
+    def __init__(self, clients: dict):
+        self._clients = clients
+
+    def client(self, service_name, **kwargs):
+        return self._clients[service_name]
+
+
+# ---------------------------------------------------------------------------
 # Validation tests
 # ---------------------------------------------------------------------------
 
@@ -239,13 +287,121 @@ class TestValidatePluginDependencies:
 
     @patch("boto3.Session")
     def test_success_when_model_available(
-        self, mock_session_cls, boto3_session, mock_context
+        self, mock_session_cls, no_ambient_aws_profile, mock_context
     ):
-        mock_session_cls.return_value = boto3_session
+        """The whole probe runs against real clients, so botocore checks every call.
+
+        This is the test that a wrong parameter name has to get past. Under a
+        MagicMock the probe succeeds whatever it is called with; here the service
+        model rejects an undeclared parameter client-side, and the reporter reports
+        that as a failed dependency check -- so the assertion below goes red.
+        """
+        model_id = BedrockSummaryReporterConfigOptions().model_id
+
+        sts, sts_stub = _stubbed_client("sts")
+        sts_stub.add_response(
+            "get_caller_identity",
+            {
+                "Account": "123456789012",
+                "Arn": "arn:aws:iam::123456789012:user/test",
+                "UserId": "AIDAEXAMPLE",
+            },
+        )
+        sts_stub.activate()
+
+        bedrock, bedrock_stub = _stubbed_client("bedrock")
+        # The reachability probe, then the two calls validate_bedrock_model makes.
+        bedrock_stub.add_response(
+            "list_foundation_models",
+            {"modelSummaries": [_foundation_model_summary(model_id)]},
+        )
+        bedrock_stub.add_response(
+            "list_inference_profiles", {"inferenceProfileSummaries": []}
+        )
+        bedrock_stub.add_response(
+            "list_foundation_models",
+            {"modelSummaries": [_foundation_model_summary(model_id)]},
+        )
+        bedrock_stub.activate()
+
+        mock_session_cls.return_value = _FixedClientSession(
+            {"sts": sts, "bedrock": bedrock}
+        )
         reporter = BedrockSummaryReporter(context=mock_context)
 
         assert reporter.validate_plugin_dependencies() is True
         assert reporter.dependencies_satisfied is True
+        # Every prepared response was consumed, so no call was skipped.
+        bedrock_stub.assert_no_pending_responses()
+        sts_stub.assert_no_pending_responses()
+
+    def test_list_foundation_models_declares_no_page_size_parameter(self):
+        """Records the measurement the probe's argument list rests on.
+
+        ListFoundationModels is unpaginated: it declares four filters and no page
+        size. ListInferenceProfiles does declare maxResults, which is how naming it
+        on the wrong operation looked plausible. If a future botocore adds a page
+        size here, this fails and the probe can be revisited deliberately.
+        """
+        service_model = botocore.session.Session().get_service_model("bedrock")
+        foundation_members = service_model.operation_model(
+            "ListFoundationModels"
+        ).input_shape.members
+
+        assert "maxResults" not in foundation_members
+        assert "byOutputModality" in foundation_members
+        assert (
+            "maxResults"
+            in service_model.operation_model(
+                "ListInferenceProfiles"
+            ).input_shape.members
+        )
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            pytest.param(
+                botocore.exceptions.ParamValidationError(
+                    report='Unknown parameter in input: "maxResults"'
+                ),
+                id="client-side-parameter-error",
+            ),
+            pytest.param(
+                botocore.exceptions.EndpointConnectionError(
+                    endpoint_url="https://bedrock.us-east-1.amazonaws.com/"
+                ),
+                id="endpoint-error",
+            ),
+        ],
+    )
+    @patch("boto3.Session")
+    def test_client_side_failures_are_reported_as_bedrock_probe_failures(
+        self, mock_session_cls, error, mock_context
+    ):
+        """A failure that never reaches Bedrock is still a failure of this probe.
+
+        These are BotoCoreError subclasses, not ClientError, and they carry no
+        ``response``. Narrowed to ClientError the probe's own handler misses them and
+        they surface from the outermost handler instead, under a message about
+        validating Bedrock access in general -- which points a reader at credentials
+        rather than at the call that failed.
+        """
+
+        class _RaisingBedrock:
+            def list_foundation_models(self, **kwargs):
+                raise error
+
+        class _Sts:
+            def get_caller_identity(self):
+                return {"Account": "123456789012"}
+
+        mock_session_cls.return_value = _FixedClientSession(
+            {"sts": _Sts(), "bedrock": _RaisingBedrock()}
+        )
+        reporter = BedrockSummaryReporter(context=mock_context)
+
+        assert reporter.validate_plugin_dependencies() is False
+        assert any("Error accessing Bedrock service" in msg for msg in reporter.errors)
 
     @patch("boto3.Session")
     def test_fails_when_region_is_none(self, mock_session_cls, mock_context):
