@@ -31,6 +31,74 @@ from automated_security_helper.core.sharding import (
 )
 
 
+#: Where ASH's own shipped plugin classes live.
+#:
+#: Used to decide whether the configuration's declared scanner roster applies to a
+#: run. A run whose plugin set contains a class from this package resolved the
+#: shipped built-in set, so the built-in roster is the honest expected set for it. A
+#: run handed plugin classes by its caller -- a library embedding, or a test double
+#: -- did not resolve that set, and measuring it against the built-in roster would
+#: report every built-in scanner the caller did not supply as missing.
+_BUILTIN_PLUGIN_MODULE_PREFIX = "automated_security_helper.plugin_modules.ash_builtin"
+
+
+#: The path segment that marks a plugin module as contributing scanners.
+#:
+#: A failed module in the scanner region costs the run scanners, which belongs in
+#: `scanner_results` where both completeness gates read. A failed reporter or
+#: converter module is recorded too, in `metadata.plugin_load_errors`, but not
+#: there: that dict is keyed by scanner name and rendered as a scanner column, and
+#: putting a reporter in it would report a scanner that does not exist.
+_SCANNER_MODULE_MARKER = ".scanners"
+
+
+def _declared_scanner_roster(config) -> List[str]:
+    """Scanner names *config* declares, in the spelling an operator writes.
+
+    NOT DERIVED FROM THE RESOLVED PLUGIN SET, which is the entire point.
+    `expected_scanners` used to come from `self._scanner_tasks`, built from
+    `plugin_modules('scanner')`; the completed set comes from the same resolve. Both
+    sides of the completeness comparison therefore came from one resolve, and a
+    scanner that never joined it was absent from both -- so the comparison could not
+    detect it. Measured: a phase whose only scanner failed to construct logged
+    "completeness rate: 100.0%".
+
+    `ScannerConfigSegment` declares one typed field per built-in scanner, fixed at
+    class-definition time. It is trustworthy wherever there is a config at all:
+    `config/ash_config.py` imports each scanner's *config* class from the same
+    module as the scanner, so an unimportable scanner module fails config resolution
+    first and loudly, rather than shrinking this roster.
+
+    The field ALIAS is preferred over the field name -- `detect-secrets`, not
+    `detect_secrets` -- because that is `config.name` on the instantiated plugin,
+    which is what `scanner_results` is keyed by and what `--exclude-scanners`
+    matches. Comparing a roster of underscored names against hyphenated rows would
+    report all ten scanners missing on a healthy run.
+
+    Extras (`__pydantic_extra__`) are included: a third-party scanner an operator
+    configured is one they expect to run, and its silent absence is the same defect.
+    """
+    scanners_segment = getattr(config, "scanners", None)
+    if scanners_segment is None:
+        return []
+
+    roster: List[str] = []
+    for field_name, field_info in (
+        getattr(type(scanners_segment), "model_fields", {}) or {}
+    ).items():
+        roster.append(getattr(field_info, "alias", None) or field_name)
+    roster.extend(getattr(scanners_segment, "model_extra", None) or {})
+
+    seen = set()
+    unique: List[str] = []
+    for name in roster:
+        key = str(name).lower().strip()
+        if key and key not in seen:
+            seen.add(key)
+            unique.append(str(name))
+    return unique
+
+
 def _scanner_display_name(plugin_instance) -> str:
     """Return the name a scanner is identified by everywhere in this phase.
 
@@ -228,31 +296,111 @@ class ScanPhase(EnginePhase):
                     f"Creating instances for {len(scanner_classes)} scanner classes"
                 )
                 for plugin_class in scanner_classes:
+                    # Bound before the try, not inside it. The except clause below
+                    # interpolates this name, so an exception raised before the
+                    # assignment produced a NameError inside the handler instead of
+                    # the error it was written to report.
+                    plugin_name = getattr(plugin_class, "__name__", "Unknown").lower()
+                    plugin_config = None
                     try:
-                        plugin_name = getattr(
-                            plugin_class, "__name__", "Unknown"
-                        ).lower()
                         ASH_LOGGER.debug(
                             f"Creating scanner instance for class: {plugin_name}"
                         )
 
-                        # Create scanner instance
-                        plugin_instance = plugin_class(
-                            config=(
+                        # Resolved into a local before the constructor call, so the
+                        # handler below can read `config.name` off it. That is the
+                        # only authoritative name a scanner has, and in the case that
+                        # actually occurs -- a constructor that raises after its
+                        # config resolved -- it is available. Recording the row under
+                        # a class-derived name instead would put a scanner in the
+                        # results under a name nothing else in the run matches:
+                        # --exclude-scanners, the shard partition and every report
+                        # key on config.name.
+                        if self.plugin_context.config is not None:
+                            plugin_config = (
                                 self.plugin_context.config.get_plugin_config(
                                     plugin_type="scanner",
                                     plugin_name=plugin_name,
                                 )
-                                if self.plugin_context.config is not None
-                                else None
-                            ),
+                            )
+
+                        # Create scanner instance
+                        plugin_instance = plugin_class(
+                            config=plugin_config,
                             context=self.plugin_context,
                         )
                         scanner_instances.append(plugin_instance)
                         ASH_LOGGER.debug(f"Created scanner instance for: {plugin_name}")
                     except Exception as e:
-                        ASH_LOGGER.error(
-                            f"Error creating scanner instance for {plugin_name}: {e}"
+                        # A construction failure has to leave a row, or it shrinks
+                        # the denominator.
+                        #
+                        # The reconciliation loop further down walks
+                        # scanner_instances, and a class that never constructed is
+                        # not in it -- so before this branch recorded anything, such
+                        # a scanner appeared nowhere at all: absent from
+                        # scanner_results, absent from every summary_stats counter
+                        # (which still summed correctly over the scanners that
+                        # remained), and therefore invisible to both completeness
+                        # gates. Expected and completed were both derived from the
+                        # set that survived construction, so no comparison could
+                        # detect a scanner that never joined it. Measured on this
+                        # tree: a phase whose only scanner failed to construct
+                        # logged "completeness rate: 100.0%".
+                        #
+                        # ERROR rather than MISSING, and the two are not
+                        # interchangeable even though both fail the gate. MISSING
+                        # carries the remediation "install the tool", and nothing
+                        # here established that any tool is absent -- a constructor
+                        # raising is a defect or a misconfiguration. ERROR says the
+                        # scanner was reached and produced no result, which is what
+                        # happened. This is deliberately the opposite choice from
+                        # the filtering-escape reconciliation below, which is
+                        # MISSING because it is reached before any dependency
+                        # question is asked; the two paths are told apart by which
+                        # status they carry.
+                        failed_name = (
+                            getattr(plugin_config, "name", None) or plugin_name
+                        )
+                        construction_error = (
+                            f"Scanner {failed_name} could not be constructed, so it "
+                            f"did not run: {type(e).__name__}: {e}"
+                        )
+                        ASH_LOGGER.error(construction_error)
+                        # `errors` passed to the constructor rather than appended
+                        # with `add_error`. ScanResultProcessor.process_container
+                        # dumps the container with `exclude_unset=True`, and
+                        # appending to a field whose default came from a
+                        # default_factory does not mark it set -- so an appended
+                        # reason is dropped from `additional_reports` and the only
+                        # record of why the scanner did not run is a log line.
+                        container = ScanResultsContainer(
+                            scanner_name=failed_name,
+                            status=ScannerStatus.ERROR,
+                            duration=None,
+                            errors=[construction_error],
+                        )
+                        aggregated_results = self._process_results(
+                            results=container,
+                            aggregated_results=aggregated_results,
+                        )
+                        aggregated_results.scanner_results[failed_name] = (
+                            ScannerTargetStatusInfo(
+                                status=ScannerStatus.ERROR,
+                                # True, because no dependency was checked. False
+                                # would tell an operator to install a tool that may
+                                # well be present, which is the misdirection the
+                                # Windows semgrep case cost.
+                                dependencies_satisfied=True,
+                                excluded=False,
+                            )
+                        )
+                        self.validation_manager.update_scanner_state(
+                            failed_name,
+                            registration_status="registered",
+                            queued_for_execution=False,
+                            execution_completed=False,
+                            failure_reason=construction_error,
                         )
 
             # Validate registered scanners after creating instances
@@ -854,6 +1002,104 @@ class ScanPhase(EnginePhase):
                         execution_completed=False,
                         failure_reason=unclassified_reason,
                     )
+
+            # Record the completeness denominator, and the plugins that never
+            # arrived to be counted in it.
+            #
+            # Both of these are about the same defect from opposite ends. The roster
+            # is what the run was SUPPOSED to account for, read from a declaration
+            # rather than from the resolve it is checking. The load errors are the
+            # measured reason a resolve came up short. Either alone leaves a gap: a
+            # roster with no load errors cannot say why a scanner is absent, and load
+            # errors with no roster cannot say that anything is absent when the module
+            # that failed was never expected on this runner.
+            # Imported here rather than at module level: `plugins.loader` imports
+            # the built-in plugin package, whose scanner modules import
+            # `config.ash_config`, which carries forward references this module is
+            # part of resolving. A top-level import turns that into a
+            # PydanticUndefinedAnnotation at collection time.
+            from automated_security_helper.plugins.loader import plugin_load_errors
+
+            load_errors = plugin_load_errors()
+            if load_errors:
+                aggregated_results.metadata.plugin_load_errors = dict(load_errors)
+
+            # A scanner-region module that failed to import gets a row, so that import
+            # loss reaches the exit code and not only a log line.
+            #
+            # Per-module import isolation turns a hard startup failure into a degraded
+            # run, which is the right direction only if the degradation is loud. This
+            # is the arm that makes it loud: nothing else in this phase puts import
+            # loss in front of `incomplete_scanners`.
+            #
+            # KEYED BY THE MODULE PATH, WHICH IS A KNOWN COSMETIC COST. `scanner_results`
+            # is rendered as a scanner column, so a report can show a dotted path where
+            # a scanner name belongs. That is confusing but recoverable -- a reader can
+            # work out what it means -- and a silently absent scanner is not. Removing
+            # this block is a one-line revert if a maintainer prefers clean reports;
+            # keeping it also preserves the option for whoever resolves the maintainer
+            # decision on whether import loss should affect the exit code at all, which
+            # dropping it would settle in one direction unasked.
+            #
+            # This row is why `cli.merge._verify_scanner_union` needed narrowing. That
+            # check refuses any `scanner_results` key no shard's `assigned_scanners`
+            # claims, and a module path can never be claimed, so before the narrowing a
+            # sharded merge refused on every run that lost a module -- through a check
+            # no flag gates. The two changes are one decision and should not be
+            # separated.
+            for failed_module, error in load_errors.items():
+                # Only the scanner region lands in scanner_results; see
+                # _SCANNER_MODULE_MARKER for why.
+                if not (
+                    failed_module.endswith(_SCANNER_MODULE_MARKER)
+                    or f"{_SCANNER_MODULE_MARKER}." in failed_module
+                ):
+                    continue
+                if failed_module in aggregated_results.scanner_results:
+                    continue
+                module_error = (
+                    f"Plugin module {failed_module} failed to import, so the scanners "
+                    f"it declares did not run: {error}"
+                )
+                ASH_LOGGER.error(module_error)
+                container = ScanResultsContainer(
+                    scanner_name=failed_module,
+                    status=ScannerStatus.ERROR,
+                    duration=None,
+                    errors=[module_error],
+                )
+                aggregated_results = self._process_results(
+                    results=container,
+                    aggregated_results=aggregated_results,
+                )
+                aggregated_results.scanner_results[failed_module] = (
+                    ScannerTargetStatusInfo(
+                        status=ScannerStatus.ERROR,
+                        # Nothing here checked a dependency. The module did not
+                        # import, which may or may not be about a dependency, and
+                        # False would tell an operator to install a tool on the
+                        # strength of a guess.
+                        dependencies_satisfied=True,
+                        excluded=False,
+                    )
+                )
+
+            # Gated on the run having resolved ASH's own plugin package, not applied
+            # unconditionally. See _BUILTIN_PLUGIN_MODULE_PREFIX: a caller that
+            # supplies its own plugin classes -- a library embedding, ten harnesses
+            # in this repository's own suite -- did not resolve the built-in set, and
+            # measuring such a run against the built-in roster would report every
+            # scanner the caller did not supply as one that went missing.
+            resolved_builtin_plugins = any(
+                str(getattr(plugin_class, "__module__", "")).startswith(
+                    _BUILTIN_PLUGIN_MODULE_PREFIX
+                )
+                for plugin_class in scanner_classes or []
+            )
+            if resolved_builtin_plugins:
+                aggregated_results.metadata.expected_scanners = (
+                    _declared_scanner_roster(self.plugin_context.config)
+                )
 
             # Validate scanner enablement after filtering
             self.validation_manager.validate_scanner_enablement(

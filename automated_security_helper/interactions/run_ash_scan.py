@@ -53,7 +53,7 @@ from automated_security_helper.interactions.run_ash_container import run_ash_con
 from automated_security_helper.interactions.run_ash_nix import run_ash_nix
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.workspace import WorkspaceExitCode
-from automated_security_helper.utils.log import NO_MARKUP, escape_markup
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP, escape_markup
 from automated_security_helper.utils.sarif_utils import _resolve_result_severity
 from automated_security_helper.utils.severity_ladder import (
     SEVERITIES,
@@ -303,18 +303,38 @@ def scanner_statuses(
     ]
 
 
-def no_scanner_ran(observed: List[tuple[str, str]]) -> bool:
-    """True when *observed* is non-empty and none of its scanners reached a verdict.
+def no_scanner_ran(
+    observed: List[tuple[str, str]],
+    expected: Optional[List[str]] = None,
+) -> bool:
+    """True when this run reached no verdict about the target.
 
-    Non-empty is load-bearing and is not the same assertion. An empty scanner set
-    means the scan phase recorded nothing, which is reachable from a legitimate
-    ``--phases convert`` run and is refused at the CI boundary instead (see
-    ``assert_scanners_completed.py``, which fails a results file reporting no
-    scanners at all). Folding the two together here would turn a phase-limited run
-    into an error.
+    Two conditions, and the second exists because the first could not express it.
+
+    1. *observed* is non-empty and none of its scanners reached a verdict. SKIPPED
+       has to be tolerated one entry at a time -- it is how sharding and
+       ``--exclude-scanners`` record work a run was never meant to do -- so a file
+       in which every entry is SKIPPED clears the per-scanner pass while having
+       measured nothing.
+
+    2. *observed* is empty AND *expected* is not. An empty scanner set used to be
+       exempt unconditionally, on the reasoning that it is reachable from a
+       legitimate ``--phases convert`` run. That reasoning is sound but covers two
+       different states, and a boolean over ``observed`` alone cannot separate
+       them: "the scan phase was not requested", which is benign, and "the scan
+       phase ran and had nothing to run", which is the silent-zero case this gate
+       exists for.
+
+    *expected* is what separates them, and it needs no new state to do it.
+    ``ScanPhase`` is what records ``metadata.expected_scanners``, so a recorded
+    roster means the scan phase ran; no roster and no scanners means it never did.
+
+    Defaults to None so a results file written by a version that recorded no roster
+    -- which ``ash merge`` reads, from whatever ASH produced each shard -- keeps the
+    old benign reading rather than becoming a failure on upgrade.
     """
     if not observed:
-        return False
+        return bool(expected)
     return not any(status in _RAN_SCANNER_STATUSES for _, status in observed)
 
 
@@ -516,6 +536,57 @@ def incomplete_scanners(
                 f"{metric.status} ({failed} of {attempted} targets unevaluated)",
             )
         )
+    return listed
+
+
+def incomplete_converters(
+    results: Optional[AshAggregatedResults],
+) -> List[tuple[str, str]]:
+    """(name, reason) for every converter that was meant to run and did not.
+
+    Conversion produces the second set of targets the scanners are given: notebooks
+    become Python, archives become their contents. A converter that crashed or whose
+    tool was absent therefore costs scan coverage, and it did so with no effect on
+    any verdict -- the scanners that ran reported PASSED on the targets they were
+    handed, and nothing asked whether the targets that should have existed did.
+
+    Two conditions, read off the recorded row rather than re-derived:
+
+    1. ``failure`` is set -- the converter raised, or was dropped by the plugin
+       filter for a reason its own dependency check did not explain. ConvertPhase
+       records both.
+    2. ``dependencies_satisfied`` is False -- its external tool was not available.
+
+    ``excluded`` is checked first and wins over both. It is the converter-side
+    counterpart of a SKIPPED scanner: work the run was never meant to do, which is
+    what a config-disabled converter and one dropped by
+    ``--python-based-plugins-only`` are. A gate that failed on those would fail every
+    run that turns conversion off, which is a supported configuration.
+
+    Read with ``getattr`` because a results file written by an older version carries
+    rows without ``failure``, and ``ash merge`` reads shard results from whatever
+    ASH produced each one.
+
+    Args:
+        results: The aggregated results, or None when the scan produced none.
+
+    Returns:
+        Pairs in the order the rows were recorded, empty when every converter either
+        ran or was excluded. The second element is a display string, not a token;
+        the caller interpolates it into a message and does not parse it.
+    """
+    if results is None:
+        return []
+
+    listed: list[tuple[str, str]] = []
+    for name, row in (getattr(results, "converter_results", None) or {}).items():
+        if getattr(row, "excluded", False):
+            continue
+        failure = getattr(row, "failure", None)
+        if failure:
+            listed.append((name, str(failure)))
+        elif getattr(row, "dependencies_satisfied", True) is False:
+            listed.append((name, "dependencies unavailable, so it never ran"))
     return listed
 
 
@@ -1226,13 +1297,53 @@ def _run_local_mode(
 
     _changed_file_set = None
     if opts.changed_files_only:
-        from automated_security_helper.utils.get_scan_set import get_changed_files
+        from automated_security_helper.utils.get_scan_set import (
+            get_changed_files,
+            git_repository_root,
+        )
 
-        changed_paths = get_changed_files(base_ref=opts.base_ref, cwd=opts.source_dir)
-        if changed_paths is not None:
-            _changed_file_set = {
-                opts.source_dir.joinpath(p).resolve() for p in changed_paths
-            }
+        # The diff is anchored on the repository root, never on source_dir.
+        # get_changed_files wraps `git diff --name-only`, which prints
+        # repository-root-relative paths whatever directory it ran in, so joining
+        # them onto source_dir is only correct when the two coincide. Under
+        # `--source-dir services/api` inside a larger repository it produced
+        # <source_dir>/services/api/app.py, while the consumer below resolves the
+        # SARIF side's source-relative URIs (made so by sanitize_sarif_paths) to
+        # <source_dir>/app.py -- two sets that cannot intersect, so the filter
+        # discarded every finding. workspace/execution.py:changed_file_set has
+        # always anchored on the root; this is the same resolution.
+        repository_root = git_repository_root(opts.source_dir)
+        if repository_root is None:
+            # The root is the only anchor, so there is nothing to resolve against.
+            # Fall back to the full scan get_changed_files already documents for
+            # its own unanswerable cases, rather than guessing a root.
+            logger.warning(
+                f"--changed-files-only was requested but "
+                f"{opts.source_dir.as_posix()} is not inside a git repository, or "
+                f"its root could not be read; scanning it in full."
+            )
+        else:
+            changed_paths = get_changed_files(
+                base_ref=opts.base_ref, cwd=opts.source_dir
+            )
+            if changed_paths is not None:
+                # Entries outside source_dir are dropped because --source-dir and
+                # --changed-files-only are two scopings and the operator asked for
+                # both, so what gets reported is their intersection. Only one input
+                # notices: a scanner that escapes the scan root with a `../` URI
+                # sanitize_sarif_paths did not make source-relative is not revived
+                # by its file being in the diff. An empty result here is a filter
+                # that matches nothing, which is the honest answer when nothing in
+                # the diff is in scope -- see the consumer below, which
+                # distinguishes that from None.
+                resolved_source = opts.source_dir.resolve()
+                _changed_file_set = {
+                    candidate
+                    for candidate in (
+                        (repository_root / p).resolve() for p in changed_paths
+                    )
+                    if candidate.is_relative_to(resolved_source)
+                }
 
     try:
         if not opts.quiet and not opts.simple:
@@ -1356,7 +1467,13 @@ def _run_local_mode(
         if opts.simple and not opts.quiet:
             typer.echo("\nASH scan completed.")
 
-        if _changed_file_set and results is not None:
+        # `is not None`, not truthiness: an empty changed set is a filter that
+        # matches nothing, and None is the absence of one. Treating empty as absent
+        # reported the whole tree whenever the diff fell entirely outside
+        # source_dir, which ignores the flag the operator passed -- and it
+        # disagreed with workspace mode, where an empty set from
+        # workspace.execution.changed_file_set is the signal to skip the project.
+        if _changed_file_set is not None and results is not None:
             results = _filter_results_to_changed_files(
                 results, _changed_file_set, opts.source_dir
             )
@@ -1800,13 +1917,55 @@ def _compute_exit_code(
         one_shard_of_a_split = (
             opts.shard_index is not None or opts.shard_count is not None
         )
-        if not one_shard_of_a_split and no_scanner_ran(observed):
+        expected_roster = list(
+            getattr(getattr(results, "metadata", None), "expected_scanners", None) or []
+        )
+        if not one_shard_of_a_split and no_scanner_ran(observed, expected_roster):
             logging.getLogger(__name__).error(
                 "Scan ran no scanners: %s. Every scanner was skipped, so this run "
                 "has shown the target to be neither clean nor dirty -- most often a "
                 "--scanners name that matches no scanner on this platform, or an "
                 "allowlist wholly cancelled by --exclude-scanners.",
                 ", ".join(f"{name} ({status})" for name, status in observed),
+            )
+            return 1
+
+        # The same question asked of the convert phase, which produces the targets
+        # the scanners above were given. A converter that crashed or whose tool was
+        # absent leaves its inputs unscanned, and every scanner that did run still
+        # reports PASSED on the targets it was handed, so no scanner-side signal can
+        # see it.
+        #
+        # Behind fail_on_incomplete_scanners rather than behind a flag of its own,
+        # and that placement is the decision worth recording. It is the same question
+        # the two arms above ask -- did what I asked for actually run -- so it belongs
+        # on the same switch. An operator who has settled how much an incomplete run
+        # matters to them has settled it once, and gets one escape hatch covering
+        # both halves instead of a second flag to discover.
+        #
+        # The consequence they will actually meet is that converters are more likely
+        # than scanners to be legitimately absent on a given host, so this is the arm
+        # that fires on a setup nobody thinks is broken. That is stated as a
+        # consequence rather than as a reason to soften the gate: a converter that did
+        # not run leaves its inputs unscanned whether or not anything is watching, and
+        # the recorded converter_results row is what names which one it was.
+        #
+        # The argument above deliberately does not turn on which way
+        # fail_on_incomplete_scanners defaults. That polarity is a separate decision,
+        # made at the field and the flag rather than here, and a rationale leaning on
+        # it would need rewriting every time it moves.
+        #
+        # 1 rather than 2, matching the two arms above: the reported findings are
+        # real but the set is known to be partial, so clearing them does not clear
+        # the scan.
+        incomplete_conversions = incomplete_converters(results)
+        if incomplete_conversions:
+            logging.getLogger(__name__).error(
+                "Conversion incomplete, so the scanners were given fewer targets "
+                "than this repository has: %s",
+                ", ".join(
+                    f"{name} ({reason})" for name, reason in incomplete_conversions
+                ),
             )
             return 1
 
@@ -2053,6 +2212,7 @@ def _filter_results_to_changed_files(
     """Remove SARIF results whose primary location is not in *changed_files*."""
     if not results or not results.sarif or not results.sarif.runs:
         return results
+    discarded = 0
     for run in results.sarif.runs:
         if not run.results:
             continue
@@ -2076,7 +2236,44 @@ def _filter_results_to_changed_files(
             resolved = Path(source_dir).joinpath(uri).resolve()
             if resolved in changed_files:
                 filtered.append(result)
+        discarded += len(run.results) - len(filtered)
         run.results = filtered
+
+    # An empty *changed_files* is a filter that matches nothing, so it discards
+    # every located result and the run reports zero findings at exit 0 --
+    # indistinguishable from a clean tree. Said at WARNING, with the count, because
+    # a filter that quietly empties a result set is how a filter becomes a false
+    # negative; the same reasoning as the output-path exclusion in
+    # `utils.sarif_utils.apply_suppressions_to_sarif`, which counts for this reason.
+    #
+    # Both routes here are reachable without operator error. `--changed-files-only`
+    # against a base ref that resolves to an empty diff produces an empty set, and
+    # so does a diff falling entirely outside `--source-dir` once the caller
+    # intersects the two scopings. The caller passes the empty set deliberately --
+    # `is not None` there distinguishes a filter matching nothing from no filter --
+    # so this reports the consequence rather than refusing it.
+    #
+    # Conditional on something actually being lost. An empty set over an empty
+    # result set costs nothing, and a count printed on every such run is noise.
+    # Workspace mode never reaches this branch: `workspace.execution` guards its
+    # call with a truthiness check, because there an empty set means skip the
+    # project.
+    #
+    # On ASH_LOGGER rather than `logging.getLogger(__name__)`, which is what the
+    # exit-code gates in this module use. Those emit at ERROR for a caller that
+    # reads the exit code; this one has to reach the operator's console, and
+    # ASH_LOGGER is the logger ASH configures and renders. It is also the logger
+    # every comparable disclosure already uses -- `apply_suppressions_to_sarif`'s
+    # exclusion count, `cli.merge`'s coverage notices.
+    if not changed_files and discarded:
+        ASH_LOGGER.warning(
+            "Discarded %d finding(s): the changed-file set is empty, so it matched "
+            "no location and every located finding was removed. This report is "
+            "therefore not evidence that the tree is clean. Either the diff against "
+            "--base-ref is empty, or none of the paths it names are inside "
+            "--source-dir.",
+            discarded,
+        )
     return results
 
 

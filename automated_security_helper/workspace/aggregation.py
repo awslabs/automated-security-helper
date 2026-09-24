@@ -597,9 +597,19 @@ def no_scanner_ran_for_project(results: Any) -> bool:
 
     Delegates for the same reason its sibling does, and the delegation carries one
     decision that is easy to get wrong by copying: an *empty* scanner set is not
-    this condition. It is what ``--phases convert`` legitimately produces, and
-    ``no_scanner_ran`` answers False for it deliberately. A mirrored version that
-    tested emptiness would fail every convert-only project in a workspace.
+    this condition **on its own**. It is what ``--phases convert`` legitimately
+    produces, and a mirrored version that tested emptiness would fail every
+    convert-only project in a workspace.
+
+    Emptiness alone cannot separate that from the silent zero, though, which is why
+    ``no_scanner_ran`` takes a second argument. An empty set covers both "the scan
+    phase was not requested" and "the scan phase ran and had nothing to run", and
+    ``metadata.expected_scanners`` is what tells them apart: ``ScanPhase`` is what
+    records the roster, so a roster means the phase ran. The roster is passed here
+    for the same reason ``_compute_exit_code`` passes it -- reading it from the same
+    field in both places is what keeps this layer's answer and ``ash --source-dir
+    P``'s from diverging, which is the whole point of the sibling above. A project
+    with no roster and no scanners keeps the benign reading.
 
     Imported inside the function because ``run_ash_scan`` imports this package's
     ``execution`` module for workspace mode; a module-level import closes that into
@@ -609,16 +619,20 @@ def no_scanner_ran_for_project(results: Any) -> bool:
         results: One project's ``AshAggregatedResults``, or ``None``.
 
     Returns:
-        True only when at least one scanner was recorded and not one of them
-        reached a verdict. False for ``None``, which is the crashed-scan case the
-        caller already reports as FAILED.
+        True when at least one scanner was recorded and not one of them reached a
+        verdict, and when no scanner was recorded but a roster says the scan phase
+        ran. False for ``None``, which is the crashed-scan case the caller already
+        reports as FAILED.
     """
     from automated_security_helper.interactions.run_ash_scan import (
         no_scanner_ran,
         scanner_statuses,
     )
 
-    return no_scanner_ran(scanner_statuses(results))
+    expected = list(
+        getattr(getattr(results, "metadata", None), "expected_scanners", None) or []
+    )
+    return no_scanner_ran(scanner_statuses(results), expected)
 
 
 def _worse_status(left: Optional[str], right: Optional[str]) -> Optional[str]:

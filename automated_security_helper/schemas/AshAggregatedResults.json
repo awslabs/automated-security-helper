@@ -4599,6 +4599,19 @@
           "default": false,
           "title": "Excluded",
           "type": "boolean"
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Why this converter produced nothing, when the reason was that something went wrong. For an exception out of convert() this is '<type>: <message>'. None when nothing went wrong, which includes a converter that ran and found nothing to convert. Distinct from excluded, which means the run never intended to use it, and from dependencies_satisfied, which reports an absent external tool.",
+          "title": "Failure"
         }
       },
       "title": "ConverterStatusInfo",
@@ -13484,6 +13497,14 @@
           "title": "Execution Discrepancy Report",
           "type": "object"
         },
+        "expected_scanners": {
+          "description": "Scanner names this run was supposed to account for, taken from the configuration's declared scanner roster rather than from the plugins that resolved. A name here with no scanner_results entry is a scanner that never joined the run. Empty when the run did not resolve ASH's built-in plugin set -- a caller supplying its own plugin classes is not measured against the built-in roster.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Expected Scanners",
+          "type": "array"
+        },
         "generated_at": {
           "anyOf": [
             {
@@ -13495,6 +13516,14 @@
           ],
           "default": null,
           "title": "Generated At"
+        },
+        "plugin_load_errors": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Plugin modules that failed to import during this run, mapped to the error text. Non-empty means the run is missing plugins it ships with, whatever the per-scanner statuses say.",
+          "title": "Plugin Load Errors",
+          "type": "object"
         },
         "project_name": {
           "anyOf": [
@@ -16191,6 +16220,19 @@
           "default": false,
           "title": "Dependencies Satisfied",
           "type": "boolean"
+        },
+        "dependency_unavailable_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Why this scanner cannot run, recorded during construction rather than raised from it. None when nothing blocks it.",
+          "title": "Dependency Unavailable Reason"
         },
         "end_time": {
           "anyOf": [

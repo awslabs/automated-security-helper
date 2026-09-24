@@ -376,9 +376,147 @@ class TestMissingResultsDirGuard:
             )
 
 
+class TestExecuteScanFailsClosedOnARecordedReason:
+    """The backstop for this family, and the only one there is.
+
+    ``ScannerPluginBase.validate_plugin_dependencies`` carries the offline-cache
+    verdict, but a recorded reason reaches a caller only through that method's
+    return value -- nothing in ``core`` reads the field, so a caller that does not
+    ask has no way to learn of it. ``ScanPhase`` does ask and never dispatches such
+    a scanner, but that is a property of one caller; a second one (an installer
+    probe, a plugin inventory, an out-of-tree orchestrator) would not inherit it.
+
+    This is the guard that covers that case for the grep family, and the docstring
+    on ``validate_plugin_dependencies`` now cites it as such. Untested until this
+    class existed, which is why removing it would have been silent.
+    """
+
+    def test_a_recorded_reason_raises_instead_of_scanning(
+        self, test_plugin_context, monkeypatch, tmp_path
+    ):
+        from automated_security_helper.core.exceptions import ScannerError
+
+        monkeypatch.delenv("SEMGREP_RULES_CACHE_DIR", raising=False)
+        scanner = SemgrepScanner(
+            context=test_plugin_context,
+            config=SemgrepScannerConfig(
+                options=SemgrepScannerConfigOptions(offline=True)
+            ),
+        )
+
+        assert scanner.dependency_unavailable_reason, (
+            "premise: offline with no rule cache records a reason during construction"
+        )
+
+        with pytest.raises(ScannerError, match="SEMGREP_RULES_CACHE_DIR"):
+            scanner._execute_scan(
+                target=tmp_path,
+                target_type="source",
+                global_ignore_paths=[],
+            )
+
+
 def test_semgrep_inherits_from_grep_base():
     assert issubclass(SemgrepScanner, GrepScannerBase)
 
 
 def test_opengrep_inherits_from_grep_base():
     assert issubclass(OpengrepScanner, GrepScannerBase)
+
+
+# ---------------------------------------------------------------------------
+# The offline-cache verdict, asserted at the family level
+# ---------------------------------------------------------------------------
+
+
+class TestOfflineCacheVerdictIsFamilyWide:
+    """A missing rule cache declines the scanner instead of destroying it.
+
+    Written against the FAMILY rather than against each scanner, because the two
+    per-scanner suites in ``tests/unit/plugin_modules/ash_builtin/scanners/`` pass
+    while the mechanism is still bypassable: both concrete scanners used to
+    override ``validate_plugin_dependencies`` with their own tool-resolution logic
+    and neither chained to the base, so a guard placed on ``ScannerPluginBase`` was
+    never reached. Measured at that point: the reason was recorded, the scanner
+    still answered True, and ScanPhase queued a scanner that cannot run.
+
+    ``_grep_scanner_base`` therefore owns ``validate_plugin_dependencies`` and
+    subclasses implement ``_validate_tool_dependencies``. The parametrization over
+    every direct subclass is what makes a third grep-family scanner inherit this
+    coverage instead of needing its own copy.
+    """
+
+    @pytest.mark.parametrize(
+        ("scanner_cls", "config_cls", "options_cls", "cache_env"),
+        [
+            (
+                SemgrepScanner,
+                SemgrepScannerConfig,
+                SemgrepScannerConfigOptions,
+                "SEMGREP_RULES_CACHE_DIR",
+            ),
+            (
+                OpengrepScanner,
+                OpengrepScannerConfig,
+                OpengrepScannerConfigOptions,
+                "OPENGREP_RULES_CACHE_DIR",
+            ),
+        ],
+        ids=["semgrep", "opengrep"],
+    )
+    def test_missing_cache_declines_without_raising(
+        self,
+        test_plugin_context,
+        monkeypatch,
+        scanner_cls,
+        config_cls,
+        options_cls,
+        cache_env,
+    ):
+        monkeypatch.delenv(cache_env, raising=False)
+
+        scanner = scanner_cls(
+            context=test_plugin_context,
+            config=config_cls(options=options_cls(offline=True)),
+        )
+
+        assert cache_env in (scanner.dependency_unavailable_reason or "")
+        assert scanner.validate_plugin_dependencies() is False, (
+            f"{scanner_cls.__name__} answered the dependency check True with no rule "
+            "cache, so ScanPhase would queue it; the verdict has to survive the "
+            "subclass's own tool-resolution logic"
+        )
+
+    def test_every_direct_subclass_routes_through_the_base_gate(self):
+        """No grep-family scanner may override the gate itself.
+
+        The bypass this closes was not hypothetical -- it is what both concrete
+        scanners did. Enumerating subclasses rather than naming the two keeps the
+        assertion true for a scanner added later, which is the case the per-scanner
+        suites cannot cover.
+        """
+        subclasses = GrepScannerBase.__subclasses__()
+        assert subclasses, "expected at least semgrep and opengrep"
+        for cls in subclasses:
+            assert "validate_plugin_dependencies" not in cls.__dict__, (
+                f"{cls.__name__} overrides validate_plugin_dependencies, which skips "
+                "the offline-cache verdict recorded during construction. Implement "
+                "_validate_tool_dependencies instead."
+            )
+
+    def test_cache_present_leaves_the_scanner_usable(
+        self, test_plugin_context, monkeypatch, tmp_path
+    ):
+        """The control: a populated cache records no reason and does not decline."""
+        (tmp_path / "rules.yaml").write_text("rules: []")
+        monkeypatch.setenv("SEMGREP_RULES_CACHE_DIR", str(tmp_path))
+
+        scanner = SemgrepScanner(
+            context=test_plugin_context,
+            config=SemgrepScannerConfig(
+                options=SemgrepScannerConfigOptions(offline=True)
+            ),
+        )
+
+        assert scanner.dependency_unavailable_reason is None
+        assert ("--config", str(tmp_path)) in _extra_arg_pairs(scanner)

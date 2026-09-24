@@ -399,14 +399,24 @@ class GitLabSASTReporter(ReporterPluginBase[GitLabSASTReporterConfig]):
             "id": finding_id,
             "identifiers": identifiers,
             "location": location_obj,
-            # None rather than "" for a result with no rule id: the schema makes
-            # `name` optional, and an absent name is the true statement where an
-            # empty one claims the vulnerability is named and blank.
-            "name": rule_id or None,
             "description": message_text,
             "raw_source_code_extract": source_extract,
             "details": details,
         }
+
+        # The key is omitted for a result with no rule id, not set to None, which
+        # is how `severity` below and the rule identifier above already treat an
+        # answer they do not have. The schema types `name` as a string and does not
+        # require it, so there are two states it describes -- a name, or no key --
+        # and `null` is a third; of the three it is the one that asserts the
+        # vulnerability is named and blank.
+        #
+        # Validating the emitted document does not catch a null here. The model in
+        # `schemas.gitlab.sast` is generated from the schema, and the generator
+        # renders a non-required string as `Optional[str]`, so `None` passes. The
+        # test for this asserts on the key's absence for that reason.
+        if rule_id:
+            vuln["name"] = rule_id
 
         # Only add severity if it's not None
         if severity:

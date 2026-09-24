@@ -157,7 +157,11 @@ from automated_security_helper.base.plugin_context import PluginContext
 # rebuild by side effect of importing resolve_config; relying on an import made
 # for another purpose is what makes this fragile, so the dependency is named here.
 from automated_security_helper.config.ash_config import AshConfig
-from automated_security_helper.core.enums import AshLogLevel, ExportFormat
+from automated_security_helper.core.enums import (
+    AshLogLevel,
+    ExportFormat,
+    ScannerStatus,
+)
 from automated_security_helper.core.exceptions import ShardCoverageError
 from automated_security_helper.core.phases.report_phase import ReportPhase
 from automated_security_helper.core.progress import LiveProgressDisplay
@@ -191,6 +195,15 @@ _RESULTS_DIR_CANDIDATES = (
     Path(RESULTS_FILE_NAME),
     Path("ash_output") / RESULTS_FILE_NAME,
     Path(".ash") / "ash_output" / RESULTS_FILE_NAME,
+)
+
+
+#: The two statuses that say a scanner did not run, as opposed to ran and reached a
+#: verdict. An unclaimed row carrying only these is reported through
+#: ``incomplete_scanners`` and the ``fail_on_incomplete_scanners`` gate rather than
+#: refused as a shard-coverage failure -- see :func:`_verify_scanner_union`.
+_NEVER_ATTEMPTED_STATUSES = frozenset(
+    {ScannerStatus.ERROR.value, ScannerStatus.MISSING.value}
 )
 
 
@@ -442,22 +455,100 @@ def _verify_scanner_union(
             owner_by_scanner[_normalized(scanner)] = position
 
     seen: Dict[str, Path] = {}
+    statuses: Dict[str, set[str]] = {}
     for results_file, results, _ in shards:
-        for scanner in results.scanner_results:
-            seen.setdefault(_normalized(scanner), results_file)
+        for scanner, entry in results.scanner_results.items():
+            key = _normalized(scanner)
+            seen.setdefault(key, results_file)
+            status = getattr(entry, "status", None)
+            statuses.setdefault(key, set()).add(str(getattr(status, "value", status)))
 
-    unclaimed = sorted(set(seen) - set(owner_by_scanner))
+    # An unclaimed row is only an offence when it claims its scanner's outcome is
+    # KNOWN, and that narrowing is what keeps this check answering the question it
+    # was written for.
+    #
+    # The harm stated below is that merging "would report them as deliberately
+    # skipped rather than never attempted". A row already recording ERROR or MISSING
+    # says never-attempted outright, so the merged report does not lose that: the
+    # scanner is still listed by `incomplete_scanners`, and the
+    # `fail_on_incomplete_scanners` gate is what turns the listing into a non-zero
+    # exit code. Refusing the merge instead put a correct finding through a channel
+    # no flag reaches, and attributed it to a partitioning disagreement that had not
+    # happened.
+    #
+    # WHAT THE EXEMPTION DOES GIVE UP, stated because the sentence above used to
+    # claim it gave up nothing. The refusal applied whatever flags were passed --
+    # this function is called unconditionally -- and the channel replacing it does
+    # not. `--no-fail-on-incomplete-scanners` removes the exit code as well as the
+    # refusal, and then no automated reader sees that a scanner appeared in the
+    # results which no shard was ever assigned. That is why the exempted names are
+    # emitted at WARNING below instead of being passed over in silence: a disclosure
+    # no flag can switch off is what is left once the refusal is gone.
+    #
+    # Two row shapes reach this, both written by ScanPhase: a scanner whose
+    # constructor raised, keyed by its resolved config name, and a plugin module that
+    # failed to import, keyed by its dotted module path. Neither can be in
+    # `assigned_scanners` -- that list is built from `scanner_instances`, and a module
+    # is not a scanner at all -- so before this narrowing a sharded merge refused on
+    # both.
+    #
+    # A DENYLIST OF THE TWO NEVER-ATTEMPTED STATUSES, and not `_completed()`, even
+    # though that helper is right next door and looks like the same question. It
+    # returns False for a status this version has never heard of, which is fail-CLOSED
+    # where it is used (`_verify_shard_contributions` asks "did any owned scanner
+    # complete") and fail-OPEN here, where False would mean "exempt". Naming the two
+    # statuses keeps an unrecognised one refusing. That asymmetry is invisible from
+    # the helper's own definition and only shows up when you ask what the caller does
+    # with a False.
+    #
+    # Every status a row carries has to qualify, across all shards that mention it: a
+    # name recorded PASSED by one shard and ERROR by another is the original defect,
+    # and taking the ERROR as permission would hide it. A name with no readable status
+    # at all is not exempt either.
+    orphans = set(seen) - set(owner_by_scanner)
+    exempted = sorted(
+        name
+        for name in orphans
+        if statuses.get(name) and statuses[name] <= _NEVER_ATTEMPTED_STATUSES
+    )
+    unclaimed = sorted(orphans - set(exempted))
+
+    # Ahead of the refusal below so the disclosure is emitted whether or not this
+    # call goes on to raise. Both sets are drawn from `orphans`, so a merge can
+    # legitimately produce one, the other, or both.
+    if exempted:
+        exempt_detail = ", ".join(
+            f"{name} ({', '.join(sorted(statuses[name]))}, "
+            f"seen in {seen[name].as_posix()})"
+            for name in exempted
+        )
+        ASH_LOGGER.warning(
+            f"{len(exempted)} scanner(s) appear in shard results that no shard was "
+            f"assigned: {exempt_detail}. Each row records the scanner as never "
+            f"attempted, which is why this is not refused as a partitioning "
+            f"disagreement and the merge continues. The coverage is still short: "
+            f"--fail-on-incomplete-scanners is what turns that into a non-zero exit "
+            f"code, and under --no-fail-on-incomplete-scanners this line is the only "
+            f"record of it."
+        )
+
     if unclaimed:
         listed = ", ".join(
-            f"{name} (seen in {seen[name].as_posix()})" for name in unclaimed
+            f"{name} ({', '.join(sorted(statuses.get(name) or {'no status'}))}, "
+            f"seen in {seen[name].as_posix()})"
+            for name in unclaimed
         )
         raise ShardCoverageError(
             f"These scanners appear in shard results but no shard was assigned "
-            f"them: {listed}. The executors resolved different scanner sets -- one "
-            f"was missing a plugin module, or --python-only or a config override "
-            f"was applied to some jobs and not others. Every shard excluded these "
-            f"scanners, so no shard ran them, and merging would report them as "
-            f"deliberately skipped rather than never attempted."
+            f"them: {listed}. No shard ran them, so merging would report them as "
+            f"deliberately skipped rather than never attempted. The status of each "
+            f"is named above because the cause differs: the executors resolved "
+            f"different scanner sets (one missing a plugin module, or --python-only "
+            f"or a config override applied to some jobs and not others), or a "
+            f"scanner was excluded by every shard's partition. A scanner that failed "
+            f"to construct, or whose plugin module failed to import, is recorded "
+            f"ERROR or MISSING instead and is reported through "
+            f"--fail-on-incomplete-scanners rather than refused here."
         )
 
     missing_from_owner = sorted(

@@ -796,18 +796,65 @@ class TestCompletenessParityWithComputeExitCode:
         assert incomplete_scanners_for_project(model) == []
         assert no_scanner_ran_for_project(model) is False
 
-    def test_an_empty_scanner_set_is_not_read_as_nothing_having_run(self, tmp_path):
-        """A results file recording no scanners at all is a different claim.
+    def test_an_empty_scanner_set_with_no_roster_is_not_read_as_nothing_having_run(
+        self, tmp_path
+    ):
+        """A results file recording no scanners *and no roster* is a different claim.
 
         ``--phases convert`` legitimately produces one, and ``no_scanner_ran``
-        returns False for it by design so that a phase-limited run does not become
-        an error. Pinned here because the workspace helper delegates, and a
-        mirrored copy that tested emptiness instead would fail every convert-only
-        project in a workspace.
+        returns False for it so that a phase-limited run does not become an error.
+        Pinned here because the workspace helper delegates, and a mirrored copy that
+        tested emptiness instead would fail every convert-only project in a
+        workspace.
+
+        The absent roster is what makes this benign, and it is why the assertion
+        cannot stop at emptiness -- see the test below.
         """
         model = self._model({})
+        assert not getattr(model.metadata, "expected_scanners", None), (
+            "premise: this model records no roster, which is what the benign "
+            "reading depends on"
+        )
 
         assert no_scanner_ran_for_project(model) is False
+
+    def test_an_empty_scanner_set_with_a_roster_is_seen_by_both(self, tmp_path):
+        """The state an empty set alone cannot distinguish.
+
+        ``no_scanner_ran`` gained a second condition and a second parameter for
+        this: an empty scanner set covers both "the scan phase was not requested",
+        which is benign, and "the scan phase ran and had nothing to run", which is
+        the silent zero. ``metadata.expected_scanners`` separates them, because
+        ``ScanPhase`` is what records it -- a roster means the phase ran.
+
+        The workspace helper called the delegate with one argument, so it answered
+        the benign reading for both states while ``ash --source-dir P`` on the same
+        project answered 1. That is the same divergence this class was opened for,
+        reappearing through a caller left on the older signature.
+        """
+        statuses: dict = {}
+        model = self._model(statuses)
+        model.metadata.expected_scanners = ["bandit", "cfn-nag"]
+
+        standalone_model = self._model(statuses)
+        standalone_model.metadata.expected_scanners = ["bandit", "cfn-nag"]
+        from automated_security_helper.interactions.run_ash_scan import (
+            ScanOptions,
+            _compute_exit_code,
+        )
+
+        standalone = _compute_exit_code(
+            standalone_model,
+            ScanOptions(
+                source_dir=tmp_path,
+                output_dir=tmp_path,
+                fail_on_incomplete_scanners=True,
+            ),
+            None,
+        )
+
+        assert standalone == 1
+        assert no_scanner_ran_for_project(model) is True
 
 
 class TestAggregatorOutput:

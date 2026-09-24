@@ -52,7 +52,7 @@ ash \
   --config-overrides 'global_settings.severity_threshold=MEDIUM'
 
 # Append to lists
-ash --config-overrides 'ash_plugin_modules+=["my_custom_plugin"]'
+ash --config-overrides 'ash_plugin_modules+=["my_ash_plugins"]'
 
 # Complex values using JSON syntax
 ash --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
@@ -325,7 +325,7 @@ ash --output-formats flat-json,sarif,html,markdown
 ash --mode precommit
 
 # Scan with custom plugins
-ash --ash-plugin-modules my_custom_plugin_module
+ash --ash-plugin-modules my_ash_plugins
 
 # Inspect the plan for a workspace, without scanning
 ash --workspace ./dev.code-workspace --dry-run
@@ -651,7 +651,7 @@ ash plugin list
 ash plugin list --include-plugin-config
 
 # List plugins including custom modules
-ash plugin list --ash-plugin-modules my_custom_plugin_module
+ash plugin list --ash-plugin-modules my_ash_plugins
 ```
 
 ## Report Command

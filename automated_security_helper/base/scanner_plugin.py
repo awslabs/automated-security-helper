@@ -64,6 +64,40 @@ class ScannerPluginBase(PluginBase, Generic[T]):
     config: T | ScannerPluginConfigBase | None = None
     dependencies_satisfied: bool = False
 
+    dependency_unavailable_reason: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Why this scanner cannot run, recorded during construction rather "
+                "than raised from it. None when nothing blocks it."
+            )
+        ),
+    ] = None
+    """Why this scanner cannot run, discovered while it was being constructed.
+
+    A FIELD RATHER THAN AN EXCEPTION, AND THAT IS THE WHOLE POINT. Construction
+    runs ``_process_config_options`` from ``model_post_init``, so a subclass that
+    raised there destroyed its own instance. ``ScanPhase`` creates every scanner
+    inside a ``try/except Exception`` that logs one line and does not append to
+    ``scanner_instances`` -- and both hooks the repository built for "cannot run
+    here", ``validate_plugin_dependencies`` and ``unsupported_platform_reason``,
+    are consulted only on entries in that list. So a scanner that refused at
+    construction did not land as MISSING or SKIPPED; it left the run entirely,
+    with the five status counters summing correctly over the scanners that
+    remained. A consumer could not tell that scan from a complete one.
+
+    Recording the reason instead keeps the instance, which is what lets the
+    existing MISSING path do its job. It carries the remediation text, so the
+    operator still gets the guidance the exception used to carry -- see
+    ``GrepScannerBase._configure_offline_mode``, where the offline-cache verdict
+    now lands.
+
+    DISTINCT FROM ``unsupported_platform_reason``, which is a statement about the
+    platform and resolves to SKIPPED because no install would help. This is
+    "something this run needs is absent", which is MISSING: the operator is being
+    told to fix something, and the completeness gate should fail until they do.
+    """
+
     tool_type: ScannerToolType = ScannerToolType.UNKNOWN
     offline_strategy: ClassVar[OfflineStrategy] = OfflineStrategy.UNKNOWN
 
@@ -163,7 +197,29 @@ class ScannerPluginBase(PluginBase, Generic[T]):
 
         Subclasses with more complex requirements (UV tool management,
         version checks, non-standard binaries) should override this.
+
+        ``dependency_unavailable_reason`` is consulted first so a construction-time
+        verdict is not silently outvoted by a PATH probe: a grep-family scanner in
+        offline mode with no rule cache has its binary on PATH and would otherwise
+        answer True, run, and report an offline scan against online defaults.
+
+        A subclass that chains to this method gets that check for free. One that
+        overrides without chaining does NOT, and nothing outside the scanner plugins
+        restores it: the field is read only here and in the plugin modules, never by
+        the phases. ``ScanPhase`` reads the sibling ``unsupported_platform_reason``,
+        which is a different question, so this method's return value is the only
+        route a recorded reason has to a caller.
+
+        For the grep family the gap is closed at the other end instead.
+        ``GrepScannerBase`` declares this method final and pushes customisation into
+        ``_validate_tool_dependencies``, and ``_execute_scan`` raises
+        ``ScannerError`` on a recorded reason -- so a scanner of that family which
+        reached execution anyway fails closed rather than reporting an offline scan
+        against online defaults. A scanner outside that family which overrides this
+        method without chaining has neither guard.
         """
+        if self.dependency_unavailable_reason:
+            return False
         found = find_executable(self.command)
         return found is not None
 

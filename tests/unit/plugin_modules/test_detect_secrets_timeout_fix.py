@@ -68,8 +68,20 @@ def test_scan_timeout_does_not_hang(detect_secrets_scanner, tmp_path):
     #  - _pre_scan to skip real validation
     #  - _post_scan to skip real cleanup
     #  - scan_set to return one fake file
-    #  - SecretsCollection constructor (scan() creates a fresh one at line 374)
+    #  - the SecretsCollection constructor, via the _detect_secrets_api seam
     #  - _resolve_arguments to skip real argument resolution
+    #
+    # The library is reached through _detect_secrets_api() rather than through
+    # module-level names, because a top-level `import detect_secrets` that raises
+    # deletes this scanner and every plugin module imported after it from the
+    # registry. Patching the seam keeps that guard intact; patching a module
+    # attribute that no longer exists fails with AttributeError.
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        detect_secrets_scanner,
+    )
+
+    _real_api = detect_secrets_scanner._detect_secrets_api()
+
     with (
         patch.object(scanner, "_pre_scan", return_value=True),
         patch.object(scanner, "_post_scan"),
@@ -81,8 +93,8 @@ def test_scan_timeout_does_not_hang(detect_secrets_scanner, tmp_path):
         ),
         patch(
             "automated_security_helper.plugin_modules.ash_builtin.scanners"
-            ".detect_secrets_scanner.SecretsCollection",
-            return_value=mock_collection,
+            ".detect_secrets_scanner._detect_secrets_api",
+            return_value=(lambda: mock_collection, _real_api[1], _real_api[2]),
         ),
     ):
         start = time.monotonic()
