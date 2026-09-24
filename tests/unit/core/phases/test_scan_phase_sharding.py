@@ -256,6 +256,143 @@ class TestShardAssignmentProvenance:
 
         assert forward == reversed_
 
+    def test_the_selection_is_recorded_separately_from_the_assignment(self, scan_phase):
+        """``assigned_scanners`` is taken before the selection filters, so it over-claims.
+
+        The partition is computed over every *registered* scanner, deliberately --
+        see the module docstring for why it must not move with what is installed on
+        a runner. The consequence is that ``assigned_scanners`` names scanners the
+        shard never intended to run: ``--scanners bandit`` leaves grype assigned to
+        shard 0 and recorded SKIPPED, and the provenance said the shard was
+        responsible for it.
+
+        That made a real hole unobservable. Two jobs given different ``--scanners``
+        values resolve the same registered set, so ``candidate_scanners`` agrees; the
+        partition is deterministic, so ``assigned_scanners`` unions to the whole
+        candidate set and ``verify_shard_coverage``'s ``uncovered`` check cannot
+        fire; and the scanner one job dropped is recorded SKIPPED, which
+        ``cli.merge._completed`` counts as a known outcome. Every check passes and
+        the merged report calls a scanner nobody ran "deliberately skipped".
+        """
+        _run(
+            scan_phase,
+            FOUR_SCANNERS,
+            shard_index=0,
+            shard_count=2,
+            enabled_scanners=["bandit"],
+        )
+        assignment = scan_phase._shard_assignment
+
+        # The assignment still over-claims, on purpose: narrowing it would make a
+        # config-disabled scanner look like a coverage gap and refuse healthy merges.
+        assert set(assignment.assigned_scanners) == EXPECTED_AT_2[0]
+        assert assignment.selected_scanners == ["bandit"]
+
+    def test_the_selection_omits_a_scanner_the_operator_excluded(self, scan_phase):
+        """``--exclude-scanners`` is the other input that narrows intent."""
+        _run(
+            scan_phase,
+            FOUR_SCANNERS,
+            shard_index=0,
+            shard_count=2,
+            excluded_scanners=["bandit"],
+        )
+        assignment = scan_phase._shard_assignment
+
+        assert set(assignment.assigned_scanners) == EXPECTED_AT_2[0]
+        assert assignment.selected_scanners == ["grype"]
+
+    def test_the_selection_omits_a_scanner_its_config_disabled(self, scan_phase):
+        scan_phase.plugins = [
+            _make_scanner_class(name, enabled=(name != "grype"))
+            for name in FOUR_SCANNERS
+        ]
+        scan_phase._execute_phase(
+            aggregated_results=AshAggregatedResults(),
+            parallel=False,
+            shard_index=0,
+            shard_count=2,
+        )
+        assignment = scan_phase._shard_assignment
+
+        assert set(assignment.assigned_scanners) == EXPECTED_AT_2[0]
+        assert assignment.selected_scanners == ["bandit"]
+
+    def test_the_selection_keeps_a_scanner_whose_tool_is_missing(self, scan_phase):
+        """Intent, not outcome, and this is the case that decides which.
+
+        A scanner whose dependencies are unsatisfied is recorded MISSING and is
+        exactly what the completeness gate exists to report. Dropping it from the
+        selection would make "selected by no shard" mean "nobody asked for it OR
+        nobody could run it", which conflates an operator's narrowed allowlist with
+        a broken runner -- and those route to different people.
+        """
+        scan_phase.plugins = [
+            _make_scanner_class(name, deps_satisfied=(name != "grype"))
+            for name in FOUR_SCANNERS
+        ]
+        scan_phase._execute_phase(
+            aggregated_results=AshAggregatedResults(),
+            parallel=False,
+            shard_index=0,
+            shard_count=2,
+        )
+        assignment = scan_phase._shard_assignment
+
+        assert assignment.selected_scanners == ["bandit", "grype"]
+
+    def test_the_selection_is_the_whole_assignment_when_nothing_narrows_it(
+        self, scan_phase
+    ):
+        """The control. Without it the field could be stuck at a single name."""
+        _run(scan_phase, FOUR_SCANNERS, shard_index=0, shard_count=2)
+        assignment = scan_phase._shard_assignment
+
+        assert assignment.selected_scanners == sorted(EXPECTED_AT_2[0])
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {},
+            {"enabled_scanners": ["bandit"]},
+            {"enabled_scanners": ["bandit", "checkov", "grype", "semgrep"]},
+            {"excluded_scanners": ["bandit"]},
+            {"excluded_scanners": ["bandit", "grype"]},
+        ],
+        ids=[
+            "unnarrowed",
+            "one-allowed",
+            "all-allowed",
+            "one-excluded",
+            "both-excluded",
+        ],
+    )
+    @pytest.mark.parametrize("index", [0, 1])
+    def test_the_selection_never_escapes_the_assignment(self, request, index, kwargs):
+        """``selected_scanners`` must stay a subset of ``assigned_scanners``, always.
+
+        ``sharding._verify_selection_within_assignment`` REFUSES a merge where a
+        shard selected a scanner another shard owns, on the grounds that the shard
+        exclusion cannot have taken effect and the scanner therefore ran twice. That
+        refusal is unreachable for results this version writes, because the shard
+        applies its partition as an exclusion and the exclusion check runs before the
+        selection is recorded -- which is the only reason it is safe to refuse
+        unconditionally rather than gate it.
+
+        Pinned as a property over every narrowing input rather than asserted once. If
+        a later change to the filter order let one scanner through, every sharded
+        merge would begin refusing, and the failure would surface at merge time in a
+        different module from the one that caused it.
+        """
+        phase = request.getfixturevalue("scan_phase")
+        _run(phase, FOUR_SCANNERS, shard_index=index, shard_count=2, **kwargs)
+        assignment = phase._shard_assignment
+
+        assert set(assignment.selected_scanners) <= set(assignment.assigned_scanners), (
+            f"shard {index} selected {assignment.selected_scanners} but owns only "
+            f"{assignment.assigned_scanners}; ash merge would refuse this"
+        )
+
     def test_a_non_sharded_run_records_no_assignment(self, scan_phase):
         """An unsharded scan must stay unstamped.
 

@@ -698,13 +698,24 @@ class TestGetScanResultsWithErrorHandling:
         assert "Wait for the scan to complete" in result["suggestions"]
 
     def test_a_completed_scan_returns_the_results_unchanged(self, tmp_path):
+        """The wrapper passes the producer's payload through, success key included.
+
+        This assertion was inverted: it read ``assert "success" not in result``,
+        which pinned the defect as the contract. The key's absence was what made
+        ``cli/mcp_server.py``'s ``not results.get("success")`` guard fire on every
+        successful scan, so a test asserting the absence would have had to be
+        deleted to fix the guard. It still measures pass-through -- the producer
+        sets the key and the wrapper must not strip or overwrite it -- and the
+        neighbouring error-path tests above already pin ``success is False``, so
+        the two directions stay distinguishable.
+        """
         _write_results(tmp_path, _aggregated_doc())
 
         result = get_scan_results_with_error_handling(tmp_path)
 
         assert result["status"] == "completed"
         assert result["is_complete"] is True
-        assert "success" not in result
+        assert result["success"] is True
 
     def test_a_resource_error_becomes_an_error_response(self, tmp_path):
         _write_results(tmp_path, "{ not json")

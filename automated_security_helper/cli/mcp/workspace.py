@@ -87,7 +87,17 @@ import asyncio
 import os
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    FrozenSet,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+)
 
 from automated_security_helper.cli.mcp.progress_monitor import (
     monitor_workspace_progress,
@@ -119,6 +129,7 @@ from automated_security_helper.interactions.run_ash_scan import (
 from automated_security_helper.models.workspace import (
     ProjectRunStatus,
     WorkspaceExitCode,
+    WorkspaceProjectResult,
     WorkspaceResults,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -500,6 +511,12 @@ def _close_registrations(
             registry.update_scan_status(scan_id, status)
 
 
+#: Declared ``WorkspaceProjectResult`` fields deliberately withheld from the MCP
+#: response. Empty: every field a project's outcome declares is something a client
+#: reading that outcome needs. An entry added here must say why.
+_WITHHELD_PROJECT_FIELDS: FrozenSet[str] = frozenset()
+
+
 def _project_verdicts(
     payload: WorkspaceResults, scan_ids: Dict[str, str]
 ) -> List[Dict[str, Any]]:
@@ -507,27 +524,61 @@ def _project_verdicts(
 
     Per project and not merged, because the first question about a workspace scan
     is which project failed and a merged count cannot answer it.
+
+    DERIVED from the model rather than hand-listed, and that is the fix for a
+    defect rather than a tidy-up. This function used to build a closed dict naming
+    each field, and it named 14 of the 19 the model declared at the time: five --
+    ``scanners``, ``incomplete_scanners``, ``scan_incomplete``,
+    ``ceiling_unreachable_findings`` and ``sarif_run_index`` -- were declared on
+    ``WorkspaceProjectResult`` and silently absent from every response. Nothing
+    else under ``cli/mcp/`` mentioned either completeness field, so an MCP client
+    had no way at all to learn that a project's scanners did not run -- it saw
+    ``finding_count: 0`` and a COMPLETED status. Deriving the projection means the
+    next field added to the model cannot fail to propagate, which is what
+    ``tests/unit/cli/mcp/test_workspace_verdict_projection.py`` asserts by comparing
+    the response's key set against ``model_fields``.
+
+    ``include=`` restricts the dump to *declared* fields. The model sets
+    ``extra="allow"``, so an unrestricted dump would also emit whatever a
+    forward-compatible producer attached, making the response shape depend on the
+    input rather than on the contract. ``mode="json"`` is what turns
+    ``ProjectRunStatus`` and ``SkippedProjectReason`` into their string values; it
+    replaces the per-field ``_enum_value`` calls this function used to make, and it
+    covers a future enum-typed field that those calls would have missed.
     """
-    return [
-        {
-            "project": entry.project,
-            "display_label": entry.display_label,
-            "relative_path": entry.relative_path,
-            "status": _enum_value(entry.status),
-            "severity_threshold": entry.severity_threshold,
-            "finding_count": entry.finding_count,
-            "actionable_finding_count": entry.actionable_finding_count,
-            "exceeds_threshold": entry.exceeds_threshold,
-            "duration_seconds": entry.duration_seconds,
-            "output_path": entry.output_path,
-            "scan_id": scan_ids.get(entry.project),
-            "skip_reason": _enum_value(entry.skip_reason),
-            "skip_detail": entry.skip_detail,
-            "error": entry.error,
-            "invalid_config": entry.invalid_config,
-        }
-        for entry in payload.projects
-    ]
+    projected = set(WorkspaceProjectResult.model_fields) - _WITHHELD_PROJECT_FIELDS
+    verdicts: List[Dict[str, Any]] = []
+    for entry in payload.projects:
+        verdict = entry.model_dump(mode="json", include=projected)
+        verdict["scan_id"] = scan_ids.get(entry.project)
+        verdicts.append(verdict)
+    return verdicts
+
+
+def _workspace_scan_incomplete(payload: WorkspaceResults) -> bool:
+    """Whether any project's scan was too incomplete to trust.
+
+    Surfaced at the top level of the response as well as per project, because the
+    common client shape for this tool is a gate that reads the envelope and never
+    walks ``projects``. Such a client saw ``exit_code`` with no statement of why,
+    and an incomplete workspace and a failed one share code 1.
+    """
+    return any(entry.scan_incomplete for entry in payload.projects)
+
+
+def _workspace_ceiling_unreachable(payload: WorkspaceResults) -> Dict[str, int]:
+    """Per scanner, how many findings the severity ceiling could not affect.
+
+    Summed across projects for the same envelope-reading client. Echoed rather
+    than left per-project because it qualifies what the verdict means: a ceiling
+    that did not reach some findings did not tighten the gate for them, so a pass
+    at that ceiling is a weaker statement than it looks.
+    """
+    totals: Dict[str, int] = {}
+    for entry in payload.projects:
+        for scanner, count in (entry.ceiling_unreachable_findings or {}).items():
+            totals[scanner] = totals.get(scanner, 0) + count
+    return totals
 
 
 async def _execute(
@@ -773,6 +824,8 @@ async def mcp_scan_workspace(
         "output_dir": str(settings.output_dir),
         "results_path": str(result.results_path),
         "scan_ids": registered,
+        "scan_incomplete": _workspace_scan_incomplete(result.payload),
+        "ceiling_unreachable_findings": _workspace_ceiling_unreachable(result.payload),
         "projects": _project_verdicts(result.payload, registered),
         "skipped_projects": [
             entry.model_dump(mode="json") for entry in plan.skipped_projects

@@ -829,6 +829,16 @@ OVERSIZE_FIXTURE_BYTES = MAX_MEMBER_BYTES + 1
 # ARCHIVE_MAGICS.
 MAGIC_READ_BYTES = 512
 
+# What a zip ARTIFACT may begin with, as opposed to what a zip MEMBER may contain.
+# Used by `read_members` to require that a wheel's zip starts at byte 0 rather than
+# being appended to something else.
+#
+# Two entries, not the three ARCHIVE_MAGICS carries for zip. `PK\x03\x04` is a
+# local file header and `PK\x05\x06` is the end-of-archive record, which is all an
+# empty zip contains. `PK\x07\x08` marks a SPANNED archive -- a multi-volume set --
+# which no wheel is, so accepting it here would only widen what passes.
+ZIP_LEADING_MAGICS = (b"PK\x03\x04", b"PK\x05\x06")
+
 
 @dataclass(frozen=True)
 class Violation:
@@ -1456,16 +1466,86 @@ def read_sdist_members(path: str) -> list[Member]:
     return members
 
 
+def leading_bytes(path: str, count: int = 4) -> bytes:
+    """The artifact's own first bytes, for deciding what container it IS.
+
+    Separate from `Member.magic`, which is the first bytes of a member INSIDE an
+    artifact. The two questions are different and conflating them is what let a
+    trailing container be read as the whole file; see `read_members`.
+    """
+    with open(path, "rb") as handle:
+        return handle.read(count)
+
+
 def read_members(path: str) -> list[Member]:
     """Dispatches on artifact shape, by content rather than by filename.
 
     Sniffing beats trusting the extension here: a misnamed artifact would
     otherwise be skipped, and a skipped artifact is an uninspected one.
+
+    BUT `zipfile.is_zipfile` DOES NOT ANSWER "IS THIS FILE A ZIP". A zip's
+    structure lives at the END of the file: the End Of Central Directory record is
+    the last thing in it, and CPython's `_EndRecData` finds it by reading the final
+    64 KiB and searching backwards for the signature. So `is_zipfile` returns True
+    for ANY file with a zip appended to it, whatever the leading bytes are -- that
+    is the same property that makes a self-extracting archive work.
+
+    It was asked first and unconditionally, so a zip concatenated onto a real sdist
+    tarball took the wheel arm: `read_sdist_members` was never called, and every
+    rule below was applied to the appended zip's member list instead of the
+    tarball's. The sdist's own members were never classified and never counted, and
+    the count this gate prints as its evidence described the decoy. Reproduced with
+    a poisoned sdist whose appended zip carried nothing but legitimate members:
+    exit 0, with the tar's payload unexamined.
+
+    Two guards, because one of them alone leaves a gap:
+
+    * BOTH SNIFFS ACCEPTING IS REFUSED. A correct artifact is one container or the
+      other, never both -- `is_tarfile` reads the header block at offset 0 and
+      verifies its checksum, and a real wheel has no such header, while a real
+      tarball has no central directory. An artifact that satisfies both is the
+      concatenation, and which half is "the artifact" is not a question this can
+      answer, so it does not guess.
+
+    * THE ZIP ARM REQUIRES THE ZIP TO START AT BYTE 0. That covers the case the
+      ambiguity check cannot see: leading bytes that are not a valid tar either --
+      arbitrary junk, or a compressed stream this does not recognize -- with a zip
+      appended. `PK\\x05\\x06` is accepted alongside `PK\\x03\\x04` because an empty
+      zip is nothing but its end record, and `check_artifact` already refuses an
+      artifact with zero members by its own rule rather than by this one.
+
+    The tar arm needs no equivalent leading check: both readers `tarfile` uses
+    begin at offset 0, so a tarball with junk PREPENDED does not open at all.
     """
-    if zipfile.is_zipfile(path):
+    zip_shaped = zipfile.is_zipfile(path)
+    tar_shaped = tarfile.is_tarfile(path)
+
+    if zip_shaped and tar_shaped:
+        raise ValueError(
+            f"{path} is accepted as BOTH a zip and a tar. A wheel is one and an "
+            "sdist is the other; nothing a correct build produces is both. This is "
+            "the shape of a zip concatenated onto a tarball, which zipfile."
+            "is_zipfile accepts because it finds the central directory by scanning "
+            "backwards from the end of the file -- so the appended half would be "
+            "checked and the leading half would not. Refusing to report it clean: "
+            "which half is the artifact is not decidable here."
+        )
+
+    if zip_shaped:
+        leading = leading_bytes(path)
+        if not leading.startswith(ZIP_LEADING_MAGICS):
+            raise ValueError(
+                f"{path} has a zip central directory but does not begin with a zip "
+                f"local-file or end-of-archive header; its first bytes are "
+                f"{leading!r}. The zip is therefore appended to something else, and "
+                "checking it would report on the appended half while leaving "
+                "whatever precedes it unexamined. Refusing to report it clean."
+            )
         return read_wheel_members(path)
-    if tarfile.is_tarfile(path):
+
+    if tar_shaped:
         return read_sdist_members(path)
+
     raise ValueError(
         f"{path} is neither a zip (wheel) nor a tar (sdist) archive. Refusing to "
         "report it clean: an artifact this cannot open is an artifact it cannot "
@@ -2149,6 +2229,56 @@ def run_self_test(stream) -> int:
                 "an archive with zero members was reported clean -- the vacuity "
                 "guard is not working, which is the defect this gate is for."
             )
+
+        # (4) An sdist with a zip appended must fail rather than have the appended
+        # half checked in its place.
+        #
+        # This is a DISPATCH control, not a member control, which is why it is not
+        # in PLANTED_MEMBERS: both halves of the fixture below contain only
+        # legitimate members, so every rule in classify_member passes on either
+        # one. What is being measured is which half read_members chose. Before the
+        # leading-magic and ambiguity guards it chose the appended zip -- because
+        # zipfile.is_zipfile finds the central directory by scanning backwards from
+        # the end of the file -- and reported the tar's contents clean without ever
+        # classifying them.
+        #
+        # The decoy carries the WHEEL-shaped member list and the tar the
+        # SDIST-shaped one, so the two halves are distinguishable in the member
+        # count if this guard is ever removed and the fixture starts passing again.
+        decoy = os.path.join(tmp, "decoy.whl")
+        _write_fixture_wheel(decoy, dict.fromkeys(LEGITIMATE_WHEEL_MEMBERS, b"# ash\n"))
+        decoy_bytes = open(decoy, "rb").read()  # noqa: SIM115 - read once, reused below
+
+        poisoned_tar = os.path.join(tmp, "poisoned-3.7.0.tar")
+        _write_fixture_sdist(
+            poisoned_tar, dict.fromkeys(LEGITIMATE_SDIST_MEMBERS, b"# ash\n")
+        )
+        with open(poisoned_tar, "ab") as handle:
+            handle.write(decoy_bytes)
+
+        # The same attack against the other guard: a leading half that is not a
+        # valid tar either, so the both-sniffs-accept check never fires and only
+        # the leading-magic check stands between this and a clean verdict.
+        poisoned_junk = os.path.join(tmp, "poisoned-junk.whl")
+        with open(poisoned_junk, "wb") as handle:
+            handle.write(b"not an archive of any kind\n" * 8)
+            handle.write(decoy_bytes)
+
+        for label, fixture in (
+            ("tar with an appended zip", poisoned_tar),
+            ("zip appended to non-archive bytes", poisoned_junk),
+        ):
+            try:
+                report = check_artifact(fixture)
+            except ValueError as err:
+                stream.write(f"  self-test: {label} rejected ({err.args[0][:60]}...)\n")
+            else:
+                failures.append(
+                    f"a {label} was accepted, and {report.count} member(s) were "
+                    "examined. The appended zip was checked in the leading half's "
+                    "place, so whatever precedes it -- which could be anything -- "
+                    "was never classified."
+                )
 
     if failures:
         stream.write("\nself-test FAILED:\n")

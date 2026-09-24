@@ -77,7 +77,11 @@ def test_the_scan_argv_forces_incomplete_scanners_to_fail(gate, monkeypatch, tmp
     """Without this flag, a run where nothing ran exits 0 and the gate calls that a pass."""
     captured: List[List[str]] = []
 
-    def _fake_run(argv, cwd=None):
+    # `env=` is accepted because `run_scan` now passes the redirected scan
+    # environment; see _scan_env and test_codecommit_gate_scan_environment.py. The
+    # value is not asserted here -- this test is about argv -- but a stub that
+    # refused the keyword would fail on the signature rather than on the property.
+    def _fake_run(argv, cwd=None, env=None):
         captured.append(list(argv))
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
@@ -123,7 +127,7 @@ def _capture_argv(gate, monkeypatch, tmp_path) -> list[list[str]]:
     monkeypatch.setattr(
         gate,
         "_run",
-        lambda argv, cwd=None: (
+        lambda argv, cwd=None, env=None: (
             captured.append(list(argv))
             or SimpleNamespace(returncode=0, stdout="", stderr="")
         ),
@@ -676,7 +680,7 @@ def test_a_refused_extra_arg_reaches_the_pull_request_as_error_and_revokes(
     monkeypatch.setattr(
         gate,
         "_run",
-        lambda argv, cwd=None: pytest.fail(
+        lambda argv, cwd=None, env=None: pytest.fail(
             f"the scan ran despite a refused extra arg: {argv}"
         ),
     )

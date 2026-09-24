@@ -583,6 +583,44 @@ def incomplete_scanners_for_project(results: Any) -> List[str]:
     return [name for name, _status in incomplete_scanners(results)]
 
 
+def no_scanner_ran_for_project(results: Any) -> bool:
+    """Whether this project recorded scanners and none of them reached a verdict.
+
+    The set-level counterpart to ``incomplete_scanners_for_project`` above, and not
+    implied by it. That function asks the question of each entry, and it has to
+    tolerate SKIPPED one entry at a time -- SKIPPED is how ``--exclude-scanners``
+    and another shard's ownership are recorded -- so a project in which *every*
+    entry is SKIPPED clears it having measured nothing. Single-project mode asks
+    both questions, in this order, inside ``_compute_exit_code``; the workspace
+    layer asked only the first, so such a project reported zero findings, COMPLETED
+    and exit 0 while ``ash --source-dir P`` on the same project exited 1.
+
+    Delegates for the same reason its sibling does, and the delegation carries one
+    decision that is easy to get wrong by copying: an *empty* scanner set is not
+    this condition. It is what ``--phases convert`` legitimately produces, and
+    ``no_scanner_ran`` answers False for it deliberately. A mirrored version that
+    tested emptiness would fail every convert-only project in a workspace.
+
+    Imported inside the function because ``run_ash_scan`` imports this package's
+    ``execution`` module for workspace mode; a module-level import closes that into
+    a cycle.
+
+    Args:
+        results: One project's ``AshAggregatedResults``, or ``None``.
+
+    Returns:
+        True only when at least one scanner was recorded and not one of them
+        reached a verdict. False for ``None``, which is the crashed-scan case the
+        caller already reports as FAILED.
+    """
+    from automated_security_helper.interactions.run_ash_scan import (
+        no_scanner_ran,
+        scanner_statuses,
+    )
+
+    return no_scanner_ran(scanner_statuses(results))
+
+
 def _worse_status(left: Optional[str], right: Optional[str]) -> Optional[str]:
     """Whichever scanner status is worse news, for the workspace-level rollup."""
     if left is None:

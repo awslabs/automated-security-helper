@@ -592,10 +592,13 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
 
     Returns:
         Dict with progress info including:
+        - success: False when the poll itself failed, in which case `error`
+          describes why and no other key below is populated.
         - is_complete: Boolean indicating if scan is done
         - status: Current status (running, completed, failed, cancelled)
-        - progress_percentage: Estimated completion percentage
-        - message: Human-readable status message
+        - completed_scanners / total_scanners: Counts, where "completed" means
+          the scanner ran and reported PASSED. A scanner that failed, errored or
+          never ran is excluded from the first number but not the second.
         - scanner_statuses: Per-scanner status for every scanner ASH considered,
           including ones that never ran. Empty until the scan finishes.
         - skipped_scanners: The subset that did not run, each with a `reason` of
@@ -608,7 +611,14 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
 
         progress_info = await mcp_get_scan_progress(scan_id=scan_id)
 
-        if not progress_info.get("success", False):
+        # Discriminates rather than tests presence. `not
+        # progress_info.get("success")` was true on both branches, because the
+        # producer set the key only on failure: this was an unconditional return
+        # and everything below it -- the scanners walk, the severity totals and
+        # summarize_scanner_statuses -- was dead on a real poll. Both arms are
+        # needed: a producer can report a problem by setting success False, or by
+        # including error without setting success at all.
+        if "error" in progress_info or progress_info.get("success") is False:
             return progress_info
 
         registry = get_scan_registry()
@@ -743,7 +753,12 @@ async def get_scan_results(
 
         results = await mcp_get_scan_results(output_dir=output_dir)
 
-        if "error" in results or not results.get("success"):
+        # `not results.get("success")` was true on both branches, because the
+        # producer set the key only on failure. Every filter below sat behind
+        # that early return, so filter_level, scanners, severities and
+        # actionable_only were all inert on a real scan while the unit tests --
+        # which stub the producer with a dict that does carry the key -- passed.
+        if "error" in results or results.get("success") is False:
             return results
 
         if actionable_only:
@@ -808,7 +823,17 @@ async def get_scan_summary(
     # via get_scan_summary from one obtained by calling get_scan_results directly.
     # Preserved from the pre-refactor implementation; asserted by
     # tests/unit/cli/test_mcp_server.py::TestGetScanSummary.
-    if isinstance(summary, dict) and summary.get("success"):
+    #
+    # Conditioned on the absence of a failure signal rather than on the presence
+    # of `success`, matching the guards in the two tools above. Requiring the key
+    # to be present and truthy meant the tag was never attached on a real scan:
+    # get_scan_results returned early before filter_summary -- the only thing on
+    # this path that sets the key -- ever ran.
+    if (
+        isinstance(summary, dict)
+        and "error" not in summary
+        and summary.get("success") is not False
+    ):
         summary["_source_function"] = "get_scan_summary"
     return summary
 

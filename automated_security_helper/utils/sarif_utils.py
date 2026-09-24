@@ -663,6 +663,40 @@ def apply_suppressions_to_sarif(
 
     _inline_suppression_cache: dict[str, list] = {}
 
+    # Whether the output directory contains the source directory, in which case the
+    # output-path exclusion below is not applied at all.
+    #
+    # Every finding in the scanned tree resolves inside such an output directory, so
+    # the exclusion would drop the entire result set -- and a run with no findings
+    # exits 0, so emptying it is indistinguishable from a clean scan. That is the
+    # worst outcome this function can produce, and it is reachable: `ash merge`
+    # builds its context with source_dir=Path.cwd() and the operator's --output-dir
+    # verbatim, so `ash merge --output-dir .` lands here. `ash scan` relocates the
+    # equal-paths case before reaching this point; this covers containment, which it
+    # does not, and covers every other caller that builds a context directly.
+    #
+    # Declining the exclusion rather than refusing the scan: the exclusion exists to
+    # keep ASH's own reports out of its findings, which is a tidiness property, and
+    # trading a whole result set for it is the wrong way round. Said at WARNING
+    # because a guard that quietly stops applying is how a guard becomes decoration.
+    # is_relative_to is true for equal paths, so this covers output_dir == source_dir
+    # as well as containment.
+    _output_dir_contains_source = _resolved_source.is_relative_to(_output_dir_resolved)
+    if _output_dir_contains_source:
+        ASH_LOGGER.warning(
+            f"Not excluding findings under the output directory "
+            f"'{_output_dir_resolved.as_posix()}': it is the source directory "
+            f"'{_resolved_source.as_posix()}' or an ancestor of it, so every finding "
+            f"in the scanned tree resolves inside it and the exclusion would discard "
+            f"the whole result set. Point --output-dir at a directory outside the "
+            f"scanned tree to restore it."
+        )
+
+    # Findings removed by the output-path exclusion, reported below. Counted because
+    # this pass can remove an arbitrary number of results, and before it was counted
+    # the only trace was one per-finding line at VERBOSE.
+    excluded_by_output_path = 0
+
     for run in sarif_report.runs:
         if not run.results:
             continue
@@ -692,15 +726,37 @@ def apply_suppressions_to_sarif(
                         _source_dir_basename,
                     )
                     if uri not in _uri_resolve_cache:
-                        _uri_resolve_cache[uri] = Path(uri).resolve()
+                        # Anchored on the source directory, NOT on the process's
+                        # working directory. _normalize_sarif_uri has just stripped
+                        # the source-directory prefix, so `uri` is relative to
+                        # source_dir; Path(uri).resolve() anchored it on cwd instead,
+                        # which agrees only when cwd happens to equal source_dir.
+                        # Anywhere else -- a CI job that checks out to one directory
+                        # and passes --source-dir for another, `ash merge`, any MCP
+                        # session -- the resolution landed outside the output
+                        # directory and the exclusion silently stopped firing, so
+                        # ASH's own reports came back as findings about the scanned
+                        # tree.
+                        #
+                        # An absolute `uri` is left alone rather than relocated:
+                        # pathlib discards the left operand of `/` when the right is
+                        # absolute. That is what this needs. A URI the prefix strip
+                        # did not match is absolute and outside the source tree -- a
+                        # system config, a cached dependency -- and joining it onto
+                        # source_dir would fabricate a path inside a tree it is not
+                        # in.
+                        _uri_resolve_cache[uri] = (_resolved_source / uri).resolve()
                     resolved_uri = _uri_resolve_cache[uri]
-                    if resolved_uri.is_relative_to(
-                        _output_dir_resolved
-                    ) and not resolved_uri.is_relative_to(_work_dir_resolved):
+                    if (
+                        not _output_dir_contains_source
+                        and resolved_uri.is_relative_to(_output_dir_resolved)
+                        and not resolved_uri.is_relative_to(_work_dir_resolved)
+                    ):
                         ASH_LOGGER.verbose(
                             f"Excluding result -- location is in output path and NOT in the work directory and should not have been included: '{uri}'",
                             extra=NO_MARKUP,
                         )
+                        excluded_by_output_path += 1
                         is_in_ignorable_path = True
                         continue
                     ignore_reason = _check_ignore_paths(uri, ignore_paths)
@@ -825,4 +881,19 @@ def apply_suppressions_to_sarif(
             updated_results.append(result)
 
         run.results = updated_results
+
+    # Reported after every run, and only when something was removed.
+    #
+    # WARNING rather than the per-finding VERBOSE line above, because the aggregate
+    # is what tells an operator their result set shrank -- silently emptying a run is
+    # the failure this exclusion is closest to causing, and the individual lines are
+    # invisible at the default level. Conditional because a count printed on every
+    # scan is noise, and noise gets filtered.
+    if excluded_by_output_path:
+        ASH_LOGGER.warning(
+            f"Excluded {excluded_by_output_path} finding(s) whose location is inside "
+            f"the output directory '{_output_dir_resolved.as_posix()}' and outside "
+            f"its work directory. These are reports ASH wrote, not findings about "
+            f"the scanned tree. Run with --verbose to see each one."
+        )
     return sarif_report

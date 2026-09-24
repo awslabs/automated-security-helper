@@ -31,6 +31,7 @@ from automated_security_helper.workspace.aggregation import (
     count_actionable_results,
     has_finding_at_min_severity,
     incomplete_scanners_for_project,
+    no_scanner_ran_for_project,
     project_relative_uri,
     project_root_uri,
     rebase_run_for_project,
@@ -753,6 +754,60 @@ class TestCompletenessParityWithComputeExitCode:
         claim about the same event.
         """
         assert incomplete_scanners_for_project(None) == []
+        assert no_scanner_ran_for_project(None) is False
+
+    def test_a_project_whose_every_scanner_was_skipped_is_seen_by_both(self, tmp_path):
+        """The set-level half, which the per-entry helper structurally cannot see.
+
+        ``incomplete_scanners`` tolerates SKIPPED one entry at a time, because that
+        is how an exclusion and another shard's ownership are recorded. So a project
+        in which *every* entry is SKIPPED clears that pass having measured nothing,
+        and before ``no_scanner_ran_for_project`` existed the workspace layer had no
+        second question to ask: the project reported zero findings and COMPLETED
+        while ``ash --source-dir P`` on the same project exited 1.
+
+        Asserted through the same agreement the rest of this class uses, so a
+        workspace-side derivation that stopped answering cannot keep this passing.
+        """
+        statuses = {"bandit": ("SKIPPED", True, True)}
+        standalone = self._standalone_exit_code(tmp_path, statuses)
+        model = self._model(statuses)
+
+        assert standalone == 1
+        assert incomplete_scanners_for_project(model) == []
+        assert no_scanner_ran_for_project(model) is True
+
+    def test_a_project_with_one_scanner_that_ran_is_clean_to_both(self, tmp_path):
+        """The control for the case above, at the boundary that decides it.
+
+        One PASSED entry beside the SKIPPED ones is the difference between a scan
+        that measured nothing and a scan that measured something and was narrowed.
+        Without this the set-level gate could be stuck at always-fail and the test
+        above would still pass.
+        """
+        statuses = {
+            "bandit": ("PASSED", False, True),
+            "cfn-nag": ("SKIPPED", True, True),
+        }
+        standalone = self._standalone_exit_code(tmp_path, statuses)
+        model = self._model(statuses)
+
+        assert standalone == 0
+        assert incomplete_scanners_for_project(model) == []
+        assert no_scanner_ran_for_project(model) is False
+
+    def test_an_empty_scanner_set_is_not_read_as_nothing_having_run(self, tmp_path):
+        """A results file recording no scanners at all is a different claim.
+
+        ``--phases convert`` legitimately produces one, and ``no_scanner_ran``
+        returns False for it by design so that a phase-limited run does not become
+        an error. Pinned here because the workspace helper delegates, and a
+        mirrored copy that tested emptiness instead would fail every convert-only
+        project in a workspace.
+        """
+        model = self._model({})
+
+        assert no_scanner_ran_for_project(model) is False
 
 
 class TestAggregatorOutput:

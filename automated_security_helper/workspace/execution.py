@@ -247,6 +247,7 @@ from automated_security_helper.workspace.aggregation import (
     count_actionable_results,
     has_finding_at_min_severity,
     incomplete_scanners_for_project,
+    no_scanner_ran_for_project,
 )
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
 from automated_security_helper.workspace.policy import ceiling_unreachable_counts
@@ -643,6 +644,20 @@ def _scan_one_project(
     # SUCCESS, while `ash --source-dir P` on the same project exited 1 -- the
     # workspace layer mirrored only the threshold pass.
     incomplete = incomplete_scanners_for_project(results)
+    # Two reads of the completeness question, not one, because the second is not
+    # implied by the first. The per-entry pass has to tolerate SKIPPED -- that is
+    # how --exclude-scanners records work this run was never meant to do -- so a
+    # project in which every entry is SKIPPED clears it having measured nothing.
+    # _compute_exit_code asks both, in this order, and the workspace layer asked
+    # only the first: such a project reported zero findings and SUCCESS while
+    # `ash --source-dir P` on it exited 1.
+    #
+    # No shard exclusion here, unlike _compute_exit_code, which excuses one shard
+    # of a split because a shard genuinely can own nothing. A workspace project is
+    # never one shard: ProjectScanSettings carries no shard fields and nothing
+    # under workspace/ passes shard_index or shard_count to an orchestrator, so a
+    # guard for it could not fire and would only imply the case was handled.
+    measured_nothing = no_scanner_ran_for_project(results)
     fail_on_incomplete = _resolve_fail_on_incomplete_scanners(settings, results)
 
     if abandoned is not None and abandoned.is_set():
@@ -692,7 +707,8 @@ def _scan_one_project(
         output_path=output_path,
         scanners=_scanner_statuses(results),
         incomplete_scanners=incomplete,
-        scan_incomplete=bool(incomplete) and fail_on_incomplete,
+        no_scanner_ran=measured_nothing,
+        scan_incomplete=(bool(incomplete) or measured_nothing) and fail_on_incomplete,
         ceiling_unreachable_findings=unreachable,
     )
     return _ProjectRun(outcome=outcome, run=run)
@@ -806,11 +822,22 @@ def _resolve_fail_on_incomplete_scanners(
 
     Same three-step precedence as ``_resolve_fail_on_findings`` above and as
     ``run_ash_scan._resolve_fail_on_incomplete_scanners``: the CLI value, then the
-    project's own config, then True.
+    project's own config, then a fallback.
 
-    True as the fallback, matching ``AshConfig.fail_on_incomplete_scanners``. The
-    two are the same question answered twice, and when they disagreed the answer
-    depended on how far config resolution had got before it was asked.
+    True as the fallback, and it does NOT match
+    ``AshConfig.fail_on_incomplete_scanners``, which is ``False``. This docstring
+    claimed it did, which was wrong about the model rather than about this code --
+    ``run_ash_scan``'s resolver falls back to ``False`` and says so. The two
+    fallbacks differ deliberately, and the difference is narrower than it reads:
+    step 2 accepts any ``bool`` the project's config carries, and every real
+    ``AshConfig`` carries one, so this step only decides a project for which no
+    config model was available at all. In workspace mode that means the
+    orchestrator returned results without a config, which is not a state to read as
+    "the operator opted out of the completeness gate" -- a project whose config
+    never loaded is exactly the project whose scanner statuses are least
+    trustworthy, so the gate stays on. Changing it to ``False`` here to match
+    single-project mode would be a fail-open change to a verdict, so it is left as
+    a maintainer's call rather than taken silently.
 
     ``isinstance(..., bool)`` rather than a truthiness test on the config value,
     because this reaches into whatever object the orchestrator handed back: a

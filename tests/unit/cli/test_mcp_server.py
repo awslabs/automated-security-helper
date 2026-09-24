@@ -358,7 +358,15 @@ class TestRunAshScan:
 
 
 class TestGetScanProgress:
-    """Tests for the get_scan_progress tool function."""
+    """Tests for the get_scan_progress tool function.
+
+    The stubs below return the shape ``mcp_get_scan_progress`` really produces.
+    They used to inject ``"success": True``, which the producer never sets on its
+    success path -- so ``get_scan_progress``'s guard fell through under test and
+    returned early in production, and these tests passed over a dead code path.
+    ``progress_percentage`` went the same way: it was in the tool's documented
+    return shape and in this stub, and no producer has ever emitted it.
+    """
 
     @pytest.mark.asyncio
     async def test_progress_success(self, mock_ctx, mock_scan_registry_entry, tmp_path):
@@ -366,9 +374,7 @@ class TestGetScanProgress:
         from automated_security_helper.cli.mcp_server import get_scan_progress
 
         mock_progress = {
-            "success": True,
             "status": "running",
-            "progress_percentage": 50,
         }
 
         mock_registry = MagicMock()
@@ -388,8 +394,13 @@ class TestGetScanProgress:
         ):
             result = await get_scan_progress(ctx=mock_ctx, scan_id="test-scan-123")
 
-        assert result["success"] is True
+        # The stub carries no ``success`` key, which is the case the guard has to
+        # survive: it must fall through to the work below rather than read the
+        # absence as a failure, and it must not invent a verdict of its own. A
+        # stub that supplied the key would let a guard rewritten as
+        # ``not progress_info.get("success")`` pass here again.
         assert result["status"] == "running"
+        assert "success" not in result
         assert "scanners" in result
         assert "severity_counts" in result
 
@@ -398,7 +409,7 @@ class TestGetScanProgress:
         """Returns error when scan_id is not in registry."""
         from automated_security_helper.cli.mcp_server import get_scan_progress
 
-        mock_progress = {"success": True, "status": "running"}
+        mock_progress = {"status": "running"}
 
         mock_registry = MagicMock()
         mock_registry.get_scan.return_value = None
@@ -452,7 +463,7 @@ class TestGetScanProgress:
             json.dumps({"severity_counts": {"critical": 2, "high": 3}})
         )
 
-        mock_progress = {"success": True, "status": "running"}
+        mock_progress = {"status": "running"}
         mock_registry = MagicMock()
         mock_scan_registry_entry.output_directory = str(tmp_path)
         mock_registry.get_scan.return_value = mock_scan_registry_entry

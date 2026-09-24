@@ -24,6 +24,11 @@ when it drifted this gate would pass pull requests that `ash scan` fails.
 Reporting "no findings" for a scan that never ran would be the worst failure this
 handler could have, so an unrecognized exit code is reported as unknown rather
 than folded into either real outcome.
+
+The scan runs under a rewritten environment; see ``_scan_env``, which is the other
+half of that same concern. Lambda gives a container image a read-only root
+filesystem and its own PATH, so the scanners ASH shells out to cannot write where
+the image points them, and a scan whose tools all failed to start still exits 0.
 """
 
 from __future__ import annotations
@@ -67,6 +72,37 @@ EXIT_FINDINGS = 2
 DEFAULT_MAX_COMMENT_CHARS = 10000
 
 TRUE_VALUES = {"1", "true", "yes", "on"}
+
+#: Where the gate image recorded the uv tool directory the ASH stage installed
+#: into, so ``_scan_env`` can give uv a writable parent without reinstalling the
+#: tools. Baked by the ENV block in
+#: deploy/terraform/modules/ash-image-pipeline/files/wrapper.Dockerfile.
+BAKED_UV_TOOL_DIR_VAR = "ASH_BAKED_UV_TOOL_DIR"
+
+#: Scanner data the image bakes, each paired with the environment variable naming
+#: the writable path ``_scan_env`` redirects that scanner to.
+#:
+#: Both halves are load-bearing and neither is sufficient. The redirect is what
+#: lets the scanner write at all on a read-only root filesystem; the seed is what
+#: keeps the database and rulesets the image was built to carry reachable through
+#: it. Redirecting without seeding aims grype at an empty directory, and grype
+#: with no database reports PASSED with zero findings -- a clean verdict over an
+#: unscanned tree, which is the worst outcome this gate has.
+#:
+#: The baked locations are read from the environment rather than written out here
+#: because they belong to the image build: ash-image-pipeline's ash_image_target
+#: selects which ASH stage is wrapped, and the stages do not agree on HOME.
+BAKED_SCANNER_DATA = (
+    ("ASH_BAKED_GRYPE_DB_DIR", "GRYPE_DB_CACHE_DIR"),
+    ("ASH_BAKED_SEMGREP_RULES_DIR", "SEMGREP_RULES_CACHE_DIR"),
+    ("ASH_BAKED_OPENGREP_RULES_DIR", "OPENGREP_RULES_CACHE_DIR"),
+)
+
+#: Values ASH itself reads as "offline". Copied from ``is_offline_mode()`` in
+#: automated_security_helper/core/constants.py, which is the predicate the
+#: scanners consult, so this handler and the scan it launches cannot disagree
+#: about whether the run has network access.
+OFFLINE_VALUES = {"YES", "TRUE", "1"}
 
 #: Scan options an operator may not set through ASH_SCAN_EXTRA_ARGS. Each one can
 #: change this gate's verdict, so the gate decides them and the environment does not.
@@ -207,17 +243,174 @@ def _env_bool(name: str, default: bool = False) -> bool:
 
 
 def _run(
-    argv: list[str], cwd: pathlib.Path | None = None
+    argv: list[str],
+    cwd: pathlib.Path | None = None,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
-    """Run a subprocess, capturing output, without raising on a non-zero exit."""
+    """Run a subprocess, capturing output, without raising on a non-zero exit.
+
+    ``env=None`` inherits this process's environment, which is what the git calls
+    want. The scan passes a rewritten one; see ``_scan_env``.
+    """
     LOGGER.info("running: %s", " ".join(argv))
     return subprocess.run(  # noqa: S603 - argv is a list, never a shell string
         argv,
         cwd=str(cwd) if cwd else None,
+        env=env,
         capture_output=True,
         text=True,
         check=False,
     )
+
+
+def _seed_from_baked(
+    baked: pathlib.Path, writable: pathlib.Path, *, directories_only: bool
+) -> None:
+    """Make the image's baked content reachable through a writable directory.
+
+    DIRECTORIES ARE SYMLINKED, FILES ARE COPIED. A directory holds content the
+    scanner only reads -- grype's vulnerability database lands in a versioned
+    subdirectory -- so a link costs no bytes of the function's ephemeral storage,
+    which the clone and ASH's output already draw on. A file is the thing a
+    scanner is most likely to rewrite in place, and a link to one aims that write
+    at the read-only root filesystem: it would look seeded and fail at scan time.
+    Copying gives the scan its own writable copy of the small files (the semgrep
+    and opengrep rulesets are these) while the bulk stays linked.
+
+    ``directories_only`` skips files entirely instead of copying them, and it
+    exists for the uv tool directory. uv's baked tree also holds uv's own ``.lock``
+    and a ``.gitignore``; uv needs to create its lock inside UV_TOOL_DIR, and a
+    copy of the baked one would be a stale lock rather than an absent one. The
+    first version of the CDK flavor of this fix linked ``.lock`` and three scanners
+    still ERRORed -- see the ``_scan_env`` note in
+    deploy/cdk/lib/ash-container-scripts.ts. Do not turn this off for the tool dir.
+
+    Idempotent: an entry already present is left alone, so a warm invocation
+    re-uses what a cold one seeded.
+    """
+    for entry in sorted(baked.iterdir()):
+        link = writable / entry.name
+        if link.exists() or link.is_symlink():
+            continue
+        if entry.is_dir():
+            link.symlink_to(entry, target_is_directory=True)
+        elif not directories_only and entry.is_file():
+            shutil.copy2(entry, link)
+
+
+def _is_offline_scan() -> bool:
+    """Whether this scan has no network, so an empty cache cannot refill itself.
+
+    The distinction decides whether an unreachable baked cache is fatal. Online,
+    grype can still fetch a database and the scan is slow rather than blind.
+    Offline it cannot, so a zero-finding report says nothing about the code.
+    """
+    return os.environ.get("ASH_OFFLINE", "NO").strip().upper() in OFFLINE_VALUES
+
+
+def _scan_env() -> dict[str, str]:
+    """The environment `ash scan` runs under. Passing it is not optional.
+
+    WHAT GOES WRONG WITHOUT IT, MEASURED ON THE CDK FLAVOR OF THIS SAME IMAGE
+    ------------------------------------------------------------------------
+    Lambda runs a container image with a read-only root filesystem -- only /tmp is
+    writable -- and replaces PATH with its own. ASH's scanner toolchain writes at
+    scan time, and every path the image points it at is on that read-only layer:
+    the three caches the base image sets (GRYPE_DB_CACHE_DIR,
+    SEMGREP_RULES_CACHE_DIR, OPENGREP_RULES_CACHE_DIR, all under /deps), HOME, and
+    uv's cache and tool directory. A real scan of a three-file repository in that
+    state reported bandit, checkov and semgrep MISSING, opengrep ERROR, and grype
+    PASSED with zero findings, and the gate reported "passed". The measurement is
+    recorded next to the CDK gate handler in
+    deploy/cdk/lib/ash-container-scripts.ts; this handler had no equivalent, which
+    is the defect. It fails visibly rather than silently here only because
+    ``--fail-on-incomplete-scanners`` is hardcoded in ``run_scan`` -- that flag is
+    what turns a scan of nothing into an error outcome, and it is the reason this
+    was a broken deployment target rather than a gate quietly approving.
+
+    Redirecting alone is not the fix. The baked uv tools, vulnerability database
+    and rulesets are all on the read-only layer, so a redirect to a fresh /tmp
+    directory points every scanner at nothing: uv reinstalls from PyPI, which
+    works only where the function has egress, and an image built with
+    ash_offline_mode cannot reach the database its own build asserted is
+    non-empty. So each redirected path is seeded from the location the image
+    recorded; see ``_seed_from_baked`` and BAKED_SCANNER_DATA.
+
+    PATH is restored from ASH_IMAGE_PATH when the image recorded one, and left
+    alone when it did not, so running this handler outside the image behaves
+    normally.
+    """
+    env = dict(os.environ)
+    home = WORK_ROOT / "home"
+    cache = home / "cache"
+    tool_dir = home / "uv-tools"
+    data_home = home / "share"
+
+    # HOME is assigned last on purpose: several tools derive their own paths from
+    # it, and the image's HOME is on the read-only layer.
+    env["XDG_CACHE_HOME"] = str(cache)
+    env["XDG_DATA_HOME"] = str(data_home)
+    env["UV_CACHE_DIR"] = str(cache / "uv")
+    env["UV_TOOL_DIR"] = str(tool_dir)
+    env["GRYPE_DB_CACHE_DIR"] = str(cache / "grype")
+    env["SEMGREP_RULES_CACHE_DIR"] = str(cache / "semgrep")
+    env["OPENGREP_RULES_CACHE_DIR"] = str(cache / "opengrep")
+    env["HOME"] = str(home)
+
+    image_path = os.environ.get("ASH_IMAGE_PATH")
+    if image_path:
+        env["PATH"] = image_path
+
+    for path in (cache, tool_dir, data_home):
+        path.mkdir(parents=True, exist_ok=True)
+
+    baked_tools = os.environ.get(BAKED_UV_TOOL_DIR_VAR, "").strip()
+    if baked_tools and pathlib.Path(baked_tools).is_dir():
+        _seed_from_baked(pathlib.Path(baked_tools), tool_dir, directories_only=True)
+    else:
+        # Not fatal: the affected scanners degrade to MISSING, which
+        # --fail-on-incomplete-scanners turns into a visible error outcome.
+        LOGGER.warning(
+            "%s names no directory, so uv's baked tools were not seeded; the "
+            "scanners uv provides will reinstall or report MISSING",
+            BAKED_UV_TOOL_DIR_VAR,
+        )
+
+    unreachable: list[str] = []
+    for baked_var, cache_var in BAKED_SCANNER_DATA:
+        writable = pathlib.Path(env[cache_var])
+        writable.mkdir(parents=True, exist_ok=True)
+        baked = os.environ.get(baked_var, "").strip()
+        if baked and pathlib.Path(baked).is_dir():
+            _seed_from_baked(pathlib.Path(baked), writable, directories_only=False)
+        if not any(writable.iterdir()):
+            unreachable.append(f"{cache_var} (from {baked_var}={baked or '<unset>'})")
+
+    # Checked on the OUTCOME rather than on the inputs, deliberately. An assertion
+    # that re-tested whether the variables are set would be silenced by whatever
+    # silenced the seeding, and the property that matters is that the scan can
+    # read a database, not that a variable exists. The root Dockerfile's own
+    # offline assertion is written the same way and says why: "Deliberately checks
+    # the ARTIFACTS rather than re-testing OFFLINE".
+    if unreachable:
+        if _is_offline_scan():
+            raise RuntimeError(
+                "ASH_OFFLINE is set, so this scan cannot fetch what it is missing, "
+                "and these redirected scanner caches are empty after seeding: "
+                + "; ".join(unreachable)
+                + ". Refusing to scan rather than reporting no findings from an "
+                "empty vulnerability database and no rulesets. Build the gate's "
+                "base image with ash_offline_mode = true so the database and "
+                "rulesets are baked in, or set ash_offline_mode = false so the "
+                "scanners may fetch them."
+            )
+        LOGGER.warning(
+            "these redirected scanner caches are empty after seeding and will be "
+            "fetched at scan time: %s",
+            "; ".join(unreachable),
+        )
+
+    return env
 
 
 def _is_gate_owned_option(token: str) -> bool:
@@ -417,7 +610,11 @@ def run_scan(
     # does not know about then resolves before the gate's value rather than after it.
     argv = ["ash", "scan", *extra_tokens, *gate_owned]
 
-    result = _run(argv)
+    # env= is load-bearing, not hygiene: without it the child inherits Lambda's
+    # PATH merged with the image's ENVs, which point every scanner's cache at the
+    # read-only root filesystem. See _scan_env. It raises when an offline scan's
+    # caches are unreachable, which handler reads as outcome "error".
+    result = _run(argv, env=_scan_env())
     log_tail = (result.stderr or result.stdout or "").strip()[-4000:]
     LOGGER.info("ash scan exited %d", result.returncode)
     return result.returncode, output_dir, log_tail
