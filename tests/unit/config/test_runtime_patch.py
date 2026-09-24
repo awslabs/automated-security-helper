@@ -20,6 +20,25 @@ def _base_config() -> AshConfig:
     return AshConfig()
 
 
+def _shipped_denied_paths() -> list[str]:
+    """The denylist a default `AshConfig` ships.
+
+    Read from the model instead of duplicated here, so a change to the shipped
+    defaults cannot leave these regressions passing against a denylist nobody
+    ships any more.
+    """
+    return list(AshConfig().global_settings.mcp.runtime_overrides.denied_paths)
+
+
+# A suppression that silences every finding: `rule_id` defaults to None, which
+# `AshSuppression.matches` reads as "every rule", and `path` "**" matches every
+# file. `reason` is not decoration -- it is a required field on
+# `IgnorePathWithReason`, so a payload without it is rejected by model
+# validation after the patch applies. A test built on such a payload sees a
+# denial and proves nothing about the denylist.
+_BLANKET_SUPPRESSION = {"path": "**", "reason": "silence everything"}
+
+
 class TestAllowlistDisabled:
     def test_disabled_allowlist_denies_all_patches(self) -> None:
         base = _base_config()
@@ -524,3 +543,358 @@ class TestRfc6901Escapes:
         with pytest.raises(RuntimePatchDeniedError) as excinfo:
             apply_runtime_patch(base, ops, allowlist=allowlist)
         assert "not in allowed_paths" in excinfo.value.rule
+
+
+class TestRootPointerRefused:
+    """A write at the root pointer replaces the whole document, so no
+    per-field `denied_paths` entry can constrain what it sets. The allowlist
+    does not keep it out on its own: `**` matches zero segments, so the
+    conventional `/**` entry matches the empty root path.
+    """
+
+    def test_root_replace_refused_even_with_subtree_allowlist(self) -> None:
+        base = _base_config()
+        allowlist = RuntimeOverridesConfig(
+            enabled=True,
+            allowed_paths=["/**"],
+            denied_paths=[],
+        )
+        ops = [{"op": "replace", "path": "", "value": {"project_name": "swapped"}}]
+        with pytest.raises(RuntimePatchDeniedError) as excinfo:
+            apply_runtime_patch(base, ops, allowlist=allowlist)
+        assert "root pointer" in excinfo.value.rule
+
+    def test_root_add_refused(self) -> None:
+        base = _base_config()
+        allowlist = RuntimeOverridesConfig(
+            enabled=True,
+            allowed_paths=["/**"],
+            denied_paths=[],
+        )
+        ops = [{"op": "add", "path": "", "value": {"project_name": "swapped"}}]
+        with pytest.raises(RuntimePatchDeniedError) as excinfo:
+            apply_runtime_patch(base, ops, allowlist=allowlist)
+        assert "root pointer" in excinfo.value.rule
+
+    def test_op_with_no_path_key_refused_as_root(self) -> None:
+        """`path` is mandatory on every RFC 6902 op this module accepts. A
+        missing key resolves to the root pointer, so it is refused rather than
+        silently treated as an empty path that some allowlist glob matches.
+        """
+        base = _base_config()
+        allowlist = RuntimeOverridesConfig(
+            enabled=True,
+            allowed_paths=["/**"],
+            denied_paths=[],
+        )
+        with pytest.raises(RuntimePatchDeniedError) as excinfo:
+            apply_runtime_patch(
+                base, [{"op": "replace", "value": 1}], allowlist=allowlist
+            )
+        assert "root pointer" in excinfo.value.rule
+
+    def test_root_replace_allowed_when_allowlist_names_root_explicitly(self) -> None:
+        """The refusal is an escape-hatch, not a wall: an operator who writes
+        the root pointer into `allowed_paths` has asked for a whole-config
+        swap, and with an empty denylist there is nothing left to constrain.
+        """
+        base = _base_config()
+        allowlist = RuntimeOverridesConfig(
+            enabled=True,
+            allowed_paths=[""],
+            denied_paths=[],
+        )
+        swapped = base.model_dump(mode="json", by_alias=False)
+        swapped["project_name"] = "swapped"
+        result = apply_runtime_patch(
+            base, [{"op": "replace", "path": "", "value": swapped}], allowlist=allowlist
+        )
+        assert result.project_name == "swapped"
+
+    def test_root_replace_still_denied_by_denylist_when_root_is_allowed(self) -> None:
+        """Naming the root in `allowed_paths` clears the structural refusal but
+        not the denylist: the root write carries every denied descendant.
+        """
+        base = _base_config()
+        allowlist = RuntimeOverridesConfig(
+            enabled=True,
+            allowed_paths=[""],
+            denied_paths=_shipped_denied_paths(),
+        )
+        swapped = base.model_dump(mode="json", by_alias=False)
+        swapped["fail_on_findings"] = False
+        ops = [{"op": "replace", "path": "", "value": swapped}]
+        with pytest.raises(RuntimePatchDeniedError) as excinfo:
+            apply_runtime_patch(base, ops, allowlist=allowlist)
+        assert "denied_paths entry" in excinfo.value.rule
+
+
+class TestDenyListIsSubtreeClosed:
+    """Each `denied_paths` entry names a subtree, not one pointer.
+
+    The matcher used to answer only "does this entry match the op's own
+    pointer", which leaves two holes. A write *below* a denied leaf (`/-`,
+    `/0`, a nested key) did not match it, because the pattern still had
+    segments when the path ran out. A write *above* it did not match either,
+    and that one is worse: the op's value supplies the denied descendant, so
+    the three leaf entries can all be set from an ancestor while each of them
+    correctly denies a direct write.
+    """
+
+    def test_ancestor_write_cannot_install_a_blanket_suppression(self) -> None:
+        """The measured bypass. `/global_settings/suppressions` is denied and
+        denies a direct write, yet a write at `/global_settings` supplied the
+        suppression list wholesale.
+
+        The assertion is on the effect, not just on the exception, so a
+        regression reports what the patch installed.
+        """
+        base = _base_config()
+        allowlist = RuntimeOverridesConfig(
+            enabled=True,
+            allowed_paths=["/global_settings/**"],
+            denied_paths=_shipped_denied_paths(),
+        )
+        global_settings = base.global_settings.model_dump(mode="json", by_alias=False)
+        global_settings["suppressions"] = [_BLANKET_SUPPRESSION]
+        ops = [{"op": "replace", "path": "/global_settings", "value": global_settings}]
+
+        try:
+            result = apply_runtime_patch(base, ops, allowlist=allowlist)
+        except RuntimePatchDeniedError as exc:
+            # The operator has to be able to act on this, which means the
+            # message names the denied descendant that caused the refusal.
+            assert "denied_paths entry '/global_settings/" in exc.rule, exc.rule
+        else:
+            pytest.fail(
+                "write at /global_settings was permitted; it installed "
+                f"suppressions={result.global_settings.suppressions!r}"
+            )
+
+    def test_root_swap_cannot_flip_fail_on_findings(self) -> None:
+        """Same mechanism at the top: a whole-config swap sets `fail_on_findings`
+        and the suppression list in one op, and `/**` reaches the root because
+        `**` matches zero segments.
+        """
+        base = _base_config()
+        allowlist = RuntimeOverridesConfig(
+            enabled=True,
+            allowed_paths=["/**"],
+            denied_paths=_shipped_denied_paths(),
+        )
+        swapped = base.model_dump(mode="json", by_alias=False)
+        swapped["fail_on_findings"] = False
+        swapped["global_settings"]["suppressions"] = [_BLANKET_SUPPRESSION]
+        ops = [{"op": "replace", "path": "", "value": swapped}]
+
+        try:
+            result = apply_runtime_patch(base, ops, allowlist=allowlist)
+        except RuntimePatchDeniedError:
+            pass
+        else:
+            pytest.fail(
+                "root swap was permitted: it set "
+                f"fail_on_findings={result.fail_on_findings!r} and "
+                f"suppressions={result.global_settings.suppressions!r}"
+            )
+
+    @pytest.mark.parametrize(
+        "op_path,denied_entry",
+        [
+            # Array-append and array-index writes under a denied list field.
+            ("/global_settings/suppressions/-", "/global_settings/suppressions"),
+            ("/global_settings/suppressions/0", "/global_settings/suppressions"),
+            ("/global_settings/ignore_paths/-", "/global_settings/ignore_paths"),
+            ("/global_settings/ignore_paths/0", "/global_settings/ignore_paths"),
+            # A nested key under a denied scalar. Nonsense against the schema,
+            # but the guard must refuse it on the pointer alone rather than
+            # leaning on validation to catch it later.
+            ("/fail_on_findings/nested", "/fail_on_findings"),
+            (
+                "/fail_on_incomplete_scanners/nested",
+                "/fail_on_incomplete_scanners",
+            ),
+            # Under a partial-segment glob entry.
+            (
+                "/reporters/bedrock-summary-reporter/options/aws_region/nested",
+                "/reporters/bedrock-summary-reporter/options/aws_*",
+            ),
+            # Control: an entry that already ends in `/**` covered its own
+            # subtree before this change, and must keep doing so.
+            (
+                "/reporters/cloudwatch-logs/options/log_group_name",
+                "/reporters/cloudwatch-logs/**",
+            ),
+        ],
+    )
+    def test_write_below_a_denied_entry_is_denied(
+        self, op_path: str, denied_entry: str
+    ) -> None:
+        assert denied_entry in _shipped_denied_paths(), (
+            f"{denied_entry!r} is no longer a shipped default, so this case "
+            "covers nothing"
+        )
+        base = _base_config()
+        allowlist = RuntimeOverridesConfig(
+            enabled=True,
+            allowed_paths=["/**"],
+            denied_paths=_shipped_denied_paths(),
+        )
+        ops = [{"op": "add", "path": op_path, "value": _BLANKET_SUPPRESSION}]
+        with pytest.raises(RuntimePatchDeniedError) as excinfo:
+            apply_runtime_patch(base, ops, allowlist=allowlist)
+        assert denied_entry in excinfo.value.rule, excinfo.value.rule
+
+    @pytest.mark.parametrize(
+        "op_path",
+        [
+            "/global_settings",
+            "/reporters",
+            "/reporters/bedrock-summary-reporter",
+            "/reporters/bedrock-summary-reporter/options",
+            # Control: `/reporters/cloudwatch-logs/**` already denied its own
+            # parent segment before this change.
+            "/reporters/cloudwatch-logs",
+        ],
+    )
+    def test_write_above_a_denied_entry_is_denied(self, op_path: str) -> None:
+        base = _base_config()
+        allowlist = RuntimeOverridesConfig(
+            enabled=True,
+            allowed_paths=["/**"],
+            denied_paths=_shipped_denied_paths(),
+        )
+        ops = [{"op": "add", "path": op_path, "value": {}}]
+        with pytest.raises(RuntimePatchDeniedError) as excinfo:
+            apply_runtime_patch(base, ops, allowlist=allowlist)
+        assert "denied_paths entry" in excinfo.value.rule, excinfo.value.rule
+
+    def test_remove_at_an_ancestor_is_denied(self) -> None:
+        """`remove` carries no value, so a predicate that inspects the value to
+        decide whether the op supplies a denied descendant cannot see this one.
+        Removing an ancestor deletes the denied subtree with it.
+        """
+        base = _base_config()
+        allowlist = RuntimeOverridesConfig(
+            enabled=True,
+            allowed_paths=["/**"],
+            denied_paths=_shipped_denied_paths(),
+        )
+        ops = [{"op": "remove", "path": "/global_settings"}]
+        with pytest.raises(RuntimePatchDeniedError) as excinfo:
+            apply_runtime_patch(base, ops, allowlist=allowlist)
+        assert "denied_paths entry" in excinfo.value.rule
+
+    def test_sibling_of_a_denied_entry_still_applies(self) -> None:
+        """Subtree closure must not swallow the legitimate case: a sibling of a
+        denied field is neither above nor below it.
+        """
+        base = _base_config()
+        allowlist = RuntimeOverridesConfig(
+            enabled=True,
+            allowed_paths=["/global_settings/**"],
+            denied_paths=_shipped_denied_paths(),
+        )
+        ops = [
+            {
+                "op": "replace",
+                "path": "/global_settings/severity_threshold",
+                "value": "HIGH",
+            }
+        ]
+        result = apply_runtime_patch(base, ops, allowlist=allowlist)
+        assert result.global_settings.severity_threshold == "HIGH"
+
+    def test_unrelated_top_level_field_still_applies(self) -> None:
+        base = _base_config()
+        allowlist = RuntimeOverridesConfig(
+            enabled=True,
+            allowed_paths=["/project_name"],
+            denied_paths=_shipped_denied_paths(),
+        )
+        ops = [{"op": "replace", "path": "/project_name", "value": "renamed"}]
+        result = apply_runtime_patch(base, ops, allowlist=allowlist)
+        assert result.project_name == "renamed"
+
+
+class TestDeniedValuePatternsAreSubtreeClosed:
+    """`denied_value_patterns` keys are pointer patterns, so they bind to a
+    subtree the same way `denied_paths` entries do. An exact dict lookup on the
+    op's own pointer covered neither a child write nor a parent write.
+    """
+
+    def test_pattern_on_parent_applies_to_child_write(self) -> None:
+        base = _base_config()
+        allowlist = RuntimeOverridesConfig(
+            enabled=True,
+            allowed_paths=["/global_settings/**"],
+            denied_paths=[],
+            denied_value_patterns={"/global_settings": r"DROP TABLE"},
+        )
+        ops = [
+            {
+                "op": "add",
+                "path": "/global_settings/suppressions/-",
+                "value": {"path": "DROP TABLE users", "reason": "r"},
+            }
+        ]
+        with pytest.raises(RuntimePatchDeniedError) as excinfo:
+            apply_runtime_patch(base, ops, allowlist=allowlist)
+        assert "denied_value_patterns" in excinfo.value.rule
+
+    def test_pattern_on_child_applies_to_parent_write(self) -> None:
+        base = _base_config()
+        allowlist = RuntimeOverridesConfig(
+            enabled=True,
+            allowed_paths=["/global_settings"],
+            denied_paths=[],
+            denied_value_patterns={
+                "/global_settings/severity_threshold": r"^CRITICAL$"
+            },
+        )
+        global_settings = base.global_settings.model_dump(mode="json", by_alias=False)
+        global_settings["severity_threshold"] = "CRITICAL"
+        ops = [{"op": "replace", "path": "/global_settings", "value": global_settings}]
+        with pytest.raises(RuntimePatchDeniedError) as excinfo:
+            apply_runtime_patch(base, ops, allowlist=allowlist)
+        assert "denied_value_patterns" in excinfo.value.rule
+
+    def test_pattern_on_glob_key_applies_to_matching_write(self) -> None:
+        base = _base_config()
+        allowlist = RuntimeOverridesConfig(
+            enabled=True,
+            allowed_paths=["/global_settings/**"],
+            denied_paths=[],
+            denied_value_patterns={"/global_settings/*": r"^CRITICAL$"},
+        )
+        ops = [
+            {
+                "op": "replace",
+                "path": "/global_settings/severity_threshold",
+                "value": "CRITICAL",
+            }
+        ]
+        with pytest.raises(RuntimePatchDeniedError) as excinfo:
+            apply_runtime_patch(base, ops, allowlist=allowlist)
+        assert "denied_value_patterns" in excinfo.value.rule
+
+    def test_unrelated_pattern_key_does_not_fire(self) -> None:
+        """Subtree closure must not make every registered regex apply to every
+        op: a key on a disjoint pointer stays out of the way.
+        """
+        base = _base_config()
+        allowlist = RuntimeOverridesConfig(
+            enabled=True,
+            allowed_paths=["/global_settings/severity_threshold"],
+            denied_paths=[],
+            denied_value_patterns={"/project_name": r"^HIGH$"},
+        )
+        ops = [
+            {
+                "op": "replace",
+                "path": "/global_settings/severity_threshold",
+                "value": "HIGH",
+            }
+        ]
+        result = apply_runtime_patch(base, ops, allowlist=allowlist)
+        assert result.global_settings.severity_threshold == "HIGH"
