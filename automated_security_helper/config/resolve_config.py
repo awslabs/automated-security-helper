@@ -26,6 +26,35 @@ def find_config_file(search_dir: Path | None = None) -> Optional[Path]:
     return None
 
 
+def _resolve_dict_key(container: Dict[str, Any], key: str) -> str:
+    """Return the key `container` already uses for `key`, if it differs only in '-' vs '_'.
+
+    The dict an override is applied to comes from `model_dump()` without
+    `by_alias=True`, so a section with an alias is keyed by its Python field name
+    -- `cdk_nag`, not `cdk-nag`. Operators type the spelling in their own config
+    file, which for those sections is the alias; this option's own documented
+    example is a kebab-case key. Writing the typed spelling verbatim added a
+    second section beside the dumped one, and since pydantic resolves an alias
+    ahead of a field name the new one won revalidation -- so the override applied
+    and every other field under that section came back as a default.
+
+    Only a key that already exists is ever followed. A name absent under both
+    spellings is created exactly as typed, which is what keeps a plugin-supplied
+    section (an extra key, present under one spelling only) reachable.
+
+    Comparing the two spellings is equivalent to consulting the alias map here
+    because every alias declared anywhere under `AshConfig` is its field name
+    with '_' replaced by '-'; that held for 9 of 9 aliases across 75 models when
+    this was written, walking `model_fields` from `AshConfig` down.
+    """
+    if key in container:
+        return key
+    for variant in (key.replace("-", "_"), key.replace("_", "-")):
+        if variant != key and variant in container:
+            return variant
+    return key
+
+
 def _apply_config_override(
     config_dict: Dict[str, Any], key_path: str, value: str
 ) -> None:
@@ -49,13 +78,14 @@ def _apply_config_override(
     # Navigate to the nested dictionary
     current = config_dict
     for i, key in enumerate(keys[:-1]):
+        resolved = _resolve_dict_key(current, key)
         # If the key doesn't exist or isn't a dict, create a new dict
-        if key not in current or not isinstance(current[key], dict):
-            current[key] = {}
-        current = current[key]
+        if resolved not in current or not isinstance(current[resolved], dict):
+            current[resolved] = {}
+        current = current[resolved]
 
     # Set the value at the final key
-    final_key = keys[-1]
+    final_key = _resolve_dict_key(current, keys[-1])
 
     # Parse the value
     parsed_value = _parse_config_value(value)

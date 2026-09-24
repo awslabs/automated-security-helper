@@ -213,6 +213,18 @@ def report_command(
         if plugin_config is not None:
             reporter_plugin.config = plugin_config
         report_content = reporter_plugin.report(model)
+        if report_content is None:
+            # `report` is annotated `-> str | None`, and a reporter returns None
+            # when it could not build its artefact at all. Without this guard the
+            # branches below hand None to print()/print_json(), so `ash report`
+            # writes the literal "None" to stdout and exits 0 -- a caller
+            # redirecting stdout to a file gets a four-byte report and a success
+            # status. Exit non-zero instead: the reporter already logged why.
+            print(
+                f"[red]Error: reporter '{report_format}' produced no report. "
+                "See the log above for the reason.[/red]"
+            )
+            raise typer.Exit(1)
         if report_format in [
             "asff",
             "cloudwatch-logs",
@@ -240,6 +252,11 @@ def report_command(
             print(Markdown(report_content))
         else:
             print(report_content)
+    except typer.Exit:
+        # click.exceptions.Exit subclasses RuntimeError, so the handler below
+        # would otherwise catch the deliberate exit above and relabel it
+        # "Error generating report: 1".
+        raise
     except Exception as e:
         print(f"[red]Error generating report: {e}[/red]")
         if debug:
