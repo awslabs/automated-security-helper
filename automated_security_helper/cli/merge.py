@@ -734,7 +734,7 @@ def _verify_shard_contributions(
             f"Their scanners contributed no findings because they did not run, not "
             f"because there was nothing to find, so merging would report a partial "
             f"scan as a whole one. Check whether those CI jobs had the scanners' "
-            f"tools available. Drop --fail-on-incomplete-scanners to merge anyway."
+            f"tools available. Pass --no-fail-on-incomplete-scanners to merge anyway."
         )
 
 
@@ -1169,10 +1169,11 @@ def merge_command(
             help=(
                 "Refuse the merge when a shard completed none of the scanners it "
                 "owned, and exit 1 when any scanner in the union is ERROR or "
-                "MISSING. Without this, a shard whose scanners never ran "
+                "MISSING. Without it, a shard whose scanners never ran "
                 "contributes no findings and the merged report reads as a "
                 "complete, clean scan. Defaults to the scan configuration's "
-                "value, then to false."
+                "value, then to true; pass --no-fail-on-incomplete-scanners to "
+                "merge a partial union anyway."
             ),
         ),
     ] = None,
@@ -1362,14 +1363,14 @@ def _resolve_require_scanner_completion(
     """Whether to refuse a merge whose shards completed nothing.
 
     The CLI flag wins; otherwise the scan's own ``fail_on_incomplete_scanners``,
-    carried in the shard results; otherwise off, matching
+    carried in the shard results; otherwise on, matching
     ``AshConfig.fail_on_incomplete_scanners``. The same precedence
     ``fail_on_findings`` follows, so an operator does not have to remember which
     of the two knobs reads the config first.
 
     The final fallback agrees with the model default, and that is the whole rule --
-    it tracks the model rather than holding an opinion of its own. It read ``True``
-    while the model default was on, and had to move with it: a merge that gated by
+    it tracks the model rather than holding an opinion of its own. It has now read
+    both values, and each time it had to move with the model: a merge that gated by
     default while a scan of the same tree did not would mean the same shards passed
     or failed depending on which command looked at them.
     ``tests/unit/cli/test_merge.py::TestRequireScannerCompletionResolution`` asserts
@@ -1388,7 +1389,7 @@ def _resolve_require_scanner_completion(
         value = getattr(results.ash_config, "fail_on_incomplete_scanners", None)
         if isinstance(value, bool):
             return value
-    return False
+    return True
 
 
 def _merged_exit_code(

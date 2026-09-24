@@ -167,15 +167,31 @@ class TestTheExitCodeSeesAConverterFailure:
 
         assert code == 1
 
-    def test_the_default_leaves_the_verdict_alone(self, tmp_path):
-        """The shipped default is off, so no currently-passing run changes."""
+    def test_the_default_now_fails_a_crashed_converter(self, tmp_path):
+        """Inverted by the default flip, and this inversion is the point.
+
+        This asserted exit 0 with the docstring "the shipped default is off, so no
+        currently-passing run changes". That premise is what the flip removes.
+
+        The inversion is worth reading rather than skimming, because it is the
+        clearest evidence of a blast radius the flip's own diff does not show. The
+        converter arm is nested inside ``fail_on_incomplete_scanners``, so flipping
+        that default turns converter incompleteness into a non-zero exit **in the
+        same commit** -- without the flip touching ``convert_phase.py``, reading
+        ``converter_results``, or mentioning converters anywhere. A reader of that
+        diff alone would not know this changed.
+
+        ``test_opting_out_explicitly_leaves_the_verdict_alone`` below is the control
+        that keeps this honest: the escape hatch still works, so what changed is the
+        default and not the mechanism.
+        """
         results = _results(
             jupyter=ConverterStatusInfo(
                 converted_paths=[], failure="RuntimeError: boom"
             )
         )
 
-        assert _exit_code(results, _opts(tmp_path)) == 0
+        assert _exit_code(results, _opts(tmp_path)) == 1
 
     def test_opting_out_explicitly_leaves_the_verdict_alone(self, tmp_path):
         results = _results(

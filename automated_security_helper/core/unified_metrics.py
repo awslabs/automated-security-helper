@@ -132,15 +132,15 @@ class ScannerMetrics(ScannerSeverityCount):
         set. Making the field mean the stricter thing is a report-schema change,
         not a bug fix.
 
-        Re-examined when ``fail_on_incomplete_scanners`` was added, and left as it
-        is. Note that the flag defaults to False, so reason 3 stands at full
-        strength: on the default path a run with a MISSING scanner still exits 0,
-        and a reader who reaches ``ash.flat.json`` sees ``passed: true`` on a
-        scanner that never ran. Enabling the flag would weaken reason 3 without
-        making the field wrong, because the argument against changing it does not
-        depend on the exit code: a boolean named ``passed`` is the wrong place to
-        encode completeness when ``status`` sits in the same row and says it
-        outright.
+        Re-examined when ``fail_on_incomplete_scanners`` was added, and again when
+        its default became True, and left as it is both times. The default being on
+        weakens reason 3 -- a run with a MISSING scanner now exits non-zero, so the
+        ``passed: true`` row in ``ash.flat.json`` is no longer the only thing
+        standing between a reader and a false clean -- without making the field
+        wrong. The argument against changing it never depended on the exit code: a
+        boolean named ``passed`` is the wrong place to encode completeness when
+        ``status`` sits in the same row and says it outright, and reasons 1 and 2
+        are untouched.
         """
         return self.status in ("PASSED", "SKIPPED", "MISSING")
 

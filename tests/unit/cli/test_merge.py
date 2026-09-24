@@ -1598,22 +1598,22 @@ class TestMergeCli:
         assert (output_dir / RESULTS_FILE_NAME).is_file()
         assert not (output_dir / ".ash").exists()
 
-    def test_the_same_shards_merge_by_default(self, tmp_path):
+    def test_the_same_shards_are_refused_by_default(self, tmp_path):
         """The default half of the pair, through the same CLI path.
 
-        The gate is opt-in, so with no flag the merge succeeds and the other shards'
-        findings decide the verdict -- exit 2 -- while the shard that ran nothing is
-        invisible to it. That is the false green the flag exists to close, and it is
-        recorded here as the current default rather than as a fixed defect, because
-        enabling the gate by default is blocked on this repository being able to pass
-        it: cdk-nag leaves 4 of its 10 targets unevaluated, which reddens every scan
-        leg on every platform.
+        No flag, same shards, same refusal. This test asserted exit 2 and a written
+        artifact while the default was off: the merge succeeded, the other shards'
+        findings decided the verdict, and the shard that had run nothing was
+        invisible to it. Nothing about that outcome was ever correct -- it was
+        recorded as the default rather than as a defect -- and the flag's default
+        moving to on is what closes it. ``--output-formats sarif`` is still passed so
+        that the refusal is shown to happen before any report is written, which is
+        what stops a downstream job reading the artifact instead of the exit code.
 
-        Kept alongside ``test_the_negated_flag_merges_the_same_shards`` even though
-        the two now assert the same outcome. They exercise different inputs -- an
-        absent option versus typer's generated ``--no-`` form -- and only the second
-        would catch a mistake in the negated option's name. If the default is turned
-        on again, this one regains its independent value with no edit.
+        Kept alongside ``test_the_negated_flag_merges_the_same_shards``, which is now
+        the other direction rather than a duplicate: an absent option refuses, and
+        typer's generated ``--no-`` form merges. While both merged, only the second
+        could catch a mistake in the negated option's name.
         """
         shards = build_shards(3)
         _make_shard_contribute_nothing(shards[1])
@@ -1625,9 +1625,9 @@ class TestMergeCli:
 
         result = self._invoke(args)
 
-        assert result.exit_code == 2, result.output
-        assert "completed none" not in result.output
-        assert (tmp_path / "merged" / RESULTS_FILE_NAME).exists()
+        assert result.exit_code == 1, result.output
+        assert "completed none" in result.output
+        assert not (tmp_path / "merged" / RESULTS_FILE_NAME).exists()
 
     def test_the_negated_flag_merges_the_same_shards(self, tmp_path):
         """The opt-out, through typer, so its option name is exercised too.
@@ -2121,14 +2121,13 @@ class TestShardContributionIsRefused:
         to restate a default that ``_resolve_require_scanner_completion`` already
         owns. The user-visible default lives there and in ``AshConfig``.
 
-        THE GATE IS PASSED EXPLICITLY, because the user-visible default is off. It
-        was on for part of this branch's life and had to be reverted: this repository
-        cannot pass its own completeness gate while cdk-nag leaves 4 of its 10
-        targets unevaluated, which reddens every scan leg on every platform. What
-        this test pins is unchanged by that -- the verdict for a union missing a
-        shard's worth of scanners, once an operator has asked to be told. The
-        default's own value is pinned by
-        ``test_fail_on_incomplete_scanners.py::test_the_default_is_off_and_the_opt_in_is_what_gates``.
+        THE GATE IS PASSED EXPLICITLY even though it is now the default, so that what
+        this test pins does not depend on the default's value: the verdict for a union
+        missing a shard's worth of scanners, asked for outright. That has held through
+        the default being off and on again. The default's own value is pinned by
+        ``test_fail_on_incomplete_scanners.py::test_config_field_defaults_to_on``, and
+        the default path through this CLI by
+        ``test_the_same_shards_are_refused_by_default`` above.
         """
         shards = build_shards(3)
         for model in shards:

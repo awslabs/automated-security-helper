@@ -474,14 +474,17 @@ runs:
 
     # WHY THE FLAG ABOVE IS LOAD-BEARING, AND WHY THIS STEP IS NOT REDUNDANT WITH IT
     #
-    # `--fail-on-incomplete-scanners` is what makes an unusable image fail. Without
-    # it the completeness check inside ASH is off: _resolve_fail_on_incomplete_scanners
-    # (automated_security_helper/interactions/run_ash_scan.py) returns False unless the
-    # flag or a config file says otherwise, and /tmp/ash-selftest has no .ash.yaml. So
-    # a container scan in which EVERY scanner reported MISSING exited 0 and wrote a
-    # well-formed ash_aggregated_results.json -- passing both the status check and a
-    # bare json.load. Measured, not argued: with a PATH holding only python3 the same
-    # scan exits 0 with 8 of 10 scanners MISSING, and exits 1 once the flag is passed.
+    # `--fail-on-incomplete-scanners` is what makes an unusable image fail, and it is
+    # passed explicitly even though it is now ASH's default. The default is a value
+    # _resolve_fail_on_incomplete_scanners
+    # (automated_security_helper/interactions/run_ash_scan.py) can be talked out of --
+    # by a config file in the scanned tree, or by a later edit to the flag itself --
+    # whereas the flag on this command line is what this job asked for, and the
+    # `case "$rc"` arm below is only meaningful because it is here to be read.
+    # Measured while the default was off, which is why the flag was added: with a PATH
+    # holding only python3 a container scan reported 8 of 10 scanners MISSING and
+    # exited 0, writing a well-formed ash_aggregated_results.json that passed both the
+    # status check and a bare json.load. Passing the flag made the same scan exit 1.
     #
     # This step then reads the per-scanner statuses out of that report. It overlaps
     # with the flag deliberately, and they fail for different reasons: the flag is

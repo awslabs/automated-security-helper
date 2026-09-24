@@ -1327,8 +1327,8 @@
           "type": "boolean"
         },
         "fail_on_incomplete_scanners": {
-          "default": false,
-          "description": "Whether to exit with a non-zero code when a selected scanner did not complete -- status ERROR (ran and failed) or MISSING (dependencies unavailable, never ran). SKIPPED scanners are not selected and never trip this. Independent of fail_on_findings: one answers 'was anything found', this one answers 'did what I asked for actually run'. Defaults to False so that environments legitimately lacking a scanner's tool keep their current exit codes.",
+          "default": true,
+          "description": "Whether to exit with a non-zero code when a selected scanner did not complete -- status ERROR (ran and failed) or MISSING (dependencies unavailable, never ran). SKIPPED scanners are not selected and never trip this. Independent of fail_on_findings: one answers 'was anything found', this one answers 'did what I asked for actually run'. Selects on the scanner's status, so it covers only a failure that reached that status. Defaults to True, so a scanner recorded ERROR or MISSING does not report the exit code of a clean scan. Set it to False, or pass --no-fail-on-incomplete-scanners, to accept a partial scan's exit code; excluding the scanner whose tool is unavailable is usually better, because an excluded scanner is recorded SKIPPED and the report then says what was not measured.",
           "title": "Fail On Incomplete Scanners",
           "type": "boolean"
         },
