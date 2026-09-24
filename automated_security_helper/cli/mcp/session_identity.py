@@ -53,10 +53,16 @@ proxy's. What this module does guarantee is that an id names one directory and
 not a path: an id that could traverse, or that carries a separator or a control
 character, is refused rather than sanitized. Sanitizing would map two distinct
 ids onto one workspace and silently merge two callers' source trees.
+
+:func:`validate_path_component` is where that guarantee lives, and it is shared
+rather than re-derived. ``source_delivery`` used to carry its own copy of three
+of these predicates, and the copy was the weaker one; the rule now has one
+implementation and three labels (the header, ``session_id``, ``upload_id``).
 """
 
 from __future__ import annotations
 
+import re
 from typing import Mapping, Optional
 
 # Lowercase because HTTP header names are case-insensitive and this is compared
@@ -67,6 +73,87 @@ MCP_SESSION_ID_HEADER = "mcp-session-id"
 # bytes on ext4/APFS/NTFS; 128 leaves room for the ``.zip.part`` suffixes that
 # source_delivery appends inside the session directory without going near it.
 _MAX_SESSION_ID_LEN = 128
+
+# The characters a single path component may be built from.
+#
+# An allowlist, because the enumeration of refused shapes it replaces was
+# incomplete in a way that no amount of adding shapes would have settled: it
+# named "/", "\\", "." and "..", and a Windows drive specifier needs none of
+# them. ``pathlib`` treats a bare drive as the anchor of whatever it is joined
+# onto, so a matching drive collapses the join onto the base -- measured, on
+# every CPython on the host, as PureWindowsPath("C:/ws") / "C:" == "C:\\ws", and
+# a non-matching drive discards the base entirely as PureWindowsPath("D:/ws") /
+# "C:" == "C:". A session id of "C:" therefore resolved to the shared workspace
+# root rather than to a directory inside it, and clear_source removed every
+# session's delivered tree and reported success. ":" also names an NTFS
+# alternate data stream, which is the same class of surprise one level down.
+#
+# The set is the URL-unreserved characters plus "+" and "=", chosen against what
+# clients actually mint rather than tightened until the tests passed: a UUID, a
+# 32-character hex token, a JWT and a base64url token all pass, as does the
+# DEFAULT_SESSION_ID sentinel. The one common token shape it refuses is standard
+# base64 containing "/", which has to be refused anyway. Widen it deliberately
+# if a client needs more, and do not add a character a filesystem reads as
+# structure.
+_PATH_COMPONENT = re.compile(r"[A-Za-z0-9._~+=-]+")
+
+
+def validate_path_component(value: str, label: str) -> str:
+    """Refuse a caller-supplied value that could name anything but one directory.
+
+    Args:
+        value: The caller-supplied value, already stripped of surrounding
+            whitespace by whoever read it off the wire.
+        label: What to call the value in the error message -- the header name at
+            the transport boundary, ``session_id`` or ``upload_id`` further in.
+            An unactionable refusal is close to no refusal at all, because the
+            operator cannot tell which of several ids the server objected to.
+
+    Returns:
+        ``value`` unchanged when it names exactly one path component.
+
+    Raises:
+        ValueError: if ``value`` is empty, longer than
+            ``_MAX_SESSION_ID_LEN``, contains a path separator, is ``.`` or
+            ``..``, contains a control character, or contains any character
+            outside :data:`_PATH_COMPONENT`.
+
+    The specific rules run before the charset so that the common mistakes keep
+    their own messages; the charset is the closing net, and is what makes the
+    guarantee checkable -- every accepted value joins to a child of the root
+    under both POSIX and Windows path semantics, which
+    ``test_session_id_single_component.py`` asserts directly rather than leaving
+    to inspection.
+    """
+
+    if not value:
+        raise ValueError(f"{label} must not be empty")
+
+    if len(value) > _MAX_SESSION_ID_LEN:
+        raise ValueError(
+            f"{label} is {len(value)} characters; the maximum is {_MAX_SESSION_ID_LEN}"
+        )
+
+    if "/" in value or "\\" in value:
+        raise ValueError(f"{label} must not contain path separators: {value!r}")
+
+    if value in (".", ".."):
+        raise ValueError(f"{label} must not be a relative-path component: {value!r}")
+
+    # A NUL truncates the path at the C boundary, so a value carrying one would
+    # name a different directory than it appears to. The other control
+    # characters are refused with it because none of them belongs in an id and
+    # each is a poor thing to have in a directory name.
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in value):
+        raise ValueError(f"{label} must not contain control characters: {value!r}")
+
+    if _PATH_COMPONENT.fullmatch(value) is None:
+        raise ValueError(
+            f"{label} may contain only letters, digits and the characters "
+            f"'.', '_', '-', '~', '+', '=': {value!r}"
+        )
+
+    return value
 
 
 def _header_value(headers: Mapping[str, str], name: str) -> Optional[str]:
@@ -97,10 +184,11 @@ def resolve_session_id(headers: Optional[Mapping[str, str]]) -> str:
 
     Raises:
         ValueError: if the header is present but could not name a single
-            directory -- it contains a path separator, is a relative-path
-            component, carries a control character, or exceeds
-            ``_MAX_SESSION_ID_LEN``. Refused rather than sanitized: see the
-            module docstring.
+            directory, per :func:`validate_path_component` -- it contains a path
+            separator, is a relative-path component, carries a control character
+            or a character with path meaning such as a drive-specifying ``:``,
+            or exceeds ``_MAX_SESSION_ID_LEN``. Refused rather than sanitized:
+            see the module docstring.
 
     A header that is absent, empty, or whitespace-only is treated as "no session
     supplied" and resolves to the default, matching the ``session_id or
@@ -127,34 +215,11 @@ def resolve_session_id(headers: Optional[Mapping[str, str]]) -> str:
     if not candidate:
         return DEFAULT_SESSION_ID
 
-    if len(candidate) > _MAX_SESSION_ID_LEN:
-        raise ValueError(
-            f"{MCP_SESSION_ID_HEADER} is {len(candidate)} characters; "
-            f"the maximum is {_MAX_SESSION_ID_LEN}"
-        )
-
-    if "/" in candidate or "\\" in candidate:
-        raise ValueError(
-            f"{MCP_SESSION_ID_HEADER} must not contain a path separator: {candidate!r}"
-        )
-
-    if candidate in (".", ".."):
-        raise ValueError(
-            f"{MCP_SESSION_ID_HEADER} must not be a relative-path component: "
-            f"{candidate!r}"
-        )
-
-    # A NUL truncates the path at the C boundary, so an id carrying one would
-    # name a different directory than it appears to. The other control
-    # characters are refused with it because none of them belongs in a session
-    # id and each is a poor thing to have in a directory name.
-    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in candidate):
-        raise ValueError(
-            f"{MCP_SESSION_ID_HEADER} must not contain control characters: "
-            f"{candidate!r}"
-        )
-
-    return candidate
+    return validate_path_component(candidate, MCP_SESSION_ID_HEADER)
 
 
-__all__ = ["MCP_SESSION_ID_HEADER", "resolve_session_id"]
+__all__ = [
+    "MCP_SESSION_ID_HEADER",
+    "resolve_session_id",
+    "validate_path_component",
+]

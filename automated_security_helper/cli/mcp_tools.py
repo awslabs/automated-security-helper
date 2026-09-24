@@ -72,7 +72,8 @@ async def mcp_scan_directory(
     """
     from automated_security_helper.cli.mcp.scan_target import (
         ASH_MCP_ALLOWED_ROOTS_ENV,
-        validate_scan_target,
+        resolve_scan_target,
+        validate_output_tree,
     )
     from automated_security_helper.core.resource_management.error_handling import (
         validate_directory_path,
@@ -84,10 +85,10 @@ async def mcp_scan_directory(
     # ahead of the existence check so that a refused target is reported as
     # refused rather than as a missing directory, and ahead of the output
     # directory creation below so that a refused target is not written into.
-    target_error = validate_scan_target(directory_path, session_id=session_id)
-    if target_error:
+    target = resolve_scan_target(directory_path, session_id=session_id)
+    if target.error is not None:
         return create_error_response(
-            error=target_error,
+            error=target.error,
             operation="scan_directory",
             suggestions=[
                 (
@@ -95,6 +96,29 @@ async def mcp_scan_directory(
                     "server should be able to scan it"
                 ),
                 "Verify that the path is correct",
+            ],
+        )
+    resolved_target = target.require()
+
+    # The policy canonicalized the target and nothing beneath it. The output tree
+    # is created below with parents=True, which follows a symlinked ".ash" out of
+    # the permitted roots, so each component it is about to create is checked
+    # first.
+    output_error = validate_output_tree(resolved_target, ".ash", "ash_output")
+    if output_error is not None:
+        return create_error_response(
+            error=output_error,
+            operation="scan_directory",
+            suggestions=[
+                (
+                    "Remove or replace the symlinked .ash directory in the scan "
+                    "target so the scan output stays inside it"
+                ),
+                (
+                    f"Add the directory the link points at to "
+                    f"{ASH_MCP_ALLOWED_ROOTS_ENV} and scan it directly if that is "
+                    f"what was intended"
+                ),
             ],
         )
 
@@ -141,9 +165,11 @@ async def mcp_scan_directory(
         # Create a unique scan ID
         scan_id = str(uuid.uuid4())
 
-        # Create output directory path
+        # Create output directory path. Built from the resolved target rather
+        # than from the caller's text, so the directory created is the one
+        # validate_output_tree just checked.
         directory_path_obj = Path(directory_path)
-        output_dir = directory_path_obj / ".ash" / "ash_output"
+        output_dir = resolved_target / ".ash" / "ash_output"
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # Register the scan in the registry
