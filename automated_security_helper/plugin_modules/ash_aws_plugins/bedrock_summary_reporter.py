@@ -321,14 +321,31 @@ class BedrockSummaryReporter(ReporterPluginBase[BedrockSummaryReporterConfig]):
             # Check if Bedrock is available
             bedrock_client = session.client("bedrock")
 
-            # Check if we can list models
+            # Check if we can list models. ListFoundationModels is unpaginated and
+            # declares only the four by* filters, so there is no page size to ask
+            # for; the response is discarded either way, since this call is here to
+            # prove the API is reachable and permitted. byOutputModality narrows it
+            # to the only models this reporter can use.
             try:
-                bedrock_client.list_foundation_models(maxResults=1)
-            except botocore.exceptions.ClientError as e:
-                error_code = e.response.get("Error", {}).get("Code")
-                error_message = e.response.get("Error", {}).get("Message")
+                bedrock_client.list_foundation_models(byOutputModality="TEXT")
+            except (
+                botocore.exceptions.ClientError,
+                botocore.exceptions.BotoCoreError,
+            ) as e:
+                # BotoCoreError is the client-side half of the contract: a parameter
+                # the operation does not declare, an endpoint that will not resolve.
+                # It is not a ClientError and carries no ``response``, so it has to
+                # be described differently -- and if it is not caught here it reaches
+                # the outermost handler below, which reports it as Bedrock access
+                # failing in general and sends a reader after credentials instead of
+                # after the call that actually failed.
+                if isinstance(e, botocore.exceptions.ClientError):
+                    error = e.response.get("Error", {})
+                    detail = f"{error.get('Code')}: {error.get('Message')}"
+                else:
+                    detail = f"{type(e).__name__}: {e}"
                 self._plugin_log(
-                    f"Error accessing Bedrock service: {error_code}: {error_message}",
+                    f"Error accessing Bedrock service: {detail}",
                     level=logging.WARNING,
                     target_type="source",
                     append_to_stream="stderr",
