@@ -486,5 +486,26 @@ class TestToolSelection:
             timeout=900,
         )
         assert proc.returncode == EXIT_BAD_SELECTION
-        assert "Unknown tool" in proc.stdout
-        assert "Nothing installed" in proc.stdout
+
+        # Rich prints the rejection inside a bordered panel, so a narrow console wraps it
+        # and puts a newline and border padding inside the phrase being searched for. ASH
+        # also rebinds this process's streams on Windows under CI -- see
+        # utils/log.py::configure_windows_safe_logging, which runs when `is_ci` is set and
+        # falls back to sys.stdout.detach() when reconfigure() raises -- so which stream
+        # carries the panel is not something to assume either.
+        #
+        # Stripping the border glyphs and collapsing whitespace rejoins a wrapped phrase,
+        # and searching both streams removes the second question. This still fails if the
+        # message is absent or renamed, which is what the test is for; it just stops being
+        # sensitive to console width and stream binding. Asserting on proc.stdout alone
+        # passed on Linux and failed on all five Windows legs for exactly those reasons.
+        rendered = " ".join(
+            (proc.stdout + "\n" + proc.stderr)
+            .translate({ord(c): " " for c in "\u2502\u2500\u256d\u256e\u2570\u256f|"})
+            .split()
+        )
+        assert "Unknown tool" in rendered, (
+            f"the rejection did not reach the operator. returncode={proc.returncode}. "
+            f"Rendered output: {rendered[:400]}"
+        )
+        assert "Nothing installed" in rendered
