@@ -47,7 +47,7 @@ global_settings:
     - rule_id: SECRET-SECRET-KEYWORD
       path: deploy/cdk/lib/ash-runtime-config.ts
       reason: >-
-        The match is `SECRET_PLACEHOLDER = 'ash-mcp-auth-disabled'`, the sentinel
+        The match is the `SECRET_PLACEHOLDER` constant, the sentinel
         value stored in Secrets Manager when ASH-level header auth is disabled. The
         keyword heuristic fires on the constant's name; the string is a marker
         meaning "no auth configured", and nothing reads it as a credential. The
