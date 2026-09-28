@@ -75,18 +75,14 @@ README_TOOL_TABLE_ROW = re.compile(r"^\|\s*`([a-z_][a-z0-9_]*)`\s*\|", re.MULTIL
 # it should cost something to add. An entry is only legitimate when the docs say
 # plainly that the tool is unavailable; naming it as though it works is the
 # defect this module exists to catch, not something to exempt.
-DOCUMENTED_BUT_NOT_REGISTERED_EXEMPTIONS: dict[str, str] = {
-    "select_profile": (
-        "mcp_select_profile is implemented and tested, but binds a config that "
-        "nothing reads: bind_session_config has no readers, and the scan entry "
-        "point takes a config path rather than a resolved AshConfig, so a bound "
-        "config has nowhere to go. Registering it would publish a call that "
-        "returns success and changes nothing. streamable-http.md documents it "
-        "under 'Selecting a profile is not available yet' and says so. Remove "
-        "this entry when the config is threaded through to the scan and the tool "
-        "is registered."
-    ),
-}
+# ``select_profile`` was exempted here, on the grounds that registering a tool
+# which binds a config nothing reads would publish a call returning success and
+# changing nothing. The exemption is gone because the condition it named is gone:
+# ``bind_session_config`` now records a path materialized into the session
+# sandbox, ``resolve_session_config_path`` reads it, and ``run_ash_scan`` plus both
+# workspace tools pass it to the scan. ``ash mcp --profile`` populates the
+# registry, without which nothing could be selected in the first place.
+DOCUMENTED_BUT_NOT_REGISTERED_EXEMPTIONS: dict[str, str] = {}
 
 # Registered tools that need no prose mention.
 #

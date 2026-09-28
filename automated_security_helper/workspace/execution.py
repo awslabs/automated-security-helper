@@ -304,6 +304,16 @@ class ProjectScanSettings:
     max_parallel_projects: int = 1
     project_timeout: Optional[float] = None
     allow_missing_projects: bool = False
+    #: Config file to use for a project that declares none of its own, in place
+    #: of ASH's built-in default. A project with an ``.ash.yaml`` is unaffected.
+    #:
+    #: Must hold the SAME value the plan was resolved with -- ``resolver``'s
+    #: ``default_config``. The resolver computes each project's reported threshold
+    #: and ``_project_config_with_policy`` below re-resolves at scan time, so a
+    #: value set here but not there (or the reverse) makes ``--dry-run`` report a
+    #: plan the scan does not run, with nothing raising. The MCP workspace tools
+    #: set both from one variable for that reason.
+    default_config_path: Optional[str] = None
 
 
 @dataclass
@@ -738,8 +748,14 @@ def _project_config_with_policy(
     """
     from automated_security_helper.config.resolve_config import resolve_config
 
+    # ``config_source`` is None for a project that declared no config. The plan was
+    # resolved with the same fallback, so the resolver already recorded the
+    # fallback as this project's config_source when one applied -- this branch
+    # covers a plan built without it, and a hand-built plan.
+    config_path = project.config_source or settings.default_config_path
+
     config = resolve_config(
-        config_path=project.config_source,
+        config_path=config_path,
         source_dir=Path(project.path),
         fallback_to_default=True,
         # Load-bearing. See the warning above.
@@ -750,7 +766,7 @@ def _project_config_with_policy(
     # which is the only thing dropping that argument costs.
     ASH_LOGGER.verbose(
         f"Project '{project.key}' configuration path: "
-        f"{project.config_source or 'ASH default config'}"
+        f"{config_path or 'ASH default config'}"
     )
 
     if project.policy_suppressions:
