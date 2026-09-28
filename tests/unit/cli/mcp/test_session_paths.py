@@ -15,8 +15,6 @@ allowlist would never have passed through.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from automated_security_helper.cli.mcp.session_paths import (
@@ -165,9 +163,16 @@ class TestTheContainmentCheck:
 class TestBothLayersTogether:
     """``session_directory`` is the form every caller should use."""
 
-    def test_it_rejects_what_the_allowlist_rejects(self):
+    def test_it_rejects_what_the_allowlist_rejects(self, tmp_path):
+        """The parent is never examined, because validation runs first.
+
+        ``validated_path_component`` is evaluated before ``joined_inside`` is
+        entered, so any real directory serves as the parent here. The ``tmp_path``
+        fixture is used rather than a literal path, matching the sibling test
+        below, so this file carries no hardcoded temporary-directory string.
+        """
         with pytest.raises(ValueError):
-            session_directory(Path("/tmp/workspaces"), "D:x")
+            session_directory(tmp_path, "D:x")
 
     def test_it_returns_the_child_for_an_ordinary_id(self, tmp_path):
         assert session_directory(tmp_path, "session-a") == tmp_path / "session-a"
