@@ -1,0 +1,125 @@
+name: "Pre-pull the build base image"
+description: >-
+  Pull the Dockerfile's base image once per job, with backoff, before anything builds.
+
+# WHY THIS EXISTS
+#
+# Every container cell in this repository builds the ASH image, and the Dockerfile's first
+# instruction is `FROM ${BASE_IMAGE}` with BASE_IMAGE defaulting to a tag on public.ecr.aws.
+# The scan matrix runs roughly twenty-four cells, most of them container cells, and they start
+# together -- so they pull the same base image from the same anonymous client at the same
+# moment and cross ECR Public's data limit for anonymous pulls. Observed on 2026-09-28 across
+# three pull requests, in four different cells, with the runtimes disagreeing only on how they
+# phrase it:
+#
+#   podman:  Error: creating build container: ... toomanyrequests: Data limit exceeded
+#   nerdctl: failed to resolve source metadata ... toomanyrequests: Data limit exceeded
+#
+# podman surfaced it as exit 125 and nerdctl as exit 1, neither of which says "rate limit", and
+# the job then failed on a missing ash_aggregated_results.json -- so the symptom an operator
+# sees is "the scan produced no output", three steps removed from the cause.
+#
+# Pulling once per job, ahead of the build, puts the retry in one place instead of at every
+# `ash build-image` call site, and leaves the build itself untouched: the runtimes use a base
+# image already in the local store rather than going back to the registry.
+#
+# WHAT THIS DELIBERATELY DOES NOT DO
+#
+# It does not save, cache, or upload the image anywhere. Sharing one pull across jobs would
+# remove the concurrency entirely, but every mechanism for it -- actions/upload-artifact,
+# actions/cache, a registry -- puts the image somewhere a person can fetch it. On a public
+# repository artifact download needs only read access, and a cache is reachable through the
+# Actions API by anyone with a token. The requirement is that the image is obtainable only by
+# the pipeline, and the only way to honor that is for it never to leave the job that pulled it.
+#
+# It also does not authenticate. Authenticating to ECR Public raises the limit and stores
+# nothing, which would satisfy the same requirement more durably, but it needs an IAM role and
+# an OIDC trust on a public repository -- a permissions decision, not a workflow change.
+
+inputs:
+  oci-runner:
+    description: "Container runtime: docker, podman, finch or nerdctl. Empty means docker."
+    required: false
+    default: ""
+  runner-wrapper:
+    description: >-
+      Command prefix for the runtime, matching OCI_RUNNER_WRAPPER in the calling workflow.
+      finch needs sudo on the hosted runners; the others do not.
+    required: false
+    default: ""
+  attempts:
+    description: "How many pulls to try before giving up."
+    required: false
+    default: "5"
+  dockerfile:
+    description: "Where to read the BASE_IMAGE default from."
+    required: false
+    default: "Dockerfile"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Pre-pull the build base image
+      shell: bash
+      env:
+        ATTEMPTS: ${{ inputs.attempts }}
+        RUNTIME: ${{ inputs.oci-runner }}
+        WRAPPER: ${{ inputs.runner-wrapper }}
+        DOCKERFILE: ${{ inputs.dockerfile }}
+      run: |
+        set -uo pipefail
+
+        runtime="${RUNTIME:-docker}"
+        # shellcheck disable=SC2206
+        wrapper=( ${WRAPPER} )
+
+        # Read the tag from the Dockerfile rather than duplicating it here, so bumping
+        # ARG BASE_IMAGE does not silently leave this step pulling the old image while the
+        # build pulls the new one -- which would restore the very rate limit this avoids and
+        # look like the step simply stopped working.
+        base="$(sed -n 's/^ARG BASE_IMAGE=\(.*\)$/\1/p' "${DOCKERFILE}" | head -n 1)"
+        if [ -z "${base}" ]; then
+          echo "::error::no 'ARG BASE_IMAGE=' line in ${DOCKERFILE}; nothing to pre-pull. \
+        This step reads the tag from the Dockerfile, so a rename there needs one here too."
+          exit 1
+        fi
+        echo "base image: ${base}"
+        echo "runtime:    ${wrapper[*]} ${runtime}"
+
+        # Already local is success, not a reason to hit the registry again. Present on a
+        # warm runner image and after any earlier step in the same job pulled it.
+        if "${wrapper[@]}" "${runtime}" image inspect "${base}" >/dev/null 2>&1; then
+          echo "already present locally; not pulling"
+          exit 0
+        fi
+
+        log="$(mktemp)"
+        for n in $(seq 1 "${ATTEMPTS}"); do
+          echo "=== pull attempt ${n} of ${ATTEMPTS} ==="
+          if "${wrapper[@]}" "${runtime}" pull "${base}" 2>&1 | tee "${log}"; then
+            [ "${n}" -gt 1 ] && echo "::warning::base image pulled on attempt ${n}; \
+        ECR Public rate-limited the earlier attempts."
+            exit 0
+          fi
+
+          # Retry ONLY the rate limit. Anything else -- a typo in the tag, a network route
+          # that is down, a manifest that does not exist -- is not made truer by waiting, and
+          # retrying it would turn a clear failure into a slow one. Both spellings, because
+          # the runtimes differ: podman and nerdctl both emit "toomanyrequests" while only
+          # some emit the "Data limit exceeded" text alongside it.
+          if ! grep -qE 'toomanyrequests|Data limit exceeded|429 Too Many Requests' "${log}"; then
+            echo "::error::pulling ${base} failed for a reason other than an ECR Public rate \
+        limit. Not retried; see the output above."
+            exit 1
+          fi
+
+          if [ "${n}" -eq "${ATTEMPTS}" ]; then
+            echo "::error::ECR Public rate-limited every one of ${ATTEMPTS} pull attempts for \
+        ${base}. The limit is on anonymous pulls and this matrix starts many cells at once."
+            exit 1
+          fi
+
+          sleep_for=$(( n * 15 ))
+          echo "::warning::ECR Public rate limit on attempt ${n}; retrying in ${sleep_for}s."
+          sleep "${sleep_for}"
+        done
