@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "automated-security-helper",
+          "version": "0.0.0-fixture",
+          "informationUri": "https://github.com/awslabs/automated-security-helper"
+        }
+      },
+      "results": [
+        {
+          "ruleId": "B602",
+          "level": "error",
+          "message": { "text": "subprocess call with shell=True identified" },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "src/app.py" },
+                "region": { "startLine": 23, "startColumn": 12, "endColumn": 76 }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "B105",
+          "level": "warning",
+          "message": { "text": "possible hardcoded password in a default value" },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "src/app.py" },
+                "region": { "startLine": 28 }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "B108",
+          "level": "note",
+          "message": { "text": "probable insecure usage of temp file or directory" },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "src/app.py" },
+                "region": { "startLine": 33 }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CKV_AWS_53",
+          "level": "none",
+          "message": { "text": "informational: bucket public-read flag is set in a fixture" },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "src/infra.py" },
+                "region": { "startLine": 10 }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "CKV_AWS_61",
+          "level": "Level.error",
+          "message": {
+            "text": "retention is zero. The level on THIS result is deliberately the Python enum member name rather than the SARIF value, which is a defect this repository has shipped -- see automated_security_helper/models/flat_vulnerability.py. A consumer that does not recognize it downgrades the finding silently."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": { "uri": "src/infra.py" },
+                "region": { "startLine": 12 }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ASH_CONFIG_NOTICE",
+          "level": "note",
+          "message": {
+            "text": "a result with no physical location, so there is nowhere to draw it. Counted as skipped rather than dropped."
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,77 @@
+{
+  "name": "automated-security-helper",
+  "displayName": "Automated Security Helper (ASH)",
+  "description": "Runs the ASH CLI on your workspace and surfaces its SARIF findings as editor diagnostics.",
+  "version": "0.1.0",
+  "publisher": "awslabs",
+  "license": "Apache-2.0",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/awslabs/automated-security-helper.git",
+    "directory": "packaging/vscode"
+  },
+  "categories": [
+    "Linters",
+    "Other"
+  ],
+  "keywords": [
+    "sarif",
+    "security",
+    "sast",
+    "diagnostics"
+  ],
+  "main": "./out/src/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "ash.scan",
+        "title": "ASH: Scan Workspace"
+      }
+    ],
+    "configuration": {
+      "title": "Automated Security Helper",
+      "properties": {
+        "ash.executablePath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Path to the `ash` executable. Empty means resolve `ash` from `PATH`. Set this when ASH is installed in a virtualenv that is not on the PATH of the window.\n\nMachine-scoped on purpose: this names a program that gets executed, so a cloned repository must not be able to set it from its own `.vscode/settings.json`. Same reason `python.defaultInterpreterPath` and `eslint.runtime` are machine-scoped."
+        },
+        "ash.outputDirectory": {
+          "type": "string",
+          "default": ".ash/ash_output",
+          "markdownDescription": "Directory ASH writes results to, relative to the workspace folder, and required to stay inside it. Matches the CLI default so `ash scan` run from a terminal and run from here agree. An absolute path, or a relative one that escapes the folder, is refused with an error rather than silently rebased."
+        },
+        "ash.scanTimeoutSeconds": {
+          "type": "number",
+          "default": 600,
+          "minimum": 0,
+          "markdownDescription": "Seconds to wait for `ash scan` before stopping it. `0` waits indefinitely.\n\nA timeout exists because an `ash` that hangs would otherwise leave the progress notification up forever with nothing in the log. The scan is also cancellable from that notification."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src test --max-warnings 0",
+    "pretest": "npm run compile && npm run lint",
+    "test": "node ./out/test/runTest.js",
+    "screenshot": "node ./out/test/screenshot/runner.js",
+    "package": "vsce package --out automated-security-helper.vsix"
+  },
+  "devDependencies": {
+    "@types/mocha": "10.0.10",
+    "@types/node": "22.20.4",
+    "@types/vscode": "1.85.0",
+    "@vscode/test-electron": "3.1.0",
+    "@vscode/vsce": "4.0.0",
+    "eslint": "10.11.0",
+    "mocha": "12.0.2",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.70.1"
+  }
+}

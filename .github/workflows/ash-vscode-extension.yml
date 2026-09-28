@@ -1,0 +1,204 @@
+name: VS Code Extension
+# Compiles, lints, and behaviorally tests the VS Code extension under
+# packaging/vscode, then builds the .vsix and checks what is inside it.
+#
+# WHY THIS WORKFLOW EXISTS
+#
+# packaging/vscode is a third TypeScript package in this repository, and
+# ash-typescript-ci.yml covers only deploy/cdk and deploy/cdk-constructs -- its
+# path filters name those two directories explicitly. Without this file the
+# extension would be built by nothing and tested by nothing.
+#
+# WHY THE TEST JOB LAUNCHES A REAL VS CODE
+#
+# The extension's job is to put diagnostics in an editor. Every interesting way
+# it can fail is invisible to a unit test over its functions: the command can be
+# absent from the command palette, activation can throw, the diagnostic
+# collection can be created and never published into, and a SARIF `level` can be
+# mapped to a severity that is correct in a table and wrong in the editor. So
+# `npm test` downloads a pinned-channel VS Code through @vscode/test-electron and
+# drives it, and the assertions read back through `vscode.languages
+# .getDiagnostics` -- the same API the Problems panel is built on.
+#
+# WHY xvfb IS INSTALLED RATHER THAN THE TESTS BEING MADE HEADLESS
+#
+# VS Code is an Electron application; there is no headless mode that still runs
+# the workbench and the extension host the way a user gets them. A virtual
+# display is the supported way to run these tests in CI, and it is what the
+# upstream extension samples do. `xvfb-run -a` picks a free display number, so
+# concurrent jobs on one runner cannot collide.
+#
+# WHY THE ARTIFACT CHECK IS packaging/vscode/assert-vsix-contents.py AND NOT
+# .github/scripts/assert-artifact-contents.py
+#
+# The operator's rule -- no artifact published from this repository may contain
+# third-party scanner source or assets -- applies to the .vsix exactly as it
+# applies to the wheel. The existing gate cannot express it for this artifact:
+# it is written around this project's Python distribution shape, so
+# `check_artifact` refuses a .vsix with "0 top-level distribution roots" before
+# any per-member rule runs. Measured, not assumed.
+#
+# Running only its per-member classifier is more informative and still not a
+# verdict, because its rules split in two. The payload rules (vendor
+# directories, nested archives, native binaries, scanner distribution names, the
+# size ceiling) are about content and transfer cleanly -- a correct .vsix trips
+# none of them. The fail-closed rules enumerate wheel and sdist namespaces by
+# name and trip on all nine members of a correct .vsix, because `extension/` is
+# not `automated_security_helper/`. That is the gate observing this is not a
+# wheel, which is true and is not a finding.
+#
+# So the payload half is reimplemented for this artifact's shape, and the
+# fail-closed half is replaced by an exact expected member list -- affordable
+# here because the artifact has nine members. The script documents what it does
+# not prove; read it before trusting a green run.
+#
+# THE EXTENSION HAS NO RUNTIME DEPENDENCIES
+#
+# `dependencies` in its package.json is empty, so vsce bundles no node_modules at
+# all and the .vsix is compiled output plus three metadata files. That is the
+# structural reason the artifact check passes, not a coincidence the check
+# happens to tolerate -- and `npm ci` below would fail loudly if a runtime
+# dependency were added without the lockfile being updated.
+
+on:
+  push:
+    # "**" not "*": GitHub branch filters are globs in which "*" does not match
+    # "/", and every branch in this repository is ci/..., fix/... or feat/... --
+    # so "*" would match none of them. The same note appears on four other
+    # workflows here; it is a repository-wide footgun rather than a local one.
+    branches:
+      - "**"
+    tags:
+      - "*"
+    paths:
+      - "packaging/vscode/**"
+      # This workflow decides what the gate tests, so an edit to it must run it.
+      # Safe to self-reference from the start, unlike ash-typescript-ci.yml:
+      # packaging/vscode arrives in the same commit as this file, so the pull
+      # request that adds the gate does not fail the gate on arrival.
+      - ".github/workflows/ash-vscode-extension.yml"
+      # setup-node reads the Node version from here, so editing it changes the
+      # toolchain this gate runs on.
+      - ".nvmrc"
+  pull_request:
+    branches:
+      - "**"
+    paths:
+      - "packaging/vscode/**"
+      - ".github/workflows/ash-vscode-extension.yml"
+      - ".nvmrc"
+  # merge_group is a distinct event from push and pull_request: a workflow that
+  # omits it never reports on a queue entry, and a required check that cannot
+  # report blocks the merge silently rather than failing it. GitHub scopes
+  # `paths` to push and pull_request only, so this leg is necessarily unfiltered
+  # -- which is also the case a per-entry filter cannot see, since a queue entry
+  # is a merge of several pull requests and the one that breaks the build may have
+  # touched nothing under packaging/vscode.
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  # Matches ash-typescript-ci.yml. github.ref is refs/pull/<n>/merge on
+  # pull_request so each pull request gets its own group; on push it is a bare
+  # branch name that every push to that branch would share, which is why the sha
+  # is appended for push only. GitHub keeps one pending run per group, so without
+  # that a third push evicts the second before it starts a job and the evicted
+  # commit never gets a verdict.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || '' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  extension:
+    name: vscode extension
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Fails rather than skips when the package is absent. A job that succeeds
+      # because it found nothing to test reports a green check for work it never
+      # did, which is the failure mode this repository has hit repeatedly.
+      - name: Confirm the package is present
+        run: |
+          if [ ! -f "packaging/vscode/package.json" ]; then
+            echo "::error::packaging/vscode/package.json is missing. This gate expects it to exist; it must not pass by finding nothing."
+            exit 1
+          fi
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: packaging/vscode/package-lock.json
+
+      # `npm ci` and not `npm install`: it fails when package.json and the
+      # lockfile disagree, which is what makes the pinned devDependency versions
+      # in package.json mean anything in CI.
+      - name: Install dependencies
+        run: npm ci --prefix packaging/vscode
+
+      - name: Compile
+        run: npm run compile --prefix packaging/vscode
+
+      - name: Lint
+        run: npm run lint --prefix packaging/vscode
+
+      # VS Code is an Electron app and needs an X display even to run its own
+      # test harness.
+      #
+      # xvfb is REQUIRED and its failure fails the job -- without it the test step
+      # cannot run at all. The Electron shared libraries are best-effort, and that
+      # asymmetry is deliberate rather than sloppy: the runner image already
+      # carries most of them, `libasound2` was renamed `libasound2t64` in Ubuntu
+      # 24.04 so a single hard-coded name breaks on one image or the other, and
+      # the honest gate for "can Electron start" is the test step below, which
+      # fails loudly if anything is actually missing. Installing them optimistically
+      # buys a clearer error when the image changes; it is not what proves the
+      # host works.
+      - name: Install a virtual display for the Electron test host
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb
+          for lib in libnss3 libgbm1 libasound2t64 libasound2; do
+            sudo apt-get install -y --no-install-recommends "$lib" \
+              || echo "note: $lib unavailable on this image; continuing"
+          done
+
+      # Downloads a real VS Code and drives it. Asserts activation, command
+      # registration, SARIF level-to-severity mapping on specific lines of a
+      # fixture, and that a missing `ash` surfaces an error instead of doing
+      # nothing quietly.
+      - name: Test in a real VS Code
+        run: xvfb-run -a npm test --prefix packaging/vscode
+
+      - name: Build the .vsix
+        run: npm run package --prefix packaging/vscode
+
+      # The artifact rule, checked on the artifact rather than argued about in
+      # review. See the header for why this script and not the wheel gate.
+      #
+      # There is NO separate table-drift step, and there used to be. The .vsix
+      # gate transcribed the wheel gate's payload tables, that transcription
+      # silently lost a third of them, and a `--assert-tables-match-gate` mode was
+      # added to detect the drift. It now IMPORTS them instead, so the check would
+      # compare a value to itself. Making drift impossible retired the step that
+      # detected it.
+      - name: Assert the .vsix carries no third-party scanner code or assets
+        run: |
+          python3 packaging/vscode/assert-vsix-contents.py \
+            packaging/vscode/automated-security-helper.vsix
+
+      - name: Upload the .vsix
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: vscode-extension-vsix
+          path: packaging/vscode/automated-security-helper.vsix
+          retention-days: 7
+          if-no-files-found: warn

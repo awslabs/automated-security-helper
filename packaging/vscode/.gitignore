@@ -1,0 +1,29 @@
+# Node / TypeScript build artifacts for the VS Code extension.
+#
+# Kept local to the package, matching deploy/cdk and deploy/cdk-constructs: the
+# repository root .gitignore does not cover node_modules, and each TypeScript
+# package here owns its own build output.
+node_modules/
+
+# Compiled output. `out/` is what package.json's `main` points into, and it is
+# rebuilt by `npm run compile` -- never committed.
+out/
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+
+# The VS Code build that @vscode/test-electron downloads for the test suite,
+# plus the user-data directory a test run creates. Hundreds of megabytes.
+.vscode-test/
+
+# Built extension. Also covered by the root .gitignore's `*.vsix`; repeated here
+# so the rule is visible next to the `npm run package` script that produces it.
+*.vsix
+
+# Bytecode from assert-vsix-contents.py. Its --assert-tables-match-gate mode
+# imports the wheel gate, and Python writes bytecode beside the source on import.
+__pycache__/
+*.pyc
+
+# Nothing in here should carry credentials. Listed defensively so a stray
+# registry token cannot be committed by accident.
+.npmrc

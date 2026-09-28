@@ -1,0 +1,49 @@
+# What must NOT go into the .vsix.
+#
+# The hard constraint this file enforces, alongside having zero runtime
+# dependencies: the packaged extension ships no third-party scanner code and no
+# scanner assets. It invokes the `ash` the user installed. Nothing here is a
+# size optimization -- `test/fixtures/` in particular contains a SARIF report and
+# deliberately vulnerable-looking Python, neither of which belongs in a
+# published artifact.
+#
+# `dependencies` in package.json is empty, so vsce bundles no node_modules at
+# all; the entry below is belt-and-braces against that changing without anyone
+# revisiting this file.
+
+.vscode/**
+.vscode-test/**
+node_modules/**
+
+# Sources. Only the compiled `out/src/**` ships.
+src/**
+test/**
+**/*.ts
+**/*.map
+
+# Toolchain and local build state.
+#
+# assert-vsix-contents.py is the gate that checks this artifact, so it is build
+# tooling and must not be inside the thing it checks. It was, on the first build
+# after it was written -- vsce includes everything not listed here, and a new file
+# at the package root ships by default. The gate caught itself: `extension/
+# assert-vsix-contents.py` came back as an unexpected-member violation, which is
+# the exact-member rule earning its place on a real mistake rather than a
+# hypothetical one.
+*.py
+# Bytecode from running the gate. Python writes it beside the source on import,
+# so the drift check (`--assert-tables-match-gate`, which imports the wheel gate)
+# mints a __pycache__ here as a side effect. It shipped once: `*.py` above does
+# not match `.pyc`, and a compiled object in a published artifact is exactly what
+# this gate exists to refuse. Caught by three detectors at once -- unexpected
+# member, vendor-directory on `__pycache__`, and native-binary on `.pyc`.
+__pycache__/**
+*.pyc
+tsconfig.json
+eslint.config.mjs
+.gitignore
+.npmrc
+out/test/**
+out/tsconfig.tsbuildinfo
+coverage/**
+*.vsix
