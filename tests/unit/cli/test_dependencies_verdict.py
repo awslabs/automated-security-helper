@@ -479,29 +479,56 @@ class TestToolSelection:
         ash = shutil.which("ash")
         if ash is None:
             pytest.skip("the `ash` console script is not on PATH in this environment")
+        # encoding and errors are load-bearing, and not for tidiness.
+        #
+        # `text=True` on its own decodes the pipe with
+        # locale.getpreferredencoding(False), which is cp1252 on a Windows runner. The
+        # child writes UTF-8: utils/log.py::configure_windows_safe_logging reconfigures
+        # ash's own stdout to UTF-8 whenever a CI indicator is in the environment. Rich
+        # then draws this panel with box-drawing glyphs, and on Windows it draws them
+        # with box.SQUARE rather than box.ROUNDED, because rich.box.Box.substitute
+        # swaps ROUNDED out when options.legacy_windows is set and a piped stdout
+        # reports no VT support. SQUARE's top-right corner is U+2510, which is e2 94 90
+        # in UTF-8, and 0x90 is unassigned in cp1252. Rounded corners would have
+        # decoded into mojibake without complaint, which is why this went unnoticed.
+        #
+        # The decode error does not reach this frame. On Windows, Popen._communicate
+        # reads each pipe on a daemon thread whose body is `buffer.append(fh.read())`,
+        # so a raising read appends nothing, and the function ends with
+        # `stdout = stdout[0] if stdout else None`. An empty buffer is falsy, so
+        # subprocess.run returns a CompletedProcess whose stdout is None having raised
+        # nothing at all -- the returncode assertion above still passes. That is what
+        # failed all five Windows legs: first as `TypeError: argument of type
+        # 'NoneType' is not iterable`, then, after this assertion was rewritten to read
+        # both streams, as `TypeError: unsupported operand type(s) for +: 'NoneType'
+        # and 'str'`. Neither shape was a console-width problem.
+        #
+        # errors="replace" is the part that closes the class rather than this instance:
+        # no byte can make the reader thread raise, so a captured stream cannot come
+        # back None again. tests/unit/utils/test_windows_console_encoding.py pins the
+        # mechanism on every platform.
         proc = subprocess.run(
             [ash, "dependencies", "install", "--tool", "nonexistent", *self.bin_args],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=900,
         )
         assert proc.returncode == EXIT_BAD_SELECTION
 
-        # Rich prints the rejection inside a bordered panel, so a narrow console wraps it
-        # and puts a newline and border padding inside the phrase being searched for. ASH
-        # also rebinds this process's streams on Windows under CI -- see
-        # utils/log.py::configure_windows_safe_logging, which runs when `is_ci` is set and
-        # falls back to sys.stdout.detach() when reconfigure() raises -- so which stream
-        # carries the panel is not something to assume either.
-        #
-        # Stripping the border glyphs and collapsing whitespace rejoins a wrapped phrase,
-        # and searching both streams removes the second question. This still fails if the
-        # message is absent or renamed, which is what the test is for; it just stops being
-        # sensitive to console width and stream binding. Asserting on proc.stdout alone
-        # passed on Linux and failed on all five Windows legs for exactly those reasons.
+        # Rich wraps the panel to its default width for a pipe, which can put a newline
+        # and border padding inside the phrase being searched for, and which stream
+        # carries the panel is not fixed either -- see configure_windows_safe_logging
+        # above. Blanking the whole box-drawing block and collapsing whitespace rejoins
+        # a wrapped phrase; searching both streams removes the second question. An
+        # enumerated glyph list was tried first and was one glyph short, so the range is
+        # deliberate. This still fails if the message is absent or renamed, which is
+        # what the test is for.
         rendered = " ".join(
             (proc.stdout + "\n" + proc.stderr)
-            .translate({ord(c): " " for c in "\u2502\u2500\u256d\u256e\u2570\u256f|"})
+            .translate(dict.fromkeys(range(0x2500, 0x2580), " "))
+            .replace("|", " ")
             .split()
         )
         assert "Unknown tool" in rendered, (
