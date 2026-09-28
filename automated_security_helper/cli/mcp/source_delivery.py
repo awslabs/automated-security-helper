@@ -50,6 +50,11 @@ import zipfile
 from pathlib import Path
 from typing import Dict, Optional
 
+from automated_security_helper.cli.mcp.session_paths import (
+    session_directory,
+    validated_path_component,
+)
+
 # ---------------------------------------------------------------------------
 # Hard limits — enforced at finalize time.
 # ---------------------------------------------------------------------------
@@ -133,17 +138,16 @@ def resolve_workspace_root() -> Path:
 def _session_workspace(workspace_root: Path, session_id: str) -> Path:
     """Return the per-session workspace path under ``workspace_root``.
 
-    The session id is treated as opaque and is not allowed to contain any
-    path-separator characters; this keeps the session sandbox flat and
-    prevents a malicious caller from escaping into a sibling session's
-    workspace by feeding ``../<other-session>``.
+    The session id is validated against an explicit allowlist and the joined path
+    is confirmed to stay inside ``workspace_root``; see
+    ``cli/mcp/session_paths.py`` for both. That keeps the session sandbox flat, so
+    one session's directory is a sibling of another's and never a parent of it.
+
+    The return value is the unresolved join, unchanged from before, so a caller
+    comparing it against its own spelling of the path still matches.
     """
 
-    if not session_id:
-        raise ValueError("session_id must be a non-empty string")
-    if "/" in session_id or "\\" in session_id or session_id in ("..", "."):
-        raise ValueError(f"session_id contains path separators: {session_id!r}")
-    return workspace_root / session_id
+    return session_directory(workspace_root, session_id)
 
 
 def _ensure_dir(path: Path) -> Path:
@@ -325,7 +329,16 @@ def set_source_git(
     if ref:
         # ``--depth 1`` may not have fetched the requested ref. Fetch it
         # explicitly before checking out so non-default refs work reliably.
-        fetch_cmd = ["git", "-C", str(target), "fetch", "--depth", str(int(depth)), "origin", ref]
+        fetch_cmd = [
+            "git",
+            "-C",
+            str(target),
+            "fetch",
+            "--depth",
+            str(int(depth)),
+            "origin",
+            ref,
+        ]
         fetch_res = subprocess.run(  # nosec B603 - list-form argv, literal "git" executable, ref validated by _reject_option_like
             fetch_cmd, capture_output=True, text=True, env=env, check=False
         )
@@ -360,17 +373,28 @@ def _incoming_dir(session_dir: Path) -> Path:
 
 
 def _part_path(session_dir: Path, upload_id: str) -> Path:
-    if not upload_id or "/" in upload_id or "\\" in upload_id or upload_id in ("..", "."):
-        raise ValueError(f"upload_id contains path separators: {upload_id!r}")
-    return _incoming_dir(session_dir) / f"{upload_id}.zip.part"
+    return (
+        _incoming_dir(session_dir)
+        / f"{validated_path_component(upload_id, 'upload_id')}.zip.part"
+    )
 
 
 def _meta_path(session_dir: Path, upload_id: str) -> Path:
-    return _incoming_dir(session_dir) / f"{upload_id}.next"
+    # Validated here too, not only in _part_path. The three build a filename from
+    # the same caller-supplied id and are called independently -- _read_next_sequence
+    # reaches _meta_path without _part_path running first -- so a check in one of
+    # them is not a check on the id.
+    return (
+        _incoming_dir(session_dir)
+        / f"{validated_path_component(upload_id, 'upload_id')}.next"
+    )
 
 
 def _final_zip_path(session_dir: Path, upload_id: str) -> Path:
-    return _incoming_dir(session_dir) / f"{upload_id}.zip"
+    return (
+        _incoming_dir(session_dir)
+        / f"{validated_path_component(upload_id, 'upload_id')}.zip"
+    )
 
 
 def _read_next_sequence(session_dir: Path, upload_id: str) -> int:
@@ -432,9 +456,7 @@ def set_source_zip_chunk(
         raise ValueError(f"invalid base64 payload: {exc}") from exc
 
     if len(decoded) > _MAX_CHUNK_BYTES:
-        raise ValueError(
-            f"chunk too large: {len(decoded)} > {_MAX_CHUNK_BYTES} bytes"
-        )
+        raise ValueError(f"chunk too large: {len(decoded)} > {_MAX_CHUNK_BYTES} bytes")
 
     # Append. Open in "ab" so successive chunks accumulate.
     with part.open("ab") as f:
@@ -541,9 +563,7 @@ def set_source_zip_finalize(
     actual_size = final.stat().st_size
     if actual_size > _MAX_ZIP_BYTES:
         final.unlink(missing_ok=True)
-        raise ValueError(
-            f"zip too large: {actual_size} > {_MAX_ZIP_BYTES} bytes"
-        )
+        raise ValueError(f"zip too large: {actual_size} > {_MAX_ZIP_BYTES} bytes")
 
     # Verify checksum before opening the archive.
     digest = hashlib.sha256()
@@ -568,9 +588,7 @@ def set_source_zip_finalize(
     with zipfile.ZipFile(final) as zf:
         infos = zf.infolist()
         if len(infos) > _MAX_FILES:
-            raise ValueError(
-                f"too many files in zip: {len(infos)} > {_MAX_FILES}"
-            )
+            raise ValueError(f"too many files in zip: {len(infos)} > {_MAX_FILES}")
 
         total_uncompressed = 0
         for info in infos:
@@ -614,9 +632,7 @@ def set_source_zip_finalize(
 # ---------------------------------------------------------------------------
 
 
-def clear_source(
-    session_id: str, *, workspace_root: Optional[Path] = None
-) -> None:
+def clear_source(session_id: str, *, workspace_root: Optional[Path] = None) -> None:
     """Wipe the session workspace and forget any recorded ``source_dir``.
 
     Idempotent: missing workspaces are silently ignored.
