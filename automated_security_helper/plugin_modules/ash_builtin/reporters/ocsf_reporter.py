@@ -14,6 +14,11 @@ from automated_security_helper.base.reporter_plugin import (
 from automated_security_helper.models.flat_vulnerability import (
     extract_workspace_project,
 )
+from automated_security_helper.models.workspace import SkippedProject
+from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_skipped_rows import (
+    skipped_project_detail,
+    skipped_projects,
+)
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.schemas.ocsf.ocsf_vulnerability_finding import (
     VulnerabilityFinding,
@@ -40,35 +45,59 @@ from automated_security_helper.utils.log import ASH_LOGGER
 #: lets a SIEM query for it without matching a project name by accident.
 WORKSPACE_PROJECT_LABEL_PREFIX = "workspace_project:"
 
+#: Marks a record that stands for a skipped project rather than for a finding.
+#: Same ``key:value`` shape as the project label, so one SIEM query form covers
+#: both; a fixed string rather than a prefix because there is nothing per-record to
+#: carry -- the project is already on its own label.
+SKIPPED_PROJECT_LABEL = "ash_row_type:workspace_skipped_project"
 
-def _metadata_for_project(metadata: Metadata, result: Result) -> Metadata:
-    """*metadata* with this finding's workspace project recorded in ``labels``.
+#: The free-form ``status`` accompanying ``status_id`` 99. OCSF defines 99 as "not
+#: mapped -- see the ``status`` attribute, which contains a data source specific
+#: value", so this string is what that lookup is meant to find.
+SKIPPED_PROJECT_STATUS = "Skipped"
 
-    Returns the shared object unchanged for a single-directory scan, so that
-    output is byte-identical and no needless copies are made.
+#: Prefix for a skipped project's ``finding_info.uid``. Deterministic, unlike a
+#: real finding's fresh uuid4, so a re-run of the same workspace produces the same
+#: identifier and a SIEM deduplicates rather than accumulating one record per run
+#: for a project that keeps being skipped.
+SKIPPED_PROJECT_UID_PREFIX = "ash-workspace-skipped-project:"
 
-    Why ``labels`` and not a ``metadata.workspace_project`` field
-    -------------------------------------------------------------
+
+def _metadata_with_labels(metadata: Metadata, *labels: str) -> Metadata:
+    """*metadata* with *labels* appended, as a copy.
+
+    Copied rather than mutated in place: one ``Metadata`` instance is shared across
+    every record in the report, so appending to its ``labels`` would give every
+    record every other record's labels -- each one individually plausible, and the
+    whole report useless for routing.
+
+    Why ``labels`` and not a declared ``metadata`` field
+    ---------------------------------------------------
     The RFC asked for the project "in metadata", and OCSF's ``Metadata`` sets
     ``extra="forbid"``. Worse than forbidding, pydantic's ``model_copy(update=...)``
     *silently drops* a key the schema does not declare -- so the obvious
     implementation would have produced findings with no attribution at all and no
     error to show for it. ``labels`` is the schema's own slot for free-form
     annotation, is indexed by SIEMs, and needs no schema extension.
+    """
+    existing = metadata.labels
+    merged = list(existing) if isinstance(existing, list) else []
+    for label in labels:
+        if label not in merged:
+            merged.append(label)
+    return metadata.model_copy(update={"labels": merged})
 
-    Copied per finding rather than mutated in place: one ``Metadata`` instance is
-    shared across every finding in the report, so appending to its ``labels``
-    would give every finding every project's label.
+
+def _metadata_for_project(metadata: Metadata, result: Result) -> Metadata:
+    """*metadata* with this finding's workspace project recorded in ``labels``.
+
+    Returns the shared object unchanged for a single-directory scan, so that
+    output is byte-identical and no needless copies are made.
     """
     project = extract_workspace_project(result)
     if not project:
         return metadata
-    existing = metadata.labels
-    labels = list(existing) if isinstance(existing, list) else []
-    label = f"{WORKSPACE_PROJECT_LABEL_PREFIX}{project}"
-    if label not in labels:
-        labels.append(label)
-    return metadata.model_copy(update={"labels": labels})
+    return _metadata_with_labels(metadata, f"{WORKSPACE_PROJECT_LABEL_PREFIX}{project}")
 
 
 class OCSFReporterConfigOptions(ReporterOptionsBase):
@@ -95,6 +124,14 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
     array is flat, an event is routed individually, and a project stated once at
     the top of the file would be lost the moment a consumer split the array --
     which is the normal way a SIEM ingests one.
+
+    A skipped project gets one record of its own, because it has no findings and
+    would otherwise be absent from this array in the one way a reader cannot
+    notice. It is marked ``status_id`` 99 -- OCSF's "not mapped, see ``status``" --
+    with ``status`` ``Skipped``, severity 1 (Informational), an empty
+    ``vulnerabilities`` array, and a ``metadata.labels`` entry naming it a project
+    record. See ``workspace_skipped_rows`` for why 99 rather than 3 (Suppressed) or
+    0 (Unknown), and for what makes the record filterable.
     """
 
     workspace_behaviour = ReporterWorkspaceBehaviour.MERGED
@@ -648,10 +685,78 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                     f"Unable to create VulnerabilityFinding for {rule_id}: {str(e)}"
                 )
 
+    def _create_skipped_project_finding(
+        self, entry: SkippedProject, metadata: Metadata, current_time_ms: int
+    ) -> VulnerabilityFinding:
+        """One record standing for a project that was never scanned.
+
+        ``vulnerabilities`` is required by the class, so the record cannot omit it
+        -- but an empty array is both the honest value and the filter: a consumer
+        summing vulnerability counts across the array never sees this record.
+
+        ``severity_id`` 1 is Informational, deliberately not 0 (Unknown). Unknown
+        severity is a thing a scanner says about a finding it could not rank, and
+        some pipelines escalate it; this is not a finding at all, and Informational
+        is the bucket that neither escalates nor disappears.
+
+        No ``try``/``except`` here, unlike the finding builder. That one wraps
+        untrusted scanner output whose shape varies; every value here comes from a
+        validated ``SkippedProject``, so a failure would be a bug in this code and
+        should surface rather than be swallowed into a fallback record that says
+        less than the real one.
+        """
+        return VulnerabilityFinding(
+            activity_id=ActivityId.integer_1,
+            activity_name="Scan",
+            # Informational: the record reports a fact about the run, not a risk.
+            severity_id=SeverityId.integer_1,
+            # 99 is OCSF's "not mapped -- see `status`". See the module constants.
+            status_id=StatusId.integer_99,
+            status=SKIPPED_PROJECT_STATUS,
+            status_detail=skipped_project_detail(entry),
+            type_uid=200201,
+            class_uid=2002,
+            category_uid=2,
+            category_name="Findings",
+            time=current_time_ms,
+            metadata=_metadata_with_labels(
+                metadata,
+                f"{WORKSPACE_PROJECT_LABEL_PREFIX}{entry.project}",
+                SKIPPED_PROJECT_LABEL,
+            ),
+            finding_info=FindingInfo(
+                uid=f"{SKIPPED_PROJECT_UID_PREFIX}{entry.project}",
+                title=f"Project '{entry.project}' was not scanned",
+                desc=skipped_project_detail(entry),
+            ),
+            vulnerabilities=[],
+        )
+
+    def _serialize_skipped_project_findings(
+        self, findings: list[VulnerabilityFinding]
+    ) -> list[dict]:
+        """*findings* as dumped dicts, with the same options the real records use.
+
+        Same ``by_alias``/``exclude_none``/``exclude_unset`` triple, so a project
+        record and a finding record are shaped alike and a consumer needs one
+        parser rather than two. ``vulnerabilities=[]`` survives ``exclude_unset``
+        because it is passed explicitly, which is what keeps the required attribute
+        present.
+        """
+        return [
+            finding.model_dump(
+                by_alias=True,
+                exclude_none=True,
+                exclude_unset=True,
+            )
+            for finding in findings
+        ]
+
     def report(self, model: "AshAggregatedResults") -> str:
         """Format ASH model in Open Cybersecurity Schema Framework (OCSF) format.
 
-        Returns an array of VulnerabilityFinding objects, one per SARIF result.
+        Returns an array of VulnerabilityFinding objects, one per SARIF result,
+        plus one per skipped workspace project.
         """
         ASH_LOGGER.info("Starting OCSF report generation")
 
@@ -673,6 +778,31 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         )
         ASH_LOGGER.debug(f"Created OCSF metadata with ASH version: {get_ash_version()}")
 
+        # Built before the four no-findings early returns below, because those are
+        # exactly the cases that lose the disclosure: a workspace whose scanned
+        # projects all came back clean has no results, and returning a bare `[]`
+        # there would make the artefact say nothing at all about a project the
+        # operator asked for. Kept in its own list rather than appended to
+        # `vulnerability_findings` so that every statistic and failure rate below
+        # still counts real findings only -- merging here would inflate the success
+        # rate with records that never went through the fragile builder.
+        skipped_project_findings = [
+            self._create_skipped_project_finding(entry, metadata, current_time_ms)
+            for entry in skipped_projects(model)
+        ]
+        skipped_project_data = self._serialize_skipped_project_findings(
+            skipped_project_findings
+        )
+
+        def _only_skipped_projects() -> str:
+            """The array when there are no findings at all.
+
+            ``json.dumps([], indent=2)`` is ``"[]"``, so a scan with nothing to
+            report and nothing skipped produces the exact string it always has --
+            which matters, because a consumer may well be comparing against it.
+            """
+            return json.dumps(skipped_project_data, indent=2, default=str)
+
         # Create array of individual VulnerabilityFinding objects
         vulnerability_findings = []
         total_results_count = 0
@@ -683,11 +813,11 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         # Check if we have SARIF data to process
         if not model.sarif:
             ASH_LOGGER.info("No SARIF data found in model - returning empty array")
-            return json.dumps([], indent=2)
+            return _only_skipped_projects()
 
         if not model.sarif.runs:
             ASH_LOGGER.info("No SARIF runs found in model - returning empty array")
-            return json.dumps([], indent=2)
+            return _only_skipped_projects()
 
         all_results = model.sarif.get_all_results()
 
@@ -695,7 +825,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             ASH_LOGGER.info(
                 "No SARIF results found in any run - returning empty array"
             )
-            return json.dumps([], indent=2)
+            return _only_skipped_projects()
 
         total_results_count = len(all_results)
         ASH_LOGGER.info(
@@ -777,7 +907,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
             ASH_LOGGER.info(
                 "No vulnerability findings created from SARIF results - returning empty array"
             )
-            return json.dumps([], indent=2)
+            return _only_skipped_projects()
 
         try:
             # Convert array of findings to JSON
@@ -832,9 +962,23 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
                     processed_results_count,  # All processed findings failed to serialize
                 )
 
+            # Appended AFTER the all-failed check, deliberately. The error response
+            # is not a findings array -- it is a single-element envelope carrying
+            # processing statistics -- so mixing project records into it would
+            # produce a document neither shape describes. A skip lost there is
+            # still in the payload and in the other five reporters, and a run where
+            # every finding failed to serialise has a larger problem to report.
+            findings_data.extend(skipped_project_data)
+
             final_json = json.dumps(findings_data, indent=2, default=str)
+            # Counted apart from the findings rather than folded in, for the same
+            # reason the records are marked in the output: a log line that called
+            # them findings would be the first place the conflation appeared.
             ASH_LOGGER.info(
-                f"Successfully generated OCSF report with {len(findings_data)} findings ({len(final_json)} characters)"
+                f"Successfully generated OCSF report with "
+                f"{len(findings_data) - len(skipped_project_data)} findings and "
+                f"{len(skipped_project_data)} skipped-project records "
+                f"({len(final_json)} characters)"
             )
             return final_json
 
