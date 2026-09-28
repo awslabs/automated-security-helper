@@ -23,6 +23,25 @@ description: >-
 # `ash build-image` call site, and leaves the build itself untouched: the runtimes use a base
 # image already in the local store rather than going back to the registry.
 #
+# TWO QUOTAS WEAR THE SAME WIRE ERROR, AND ONLY ONE IS WORTH WAITING ON
+#
+# ECR Public meters anonymous clients two separate ways, per
+# https://docs.aws.amazon.com/AmazonECR/latest/public/public-service-quotas.html:
+#
+#   Rate of unauthenticated image pulls   1 per second     not adjustable
+#   Unauthenticated data volume           500 GB / month   not adjustable
+#
+# Both surface as `toomanyrequests`. Waiting fixes the first one, because a second passes.
+# Nothing this workflow can do fixes the second one, because a month does not pass inside a
+# job -- and the quota is per calendar month, so once it is spent every container cell in the
+# repository fails until the month rolls over, no matter how patient the retry is.
+#
+# The distinguishing text is "Data limit exceeded", and the observed message carries BOTH
+# strings at once: `toomanyrequests: Data limit exceeded`. So the data-cap check has to come
+# first; matching on `toomanyrequests` alone sends the unrecoverable case down the retry path,
+# where it spends 2m31s over five attempts to arrive at a failure that was certain from the
+# first one, reported as a rate limit that will pass.
+#
 # WHAT THIS DELIBERATELY DOES NOT DO
 #
 # It does not save, cache, or upload the image anywhere. Sharing one pull across jobs would
@@ -102,12 +121,27 @@ runs:
             exit 0
           fi
 
-          # Retry ONLY the rate limit. Anything else -- a typo in the tag, a network route
-          # that is down, a manifest that does not exist -- is not made truer by waiting, and
-          # retrying it would turn a clear failure into a slow one. Both spellings, because
-          # the runtimes differ: podman and nerdctl both emit "toomanyrequests" while only
-          # some emit the "Data limit exceeded" text alongside it.
-          if ! grep -qE 'toomanyrequests|Data limit exceeded|429 Too Many Requests' "${log}"; then
+          # The monthly data cap first, because the wire error carries both strings and this
+          # one cannot be waited out. Reporting it as a rate limit sends whoever reads the log
+          # looking for a concurrency problem in the matrix, when the matrix is not the cause
+          # and spacing the cells out would not help.
+          if grep -q 'Data limit exceeded' "${log}"; then
+            echo "::error::ECR Public's 500 GB/month anonymous data quota is exhausted, so \
+        ${base} cannot be pulled. This is the monthly data limit, not the 1/second pull rate: \
+        retrying cannot clear it, and neither can spacing out the matrix. Every container cell \
+        in the repository will fail until the calendar month rolls over. The quota is not \
+        adjustable -- see \
+        https://docs.aws.amazon.com/AmazonECR/latest/public/public-service-quotas.html -- so \
+        the ways out are authenticating the pull, which needs an IAM role and an OIDC trust on \
+        a public repository, or sourcing the base image from a registry that does not meter \
+        anonymous clients by volume."
+            exit 1
+          fi
+
+          # Retry ONLY the per-second rate limit. Anything else -- a typo in the tag, a network
+          # route that is down, a manifest that does not exist -- is not made truer by waiting,
+          # and retrying it would turn a clear failure into a slow one.
+          if ! grep -qE 'toomanyrequests|429 Too Many Requests' "${log}"; then
             echo "::error::pulling ${base} failed for a reason other than an ECR Public rate \
         limit. Not retried; see the output above."
             exit 1
