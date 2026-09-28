@@ -284,7 +284,7 @@ _NARROWING_OPTIONS_WITH_VALUES = [
     ),
     (
         "--config",
-        "/tmp/none.yaml",  # a test argument, never opened
+        "/tmp/none.yaml",  # nosec B108 - a test argument, never opened
         "a config that disables every scanner is --scanners with no names",
     ),
     (
@@ -488,9 +488,9 @@ def test_every_reserved_spelling_is_one_the_cli_actually_accepts():
         (["--shard-index", "0"], "shard_index", 0),
         (["--shard-count", "4"], "shard_count", 4),
         (["--use-existing"], "use_existing", True),
-        (["--config", "/tmp/none.yaml"], "config", "/tmp/none.yaml"),
-        (["-c", "/tmp/none.yaml"], "config", "/tmp/none.yaml"),
-        (["-c/tmp/none.yaml"], "config", "/tmp/none.yaml"),
+        (["--config", "/tmp/none.yaml"], "config", "/tmp/none.yaml"),  # nosec B108
+        (["-c", "/tmp/none.yaml"], "config", "/tmp/none.yaml"),  # nosec B108
+        (["-c/tmp/none.yaml"], "config", "/tmp/none.yaml"),  # nosec B108
     ],
 )
 def test_a_reserved_option_would_really_have_narrowed_the_scan(
