@@ -64,7 +64,15 @@ def _project(root: Path, relative: str) -> Path:
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch, tmp_path):
     from automated_security_helper.cli.mcp import profile_registry
-    from automated_security_helper.cli.mcp.sandbox import ASH_MCP_TRANSPORT_ENV
+
+    # The literal rather than sandbox.ASH_MCP_TRANSPORT_ENV, deliberately. This is
+    # an autouse fixture, so importing a module the change introduces makes every
+    # test in the file ERROR at setup when run against the pre-change code -- 14
+    # errors and zero failures, which is evidence of nothing except that the tests
+    # are new. Keeping the fixture free of new imports is what lets the failures
+    # below be real ones. The constant is asserted to equal this string in
+    # test_session_sandbox.py, so the two cannot drift apart silently.
+    ASH_MCP_TRANSPORT_ENV = "ASH_MCP_TRANSPORT"
 
     monkeypatch.delenv("ASH_MCP_ALLOWED_ROOTS", raising=False)
     monkeypatch.delenv("ASH_MCP_ALLOWED_CONFIG_ROOTS", raising=False)

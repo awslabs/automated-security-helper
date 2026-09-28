@@ -516,6 +516,16 @@ class TestTheTransportIsNotLeakyProcessState:
         set_server_transport("sse")
         assert os.environ[ASH_MCP_TRANSPORT_ENV] == "sse"
 
+    def test_the_variable_is_spelled_the_way_other_files_hardcode_it(self):
+        """``test_workspace_session_and_profile.py`` hardcodes this string.
+
+        It hardcodes it on purpose -- importing the constant into an autouse
+        fixture makes that whole file ERROR rather than FAIL when run against the
+        pre-change code, which destroys its value as before/after evidence. This
+        assertion is what keeps the duplicated literal from drifting.
+        """
+        assert ASH_MCP_TRANSPORT_ENV == "ASH_MCP_TRANSPORT"
+
     def test_mcp_command_does_not_write_it(self):
         """ASH reads this variable and never writes it.
 
