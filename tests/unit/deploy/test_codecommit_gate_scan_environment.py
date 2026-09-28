@@ -147,7 +147,21 @@ def _load_cdk_scan_env() -> SimpleNamespace:
         "subprocess": subprocess,
         "__name__": "_cdk_gate_scan_env",
     }
-    exec(compile(snippet, str(CDK_SCRIPTS), "exec"), namespace)  # noqa: S102
+    # Two pragmas, because two tools look at this line and neither reads the other's:
+    # ruff's code for exec is S102, bandit's is B102. Do not start a comment line here
+    # with the word ruff uses -- doing so is read as a bare directive and trips PGH004.
+    # Keeping compile() on its own statement is what lets both pragmas fit at a line
+    # length of 88; appending the second to the original one-liner overran it, and
+    # wrapping the call instead let `ruff format` move the comment off the line bandit
+    # attributes B102 to.
+    #
+    # Justified rather than merely silenced: snippet is a slice of this repository's
+    # own CDK script, read from disk a few lines above and guarded by the two
+    # extraction assertions there. Nothing external reaches this exec, and the
+    # docstring explains why executing the slice is the only way this test can tell
+    # a working implementation from a broken one.
+    compiled = compile(snippet, str(CDK_SCRIPTS), "exec")
+    exec(compiled, namespace)  # noqa: S102  # nosec B102
     module = SimpleNamespace(**namespace)
     assert callable(module._scan_env)
     assert callable(module._seed_from_baked)
