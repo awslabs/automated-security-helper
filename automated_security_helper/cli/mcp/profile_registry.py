@@ -282,6 +282,32 @@ def materialize_session_config(session_id: Optional[str], config: AshConfig) -> 
     written anywhere else would be refused by the gate that protects it, and a
     file written to a shared location would be readable by a sibling session.
 
+    Why the returned spelling is POSIX-shaped
+    -----------------------------------------
+    This is the only producer of the path a binding records, and the path is
+    reported twice for one file: a workspace scan passes it as
+    ``ProjectScanSettings.default_config_path`` *and* as ``resolve_workspace``'s
+    ``default_config``, which the resolver turns into a project's
+    ``ProjectPlan.config_source``. ``WorkspacePlan`` spells every path it reports
+    POSIX-shaped -- ``ProjectPlan.path`` says so in its field description, and
+    ``relative_path``, ``workspace_file``, ``workspace_root``,
+    ``workspace_config_source`` and ``config_source`` are all built with
+    ``as_posix()``.
+
+    So returning ``str(target)`` gave one file two spellings on Windows: the plan
+    reported ``C:/...`` and the settings ``C:\\...``. Both were valid paths and both
+    opened the same file, so nothing failed -- a client comparing the dry-run plan
+    against the config the scan reports simply saw two different files, which is
+    the exact thing ``default_config`` and ``default_config_path`` being set from
+    one variable exists to prevent.
+
+    Normalized here rather than at either consumer because the consumers are the
+    two sides of the comparison; a fix applied to one of them leaves the next
+    consumer to rediscover the mismatch. ``as_posix()`` and not ``str()`` because
+    the plan's convention is the older and the more widely asserted of the two, and
+    because a POSIX-shaped absolute Windows path is accepted everywhere this value
+    is consumed -- ``Path``, ``open`` and ``resolve_config`` all take it.
+
     Raises:
         RuntimeError: if the session has no resolvable sandbox -- a host with no
             home directory and no ``ASH_MCP_WORKSPACE_ROOT``. Raised rather than
@@ -301,8 +327,9 @@ def materialize_session_config(session_id: Optional[str], config: AshConfig) -> 
     config_dir = sandbox.config_dir
     config_dir.mkdir(parents=True, exist_ok=True)
     target = config_dir / SESSION_CONFIG_FILENAME
+    # Written to the native path; only the recorded spelling is normalized.
     config.save(target)
-    return str(target)
+    return target.as_posix()
 
 
 def bind_session_config(

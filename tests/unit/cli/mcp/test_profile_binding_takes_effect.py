@@ -242,6 +242,93 @@ class TestABoundProfileReachesTheScan:
         assert resolve_session_config_path("never-bound") is None
 
 
+class TestTheRecordedPathIsSpelledLikeThePlanSpellsPaths:
+    """One config file must not get two spellings on the way to one report.
+
+    ``WorkspacePlan`` reports POSIX-shaped paths throughout -- ``path`` says so in
+    its own field description, ``relative_path``, ``workspace_file``,
+    ``workspace_root`` and ``workspace_config_source`` are all built with
+    ``as_posix()``, and ``ProjectPlan.config_source`` is too. So when a bound
+    profile becomes a project's ``config_source``, the resolver re-spells whatever
+    it was handed into POSIX form.
+
+    ``materialize_session_config`` is the single producer of that path, and it
+    recorded the native spelling. On Windows the same file therefore appeared as
+    ``C:/Users/.../ash.yaml`` in ``plan.active_projects[].config_source`` and as
+    ``C:\\Users\\...\\ash.yaml`` in ``ProjectScanSettings.default_config_path``,
+    which are set from one variable precisely because they must agree. A client
+    diffing the dry-run plan against the config the scan reports saw two files.
+
+    Why this is a proxy and what it cannot show
+    -------------------------------------------
+    On POSIX ``str(path)`` and ``path.as_posix()`` are the same function, so no
+    test running on Linux or macOS can distinguish the two spellings through a real
+    filesystem path -- the divergence only exists on a Windows flavour. The test
+    below forces that flavour with ``PureWindowsPath`` and stubs the two calls the
+    function makes against the filesystem, so what is measured is the spelling the
+    function records and nothing else. It is not a substitute for the Windows CI
+    leg, which exercises the same line against a real Windows path.
+    """
+
+    def test_the_recorded_path_is_posix_shaped_for_a_windows_sandbox(self, monkeypatch):
+        from pathlib import PureWindowsPath
+
+        from automated_security_helper.cli.mcp import sandbox as sandbox_module
+        from automated_security_helper.cli.mcp.profile_registry import (
+            materialize_session_config,
+        )
+
+        class _WindowsDir(PureWindowsPath):
+            """Windows-flavoured, and tolerates the one directory call made on it.
+
+            Subclassing keeps the flavour across ``/`` joins, which is what makes
+            the ``config/`` and ``ash.yaml`` segments Windows-shaped too.
+            """
+
+            def mkdir(self, *args, **kwargs):
+                return None
+
+        class _Sandbox:
+            root = _WindowsDir(r"C:\ash-mcp\session-a")
+
+            @property
+            def config_dir(self):
+                return self.root / "config"
+
+        class _Config:
+            """Records where it was asked to write, and writes nothing."""
+
+            def __init__(self):
+                self.saved_to = None
+
+            def save(self, target):
+                self.saved_to = target
+
+        # Patched on the sandbox module, not on profile_registry:
+        # ``materialize_session_config`` imports the name inside its own body, so
+        # it re-fetches from the real module on every call and an attribute set on
+        # the importer would never be read.
+        monkeypatch.setattr(
+            sandbox_module,
+            "session_sandbox",
+            lambda session_id=None: _Sandbox(),
+        )
+
+        config = _Config()
+        recorded = materialize_session_config("session-a", config)
+
+        assert recorded == "C:/ash-mcp/session-a/config/ash.yaml", (
+            "the binding recorded a native-spelled path while the workspace plan "
+            "reports the same file POSIX-shaped, so the plan and the settings "
+            "describe two different files on Windows"
+        )
+        # The file is still written to the Windows-flavoured path, not to the
+        # re-spelled string: only the *recorded* spelling changed.
+        assert config.saved_to == PureWindowsPath(
+            r"C:\ash-mcp\session-a\config\ash.yaml"
+        )
+
+
 class TestTheScanUsesTheBoundConfig:
     """``run_ash_scan`` with no ``config_path`` picks up the session's binding."""
 

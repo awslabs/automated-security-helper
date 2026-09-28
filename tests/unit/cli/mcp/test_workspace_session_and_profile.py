@@ -323,8 +323,15 @@ class TestABoundProfileReachesAWorkspaceScan:
 
         assert response["success"] is True, response.get("error")
         plan, _settings = executions[0]
-        assert plan.active_projects[0].config_source == str(
-            (own / ".ash.yaml").resolve()
+        # ``as_posix()``, not ``str()``: the plan spells every path it reports
+        # POSIX-shaped, which ``test_config_source_names_the_file_that_was_used``
+        # in tests/unit/workspace/test_resolver.py has pinned since workspace mode
+        # landed. The two agree on POSIX and differ on Windows, so ``str()`` here
+        # asserted a spelling the model does not use and failed on the Windows leg
+        # alone.
+        assert (
+            plan.active_projects[0].config_source
+            == (own / ".ash.yaml").resolve().as_posix()
         )
 
     @pytest.mark.asyncio
