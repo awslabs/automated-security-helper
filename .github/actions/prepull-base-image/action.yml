@@ -31,16 +31,27 @@ description: >-
 #   Rate of unauthenticated image pulls   1 per second     not adjustable
 #   Unauthenticated data volume           500 GB / month   not adjustable
 #
-# Both surface as `toomanyrequests`. Waiting fixes the first one, because a second passes.
-# Nothing this workflow can do fixes the second one, because a month does not pass inside a
-# job -- and the quota is per calendar month, so once it is spent every container cell in the
-# repository fails until the month rolls over, no matter how patient the retry is.
+# Both surface as `toomanyrequests`. Waiting out the first is what a retry is for. Waiting out
+# the second inside one job is not possible, and measurement says a retry there is futile:
+# when a runner hit the data cap it hit it on all five attempts across 2m31s.
+#
+# But the cap is NOT a repository-wide monthly wall, and it is worth being precise about that
+# because the obvious reading is wrong. Measured across the open pull requests on 2026-09-28,
+# 148 of 154 container and scan legs SUCCEEDED. Two legs pulling this same base image four
+# minutes apart on the same commit came out opposite ways, and at another commit 49 of 50
+# identically-named legs were green while one was red. Whatever identifies an "unauthenticated
+# customer" is therefore not this repository -- the hosted runners draw from a shared egress
+# pool, and a leg fails when it lands behind an address whose volume is already spent.
+#
+# So the practical remedy is neither patience nor a permissions change: re-run the job and it
+# lands somewhere else. That is what this step's error message has to say, because an operator
+# told to wait for the month to roll over will wait three days for something a re-run fixes in
+# five minutes.
 #
 # The distinguishing text is "Data limit exceeded", and the observed message carries BOTH
 # strings at once: `toomanyrequests: Data limit exceeded`. So the data-cap check has to come
-# first; matching on `toomanyrequests` alone sends the unrecoverable case down the retry path,
-# where it spends 2m31s over five attempts to arrive at a failure that was certain from the
-# first one, reported as a rate limit that will pass.
+# first; matching on `toomanyrequests` alone sends the case down the retry path, where it
+# spends 2m31s over five attempts to arrive at the failure the first attempt already had.
 #
 # WHAT THIS DELIBERATELY DOES NOT DO
 #
@@ -126,15 +137,16 @@ runs:
           # looking for a concurrency problem in the matrix, when the matrix is not the cause
           # and spacing the cells out would not help.
           if grep -q 'Data limit exceeded' "${log}"; then
-            echo "::error::ECR Public's 500 GB/month anonymous data quota is exhausted, so \
-        ${base} cannot be pulled. This is the monthly data limit, not the 1/second pull rate: \
-        retrying cannot clear it, and neither can spacing out the matrix. Every container cell \
-        in the repository will fail until the calendar month rolls over. The quota is not \
-        adjustable -- see \
-        https://docs.aws.amazon.com/AmazonECR/latest/public/public-service-quotas.html -- so \
-        the ways out are authenticating the pull, which needs an IAM role and an OIDC trust on \
-        a public repository, or sourcing the base image from a registry that does not meter \
-        anonymous clients by volume."
+            echo "::error::RE-RUN THIS JOB. ECR Public refused to serve ${base} because the \
+        anonymous 500 GB/month data quota is spent for the address this runner pulled from -- \
+        which is a shared pool, not this repository, so most legs are unaffected and a re-run \
+        usually lands somewhere with quota left. This is the monthly data limit rather than the \
+        1/second pull rate, so retrying inside this job does not help and is not attempted: \
+        all attempts here would fail the same way. Neither limit is adjustable, see \
+        https://docs.aws.amazon.com/AmazonECR/latest/public/public-service-quotas.html. If it \
+        fails repeatedly across re-runs, the durable fixes are authenticating the pull, which \
+        needs an IAM role and an OIDC trust on a public repository, or sourcing the base image \
+        from a registry that does not meter anonymous clients by volume."
             exit 1
           fi
 
