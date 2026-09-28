@@ -123,6 +123,27 @@ global_settings:
       line_start: 198
       line_end: 199
       reason: Intentional test data — MRZ-format passport strings used to generate sample documents for ferret-scan integration testing.
+    # === ferret-scan JWT_TOKEN: a shape the validator under test must accept ===
+    - path: tests/unit/cli/mcp/test_session_id_single_component.py
+      rule_id: JWT_TOKEN
+      reason: >-
+        Intentional test data. The ACCEPTED list in this module enumerates session-id
+        shapes a client may legitimately mint -- a UUID, a base64url token and a JWT
+        among them -- and the charset validator was chosen against that list rather
+        than tightened until the tests passed. The JWT entry is a synthetic three-part
+        string whose example header and payload carry no claims worth anything and
+        which nothing signs or verifies.
+
+        Paraphrased rather than quoted, per the note at the top of this file: writing
+        the shape out here would make this file flag itself. That is not hypothetical
+        -- it is what happened in .ash/.ash.yaml, where a suppression reason quoted the
+        literal it excused and the config became the only actionable finding in the
+        repository.
+
+        Scoped by path and rule rather than pinned to a line number. Two PASSPORT
+        entries above do pin lines, which suits a generator script that does not
+        change; this list grows, and a pinned suppression would silently stop matching
+        the moment an entry is added above the JWT one.
     - path: tests/integration/cli/test_mcp_file_tracking_integration.py
       rule_id: SECRET-SECRET-KEYWORD
       reason: False positive.
