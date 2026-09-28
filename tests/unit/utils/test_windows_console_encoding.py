@@ -203,10 +203,26 @@ class TestCapturedChildOutputIsDecodedExplicitly:
 
     @staticmethod
     def _child(payload: str) -> list:
-        """A child that writes UTF-8 to stdout, as ASH does under CI."""
+        """A child that writes UTF-8 to stdout, as ASH does under CI.
+
+        The program source is kept ASCII-only deliberately. Embedding the glyph with
+        ``{payload!r}`` puts a non-ASCII character on the command line, and Windows
+        encodes argv using the active ANSI code page -- so on the runner the child
+        received a substituted character, wrote bytes cp1252 could decode, and
+        ``test_the_host_code_page_loses_the_payload`` failed with "DID NOT RAISE
+        UnicodeDecodeError" while passing on every other platform. The premise guard
+        above still held, because it never crossed a process boundary; only the
+        child's copy of the payload was altered, which is precisely the case a
+        same-process assertion cannot see.
+
+        Passing the UTF-8 bytes as an escaped literal keeps argv ASCII, so the
+        child's output is identical everywhere. ``test_replace_survives_bytes_that_
+        are_not_utf8_either`` already built its child this way; this one now matches.
+        """
+        literal = "".join(f"\\x{b:02x}" for b in payload.encode("utf-8"))
         program = (
             "import sys; "
-            f"sys.stdout.buffer.write({payload!r}.encode('utf-8')); "
+            f"sys.stdout.buffer.write(b'{literal}'); "
             "sys.stdout.buffer.flush()"
         )
         return [sys.executable, "-c", program]
