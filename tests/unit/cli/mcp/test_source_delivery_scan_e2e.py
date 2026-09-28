@@ -26,9 +26,11 @@ Shaped like the Bedrock AgentCore Runtime target on purpose:
 The assertions name findings -- rule id, file, and line -- rather than counting
 them. A count assertion would still pass if the scanner ran against the server's
 own working directory instead of the delivered tree, which is the failure this
-test exists to catch. ``completed_scanners``/``total_scanners`` are asserted
+test exists to catch. ``total_scanners`` and ``skipped_scanners`` are asserted
 alongside, because a scan where nothing ran reports zero findings the same way a
-clean scan does.
+clean scan does. Not ``completed_scanners``: that counts only the scanners that
+ran and reported PASSED, so it falls as findings are reported, and this test
+plants findings on purpose.
 """
 
 from __future__ import annotations
@@ -357,12 +359,24 @@ def test_uploaded_source_is_scanned_and_reports_its_own_findings(
     progress = collected["progress"]
     assert progress.get("status") == "completed", f"scan did not complete: {progress}"
     total_scanners = progress.get("total_scanners")
-    completed_scanners = progress.get("completed_scanners")
     assert total_scanners, (
         f"no scanners were registered, so zero findings would prove nothing: {progress}"
     )
-    assert completed_scanners == total_scanners, (
-        f"only {completed_scanners}/{total_scanners} scanners completed: {progress}"
+    # Not `completed_scanners == total_scanners`. That count excludes any scanner that
+    # reported findings (see mcp_server.get_scan_progress), and this test plants
+    # findings deliberately -- so the equality asserted that nothing was found, which
+    # is the opposite of what the planted-finding assertions below require. It held
+    # only while the count meant "ran". Measured on this very test: it reported
+    # "only 7/10 scanners completed" in a run whose own log line read "Result
+    # completeness validation passed - completeness rate: 100.0%". Every scanner ran;
+    # three of them found something.
+    #
+    # `skipped_scanners` is the key the contract points at for telling "scanned, found
+    # nothing" from "never ran", so it is the one that carries the original intent.
+    skipped = [entry.get("scanner") for entry in progress.get("skipped_scanners", [])]
+    assert len(skipped) < total_scanners, (
+        f"every one of the {total_scanners} scanners was skipped, so the findings "
+        f"asserted below would prove nothing: skipped={skipped} progress={progress}"
     )
 
     # --- the findings are from the delivered files --------------------------
