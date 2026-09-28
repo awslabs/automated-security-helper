@@ -16,13 +16,18 @@ command's return value is discarded, so the previous implementation could print
 caller cannot observe is not a verdict.
 """
 
+import io
+import shutil
+import subprocess
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 import typer
+from rich.console import Console
 from typer.testing import CliRunner
 
+from automated_security_helper.cli import dependencies as dependencies_module
 from automated_security_helper.cli.dependencies import (
     EXIT_BAD_SELECTION,
     EXIT_INSTALL_FAILED,
@@ -398,21 +403,55 @@ class TestToolSelection:
     in-process -- so without monkeypatch.setenv these tests would leave that
     variable set for every later test sharing the xdist worker, changing where
     find_executable looks.
+
+    WHY THESE ASSERTIONS DO NOT READ ``result.output``
+
+    CliRunner captures by swapping ``sys.stdout``, and pytest's logging plugin
+    suspends and resumes global capture around log records -- on resume
+    ``sys.stdout`` is pytest's capture object rather than the runner's. ASH emits
+    its first log records while loading plugins, which happens once per process,
+    so everything the command prints after that point misses the runner's buffer
+    on the first invocation in a worker and reaches it on every later one.
+
+    Measured rather than reasoned: this test failed run first and passed run
+    second, passes under ``-p no:logging``, passes under ``-s``, and the missing
+    "Nothing installed" panel accounts for the entire 451-byte difference between
+    a first and a second invocation's captured length.
+
+    The product is not affected. A real ``ash dependencies install --tool
+    nonexistent`` prints the panel and exits 2;
+    ``test_unknown_tool_reaches_a_real_stdout`` asserts that out of process, which
+    is the only place it can honestly be asserted.
+
+    So the installer's console is pinned to a buffer these tests own. That also
+    repairs a negative assertion that had been passing vacuously: on a truncated
+    capture, ``"Running command" not in result.output`` holds whether or not the
+    text was printed, because the text it looks for was cut off rather than never
+    written.
     """
 
     @pytest.fixture(autouse=True)
     def _isolate(self, tmp_path, monkeypatch):
         monkeypatch.setenv("ASH_BIN_PATH", str(tmp_path / "bin"))
         self.bin_args = ["--bin-path", str(tmp_path / "bin")]
+        # width, so Rich does not wrap a string an assertion looks for across two
+        # lines; no_color, so it does not interleave ANSI inside one.
+        self.panels = io.StringIO()
+        monkeypatch.setattr(
+            dependencies_module,
+            "console",
+            Console(file=self.panels, width=200, no_color=True),
+        )
 
     def test_unknown_tool_exits_two_and_lists_what_exists(self):
         result = runner.invoke(
             dependencies_app, ["--tool", "nonexistent", *self.bin_args]
         )
         assert result.exit_code == EXIT_BAD_SELECTION
-        assert "Unknown tool" in result.output
+        printed = self.panels.getvalue()
+        assert "Unknown tool" in printed
         # The available list is what makes the error actionable rather than a wall.
-        assert "grype" in result.output
+        assert "grype" in printed
 
     def test_unknown_tool_installs_nothing(self):
         """A bad selection must be refused before any command runs.
@@ -424,5 +463,28 @@ class TestToolSelection:
         result = runner.invoke(
             dependencies_app, ["--tool", "nonexistent", *self.bin_args]
         )
-        assert "Nothing installed" in result.output
-        assert "Running command" not in result.output
+        assert result.exit_code == EXIT_BAD_SELECTION
+        printed = self.panels.getvalue()
+        assert "Nothing installed" in printed
+        assert "Running command" not in printed
+
+    def test_unknown_tool_reaches_a_real_stdout(self):
+        """The rejection has to be visible to a person, not only to a test double.
+
+        Every other assertion in this class reads a console this test pinned, which
+        proves what the code printed but not where it went. Running the installed
+        entry point in its own process is what shows an operator who typed a tool
+        name wrong gets told so, and gets a non-zero status to act on.
+        """
+        ash = shutil.which("ash")
+        if ash is None:
+            pytest.skip("the `ash` console script is not on PATH in this environment")
+        proc = subprocess.run(
+            [ash, "dependencies", "install", "--tool", "nonexistent", *self.bin_args],
+            capture_output=True,
+            text=True,
+            timeout=900,
+        )
+        assert proc.returncode == EXIT_BAD_SELECTION
+        assert "Unknown tool" in proc.stdout
+        assert "Nothing installed" in proc.stdout
