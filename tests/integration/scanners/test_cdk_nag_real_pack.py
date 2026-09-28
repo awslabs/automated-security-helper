@@ -19,8 +19,13 @@ nothing, and CI installed no extras at the time this was written -- so an unguar
 import json
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:  # pragma: no cover - imported for annotations only
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+    from automated_security_helper.schemas.sarif_schema_model import SarifReport
 
 
 def _require_cdk_nag():
@@ -40,6 +45,72 @@ def _require_cdk_nag():
                 "silent skip is what let a breaking cdk-nag major bump land green."
             )
         pytest.skip(f"[cdk] extra not installed ({type(exc).__name__})")
+
+
+def _aggregate_a_completed_scan(report: "SarifReport") -> "AshAggregatedResults":
+    """Merge ``report`` into a fresh aggregation, recorded as a scan that completed.
+
+    Merging SARIF is not the whole of what a finished run leaves in
+    ``AshAggregatedResults``, and the remainder is load-bearing for every exit code
+    asserted below. ``ScannerStatisticsCalculator.get_scanner_status_info`` looks a
+    scanner up in ``additional_reports`` and then in ``scanner_results``; one found in
+    neither falls to an ``else`` that sets ``error = True``, and
+    ``get_unified_scanner_metrics`` grades that ERROR. So a scanner known only from the
+    SARIF it produced reads as having crashed, and the completeness gate -- on by
+    default -- returns 1 from ``incomplete_scanners``, several gates ahead of the
+    condition any test here is about.
+
+    The real pipeline never reaches that ``else``: ``ScanPhase`` writes an
+    ``additional_reports`` entry per target, and the report phase then replaces the
+    ``scanner_results`` entry through
+    ``unified_metrics._populate_scanner_results_from_unified_metrics``. This records
+    the second of the two, which is the shape ``scanner_results`` is declared and
+    published with.
+
+    Keyed off the scanner names the SARIF itself carries, read through the same
+    discovery the gate reads them through rather than through a name spelled out here.
+    A literal would be a second source of truth for the key, and one that drifted
+    would leave the entry unread and the ERROR arm live -- reintroducing, silently,
+    the exact failure this helper exists to prevent.
+
+    Only the three fields the status roll-up reads are set. The counts stay at their
+    defaults because nothing in this chain reads them -- severities are taken from the
+    SARIF and durations from ``additional_reports`` -- so deriving them here would add
+    a second, independently-computed count that no assertion ever compares against the
+    report it claims to describe.
+
+    ``PASSED`` even for a fixture that produces real findings, because the recorded
+    status is not authoritative about the finding count: ``get_scanner_status_info``
+    takes only ERROR from it, and ``get_unified_scanner_metrics`` grades FAILED off
+    ``actionable > 0`` on its own. PASSED is the narrow claim being made here, which is
+    that this scanner ran and did not crash.
+    """
+    from automated_security_helper.core.enums import ScannerStatus
+    from automated_security_helper.core.scanner_statistics_calculator import (
+        ScannerStatisticsCalculator,
+    )
+    from automated_security_helper.models.asharp_model import (
+        AshAggregatedResults,
+        ScannerTargetStatusInfo,
+    )
+
+    aggregated = AshAggregatedResults()
+    aggregated.sarif.merge_sarif_report(report)
+
+    scanner_names = ScannerStatisticsCalculator._get_scanner_names_from_sarif(
+        aggregated
+    )
+    assert scanner_names, (
+        "the merged SARIF names no scanner, so there is no key to record a completed "
+        "scan under and the ERROR arm this helper exists to avoid is still live"
+    )
+    for scanner_name in scanner_names:
+        aggregated.scanner_results[scanner_name] = ScannerTargetStatusInfo(
+            status=ScannerStatus.PASSED,
+            dependencies_satisfied=True,
+            excluded=False,
+        )
+    return aggregated
 
 
 # A template that must produce findings. An S3 bucket with no encryption, no access logging
@@ -501,7 +572,6 @@ class TestRuleThatCouldNotBeEvaluated:
             _compute_exit_code,
             unevaluated_rules,
         )
-        from automated_security_helper.models.asharp_model import AshAggregatedResults
         from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
             CdkNagScanner,
             CdkNagScannerConfig,
@@ -526,8 +596,7 @@ class TestRuleThatCouldNotBeEvaluated:
         assert scanner.targets_attempted == 1
         assert scanner.targets_failed == 0
 
-        aggregated = AshAggregatedResults()
-        aggregated.sarif.merge_sarif_report(report)
+        aggregated = _aggregate_a_completed_scan(report)
 
         assert unevaluated_rules(aggregated), (
             "the aggregated model carries no unevaluated-rule condition, so the "
@@ -568,7 +637,6 @@ class TestRuleThatCouldNotBeEvaluated:
             _compute_exit_code,
             unevaluated_rules,
         )
-        from automated_security_helper.models.asharp_model import AshAggregatedResults
         from automated_security_helper.models.core import AshSuppression
         from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
             CdkNagScanner,
@@ -584,7 +652,7 @@ class TestRuleThatCouldNotBeEvaluated:
         source_dir.mkdir(parents=True, exist_ok=True)
         (source_dir / template_name).write_text(unevaluatable_template.read_text())
 
-        def _aggregate_with(suppressions) -> AshAggregatedResults:
+        def _aggregate_with(suppressions) -> "AshAggregatedResults":
             test_plugin_context.config.global_settings.suppressions = suppressions
             scanner = CdkNagScanner(
                 context=test_plugin_context, config=CdkNagScannerConfig()
@@ -597,9 +665,7 @@ class TestRuleThatCouldNotBeEvaluated:
                 plugin_context=test_plugin_context,
                 used_suppressions=set(),
             )
-            aggregated = AshAggregatedResults()
-            aggregated.sarif.merge_sarif_report(sanitized)
-            return aggregated
+            return _aggregate_a_completed_scan(sanitized)
 
         opts = ScanOptions(
             source_dir=source_dir,
@@ -687,7 +753,6 @@ class TestRuleThatCouldNotBeEvaluated:
             _compute_exit_code,
             unevaluated_rules,
         )
-        from automated_security_helper.models.asharp_model import AshAggregatedResults
         from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
             CdkNagScanner,
             CdkNagScannerConfig,
@@ -712,8 +777,7 @@ class TestRuleThatCouldNotBeEvaluated:
             "distinguishes a complete scan from an empty one"
         )
 
-        aggregated = AshAggregatedResults()
-        aggregated.sarif.merge_sarif_report(report)
+        aggregated = _aggregate_a_completed_scan(report)
 
         assert unevaluated_rules(aggregated) == [], (
             "a template with no unresolvable primitives reported an unevaluated "
