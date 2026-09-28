@@ -260,12 +260,19 @@ def ceiling_unreachable_counts(
     return counts
 
 
-def _normalise_scanner_name(name: str) -> str:
+def normalise_scanner_name(name: str) -> str:
     """Fold a scanner name to the form used for comparison.
 
     ``cdk-nag`` and ``cdk_nag`` are one scanner: the former is what
     ``--scanners`` and the config file accept, the latter is the Python field
     name. Comparing raw strings would make policy add a duplicate.
+
+    Public rather than private because ``workspace/execution.py`` has to fold
+    the same two spellings when it enables a policy scanner and when it decides
+    which findings that scanner produced. A second copy of this rule is a
+    correctness hazard, not a style one: the two would agree on every name until
+    one of them met an aliased scanner, and the disagreement would show up as a
+    policy that enables nothing while the plan says it enabled something.
     """
     return name.strip().lower().replace("-", "_")
 
@@ -535,11 +542,11 @@ def policy_for_project(
     # asked for X, capped by Y".
     effective = stricter_of(project_threshold, ceiling)
 
-    declared = {_normalise_scanner_name(name) for name in project_scanners}
+    declared = {normalise_scanner_name(name) for name in project_scanners}
     policy_scanners = tuple(
         name
         for name in policy.additional_scanners
-        if _normalise_scanner_name(name) not in declared
+        if normalise_scanner_name(name) not in declared
     )
 
     return ProjectPolicy(
