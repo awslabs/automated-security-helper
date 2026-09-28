@@ -296,7 +296,7 @@ jobs:
   # that is not its own working directory.
   #
   # Scanning an external target already happens in CI -- validate-install (lines
-  # 32, 52, 70), validate-mcp (line 48) and ash-upgrade-paths.yml (line 167) all
+  # 66, 86, 104), validate-mcp (line 68) and ash-upgrade-paths.yml (line 179) all
   # pass --source-dir. So the gap is NOT the flag, and this job is not redundant
   # with them. The gap is that nothing ever checked the result. Those jobs use a
   # clean one-line fixture that yields zero findings even when everything works,

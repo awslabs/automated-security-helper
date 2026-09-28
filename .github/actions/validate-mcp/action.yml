@@ -38,10 +38,17 @@ runs:
           exit 1
         fi
 
-    - name: "mcp: install MCP Inspector"
-      if: runner.os != 'Windows'
-      shell: bash
-      run: npm install -g @modelcontextprotocol/inspector
+    # There is deliberately no MCP Inspector install step here. It arrived as a
+    # best-effort probe -- `npm install -g @modelcontextprotocol/inspector
+    # 2>/dev/null || true` -- and later lost the `|| true`, which turned every run
+    # of this job into a hard dependency on registry.npmjs.org resolving. Nothing
+    # in this repository ever invoked the inspector, so the install asserted
+    # nothing and the only thing the step could contribute was a red job: a macOS
+    # runner hit `getaddrinfo ENOTFOUND registry.npmjs.org` and burned 161s in DNS
+    # timeout after the import test and the start/stop health check had both
+    # already passed. Bring it back only alongside a step that actually drives the
+    # inspector, and behind a retry, or the next registry blip fails this job for
+    # the same reason.
 
     # `--scanners detect-secrets` for the same reason as validate-install: this job
     # checks that the MCP install can run a scan, and it installs ASH alone, so
