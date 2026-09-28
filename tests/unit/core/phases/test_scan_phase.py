@@ -360,13 +360,18 @@ class TestErrorHandling:
             (
                 "failing_scanner",
                 MagicMock(),
-                [{"path": Path("/tmp"), "type": "source"}],
-            ),  # nosec B108
+                # The pragma belongs on the line holding the literal. bandit attributes
+                # B108 to that line, so a `# nosec B108` on the closing `),` below is
+                # one line off and suppresses nothing -- which is exactly how these two
+                # sites stayed actionable while looking suppressed. The rest of this
+                # file already uses the on-the-literal form in 15 places.
+                [{"path": Path("/tmp"), "type": "source"}],  # nosec B108
+            ),
             (
                 "passing_scanner",
                 MagicMock(),
-                [{"path": Path("/tmp"), "type": "source"}],
-            ),  # nosec B108
+                [{"path": Path("/tmp"), "type": "source"}],  # nosec B108
+            ),
         ]
 
         call_order = []
