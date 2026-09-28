@@ -254,8 +254,17 @@ class TestScanWorkflowIntegration:
         assert progress["scan_id"] == scan_id
         assert progress["status"] == "completed"
         assert progress["is_complete"] is True
-        assert progress["completed_scanners"] == 3
+        # `completed_scanners` counts only scanners that ran AND reported PASSED --
+        # the contract is documented on mcp_server.get_scan_progress. Every scanner
+        # this fixture writes has findings, so each is recorded FAILED and none is
+        # clean. Asserting 3 read the count as "how many ran", which it stopped
+        # meaning when it began excluding scanners that found something.
+        assert progress["completed_scanners"] == 0
         assert progress["total_scanners"] == 3
+        # Zero clean scanners must stay distinguishable from a scan where nothing
+        # ran, which is the reason the two counts are reported separately at all.
+        # Without this line the assertion above passes for both.
+        assert progress["skipped_scanners"] == []
         assert progress["total_findings"] == 6  # 1 + 2 + 3 findings
         assert progress["severity_counts"]["critical"] == 3
 
