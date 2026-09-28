@@ -71,7 +71,10 @@ from automated_security_helper.cli.mcp.sandbox import (
     transport_is_networked,
     validate_config_input,
 )
-from automated_security_helper.cli.mcp.scan_target import validate_scan_target
+from automated_security_helper.cli.mcp.scan_target import (
+    _denied_root_values,
+    validate_scan_target,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -367,8 +370,34 @@ class TestStdioKeepsItsAmbientAuthority:
         assert validate_config_input(stray, session_id=DEFAULT_SESSION_ID) is None
 
     def test_a_system_directory_is_still_refused(self):
-        """The old safety net survives the move onto the sandbox."""
-        assert validate_scan_target("/etc") is not None
+        """The old safety net survives the move onto the sandbox.
+
+        The target comes from the policy's own ``_denied_root_values()`` rather
+        than being written out here. The literal ``"/etc"`` this used to assert
+        names nothing on Windows: ``pathlib`` reads a leading separator with no
+        drive as relative to the current drive, so it resolves to ``C:\\etc``, an
+        ordinary directory the policy has no reason to refuse, and
+        ``is_absolute()`` is False for it besides. The assertion was demanding the
+        wrong answer rather than detecting a missing one -- the denylist has named
+        the Windows locations since confinement landed.
+
+        Restating a Windows spelling here instead would have swapped that for a
+        worse bug: two lists that must agree and are never compared against each
+        other. So what this asserts is the end-to-end path -- that a directory the
+        policy *names* as denied is in fact refused on whatever platform is
+        running -- while the *contents* of the list stay pinned per platform by
+        ``test_scan_target.py::TestDeniedRootSet``. Neither test duplicates the
+        other, and there is no second list to drift.
+
+        Existence is deliberately not arranged for: the policy judges a target
+        without touching the filesystem, which
+        ``test_nonexistent_path_is_still_judged_by_policy`` pins directly, so the
+        first denied root works as a target whether or not this host has one.
+        """
+        denied = _denied_root_values()
+        assert denied, "the policy names no denied directories on this platform"
+
+        assert validate_scan_target(denied[0]) is not None
 
 
 # ---------------------------------------------------------------------------
