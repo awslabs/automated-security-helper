@@ -70,6 +70,80 @@ description: >-
 # authoritative: the reference the build resolves is unchanged, and the common path is byte for
 # byte the path that ran before this fallback existed.
 #
+# HOW THE FALLBACK REACHES THE BUILD, AND WHY A LOCAL TAG IS NOT ENOUGH
+#
+# The first version of the fallback pulled from Docker Hub, tagged the result locally under
+# the ECR reference, and announced that "the build resolves it from the local store without
+# touching public.ecr.aws". That sentence was false for three of the four runtimes, and it is
+# the reason a broken path looked healthy: the step exited 0, the log said the base image was
+# in place, and the build died 1.1 seconds later still asking ECR Public for it.
+#
+# From the finch leg's own log -- the retag succeeded, the build started 2.07s later and
+# failed at the Dockerfile's first instruction:
+#
+#     >>> FROM ${BASE_IMAGE} AS uv-reqs
+#     error: failed to solve: public.ecr.aws/docker/library/python:3.12-slim-bookworm:
+#     failed to resolve source metadata for ...: 429 Too Many Requests
+#     toomanyrequests: Data limit exceeded
+#
+# Per runtime, and the last column is how each was established:
+#
+#   plain `docker build`                    honours the local tag   measured locally
+#   `docker buildx` on a docker-container   DOES NOT                measured locally
+#   podman / buildah                        honours it              read from source
+#   nerdctl 2.3.5 and finch                 DOES NOT                the job log above
+#
+# The two that do not are the two driving BuildKit, and it is not a setting. BuildKit's OCI
+# worker constructs its image resolver with `ImageStore: nil, // explicitly`, so
+# `ResolveImageConfig` goes to the registry first, and its local-store recovery is gated
+# behind `is.ImageStore == nil` being false. There is nothing to push an image into.
+#
+# Docker's apparent immunity was also never exercised in CI. run-scan-test sets up
+# docker/setup-buildx-action, whose driver defaults to `docker-container`, and exports
+# ACTIONS_RUNTIME_TOKEN -- which is what makes ASH's build switch its argv to
+# `docker buildx build --load`. So every docker cell runs the configuration that ignores the
+# tag; none had happened to hit the quota yet.
+#
+# So the fix changes what `FROM` ASKS FOR rather than trying to satisfy the old ask out of a
+# store the builder may not consult. On the fallback path the step writes
+#
+#     ASH_BASE_IMAGE_OVERRIDE=<fallback repo>@<pin>
+#
+# to GITHUB_ENV, and each of the three build entrypoints -- run_ash_container.py's
+# `_build_image`, `./ash`, and utils/ash_helpers.ps1 -- passes it through as
+# `--build-arg BASE_IMAGE=...`. That is uniform across every runtime and every builder
+# driver, because no runtime has any say in which reference a build-arg names.
+#
+# The digest interaction is favourable rather than awkward. `FROM ${BASE_IMAGE}` accepts a
+# digest-suffixed value; only `docker tag` refuses one, which is why BASE_IMAGE_DIGEST sits on
+# its own Dockerfile line. So the fallback path is now MORE pinned than the primary: the
+# primary resolves a tag, the fallback resolves content.
+#
+# The local tag is still set, and is deliberately demoted rather than removed. It is what
+# keeps a consumer that does not read ASH_BASE_IMAGE_OVERRIDE working on docker and podman --
+# removing it would regress those from "works" to "broken everywhere" in exchange for
+# tidiness. What changed is that no message claims it is the mechanism.
+#
+# Rejected: pushing the fallback image into the builder's own store. Impossible for BuildKit's
+# OCI worker, per `ImageStore: nil` above. Switching nerdctl's buildkitd to the containerd
+# worker would make it possible and was already rejected in this repository for a sound
+# reason: the nerdctl-full bundle ships the OCI worker, so that would test a configuration no
+# user runs.
+#
+# Rejected: a BuildKit source policy (`--source-policy-file`, or
+# EXPERIMENTAL_BUILDKIT_SOURCE_POLICY) rewriting the ECR reference to the Docker Hub one. It
+# would work, and only for the BuildKit runtimes -- buildah has no equivalent -- so it is a
+# possible second layer, never the fix.
+#
+# Rejected: a composite-action `outputs:` value instead of GITHUB_ENV. The consumer is not the
+# workflow YAML; it is a build several layers inside three different entrypoints, reached by
+# `ash build-image`, `ash scan --mode container`, `./ash` and a PowerShell function. An output
+# would have to be threaded through every caller's argv, at six `uses:` sites across two
+# actions, each one a place to forget. GITHUB_ENV reaches every later step in the job whatever
+# the entrypoint, and it is already this repository's idiom for the same handoff --
+# run-scan-test exports ACTIONS_RUNTIME_TOKEN the same way, and ASH's build reads it from the
+# environment.
+#
 # WHY THE DIGEST PIN IS THE LOAD-BEARING PART
 #
 # A fallback that quietly accepts a different image is a supply-chain substitution, and strictly
@@ -397,9 +471,11 @@ runs:
         case "${base}" in
           *@*)
             echo "::error::ARG BASE_IMAGE in ${DOCKERFILE} is '${base}', which carries a \
-        digest. This step has to be able to tag a fallback pull under that exact reference so \
-        the build resolves it locally, and a digest-suffixed reference is not a valid tag \
-        target. Keep the digest in ARG BASE_IMAGE_DIGEST instead."
+        digest. The fallback path tags a Docker Hub pull under that exact reference, as the \
+        layer that keeps plain \`docker build\` and podman working, and a digest-suffixed \
+        reference is not a valid \`tag\` target. Keep the digest in ARG BASE_IMAGE_DIGEST \
+        instead; the build-arg this step exports carries it separately, and \`FROM\` accepts \
+        a digest there."
             exit 1
             ;;
         esac
@@ -529,7 +605,7 @@ runs:
         # 10 this registry refused; try the next one
         try_registry() {
           local repo="$1" kind="$2"
-          local rc=0 tag_id pin_id placed_id unanswered
+          local rc=0 tag_id pin_id placed_id unanswered override
 
           pull_ref "${repo}:${tag}" "${kind}" || rc=$?
           [ "${rc}" -eq 0 ] || return "${rc}"
@@ -577,13 +653,16 @@ runs:
           fi
 
           if [ "${repo}" != "${primary_repo}" ]; then
-            # The build resolves `FROM ${BASE_IMAGE}`, so the fallback's bytes have to appear
-            # under that exact reference. Tagging from the digest reference rather than from
-            # the fallback's tag keeps this pinned end to end, and works the same on docker,
-            # podman, finch and nerdctl because `tag` and `pull` are all it needs.
+            # Second layer, not the mechanism. Plain `docker build` and podman resolve
+            # `FROM ${BASE_IMAGE}` out of the local store, so a tag under the Dockerfile's
+            # own reference keeps those two working for any consumer that never reads
+            # ASH_BASE_IMAGE_OVERRIDE. The BuildKit runtimes ignore it; see the notes above.
+            # Tagging from the digest reference rather than from the fallback's tag keeps this
+            # pinned end to end, and works the same on docker, podman, finch and nerdctl
+            # because `tag` and `pull` are all it needs.
             if ! run_runtime tag "${repo}@${pin}" "${base}"; then
-              echo "::error::pulled ${repo}@${pin} but could not tag it as ${base}, so the \
-        build would go back to ${primary_repo} and be refused again. See the output above."
+              echo "::error::pulled ${repo}@${pin} but could not tag it as ${base}. See the \
+        output above."
               exit 1
             fi
             placed_id="$(image_id "${base}" || true)"
@@ -593,9 +672,51 @@ runs:
         that is not the pinned one."
               exit 1
             fi
-            echo "::notice::sourced ${base} from ${repo} at ${pin} and tagged it locally as \
-        ${base}; the build resolves it from the local store without touching \
-        ${primary_repo}."
+
+            # THE MECHANISM: tell the build which registry answered.
+            #
+            # Digest-pinned rather than the fallback's tag, because `FROM ${BASE_IMAGE}`
+            # accepts a digest-suffixed reference -- only `docker tag` above refuses one. So
+            # this path hands the build content rather than a name, which makes it strictly
+            # more pinned than the primary path it is standing in for.
+            override="${repo}@${pin}"
+
+            # GITHUB_ENV's `NAME=value` form is line-oriented, so a value carrying a newline
+            # would let this step inject an arbitrary second variable into the job. Neither
+            # component can carry one today -- `pin` is matched against
+            # ^sha256:[0-9a-f]{64}$ above and `repo` is derived from a single sed-extracted
+            # Dockerfile line with `*@*` already rejected -- so this guard has no reachable
+            # trigger. It is here anyway: the cost is three lines, and the thing on the other
+            # side of it is writing attacker-shaped text into the environment of every later
+            # step in the job.
+            case "${override}" in
+              *[!a-zA-Z0-9._:/@-]*)
+                echo "::error::refusing to export ASH_BASE_IMAGE_OVERRIDE='${override}': it \
+        contains a character that is not valid in an image reference. GITHUB_ENV is \
+        line-oriented, so this step will not write an unexpected value into it."
+                exit 1
+                ;;
+            esac
+
+            if [ -n "${GITHUB_ENV:-}" ]; then
+              printf '%s\n' "ASH_BASE_IMAGE_OVERRIDE=${override}" >> "${GITHUB_ENV}"
+              echo "::notice::sourced ${base} from ${repo} at ${pin}. The build is told to \
+        ask for ${override} directly, through ASH_BASE_IMAGE_OVERRIDE in the job environment, \
+        and that is what keeps it off ${primary_repo}. ${base} is also tagged locally, but \
+        that is a second layer and not what this relies on: a BuildKit builder resolves FROM \
+        against the registry first, and the OCI worker these runtimes ship keeps no image \
+        store for it to fall back to."
+            else
+              # Not an error, because a hand-run of this script outside Actions is a
+              # legitimate way to use it. But it is the exact state the retag alone used to
+              # be mistaken for, so it says what breaks rather than that something is unset.
+              echo "::warning::sourced ${base} from ${repo} at ${pin} and tagged it locally, \
+        but GITHUB_ENV is not set, so the build cannot be told which registry answered. Only \
+        plain \`docker build\` and podman resolve a local tag at FROM; a BuildKit builder -- \
+        nerdctl, finch, or docker buildx on a docker-container driver -- will go back to \
+        ${primary_repo} and be refused again. Pass BASE_IMAGE=${override} to the build \
+        yourself."
+            fi
           fi
 
           return 0

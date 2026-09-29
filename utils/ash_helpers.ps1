@@ -300,6 +300,21 @@ function Invoke-ASH {
                         "--build-arg", "BUILD_DATE=$(Get-Date -UFormat %s)"
                     )
 
+                    # ASH_BASE_IMAGE_OVERRIDE redirects `FROM ${BASE_IMAGE}` at whichever
+                    # registry actually served the base image.
+                    # .github/actions/prepull-base-image sets it when ECR Public refuses and
+                    # Docker Hub answers, as a digest-pinned reference.
+                    #
+                    # A local tag under the ECR name does not suffice: BuildKit's OCI worker
+                    # keeps no image store, so nerdctl and finch resolve FROM against the
+                    # registry and ignore it. Emitted before $buildArgs so a caller's explicit
+                    # BASE_IMAGE build-arg lands later and wins -- a duplicate --build-arg is
+                    # last-wins.
+                    if ($env:ASH_BASE_IMAGE_OVERRIDE) {
+                        Write-Host "Base image redirected to $($env:ASH_BASE_IMAGE_OVERRIDE) by ASH_BASE_IMAGE_OVERRIDE."
+                        $buildCmd += "--build-arg", "BASE_IMAGE=$($env:ASH_BASE_IMAGE_OVERRIDE)"
+                    }
+
                     # Add any extra build args
                     if ($buildArgs.Count -gt 0) {
                         $buildCmd += $buildArgs

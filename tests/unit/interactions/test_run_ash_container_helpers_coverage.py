@@ -528,6 +528,16 @@ class TestBuildImage:
         path.write_text("FROM scratch\n", encoding="utf-8")
         return path
 
+    @pytest.fixture(autouse=True)
+    def _no_inherited_base_image_override(self, monkeypatch):
+        """ASH_BASE_IMAGE_OVERRIDE is read from the environment, so clear it.
+
+        CI sets it on the base-image fallback path, and a developer may well have it exported
+        after debugging that path. Left inherited, every assertion in this class about what is
+        and is not in the build argv would depend on the machine running it.
+        """
+        monkeypatch.delenv("ASH_BASE_IMAGE_OVERRIDE", raising=False)
+
     def test_the_gha_cache_switches_the_build_to_buildx_with_load(
         self, monkeypatch, recorded_commands, dockerfile, capfd
     ):
@@ -617,6 +627,128 @@ class TestBuildImage:
         _build_image(**_build_image_kwargs(dockerfile, debug=True))
 
         assert "Build completed with return code: 0" in capfd.readouterr().out
+
+    def test_custom_build_args_reach_the_build(
+        self, monkeypatch, recorded_commands, dockerfile
+    ):
+        """``--custom-build-arg`` was accepted, threaded three layers down, and dropped.
+
+        The value arrived in this function's signature from cli/image.py and cli/scan.py via
+        run_ash_scan and was then never appended to the command, so
+        ``ash build-image --custom-build-arg FOO=bar`` built an image with no FOO. Nothing
+        failed and nothing was logged; the arg simply had no effect.
+        """
+        monkeypatch.delenv("ACTIONS_RUNTIME_TOKEN", raising=False)
+
+        _build_image(
+            **_build_image_kwargs(
+                dockerfile, custom_build_arg=["FOO=bar", "BAZ=qux with space"]
+            )
+        )
+
+        cmd = recorded_commands[0]
+        assert "FOO=bar" in cmd, (
+            f"--custom-build-arg FOO=bar never reached the build command: {cmd}"
+        )
+        assert "BAZ=qux with space" in cmd, (
+            "each value must be passed as one argv element rather than split on whitespace, "
+            f"or a build-arg with a space in its value becomes two broken ones: {cmd}"
+        )
+        # One --build-arg per value, paired with it.
+        for value in ("FOO=bar", "BAZ=qux with space"):
+            assert cmd[cmd.index(value) - 1] == "--build-arg", (
+                f"{value!r} must be preceded by its own --build-arg: {cmd}"
+            )
+
+    def test_the_base_image_override_redirects_the_from_reference(
+        self, monkeypatch, recorded_commands, dockerfile
+    ):
+        """The base-image pre-pull's fallback reaches the build through this read.
+
+        ``.github/actions/prepull-base-image`` sets ASH_BASE_IMAGE_OVERRIDE to a digest-pinned
+        reference when ECR Public refuses the base image and Docker Hub serves it. It has to
+        arrive as a build-arg rather than as a local tag under the ECR name: BuildKit's OCI
+        worker keeps no image store, so nerdctl, finch and ``docker buildx`` on a
+        docker-container driver resolve ``FROM`` against the registry and never look locally.
+        Measured -- a build with the tag present still died at ``FROM`` asking the refusing
+        registry.
+        """
+        monkeypatch.delenv("ACTIONS_RUNTIME_TOKEN", raising=False)
+        pinned = "docker.io/library/python@sha256:" + "a" * 64
+        monkeypatch.setenv("ASH_BASE_IMAGE_OVERRIDE", pinned)
+
+        _build_image(**_build_image_kwargs(dockerfile))
+
+        cmd = recorded_commands[0]
+        assert f"BASE_IMAGE={pinned}" in cmd, (
+            f"the override must reach the build as a build-arg: {cmd}"
+        )
+        assert cmd[cmd.index(f"BASE_IMAGE={pinned}") - 1] == "--build-arg", cmd
+
+    def test_no_base_image_build_arg_when_the_override_is_unset(
+        self, monkeypatch, recorded_commands, dockerfile
+    ):
+        """The primary path's argv must be exactly what it was before this existed.
+
+        ECR Public answers on nearly every run, and on those runs the Dockerfile's own
+        ``ARG BASE_IMAGE`` default is the correct reference. Emitting a redirect anyway would
+        put a ``--build-arg BASE_IMAGE=`` on every container build in the repository and make
+        the Dockerfile's default unreachable.
+        """
+        monkeypatch.delenv("ACTIONS_RUNTIME_TOKEN", raising=False)
+
+        _build_image(**_build_image_kwargs(dockerfile))
+
+        cmd = recorded_commands[0]
+        assert not any(arg.startswith("BASE_IMAGE=") for arg in cmd), (
+            f"nothing should redirect FROM when no registry fallback happened: {cmd}"
+        )
+
+    def test_an_empty_or_blank_override_is_ignored(
+        self, monkeypatch, recorded_commands, dockerfile
+    ):
+        """Writing an empty value to GITHUB_ENV is how a composite action unsets a variable.
+
+        run-scan-test already does exactly that to clear the Actions cache credentials after
+        the build, so an empty ASH_BASE_IMAGE_OVERRIDE is a reachable state rather than a
+        hypothetical one. ``--build-arg BASE_IMAGE=`` would make ``FROM ${BASE_IMAGE}`` empty
+        and fail the build with a Dockerfile parse error, three steps from the cause.
+        """
+        monkeypatch.delenv("ACTIONS_RUNTIME_TOKEN", raising=False)
+        monkeypatch.setenv("ASH_BASE_IMAGE_OVERRIDE", "   ")
+
+        _build_image(**_build_image_kwargs(dockerfile))
+
+        cmd = recorded_commands[0]
+        assert not any(arg.startswith("BASE_IMAGE=") for arg in cmd), (
+            f"a blank override must be treated as unset, not passed through: {cmd}"
+        )
+
+    def test_an_explicit_custom_build_arg_outranks_the_override(
+        self, monkeypatch, recorded_commands, dockerfile
+    ):
+        """A caller who names BASE_IMAGE themselves means it.
+
+        A duplicate ``--build-arg`` is last-wins -- measured on docker 25.0.16 -- so the
+        override is emitted first and the caller's own value lands after it. Asserted on
+        position rather than presence, because both are present and only the order decides
+        which one the build uses.
+        """
+        monkeypatch.delenv("ACTIONS_RUNTIME_TOKEN", raising=False)
+        monkeypatch.setenv(
+            "ASH_BASE_IMAGE_OVERRIDE", "docker.io/library/python:from-ci"
+        )
+        chosen = "BASE_IMAGE=my.registry.invalid/python:mine"
+
+        _build_image(**_build_image_kwargs(dockerfile, custom_build_arg=[chosen]))
+
+        cmd = recorded_commands[0]
+        assert cmd.index(chosen) > cmd.index(
+            "BASE_IMAGE=docker.io/library/python:from-ci"
+        ), (
+            "the caller's explicit value has to come last, or the CI fallback silently "
+            f"overrides an intentional choice: {cmd}"
+        )
 
 
 class TestBuildCustomImage:

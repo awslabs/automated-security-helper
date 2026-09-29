@@ -158,10 +158,25 @@ else
       elif [[ "${HOST_GID}" != "" ]]; then
         CONTAINER_GID_OPTION="--build-arg GID=${HOST_GID}" # set the GID build-arg to the caller's GID if --container-uid is not specified
       fi
+      # ASH_BASE_IMAGE_OVERRIDE redirects `FROM ${BASE_IMAGE}` at whichever registry actually
+      # served the base image. .github/actions/prepull-base-image sets it when ECR Public
+      # refuses and Docker Hub answers, as a digest-pinned reference.
+      #
+      # It cannot be a local tag under the ECR name instead. BuildKit's OCI worker keeps no
+      # image store, so nerdctl and finch -- both reachable here through OCI_RUNNER -- resolve
+      # FROM against the registry and ignore the local tag entirely. Unquoted for the same
+      # reason as the two options above: these expand to nothing when unset, and an image
+      # reference contains no whitespace.
+      BASE_IMAGE_OPTION=""
+      if [[ -n "${ASH_BASE_IMAGE_OVERRIDE:-}" ]]; then
+        BASE_IMAGE_OPTION="--build-arg BASE_IMAGE=${ASH_BASE_IMAGE_OVERRIDE}"
+        echo "Base image redirected to ${ASH_BASE_IMAGE_OVERRIDE} by ASH_BASE_IMAGE_OVERRIDE."
+      fi
       echo "Building image ${ASH_IMAGE_NAME} -- this may take a few minutes during the first build..."
       ${RESOLVED_OCI_RUNNER} build \
         ${CONTAINER_UID_OPTION} \
         ${CONTAINER_GID_OPTION} \
+        ${BASE_IMAGE_OPTION} \
         --tag ${ASH_IMAGE_NAME} \
         --target ${TARGET_STAGE} \
         --file "${ASH_ROOT_DIR}/Dockerfile" \
