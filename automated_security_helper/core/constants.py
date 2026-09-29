@@ -32,6 +32,63 @@ ASH_CONFIG_FILE_NAMES = [
     "ash.json",
 ]
 
+# The environment variable names an ASH config file may interpolate.
+#
+# Why there is a bound at all
+# ---------------------------
+# ``AshConfig.from_file`` resolves ``${VAR:default}`` references in YAML, and the
+# file it resolves them in is the project config -- ``ASH_CONFIG_FILE_NAMES``
+# above, found inside the tree being scanned. ASH's own use case is scanning code
+# whose author is not the operator running the scan, so which variables that file
+# may name is ASH's decision rather than the file's. Without a bound the set was
+# "every variable in the process", and the resolved value does not stay in the
+# field it lands in: ``AshAggregatedResults.ash_config`` holds the whole resolved
+# config and ``to_simple_dict`` writes it into ``ash_aggregated_results.json``,
+# so any field is an output field.
+#
+# This is the same reasoning ``config/ash_workspace_config.py`` records under
+# "No ``!ENV`` substitution, unlike the project config", reached from the other
+# direction. That loader answered the question by resolving nothing. This one
+# cannot: the ``!ENV`` feature is deliberate, documented, and used by the AWS
+# reporters, so the answer here is a bounded set rather than an empty one.
+#
+# Why a prefix plus a short list, rather than a list alone
+# -------------------------------------------------------
+# ASH's own settings are already conventionally ``ASH_``-prefixed, so a prefix
+# covers every present and future one -- including the documented
+# ``ASH_S3_BUCKET_NAME``, ``ASH_S3_BUCKET_PREFIX`` and
+# ``ASH_CLOUDWATCH_LOG_GROUP`` -- without this list having to track the plugins.
+# The three names below are the ones the shipped AWS reporters document that a
+# prefix cannot reach.
+#
+# What was rejected
+# -----------------
+# * Interpolating for an operator-supplied ``--config`` but not for a config
+#   discovered inside the scanned tree. The distinction exists in
+#   ``resolve_config`` but does not track trust: pointing ``--config`` at a file
+#   inside the tree is the documented common case, and ASH's own CI does it.
+# * Dropping the implicit resolver so ``!ENV`` must be written explicitly. The
+#   file is written by whoever wrote the tree, so they can write the tag too;
+#   it would remove a working spelling and bound nothing.
+# * An environment variable that extends this list. A bound an environment
+#   variable can widen is not a bound -- ``ash_workspace_config.py`` records the
+#   same objection about a ceiling -- and CI is where an extra variable is
+#   easiest to arrange and hardest to notice.
+#
+# Growing the list
+# ----------------
+# Every entry names *where* to send a report, never *what to authenticate with*.
+# ``tests/unit/config/test_config_env_interpolation.py`` asserts that, so an
+# entry ending in KEY, TOKEN, SECRET, PASSWORD or CREDENTIAL fails the suite.
+# An operator needing another name renames it with the ``ASH_`` prefix.
+ASH_CONFIG_ENV_VAR_PREFIX = "ASH_"
+
+ASH_CONFIG_ENV_VAR_ALLOWLIST = [
+    "AWS_DEFAULT_REGION",
+    "AWS_PROFILE",
+    "AWS_REGION",
+]
+
 KNOWN_LOCKFILE_NAMES = [
     "package-lock.json",
     "yarn.lock",

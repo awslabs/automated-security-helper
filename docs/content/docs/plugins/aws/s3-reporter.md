@@ -34,10 +34,12 @@ reporters:
   s3:
     enabled: true
     options:
-      # Use environment variables to insert the bucket name
-      bucket_name: !ENV ASH_S3_BUCKET_NAME
-      aws_region: !ENV AWS_REGION
-      aws_profile: !ENV AWS_PROFILE
+      # Use environment variables to insert the bucket name. The braces and the
+      # default are both required: `!ENV ASH_S3_BUCKET_NAME` resolves to the
+      # literal string "ASH_S3_BUCKET_NAME", and so does `${ASH_S3_BUCKET_NAME}`.
+      bucket_name: !ENV ${ASH_S3_BUCKET_NAME:None}
+      aws_region: !ENV ${AWS_REGION:None}
+      aws_profile: !ENV ${AWS_PROFILE:None}
       file_format: json
       key_prefix: security-scans/
       # Retry configuration
