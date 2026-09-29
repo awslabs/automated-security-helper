@@ -17,7 +17,9 @@ from automated_security_helper.base.scanner_plugin import ScannerPluginConfigBas
 from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
-from automated_security_helper.core.constants import KNOWN_LOCKFILE_NAMES
+from automated_security_helper.core.constants import (
+    KNOWN_GENERATED_LOCKFILE_NAMES,
+)
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.core.exceptions import ScannerError
@@ -90,6 +92,20 @@ class DetectSecretsScannerConfigOptions(ScannerOptionsBase):
             description="Settings to use with detect-secrets. Refer to the detect-secrets documentation for formatting information. By default, all plugins will be used and no filters are configured. scan_settings takes precedence over baseline_file",
         ),
     ] = DetectSecretsScanSettings()
+    skip_generated_lockfiles: Annotated[
+        bool,
+        Field(
+            description=(
+                "Skip machine-generated dependency lockfiles (package-lock.json, "
+                "yarn.lock, poetry.lock, and similar) before scanning. These are "
+                "dense with integrity hashes and are regenerated rather than "
+                "hand-edited, so findings in them are usually noise. Hand-authored "
+                "dependency declarations such as requirements.txt, Pipfile and "
+                "environment.yml are always scanned and are not affected by this "
+                "option. Set to false to scan generated lockfiles as well."
+            ),
+        ),
+    ] = True
     # scan_timeout is inherited from ScannerOptionsBase now. The local copy that
     # used to live here declared `int` with no `ge`, so it shadowed the base field
     # and gave detect-secrets a different contract from every other scanner:
@@ -432,7 +448,21 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
             )
             self._secrets_collection.root = Path(scan_root).absolute()
 
-            # Find all files to scan from the scan set
+            # Find all files to scan from the scan set.
+            #
+            # Only machine-generated lockfiles are dropped here. Hand-authored
+            # dependency declarations -- requirements.txt, Pipfile,
+            # environment.yml and friends -- stay in the scan set: a human types
+            # those, so a credential can land in one, and this pre-filter runs
+            # upstream of every other control, so anything dropped here is
+            # unrecoverable by any baseline or ignore-path setting. See the
+            # comment block on KNOWN_GENERATED_LOCKFILE_NAMES for why the two
+            # lists must stay separate.
+            skipped_names = (
+                frozenset(KNOWN_GENERATED_LOCKFILE_NAMES)
+                if self.config.options.skip_generated_lockfiles
+                else frozenset()
+            )
             scannable = [
                 str(item)
                 for item in (
@@ -443,8 +473,7 @@ class DetectSecretsScanner(ScannerPluginBase[DetectSecretsScannerConfig]):
                         output=self.context.output_dir,
                     )
                 )
-                if Path(item).name not in [*KNOWN_LOCKFILE_NAMES]
-                and "/.ash/" not in str(item)
+                if Path(item).name not in skipped_names and "/.ash/" not in str(item)
             ]
 
             # Build the scan_settings dict for transient_settings, ensuring
