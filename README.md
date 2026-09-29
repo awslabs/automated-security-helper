@@ -68,8 +68,8 @@ ASH v3 integrates multiple open-source security tools as scanners. Tools like Ba
 
 | Scanner                                                       | Type      | Languages/Frameworks                                                                         | Installation (Local Mode)                                               |
 |---------------------------------------------------------------|-----------|----------------------------------------------------------------------------------------------|-------------------------------------------------------------------------|
-| [Bandit](https://github.com/PyCQA/bandit)                     | SAST      | Python                                                                                       | Managed via UV tool isolation (auto-installed: `bandit>=1.7.0`)        |
-| [Semgrep](https://github.com/semgrep/semgrep)                 | SAST      | Python, JavaScript, TypeScript, Java, Go, C#, Ruby, PHP, Kotlin, Swift, Bash, and more       | Managed via UV tool isolation (auto-installed: `semgrep>=1.125.0`)     |
+| [Bandit](https://github.com/PyCQA/bandit)                     | SAST      | Python                                                                                       | Managed via UV tool isolation (auto-installed: `bandit>=1.7.0,<2.0.0`)        |
+| [Semgrep](https://github.com/semgrep/semgrep)                 | SAST      | Python, JavaScript, TypeScript, Java, Go, C#, Ruby, PHP, Kotlin, Swift, Bash, and more       | Managed via UV tool isolation (auto-installed: `semgrep>=1.125.0,<2.0.0`)     |
 | [Opengrep](https://github.com/opengrep/opengrep)               | SAST      | Same rule surface as Semgrep (open-source fork)                                               | Managed via UV tool isolation                                           |
 | [detect-secrets](https://github.com/Yelp/detect-secrets)      | Secrets   | All text files                                                                               | Included with ASH                                                       |
 | [Checkov](https://github.com/bridgecrewio/checkov)            | IaC, SAST | Terraform, CloudFormation, Kubernetes, Dockerfile, ARM Templates, Serverless, Helm, and more | Managed via UV tool isolation (auto-installed: `checkov>=3.2.0,<4.0.0`) |
@@ -537,9 +537,9 @@ If you're experiencing UV tool installation issues:
 3. **Use offline mode**: Set `ASH_OFFLINE=true` to skip downloads and use pre-installed tools
 4. **Manual installation**: Pre-install tools manually:
    ```bash
-   uv tool install bandit>=1.7.0
+   uv tool install bandit>=1.7.0,<2.0.0
    uv tool install checkov>=3.2.0,<4.0.0
-   uv tool install semgrep>=1.125.0
+   uv tool install semgrep>=1.125.0,<2.0.0
    ```
 5. **Check logs**: Run ASH with `--verbose` to see detailed error messages including:
    - UV availability status

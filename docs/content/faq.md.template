@@ -132,8 +132,8 @@ ash --config-overrides 'global_settings.severity_threshold=LOW'
 
 ### What security scanners are included in ASH v3?
 ASH v3 integrates multiple open-source security tools. Tools like Bandit, Checkov, and Semgrep are managed via UV's tool isolation system, which automatically installs and runs them in isolated environments:
-- Bandit (Python SAST) - Managed via UV tool isolation (auto-installed: `bandit>=1.7.0`)
-- Semgrep (Multi-language SAST) - Managed via UV tool isolation (auto-installed: `semgrep>=1.125.0`)
+- Bandit (Python SAST) - Managed via UV tool isolation (auto-installed: `bandit>=1.7.0,<2.0.0`)
+- Semgrep (Multi-language SAST) - Managed via UV tool isolation (auto-installed: `semgrep>=1.125.0,<2.0.0`)
 - detect-secrets (Secret detection) - Included with ASH
 - Checkov (IaC scanning) - Managed via UV tool isolation (auto-installed: `checkov>=3.2.0,<4.0.0`)
 - cfn_nag (CloudFormation scanning) - Requires separate installation

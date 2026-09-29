@@ -70,7 +70,10 @@ class BanditScannerConfigOptions(ScannerOptionsBase):
     tool_version: Annotated[
         str | None,
         Field(
-            description="Specific version constraint for bandit installation (e.g., '>=1.7.0,<2.0.0')"
+            description=(
+                "Version constraint for bandit installation, in pip requirement "
+                "syntax. The default below is the constraint the scanner enforces."
+            )
         ),
     ] = ">=1.7.0,<2.0.0"
     install_timeout: Annotated[
@@ -136,7 +139,11 @@ class BanditScanner(ScannerPluginBase[BanditScannerConfig]):
         """Get version constraint for bandit installation.
 
         Returns:
-            Version constraint string for bandit (e.g., ">=1.7.0") or None for latest
+            The configured ``tool_version`` constraint, whose default carries an
+            upper bound excluding the next major version. No literal is repeated
+            here: a copy of the constraint in this docstring went stale against
+            the default beside it, which is what made the published docs drop the
+            ceiling and tell readers to install an excluded major version.
         """
         # Use bandit-specific version constraint - bandit 1.7.0+ has better SARIF support
         return self.config.options.tool_version

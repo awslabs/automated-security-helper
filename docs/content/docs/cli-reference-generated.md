@@ -3,6 +3,13 @@
 This document is auto-generated from the ASH CLI source code using introspection.
 Do not edit manually. Regenerate with: `uv run python scripts/generate_cli_docs.py`
 
+**Which CLI reference is authoritative.** Two pages describe the CLI: this one and the hand-written [CLI Reference](cli-reference.md). They are not interchangeable, and the split is deliberate rather than accidental:
+
+* For **flag names and aliases, parameter types, defaults, and environment variables**, this page wins. Every row here is introspected from the Typer command definitions, and `tests/unit/test_generated_docs_freshness.py` fails the build if this file and the code disagree. The hand-written page has no such gate and has drifted.
+* For **worked examples, exit codes, configuration-override syntax, and narrative guidance**, the hand-written page wins. None of that can be introspected, so it is not reproduced here.
+
+The intended end state is a single page: this one, with the hand-written page's narrative content folded in. Until that migration lands, treat a disagreement about a flag between the two pages as a defect in the hand-written page.
+
 ## Commands
 
 ### `ash scan`
@@ -20,21 +27,21 @@ Runs an ASH scan against the source-dir, outputting results to the output-dir.
 | `--offline` | bool | False |  | Run scan in offline/airgapped mode (skips NPM/PNPM/Yarn Audit checks). IMPORTANT: Online access is needed when building ASH to prepare it for usage during a scan! If selecting Offline while performing a build, the ASH container image will be built in offline mode and any typically online-only dependencies like downloadable tool vulnerability databases will be cached in the image itself before publishing for scan usage. |
 | `--offline-semgrep-rulesets` | str | `p/ci` |  | Specify Semgrep rulesets for use in ASH offline mode |
 | `--strategy` | enum(sequential, parallel) | `parallel` |  | Whether to run scanners in parallel or sequential |
-| `-p/-P` | bool | True |  | Show progress of each job live in the console. Defaults to True. |
-| `--output-format`, `--formats`, `--format`, `-f` | List[str] |  |  | The output formats to use (comma-separated). Available formats: aggregated, text, flat-json, yaml, csv, html, dict, junitxml, markdown, sarif, asff, ocsf, cyclonedx, spdx, custom |
+| `--progress/--no-progress`, `-p/-P` | bool | True |  | Show progress of each job live in the console. Defaults to True. |
+| `--output-formats`, `--output-format`, `--formats`, `--format`, `-f` | List[str] |  |  | The output formats to use (comma-separated). Available formats: aggregated, text, flat-json, yaml, csv, html, dict, junitxml, markdown, sarif, asff, ocsf, cyclonedx, spdx, custom |
 | `--cleanup` | bool | False |  | Clean up 'converted' directory and other temporary files after scan completes. Defaults to False. Note: Scans will always clean up existing files in the output directory before a new scan starts. This parameter only affects the cleanup of the temporary work directory after a scan has completed, typically for inspection of temporary artifacts. |
 | `--phases` | List[enum(convert, scan, report, inspect)] |  |  | The phases to run. Defaults to all phases except inspect. |
 | `--inspect` | bool | False |  | Enable inspection of SARIF fields after running. This adds the inspect phase to the execution. |
 | `--use-existing` | bool | False |  | Use an existing ash_aggregated_results.json file in the output-dir. If True, the scan phase will be skipped and reports will be generated from this file. |
 | `--version` | bool | False |  | Prints version number |
 | `--mode` | enum(precommit, container, local, nix) | `RunMode.local` | ASH_MODE | Execution mode preset. 'precommit' enables python-based plugins only and simplified output. 'container' runs non-Python plugins in a container. 'local' (default) runs everything in the local Python process. |
-| `--python-based-scanners-only/--all-enabled-scanners`, `--python-based-plugins-only/--all-enabled-plugins` | bool | False |  | Exclude execution of any plugins or tools that have depencies external to Python. |
+| `--python-only/--full`, `--python-based-scanners-only/--all-enabled-scanners`, `--python-based-plugins-only/--all-enabled-plugins` | bool | False |  | Exclude execution of any plugins or tools that have depencies external to Python. |
 | `--show-summary` | bool | True |  | Show metrics table and results summary |
 | `--quiet` | bool | False |  | Hide all log output |
 | `--log-level` | enum(QUIET, SIMPLE, ERROR, INFO, ...) | `AshLogLevel.INFO` |  | Set the log level. |
-| `-c` | str |  | ASH_CONFIG | The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json']. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH. |
-| `-v` | bool | False |  | Enable verbose logging |
-| `-d` | bool | False |  | Enable debug logging |
+| `--config`, `-c` | str |  | ASH_CONFIG | The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json']. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH. |
+| `--verbose`, `-v` | bool | False |  | Enable verbose logging |
+| `--debug`, `-d` | bool | False |  | Enable debug logging |
 | `--color` | bool | True |  | Enable/disable colorized output |
 | `--fail-on-findings` | bool |  |  | Enable/disable throwing non-successful exit codes if any actionable findings are found. Defaults to unset, which prefers the configuration value. If this is set directly, it takes precedence over the configuration value. |
 | `--fail-on-incomplete-scanners` | bool |  |  | Exit 1 when a selected scanner did not complete -- ERROR (ran and failed) or MISSING (dependencies unavailable, so it never ran). Without this, a run where nothing ran exits 0, the same code as a clean scan, because no scanner produced any finding. SKIPPED scanners are ones you did not select and never trip it, so --scanners and --exclude-scanners both narrow what is gated. Independent of --fail-on-findings, and takes precedence over it when both would fail: a partial scan's findings are real but its clean bill of health is not. Defaults to unset, which prefers the configuration value and then off, because this repository's own cdk-nag leaves 4 of 10 targets unevaluated and would fail the gate on every platform. Pass --fail-on-incomplete-scanners to enable it. |
@@ -50,13 +57,13 @@ Runs an ASH scan against the source-dir, outputting results to the output-dir.
 | `--workspace-config` | str |  | ASH_WORKSPACE_CONFIG | Path to the workspace policy file (severity ceiling, workspace-wide suppressions and ignore paths, additional scanners). Without this, ASH looks for 'ash-workspace.{yaml,yml,json}' in the workspace root or its '.ash' directory; finding none is not an error. Must not be any project's own ASH config: workspace policy governs every project, so reading one project's config as policy would apply its settings to its siblings. |
 | `--allow-missing-projects` | bool | False |  | In workspace mode, skip project folders that are absent or unreadable instead of failing. Skipped projects are recorded in the plan. Without this, a missing project fails the whole workspace, so a typo or an un-cloned repository cannot pass as a clean scan. |
 | `--dry-run` | bool | False |  | In workspace mode, print the resolved execution plan and exit without scanning anything. |
-| `-b/-B` | bool | True |  | Whether to build the ASH container image |
-| `-r/-R` | bool | True |  | Whether to run the ASH container image |
+| `--build/--no-build`, `-b/-B` | bool | True |  | Whether to build the ASH container image |
+| `--run/--no-run`, `-r/-R` | bool | True |  | Whether to run the ASH container image |
 | `--force` | bool | False |  | Force rebuild of the ASH container image |
-| `--oci`, `--runner`, `-o` | str |  | OCI_RUNNER | Use the specified OCI runner instead of docker to run the containerized tools |
+| `--oci-runner`, `--oci`, `--runner`, `-o` | str |  | OCI_RUNNER | Use the specified OCI runner instead of docker to run the containerized tools |
 | `--build-target` | enum(non-root, ci) |  |  | Specify the target stage of the ASH image to build |
-| `-u` | str |  |  | UID to use for the container user |
-| `-g` | str |  |  | GID to use for the container user |
+| `--container-uid`, `-u` | str |  |  | UID to use for the container user |
+| `--container-gid`, `-g` | str |  |  | GID to use for the container user |
 | `--ash-revision-to-install` | str |  |  | ASH branch or tag to install in the container image for usage during containerized scans |
 | `--custom-containerfile` | str |  |  | Path to a custom container definition (e.g. Dockerfile) that you would like to build *after* the ASH container image builds. This is typically used when building a custom container image for ASH and including custom tooling that ASH does not come with by default. The fully qualified image name for the ASH image is passed in as the `ASH_BASE_IMAGE` build-arg so you can use it as a base. IMPORTANT: When a custom_containerfile path is provided, the build-target is set to `ci` so the container run-as configuration is not shifted to the non-root user. If you are using this parameter, you are responsible for securing your final container as appropriate. |
 | `--custom-build-arg` | List[str] |  |  | Custom build arguments to pass to the container build |
@@ -69,13 +76,13 @@ Builds the ASH container image then runs a scan with it.
 |------|------|---------|---------|-------------|
 | `--no-build` | bool | False |  | Skip building the ASH container image; reuse an existing image if present |
 | `--no-run` | bool | False |  | Build the ASH container image but do not run a scan |
-| `-f` | bool | False |  | Force rebuild of the ASH container image |
-| `--oci`, `--runner`, `-r` | str |  | OCI_RUNNER | Use the specified OCI runner instead of docker to run the containerized tools. To prefix every OCI command with a wrapper (e.g. sudo), set the OCI_RUNNER_WRAPPER environment variable instead of using this option (e.g. OCI_RUNNER_WRAPPER=sudo ash ...). |
+| `--force`, `-f` | bool | False |  | Force rebuild of the ASH container image |
+| `--oci-runner`, `--oci`, `--runner`, `-r` | str |  | OCI_RUNNER | Use the specified OCI runner instead of docker to run the containerized tools. To prefix every OCI command with a wrapper (e.g. sudo), set the OCI_RUNNER_WRAPPER environment variable instead of using this option (e.g. OCI_RUNNER_WRAPPER=sudo ash ...). |
 | `--container-network` | str | `bridge` |  | Docker network mode for the container run (e.g. 'bridge', 'none', 'host'). Pass 'none' to force offline/airgapped network isolation independently of --offline. |
 | `--build-target` | enum(non-root, ci) | `BuildTarget.NON_ROOT` |  | Specify the target stage of the ASH image to build |
 | `--offline-semgrep-rulesets` | str | `p/ci` |  | Specify Semgrep rulesets for use in ASH offline mode |
-| `-u` | str |  |  | UID to use for the container user |
-| `-g` | str |  |  | GID to use for the container user |
+| `--container-uid`, `-u` | str |  |  | UID to use for the container user |
+| `--container-gid`, `-g` | str |  |  | GID to use for the container user |
 | `--ash-revision-to-install` | str |  |  | ASH branch or tag to install in the container image for usage during containerized scans |
 | `--custom-containerfile` | str |  |  | Path to a custom container definition (e.g. Dockerfile) that you would like to build *after* the ASH container image builds. This is typically used when building a custom container image for ASH and including custom tooling that ASH does not come with by default. The fully qualified image name for the ASH image is passed in as the `ASH_BASE_IMAGE` build-arg so you can use it as a base. IMPORTANT: When a custom_containerfile path is provided, the build-target is set to `ci` so the container run-as configuration is not shifted to the non-root user. If you are using this parameter, you are responsible for securing your final container as appropriate. |
 | `--custom-build-arg` | List[str] |  |  | Custom build arguments to pass to the container build |
@@ -83,9 +90,9 @@ Builds the ASH container image then runs a scan with it.
 | `--offline` | bool | False |  | Run scan in offline/airgapped mode (skips NPM/PNPM/Yarn Audit checks). IMPORTANT: Online access is needed when building ASH to prepare it for usage during a scan! If selecting Offline while performing a build, the ASH container image will be built in offline mode and any typically online-only dependencies like downloadable tool vulnerability databases will be cached in the image itself before publishing for scan usage. |
 | `--quiet` | bool | False |  | Hide all log output |
 | `--log-level` | enum(QUIET, SIMPLE, ERROR, INFO, ...) | `AshLogLevel.INFO` |  | Set the log level. |
-| `-c` | str |  | ASH_CONFIG | The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json']. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH. |
-| `-v` | bool | False |  | Enable verbose logging |
-| `-d` | bool | False |  | Enable debug logging |
+| `--config`, `-c` | str |  | ASH_CONFIG | The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json']. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH. |
+| `--verbose`, `-v` | bool | False |  | Enable verbose logging |
+| `--debug`, `-d` | bool | False |  | Enable debug logging |
 | `--color` | bool | True |  | Enable/disable colorized output |
 
 ### `ash report`
@@ -94,15 +101,32 @@ Generate a report from ASH scan results using the specified reporter plugin.
 
 | Flag | Type | Default | Env Var | Description |
 |------|------|---------|---------|-------------|
-| `--report-format` | str | `markdown` |  | Report format to generate (reporter plugin name). Defaults to 'markdown'. Examples values: aggregated, text, flat-json, yaml, csv, html, dict, junitxml, markdown, sarif, asff, ocsf, cyclonedx, spdx, custom |
+| `--format` | str | `markdown` |  | Report format to generate (reporter plugin name). Defaults to 'markdown'. Examples values: aggregated, text, flat-json, yaml, csv, html, dict, junitxml, markdown, sarif, asff, ocsf, cyclonedx, spdx, custom |
 | `--output-dir` | str |  | ASH_OUTPUT_DIR | The directory to output results to |
 | `--log-level` | enum(QUIET, SIMPLE, ERROR, INFO, ...) | `AshLogLevel.INFO` |  | Set the log level. |
-| `-c` | str |  | ASH_CONFIG | The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json']. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH. |
+| `--config`, `-c` | str |  | ASH_CONFIG | The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json']. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH. |
 | `--config-overrides` | List[str] |  |  | Configuration overrides specified as key-value pairs (e.g., 'reporters.cloudwatch-logs.options.aws_region=us-west-2') |
-| `-v` | bool | False |  | Enable verbose logging |
-| `-d` | bool | False |  | Enable debug logging |
+| `--verbose`, `-v` | bool | False |  | Enable verbose logging |
+| `--debug`, `-d` | bool | False |  | Enable debug logging |
 | `--color` | bool | True |  | Enable/disable colorized output |
 
+### `ash merge`
+
+Merges the results of a sharded scan into one unified report.
+
+| Flag | Type | Default | Env Var | Description |
+|------|------|---------|---------|-------------|
+| `--results` | List[str] | *required* |  | A shard's ash_aggregated_results.json, or a directory containing one. Repeat once per shard. |
+| `--output-dir` | str | *required* | ASH_OUTPUT_DIR | Directory to write the merged results and reports to. |
+| `--output-formats` | List[str] |  |  | Comma-separated report formats to generate. Defaults to the formats the scan's own configuration asks for. |
+| `--min-severity` | str | `low` |  | Minimum severity that counts as actionable for the exit code. |
+| `--ignore-suppressions` | bool | False |  | Ignore all suppression rules and report every finding regardless of suppression status. Mirrors 'ash scan --ignore-suppressions', so the same tree gives the same verdict sharded or not. |
+| `--fail-on-findings/--no-fail-on-findings` | bool |  |  | Exit non-zero when the merged report has actionable findings. Defaults to the scan configuration's value, then to true. |
+| `--fail-on-incomplete-scanners/--no-fail-on-incomplete-scanners` | bool |  |  | Refuse the merge when a shard completed none of the scanners it owned, and exit 1 when any scanner in the union is ERROR or MISSING. Without this, a shard whose scanners never ran contributes no findings and the merged report reads as a complete, clean scan. Defaults to the scan configuration's value, then to false. |
+| `--log-level` | enum(QUIET, SIMPLE, ERROR, INFO, ...) | `AshLogLevel.INFO` |  | Set the log level. |
+| `--verbose`, `-v` | bool | False |  | Enable verbose logging |
+| `--debug`, `-d` | bool | False |  | Enable debug logging |
+| `--color` | bool | True |  | Enable/disable colorized output |
 
 ### `ash mcp`
 
@@ -140,9 +164,9 @@ Download the ASH GenAI Integration Guide for use with AI assistants and LLMs.
 
 | Flag | Type | Default | Env Var | Description |
 |------|------|---------|---------|-------------|
-| `-c` | str | `.ash/.ash.yaml` | ASH_CONFIG | The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json']. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH. |
-| `-v` | bool | False |  | Enable verbose logging |
-| `-d` | bool | False |  | Enable debug logging |
+| `--config`, `-c` | str | `.ash/.ash.yaml` | ASH_CONFIG | The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json']. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH. |
+| `--verbose`, `-v` | bool | False |  | Enable verbose logging |
+| `--debug`, `-d` | bool | False |  | Enable debug logging |
 | `--color` | bool | True |  | Enable/disable colorized output |
 | `--force` | bool | False |  | Overwrite the config file if it already exists at the target path. |
 
@@ -173,7 +197,7 @@ Update an existing configuration file with the specified modifications.
 
 | Flag | Type | Default | Env Var | Description |
 |------|------|---------|---------|-------------|
-| `--modifications` | List[str] | [] |  | Configuration modifications specified as key-value pairs (e.g., 'global_settings.severity_threshold=LOW'). Supports lists with [item1,item2], append mode with key+=[value], and JSON syntax. |
+| `--set` | List[str] | [] |  | Configuration modifications specified as key-value pairs (e.g., 'global_settings.severity_threshold=LOW'). Supports lists with [item1,item2], append mode with key+=[value], and JSON syntax. |
 | `--verbose` | bool | False |  | Enable verbose logging |
 | `--debug` | bool | False |  | Enable debug logging |
 | `--color` | bool | True |  | Enable/disable colorized output |
@@ -200,13 +224,13 @@ Lint an ASH configuration file for issues and optionally auto-fix them.
 
 | Flag | Type | Default | Env Var | Description |
 |------|------|---------|---------|-------------|
-| `-c` | str | `.ash/.ash.yaml` | ASH_CONFIG | The path to the configuration file to lint. By default, ASH looks for config files in .ash/.ash.yaml |
-| `-o` | str |  |  | Path to the ASH output directory (for unused suppressions report). Defaults to .ash/ash_output |
+| `--config`, `-c` | str | `.ash/.ash.yaml` | ASH_CONFIG | The path to the configuration file to lint. By default, ASH looks for config files in .ash/.ash.yaml |
+| `--output-dir`, `-o` | str |  |  | Path to the ASH output directory (for unused suppressions report). Defaults to .ash/ash_output |
 | `--fix` | bool | False |  | Auto-fix fixable issues (internal fields, missing line_end, expired suppressions, multi-line suppression reasons) |
 | `--fix-unused` | bool | False |  | Comment out unused suppressions based on the last scan's unused suppressions report |
-| `--yes`, `-y` | bool | False |  | Accept all changes without prompting. Useful for pre-commit hooks and CI/CD |
-| `-v` | bool | False |  | Enable verbose logging |
-| `-d` | bool | False |  | Enable debug logging |
+| `--non-interactive`, `--yes`, `-y` | bool | False |  | Accept all changes without prompting. Useful for pre-commit hooks and CI/CD |
+| `--verbose`, `-v` | bool | False |  | Enable verbose logging |
+| `--debug`, `-d` | bool | False |  | Enable debug logging |
 | `--color` | bool | True |  | Enable/disable colorized output |
 
 ### `ash config wizard`
@@ -215,9 +239,9 @@ Interactive configuration wizard.
 
 | Flag | Type | Default | Env Var | Description |
 |------|------|---------|---------|-------------|
-| `-c` | str | `.ash/.ash.yaml` | ASH_CONFIG | Path to read/write the configuration file. |
-| `-v` | bool | False |  | Enable verbose logging |
-| `-d` | bool | False |  | Enable debug logging |
+| `--config`, `-c` | str | `.ash/.ash.yaml` | ASH_CONFIG | Path to read/write the configuration file. |
+| `--verbose`, `-v` | bool | False |  | Enable verbose logging |
+| `--debug`, `-d` | bool | False |  | Enable debug logging |
 | `--color` | bool | True |  | Enable/disable colorized output |
 
 ### `ash config validate`
@@ -226,9 +250,9 @@ Validate an ASH configuration file for common issues.
 
 | Flag | Type | Default | Env Var | Description |
 |------|------|---------|---------|-------------|
-| `-c` | str | `.ash/.ash.yaml` | ASH_CONFIG | The path to the configuration file to validate. By default, ASH looks for config files in .ash/.ash.yaml |
-| `-v` | bool | False |  | Enable verbose logging |
-| `-d` | bool | False |  | Enable debug logging |
+| `--config`, `-c` | str | `.ash/.ash.yaml` | ASH_CONFIG | The path to the configuration file to validate. By default, ASH looks for config files in .ash/.ash.yaml |
+| `--verbose`, `-v` | bool | False |  | Enable verbose logging |
+| `--debug`, `-d` | bool | False |  | Enable debug logging |
 
 ## Inspect Subcommands
 
@@ -240,6 +264,7 @@ Interactively explore security findings.
 |------|------|---------|---------|-------------|
 | `--output-dir` | Path |  |  | Path to the output directory containing an ASH Aggregated Results JSON report file to analyze. |
 | `--report-file` | str | `ash_aggregated_results.json` |  | Name of the report file to analyze. Defaults to 'ash_aggregated_results.json'. |
+| `--config`, `-c` | Path |  | ASH_CONFIG | Path to the configuration file where suppressions should be saved. By default, ASH searches for ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json']. |
 
 ### `ash inspect sarif-fields`
 
@@ -341,13 +366,9 @@ List all active and recent scans with their current status.
 
 List the config profiles the operator registered at server startup.
 
-### `monitor_scan_progress`
+### `list_scanners`
 
-Monitor scan progress and report updates via the MCP context.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `scan_id` | str | *required* | The scan ID returned by run_ash_scan. |
+List all registered ASH scanners with their metadata.
 
 ### `resolve_ash_workspace`
 
@@ -428,3 +449,12 @@ Build a paste-ready AshSuppression entry for a specific finding.
 | `results_path` | str |  | Path to ash_aggregated_results.json. Defaults to |
 | `expiration` | str |  | Expiration date in YYYY-MM-DD format. Defaults to 90 days from today. |
 | `justification` | str |  | Human-readable reason for the suppression. |
+
+### `validate_config`
+
+Validate an ASH configuration file or content string.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `config_content` | str |  | YAML/JSON string to validate. |
+| `config_path` | str |  | Path to the config file to validate. |

@@ -9,7 +9,46 @@ from automated_security_helper.plugins.events import AshEventType
 def _load_module(module_path: str):
     """Import a module by its dotted path and return it."""
     # nosec
-    return importlib.import_module(module_path)  # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
+    return importlib.import_module(
+        module_path
+    )  # nosemgrep: python.lang.security.audit.non-literal-import.non-literal-import
+
+
+def _plugin_classes(module, base) -> list:
+    """Return every ``base`` subclass the module exports, sorted by class name.
+
+    Why this exists rather than a hand-written list per plugin kind: importing a
+    plugin package fires its ``@ash_*_plugin`` decorators, so the *registered*
+    set is whatever that package exports. Naming the classes a second time in
+    ``_load_builtin_plugins`` created a second, independent inventory that
+    nothing reconciled against the first, and it drifted -- ``GHASReporter`` and
+    ``GitLabCycloneDXReporter`` were registered by their decorators but absent
+    from ``ASH_REPORTERS``, which is what ``plugins/discovery.py`` reads. The
+    two reporters were therefore invisible to plugin discovery while being live
+    in the registry.
+
+    Deriving the list means "exported by the package" and "in ASH_REPORTERS" are
+    the same statement, so adding a reporter cannot forget this file.
+
+    ``__all__`` is the enumeration source because it is the package's own
+    declaration of what it exports; the ``base`` filter then drops exported
+    non-plugin helpers such as ``ReportContentEmitter``, which is a plain class
+    and not a ``ReporterPluginBase``.
+    """
+    found = []
+    for name in getattr(module, "__all__", ()):
+        obj = getattr(module, name, None)
+        if isinstance(obj, type) and issubclass(obj, base) and obj is not base:
+            found.append(obj)
+    if not found:
+        # An empty inventory would silently disable a whole plugin kind, which is
+        # indistinguishable from "this package legitimately ships none" at every
+        # call site downstream. Builtin packages always ship some.
+        raise RuntimeError(
+            f"{module.__name__} exported no {base.__name__} subclasses via __all__; "
+            f"builtin plugin discovery would silently come up empty."
+        )
+    return sorted(found, key=lambda cls: cls.__name__)
 
 
 def _load_builtin_plugins():
@@ -19,84 +58,32 @@ def _load_builtin_plugins():
     decorators fire at import time to register each class with the plugin
     manager, so the import itself is sufficient for registration.
     """
+    from automated_security_helper.base.converter_plugin import ConverterPluginBase
+    from automated_security_helper.base.reporter_plugin import ReporterPluginBase
+    from automated_security_helper.base.scanner_plugin import ScannerPluginBase
+
     _base = "automated_security_helper.plugin_modules.ash_builtin"
 
     # -- Converters --
     converters_mod = _load_module(f"{_base}.converters")
-    ArchiveConverter = converters_mod.ArchiveConverter
-    JupyterConverter = converters_mod.JupyterConverter
 
     # -- Scanners --
     scanners_mod = _load_module(f"{_base}.scanners")
-    BanditScanner = scanners_mod.BanditScanner
-    CdkNagScanner = scanners_mod.CdkNagScanner
-    CfnNagScanner = scanners_mod.CfnNagScanner
-    CheckovScanner = scanners_mod.CheckovScanner
-    DetectSecretsScanner = scanners_mod.DetectSecretsScanner
-    GrypeScanner = scanners_mod.GrypeScanner
-    SyftScanner = scanners_mod.SyftScanner
-    OpengrepScanner = scanners_mod.OpengrepScanner
-
-    npm_mod = _load_module(
-        f"{_base}.scanners.npm_audit_scanner"
-    )
-    NpmAuditScanner = npm_mod.NpmAuditScanner
-
-    semgrep_mod = _load_module(
-        f"{_base}.scanners.semgrep_scanner"
-    )
-    SemgrepScanner = semgrep_mod.SemgrepScanner
 
     # -- Reporters --
     reporters_mod = _load_module(f"{_base}.reporters")
-    CsvReporter = reporters_mod.CsvReporter
-    CycloneDXReporter = reporters_mod.CycloneDXReporter
-    FlatJsonReporter = reporters_mod.FlatJsonReporter
-    GitLabSASTReporter = reporters_mod.GitLabSASTReporter
-    HtmlReporter = reporters_mod.HtmlReporter
-    JunitXmlReporter = reporters_mod.JunitXmlReporter
-    MarkdownReporter = reporters_mod.MarkdownReporter
-    OcsfReporter = reporters_mod.OcsfReporter
-    SarifReporter = reporters_mod.SarifReporter
-    SpdxReporter = reporters_mod.SpdxReporter
-    TextReporter = reporters_mod.TextReporter
-    UnusedSuppressionsReporter = reporters_mod.UnusedSuppressionsReporter
-    YamlReporter = reporters_mod.YamlReporter
 
     # -- Event Handlers --
     event_handlers_mod = _load_module(f"{_base}.event_handlers")
     handle_scan_completion_logging = event_handlers_mod.handle_scan_completion_logging
-    handle_suppression_expiration_check = event_handlers_mod.handle_suppression_expiration_check
+    handle_suppression_expiration_check = (
+        event_handlers_mod.handle_suppression_expiration_check
+    )
 
     return (
-        [ArchiveConverter, JupyterConverter],
-        [
-            BanditScanner,
-            CdkNagScanner,
-            CfnNagScanner,
-            CheckovScanner,
-            DetectSecretsScanner,
-            GrypeScanner,
-            NpmAuditScanner,
-            OpengrepScanner,
-            SemgrepScanner,
-            SyftScanner,
-        ],
-        [
-            CsvReporter,
-            CycloneDXReporter,
-            FlatJsonReporter,
-            GitLabSASTReporter,
-            HtmlReporter,
-            JunitXmlReporter,
-            MarkdownReporter,
-            OcsfReporter,
-            SarifReporter,
-            SpdxReporter,
-            TextReporter,
-            UnusedSuppressionsReporter,
-            YamlReporter,
-        ],
+        _plugin_classes(converters_mod, ConverterPluginBase),
+        _plugin_classes(scanners_mod, ScannerPluginBase),
+        _plugin_classes(reporters_mod, ReporterPluginBase),
         {
             AshEventType.SCAN_COMPLETE: [handle_scan_completion_logging],
             AshEventType.EXECUTION_START: [handle_suppression_expiration_check],
