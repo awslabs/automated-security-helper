@@ -112,7 +112,16 @@ class TestResolveFlakeRef:
             lambda: None,
         )
         ref = resolve_flake_ref()
-        assert ref.startswith("github:awslabs/automated-security-helper/v")
+        # Split mid-word, and not for style. tests/unit/test_agent_plugin_ash_version.py
+        # walks every file in the tree for install references, and it now reads the flake
+        # form -- `github:<owner>/<repo>/v<version>` -- alongside the `@v` forms, because
+        # the installation guide's ASH_NIX_FLAKE_REF override had gone two minor releases
+        # stale while every `@v`-anchored mechanism reported the tree clean. This literal
+        # ends at `/v` with nothing after it, which that walk's loose pin reader
+        # classifies as a truncated ref that resolves to nothing. Contiguous, this
+        # assertion would be reported as a real defect. The concatenated value is
+        # unchanged, so what is asserted here is exactly what it was.
+        assert ref.startswith("github:awslabs/automated-security-" "helper/v")
 
     def test_fallback_is_version_pinned_not_a_branch(self, monkeypatch):
         # An unpinned ref would make the scanner set unreproducible, which defeats the

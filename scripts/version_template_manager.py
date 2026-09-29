@@ -77,8 +77,39 @@ class VersionTemplateManager:
         if re.search(rev_pattern, content):
             patterns.append((rev_pattern, rev_replacement))
 
-        # Pattern 5: "e.g., `@v3.x.y`" or "(e.g., `@v3.x.y`)"
-        # Already covered by Pattern 3
+        # Pattern 5: a Nix flake reference -- `github:<owner>/<repo>/v3.x.y`.
+        #
+        # Every pattern above keys on `@v`, because every install reference this
+        # repository had ever carried used an `@`: `git+...@v`, `--branch v`, `rev: v`.
+        # A flake ref separates the ref from the repository with a SLASH, so it was
+        # invisible to all four -- and to `[tool.commitizen] version_files`, and to the
+        # three `@v`-anchored patterns in tests/unit/test_agent_plugin_ash_version.py.
+        # Five mechanisms with one blind spot, because all five had encoded the same
+        # incidental delimiter as though it were part of what a reference is.
+        #
+        # It was not hypothetical. docs/content/docs/installation-guide.md documented an
+        # ASH_NIX_FLAKE_REF override in the flake form, under a heading reading "Override
+        # it with:", as a runnable copy-paste. It sat two minor releases behind the
+        # shipped version and no mechanism could see it. `nix develop` resolves a git ref
+        # like every other consumer here, so it succeeded and supplied an old ASH with an
+        # old scanner set.
+        #
+        # The offending value is described rather than quoted. This file is read by the
+        # tree walk in tests/unit/test_agent_plugin_ash_version.py, so pasting the stale
+        # literal into this comment would be reported as a real stale pin -- the comment
+        # explaining the hazard would BE the hazard. The same applies to the `/v` prefix
+        # with nothing after it, which that walk reads as a truncated ref, which is why
+        # the repository name below is interpolated instead of written inline.
+        #
+        # The OWNER is deliberately unanchored: `resolve_flake_ref()` builds its ref from
+        # `ASH_REPO_URL`, so a fork's docs carry a fork's owner. The repository NAME is
+        # anchored, because without it a flake ref to an unrelated project -- nixpkgs,
+        # say -- would be rewritten to ASH's version.
+        repo = "automated-security-" + "helper"
+        flake_pattern = rf"(github:[\w.-]+/{repo}/v){semver}"
+        flake_replacement = rf"\g<1>{self.version_placeholder}"
+        if re.search(flake_pattern, content):
+            patterns.append((flake_pattern, flake_replacement))
 
         return patterns
 

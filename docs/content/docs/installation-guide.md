@@ -135,7 +135,7 @@ The shell sets `ASH_OFFLINE=YES` for the inner run. Several scanners prefer to i
 By default ASH uses the flake in your checkout when you are running from source, and otherwise the published repository at the version of ASH you are running. Override it with:
 
 ```bash
-export ASH_NIX_FLAKE_REF="github:awslabs/automated-security-helper/v3.5.9"
+export ASH_NIX_FLAKE_REF="github:awslabs/automated-security-helper/v3.7.0"
 ```
 
 ### Platform support
