@@ -79,8 +79,8 @@ Each object in the `findings` array has these fields:
 | `scanner_type` | string | Category of scanner: `SAST`, `SCA`, `IAC`, `SECRETS`, `SBOM`, or `UNKNOWN` |
 | `rule_id` | string or null | The scanner-specific rule identifier |
 | `file_path` | string or null | Path to the affected file, relative to the scan root |
-| `line_start` | integer or null | Starting line number |
-| `line_end` | integer or null | Ending line number |
+| `line_start` | integer or null | First line of the finding, 1-based. The same value SARIF reports as `region.startLine` for that finding, so the two outputs can be cross-referenced |
+| `line_end` | integer or null | Last line of the finding, 1-based. Matches SARIF's `region.endLine` |
 | `cve_id` | string or null | CVE identifier, if applicable |
 | `cwe_id` | string or null | CWE identifier, if applicable |
 | `fix_available` | boolean or null | Whether a known fix exists |
@@ -88,7 +88,7 @@ Each object in the `findings` array has these fields:
 | `suppression_kind` | string or null | `"inSource"` or `"external"`, depending on how it was suppressed |
 | `suppression_justification` | string or null | Reason text provided with the suppression |
 | `detected_at` | string or null | ISO 8601 timestamp of detection |
-| `code_snippet` | string or null | Relevant source code fragment |
+| `code_snippet` | string or null | Relevant source code fragment. May span more lines than `line_start`–`line_end` when the scanner supplied surrounding context, so do not use it to infer the line range |
 | `tags` | string or null | JSON-encoded array of tags |
 | `properties` | string or null | JSON-encoded map of additional scanner-specific properties |
 | `references` | string or null | JSON-encoded array of reference URIs |

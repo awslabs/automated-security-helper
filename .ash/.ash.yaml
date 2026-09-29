@@ -96,7 +96,27 @@ global_settings:
         Scope: npm-audit reports the bundled copy at this path and every other copy at a
         different one, so this entry matches only the aws-cdk-lib-bundled copy (in any
         tree whose aws-cdk-lib bundles it).
-    # === detect-secrets: broad patterns by path (no inline nosec support) ===
+    # === detect-secrets: broad patterns by path ===
+    #
+    # This header used to claim detect-secrets had "no inline nosec support".
+    # It does have one: `# pragma: allowlist secret` on the offending line, and
+    # detect-secrets drops the finding when it is present. That claim steered
+    # contributors here, to a config entry covering a whole path, when a marker
+    # on the line itself was available and narrower.
+    #
+    # Prefer the inline pragma. It sits at the value it protects, so a reviewer
+    # reading the line sees the decision; it travels with the code when the line
+    # moves; and it leaves the rest of the file scanned, so a real secret added
+    # later is still found. This repository already depends on it -- the 16
+    # release checksums in automated_security_helper/utils/tool_downloads.py are
+    # each marked that way, and the comment above them explains why per-line
+    # beats suppressing the file.
+    #
+    # Reach for a path entry below only where per-line marking is not available:
+    # a generated or vendored file nobody hand-edits, a format with no comment
+    # syntax, or a pattern spread over more lines than is reasonable to mark.
+    # The entries that follow predate this note and are left alone; narrowing
+    # them is a separate change with its own review.
     - rule_id: "SECRET-*"
       path: "tests/**"
       reason: "Test fixtures contain intentional secret patterns for validation"
