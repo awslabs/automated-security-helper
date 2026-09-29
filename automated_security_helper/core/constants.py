@@ -48,12 +48,26 @@ ASH_CONFIG_FILE_NAMES = [
 #
 # The cost of merging them was a silent blind spot. A credential embedded in a
 # hand-authored declaration -- the classic case being a private index URL with
-# inline basic-auth credentials, e.g.
-# `--extra-index-url https://user:token@pypi.example.com/simple` in
-# requirements.txt, or the `[[source]]` url in a Pipfile -- was never scanned at
-# all. Not suppressed, not baselined: never read. The pre-filter runs upstream of
-# every other control, so no baseline `filters_used` entry, ignore-path setting or
-# severity threshold could recover it, and nothing downstream re-adds a file.
+# inline basic-auth credentials, so an `--extra-index-url` whose host is preceded
+# by a `user:token@` userinfo component, in requirements.txt, or the `[[source]]`
+# url in a Pipfile -- was never scanned at all. Not suppressed, not baselined:
+# never read. The pre-filter runs upstream of every other control, so no baseline
+# `filters_used` entry, ignore-path setting or severity threshold could recover
+# it, and nothing downstream re-adds a file.
+#
+# The userinfo above is deliberately written without a scheme in front of it.
+# BasicAuthDetector matches `://` immediately followed by `word:word@`, so
+# spelling the example out as a complete URL makes this comment a finding of the
+# very scanner this change fixes -- which it was, until the wording moved the
+# scheme off the line.
+#
+# The alternative was `# pragma: allowlist secret`, which detect-secrets honours
+# inline and which would have let the full URL stay. It was not taken: that pragma
+# allowlists the whole line against EVERY detector rather than against Basic Auth,
+# and the literal shape is not lost by leaving it out of prose -- the fixture in
+# tests/unit/plugin_modules/test_detect_secrets_lockfile_split.py spells the URL
+# out in full, carries the pragma there, and is the place the shape is actually
+# exercised rather than merely described.
 #
 # WHAT EACH SIDE COSTS
 # --------------------
