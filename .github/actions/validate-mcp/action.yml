@@ -38,10 +38,105 @@ runs:
           exit 1
         fi
 
+    # The inspector is load-bearing: the step below drives a real protocol
+    # handshake with it and diffs the reply against a committed golden. That is a
+    # change from what this step used to be. The package name appeared in this
+    # install line and nowhere else in the repository, so the step asserted
+    # nothing while still being able to fail the job -- one macOS leg died on
+    # `getaddrinfo ENOTFOUND registry.npmjs.org` after 161 seconds, after the two
+    # steps that do test something had already passed.
+    #
+    # Pinned to an exact version rather than a range for two reasons. The obvious
+    # one is reproducibility. The load-bearing one is that the portability gate
+    # below keys off `--strict`, whose severity ruleset is upstream-owned: on a
+    # floating range a new upstream rule could turn every pull request red with no
+    # change to this repository. Pinning makes adopting a new ruleset a deliberate
+    # edit to this line.
+    #
+    # Bump procedure: change the version, then regenerate the golden and review
+    # its diff -- `python .github/actions/validate-mcp/compare_tool_surface.py --update`.
     - name: "mcp: install MCP Inspector"
       if: runner.os != 'Windows'
       shell: bash
-      run: npm install -g @modelcontextprotocol/inspector
+      env:
+        INSPECTOR_VERSION: "2.8.0"
+      run: |
+        set -u
+        PKG="@modelcontextprotocol/inspector@${INSPECTOR_VERSION}"
+        LOG="${RUNNER_TEMP:-/tmp}/npm-inspector-install.log"
+
+        # Retry only what waiting can fix, as an allowlist rather than a denylist
+        # of non-retryable errors: a denylist is always one entry short, and the
+        # entry it is missing gets retried four times before failing anyway.
+        # DNS (ENOTFOUND, EAI_AGAIN), transport resets and timeouts, registry 5xx
+        # (npm renders these as `code E503`), and rate limiting are all transient.
+        # A 404/ETARGET on a pinned version is not: the version does not exist, so
+        # every retry costs a minute and changes nothing. Anything unrecognized
+        # fails on the first attempt with its log, which is the honest default --
+        # an unknown failure is more likely a real problem than a blip.
+        RETRYABLE='ENOTFOUND|EAI_AGAIN|ECONNRESET|ECONNREFUSED|ETIMEDOUT|ESOCKETTIMEDOUT|ENETUNREACH|EHOSTUNREACH|EAGAIN|ERR_SOCKET_CONNECTION_TIMEOUT|E429|ERATELIMIT|Too Many Requests|code E5[0-9][0-9]|network request .* failed|request to https?://[^ ]* failed'
+
+        # npm has its own retry layer: `fetch-retries` defaults to 2 and
+        # `fetch-timeout` to 300000 ms (both confirmed with `npm config ls -l` on
+        # npm 10.9.4), which is the budget one DNS failure spent 161 seconds of.
+        # Setting retries to 0 makes the loop below the only retry layer, so the
+        # step's worst case is arithmetic a reader can check rather than two
+        # nested backoffs: 4 attempts x 60 s, plus 5+20+45 s of sleep, is about
+        # five minutes against this job's 20-minute budget.
+        NPM_FLAGS=(--fetch-retries=0 --fetch-timeout=60000 --no-audit --no-fund)
+
+        for attempt in 1 2 3 4; do
+          echo "::group::npm install ${PKG} (attempt ${attempt}/4)"
+          if npm install -g "${PKG}" "${NPM_FLAGS[@]}" >"$LOG" 2>&1; then
+            cat "$LOG"
+            echo "::endgroup::"
+            echo "Installed ${PKG} on attempt ${attempt}."
+            # npm can exit 0 while the bin shim is missing from PATH -- a global
+            # prefix outside PATH does that. Fail here rather than in the step
+            # below, where the same symptom reads as a protocol failure.
+            if ! mcp-inspector --cli --help >/dev/null; then
+              echo "::error::npm reported success but 'mcp-inspector --cli' does not run. Check the global npm prefix is on PATH."
+              exit 1
+            fi
+            exit 0
+          fi
+          cat "$LOG"
+          echo "::endgroup::"
+
+          # grep against a file, never a pipe: `set -o pipefail` plus a `grep -q`
+          # that exits on its first match can take down the producer with SIGPIPE
+          # and invert the verdict.
+          if ! grep -Eq "$RETRYABLE" "$LOG"; then
+            echo "::error::npm install ${PKG} failed with an error a retry cannot fix. Log above."
+            exit 1
+          fi
+          if [ "$attempt" -eq 4 ]; then
+            echo "::error::npm install ${PKG} failed 4 times with retryable network errors. Log above."
+            exit 1
+          fi
+          BACKOFF=$((attempt * attempt * 5))
+          echo "Retryable failure; sleeping ${BACKOFF}s before attempt $((attempt + 1))."
+          sleep "$BACKOFF"
+        done
+
+    # The step the install exists for. Uses the same stdio invocation the
+    # start/stop check above uses -- `ash mcp` with no transport flag, which
+    # defaults to stdio -- except that here a real client performs the
+    # initialization handshake and calls tools/list, and the reply is diffed
+    # against .github/actions/validate-mcp/tool_surface.golden.json.
+    #
+    # Regenerate that golden with exactly one command, from the repository root:
+    #
+    #     python .github/actions/validate-mcp/compare_tool_surface.py --update
+    #
+    # Read the script's module docstring before doing so. It records which fields
+    # are normalized, what was measured to justify each one, and what this check
+    # covers that tests/unit/cli/mcp/test_tool_surface_parity.py cannot. A missing
+    # golden fails the step loudly and is never auto-created.
+    - name: "mcp: protocol handshake and golden tool surface"
+      if: runner.os != 'Windows'
+      shell: bash
+      run: python "${GITHUB_ACTION_PATH}/compare_tool_surface.py"
 
     # `--scanners detect-secrets` for the same reason as validate-install: this job
     # checks that the MCP install can run a scan, and it installs ASH alone, so
