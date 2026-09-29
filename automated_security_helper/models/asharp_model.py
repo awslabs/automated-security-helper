@@ -333,6 +333,34 @@ class ConverterStatusInfo(BaseModel):
         ),
     ] = None
 
+    # Declared for the same reason failure is: a consumer reads the committed schema,
+    # and this field is what makes an unavailable converter's row interpretable.
+    #
+    # The number of files the converter WOULD have converted, established without its
+    # tool. None means the converter does not report one, and the completeness gate
+    # treats None exactly as strictly as it treated every row before this field existed
+    # -- an unavailable converter with no count is still incomplete conversion. 0 is the
+    # only value that exempts a row, and it is a positive claim that there was nothing
+    # to convert rather than an absence of information.
+    #
+    # Separate from converted_paths, which cannot answer this. An empty converted_paths
+    # is produced both by "no notebooks here" and by "notebooks here, tool missing", and
+    # collapsing those is what made every nix-mode run report lost conversion coverage on
+    # trees containing no notebooks.
+    candidate_inputs: Annotated[
+        int | None,
+        Field(
+            default=None,
+            description=(
+                "How many files this converter would have converted, counted without "
+                "its external tool. 0 means there was nothing for it to do, so its "
+                "absence cost no coverage. None means the converter does not report a "
+                "count, which the completeness gate treats as strictly as it treats a "
+                "converter that lost inputs."
+            ),
+        ),
+    ] = None
+
     converted_paths: List[str] = []
 
 

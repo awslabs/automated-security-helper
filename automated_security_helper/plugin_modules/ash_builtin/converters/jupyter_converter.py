@@ -236,6 +236,47 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
             ASH_LOGGER.warning(f"Unexpected error during UV jupyter execution: {e}")
             return False
 
+    def _notebooks_in_scan_set(self) -> List[str]:
+        """Every ``.ipynb`` in the scan set, found without invoking nbconvert.
+
+        Extracted from ``convert`` so ``candidate_input_count`` can answer from the same
+        predicate rather than a second copy of it. A second copy is the specific thing to
+        avoid here: the count decides whether a missing nbconvert costs coverage, so a
+        copy that drifted from the real selection would make the completeness gate fire
+        on files this converter would not have touched, or stay silent on ones it would.
+        """
+        ipynb_files = scan_set(
+            source=self.context.source_dir,
+            output=self.context.output_dir,
+        )
+        return [f.strip() for f in ipynb_files if f.strip().endswith(".ipynb")]
+
+    def candidate_input_count(self) -> int | None:
+        """How many notebooks this converter would convert, tool or no tool.
+
+        ``scan_set`` reads the filesystem and the ignore rules; nbconvert is not involved,
+        which is what lets this be answered for a converter that has already been dropped
+        for an unavailable tool. That is the case it exists for: in ``--mode nix`` the dev
+        shell supplies scanner binaries and exports ``ASH_OFFLINE=YES``, so
+        ``uv tool install nbconvert`` is correctly refused and this converter is
+        unavailable on every such run. Before this method the completeness gate reported
+        that as lost conversion coverage even on a tree with no notebooks in it, which is
+        what failed both nix CI legs on a fixture holding one YAML template, one Python
+        file and one package.json.
+
+        Returning a real count rather than None on the error path is deliberate: if the
+        scan set cannot be read, that is not evidence of zero notebooks, so it answers
+        None and the gate stays strict.
+        """
+        try:
+            return len(self._notebooks_in_scan_set())
+        except Exception as exc:  # pragma: no cover - defensive
+            ASH_LOGGER.debug(
+                f"Could not count .ipynb candidates for the jupyter converter ({exc!r}); "
+                "reporting no count so the completeness gate stays strict"
+            )
+            return None
+
     def convert(self) -> List[Path]:
         """Converts Jupyter notebooks (.ipynb files) in the source_dir to Python files using CLI.
 
@@ -246,11 +287,7 @@ class JupyterConverter(ConverterPluginBase[JupyterConverterConfig]):
             f"Searching for .ipynb files in search_path within the ASH scan set: {self.context.source_dir}"
         )
         # Find all notebook files to scan from the scan set
-        ipynb_files = scan_set(
-            source=self.context.source_dir,
-            output=self.context.output_dir,
-        )
-        ipynb_files = [f.strip() for f in ipynb_files if f.strip().endswith(".ipynb")]
+        ipynb_files = self._notebooks_in_scan_set()
 
         ASH_LOGGER.debug(f"Found {len(ipynb_files)} .ipynb files in scan set.")
         results: List[Path] = []

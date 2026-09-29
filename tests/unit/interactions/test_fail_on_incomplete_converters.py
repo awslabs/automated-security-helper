@@ -40,6 +40,7 @@ scanner side.
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -49,6 +50,7 @@ from automated_security_helper.interactions.run_ash_scan import (
     ScanOptions,
     _compute_exit_code,
     incomplete_converters,
+    print_incompleteness_message,
 )
 from automated_security_helper.models.asharp_model import ConverterStatusInfo
 
@@ -267,3 +269,169 @@ class TestTheExitCodeSeesAConverterFailure:
 
         assert "jupyter" in caplog.text
         assert "nbconvert is not on PATH" in caplog.text
+
+
+class TestAnUnavailableConverterWithNothingToConvert:
+    """An absent tool costs coverage only if there was something for it to do.
+
+    WHAT THIS FIXES, MEASURED
+    -------------------------
+    ``--mode nix`` supplies scanner binaries through the flake's dev shell and exports
+    ``ASH_OFFLINE=YES``, which correctly refuses ``uv tool install nbconvert``. So the
+    jupyter converter is unavailable on every Nix-mode run. Both nix CI legs on #654
+    therefore exited 1 -- on a fixture holding one CloudFormation template, one Python
+    file and one package.json, and **no notebooks at all**. Nothing went unscanned and
+    the run still failed.
+
+    That is the same defect shape as a scanner counting a file it was never going to
+    evaluate: a completeness gate firing over a file class that is not present.
+
+    WHY THIS IS NOT THE CARVE-OUT THAT WAS REJECTED
+    ----------------------------------------------
+    Exempting converters from the gate was the other option and would let ASH report
+    success on a tree whose notebooks were never scanned -- the precise defect the gate
+    exists to catch. So the exemption is not "converters", it is "nothing to convert",
+    and it turns on a positive claim rather than on missing information:
+    ``candidate_input_count`` is answered WITHOUT the converter's tool, which is what
+    makes it available for a converter that never ran.
+
+    ``test_the_gate_still_fires_when_notebooks_go_unconverted`` is the control that keeps
+    this honest, and it is the one to read first.
+    """
+
+    def test_nothing_to_convert_is_not_incomplete_conversion(self, tmp_path):
+        """The measured CI case: unavailable converter, zero candidate inputs."""
+        results = _results(
+            jupyter=ConverterStatusInfo(
+                dependencies_satisfied=False,
+                candidate_inputs=0,
+                converted_paths=[],
+            )
+        )
+
+        assert incomplete_converters(results) == []
+        assert (
+            _exit_code(results, _opts(tmp_path, fail_on_incomplete_scanners=True)) == 0
+        )
+
+    def test_the_gate_still_fires_when_notebooks_go_unconverted(self, tmp_path):
+        """The control. Inputs existed and none were converted, so coverage was lost.
+
+        Without this the test above could be satisfied by exempting converters wholesale,
+        which is the carve-out that was considered and rejected.
+        """
+        results = _results(
+            jupyter=ConverterStatusInfo(
+                dependencies_satisfied=False,
+                candidate_inputs=2,
+                converted_paths=[],
+            )
+        )
+
+        listed = incomplete_converters(results)
+        assert [name for name, _ in listed] == ["jupyter"]
+        assert (
+            _exit_code(results, _opts(tmp_path, fail_on_incomplete_scanners=True)) == 1
+        )
+
+    def test_a_converter_reporting_no_count_is_still_incomplete(self, tmp_path):
+        """Missing information must not exempt anything.
+
+        ``None`` covers three real cases at once: a converter that has not implemented
+        the count, one whose count raised, and a results file written by a version
+        predating the field -- ``ash merge`` reads shard results from whatever ASH wrote
+        each one. All three keep the strict answer, so adding the field cannot have
+        quietly relaxed any converter that did not opt in.
+        """
+        results = _results(
+            jupyter=ConverterStatusInfo(
+                dependencies_satisfied=False,
+                candidate_inputs=None,
+                converted_paths=[],
+            )
+        )
+
+        listed = incomplete_converters(results)
+        assert [name for name, _ in listed] == ["jupyter"]
+        assert (
+            _exit_code(results, _opts(tmp_path, fail_on_incomplete_scanners=True)) == 1
+        )
+
+    def test_a_boolean_count_does_not_exempt_an_unvalidated_row(self, tmp_path):
+        """``bool`` is an ``int`` subclass and ``False == 0``, so the check excludes it.
+
+        Not reachable through ``ConverterStatusInfo``: the field is ``int | None`` and
+        pydantic coerces ``False`` to ``0`` on validation, which legitimately means "no
+        candidates". This measures the un-validated path instead --
+        ``incomplete_converters`` reads rows with ``getattr``, so what it is handed is
+        whatever the caller assembled, and ``ash merge`` assembles from shard files.
+
+        An earlier version of this test asserted the bool survived validation. It did
+        not, and the test failed for that reason rather than finding a defect, so it is
+        written against the path where the guard is actually load-bearing.
+        """
+        row = SimpleNamespace(
+            excluded=False,
+            failure=None,
+            dependencies_satisfied=False,
+            candidate_inputs=False,
+            converted_paths=[],
+        )
+        results = _results(jupyter=row)
+
+        listed = incomplete_converters(results)
+        assert [name for name, _ in listed] == ["jupyter"], (
+            "a boolean count must not exempt a row; bool is an int subclass so a bare "
+            "`== 0` would read False as 'nothing to convert'"
+        )
+
+
+class TestTheConverterArmHasItsOwnExitMessage:
+    """The converter arm used to print "Exiting due to exception during ASH scan".
+
+    Nothing had raised. The message selector handled the scanner arm and fell through to
+    an exception line for everything else, so both nix legs exited 1 claiming an exception
+    that did not exist -- and a reader went through 1572 log lines looking for a traceback.
+    The only record of the real cause was a ``logger.error`` call seventy lines earlier.
+    """
+
+    def test_the_message_names_the_converter_and_not_an_exception(self, capsys):
+        print_incompleteness_message(
+            [], [("jupyter", "dependencies unavailable, so it never ran")]
+        )
+        out = capsys.readouterr().out
+
+        assert "conversion was incomplete" in out
+        assert "jupyter" in out
+        assert "exception" not in out.lower(), (
+            "the converter arm must not claim an exception occurred; nothing raised, and "
+            "that wording sent a reader hunting a traceback that was never there"
+        )
+
+    def test_the_scanner_arm_keeps_precedence_when_both_are_present(self, capsys):
+        """Both lists non-empty prints the scanner message, not the converter one.
+
+        A scanner that did not run is the more specific finding, and an environment
+        missing a scanner's tool is often missing a converter's too, so the converter
+        line would bury the more serious one.
+        """
+        print_incompleteness_message(
+            [("cdk-nag", "MISSING")],
+            [("jupyter", "dependencies unavailable, so it never ran")],
+        )
+        out = capsys.readouterr().out
+
+        assert "the scan was incomplete" in out
+        assert "cdk-nag" in out
+        assert "conversion was incomplete" not in out
+
+    def test_neither_list_still_reports_an_exception(self, capsys):
+        """The arm that was over-reported must stay reachable for its real case.
+
+        Exit 1 with no incompleteness recorded genuinely is a crash, and that is the one
+        situation where this wording is correct.
+        """
+        print_incompleteness_message([], [])
+        out = capsys.readouterr().out
+
+        assert "exception" in out.lower()

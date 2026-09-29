@@ -586,8 +586,93 @@ def incomplete_converters(
         if failure:
             listed.append((name, str(failure)))
         elif getattr(row, "dependencies_satisfied", True) is False:
+            # An unavailable converter costs coverage only if it had inputs. The count
+            # is established without its tool, which is what makes it answerable for a
+            # converter that never ran -- see
+            # ``ConverterPluginBase.candidate_input_count``.
+            #
+            # ONLY an explicit 0 exempts the row. None means the converter reports no
+            # count, and that is treated exactly as this function treated every row
+            # before the field existed: still incomplete. So a converter that has not
+            # opted in, one whose count raised, and a results file written by a version
+            # predating the field all keep the strict answer, and nothing is exempted by
+            # missing information. ``is 0`` rather than ``== 0`` to keep False out:
+            # ``bool`` is an ``int`` subclass and ``False == 0``, so a row carrying a
+            # boolean would otherwise silence the gate.
+            candidates = getattr(row, "candidate_inputs", None)
+            if candidates is not None and not isinstance(candidates, bool):
+                if candidates == 0:
+                    continue
             listed.append((name, "dependencies unavailable, so it never ran"))
     return listed
+
+
+def print_incompleteness_message(
+    incomplete_scanner_rows: List[tuple[str, str]],
+    incomplete_converter_rows: List[tuple[str, str]],
+) -> None:
+    """Explain an exit code of 1 in terms of what actually caused it.
+
+    WHY THIS IS A FUNCTION RATHER THAN THREE BRANCHES INLINE
+    ------------------------------------------------------
+    It was inline, and the converter arm had no branch of its own, so it fell through to
+    "Exiting due to exception during ASH scan" -- which is false. Nothing raises on that
+    path: ``_compute_exit_code`` returns 1 from the converter gate after a
+    ``logger.error``. Both Nix CI legs exited that way, and the wording sent a reader
+    through 1572 log lines hunting a traceback that was never written, with the real
+    cause recorded only in a log line seventy lines earlier.
+
+    Inline it also could not be tested. The enclosing function runs a whole scan, so no
+    unit test could assert on the wording, which is how a message this wrong survived.
+    Extracted, the arm selection is a pure function of two lists and
+    ``tests/unit/interactions/test_fail_on_incomplete_converters.py`` asserts it
+    directly.
+
+    THE SCANNER ARM WINS WHEN BOTH ARE NON-EMPTY, deliberately. A scanner that did not
+    run is the more specific and more serious finding, and conversion shortfalls often
+    follow from the same absent environment. The converter arm is still reachable on its
+    own, which is the case Nix mode produces.
+    """
+    if incomplete_scanner_rows:
+        # "did not run" would be false for the coverage case: that scanner ran,
+        # reported a status, and could not read some of its targets. Sending an
+        # operator to install a tool that is already installed is the specific
+        # wrong turn this wording avoids.
+        print(
+            "\n[bold red]ERROR (1) Exiting because the scan was incomplete: "
+            f"{len(incomplete_scanner_rows)} selected scanner(s) did not evaluate "
+            "everything they were given[/bold red]"
+        )
+        for _name, _status in incomplete_scanner_rows:
+            print(f"  [red]{_name}: {_status}[/red]")
+        print(
+            "[yellow]ERROR means the scanner ran and failed; MISSING means its "
+            "dependencies were unavailable; a target count means the scanner ran "
+            "but could not read that many of its inputs. Install the missing "
+            "tools, fix or exclude the unreadable targets, exclude the scanners "
+            "with --exclude-scanners, or drop --fail-on-incomplete-scanners to "
+            "accept a partial scan.[/yellow]"
+        )
+    elif incomplete_converter_rows:
+        # Names the converter, because that is the actionable part -- the fix is to
+        # install that converter's tool or accept the partial scan, and neither is
+        # discoverable from "an exception occurred".
+        print(
+            "\n[bold red]ERROR (1) Exiting because conversion was incomplete: "
+            f"{len(incomplete_converter_rows)} converter(s) did not process the "
+            "files they were given[/bold red]"
+        )
+        for _name, _reason in incomplete_converter_rows:
+            print(f"  [red]{_name}: {_reason}[/red]")
+        print(
+            "[yellow]A converter that did not run leaves its inputs unscanned, so "
+            "the scanners saw fewer files than this repository holds. Install the "
+            "converter's tool, disable the converter if its inputs are not wanted, "
+            "or drop --fail-on-incomplete-scanners to accept a partial scan. A "
+            "converter with nothing to convert never reports here.[/yellow]"
+        )
+    else:
+        print("[bold red]ERROR (1) Exiting due to exception during ASH scan[/bold red]")
 
 
 def unevaluated_rules(results: Optional[AshAggregatedResults]) -> List[str]:
@@ -2515,37 +2600,15 @@ def run_ash_scan(
         # chosen from the cause rather than the code. Printing "an exception
         # occurred" for a run whose scanners simply were not installed sends the
         # operator looking for a traceback that does not exist.
-        _incomplete = (
-            incomplete_scanners(results)
-            if _resolve_fail_on_incomplete_scanners(
-                results, opts, config_fail_on_incomplete_scanners
-            )
-            else []
+        _gate_on = _resolve_fail_on_incomplete_scanners(
+            results, opts, config_fail_on_incomplete_scanners
         )
-        if _incomplete:
-            # "did not run" would be false for the coverage case: that scanner ran,
-            # reported a status, and could not read some of its targets. Sending an
-            # operator to install a tool that is already installed is the specific
-            # wrong turn this wording avoids.
-            print(
-                "\n[bold red]ERROR (1) Exiting because the scan was incomplete: "
-                f"{len(_incomplete)} selected scanner(s) did not evaluate "
-                "everything they were given[/bold red]"
-            )
-            for _name, _status in _incomplete:
-                print(f"  [red]{_name}: {_status}[/red]")
-            print(
-                "[yellow]ERROR means the scanner ran and failed; MISSING means its "
-                "dependencies were unavailable; a target count means the scanner ran "
-                "but could not read that many of its inputs. Install the missing "
-                "tools, fix or exclude the unreadable targets, exclude the scanners "
-                "with --exclude-scanners, or drop --fail-on-incomplete-scanners to "
-                "accept a partial scan.[/yellow]"
-            )
-        else:
-            print(
-                "[bold red]ERROR (1) Exiting due to exception during ASH scan[/bold red]"
-            )
+        _incomplete = incomplete_scanners(results) if _gate_on else []
+        # Read off the same resolved flag, because both arms live behind it. Computed
+        # here rather than inside the branch so the scanner arm keeps precedence when a
+        # run trips both: a scanner that did not run is the more specific finding.
+        _incomplete_conversions = incomplete_converters(results) if _gate_on else []
+        print_incompleteness_message(_incomplete, _incomplete_conversions)
 
     if exit_code != 0:
         sys.exit(exit_code)

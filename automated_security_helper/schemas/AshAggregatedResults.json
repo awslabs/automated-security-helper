@@ -4582,6 +4582,19 @@
       "additionalProperties": true,
       "description": "Information about converter status.",
       "properties": {
+        "candidate_inputs": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "How many files this converter would have converted, counted without its external tool. 0 means there was nothing for it to do, so its absence cost no coverage. None means the converter does not report a count, which the completeness gate treats as strictly as it treats a converter that lost inputs.",
+          "title": "Candidate Inputs"
+        },
         "converted_paths": {
           "default": [],
           "items": {

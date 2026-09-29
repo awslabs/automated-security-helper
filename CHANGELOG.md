@@ -370,6 +370,39 @@
   target, with a test pinning it so the arm cannot be widened into a bare
   `except Exception`.
 
+- **An unavailable converter with nothing to convert no longer fails the scan.** The
+  converter arm of `fail_on_incomplete_scanners` fired whenever a converter's tool was
+  absent, regardless of whether that converter had any inputs. In `--mode nix` the dev
+  shell supplies scanner binaries and exports `ASH_OFFLINE=YES`, which correctly refuses
+  `uv tool install nbconvert`, so the jupyter converter is unavailable on every Nix-mode
+  run — and both Nix CI legs exited 1 on a fixture holding one CloudFormation template,
+  one Python file and one `package.json`, and **no notebooks at all**. Nothing had gone
+  unscanned.
+
+  `ConverterPluginBase.candidate_input_count()` answers how many files a converter *would*
+  have converted, established **without** its external tool — which is what makes it
+  available for a converter already dropped for a missing tool. `ConverterStatusInfo`
+  carries it as `candidate_inputs`, and the gate exempts a row only on an explicit `0`.
+
+  **This is not a carve-out, and the carve-out was the rejected alternative.** Exempting
+  converters from the gate would let ASH report success on a tree whose notebooks were
+  never scanned, which is the defect the gate exists to catch — reintroduced one file type
+  at a time. So the exemption is "nothing to convert", never "converters", and it turns on
+  a positive claim rather than on missing information: `None` means the converter reports
+  no count and is treated exactly as strictly as every row was before the field existed,
+  which covers a converter that has not opted in, one whose count raised, and a results
+  file written by a version predating the field.
+
+- **An incomplete-conversion exit says so, instead of claiming an exception.** The message
+  selector behind exit 1 handled the scanner arm and fell through to `ERROR (1) Exiting
+  due to exception during ASH scan` for everything else. Nothing raises on the converter
+  path — `_compute_exit_code` returns 1 after a `logger.error` — so both Nix legs exited
+  claiming an exception that did not exist, and the only record of the real cause was a log
+  line seventy lines earlier. The converter arm now names the converter and what to do
+  about it. The arm selection moved into `print_incompleteness_message`, because inline in
+  a function that runs a whole scan it could not be unit tested, which is how wording that
+  wrong survived.
+
 - **The Nix install-method CI job installs the `cdk` extra.** cdk-nag is the one
   scanner Nix cannot supply — it runs in-process through jsii rather than as an
   external binary, which is why `flake.nix` omits it — but "Nix does not supply it"

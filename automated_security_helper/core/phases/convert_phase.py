@@ -92,10 +92,31 @@ class ConvertPhase(EnginePhase):
                     "dependency check reported satisfied"
                 )
 
+            # Asked even though this converter is about to disappear, and that is the
+            # point: it is the only moment anything can establish whether its absence
+            # cost coverage. ``candidate_input_count`` is answered without the
+            # converter's external tool, so it works precisely when the tool is what is
+            # missing. A converter that does not report one answers None and the
+            # completeness gate stays as strict as it was.
+            #
+            # Wrapped because this calls into plugin code, including third-party
+            # converters. A count that raised has not shown the tree to be empty, so it
+            # must not resolve to 0 -- that would exempt the row from the gate on the
+            # strength of a failure. None is the strict answer.
+            try:
+                candidate_inputs = plugin_instance.candidate_input_count()
+            except Exception as exc:
+                ASH_LOGGER.debug(
+                    f"Candidate-input count for converter {display_name} raised "
+                    f"{exc!r}; recording no count so the completeness gate stays strict"
+                )
+                candidate_inputs = None
+
             aggregated_results.converter_results[display_name] = ConverterStatusInfo(
                 dependencies_satisfied=dependencies_satisfied,
                 excluded=not enabled or declined_by_python_only,
                 failure=failure,
+                candidate_inputs=candidate_inputs,
                 converted_paths=[],
             )
 
