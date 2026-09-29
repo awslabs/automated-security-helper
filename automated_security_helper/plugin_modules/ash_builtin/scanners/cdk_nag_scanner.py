@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 from urllib.request import url2pathname
 
 from pydantic import BaseModel, ConfigDict, Field
+from yaml import YAMLError
 
 from automated_security_helper.core.constants import ASH_DOCS_URL, ASH_REPO_URL
 from automated_security_helper.core.enums import OfflineStrategy, ScannerToolType
@@ -1169,6 +1170,71 @@ class CdkNagScanner(ScannerPluginBase[CdkNagScannerConfig]):
                         f"Found {len(findings)} findings for {pack} on template {cfn_file}"
                     )
                     sarif_results.extend(findings)
+            except (YAMLError, UnicodeDecodeError) as e:
+                # NOT a failed target, and NOT silent either. Both halves are the point.
+                #
+                # WHY IT IS NOT A FAILED TARGET
+                # -----------------------------
+                # A file no YAML or JSON parser can load cannot carry a ``Resources``
+                # mapping, and carrying one is the single question that separates "not
+                # CloudFormation" from "CloudFormation this model cannot represent" --
+                # see ``CloudFormationTemplateModelError``. So a parse failure answers
+                # "this was never a candidate template", which is the skip below, not a
+                # coverage hole. ``cfn_nag_scanner`` already classifies it exactly this
+                # way over the same scan set through the same
+                # ``get_model_from_template``, and that function's docstring records the
+                # contract both callers are meant to honor: "Exceptions from
+                # ``load_yaml`` propagate unchanged ... and the two callers already
+                # classify that case for themselves." cdk-nag was the caller that did
+                # not -- the parse error fell through to the broad handler below and
+                # incremented ``targets_failed``.
+                #
+                # It matters well beyond two files. This scanner's scan set is every
+                # ``*.json``, ``*.yaml`` and ``*.yml`` file in the tree, most of which
+                # were never CloudFormation. ASH's own repository holds two that do not
+                # parse -- ``deploy/cdk/tsconfig.json`` (JSON with ``//`` comments) and
+                # ``mkdocs.yml`` (``!!python/name:`` tags ``SafeLoader`` refuses) -- so
+                # with ``fail_on_incomplete_scanners`` on by default, ANY repository
+                # holding either shape failed its scan for files containing no
+                # CloudFormation to scan.
+                #
+                # WHY IT IS STILL RECORDED
+                # -----------------------
+                # Uncounting it silently was the first attempt and it was wrong. A parse
+                # failure is not confidently a non-template the way a document that
+                # parses and has no ``Resources`` key is: the same symptom fits a
+                # truncated or malformed real template, and ASH cannot tell which from
+                # here. Dropping it to DEBUG left that indistinguishable from a file
+                # nobody ever thought was a template, and
+                # ``tests/integration/scanners/test_cdk_nag_real_pack.py``'s
+                # ``TestTargetThatCouldNotBeParsed`` says why that is unacceptable in its
+                # own words -- "'not a finding' on its own would also be satisfied by the
+                # failure vanishing entirely".
+                #
+                # So it goes through ``_plugin_log`` with ``append_to_stream="stderr"``,
+                # which appends to ``self.errors`` and therefore reaches the SARIF
+                # ``exitCodeDescription`` -- the same channel the "target directory is
+                # empty" notice above uses, and for the same reason: a fact worth
+                # surfacing that is not an error. INFO rather than ERROR because
+                # ``_plugin_log`` routes ERROR into ``self.errors`` too, so the level is
+                # free to say what this actually is.
+                #
+                # NARROW ON PURPOSE. Only a parse failure. ``UnicodeDecodeError`` comes
+                # from the ``open(...).read()`` inside ``get_model_from_template`` on a
+                # file that is not text at all -- the same answer for the same reason.
+                # ``OSError`` is deliberately NOT caught: an unreadable file is a target
+                # ASH was asked to scan and could not, which is real incompleteness the
+                # gate should see. Nor is ``CloudFormationTemplateModelError``, which the
+                # wrapper converts into a ``failure`` handled above.
+                self.targets_attempted -= 1
+                self._plugin_log(
+                    f"{cfn_file} is not parseable as YAML or JSON "
+                    f"({type(e).__name__}: {e}), so it is not a CloudFormation template "
+                    "and cdk-nag evaluated no rule against it.",
+                    target_type=target_type,
+                    level=logging.INFO,
+                    append_to_stream="stderr",
+                )
             except Exception as e:
                 # error, not trace. trace sits below debug, so this was invisible even with
                 # --debug: a scanner failing on every template produced no operator-visible

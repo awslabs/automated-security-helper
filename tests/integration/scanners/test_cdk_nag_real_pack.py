@@ -818,13 +818,39 @@ class TestTargetThatCouldNotBeParsed:
     unparseable files, and the presence of both failures in ``exitCodeDescription`` -- the error
     channel the scanner actually reports them through.
 
-    WHAT IS DELIBERATELY NOT ASSERTED AS CORRECT
-    --------------------------------------------
-    ``executionSuccessful`` is True and ``exitCode`` is 0 on this run even though a third of the
-    targets were never evaluated, because ``determine_status`` only reports ERROR once
-    ``targets_failed >= targets_attempted``. Partial coverage loss being invisible in the
-    rolled-up status is a real and separate defect from the three this module covers; it is not
-    fixed here and this test does not pretend the value is right, it only records what it is.
+    THE COUNTS CHANGED, AND THIS IS THE SEPARATE DEFECT THIS DOCSTRING PREDICTED
+    ---------------------------------------------------------------------------
+    An earlier revision asserted ``targets_attempted == 3`` and ``targets_failed == 2`` here,
+    and said of them: "Partial coverage loss being invisible in the rolled-up status is a real
+    and separate defect from the three this module covers; it is not fixed here and this test
+    does not pretend the value is right, it only records what it is."
+
+    That defect is now fixed -- ``fail_on_incomplete_scanners`` defaults to on and reads those
+    counters -- which turned the recorded values into load-bearing ones and showed they were
+    wrong. Counting an unparseable file as a FAILED target means it is counted as lost coverage,
+    and there was never any CloudFormation in it to lose. With the gate on, every repository
+    holding a JSON-with-comments file or a YAML carrying application-specific tags failed its
+    scan for files that were never templates. So the counts asserted below are now 1 attempted
+    and 0 failed: only the real template is a target.
+
+    This is not a relaxation. ``cfn_nag_scanner`` already classified a parse failure as a skip
+    over the same scan set through the same ``get_model_from_template``, whose docstring records
+    the contract -- cdk-nag was simply the caller that did not honor it. And the classification
+    is narrow: a document that DOES carry a ``Resources`` mapping and cannot be modeled still
+    counts a failed target, which ``tests/unit/plugin_modules/ash_builtin/
+    test_cdk_nag_unevaluated_is_not_skipped.py`` pins as the control.
+
+    WHAT THIS STILL ASSERTS UNCHANGED, AND WHY IT IS THE IMPORTANT HALF
+    -----------------------------------------------------------------
+    Uncounting a target is only acceptable if the fact does not vanish with it, and the first
+    attempt at this fix dropped the parse failure to a DEBUG log -- which this class's own last
+    assertion forbids, because "'not a finding' on its own would also be satisfied by the
+    failure vanishing entirely". A parse failure is not confidently a non-template the way a
+    document that parses with no ``Resources`` key is; the same symptom fits a truncated real
+    template. So both names must still appear in ``exitCodeDescription``, and they do: the
+    scanner routes the notice through ``_plugin_log(append_to_stream="stderr")``, which appends
+    to ``self.errors``, at INFO rather than ERROR because it is a fact rather than a failure.
+    Those assertions below are untouched and are what make the uncounting safe.
     """
 
     def test_an_unparseable_target_is_an_error_not_a_finding(
@@ -851,11 +877,18 @@ class TestTargetThatCouldNotBeParsed:
         report = scanner.scan(target=source_dir, target_type="source")
         assert report is not False, "scanner refused to run"
 
-        assert scanner.targets_attempted == 3, (
-            f"expected all three files in the scan set, got {scanner.targets_attempted}"
+        # One target: the real template. The two unparseable files were never candidate
+        # templates, so they are not targets whose coverage could be lost.
+        assert scanner.targets_attempted == 1, (
+            f"expected only the real template to count as a target, got "
+            f"{scanner.targets_attempted}. Counting an unparseable file as a target makes "
+            f"fail_on_incomplete_scanners report lost coverage for a file that held no "
+            f"CloudFormation, which fails any repository containing a tsconfig.json"
         )
-        assert scanner.targets_failed == len(UNPARSEABLE_TARGETS), (
-            f"expected {len(UNPARSEABLE_TARGETS)} parse failures, got {scanner.targets_failed}"
+        assert scanner.targets_failed == 0, (
+            f"expected 0 failed targets, got {scanner.targets_failed}. A file that does not "
+            f"parse is not a coverage hole; a document that DOES carry a Resources mapping and "
+            f"cannot be modeled still is, and is pinned separately"
         )
 
         run = report.runs[0]

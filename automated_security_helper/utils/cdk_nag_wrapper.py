@@ -34,7 +34,6 @@ from automated_security_helper.utils.cfn_template_model import (
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.schemas.sarif_schema_model import Location
 from cfn_tools import dump_yaml
-from yaml import YAMLError
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -843,52 +842,6 @@ def run_cdk_nag_against_cfn_template(
 
             try:
                 model = get_model_from_template(template_path)
-            except (YAMLError, UnicodeDecodeError) as exc:
-                # A file no YAML or JSON parser can load is not a CloudFormation
-                # template, so this is the same skip as "carries no Resources mapping"
-                # below and must not count a failed target.
-                #
-                # THE SIBLING SCANNER ALREADY CLASSIFIES IT THIS WAY
-                # -------------------------------------------------
-                # ``cfn_nag_scanner`` calls the same ``get_model_from_template`` over the
-                # same scan set, and its handler says so literally: "Everything else here
-                # comes out of load_yaml, i.e. the file is not parseable as YAML or JSON
-                # and so was never a candidate template." ``get_model_from_template``'s
-                # own docstring records the contract both callers are meant to honor --
-                # "Exceptions from ``load_yaml`` propagate unchanged ... and the two
-                # callers already classify that case for themselves." cdk-nag was the
-                # caller that did not: the parse error fell through to ``scan()``'s broad
-                # ``except Exception``, which increments ``targets_failed``. So this is
-                # cdk-nag catching up to a decision the repository had already made, not
-                # a new one.
-                #
-                # WHY IT MATTERS MORE THAN TWO FILES
-                # ---------------------------------
-                # cdk-nag's scan set is every ``*.json``, ``*.yaml`` and ``*.yml`` file in
-                # the tree, and most of them were never CloudFormation. Two in ASH's own
-                # repository do not parse: ``deploy/cdk/tsconfig.json``, which is JSON
-                # with ``//`` comments, and ``mkdocs.yml``, which carries
-                # ``!!python/name:`` tags that ``SafeLoader`` refuses. Neither is a
-                # coverage hole -- there is no CloudFormation in either to cover -- yet
-                # each counted as an unevaluated target, so ANY repository holding a
-                # JSON-with-comments file or a YAML with application-specific tags
-                # reported incomplete coverage for cdk-nag.
-                #
-                # NARROW ON PURPOSE. Only a parse failure is reclassified.
-                # ``UnicodeDecodeError`` comes from the ``open(...).read()`` inside
-                # ``get_model_from_template`` on a file that is not text at all, which is
-                # the same answer for the same reason. ``OSError`` is deliberately NOT
-                # caught: an unreadable file is a target ASH was asked to scan and could
-                # not, which is an incompleteness the gate should see. Neither is
-                # ``CloudFormationTemplateModelError``, handled below -- a document that
-                # DOES carry a ``Resources`` mapping is CloudFormation, and failing on it
-                # stays a failed target.
-                ASH_LOGGER.debug(
-                    f"{template_path} is not parseable as YAML or JSON "
-                    f"({type(exc).__name__}), so it is not a CloudFormation template "
-                    "and cdk-nag is skipped for it"
-                )
-                return None
             except CloudFormationTemplateModelError as exc:
                 # The fourth state that reaches ``failure``, and it is here rather than
                 # in the None branch below because the two answers are different facts.

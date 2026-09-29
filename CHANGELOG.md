@@ -330,12 +330,24 @@
   rejected: it also refuses file and Docker image assets, which would make an
   asset-bearing template fail for a second, unrelated reason.
 
-- **A file cdk-nag cannot parse is a skip, not an unevaluated target.** cdk-nag's
-  scan set is every `*.json`, `*.yaml` and `*.yml` file in the tree, most of which
-  were never CloudFormation. A file that no YAML or JSON parser can load cannot carry
-  a `Resources` mapping, so it is not a candidate template — but the parse error
-  escaped the wrapper into `CdkNagScanner.scan()`'s broad `except Exception`, which
-  counts a **failed target**.
+- **A file cdk-nag cannot parse is an announced skip, not an unevaluated target.**
+  cdk-nag's scan set is every `*.json`, `*.yaml` and `*.yml` file in the tree, most of
+  which were never CloudFormation. A file that no YAML or JSON parser can load cannot
+  carry a `Resources` mapping, so it is not a candidate template — but the parse error
+  fell through to `CdkNagScanner.scan()`'s broad `except Exception`, which counts a
+  **failed target**.
+
+  It is uncounted **and still reported**, which is two changes rather than one. A
+  parse failure is not confidently a non-template the way a document that parses with
+  no `Resources` key is — a truncated or malformed real template produces the same
+  symptom, and ASH cannot tell which from here. So the notice goes through
+  `_plugin_log(append_to_stream="stderr")`, which appends to the scanner's error list
+  and therefore reaches SARIF `exitCodeDescription`: the same channel the "target
+  directory is empty" notice uses, at INFO rather than ERROR because it is a fact
+  rather than a failure. Dropping it to a DEBUG log was tried first and rejected —
+  `tests/integration/scanners/test_cdk_nag_real_pack.py` pins that an unparseable
+  target must appear in that channel, on the grounds that "not a finding" would
+  otherwise also be satisfied by the failure vanishing entirely.
 
   With `fail_on_incomplete_scanners` on by default, that made any repository holding
   a JSON-with-comments file or a YAML with application-specific tags report
@@ -350,8 +362,9 @@
   caller that did not. This is convergence on a decision the codebase had already
   made, not a new leniency.
 
-  **Narrow on purpose.** Only `YAMLError` and `UnicodeDecodeError` are reclassified.
-  `OSError` is not: an unreadable file is a target ASH was asked to scan and could
+  **Narrow on purpose.** Only `YAMLError` and `UnicodeDecodeError` are reclassified,
+  in the scanner's per-target loop immediately above the broad handler it carves out
+  of. `OSError` is not: an unreadable file is a target ASH was asked to scan and could
   not, which is an incompleteness the gate should see. A document that *does* carry a
   `Resources` mapping and cannot be modeled is not either — that stays a failed
   target, with a test pinning it so the arm cannot be widened into a bare
