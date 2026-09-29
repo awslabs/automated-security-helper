@@ -1,6 +1,7 @@
 name: "Pre-pull the build base image"
 description: >-
-  Pull the Dockerfile's base image once per job, with backoff, before anything builds.
+  Pull the Dockerfile's base image once per job, from either of two registries, with the
+  Dockerfile's pinned digest enforced, before anything builds.
 
 # WHY THIS EXISTS
 #
@@ -43,15 +44,168 @@ description: >-
 # customer" is therefore not this repository -- the hosted runners draw from a shared egress
 # pool, and a leg fails when it lands behind an address whose volume is already spent.
 #
-# So the practical remedy is neither patience nor a permissions change: re-run the job and it
-# lands somewhere else. That is what this step's error message has to say, because an operator
-# told to wait for the month to roll over will wait three days for something a re-run fixes in
-# five minutes.
-#
 # The distinguishing text is "Data limit exceeded", and the observed message carries BOTH
 # strings at once: `toomanyrequests: Data limit exceeded`. So the data-cap check has to come
 # first; matching on `toomanyrequests` alone sends the case down the retry path, where it
 # spends 2m31s over five attempts to arrive at the failure the first attempt already had.
+#
+# WHY A SECOND REGISTRY, AND WHY IT IS A FALLBACK RATHER THAN A SWAP
+#
+# Re-running the job fixes a data-cap refusal, because the re-run lands behind a different
+# address. That works and costs a human five minutes of noticing. A second registry does the
+# same thing without the human, on the same runner, inside the same job.
+#
+# Docker Hub is emphatically not a better primary. Per
+# https://docs.docker.com/docker-hub/usage/pulls/ its anonymous allowance is counted "per IPv4
+# address or IPv6 /64 subnet", the page warns that a CI platform "may use the same IPv4 address
+# or IPv6 /64 subnet to pull images for multiple users", and "a pull for a multi-arch image will
+# count as one pull for each different architecture". That is the same shared-address failure
+# mode in a smaller bucket. Measured against registry-1.docker.io on 2026-09-29, the live
+# response headers reported `ratelimit-limit: 100;w=3600` for an anonymous client.
+#
+# The value is not that either registry is reliable. It is that the two quotas are metered on
+# different axes -- bytes per month against pulls per window -- and keep separate counters, so
+# an address that has exhausted one has very likely not exhausted the other. Two registries buy
+# two independent chances on one runner. Ordering ECR Public first keeps the shipped Dockerfile
+# authoritative: the reference the build resolves is unchanged, and the common path is byte for
+# byte the path that ran before this fallback existed.
+#
+# WHY THE DIGEST PIN IS THE LOAD-BEARING PART
+#
+# A fallback that quietly accepts a different image is a supply-chain substitution, and strictly
+# worse than the pull failing. The safety argument for sourcing from docker.io is that
+# public.ecr.aws/docker/library/python is a mirror of docker.io/library/python: measured
+# 2026-09-29, both registries answer this tag with index digest
+# sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e and mediaType
+# application/vnd.oci.image.index.v1+json. That argument only holds while the digest is checked,
+# so it is checked in code here rather than assumed, and `ARG BASE_IMAGE_DIGEST` in the
+# Dockerfile is where the expected value lives -- one line from the tag it belongs to.
+#
+# The check is two pulls and a comparison of image ids, and the shape is deliberate:
+#
+#   1. pull `repo:tag`      -- what the Dockerfile's FROM would have resolved
+#   2. pull `repo@<pin>`    -- content-addressed, so the registry cannot answer with anything
+#                              else and the runtime verifies it; no bytes move if step 1
+#                              already fetched them
+#   3. compare the two local image ids; equal means the tag currently resolves to the pinned
+#      content, and the reference the build will use holds exactly that content
+#
+# Rejected: reading the digest back from the runtime with `image inspect` and comparing the
+# string. Measured on docker 25.0.16, `.RepoDigests` does carry the index digest -- but podman
+# records the per-platform manifest digest instead in at least some versions, and nerdctl reads
+# from containerd's own store. One pinned index digest cannot be compared against three
+# different notions of "the digest", and a pin per runtime per platform is not a pin. Comparing
+# image ids sidesteps this entirely: both ids come from the same runtime in the same format, so
+# only their equality is ever relied on.
+#
+# NERDCTL CANNOT INSPECT `repo@<digest>`, SO THE PINNED IMAGE IS LOOKED UP TWO WAYS
+#
+# The first version of this asked for the pinned image as `${repo}@${pin}` and nothing else.
+# That works on docker and it does not work on nerdctl, which is what finch runs. The finch leg
+# failed with this step's own "reported no image id" refusal, correctly, having pulled both
+# references successfully.
+#
+# The cause is in nerdctl's own resolver, `pkg/cmd/image/inspect.go`. `inspectIdentifier`
+# splits the argument into a name, a tag and a digest, and for `repo@sha256:...` the tag is
+# empty -- distribution/reference treats that form as canonical rather than tagged, so
+# nerdctl's `referenceutil.Parse` leaves `Tag` unset. `Inspect` then lists every image whose
+# containerd target digest equals the pin and keeps only candidates matching BOTH the requested
+# name and the requested tag, having first rewritten an empty requested tag to `latest`:
+#
+#     candidateTag := parsedReference.Tag
+#     // If the name had a digest, an empty tag is not normalized to latest, so, account
+#     // for that here
+#     if requestedTag == "" {
+#         requestedTag = "latest"
+#     }
+#     if parsedReference.Name() == requestedName && candidateTag == requestedTag {
+#
+# So `repo@<digest>` only ever resolves when a `repo:latest` record carrying that digest
+# happens to exist. This base image is pulled as `:3.12-slim-bookworm`, so no candidate has
+# tag `latest`, every candidate falls through, and `Inspect` returns `no such image`. Read at
+# v2.2.2 (what finch 1.19.0 ships, per NERDCTL_COMMIT/NERDCTL_RELEASE in finch-core's
+# deps/ubuntu-deps.conf), v2.3.5 (what scripts/setup-nerdctl-linux.sh installs) and v2.4.0:
+# identical in all three, so this is not a version to wait out.
+#
+# Dropping the repository name fixes it. With a bare `sha256:...` argument, nerdctl's
+# `referenceutil.Parse` takes the `digest.Parse` early return, the requested name comes back
+# empty, the name-and-tag branch is skipped entirely and the first candidate at that target
+# digest is returned. So the pinned image is asked for as `${repo}@${pin}` first -- unchanged,
+# and the only form docker accepts, since docker's `image inspect` resolves a bare digest
+# against image IDs (config digests) and never against an index digest -- and as a bare
+# `${pin}` only if that answered nothing.
+#
+# The second form is fail-safe rather than merely convenient, which is what makes it
+# acceptable here at all. It is a LOOKUP KEY, not a value being compared: the pin selects an
+# image record whose containerd target digest is the pin, and what gets compared is still two
+# ids the same runtime printed in the same format. A runtime whose stored target digest is the
+# per-platform manifest digest rather than the index digest therefore finds nothing and lands
+# on the refusal below. This form can turn a refusal into a pass only when the local store
+# really does hold the pinned content; it can never accept different content.
+#
+# Rejected: verifying the digest over the registry API with curl instead, which is genuinely
+# runtime-independent. It answers a different question. `pull ${repo}@${pin}` is
+# content-addressed, so the runtime itself verifies that the bytes in the local store hash to
+# the pin -- no registry round trip can establish that, and no registry round trip is needed
+# for it. What the id comparison adds is only "the tag currently resolves to the pinned
+# content", and moving that to curl would mean trusting a registry's answer to a manifest HEAD
+# about a tag, over a token endpoint and an Accept header for the index media types, instead of
+# trusting the local store the build is about to read. That is a weaker claim about a
+# less relevant object, for more moving parts.
+#
+# Rejected: tagging `${repo}@${pin}` under a throwaway local name and inspecting that. It
+# would work -- `nerdctl tag` resolves references through `pkg/idutil/imagewalker`, whose
+# `name==` filter does match a digest-suffixed record, which is why the fallback path's
+# existing `tag` call is unaffected by any of this. But it writes to the local image store on
+# the verification path, before anything has been verified, and "nothing was tagged" is one of
+# the properties a refusal here is supposed to guarantee.
+#
+# Rejected: `image inspect --mode=native --format '{{.Image.Target.Digest}}'`. nerdctl-only
+# spelling, and it puts a runtime's notion of "the digest" back into the comparison, which is
+# the thing the id comparison exists to avoid.
+#
+# podman needs neither form, and `{{.Id}}` IS THE LOAD-BEARING SPELLING FOR IT
+#
+# Established from source rather than assumed, because podman is the third runtime here and the
+# one this pre-pull reaches without a wrapper. Two things hold on podman 4.9.3, which is what
+# Ubuntu noble ships:
+#
+#   - `repo@<index digest>` resolves for an image pulled by tag. containers/image stores the
+#     top-level manifest under its own digest when it differs from the per-platform one
+#     (`storage/storage_dest.go`), containers/storage folds that into the image's digest index
+#     (`images.go`, recomputeDigests), and a digested reference that matches no name falls back
+#     to `ImagesByDigest` (`storage/storage_reference.go`, resolveImage). So the first form
+#     answers and the bare digest is never reached.
+#   - podman's inspect executes the template against a TYPED struct whose field is `ID`, so
+#     `{{.Id}}` only works because `cmd/podman/inspect/inspect.go` rewrites it, with a regex
+#     that matches the whole action and nothing else:
+#
+#         m := regexp.MustCompile(`{{\s*\.Id\s*}}`)
+#         row = m.ReplaceAllString(row, "{{.ID}}")
+#
+#     Which means `{{.Id}}` is safe and `{{.Id | something}}` or `{{printf "%s" .Id}}` is not:
+#     a pipeline is not rewritten, `.Id` is not a field of the struct, and podman would fail.
+#     If this format string ever needs to do more than name the field, spell it `{{.ID}}` --
+#     that is the real field on podman, the alias docker accepts, and the typed-pass spelling
+#     on nerdctl. It is left as `{{.Id}}` here only because that is what already ran green.
+#
+# All three runtimes' ids are the config blob digest, so they are comparable for the same
+# reason docker's are: podman's `Id` comes from `manifest.ImageID(diffIDs)`, and nerdctl's
+# dockercompat `Id` is `nativeImage.ImageConfigDesc.Digest` with an in-source comment saying it
+# is deliberately docker's notion rather than containerd's. Not that this action relies on
+# that -- it only ever compares two ids from one runtime -- but it is why a mismatch here means
+# what it says.
+#
+# Rejected: pulling only by digest and skipping step 1. It is shorter and it defeats a
+# substituting registry just as well, but it cannot see a tag bump. Move the Dockerfile to
+# python:3.13 and forget the pin, and a digest-only pre-pull fetches the 3.12 image and tags it
+# as 3.13 in the local store -- after which the build gets 3.12 while the Dockerfile says 3.13,
+# silently, precisely because this action makes the local store authoritative. Step 1 is what
+# turns that into a failure.
+#
+# On mismatch this fails and does not try the other registry. The other registry mirrors the
+# same upstream tag, so it would report the same digest; and falling through on a real error
+# turns a clear failure into a slow, confusing one.
 #
 # WHAT THIS DELIBERATELY DOES NOT DO
 #
@@ -65,6 +219,13 @@ description: >-
 # It also does not authenticate. Authenticating to ECR Public raises the limit and stores
 # nothing, which would satisfy the same requirement more durably, but it needs an IAM role and
 # an OIDC trust on a public repository -- a permissions decision, not a workflow change.
+#
+# It does not pre-flight Docker Hub's remaining allowance. A manifest HEAD returns
+# `ratelimit-remaining` and does not spend a pull, so an attempt certain to fail could be
+# skipped. It is not worth it here: reading that header needs a registry token, which means a
+# token endpoint, an Accept header for the index media types and JSON parsing -- the whole
+# apparatus this design avoided by comparing image ids. The attempt it would save fails in
+# about a second.
 
 inputs:
   oci-runner:
@@ -78,11 +239,13 @@ inputs:
     required: false
     default: ""
   attempts:
-    description: "How many pulls to try before giving up."
+    description: >-
+      How many pulls to try against one registry before moving to the next. Only the
+      per-second rate limit is retried; see the notes above for what is not.
     required: false
     default: "5"
   dockerfile:
-    description: "Where to read the BASE_IMAGE default from."
+    description: "Where to read the BASE_IMAGE and BASE_IMAGE_DIGEST defaults from."
     required: false
     default: "Dockerfile"
 
@@ -100,72 +263,380 @@ runs:
         set -uo pipefail
 
         runtime="${RUNTIME:-docker}"
+
+        # EVERY EXPANSION OF `wrapper` IS GUARDED, BECAUSE IT IS USUALLY EMPTY
+        #
+        # `runner-wrapper` is empty for docker and podman -- only finch and nerdctl need
+        # sudo -- so this array normally has no elements at all. Under `set -u`, bash
+        # before 4.4 treats expanding an element-less array as an unbound variable and
+        # exits. From bash's own CHANGES for 4.4-rc2, under "3. New Features in Bash":
+        #
+        #     Using ${a[@]} or ${a[*]} with an array without any assigned elements when
+        #     the nounset option is enabled no longer throws an unbound variable error.
+        #
+        # macOS ships bash 3.2.57 and is not going to ship anything newer -- Apple stopped
+        # at the last GPLv2 release -- so an unguarded `${wrapper[*]}` is fatal there while
+        # being fine on the ubuntu runners and on any current development machine. Measured
+        # on #672: all ten `PyTest - macos-*` legs, 3.10 through 3.14 on both macos-14 and
+        # macos-latest, died on the first such expansion with
+        #
+        #     step.sh: line 93: wrapper[*]: unbound variable
+        #
+        # having issued no runtime call at all, which then failed every assertion
+        # downstream.
+        #
+        # This action is not itself scheduled on macOS: every macOS x {podman, finch,
+        # nerdctl} cell is excluded in both ash-unified-ci.yml and ash-install-methods.yml,
+        # hosted macOS runners having no nested virtualization, and run-scan-test skips the
+        # pre-pull for python-local. What ran on those legs was
+        # tests/unit/test_prepull_base_image_registry_fallback.py, which extracts this
+        # script and runs it under the host's bash. The guard is still the right fix rather
+        # than a test-only workaround: a step that silently requires bash 4.4+ is one
+        # runner-image change away from being a live failure, and the only thing standing
+        # between the two today is a matrix exclusion written for an unrelated reason.
+        #
+        # `${arr[@]+"${arr[@]}"}` is the portable spelling. `+` tests for set-ness, so it is
+        # exempt from nounset in every version, and it substitutes nothing when the array is
+        # empty. Guarded at every expansion rather than only at the one that failed: an
+        # unguarded site left behind does not remove the bug, it moves it to whichever code
+        # path reaches that line first.
+        #
+        # `[*]` stays `[*]` and `[@]` stays `[@]`. The three `[*]` uses sit inside a larger
+        # double-quoted string that has to stay one word -- an inspect-log line, the status
+        # line below and one annotation -- and `[@]` there would split each into several.
+        # The single `[@]` use is argv, where element boundaries are the whole point.
+        #
+        # Rejected: folding `${runtime}` into the array so it can never be empty and needs
+        # no guard anywhere. Shorter, and immune to this whole class rather than defended
+        # against it -- but the array is displayed as well as executed, and with the wrapper
+        # empty `${wrapper[*]} ${runtime}` renders as ` docker`, so collapsing the two would
+        # reword three log lines. Not worth spending the "nothing observable changed" claim
+        # on in a commit whose entire job is a portability fix.
+        #
+        # Rejected: dropping `set -u`. It is what makes a mistyped variable in a step that
+        # decides which registry a base image comes from fail loudly rather than expand to
+        # nothing.
         # shellcheck disable=SC2206
         wrapper=( ${WRAPPER} )
 
-        # Read the tag from the Dockerfile rather than duplicating it here, so bumping
+        # A non-positive value would make `seq 1 "${ATTEMPTS}"` produce nothing, the retry
+        # loop body never run, and the pull function return the `for` statement's own status
+        # -- reporting success having pulled nothing at all.
+        if [[ ! "${ATTEMPTS}" =~ ^[1-9][0-9]*$ ]]; then
+          echo "::error::attempts is '${ATTEMPTS}'; it must be a positive integer."
+          exit 1
+        fi
+
+        run_runtime() { "${wrapper[@]+"${wrapper[@]}"}" "${runtime}" "$@"; }
+
+        # Every inspect this step issues is recorded here, each followed by whatever the
+        # runtime wrote to stderr for it. The first version sent that stream to /dev/null, so
+        # when finch refused the pinned reference the log said the id was empty and nothing at
+        # all about why -- the reason was one line on stderr, discarded. A refusal has to carry
+        # it, and it has to carry the argv too, because the step now asks more than one
+        # question and "which one failed" is half the diagnosis.
+        inspect_log="$(mktemp)"
+
+        # Answers with an empty string rather than a non-zero exit on some runtimes, so every
+        # caller has to reject emptiness explicitly. Two empty ids compare equal, and "the
+        # comparison passed because neither side said anything" is the one outcome this action
+        # must never have.
+        #
+        # Takes one or more references to ask about and returns the first id any of them
+        # yields, because no single spelling of "the pinned image" is accepted by every
+        # runtime; see the notes above for which spellings and why the order is what it is.
+        image_id() {
+          local ref out
+          for ref in "$@"; do
+            printf '%s\n' "--- ${wrapper[*]+"${wrapper[*]}"} ${runtime} image inspect --format '{{.Id}}' ${ref}" \
+              >> "${inspect_log}"
+            out="$(run_runtime image inspect --format '{{.Id}}' "${ref}" 2>> "${inspect_log}")" || true
+            # First line only, and not a Go template's way of spelling "that field was absent"
+            # -- `<no value>` is what text/template prints for a missing map key under the
+            # default missingkey mode, and it is not an image id.
+            out="${out%%$'\n'*}"
+            case "${out}" in
+              '' | '<no value>') continue ;;
+            esac
+            printf '%s\n' "${out}"
+            return 0
+          done
+          return 1
+        }
+
+        # Read both pins from the Dockerfile rather than duplicating them here, so bumping
         # ARG BASE_IMAGE does not silently leave this step pulling the old image while the
         # build pulls the new one -- which would restore the very rate limit this avoids and
         # look like the step simply stopped working.
-        base="$(sed -n 's/^ARG BASE_IMAGE=\(.*\)$/\1/p' "${DOCKERFILE}" | head -n 1)"
+        #
+        # `p;q` on the first match instead of `| head -n 1`: with pipefail set, head closing
+        # the pipe early makes sed exit 141 and the whole assignment fail on a Dockerfile that
+        # happens to have a second matching line.
+        base="$(sed -n '/^ARG BASE_IMAGE=/{s/^ARG BASE_IMAGE=//;p;q;}' "${DOCKERFILE}")"
+        pin="$(sed -n '/^ARG BASE_IMAGE_DIGEST=/{s/^ARG BASE_IMAGE_DIGEST=//;p;q;}' "${DOCKERFILE}")"
+
         if [ -z "${base}" ]; then
           echo "::error::no 'ARG BASE_IMAGE=' line in ${DOCKERFILE}; nothing to pre-pull. \
         This step reads the tag from the Dockerfile, so a rename there needs one here too."
           exit 1
         fi
-        echo "base image: ${base}"
-        echo "runtime:    ${wrapper[*]} ${runtime}"
-
-        # Already local is success, not a reason to hit the registry again. Present on a
-        # warm runner image and after any earlier step in the same job pulled it.
-        if "${wrapper[@]}" "${runtime}" image inspect "${base}" >/dev/null 2>&1; then
-          echo "already present locally; not pulling"
-          exit 0
+        if [ -z "${pin}" ]; then
+          echo "::error::no 'ARG BASE_IMAGE_DIGEST=' line in ${DOCKERFILE}. This step will \
+        not pre-pull a base image it cannot verify, because it may source that image from a \
+        fallback registry and the digest is the only thing establishing the two registries \
+        serve the same bytes. Add the line next to ARG BASE_IMAGE; get the value with: \
+        ${runtime} pull ${base} && ${runtime} image inspect --format '{{index .RepoDigests 0}}' ${base}"
+          exit 1
+        fi
+        if [[ ! "${pin}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+          echo "::error::ARG BASE_IMAGE_DIGEST in ${DOCKERFILE} is '${pin}', which is not a \
+        sha256:<64 hex> digest. It must be the multi-arch index digest of ${base}."
+          exit 1
         fi
 
-        log="$(mktemp)"
-        for n in $(seq 1 "${ATTEMPTS}"); do
-          echo "=== pull attempt ${n} of ${ATTEMPTS} ==="
-          if "${wrapper[@]}" "${runtime}" pull "${base}" 2>&1 | tee "${log}"; then
-            [ "${n}" -gt 1 ] && echo "::warning::base image pulled on attempt ${n}; \
-        ECR Public rate-limited the earlier attempts."
+        case "${base}" in
+          *@*)
+            echo "::error::ARG BASE_IMAGE in ${DOCKERFILE} is '${base}', which carries a \
+        digest. This step has to be able to tag a fallback pull under that exact reference so \
+        the build resolves it locally, and a digest-suffixed reference is not a valid tag \
+        target. Keep the digest in ARG BASE_IMAGE_DIGEST instead."
+            exit 1
+            ;;
+        esac
+
+        primary_repo="${base%:*}"
+        tag="${base##*:}"
+        if [ "${primary_repo}" = "${base}" ] || [ -z "${primary_repo}" ] || [ -z "${tag}" ] \
+          || [ "${tag}" != "${tag#*/}" ]; then
+          echo "::error::ARG BASE_IMAGE in ${DOCKERFILE} is '${base}', which does not parse \
+        as repository:tag. This step needs the tag separately to look the same image up in a \
+        fallback registry."
+          exit 1
+        fi
+
+        # The fallback is derived from the primary rather than written out, so that changing
+        # ARG BASE_IMAGE cannot leave the fallback pointing at a different image than the
+        # build. public.ecr.aws/docker/library/* is AWS's mirror of Docker Hub's official
+        # images, so the mapping is exact for that prefix and unknown for anything else --
+        # in which case there is no fallback rather than a guessed one.
+        case "${primary_repo}" in
+          public.ecr.aws/docker/library/*)
+            fallback_repo="docker.io/library/${primary_repo#public.ecr.aws/docker/library/}"
+            ;;
+          *)
+            fallback_repo=""
+            echo "::notice::${primary_repo} is not a public.ecr.aws mirror of a Docker Hub \
+        official image, so no fallback registry is known for it and this step will try the \
+        one registry. If the base image moved deliberately, teach this action the new \
+        mirror pairing."
+            ;;
+        esac
+
+        echo "base image:    ${base}"
+        echo "pinned digest: ${pin}"
+        echo "runtime:       ${wrapper[*]+"${wrapper[*]}"} ${runtime}"
+        echo "registries:    ${primary_repo}${fallback_repo:+ then ${fallback_repo}}"
+
+        # Already local AND already matching the pin is success, not a reason to hit a
+        # registry. Present on a warm runner image and after any earlier step in the same job
+        # pulled it. Unlike a bare existence probe this cannot accept an unverified image: if
+        # the local tag is something other than the pinned content, the probe does not match
+        # and the full path below runs.
+        #
+        # The pin is only asked about when the tag is local, which is both one fewer question
+        # on the common cold-runner path and what keeps the runtime measured working from
+        # being asked anything new: the second spelling of the pinned reference below is only
+        # reached when the first answered nothing, and on docker the first always answers.
+        local_tag_id="$(image_id "${base}" || true)"
+        if [ -n "${local_tag_id}" ]; then
+          local_pin_id="$(image_id "${primary_repo}@${pin}" "${pin}" || true)"
+          if [ "${local_tag_id}" = "${local_pin_id}" ]; then
+            echo "already present locally at the pinned digest; not pulling"
             exit 0
           fi
+        fi
 
-          # The monthly data cap first, because the wire error carries both strings and this
-          # one cannot be waited out. Reporting it as a rate limit sends whoever reads the log
-          # looking for a concurrency problem in the matrix, when the matrix is not the cause
-          # and spacing the cells out would not help.
-          if grep -q 'Data limit exceeded' "${log}"; then
-            echo "::error::RE-RUN THIS JOB. ECR Public refused to serve ${base} because the \
-        anonymous 500 GB/month data quota is spent for the address this runner pulled from -- \
-        which is a shared pool, not this repository, so most legs are unaffected and a re-run \
-        usually lands somewhere with quota left. This is the monthly data limit rather than the \
-        1/second pull rate, so retrying inside this job does not help and is not attempted: \
-        all attempts here would fail the same way. Neither limit is adjustable, see \
-        https://docs.aws.amazon.com/AmazonECR/latest/public/public-service-quotas.html. If it \
-        fails repeatedly across re-runs, the durable fixes are authenticating the pull, which \
-        needs an IAM role and an OIDC trust on a public repository, or sourcing the base image \
-        from a registry that does not meter anonymous clients by volume."
+        # Grows for every pull the step issues, over every registry, so the log ends with one
+        # number an operator can compare against ATTEMPTS.
+        pulls=0
+
+        # 0  the ref is in the local store
+        # 10 this registry refused it for a quota reason; try the next registry
+        # Anything else is not made truer by asking a different registry, so this exits the
+        # step directly rather than returning.
+        pull_ref() {
+          local ref="$1" kind="$2"
+          local log n sleep_for
+          log="$(mktemp)"
+          for n in $(seq 1 "${ATTEMPTS}"); do
+            pulls=$(( pulls + 1 ))
+            echo "=== pull ${ref} (attempt ${n} of ${ATTEMPTS}) ==="
+            if run_runtime pull "${ref}" 2>&1 | tee "${log}"; then
+              [ "${n}" -gt 1 ] && echo "::warning::${ref} pulled on attempt ${n}; the \
+        earlier attempts were rate-limited."
+              return 0
+            fi
+
+            # The monthly data cap first, because the wire error carries both strings and this
+            # one cannot be waited out. Reporting it as a rate limit sends whoever reads the log
+            # looking for a concurrency problem in the matrix, when the matrix is not the cause
+            # and spacing the cells out would not help.
+            if grep -q 'Data limit exceeded' "${log}"; then
+              echo "::warning::${ref} refused: the anonymous 500 GB/month data quota is spent \
+        for the address this runner pulls from. Not retried here -- measurement says every \
+        attempt from the same address fails the same way. Moving to the next registry."
+              return 10
+            fi
+
+            # Deliberately not a bare `429`: three digits match layer sizes and digest
+            # prefixes, and a false quota reading here would send a real error down the
+            # fallback path and report it as a quota problem.
+            if ! grep -qE 'toomanyrequests|[Tt]oo [Mm]any [Rr]equests' "${log}"; then
+              echo "::error::pulling ${ref} failed for a reason other than a registry quota. \
+        Not retried, and no other registry was tried: an unknown manifest, a bad tag, a DNS \
+        failure or an auth error is not fixed by asking somewhere else, and trying anyway \
+        would report a typo in ${DOCKERFILE} as a quota problem. If the reference above ends \
+        in @sha256: and '${runtime}' cannot pull a digest reference, that is a gap in this \
+        action rather than anything wrong with ${DOCKERFILE}. See the output above."
+              exit 1
+            fi
+
+            # Docker Hub's allowance is counted per window per address, not per second, so
+            # there is nothing to wait out inside one job. ECR Public's 1/second limit is
+            # exactly what a short backoff is for.
+            if [ "${kind}" != "ecr" ]; then
+              echo "::warning::${ref} refused: ${kind} rate-limited this address, and its \
+        allowance is per window rather than per second, so retrying inside this job would not \
+        clear it. Moving on."
+              return 10
+            fi
+
+            if [ "${n}" -eq "${ATTEMPTS}" ]; then
+              echo "::warning::ECR Public rate-limited every one of ${ATTEMPTS} pull attempts \
+        for ${ref}. The limit is on anonymous pulls and this matrix starts many cells at once. \
+        Moving to the next registry."
+              return 10
+            fi
+
+            sleep_for=$(( n * 15 ))
+            echo "::warning::ECR Public rate limit on attempt ${n} for ${ref}; retrying in \
+        ${sleep_for}s."
+            sleep "${sleep_for}"
+          done
+        }
+
+        # 0  the pinned image is in the local store under ${base}
+        # 10 this registry refused; try the next one
+        try_registry() {
+          local repo="$1" kind="$2"
+          local rc=0 tag_id pin_id placed_id unanswered
+
+          pull_ref "${repo}:${tag}" "${kind}" || rc=$?
+          [ "${rc}" -eq 0 ] || return "${rc}"
+
+          # Content-addressed, so this is the fetch whose result cannot be substituted. It
+          # moves no layers when the tag above already resolved to the same digest.
+          pull_ref "${repo}@${pin}" "${kind}" || rc=$?
+          [ "${rc}" -eq 0 ] || return "${rc}"
+
+          tag_id="$(image_id "${repo}:${tag}" || true)"
+          pin_id="$(image_id "${repo}@${pin}" "${pin}" || true)"
+          if [ -z "${tag_id}" ] || [ -z "${pin_id}" ]; then
+            # Naming the side that came back empty rather than both: the original of this
+            # message said "for X or Y", and on the finch failure that left whoever read it
+            # unable to tell that the tag was fine and only the pinned reference was not,
+            # which is the whole shape of the problem.
+            if [ -z "${tag_id}" ] && [ -z "${pin_id}" ]; then
+              unanswered="${repo}:${tag} or ${repo}@${pin}"
+            elif [ -z "${tag_id}" ]; then
+              unanswered="${repo}:${tag}"
+            else
+              unanswered="${repo}@${pin}, in any form this step knows to ask for it"
+            fi
+            echo "::error::${wrapper[*]+"${wrapper[*]}"} ${runtime} reported no image id for \
+        ${unanswered} after pulling both, so the pinned digest cannot be checked. Refusing to \
+        hand the build an unverified base image. This is a gap in this action's support for \
+        '${runtime}', not a registry problem. Every inspect this step issued follows, in \
+        order, each with anything the runtime wrote to stderr for it. The first entry is the \
+        warm-runner probe and is expected to miss on a cold runner."
+            cat "${inspect_log}"
             exit 1
           fi
 
-          # Retry ONLY the per-second rate limit. Anything else -- a typo in the tag, a network
-          # route that is down, a manifest that does not exist -- is not made truer by waiting,
-          # and retrying it would turn a clear failure into a slow one.
-          if ! grep -qE 'toomanyrequests|429 Too Many Requests' "${log}"; then
-            echo "::error::pulling ${base} failed for a reason other than an ECR Public rate \
-        limit. Not retried; see the output above."
+          if [ "${tag_id}" != "${pin_id}" ]; then
+            echo "::error::DIGEST MISMATCH, refusing to pre-pull. ${repo}:${tag} does not \
+        resolve to ${pin}, the digest pinned as ARG BASE_IMAGE_DIGEST in ${DOCKERFILE} \
+        (${repo}:${tag} is image ${tag_id}; ${pin} is image ${pin_id}). Nothing has been \
+        tagged and no other registry was tried. IF YOU JUST BUMPED ARG BASE_IMAGE: this is \
+        the missing second line. Recompute the pin with \`${runtime} pull ${base} && \
+        ${runtime} image inspect --format '{{index .RepoDigests 0}}' ${base}\` and put that \
+        value in ARG BASE_IMAGE_DIGEST in the same commit as the tag. IF YOU DID NOT CHANGE \
+        THE TAG: the tag moved under a pin that was reviewed, so the image on offer is not \
+        the reviewed one -- find out why before updating the pin to make this pass."
             exit 1
           fi
 
-          if [ "${n}" -eq "${ATTEMPTS}" ]; then
-            echo "::error::ECR Public rate-limited every one of ${ATTEMPTS} pull attempts for \
-        ${base}. The limit is on anonymous pulls and this matrix starts many cells at once."
-            exit 1
+          if [ "${repo}" != "${primary_repo}" ]; then
+            # The build resolves `FROM ${BASE_IMAGE}`, so the fallback's bytes have to appear
+            # under that exact reference. Tagging from the digest reference rather than from
+            # the fallback's tag keeps this pinned end to end, and works the same on docker,
+            # podman, finch and nerdctl because `tag` and `pull` are all it needs.
+            if ! run_runtime tag "${repo}@${pin}" "${base}"; then
+              echo "::error::pulled ${repo}@${pin} but could not tag it as ${base}, so the \
+        build would go back to ${primary_repo} and be refused again. See the output above."
+              exit 1
+            fi
+            placed_id="$(image_id "${base}" || true)"
+            if [ "${placed_id}" != "${pin_id}" ]; then
+              echo "::error::tagged ${repo}@${pin} as ${base}, but ${base} now resolves to \
+        image '${placed_id}' rather than '${pin_id}'. Refusing to proceed with a base image \
+        that is not the pinned one."
+              exit 1
+            fi
+            echo "::notice::sourced ${base} from ${repo} at ${pin} and tagged it locally as \
+        ${base}; the build resolves it from the local store without touching \
+        ${primary_repo}."
           fi
 
-          sleep_for=$(( n * 15 ))
-          echo "::warning::ECR Public rate limit on attempt ${n}; retrying in ${sleep_for}s."
-          sleep "${sleep_for}"
+          return 0
+        }
+
+        tried=""
+        rc=10
+        for entry in "${primary_repo}|ecr" "${fallback_repo}|dockerhub"; do
+          repo="${entry%%|*}"
+          kind="${entry##*|}"
+          [ -n "${repo}" ] || continue
+          tried="${tried:+${tried}, }${repo}"
+          rc=0
+          try_registry "${repo}" "${kind}" || rc=$?
+          if [ "${rc}" -eq 0 ]; then
+            echo "base image ${base} present at ${pin} after ${pulls} pull(s)"
+            exit 0
+          fi
         done
+
+        # Said accurately for one registry as well as two: a base image with no known Docker
+        # Hub mirror gets here having tried only ECR Public, and telling that operator both
+        # quotas are spent would send them looking for a Docker Hub problem they do not have.
+        if [ -n "${fallback_repo}" ]; then
+          exhausted="ECR Public's 500 GB/month volume quota and Docker Hub's per-window pull \
+        allowance are both spent for this runner's egress address, and those two are metered \
+        on different axes with separate counters, so hitting them at once takes some bad luck"
+        else
+          exhausted="ECR Public's 500 GB/month volume quota is spent for this runner's egress \
+        address, and no fallback registry is known for ${primary_repo}, so there was nowhere \
+        else to try"
+        fi
+
+        echo "::error::RE-RUN THIS JOB. Every registry refused to serve ${base}: ${tried}. \
+        ${exhausted}. The \
+        address is a shared pool rather than this repository, which is why most legs are \
+        unaffected and a re-run usually lands somewhere with quota left. Neither limit is \
+        adjustable: \
+        https://docs.aws.amazon.com/AmazonECR/latest/public/public-service-quotas.html and \
+        https://docs.docker.com/docker-hub/usage/pulls/. If it fails repeatedly across \
+        re-runs, the durable fixes are authenticating the pull, which needs an IAM role and \
+        an OIDC trust on a public repository, or sourcing the base image from a registry \
+        that does not meter anonymous clients at all."
+        exit 1
