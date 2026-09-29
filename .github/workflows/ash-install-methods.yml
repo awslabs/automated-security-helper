@@ -36,6 +36,14 @@ jobs:
   # `nix` method that job does not carry. Keep the `python-version` axes of the
   # two identical, deliberately -- a version added to one and not the other
   # leaves a supported interpreter untested on whichever surface was missed.
+  #
+  # The `method` axes are NOT meant to match and should not be "re-aligned". That
+  # job folded pip, pipx, uvx, pre-commit and mcp into one `bundle` value that runs
+  # them as steps, because 105 of its 113 legs were 21-second installs each paying
+  # a ~6.5-minute queue wait. This workflow is path-filtered and runs far less
+  # often, so a leg per method still buys the cleaner per-method check name here.
+  # Same cells, different shape; see the note above install-validation in
+  # ash-unified-ci.yml.
   validate:
     name: ${{ matrix.method }} (${{ matrix.os }}, py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
