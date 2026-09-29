@@ -356,7 +356,13 @@ echo "  buildkitd default worker: containerd (can read containerd's image store)
 # helps if the store it is bound to is the one the nerdctl CLI writes to; bound to
 # any other namespace it reads a real store that is simply empty of our images,
 # which looks identical to having no store at all.
-nerdctl_ns="$(nerdctl namespace list --quiet 2>/dev/null | head -n 1 || true)"
+# `ls` rather than `list`: `ls` is the spelling nerdctl's own command reference
+# documents, and `list` is not documented as an alias for it. Purely diagnostic --
+# it only feeds the error message below -- but a diagnostic that silently prints
+# nothing is worse than no diagnostic, which is why the spelling is the documented
+# one rather than the one that reads better. `|| true` keeps it from ever being the
+# reason this script fails.
+nerdctl_ns="$(nerdctl namespace ls --quiet 2>/dev/null | tr '\n' ' ' || true)"
 if grep -q '"org.mobyproject.buildkit.worker.containerd.namespace":"default"' "${workers_json}"; then
     echo "  buildkitd containerd namespace: default (matches the nerdctl CLI)"
 else
