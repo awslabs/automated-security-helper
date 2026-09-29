@@ -698,40 +698,69 @@ class TestTheFallbackReachesTheBuild:
     ---------------------
     The first fallback pulled from Docker Hub, tagged the result under the ECR reference, and
     announced that "the build resolves it from the local store without touching
-    public.ecr.aws". That was true of plain ``docker build`` and podman and false of the two
-    runtimes driving BuildKit. From the finch leg's own log -- the retag succeeded, the build
-    started 2.07s later and died at the Dockerfile's first instruction still asking ECR
+    public.ecr.aws". A build then died at the Dockerfile's first instruction still asking ECR
     Public::
 
         >>> FROM ${BASE_IMAGE} AS uv-reqs
         error: failed to solve: public.ecr.aws/docker/library/python:3.12-slim-bookworm:
         failed to resolve source metadata for ...: 429 Too Many Requests
 
-    BuildKit's OCI worker builds its resolver with ``ImageStore: nil, // explicitly``, so
-    there is no local store for ``FROM`` to consult and nothing to push an image into. That
-    covers nerdctl, finch, and ``docker buildx build`` on a ``docker-container`` driver --
-    which is what every docker cell in this repository runs, because run-scan-test sets up
-    ``docker/setup-buildx-action`` (driver defaults to ``docker-container``) and exports
-    ``ACTIONS_RUNTIME_TOKEN``, which switches ASH's build to ``docker buildx build --load``.
+    What decides whether a local tag is visible, read from BuildKit
+    --------------------------------------------------------------
+    One guard in ``sourceresolver/imageresolver.go``'s ``ResolveImageMetadata``, at v0.31.2 --
+    the version nerdctl v2.3.5 pins. The registry is tried first, and when it fails::
+
+        if rm != resolver.ResolveModeDefault || is.ImageStore == nil {
+            return nil, err
+        }
+        localRslvr := rslvr.WithImageStore(is.ImageStore, resolver.ResolveModePreferLocal)
+        if _, _, localErr := localRslvr.ResolveLocal(ctx, ref); localErr != nil {
+            return nil, err
+        }
+
+    So a local tag IS consulted after a registry refusal, 429 included -- but only when the
+    resolve mode is the default (it is; nothing here passes ``--pull``) and the worker has an
+    image store. ``ImageStore`` is the only variable, and it depends on the worker:
+    ``worker/runc/runc.go`` sets ``ImageStore: nil, // explicitly``, while the containerd
+    worker binds it to one containerd namespace.
+
+    That correction matters for this class's own history. An earlier version of this docstring
+    attributed the log above to finch and explained it with the OCI worker's nil store. finch
+    does not run that worker: it ships ``/etc/finch/buildkit/buildkitd.toml`` with
+    ``[worker.oci] enabled = false`` and ``[worker.containerd] ... namespace = "finch"``, and
+    its own nerdctl.toml sets the same namespace, so its buildkitd reads the store its CLI
+    writes to. The runtime that genuinely could not see the tag was **nerdctl**, whose
+    buildkitd had no config file at all and therefore defaulted to the OCI worker;
+    ``scripts/setup-nerdctl-linux.sh`` now configures it the way finch does, and asserts the
+    result with ``buildctl debug workers``.
+
+    ``docker buildx`` on a ``docker-container`` driver remains genuinely unable to read it --
+    measured locally, and inherent rather than configurable, since that driver is a separate
+    container with its own OCI worker. Every docker cell here runs that driver, because
+    run-scan-test sets up ``docker/setup-buildx-action`` (driver defaults to
+    ``docker-container``) and exports ``ACTIONS_RUNTIME_TOKEN``, which switches ASH's build to
+    ``docker buildx build --load``.
 
     So the step exports ``ASH_BASE_IMAGE_OVERRIDE`` and the three build entrypoints pass it
     through as ``--build-arg BASE_IMAGE=``. Changing what ``FROM`` asks for is uniform across
-    every runtime, because no runtime has a say in what a build-arg names.
+    every runtime, because no runtime has a say in what a build-arg names. The local tag is the
+    second layer, and it is now a working second layer on four of the five builders rather than
+    two.
 
     What is measured here and what is measured elsewhere
     ---------------------------------------------------
     This class pins the part that is this repository's: the variable is exported, digest-
     pinned, only on the fallback path, and the message no longer claims an outcome the step
-    cannot guarantee. Whether BuildKit ignores a local tag is a property of BuildKit, so
-    asserting it here would be measuring BuildKit rather than the action. That was measured out
-    of band, and the measurement is recorded in
+    cannot guarantee. Whether a given builder consults a local tag is a property of BuildKit and
+    buildah, so asserting it here would be measuring them rather than the action. The docker
+    measurement is recorded in
     ``tests/unit/test_base_image_override_reaches_every_build_entrypoint.py`` -- four runs of
-    one instrument, including the control that proves the instrument can see a local tag at
-    all.
+    one instrument, including the control that proves the instrument can see a local tag at all.
 
-    Not covered here or there: nerdctl, finch and podman have no binary on the machine this
-    was developed on, so their rows in the table above rest on the CI log and on their sources.
-    Only CI can close that.
+    Not covered here or there: nerdctl, finch and podman have no binary on the machine this was
+    developed on. Their rows rest on upstream source, quoted above and in the action, plus the
+    ``buildctl debug workers`` assertion that now runs in the nerdctl leg itself. Only CI closes
+    the rest.
     """
 
     pytestmark = _REQUIRES_BASH

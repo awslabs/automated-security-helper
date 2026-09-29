@@ -162,11 +162,14 @@ else
       # served the base image. .github/actions/prepull-base-image sets it when ECR Public
       # refuses and Docker Hub answers, as a digest-pinned reference.
       #
-      # It cannot be a local tag under the ECR name instead. BuildKit's OCI worker keeps no
-      # image store, so nerdctl and finch -- both reachable here through OCI_RUNNER -- resolve
-      # FROM against the registry and ignore the local tag entirely. Unquoted for the same
-      # reason as the two options above: these expand to nothing when unset, and an image
-      # reference contains no whitespace.
+      # A local tag under the ECR name is not sufficient on its own. BuildKit falls back to a
+      # local store after a registry refusal only when its worker has one -- the recovery in
+      # sourceresolver/imageresolver.go is gated on `is.ImageStore == nil` -- and
+      # worker/runc/runc.go sets that to nil explicitly. A buildkitd left on its default OCI
+      # worker therefore ignores the tag, as does `docker buildx` on a docker-container driver,
+      # both reachable here through OCI_RUNNER. Unquoted for the same reason as the two options
+      # above: these expand to nothing when unset, and an image reference contains no
+      # whitespace.
       BASE_IMAGE_OPTION=""
       if [[ -n "${ASH_BASE_IMAGE_OVERRIDE:-}" ]]; then
         BASE_IMAGE_OPTION="--build-arg BASE_IMAGE=${ASH_BASE_IMAGE_OVERRIDE}"

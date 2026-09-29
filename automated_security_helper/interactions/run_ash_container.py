@@ -532,12 +532,16 @@ def _build_image(
     # base image and Docker Hub serves it instead. It is a digest-pinned reference, so this
     # path is more tightly pinned than the Dockerfile's own tag default, not less.
     #
-    # It has to be a build-arg rather than a local tag under the ECR name. BuildKit's OCI
-    # worker is constructed with no image store at all, so nerdctl, finch and
-    # `docker buildx build` on a docker-container driver resolve FROM against the registry
-    # and never consult the local store -- measured: a build with the tag present still died
-    # at `FROM` asking the refusing registry. Changing what FROM asks for is the only
-    # mechanism every runtime honours. See the action for the full measurement.
+    # It has to be a build-arg rather than only a local tag under the ECR name. BuildKit does
+    # consult a local store after a registry refusal, but only when the worker HAS one:
+    # `sourceresolver/imageresolver.go` gates that recovery behind
+    # `rm != ResolveModeDefault || is.ImageStore == nil`, and `worker/runc/runc.go` sets
+    # `ImageStore: nil, // explicitly`. A `docker buildx build` on a docker-container driver
+    # runs buildkitd in its own container with exactly that worker, so it never sees the host's
+    # image store -- measured: a build with the tag present still died at `FROM` asking the
+    # refusing registry. That driver cannot be configured out of it from here, so changing what
+    # FROM asks for is the one mechanism every runtime and every driver honours. See
+    # .github/actions/prepull-base-image for the full per-runtime table.
     #
     # Emitted BEFORE custom_build_arg, because a duplicate --build-arg is last-wins (measured
     # on docker 25.0.16), so an explicit `--custom-build-arg BASE_IMAGE=...` from the caller

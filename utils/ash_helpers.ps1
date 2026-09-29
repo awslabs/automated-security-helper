@@ -305,9 +305,11 @@ function Invoke-ASH {
                     # .github/actions/prepull-base-image sets it when ECR Public refuses and
                     # Docker Hub answers, as a digest-pinned reference.
                     #
-                    # A local tag under the ECR name does not suffice: BuildKit's OCI worker
-                    # keeps no image store, so nerdctl and finch resolve FROM against the
-                    # registry and ignore it. Emitted before $buildArgs so a caller's explicit
+                    # A local tag under the ECR name does not suffice on its own. BuildKit only
+                    # falls back to a local store when its worker has one, and
+                    # worker/runc/runc.go sets `ImageStore: nil` explicitly -- so a buildkitd on
+                    # its default OCI worker, and `docker buildx` on a docker-container driver,
+                    # ignore the tag. Emitted before $buildArgs so a caller's explicit
                     # BASE_IMAGE build-arg lands later and wins -- a duplicate --build-arg is
                     # last-wins.
                     if ($env:ASH_BASE_IMAGE_OVERRIDE) {

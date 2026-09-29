@@ -12,22 +12,33 @@ build to ask Docker Hub for it.
 
 Its first attempt did not tell the build anything. It tagged the Docker Hub image locally under
 the ECR reference and announced that "the build resolves it from the local store without
-touching public.ecr.aws". Measured, that claim held for one of the four runtimes this
-repository supports. From the finch leg's own log -- the retag succeeded, the build started
-2.07s later and died at the Dockerfile's first instruction::
+touching public.ecr.aws". A build then died at the Dockerfile's first instruction::
 
     >>> FROM ${BASE_IMAGE} AS uv-reqs
     error: failed to solve: public.ecr.aws/docker/library/python:3.12-slim-bookworm:
     failed to resolve source metadata for ...: 429 Too Many Requests
     toomanyrequests: Data limit exceeded
 
-BuildKit's OCI worker constructs its image resolver with ``ImageStore: nil, // explicitly``,
-so ``FROM`` resolves against the registry and there is no local store to consult. That covers
-nerdctl, finch, and ``docker buildx build`` on a ``docker-container`` driver -- which is what
-every docker cell here runs, since ``run-scan-test`` sets up ``docker/setup-buildx-action``
-(driver defaults to ``docker-container``) and exports ``ACTIONS_RUNTIME_TOKEN``, which switches
-ASH's build to ``docker buildx build --load``. Plain ``docker build`` and podman do honour the
-local tag; those are the exceptions, not the rule.
+Whether a local tag is visible to ``FROM`` comes down to one guard in BuildKit's
+``sourceresolver/imageresolver.go`` (v0.31.2). The registry is tried first, and the local-store
+recovery after a failure is gated on ``rm != resolver.ResolveModeDefault || is.ImageStore ==
+nil``. Nothing here passes ``--pull``, so the mode is always the default -- which leaves
+``ImageStore`` as the only variable, and that is a property of the worker.
+``worker/runc/runc.go`` sets ``ImageStore: nil, // explicitly``; the containerd worker binds it
+to a containerd namespace.
+
+So the builders that ignore the tag are the ones on a store-less worker: ``docker buildx build``
+on a ``docker-container`` driver, which is a separate container with its own OCI worker and
+cannot be configured otherwise from here, and any buildkitd left on its default worker. That
+second case was nerdctl's, and it was fixable -- ``scripts/setup-nerdctl-linux.sh`` now writes
+the same ``buildkitd.toml`` finch ships. Plain ``docker build``, podman, finch and the
+now-configured nerdctl all read the tag.
+
+The docker-container driver is the one that matters most here, because every docker cell runs
+it: ``run-scan-test`` sets up ``docker/setup-buildx-action`` (driver defaults to
+``docker-container``) and exports ``ACTIONS_RUNTIME_TOKEN``, which switches ASH's build to
+``docker buildx build --load``. That is why the override, not the tag, is the mechanism this
+file guards.
 
 So the fallback exports ``ASH_BASE_IMAGE_OVERRIDE=<repo>@<pinned digest>`` and each build
 entrypoint passes it through as ``--build-arg BASE_IMAGE=``. Changing what ``FROM`` *asks for*
