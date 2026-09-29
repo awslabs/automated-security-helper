@@ -5,9 +5,6 @@ inputs:
   os:
     description: "OS label for artifact naming"
     required: true
-  arch:
-    description: "Architecture label for artifact naming"
-    required: true
   python-version:
     description: "Python version label for artifact naming"
     required: true
@@ -15,6 +12,53 @@ inputs:
 runs:
   using: "composite"
   steps:
+    # WHY THE ARCH LABEL IS DERIVED HERE RATHER THAN PASSED IN
+    #
+    # This was an `arch` input, fed from a five-row `include:` table in ash-unified-ci.yml that
+    # mapped each `os` to a label by hand. Those labels could disagree with the machine, and one
+    # did: `macos-latest` is an alias, GitHub moved it to Apple silicon, and the table said
+    # x86_64 while the runner logged `Image: macos-26-arm64`.
+    #
+    # The label is not only cosmetic here. The "Code coverage summary" step below selects exactly
+    # one of the 25 matrix legs, and it used to select it by comparing that label, so a
+    # mislabelled Linux row would have dropped the step from every leg at once -- a summary that
+    # nothing renders and nothing reports missing. It now compares `runner.arch` directly, which
+    # is the runner's own statement about itself and cannot be mislabelled upstream.
+    #
+    # Deriving it in the workflow was not available: GitHub Actions `include:` entries are
+    # literals and no expression context exposes a sibling matrix key, so a matrix cannot compute
+    # one of its own values from another.
+    #
+    # `runner.arch` is a closed set. Per the GitHub docs at
+    # https://docs.github.com/en/actions/reference/workflows-and-actions/contexts it is "X86, X64,
+    # ARM, or ARM64" -- verbatim. All four have an arm, and the default arm still fails closed: a
+    # fifth value appearing upstream must surface as a failed step rather than as an empty string
+    # in an artifact name, which is how two legs would come to upload under the same name.
+    #
+    # x86_64 and arm64 are the labels the old table used, kept so artifact names and the `PyTest -
+    # ...` check-run names do not change for the legs whose labels were already right.
+    - name: Resolve this runner's architecture from the runner itself
+      id: runner-arch
+      shell: bash
+      run: |
+        case "${RUNNER_ARCH}" in
+          X64) label=x86_64 ;;
+          ARM64) label=arm64 ;;
+          X86) label=i686 ;;
+          ARM) label=armv7l ;;
+          *)
+            # Two steps below carry `if: success() || failure()`, so they run even once this one
+            # has failed. A label is still emitted so the artifact name stays distinct per leg --
+            # an empty one would make several legs upload under the same name and bury the real
+            # error under a duplicate-artifact error.
+            echo "label=unknown-${RUNNER_ARCH}" >> "$GITHUB_OUTPUT"
+            echo "::error::runner.arch is '${RUNNER_ARCH}', which is not one of the documented values (X86, X64, ARM, ARM64). Add an arm rather than letting the artifact name lose its architecture."
+            exit 1
+            ;;
+        esac
+        echo "label=${label}" >> "$GITHUB_OUTPUT"
+        echo "runner.arch=${RUNNER_ARCH} -> ${label}"
+
     - name: Install dependencies
       shell: bash
       # --extra cdk is required, not cosmetic. A plain `uv sync` installs no optional
@@ -74,7 +118,7 @@ runs:
       with:
         report_paths: "**/pytest.junit.xml"
         include_passed: true
-        check_name: PyTest - ${{ inputs.os }} ${{ inputs.arch }} Python ${{ inputs.python-version }}
+        check_name: PyTest - ${{ inputs.os }} ${{ steps.runner-arch.outputs.label }} Python ${{ inputs.python-version }}
 
     # Rendered by coverage.py itself rather than by irongut/CodeCoverageSummary, which is a
     # Docker-based action. A Docker action's image is pulled during the job's prepare phase,
@@ -103,7 +147,12 @@ runs:
     # run by this point and fails the leg on its own.
     - name: Code coverage summary
       shell: bash
-      if: runner.os == 'Linux' && inputs.python-version == '3.12' && inputs.arch == 'x86_64'
+      # `runner.arch == 'X64'`, not a comparison against the derived label. Both select the same
+      # single leg -- ubuntu-latest at 3.12, since ubuntu-24.04-arm reports ARM64 -- but this form
+      # reads the runner context directly, so the selection does not depend on the mapping in the
+      # step above being right. A typo there can only break an artifact name, never silently
+      # deselect every leg.
+      if: runner.os == 'Linux' && inputs.python-version == '3.12' && runner.arch == 'X64'
       run: |
         {
           echo '## Code coverage'
@@ -115,6 +164,6 @@ runs:
       if: success() || failure()
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
-        name: test-results-${{ inputs.os }}-${{ inputs.arch }}-py${{ inputs.python-version }}
+        name: test-results-${{ inputs.os }}-${{ steps.runner-arch.outputs.label }}-py${{ inputs.python-version }}
         path: test-results/
         if-no-files-found: warn

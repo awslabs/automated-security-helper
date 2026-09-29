@@ -156,6 +156,37 @@ jobs:
           - { os: windows-latest, python-version: "3.13", method: uvx }
           - { os: windows-latest, python-version: "3.14", method: uvx }
     steps:
+      # FAIL CLOSED BEFORE ANY OF THE ROUTING CONDITIONS BELOW
+      #
+      # The four `uses:` steps at the end of this job are mutually exclusive `if:`s with no else.
+      # A method that satisfies none of them -- a new entry on the `method` axis, or one renamed
+      # on the axis and not in the conditions -- runs checkout and setup-python, does no
+      # validation at all, and exits 0. Green, over nothing.
+      #
+      # Same guard, same reason, as .github/actions/validate-container/action.yml carries for its
+      # `runtime` input, and as ash-unified-ci.yml's `install-validation` job now carries for the
+      # three methods it routes. The arms here differ from that job's by exactly `nix`, which is
+      # the method this workflow adds.
+      #
+      # tests/unit/test_ci_matrix_agreement.py reconciles these arms against the routing
+      # conditions AND against the `method` axis, in both workflows.
+      - name: "Assert this install method is routed to a validator"
+        shell: bash
+        env:
+          METHOD: ${{ matrix.method }}
+        run: |
+          case "${METHOD}" in
+            pip | pipx | uvx | homebrew | pre-commit) ;;
+            podman | finch | nerdctl) ;;
+            mcp) ;;
+            nix) ;;
+            *)
+              echo "::error::This workflow has no validator for method '${METHOD}'. The routing conditions on the steps at the end of this job cover none of it, so this leg would run setup-python and then nothing, and exit 0. Route it to a composite action and add it to the case above."
+              exit 1
+              ;;
+          esac
+          echo "${METHOD}: routed to a validator"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Python setup (skip for uvx which bundles its own)
