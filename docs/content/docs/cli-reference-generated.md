@@ -34,11 +34,11 @@ Runs an ASH scan against the source-dir, outputting results to the output-dir.
 | `--inspect` | bool | False |  | Enable inspection of SARIF fields after running. This adds the inspect phase to the execution. |
 | `--use-existing` | bool | False |  | Use an existing ash_aggregated_results.json file in the output-dir. If True, the scan phase will be skipped and reports will be generated from this file. |
 | `--version` | bool | False |  | Prints version number |
-| `--mode` | enum(precommit, container, local, nix) | `RunMode.local` | ASH_MODE | Execution mode preset. 'precommit' enables python-based plugins only and simplified output. 'container' runs non-Python plugins in a container. 'local' (default) runs everything in the local Python process. |
+| `--mode` | enum(precommit, container, local, nix) | `local` | ASH_MODE | Execution mode preset. 'precommit' enables python-based plugins only and simplified output. 'container' runs non-Python plugins in a container. 'local' (default) runs everything in the local Python process. |
 | `--python-only/--full`, `--python-based-scanners-only/--all-enabled-scanners`, `--python-based-plugins-only/--all-enabled-plugins` | bool | False |  | Exclude execution of any plugins or tools that have depencies external to Python. |
 | `--show-summary` | bool | True |  | Show metrics table and results summary |
 | `--quiet` | bool | False |  | Hide all log output |
-| `--log-level` | enum(QUIET, SIMPLE, ERROR, INFO, ...) | `AshLogLevel.INFO` |  | Set the log level. |
+| `--log-level` | enum(QUIET, SIMPLE, ERROR, INFO, ...) | `INFO` |  | Set the log level. |
 | `--config`, `-c` | str |  | ASH_CONFIG | The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json']. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH. |
 | `--verbose`, `-v` | bool | False |  | Enable verbose logging |
 | `--debug`, `-d` | bool | False |  | Enable debug logging |
@@ -79,7 +79,7 @@ Builds the ASH container image then runs a scan with it.
 | `--force`, `-f` | bool | False |  | Force rebuild of the ASH container image |
 | `--oci-runner`, `--oci`, `--runner`, `-r` | str |  | OCI_RUNNER | Use the specified OCI runner instead of docker to run the containerized tools. To prefix every OCI command with a wrapper (e.g. sudo), set the OCI_RUNNER_WRAPPER environment variable instead of using this option (e.g. OCI_RUNNER_WRAPPER=sudo ash ...). |
 | `--container-network` | str | `bridge` |  | Docker network mode for the container run (e.g. 'bridge', 'none', 'host'). Pass 'none' to force offline/airgapped network isolation independently of --offline. |
-| `--build-target` | enum(non-root, ci) | `BuildTarget.NON_ROOT` |  | Specify the target stage of the ASH image to build |
+| `--build-target` | enum(non-root, ci) | `non-root` |  | Specify the target stage of the ASH image to build |
 | `--offline-semgrep-rulesets` | str | `p/ci` |  | Specify Semgrep rulesets for use in ASH offline mode |
 | `--container-uid`, `-u` | str |  |  | UID to use for the container user |
 | `--container-gid`, `-g` | str |  |  | GID to use for the container user |
@@ -89,7 +89,7 @@ Builds the ASH container image then runs a scan with it.
 | `--config-overrides` | List[str] |  |  | Configuration overrides specified as key-value pairs (e.g., 'reporters.cloudwatch-logs.options.aws_region=us-west-2') |
 | `--offline` | bool | False |  | Run scan in offline/airgapped mode (skips NPM/PNPM/Yarn Audit checks). IMPORTANT: Online access is needed when building ASH to prepare it for usage during a scan! If selecting Offline while performing a build, the ASH container image will be built in offline mode and any typically online-only dependencies like downloadable tool vulnerability databases will be cached in the image itself before publishing for scan usage. |
 | `--quiet` | bool | False |  | Hide all log output |
-| `--log-level` | enum(QUIET, SIMPLE, ERROR, INFO, ...) | `AshLogLevel.INFO` |  | Set the log level. |
+| `--log-level` | enum(QUIET, SIMPLE, ERROR, INFO, ...) | `INFO` |  | Set the log level. |
 | `--config`, `-c` | str |  | ASH_CONFIG | The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json']. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH. |
 | `--verbose`, `-v` | bool | False |  | Enable verbose logging |
 | `--debug`, `-d` | bool | False |  | Enable debug logging |
@@ -103,7 +103,7 @@ Generate a report from ASH scan results using the specified reporter plugin.
 |------|------|---------|---------|-------------|
 | `--format` | str | `markdown` |  | Report format to generate (reporter plugin name). Defaults to 'markdown'. Examples values: aggregated, text, flat-json, yaml, csv, html, dict, junitxml, markdown, sarif, asff, ocsf, cyclonedx, spdx, custom |
 | `--output-dir` | str |  | ASH_OUTPUT_DIR | The directory to output results to |
-| `--log-level` | enum(QUIET, SIMPLE, ERROR, INFO, ...) | `AshLogLevel.INFO` |  | Set the log level. |
+| `--log-level` | enum(QUIET, SIMPLE, ERROR, INFO, ...) | `INFO` |  | Set the log level. |
 | `--config`, `-c` | str |  | ASH_CONFIG | The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json']. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH. |
 | `--config-overrides` | List[str] |  |  | Configuration overrides specified as key-value pairs (e.g., 'reporters.cloudwatch-logs.options.aws_region=us-west-2') |
 | `--verbose`, `-v` | bool | False |  | Enable verbose logging |
@@ -123,7 +123,7 @@ Merges the results of a sharded scan into one unified report.
 | `--ignore-suppressions` | bool | False |  | Ignore all suppression rules and report every finding regardless of suppression status. Mirrors 'ash scan --ignore-suppressions', so the same tree gives the same verdict sharded or not. |
 | `--fail-on-findings/--no-fail-on-findings` | bool |  |  | Exit non-zero when the merged report has actionable findings. Defaults to the scan configuration's value, then to true. |
 | `--fail-on-incomplete-scanners/--no-fail-on-incomplete-scanners` | bool |  |  | Refuse the merge when a shard completed none of the scanners it owned, and exit 1 when any scanner in the union is ERROR or MISSING. Without this, a shard whose scanners never ran contributes no findings and the merged report reads as a complete, clean scan. Defaults to the scan configuration's value, then to false. |
-| `--log-level` | enum(QUIET, SIMPLE, ERROR, INFO, ...) | `AshLogLevel.INFO` |  | Set the log level. |
+| `--log-level` | enum(QUIET, SIMPLE, ERROR, INFO, ...) | `INFO` |  | Set the log level. |
 | `--verbose`, `-v` | bool | False |  | Enable verbose logging |
 | `--debug`, `-d` | bool | False |  | Enable debug logging |
 | `--color` | bool | True |  | Enable/disable colorized output |

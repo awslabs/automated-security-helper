@@ -2089,7 +2089,7 @@
             }
           ],
           "default": ">=1.7.0,<2.0.0",
-          "description": "Specific version constraint for bandit installation (e.g., '>=1.7.0,<2.0.0')",
+          "description": "Version constraint for bandit installation, in pip requirement syntax. The default below is the constraint the scanner enforces.",
           "title": "Tool Version"
         }
       },
@@ -2823,7 +2823,7 @@
             }
           ],
           "default": null,
-          "description": "Specific version constraint for checkov installation (e.g., '>=3.2.0,<4.0.0')",
+          "description": "Version constraint for checkov installation, in pip requirement syntax. Leave unset to use the scanner's own default constraint.",
           "title": "Tool Version"
         }
       },
@@ -16731,7 +16731,7 @@
             }
           ],
           "default": null,
-          "description": "Specific version constraint for semgrep installation (e.g., '>=1.125.0')",
+          "description": "Version constraint for semgrep installation, in pip requirement syntax. Leave unset to use the scanner's own default constraint.",
           "title": "Tool Version"
         }
       },

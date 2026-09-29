@@ -12,6 +12,7 @@ Usage:
 """
 
 import argparse
+import enum
 import inspect
 import re
 import sys
@@ -95,8 +96,6 @@ def _get_type_name(annotation: Any) -> str:
         pass  # Not a typing.Optional; see the Annotated block above.
 
     # Enum types
-    import enum
-
     if isinstance(annotation, type) and issubclass(annotation, enum.Enum):
         values = [e.value for e in annotation]
         if len(values) <= 6:
@@ -122,11 +121,31 @@ def _get_type_name(annotation: Any) -> str:
 
 
 def _format_default(default: Any) -> str:
-    """Format a default value for display."""
+    """Format a default value for display.
+
+    The enum test comes before the scalar ones on purpose. Every enum the CLI
+    uses for a flag default is declared as a mixin -- ``class AshLogLevel(str,
+    Enum)``, ``RunMode``, ``BuildTarget`` -- so ``isinstance(default, str)`` is
+    true of its members. With the scalar tests first, those members were
+    rendered by the str branch's f-string, which is ``format(member)``, and
+    Python changed what that returns in 3.11: 3.10 gives the mixed-in value
+    (``INFO``) and 3.11+ gives ``AshLogLevel.INFO``. The output of this script
+    therefore depended on which interpreter ran it, across the whole supported
+    range, and the freshness check could not be satisfied by regenerating --
+    a file matching 3.10 is stale on 3.11+ and the other way round.
+
+    Reading ``.value`` explicitly is also the form the reader wants. These are
+    the strings a user types: ``--log-level INFO``, ``--mode local``,
+    ``--build-target non-root``. The member name is a Python identifier that
+    does not always match -- ``BuildTarget.NON_ROOT`` is not a value the CLI
+    accepts -- so documenting it was wrong as well as unstable.
+    """
     if default is inspect.Parameter.empty:
         return "*required*"
     if default is None:
         return ""
+    if isinstance(default, enum.Enum):
+        return f"`{default.value}`"
     if isinstance(default, bool):
         return str(default)
     if isinstance(default, str):
@@ -135,11 +154,6 @@ def _format_default(default: Any) -> str:
         return f"`{default}`"
     if isinstance(default, list):
         return "[]"
-    # Enum values
-    import enum
-
-    if isinstance(default, enum.Enum):
-        return f"`{default.value}`"
     return str(default)
 
 
