@@ -914,3 +914,186 @@ class TestCommitizenMaintainsTheReferences:
             "package would build one version and release another. Set both to the "
             "same value."
         )
+
+
+class TestOneAuthorityForTheVersion:
+    """Every mechanism that reads the release version must read the same field.
+
+    The test above asserts the two pyproject version fields agree. This class asserts that
+    nothing depends on that agreement to be correct -- which is a different claim, and the
+    one that was false.
+
+    `scripts/verify_docs_freshness.py` read `[project] version` and compared docs against
+    it. That is a third opinion about one fact: commitizen bumps from
+    `[tool.commitizen] version`, this file reads it, and
+    `tests/unit/test_version_template_round_trip.py` reads it. The three agreed only
+    because `pyproject.toml:^version` matches both lines so a bump moves them together,
+    and because the test above fails if a hand edit desyncs them. A verdict resting on
+    another test's guarantee is a verdict that goes wrong at the moment that guarantee
+    breaks, and the failure would arrive as "every doc is stale" rather than as the one
+    line that is actually wrong.
+    """
+
+    @staticmethod
+    def _docs_freshness_module():
+        """Import the script by path; `scripts/` is not a package.
+
+        Same approach as `tests/unit/test_version_template_round_trip.py`, and under a
+        distinct `sys.modules` name so no other worker picks up a half-initialised module.
+        """
+        import importlib.util
+
+        path = REPO_ROOT / "scripts" / "verify_docs_freshness.py"
+        spec = importlib.util.spec_from_file_location(
+            "ash_verify_docs_freshness_for_test", path
+        )
+        assert spec is not None and spec.loader is not None, path
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        return module
+
+    def test_the_docs_freshness_check_reads_the_commitizen_field(self):
+        """Asserted against a DESYNCED copy, because agreement makes it vacuous.
+
+        On the committed tree both fields hold the same value, so any assertion that this
+        script "reads the authority" passes whichever field it reads. The only way to
+        observe the choice is to make the two disagree, which is exactly the state the
+        choice matters in.
+        """
+        module = self._docs_freshness_module()
+
+        assert module.get_version_from_pyproject() == _packaged_version(), (
+            "on the committed tree the script must report the packaged version"
+        )
+
+        import tempfile
+
+        text = PYPROJECT_PATH.read_text(encoding="utf-8")
+        current = _packaged_version()
+        marker = f'[tool.commitizen]\nname = "cz_conventional_commits"\nversion = "{current}"'
+        assert marker in text, (
+            "fixture check: the [tool.commitizen] header no longer looks the way this "
+            "test rewrites it, so the desync below would be a no-op and the assertion "
+            "would pass without testing anything"
+        )
+        desynced = text.replace(marker, marker.replace(f'"{current}"', '"9.9.9"'), 1)
+
+        with tempfile.TemporaryDirectory() as directory:
+            copy = Path(directory) / "pyproject.toml"
+            copy.write_text(desynced, encoding="utf-8")
+            module.PYPROJECT_TOML = copy
+            try:
+                observed = module.get_version_from_pyproject()
+            finally:
+                module.PYPROJECT_TOML = PYPROJECT_PATH
+
+        assert observed == "9.9.9", (
+            f"With [tool.commitizen] version at 9.9.9 and [project] version at {current}, "
+            f"verify_docs_freshness reported {observed!r}. It is reading [project] "
+            "version, which is not what `cz bump` moves or what `cz version --project` "
+            "reports, so its verdict about documentation would be measured against a "
+            "version nothing releases."
+        )
+
+
+class TestTheTwoMaintenanceMechanismsDoNotOverlap:
+    """A file must be maintained by exactly one mechanism, and which one is not free.
+
+    Two lists cover this class of fact. `[tool.commitizen] version_files` rewrites a
+    literal in place at bump time; `scripts/version_template_manager.py`'s `target_files`
+    keeps a `.md.template` carrying `{{VERSION}}` and re-renders the doc. They are
+    disjoint today -- nine entries and ten, zero overlap -- and that disjointness is the
+    correct state rather than an accident, but nothing asserted it.
+
+    WHY OVERLAP IS A DEFECT AND NOT MERELY REDUNDANT
+    -----------------------------------------------
+    Both mechanisms write the generated doc, and at release time the template renders
+    LAST: `cz bump` rewrites version_files, then ash-create-release.yml runs
+    `version_template_manager.py generate`. So for a doc in both lists, commitizen's
+    rewrite is discarded -- harmlessly while the template still carries `{{VERSION}}`,
+    because the rendered result matches. Replace that placeholder with a literal and the
+    two mechanisms silently disagree, with the template winning, and every existing check
+    keeps passing: `test_every_version_files_entry_rewrites_a_line` confirms commitizen
+    CAN rewrite the line, not that the rewrite survives, and the round-trip test confirms
+    the doc matches its template, which it does -- at the stale value.
+
+    The reverse arrangement fails loudly and needs no guard: a `.template` listed in
+    version_files holds no version literal for commitizen to find, so
+    `test_every_version_files_entry_rewrites_a_line` reports it inert.
+    """
+
+    @staticmethod
+    def _template_targets() -> list[str]:
+        import importlib.util
+
+        path = REPO_ROOT / "scripts" / "version_template_manager.py"
+        spec = importlib.util.spec_from_file_location(
+            "ash_version_template_manager_for_test", path
+        )
+        assert spec is not None and spec.loader is not None, path
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        return list(module.VersionTemplateManager(REPO_ROOT).target_files)
+
+    def test_no_file_is_claimed_by_both_mechanisms(self):
+        version_files = {
+            _split_entry(entry)[0] for entry in _commitizen_settings()["version_files"]
+        }
+        overlap = sorted(version_files.intersection(self._template_targets()))
+
+        assert not overlap, (
+            "These files are maintained by both mechanisms at once: "
+            f"{overlap}\n\n"
+            "At release time `cz bump` rewrites version_files first and "
+            "`version_template_manager.py generate` renders templates after, so the "
+            "template wins and commitizen's rewrite is thrown away. That is invisible "
+            "while the template holds {{VERSION}} and silent once it holds a literal. "
+            "Pick one: leave the file to the template and drop the version_files entry, "
+            "or drop the template and let `cz bump` own the literal."
+        )
+
+    def test_no_version_files_target_has_a_template_sibling(self):
+        """The same claim, checked against the tree rather than against the other list.
+
+        `target_files` is what `generate` iterates, but a `.md.template` sitting beside a
+        version_files target is the hazard regardless of whether anyone remembered to list
+        it -- someone runs `version_template_manager.py convert` on a file, the template
+        appears, and the doc now has two owners.
+        """
+        shadowed = sorted(
+            path
+            for path in (
+                _split_entry(entry)[0]
+                for entry in _commitizen_settings()["version_files"]
+            )
+            if (REPO_ROOT / f"{path}.template").is_file()
+        )
+
+        assert not shadowed, (
+            f"These version_files targets have a .template sibling: {shadowed}. The "
+            "template is rendered over the file after `cz bump` rewrites it, so the "
+            "commitizen entry is maintaining a value the release discards."
+        )
+
+    def test_both_lists_are_populated(self):
+        """Positive control. Disjointness of two sets is satisfied by either being empty.
+
+        Emptying `version_files`, or breaking the import of `target_files`, would make the
+        two assertions above pass while nothing at all was maintained.
+        """
+        version_files = _commitizen_settings()["version_files"]
+        targets = self._template_targets()
+
+        assert len(version_files) >= 5, (
+            f"[tool.commitizen] version_files has {len(version_files)} entries; the four "
+            "transpiler _base/ sources and Formula/ash.rb alone account for five, so "
+            "fewer means entries were dropped rather than that the list shrank honestly."
+        )
+        assert len(targets) >= 5, (
+            f"VersionTemplateManager.target_files names {len(targets)} file(s). "
+            "tests/unit/test_version_template_round_trip.py holds the real floor of ten; "
+            "this one only has to be far enough above zero that the disjointness "
+            "assertions above cannot pass vacuously."
+        )

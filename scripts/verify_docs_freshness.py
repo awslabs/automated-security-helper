@@ -40,25 +40,49 @@ def read_text(path: Path) -> str:
 
 
 def get_version_from_pyproject() -> str:
-    """Extract version from pyproject.toml."""
-    try:
-        import tomllib  # Python 3.11+
-    except ModuleNotFoundError:
-        # Fallback for Python 3.10
-        tomllib = None
+    """The version this repository releases, read from its designated authority.
 
+    That authority is ``[tool.commitizen] version``, not ``[project] version``. This
+    function used to read the latter, which made it a third opinion about the same fact:
+    commitizen bumps from its own table -- ``version_provider`` is ``commitizen``, so
+    ``CommitizenProvider`` reads it, and ``cz version --project`` in
+    ``.github/workflows/ash-create-release.yml`` reports it -- while
+    ``tests/unit/test_agent_plugin_ash_version.py`` and
+    ``tests/unit/test_version_template_round_trip.py`` both read it too.
+
+    The two fields agree today, but only because ``pyproject.toml:^version`` matches both
+    lines so a bump moves them together, and because
+    ``test_the_two_pyproject_version_fields_agree`` fails if a hand edit desyncs them.
+    That is a guarantee held by a test, and reading the non-authoritative field meant this
+    check's verdict depended on it. If the two ever diverge, the failure a maintainer needs
+    to see is that one test, not this script reporting every doc stale against a version
+    nothing releases.
+    """
     text = read_text(PYPROJECT_TOML)
 
+    try:
+        import tomllib  # Python 3.11+
+    except ModuleNotFoundError:  # pragma: no cover - only reachable on 3.10
+        tomllib = None
+
     if tomllib:
-        import io
+        return tomllib.loads(text)["tool"]["commitizen"]["version"]
 
-        data = tomllib.loads(text)
-        return data["project"]["version"]
-
-    # Regex fallback
-    m = re.search(r'^version\s*=\s*"([^"]+)"', text, re.MULTILINE)
+    # Regex fallback for 3.10, scoped to the commitizen table. An unscoped
+    # `^version = "..."` search cannot express which field it wants: it returns whichever
+    # comes first in the file, and [project] does, so the fallback would silently disagree
+    # with the tomllib path above on exactly the divergence this function exists to avoid.
+    table = re.search(
+        r"^\[tool\.commitizen\]\n(.*?)(?=^\[|\Z)", text, re.MULTILINE | re.DOTALL
+    )
+    if not table:
+        raise RuntimeError("pyproject.toml has no [tool.commitizen] table")
+    m = re.search(r'^version\s*=\s*"([^"]+)"', table.group(1), re.MULTILINE)
     if not m:
-        raise RuntimeError("Could not parse version from pyproject.toml")
+        raise RuntimeError(
+            "[tool.commitizen] in pyproject.toml has no version; that field is what "
+            "`cz bump` moves, so there is nothing authoritative to check docs against"
+        )
     return m.group(1)
 
 
@@ -107,7 +131,9 @@ def check_cli_flags() -> list[str]:
         if flag.lower() not in docs_lower:
             # Also try with backtick wrapping
             if f"`{flag}`".lower() not in docs_lower:
-                failures.append(f"CLI flag {flag} found in source but missing from cli-reference.md")
+                failures.append(
+                    f"CLI flag {flag} found in source but missing from cli-reference.md"
+                )
 
     return failures
 
