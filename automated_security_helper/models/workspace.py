@@ -325,6 +325,25 @@ class WorkspaceProjectResult(BaseModel):
             ),
         ),
     ] = 0
+    policy_origin_finding_count: Annotated[
+        int,
+        Field(
+            0,
+            ge=0,
+            description=(
+                "How many of this project's unsuppressed findings came from a "
+                "scanner only `workspace.additional_scanners` asked for, rather "
+                "than one the project enables itself. Those findings carry "
+                "`properties.origin: workspace-policy`, and unless "
+                "`policy_scanners_gate` is set they are excluded from "
+                "actionable_finding_count and cannot fail the project. A count "
+                "of its own because that is what makes them 'reported "
+                "separately': comparing finding_count against "
+                "actionable_finding_count cannot tell a finding the policy "
+                "contributed from one the severity threshold excluded."
+            ),
+        ),
+    ] = 0
     exceeds_threshold: Annotated[
         bool,
         Field(
