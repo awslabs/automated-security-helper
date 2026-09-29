@@ -25,6 +25,18 @@ CLI_SCAN_PY = REPO_ROOT / "automated_security_helper" / "cli" / "scan.py"
 MCP_SERVER_PY = REPO_ROOT / "automated_security_helper" / "cli" / "mcp_server.py"
 PYPROJECT_TOML = REPO_ROOT / "pyproject.toml"
 README_MD = REPO_ROOT / "README.md"
+
+# README.md is GENERATED. scripts/version_template_manager.py renders
+# README.md.template over it on every release that bumps the version, so an edit
+# made to README.md alone is discarded at the next bump -- which is exactly what
+# happened to a `@v3.0,1` typo fix that survived six releases (see
+# tests/unit/test_version_template_round_trip.py for the measurement).
+#
+# Every check below that looks for a NAME therefore reads the template, so a
+# contributor sent here by a failure edits the file that survives.
+# check_version_consistency is the deliberate exception: it asserts the rendered
+# version string, which by construction exists only in the generated file.
+README_TEMPLATE_MD = REPO_ROOT / "README.md.template"
 DOCS_DIR = REPO_ROOT / "docs"
 CLI_REFERENCE_MD = DOCS_DIR / "content" / "docs" / "cli-reference.md"
 OUTPUT_FORMATS_MD = DOCS_DIR / "content" / "docs" / "output-formats.md"
@@ -50,8 +62,6 @@ def get_version_from_pyproject() -> str:
     text = read_text(PYPROJECT_TOML)
 
     if tomllib:
-        import io
-
         data = tomllib.loads(text)
         return data["project"]["version"]
 
@@ -62,11 +72,179 @@ def get_version_from_pyproject() -> str:
     return m.group(1)
 
 
+# Directories that hold no prose a reader is ever sent to, or hold generated or
+# vendored copies of prose that lives elsewhere. Everything else in the tree is
+# in scope.
+#
+# Why an exclusion list rather than an inclusion list: the previous glob was
+# `docs/**/*.md` plus README.md, which left skills/, examples/, quickstart/,
+# SECURITY.md, CONTRIBUTING.md, DEVELOPMENT.md and every doc shipped inside the
+# package outside every check here. A config example with an invented option key
+# is exactly as wrong in examples/ as in docs/, and the reader is exactly as
+# stuck. An inclusion list reproduces the bug the first time someone adds a
+# directory, because the omission is silent.
+_EXCLUDED_MD_DIRS = frozenset(
+    {
+        ".git",
+        ".venv",
+        "venv",
+        "node_modules",
+        "site",  # mkdocs build output
+        ".pytest_cache",
+        ".ruff_cache",
+        ".mypy_cache",
+        "test-results",
+        "__pycache__",
+    }
+)
+
+
 def collect_md_files() -> list[Path]:
-    """Collect all .md files under docs/ and the repo-root README."""
-    files = list(DOCS_DIR.rglob("*.md"))
-    files.append(README_MD)
-    return files
+    """Collect every doc in the repository that a reader might be sent to.
+
+    Deliberately repo-wide. Measured when this was widened from
+    ``docs/**/*.md`` + README.md: 86 files before, 179 after, and the three
+    checks that consume this list reported zero new failures -- so the narrow
+    glob was not holding anything back, it was simply not looking.
+
+    ``.md.template`` files are included alongside the ``.md`` files they render
+    to. Ten docs in this repository are generated from a sibling template, and
+    the template is the file an edit has to land in -- a fix applied only to the
+    rendered doc is discarded at the next release. Checking both means a stale
+    list in a template is reported against the template's own path.
+
+    This is not redundant with tests/unit/test_version_template_round_trip.py,
+    which asserts doc == rendered template. That test makes the two agree; it
+    does not know whether what they agree on is correct. Including templates here
+    is also what caught the omission that this docstring is the record of: the
+    first version of this change edited docs/content/faq.md and not
+    docs/content/faq.md.template, and the round-trip test is what noticed.
+    """
+    patterns = ("*.md", "*.md.template")
+    files = [
+        path
+        for pattern in patterns
+        for path in REPO_ROOT.rglob(pattern)
+        if not _EXCLUDED_MD_DIRS.intersection(path.parts)
+    ]
+    return sorted(set(files))
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers for the name-inventory checks
+# ---------------------------------------------------------------------------
+
+_MD_LINK = re.compile(r"\[([^\]]+)\]\([^)]*\)")
+
+
+def normalize_name(text: str) -> str:
+    """Fold a name to its comparable core: link label, alphanumerics, lowercase.
+
+    The docs and the code legitimately spell the same plugin differently --
+    ``cfn_nag`` in a README link label against the ``cfn-nag`` config key,
+    ``JUnit XML`` in a table against the ``junitxml`` field. Comparing on
+    alphanumerics alone accepts those and nothing looser: it still separates
+    ``sarif`` from ``ocsf``. Link URLs are dropped first, because
+    ``[Bandit](https://github.com/PyCQA/bandit)`` would otherwise match any name
+    that happens to appear in a URL.
+    """
+    return re.sub(r"[^a-z0-9]+", "", _MD_LINK.sub(r"\1", text).lower())
+
+
+def table_first_column(text: str, header_cell: str) -> list[str] | None:
+    """Return the first cell of each data row of one specific markdown table.
+
+    The table is located by the exact text of its first header cell. Returns
+    ``None`` when no such table exists, which callers MUST treat as a failure --
+    a whole-file substring search was what let a flag mentioned only in a
+    deprecation note count as documented, and silently finding no table would
+    reintroduce the same vacuity in a new place.
+    """
+    lines = text.splitlines()
+    want = header_cell.strip().lower()
+
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            continue
+        cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+        if not cells or cells[0].lower() != want:
+            continue
+        # A header row is only a header row when a delimiter row follows it.
+        if index + 1 >= len(lines):
+            continue
+        if not set(lines[index + 1].strip()) <= set("|-: "):
+            continue
+
+        rows: list[str] = []
+        for row in lines[index + 2 :]:
+            candidate = row.strip()
+            if not candidate.startswith("|"):
+                break
+            first = candidate.strip("|").split("|")[0].strip()
+            if first:
+                rows.append(first)
+        return rows
+
+    return None
+
+
+def compare_inventories(
+    label: str,
+    code_names: dict[str, str],
+    doc_text: str,
+    header_cell: str,
+    doc_label: str,
+) -> list[str]:
+    """Compare a code-derived inventory against one published table, BOTH ways.
+
+    ``code_names`` maps the user-facing name to the thing it came from, for the
+    failure message.
+
+    Both directions, because only one of them was ever checked. code-to-docs
+    catches a plugin shipped without a mention. docs-to-code catches a row that
+    names something removed -- a promise to a reader that nothing keeps, and the
+    direction that was silently passing.
+    """
+    failures: list[str] = []
+
+    rows = table_first_column(doc_text, header_cell)
+    if rows is None:
+        return [
+            (
+                f"{label}: {doc_label} has no table whose first header cell is "
+                f"'{header_cell}'. The table was renamed, moved or removed; this "
+                f"check cannot run and must not report success."
+            )
+        ]
+    if not rows:
+        return [
+            (
+                f"{label}: the '{header_cell}' table in {doc_label} has no data "
+                f"rows, so every comparison against it would pass trivially."
+            )
+        ]
+
+    normalized_rows = {row: normalize_name(row) for row in rows}
+    normalized_code = {name: normalize_name(name) for name in code_names}
+
+    for name, origin in sorted(code_names.items()):
+        needle = normalized_code[name]
+        if not any(needle in row for row in normalized_rows.values()):
+            failures.append(
+                f"{label}: '{name}' (from {origin}) is in the code but no row of "
+                f"the '{header_cell}' table in {doc_label} names it"
+            )
+
+    for row, normalized in sorted(normalized_rows.items()):
+        if not any(needle in normalized for needle in normalized_code.values()):
+            failures.append(
+                f"{label}: the '{header_cell}' table in {doc_label} has a row "
+                f"'{row}' that names nothing in the code -- it was removed or "
+                f"renamed and the row was left behind"
+            )
+
+    return failures
 
 
 # ---------------------------------------------------------------------------
@@ -80,10 +258,19 @@ def check_cli_flags() -> list[str]:
     source = read_text(CLI_SCAN_PY)
     docs = read_text(CLI_REFERENCE_MD)
 
-    # Extract explicit --flag-name strings from typer.Option() calls
-    # Match quoted strings that start with --
-    flag_pattern = re.compile(r'"(--[a-z][a-z0-9-]*)"')
-    flags_in_source: set[str] = set(flag_pattern.findall(source))
+    # Extract every --flag named inside a quoted string in scan.py.
+    #
+    # The pattern this replaced required the flag to be the ENTIRE quoted string,
+    # so it could not see either half of typer's combined form. scan.py writes
+    # `"--python-only/--full"` and `"--progress/--no-progress"`, and those are
+    # real user-facing flags; the old pattern found neither. That is also why
+    # skip_flags below was dead code -- it listed `--no-progress`, a string the
+    # pattern was structurally incapable of producing, so the entry could never
+    # match and never skipped anything.
+    flag_pattern = re.compile(r"--[a-z][a-z0-9-]*")
+    flags_in_source: set[str] = set()
+    for literal in re.findall(r'"([^"]*--[^"]*)"', source):
+        flags_in_source.update(flag_pattern.findall(literal))
 
     # Also derive flags from Python parameter names (snake_case -> --kebab-case)
     # Match the parameter name preceding the Annotated[...typer.Option block
@@ -96,7 +283,12 @@ def check_cli_flags() -> list[str]:
         flag = "--" + param_name.replace("_", "-")
         flags_in_source.add(flag)
 
-    # Flags that are internal/not user-facing or are short aliases only
+    # Off-by-default halves of a boolean pair. typer generates both halves from
+    # one declaration, and the docs document the pair under its on-form, so
+    # requiring a separate entry for the negation would report drift that does
+    # not exist. Now that the extraction above actually produces these strings,
+    # every entry here is load-bearing -- verified by removing them one at a
+    # time and seeing the check fail.
     skip_flags = {"--no-build", "--no-run", "--no-progress", "--no-color"}
 
     docs_lower = docs.lower()
@@ -107,7 +299,9 @@ def check_cli_flags() -> list[str]:
         if flag.lower() not in docs_lower:
             # Also try with backtick wrapping
             if f"`{flag}`".lower() not in docs_lower:
-                failures.append(f"CLI flag {flag} found in source but missing from cli-reference.md")
+                failures.append(
+                    f"CLI flag {flag} found in source but missing from cli-reference.md"
+                )
 
     return failures
 
@@ -117,27 +311,26 @@ def check_cli_flags() -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def check_reporters() -> list[str]:
-    """Verify all reporter config fields appear in output-formats.md."""
-    failures: list[str] = []
+def _segment_names(segment: type) -> dict[str, str]:
+    """Map each plugin's user-facing name to the config field that declares it."""
+    names: dict[str, str] = {}
+    for field_name, field_info in segment.model_fields.items():
+        display_name = field_info.alias or field_name.replace("_", "-")
+        names[display_name] = f"field {field_name}"
+    return names
 
+
+def check_reporters() -> list[str]:
+    """The reporter inventory and the output-formats table must be the same set."""
     from automated_security_helper.config.ash_config import ReporterConfigSegment
 
-    docs = read_text(OUTPUT_FORMATS_MD).lower()
-
-    for field_name, field_info in ReporterConfigSegment.model_fields.items():
-        # Use alias if present, otherwise convert underscores to hyphens
-        alias = None
-        if field_info.alias:
-            alias = field_info.alias
-        display_name = alias if alias else field_name.replace("_", "-")
-
-        if display_name.lower() not in docs:
-            failures.append(
-                f"Reporter '{display_name}' (field: {field_name}) missing from output-formats.md"
-            )
-
-    return failures
+    return compare_inventories(
+        "Reporter",
+        _segment_names(ReporterConfigSegment),
+        read_text(OUTPUT_FORMATS_MD),
+        "Format",
+        "docs/content/docs/output-formats.md",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -146,31 +339,24 @@ def check_reporters() -> list[str]:
 
 
 def check_scanners() -> list[str]:
-    """Verify all scanner config fields appear in README.md scanner table."""
-    failures: list[str] = []
+    """The scanner inventory and README's scanner table must be the same set.
 
+    The three "variants" this used to try were one variant and two no-ops: the
+    third was ``field_name.replace("_", "_")``, which is the field name
+    unchanged, and the first two collapsed to the same string for every scanner
+    ASH ships. All three were whole-file substring tests against the generated
+    README, so `bandit` matched the word inside an unrelated code sample.
+    normalize_name plus a table-scoped comparison replaces all of it.
+    """
     from automated_security_helper.config.ash_config import ScannerConfigSegment
 
-    readme = read_text(README_MD).lower()
-
-    for field_name, field_info in ScannerConfigSegment.model_fields.items():
-        alias = None
-        if field_info.alias:
-            alias = field_info.alias
-        display_name = alias if alias else field_name.replace("_", "-")
-
-        # Check both the alias and the raw field name variants
-        found = (
-            display_name.lower() in readme
-            or field_name.lower().replace("_", "-") in readme
-            or field_name.lower().replace("_", "_") in readme
-        )
-        if not found:
-            failures.append(
-                f"Scanner '{display_name}' (field: {field_name}) missing from README.md"
-            )
-
-    return failures
+    return compare_inventories(
+        "Scanner",
+        _segment_names(ScannerConfigSegment),
+        read_text(README_TEMPLATE_MD),
+        "Scanner",
+        "README.md.template",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -178,33 +364,62 @@ def check_scanners() -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+def mcp_tool_names() -> dict[str, str]:
+    """Return every function decorated with ``@mcp.tool``, found by parsing.
+
+    Parsed rather than matched. The regex this replaced required ``@mcp.tool()``
+    to be followed by ``async def``, so it found 19 of the 21 registered tools:
+    ``list_scanners`` and ``validate_config`` are plain ``def`` and were
+    invisible to it. A decorator is a property of the function, not of the line
+    after it, so the only way to read it correctly is from the syntax tree.
+
+    Accepts both ``@mcp.tool`` and ``@mcp.tool(...)``, since either registers.
+    """
+    import ast
+
+    tree = ast.parse(read_text(MCP_SERVER_PY))
+    names: dict[str, str] = {}
+
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for decorator in node.decorator_list:
+            target = decorator.func if isinstance(decorator, ast.Call) else decorator
+            if (
+                isinstance(target, ast.Attribute)
+                and target.attr == "tool"
+                and isinstance(target.value, ast.Name)
+                and target.value.id == "mcp"
+            ):
+                names[node.name] = f"mcp_server.py:{node.lineno}"
+                break
+
+    return names
+
+
 def check_mcp_tools() -> list[str]:
-    """Parse mcp_server.py for @mcp.tool() functions and check README."""
-    failures: list[str] = []
-    source = read_text(MCP_SERVER_PY)
-    readme = read_text(README_MD).lower()
+    """The registered MCP tool set and README's tool table must be the same set.
 
-    # Find all functions decorated with @mcp.tool()
-    # Pattern: @mcp.tool() followed by async def func_name(
-    tool_pattern = re.compile(
-        r"@mcp\.tool\(\)\s*\n\s*async\s+def\s+([a-z_][a-z0-9_]*)\s*\(",
-        re.MULTILINE,
+    Overlaps deliberately with tests/unit/cli/mcp/test_tool_surface_parity.py,
+    and neither subsumes the other. That test derives the registered side from
+    ``await mcp.list_tools()`` -- the runtime answer a client receives, which is
+    stronger than any parse -- but it needs the package importable and runs in
+    the unit suite. This runs in the lint job with the docs checks, where a
+    documentation-only pull request gets its answer. The shared property is the
+    set of names; if they ever disagree, the runtime one is right.
+    """
+    failures = ["MCP tool inventory is empty; the parse found nothing to check"]
+    tools = mcp_tool_names()
+    if not tools:
+        return failures
+
+    return compare_inventories(
+        "MCP tool",
+        tools,
+        read_text(README_TEMPLATE_MD),
+        "Tool",
+        "README.md.template",
     )
-    tool_names = tool_pattern.findall(source)
-
-    for tool_name in tool_names:
-        # Check if the tool name appears in the README (as-is or with underscores)
-        if tool_name.lower() not in readme:
-            # Also try a display form: replace underscores with spaces or other patterns
-            # The README uses names like "scan_directory" which may differ from function names
-            # Check a loose match: any word boundary match
-            alt_name = tool_name.replace("_", " ")
-            if alt_name not in readme and tool_name not in readme:
-                failures.append(
-                    f"MCP tool '{tool_name}' found in mcp_server.py but missing from README.md MCP tools table"
-                )
-
-    return failures
 
 
 # ---------------------------------------------------------------------------
@@ -249,26 +464,88 @@ def check_version_consistency() -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+# A list item whose entire content is a code span holding a config file path:
+# "1. `.ash/.ash.yaml`", "- `ash.yml`". The code span is required, so ordinary
+# prose that happens to mention a filename is not mistaken for a published
+# inventory.
+_CONFIG_LIST_ITEM = re.compile(
+    r"^\s*(?:[-*+]|\d+[.)])\s+`(?:\./)?(?:\.ash/)?"
+    r"([A-Za-z0-9_.-]+\.(?:ya?ml|json))`\s*$"
+)
+
+
 def check_config_path() -> list[str]:
-    """Verify docs reference a config filename ASH actually supports.
+    """Every published config-discovery list must match ASH_CONFIG_FILE_NAMES.
 
-    ASH_CONFIG_FILE_NAMES in core/constants.py accepts BOTH ".ash.yaml" and
-    "ash.yaml" (plus .yml/.json variants), so ".ash/ash.yaml" is valid and must
-    not be flagged. This check previously asserted ".ash/.ash.yaml" was the only
-    correct form, which contradicted the source of truth.
+    What this checks, and why it is the only form that can work
+    -----------------------------------------------------------
+    ASH_CONFIG_FILE_NAMES in core/constants.py is the set of names
+    find_config_file() searches for automatically. It is NOT a restriction on
+    what --config accepts, which is any path -- and the docs correctly reference
+    around forty per-project config files (`.ash/terraform.yaml`,
+    `.ash/production.yaml`, and so on) that are passed explicitly. So a check
+    that flagged every `.ash/<name>` absent from the constant would report forty
+    failures against correct documentation, which is why the earlier attempt at
+    this check was neutered instead of fixed.
+
+    What the constant genuinely constrains is the AUTO-DISCOVERY inventory, and
+    the docs publish that inventory as a list in at least three places. Those
+    lists are checkable, exactly, in both directions: a name in the list that ASH
+    does not search for sends a reader to a file that will be ignored, and a name
+    ASH searches for that the list omits hides a working option.
+
+    This was a live defect when the check was written, not a hypothetical:
+    configuration-guide.md and faq.md both published four of the six names,
+    omitting the .json variants and the non-dotted `ash.*` forms entirely.
     """
-    failures: list[str] = []
+    from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
 
-    # Pattern: .ash/ash.yaml NOT preceded by a dot (i.e., not .ash/.ash.yaml)
-    # We look for occurrences of ".ash/ash.yaml" that are NOT ".ash/.ash.yaml"
-    bad_pattern = re.compile(r"(?<!\.)\.ash/ash\.yaml")
+    failures: list[str] = []
+    supported = set(ASH_CONFIG_FILE_NAMES)
+    lists_found = 0
 
     for md_file in collect_md_files():
-        content = read_text(md_file)
-        matches = bad_pattern.findall(content)
-        if matches:
-            rel_path = md_file.relative_to(REPO_ROOT)
-            pass  # ".ash/ash.yaml" is a supported name; nothing to report
+        rel_path = md_file.relative_to(REPO_ROOT)
+        lines = read_text(md_file).splitlines()
+
+        # Group consecutive matching list items into one published inventory.
+        run: list[tuple[int, str]] = []
+        for lineno, line in enumerate(lines + [""], start=1):
+            match = _CONFIG_LIST_ITEM.match(line)
+            if match:
+                run.append((lineno, match.group(1)))
+                continue
+
+            # A run of one is a single example, not an inventory.
+            if len(run) >= 2:
+                lists_found += 1
+                names = {name for _, name in run}
+                start = run[0][0]
+
+                missing = sorted(supported - names)
+                if missing:
+                    failures.append(
+                        f"{rel_path}:{start} publishes a config-discovery list of "
+                        f"{len(names)} name(s) but omits {missing}, which ASH does "
+                        f"search for (ASH_CONFIG_FILE_NAMES). A reader cannot "
+                        f"discover a working config filename from this list."
+                    )
+                unknown = sorted(names - supported)
+                if unknown:
+                    failures.append(
+                        f"{rel_path}:{start} publishes a config-discovery list "
+                        f"naming {unknown}, which ASH does NOT search for "
+                        f"(ASH_CONFIG_FILE_NAMES). A file with that name is "
+                        f"silently ignored unless --config points at it."
+                    )
+            run = []
+
+    if not lists_found:
+        failures.append(
+            "No config-discovery list was found in any markdown file. The docs "
+            "published three; they have been reformatted or removed, and this "
+            "check is no longer comparing anything."
+        )
 
     return failures
 
