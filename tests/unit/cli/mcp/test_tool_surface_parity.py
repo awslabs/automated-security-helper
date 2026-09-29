@@ -39,6 +39,17 @@ ones passes here. Names are what broke, so names are what this pins; argument
 drift would need the schema compared against the examples, which is a bigger
 job and a separate test.
 
+Nor the wire. `mcp.list_tools()` is the in-process registration table, one Python
+call from the decorator that filled it, so everything between that table and a
+real client is out of scope here: the console-script entry point, the stdio
+transport, the `initialize` exchange, and the serialization of each signature
+into JSON Schema. `.github/actions/validate-mcp/compare_tool_surface.py` covers
+that half -- it drives `ash mcp` through the MCP Inspector as a client would and
+diffs the full `tools/list` reply, schemas included, against a committed golden.
+The two overlap on exactly one property, the set of names, and neither subsumes
+the other: this module can run in a unit test suite with no Node toolchain, and
+that one can see a tool that is registered but unreachable.
+
 `scripts/verify_docs_freshness.py` covers an adjacent but different thing: that
 every registered tool appears in README's table. It derives the registered side
 by regex and only matches `async def`, so a `def` tool is invisible to it. This
