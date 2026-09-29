@@ -21,7 +21,7 @@ authoritative for the build that follows.
 
 What this asserts
 -----------------
-Six behaviours, one class each, by running the action's own shell with the container runtime
+Seven behaviours, one class each, by running the action's own shell with the container runtime
 replaced by a stub that records its argv:
 
 1. the primary answering means one registry is touched and nothing is retagged;
@@ -30,7 +30,9 @@ replaced by a stub that records its argv:
 3. the primary refusing with the bare rate-limit signature retries the primary first;
 4. both registries refusing fails, naming both;
 5. a registry whose tag does not resolve to the pinned digest is refused, with nothing tagged;
-6. a non-quota error fails on the first attempt without trying the fallback.
+6. a non-quota error fails on the first attempt without trying the fallback;
+7. a runtime that cannot inspect a ``repo@sha256:...`` reference is still able to verify the
+   pin, and a runtime that cannot answer any form of the question is still refused.
 
 Cases 5 and 6 are the ones that matter most. 5 is the substitution the digest pin exists to
 stop. 6 is the failure mode a fallback introduces: trying the next registry on a real error
@@ -48,13 +50,24 @@ really are the same image -- that was measured out of band (both answer
 that reached the network would be measuring the registries, not the action, and would spend
 from the very quotas under discussion.
 
-It does not exercise podman, finch or nerdctl. The action only ever asks a runtime for
-``pull``, ``tag`` and ``image inspect --format '{{.Id}}'``, and it compares two ids that both
-came from the same runtime in the same call -- so no runtime's notion of "the digest" is relied
-on. What is not covered is whether all four accept a ``repo@sha256:...`` reference as an
-inspect target and a tag source; that was verified on docker 25.0.16 only. The action's
-response to a runtime that does not is a loud failure with the runtime named, never a silently
-accepted image, which is the property this file's ``test_empty_image_id_is_refused`` pins.
+It runs no real runtime. The action only ever asks one for ``pull``, ``tag`` and
+``image inspect --format '{{.Id}}'``, and it compares two ids that both came from the same
+runtime in the same format -- so no runtime's notion of "the digest" is relied on.
+
+The gap this file used to name here has since been measured and is now covered by stub, not by
+hope. nerdctl -- which is what finch runs -- cannot inspect a ``repo@sha256:...`` reference at
+all, for the reason set out on ``TestARuntimeThatRefusesADigestReference``, and the finch leg
+of #672 failed on exactly that. The stub therefore models three runtimes by
+``STUB_DIGEST_INSPECT``: ``docker`` (measured on docker 25.0.16: both the repository-qualified
+and bare-digest forms of the argument resolve), ``nerdctl`` (read from nerdctl's source at
+v2.2.2, v2.3.5 and v2.4.0: the repository-qualified form does not resolve and the bare digest
+does) and ``neither`` (a runtime that answers no form, which must end in a refusal).
+
+Still not covered: whether podman's and finch's real binaries behave as their sources say, and
+whether every runtime accepts a digest reference as a ``tag`` source. The action's response to
+a runtime that cannot answer is a loud failure naming the runtime and quoting what it said,
+never a silently accepted image, which is the property ``test_empty_image_id_is_refused`` and
+``test_a_runtime_that_answers_no_form_is_still_refused`` pin.
 
 Failure mode of this harness itself
 -----------------------------------
@@ -175,6 +188,36 @@ case "$cmd" in
       shift 2
     fi
     ref="$1"
+    # How this runtime answers an inspect whose argument carries a digest. `docker` is what
+    # docker 25.0.16 was measured doing; `nerdctl` is what nerdctl 2.2.2/2.3.5/2.4.0 do, which
+    # is to refuse `repo@sha256:...` and accept a bare `sha256:...`; `neither` is a runtime
+    # that answers no form of the question, which must end in a refusal.
+    case "${STUB_DIGEST_INSPECT:-docker}" in
+      docker) : ;;
+      nerdctl | neither)
+        case "$ref" in
+          *@sha256:*)
+            # Verbatim shape of nerdctl's own answer: pkg/cmd/image/inspect.go keeps only
+            # candidates whose tag equals the requested tag, having rewritten the empty tag a
+            # digest-suffixed reference carries to `latest`, so nothing matches.
+            echo "FATA[0000] 1 errors:" >&2
+            echo "no such image: $ref" >&2
+            exit 1
+            ;;
+          sha256:*)
+            if [ "${STUB_DIGEST_INSPECT}" != "nerdctl" ]; then
+              echo "stub: no such image: $ref" >&2
+              exit 1
+            fi
+            # Resolve by target digest, which is what the bare form asks containerd for: the
+            # first present reference pinned at this digest.
+            ref="$(awk -v d="@$ref" 'index($0, d) { print; exit }' "$STUB_PRESENT")"
+            [ -n "$ref" ] || { echo "stub: no such image: $1" >&2; exit 1; }
+            ;;
+        esac
+        ;;
+      *) echo "stub: unknown STUB_DIGEST_INSPECT: ${STUB_DIGEST_INSPECT}" >&2; exit 64 ;;
+    esac
     present "$ref" || { echo "stub: no such image: $ref" >&2; exit 1; }
     if [ "${STUB_BLANK_IDS:-0}" = "1" ]; then
       echo ""
@@ -306,6 +349,14 @@ class Result:
             out = [c for c in out if c == f"pull {ref}"]
         return out
 
+    def inspects(self, ref: str | None = None) -> list[str]:
+        """Every `image inspect` the step issued, as the reference it asked about."""
+        prefix = "image inspect --format {{.Id}} "
+        out = [c[len(prefix) :] for c in self.calls if c.startswith(prefix)]
+        if ref is not None:
+            out = [c for c in out if c == ref]
+        return out
+
     @property
     def tags(self) -> list[tuple[str, str]]:
         out = []
@@ -346,13 +397,16 @@ def _run(
     script: str | None = None,
     blank_ids: bool = False,
     dockerfile_text: str | None = None,
+    digest_inspect: str = "docker",
 ) -> Result:
     """Run the action's shell against the stub runtime.
 
     ``rules`` maps a reference to how the registry answers a pull of it: ``datalimit``,
     ``ratelimit``, ``hub429`` or ``unknown``. Anything absent succeeds. ``ids`` maps a
     reference to the image id the runtime reports for it; anything absent reports the pinned
-    id, so a test only has to name the reference it wants to diverge.
+    id, so a test only has to name the reference it wants to diverge. ``digest_inspect``
+    selects which runtime's answer to a digest-bearing inspect argument the stub gives:
+    ``docker``, ``nerdctl`` or ``neither``.
     """
     script = _prepull_script() if script is None else script
     assert "${{" not in script, (
@@ -411,6 +465,7 @@ def _run(
         "STUB_IDS": str(ids_file),
         "STUB_DEFAULT_ID": ID_PINNED,
         "STUB_BLANK_IDS": "1" if blank_ids else "0",
+        "STUB_DIGEST_INSPECT": digest_inspect,
     }
     # The shell Actions gives a composite `shell: bash` step. `-e` in particular is not
     # optional: the script relies on it, so a harness without it would be running a more
@@ -750,6 +805,176 @@ class TestAWrongDigestIsRefused:
         assert result.tags == [], f"{result.describe()}"
 
 
+class TestARuntimeThatRefusesADigestReference:
+    """The finch failure. A runtime can pull `repo@sha256:...` and still not inspect it.
+
+    Measured cause, from nerdctl's own resolver rather than from finch: for a digest-suffixed
+    reference ``pkg/cmd/image/inspect.go`` ends up comparing the candidate's tag against
+    ``latest`` -- the empty tag such a reference carries is rewritten to ``latest`` on the
+    requested side instead of being accepted on the candidate side -- so nothing matches unless
+    a ``repo:latest`` record happens to sit at that digest. Present identically at v2.2.2
+    (finch 1.19.0's bundled nerdctl), v2.3.5 (``scripts/setup-nerdctl-linux.sh``'s) and
+    v2.4.0. A bare ``sha256:...`` argument takes a different branch and does resolve, so that
+    is the second form this step is willing to ask.
+    """
+
+    pytestmark = _REQUIRES_BASH
+
+    def test_the_step_succeeds_where_only_the_bare_digest_resolves(
+        self, tmp_path: Path
+    ):
+        result = _run(tmp_path, digest_inspect="nerdctl")
+
+        assert result.pulls(PRIMARY_PIN_REF), (
+            f"positive evidence the step reached the digest fetch\n{result.describe()}"
+        )
+        assert result.ok, (
+            "the pinned content is in the local store and the runtime can be asked for its id; "
+            f"refusing here would be the bug this closes\n{result.describe()}"
+        )
+
+    def test_the_repository_form_is_asked_first_and_the_bare_digest_only_after(
+        self, tmp_path: Path
+    ):
+        """Order matters: the first form is the one docker answers."""
+        result = _run(tmp_path, digest_inspect="nerdctl")
+        asked = result.inspects()
+
+        assert PRIMARY_PIN_REF in asked, (
+            f"the repository-qualified form must still be asked first\n{result.describe()}"
+        )
+        assert BASE_IMAGE_DIGEST in asked, (
+            "the step must fall back to the bare digest when the repository-qualified form "
+            f"answers nothing\n{result.describe()}"
+        )
+        assert asked.index(PRIMARY_PIN_REF) < asked.index(BASE_IMAGE_DIGEST), (
+            f"the bare digest must be a fallback, not the first choice\n{result.describe()}"
+        )
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            pytest.param({}, id="cold-runner"),
+            pytest.param(
+                {"present": [PRIMARY_TAG_REF, PRIMARY_PIN_REF]}, id="warm-at-the-pin"
+            ),
+        ],
+    )
+    def test_the_docker_path_never_asks_the_bare_digest(
+        self, tmp_path: Path, kwargs: dict
+    ):
+        """The measured-working runtime is asked nothing new whenever its answer matters."""
+        result = _run(tmp_path, **kwargs)
+
+        assert result.ok and result.inspects(PRIMARY_PIN_REF), (
+            f"positive evidence the docker path ran and compared ids\n{result.describe()}"
+        )
+        assert result.inspects(BASE_IMAGE_DIGEST) == [], (
+            "the repository-qualified form answered, so there is no second question to ask, "
+            f"and asking it anyway would be a new dependency\n{result.describe()}"
+        )
+
+    def test_the_bare_digest_is_reached_only_after_the_first_form_answers_nothing(
+        self, tmp_path: Path
+    ):
+        """The one docker case that does reach the second form, pinned rather than a surprise.
+
+        A runner holding the tag at some other digest: the repository-qualified form answers
+        nothing because that content is not local, so the bare form is tried and also answers
+        nothing. Both are local, networkless lookups, and the run ends exactly where it ended
+        before -- on the mismatch, after pulling.
+        """
+        result = _run(
+            tmp_path, present=[PRIMARY_TAG_REF], ids={PRIMARY_TAG_REF: ID_OTHER}
+        )
+
+        assert result.inspects(BASE_IMAGE_DIGEST) == [BASE_IMAGE_DIGEST], (
+            "the bare form must be asked exactly once here -- never before the "
+            f"repository-qualified form, and never twice\n{result.describe()}"
+        )
+        assert not result.ok and "DIGEST MISMATCH" in result.output, (
+            f"and the outcome is the one the pin exists to produce\n{result.describe()}"
+        )
+
+    def test_a_moved_tag_is_still_refused_on_that_runtime(self, tmp_path: Path):
+        """The fallback form must not become a way to pass the digest check."""
+        result = _run(
+            tmp_path, ids={PRIMARY_TAG_REF: ID_OTHER}, digest_inspect="nerdctl"
+        )
+
+        assert result.pulls(PRIMARY_PIN_REF), (
+            f"positive evidence ids were compared\n{result.describe()}"
+        )
+        assert not result.ok, (
+            f"a tag that does not resolve to the pin must be refused\n{result.describe()}"
+        )
+        assert "DIGEST MISMATCH" in result.output, f"{result.describe()}"
+        assert result.tags == [], f"{result.describe()}"
+
+    def test_the_fallback_registry_still_works_on_that_runtime(self, tmp_path: Path):
+        """The whole point of the action has to keep working, not just the happy path."""
+        result = _run(
+            tmp_path,
+            rules={PRIMARY_TAG_REF: "datalimit", PRIMARY_PIN_REF: "datalimit"},
+            digest_inspect="nerdctl",
+        )
+
+        assert result.ok, f"{result.describe()}"
+        assert result.tags == [(FALLBACK_PIN_REF, BASE_IMAGE)], (
+            "the fallback's bytes still have to land under the reference the Dockerfile's "
+            f"FROM resolves\n{result.describe()}"
+        )
+
+    def test_a_runtime_that_answers_no_form_is_still_refused(self, tmp_path: Path):
+        """Adding a second spelling must not turn the unsupported case into a pass."""
+        result = _run(tmp_path, digest_inspect="neither")
+
+        assert result.pulls(PRIMARY_PIN_REF), (
+            f"positive evidence both pulls happened before the check\n{result.describe()}"
+        )
+        assert not result.ok, (
+            "no form of the question answered, so the pin is unchecked and the image must "
+            f"not be handed to the build\n{result.describe()}"
+        )
+        assert "no image id" in result.output, f"{result.describe()}"
+        assert result.tags == [], f"{result.describe()}"
+
+    def test_the_refusal_names_the_reference_that_went_unanswered(self, tmp_path: Path):
+        """Both references in one message left the finch failure ambiguous.
+
+        The tag resolved there and the pinned reference did not, which is the whole shape of
+        the problem, and the message as written could not say so.
+        """
+        result = _run(tmp_path, digest_inspect="neither")
+
+        assert not result.ok, f"{result.describe()}"
+        assert f"no image id for {PRIMARY_PIN_REF}" in result.output, (
+            "the tag answered and the pinned reference did not, so the message must say that "
+            f"rather than naming both\n{result.describe()}"
+        )
+        assert f"no image id for {PRIMARY_TAG_REF}" not in result.output, (
+            f"and it must not accuse the reference that answered\n{result.describe()}"
+        )
+
+    def test_the_refusal_carries_the_runtimes_own_explanation(self, tmp_path: Path):
+        """The original failure said the id was empty and nothing about why.
+
+        That stream was going to /dev/null. A refusal that does not carry it costs whoever
+        reads the log a round trip through a runtime they may not have.
+        """
+        result = _run(tmp_path, digest_inspect="neither")
+
+        assert not result.ok, f"{result.describe()}"
+        assert "no such image" in result.output, (
+            "the runtime's own reason for answering nothing has to reach the log, or the next "
+            f"unsupported runtime is diagnosed the same slow way\n{result.describe()}"
+        )
+        assert f"--format '{{{{.Id}}}}' {PRIMARY_PIN_REF}" in result.output, (
+            "and the log has to say which invocation produced it, since the step asks about "
+            f"more than one reference\n{result.describe()}"
+        )
+
+
 class TestANonQuotaErrorFailsImmediately:
     """Case 6. The failure mode a fallback introduces, closed on purpose."""
 
@@ -883,6 +1108,47 @@ class TestTheHarnessCanFail:
             f"pin closes. If this fails, the control no longer isolates the change\n{result.describe()}"
         )
         assert "DIGEST MISMATCH" not in result.output, f"{result.describe()}"
+
+    def test_a_mutant_that_proceeds_on_an_unverifiable_image_is_caught(
+        self, tmp_path: Path
+    ):
+        """The tempting weakening, applied on purpose, must not survive the refusal test.
+
+        "If we cannot compare the ids, carry on" is the one-line change that would have turned
+        the finch leg green, and it is the change this file exists to make impossible. So the
+        mutation is that change and not an arbitrary break: skip the comparison when either id
+        is missing, rather than refusing.
+        """
+        script = _prepull_script()
+        mutant, refusal_subs = re.subn(
+            r'if \[ -z "\$\{tag_id\}" \] \|\| \[ -z "\$\{pin_id\}" \]; then',
+            'if [ -z "${tag_id}" ] && [ -z "${pin_id}" ] && false; then',
+            script,
+        )
+        mutant, compare_subs = re.subn(
+            r'if \[ "\$\{tag_id\}" != "\$\{pin_id\}" \]; then',
+            'if [ -n "${tag_id}" ] && [ -n "${pin_id}" ] '
+            '&& [ "${tag_id}" != "${pin_id}" ]; then',
+            mutant,
+        )
+        assert (refusal_subs, compare_subs) == (1, 1), (
+            "the mutation matched nothing, so this control is checking a script it did not "
+            f"change. Re-derive the patterns from the action. Substitutions: {refusal_subs} "
+            f"refusal, {compare_subs} comparison"
+        )
+
+        weakened = _run(tmp_path, script=mutant, digest_inspect="neither")
+        real = _run(tmp_path, digest_inspect="neither")
+
+        assert weakened.ok, (
+            "the mutant is supposed to accept the unverified image; if it does not, the "
+            "mutation is not the one described and the control proves nothing\n"
+            f"{weakened.describe()}"
+        )
+        assert not real.ok, (
+            "and the shipped script must refuse the same input -- that gap is the whole "
+            f"assertion\n{real.describe()}"
+        )
 
     def test_the_stub_refuses_an_invocation_it_was_not_taught(self, tmp_path: Path):
         """A stub that tolerated unknown verbs would hide the action growing a dependency."""
