@@ -348,8 +348,48 @@ def _default_display(
     return f"`{value}`"
 
 
+def _docstring_arg_notes(func) -> dict[str, str]:
+    """Per-parameter descriptions parsed out of a Google-style ``Args:`` block.
+
+    Used as the fallback for the Notes column so a tool with no ``TOOL_NOTES``
+    entry still gets populated cells rather than blank ones. Continuation lines
+    are folded into the preceding parameter, because several of these docstrings
+    wrap a long description over two or three lines.
+    """
+    doc = inspect.getdoc(func) or ""
+    if "Args:" not in doc:
+        return {}
+    section = doc.split("Args:", 1)[1]
+    for terminator in ("Returns:", "Raises:", "Example:", "Examples:", "Note:"):
+        if terminator in section:
+            section = section.split(terminator)[0]
+
+    found: dict[str, str] = {}
+    current: str | None = None
+    for raw in section.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        head, sep, tail = line.partition(":")
+        candidate = head.strip()
+        if (
+            sep
+            and candidate
+            and candidate.replace("_", "").isalnum()
+            and " " not in candidate
+        ):
+            current = candidate
+            found[current] = tail.strip()
+        elif current:
+            found[current] = f"{found[current]} {line}".strip()
+
+    # A pipe would end the markdown table column early.
+    return {k: v.replace("|", r"\|") for k, v in found.items()}
+
+
 def _render_tool(name: str, description: str, schema: dict, func) -> list[str]:
     notes = TOOL_NOTES.get(name, {})
+    doc_notes = _docstring_arg_notes(func)
     lines = [f"## {name}", ""]
 
     intro = notes.get("intro")
@@ -386,7 +426,7 @@ def _render_tool(name: str, description: str, schema: dict, func) -> list[str]:
         else:
             lines += ["| Param | Type | Notes |", "|-------|------|-------|"]
         for key, spec in properties.items():
-            note = param_notes.get(key, {}).get("notes", "")
+            note = param_notes.get(key, {}).get("notes") or doc_notes.get(key, "")
             if show_default:
                 lines.append(
                     f"| `{key}` | {_type_name(spec)} | {defaults[key]} | {note} |"

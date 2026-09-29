@@ -255,8 +255,8 @@ Compare two ash_aggregated_results.json files and return a structured diff.
 
 | Param | Type | Notes |
 |-------|------|-------|
-| `before_path` | string |  |
-| `after_path` | string |  |
+| `before_path` | string | Path to the baseline ash_aggregated_results.json file. |
+| `after_path` | string | Path to the comparison ash_aggregated_results.json file. |
 
 ## explain_finding
 
@@ -264,8 +264,8 @@ Return structured details for a single finding by ID.
 
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
-| `finding_id` | string | *required* |  |
-| `results_path` | string \| null | `null` |  |
+| `finding_id` | string | *required* | The FlatVulnerability ID to look up (e.g. "bandit-B601-deadbeef"). |
+| `results_path` | string \| null | `null` | Optional path to the output directory containing ash_aggregated_results.json. Defaults to <cwd>/.ash/ash_output. |
 
 ## get_config
 
@@ -273,8 +273,8 @@ Get the resolved ASH config (defaults + user overrides merged).
 
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
-| `config_path` | string \| null | `null` |  |
-| `raw` | boolean | `false` |  |
+| `config_path` | string \| null | `null` | Optional explicit path to config file. If None, auto-discovers. |
+| `raw` | boolean | `false` | If True, returns the user file contents without merging defaults. |
 
 ## list_profiles
 
@@ -294,10 +294,10 @@ Resolve a VS Code workspace file into a scan plan without scanning anything.
 
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
-| `workspace_file` | string | *required* |  |
-| `workspace_config` | string \| null | `null` |  |
-| `allow_missing_projects` | boolean | `false` |  |
-| `config_overrides` | array \| null | `null` |  |
+| `workspace_file` | string | *required* | Absolute path to the .code-workspace file. |
+| `workspace_config` | string \| null | `null` | Optional path to a workspace policy file. Must exist if given; ASH will not fall back to searching for one. |
+| `allow_missing_projects` | boolean | `false` | Mark project directories that are absent or unreadable as skipped instead of refusing the workspace. |
+| `config_overrides` | array \| null | `null` | Optional list of `key=value` config overrides, applied to each project's config so the reported threshold is the enforced one. |
 
 ## run_ash_workspace_scan
 
@@ -305,15 +305,15 @@ Scan every project in a VS Code workspace and return the per-project verdict.
 
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
-| `workspace_file` | string | *required* |  |
-| `workspace_config` | string \| null | `null` |  |
-| `allow_missing_projects` | boolean | `false` |  |
-| `config_overrides` | array \| null | `null` |  |
-| `output_dir` | string \| null | `null` |  |
-| `scanners` | array \| null | `null` |  |
-| `excluded_scanners` | array \| null | `null` |  |
-| `offline` | boolean | `false` |  |
-| `clean_output` | boolean | `true` |  |
+| `workspace_file` | string | *required* | Absolute path to the .code-workspace file. |
+| `workspace_config` | string \| null | `null` | Optional path to a workspace policy file. |
+| `allow_missing_projects` | boolean | `false` | Skip absent or unreadable project directories rather than refusing the workspace. |
+| `config_overrides` | array \| null | `null` | Optional list of `key=value` config overrides. |
+| `output_dir` | string \| null | `null` | Where to write the workspace output tree. Defaults to `<workspace root>/.ash/ash_output`. |
+| `scanners` | array \| null | `null` | Restrict every project to these scanner names. |
+| `excluded_scanners` | array \| null | `null` | Exclude these scanners from every project. Takes precedence over `scanners`. |
+| `offline` | boolean | `false` | Run without network access. |
+| `clean_output` | boolean | `true` | Remove each project's previous aggregated-results file first. |
 
 ## set_source_git
 
@@ -345,8 +345,8 @@ Verify an uploaded zip and extract it as this session's scan target.
 
 | Param | Type | Notes |
 |-------|------|-------|
-| `upload_id` | string |  |
-| `expected_sha256` | string |  |
+| `upload_id` | string | The identifier used for the preceding chunk calls. |
+| `expected_sha256` | string | Hex sha256 of the complete zip. |
 
 ## suggest_suppression
 
@@ -354,10 +354,10 @@ Build a paste-ready AshSuppression entry for a specific finding.
 
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
-| `finding_id` | string | *required* |  |
-| `results_path` | string \| null | `null` |  |
-| `expiration` | string \| null | `null` |  |
-| `justification` | string \| null | `null` |  |
+| `finding_id` | string | *required* | Stable hash ID of the finding (from get_scan_results or explain_finding). |
+| `results_path` | string \| null | `null` | Path to ash_aggregated_results.json. Defaults to .ash/ash_output/ash_aggregated_results.json in cwd. |
+| `expiration` | string \| null | `null` | Expiration date in YYYY-MM-DD format. Defaults to 90 days from today. |
+| `justification` | string \| null | `null` | Human-readable reason for the suppression. |
 
 ## validate_config
 
@@ -365,8 +365,8 @@ Validate an ASH configuration file or content string.
 
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
-| `config_content` | string \| null | `null` |  |
-| `config_path` | string \| null | `null` |  |
+| `config_content` | string \| null | `null` | YAML/JSON string to validate. |
+| `config_path` | string \| null | `null` | Path to the config file to validate. |
 
 ## Resources
 
