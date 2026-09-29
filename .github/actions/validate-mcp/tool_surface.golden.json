@@ -1,0 +1,865 @@
+{
+  "_comment": "Golden copy of the ASH MCP server's tools/list reply, as a real client receives it over stdio. Compared by .github/actions/validate-mcp/compare_tool_surface.py, which the validate-mcp composite action runs in CI. Read that script before editing this file: it explains which fields are normalized and why, and why regenerating rather than reading a diff is the wrong instinct. Do not hand-edit -- regenerate.",
+  "_normalization": [
+    "description: inspect.cleandoc (CPython 3.14 dedents docstrings, 3.10-3.13 do not)",
+    "object keys: sorted (JSON objects are unordered per RFC 8259)",
+    "required/enum arrays: sorted (both are sets per JSON Schema)"
+  ],
+  "_regenerate": "python .github/actions/validate-mcp/compare_tool_surface.py --update",
+  "tools": {
+    "cancel_scan": {
+      "description": "Cancel a running scan and clean up its resources.\n\nArgs:\n    scan_id: The scan ID to cancel",
+      "inputSchema": {
+        "properties": {
+          "scan_id": {
+            "title": "Scan Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scan_id"
+        ],
+        "title": "cancel_scanArguments",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "cancel_scanOutput",
+        "type": "object"
+      }
+    },
+    "check_installation": {
+      "description": "Check if ASH is properly installed and ready to use.",
+      "inputSchema": {
+        "properties": {},
+        "title": "check_installationArguments",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "check_installationOutput",
+        "type": "object"
+      }
+    },
+    "clear_source": {
+      "description": "Delete this session's delivered source tree and workspace.\n\nIdempotent: a session that delivered nothing still succeeds. Call this to\nreclaim space or before delivering a different tree.\n\nReturns:\n    Dict with success.",
+      "inputSchema": {
+        "properties": {},
+        "title": "clear_sourceArguments",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "clear_sourceOutput",
+        "type": "object"
+      }
+    },
+    "diff_scan_results": {
+      "description": "Compare two ash_aggregated_results.json files and return a structured diff.\n\nArgs:\n    before_path: Path to the baseline ash_aggregated_results.json file.\n    after_path: Path to the comparison ash_aggregated_results.json file.\n\nReturns:\n    Dict with keys new, resolved, and severity_changed.",
+      "inputSchema": {
+        "properties": {
+          "after_path": {
+            "title": "After Path",
+            "type": "string"
+          },
+          "before_path": {
+            "title": "Before Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "after_path",
+          "before_path"
+        ],
+        "title": "diff_scan_resultsArguments",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "diff_scan_resultsOutput",
+        "type": "object"
+      }
+    },
+    "explain_finding": {
+      "description": "Return structured details for a single finding by ID.\n\nPerforms a pure structured lookup against already-emitted SARIF results.\nNo LLM calls are made.\n\nArgs:\n    finding_id: The FlatVulnerability ID to look up (e.g. \"bandit-B601-deadbeef\").\n    results_path: Optional path to the output directory containing\n                  ash_aggregated_results.json. Defaults to\n                  <cwd>/.ash/ash_output.\n\nReturns:\n    Dict with ``success`` and ``finding`` keys containing title, description,\n    severity, severity_rationale, cwe_id, cve_id, references, scanner,\n    and scanner_metadata.",
+      "inputSchema": {
+        "properties": {
+          "finding_id": {
+            "title": "Finding Id",
+            "type": "string"
+          },
+          "results_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Results Path"
+          }
+        },
+        "required": [
+          "finding_id"
+        ],
+        "title": "explain_findingArguments",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "explain_findingOutput",
+        "type": "object"
+      }
+    },
+    "get_config": {
+      "description": "Get the resolved ASH config (defaults + user overrides merged).\n\nArgs:\n    config_path: Optional explicit path to config file. If None, auto-discovers.\n    raw: If True, returns the user file contents without merging defaults.",
+      "inputSchema": {
+        "properties": {
+          "config_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Config Path"
+          },
+          "raw": {
+            "default": false,
+            "title": "Raw",
+            "type": "boolean"
+          }
+        },
+        "title": "get_configArguments",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "get_configOutput",
+        "type": "object"
+      }
+    },
+    "get_scan_progress": {
+      "description": "Get current progress and partial results for a running scan.\n\nIMPORTANT: Call this tool every 5 seconds in a loop to:\n- Keep the MCP connection alive during long-running scans (30-120+ seconds)\n- Get real-time status updates\n- Detect completion or failures immediately\n\nUsage pattern:\n    while True:\n        progress = get_scan_progress(scan_id=scan_id)\n        if progress.get('is_complete') or progress.get('status') in ['completed', 'failed', 'cancelled']:\n            break\n        time.sleep(5)  # Wait 5 seconds before next check\n\nArgs:\n    scan_id: The scan ID returned from run_ash_scan\n\nReturns:\n    Dict with progress info including:\n    - is_complete: Boolean indicating if scan is done\n    - status: Current status (running, completed, failed, cancelled)\n    - progress_percentage: Estimated completion percentage\n    - message: Human-readable status message\n    - scanner_statuses: Per-scanner status for every scanner ASH considered,\n      including ones that never ran. Empty until the scan finishes.\n    - skipped_scanners: The subset that did not run, each with a `reason` of\n      `missing_dependencies`, `excluded_by_configuration` or `skipped`. Use\n      this to tell \"scanned, found nothing\" from \"never ran\"; a zero finding\n      count alone cannot distinguish the two.",
+      "inputSchema": {
+        "properties": {
+          "scan_id": {
+            "title": "Scan Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scan_id"
+        ],
+        "title": "get_scan_progressArguments",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "get_scan_progressOutput",
+        "type": "object"
+      }
+    },
+    "get_scan_result_paths": {
+      "description": "Get file paths for all scan result files by type.\n\nThis tool returns the absolute paths to various result files (SARIF, JSON, HTML, etc.)\nallowing the client to decide which files to read and how to process them.\n\nReturns paths for:\n- SARIF report\n- Flat JSON report\n- HTML report\n- CSV report\n- Markdown summary\n- OCSF report\n- CycloneDX SBOM\n- JUnit XML report\n- GitLab SAST report\n\nArgs:\n    output_dir: Path to the scan output directory (absolute path recommended)",
+      "inputSchema": {
+        "properties": {
+          "output_dir": {
+            "default": ".ash/ash_output",
+            "title": "Output Dir",
+            "type": "string"
+          }
+        },
+        "title": "get_scan_result_pathsArguments",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "get_scan_result_pathsOutput",
+        "type": "object"
+      }
+    },
+    "get_scan_results": {
+      "description": "Get final results for a completed scan with optional filtering.\n\nArgs:\n    output_dir: Path to the scan output directory (absolute path recommended)\n    filter_level: Filter level for response data. Options:\n            - \"full\" (default): Return all results including raw_results, validation_checkpoints, etc.\n            - \"summary\": Return only summary data (metadata, findings counts, scanner summaries)\n            - \"minimal\": Return only basic scan status and completion info\n    scanners: Comma-separated list of scanner names to include (e.g., \"bandit,semgrep\").\n              If not specified, includes all scanners.\n    severities: Comma-separated list of severity levels to include (e.g., \"critical,high,medium\").\n                Options: critical, high, medium, low, info, suppressed\n                If not specified, includes all severities.\n    actionable_only: If True, exclude suppressed findings from results. This filters out findings\n                    that have been marked as false positives or accepted risks. Default is False.",
+      "inputSchema": {
+        "properties": {
+          "actionable_only": {
+            "default": false,
+            "title": "Actionable Only",
+            "type": "boolean"
+          },
+          "filter_level": {
+            "default": "full",
+            "title": "Filter Level",
+            "type": "string"
+          },
+          "output_dir": {
+            "default": ".ash/ash_output",
+            "title": "Output Dir",
+            "type": "string"
+          },
+          "scanners": {
+            "default": null,
+            "title": "Scanners",
+            "type": "string"
+          },
+          "severities": {
+            "default": null,
+            "title": "Severities",
+            "type": "string"
+          }
+        },
+        "title": "get_scan_resultsArguments",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "get_scan_resultsOutput",
+        "type": "object"
+      }
+    },
+    "get_scan_summary": {
+      "description": "Get a lightweight summary of scan results without detailed findings.\n\nThis tool returns only high-level metadata and statistics, making it ideal for\nquick status checks without transferring large amounts of data.\n\nReturns:\n- Scan metadata (timestamps, duration, etc.)\n- Findings count by severity\n- Findings count by scanner/tool\n- Scanner execution status\n- No detailed finding information\n\nArgs:\n    output_dir: Path to the scan output directory (absolute path recommended)",
+      "inputSchema": {
+        "properties": {
+          "output_dir": {
+            "default": ".ash/ash_output",
+            "title": "Output Dir",
+            "type": "string"
+          }
+        },
+        "title": "get_scan_summaryArguments",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "get_scan_summaryOutput",
+        "type": "object"
+      }
+    },
+    "list_active_scans": {
+      "description": "List all active and recent scans with their current status.",
+      "inputSchema": {
+        "properties": {},
+        "title": "list_active_scansArguments",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "list_active_scansOutput",
+        "type": "object"
+      }
+    },
+    "list_profiles": {
+      "description": "List the config profiles the operator registered at server startup.\n\nA profile is a named, pre-validated ASH config, registered with\n`ash mcp --profile NAME=path/to/ash.yaml`. Only the name and a hash of the\npath are returned; the path itself is an operator deployment detail, and the\nhash is enough for a client to notice that a registration changed underneath\nit.\n\nReturns:\n    Dict with profiles (a list of name/path_sha256 pairs) and count. An empty\n    list means the operator registered none, not that the call failed.",
+      "inputSchema": {
+        "properties": {},
+        "title": "list_profilesArguments",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "list_profilesOutput",
+        "type": "object"
+      }
+    },
+    "list_scanners": {
+      "description": "List all registered ASH scanners with their metadata.\n\nReturns one entry per scanner with:\n  name: scanner config name (e.g. \"bandit\", \"checkov\")\n  version: detected version string, or null when the scanner reports none.\n    The format is whatever each scanner reports and is not consistent between\n    them -- bandit reports \"bandit 1.9.4\" where checkov reports \"3.3.11\".\n  dependencies_satisfied: true, false, or null when it could not be\n    determined, which happens when a scanner cannot be constructed or its own\n    dependency check raises. Treat null as \"unknown\", not as \"not met\": a\n    scanner reporting null may well run.\n  offline_strategy: one of \"bundled\", \"cache_flags\", \"skip_offline\", \"unknown\"\n  enabled: whether the scanner is enabled in the default ASH config\n\ndependencies_satisfied describes this deployment's environment at the moment of\nthe call. It is not a prediction about a scan: a scanner reporting true can\nstill fail on a given target, and a scan may skip a scanner for reasons of\nconfiguration rather than dependencies.",
+      "inputSchema": {
+        "properties": {},
+        "title": "list_scannersArguments",
+        "type": "object"
+      }
+    },
+    "resolve_ash_workspace": {
+      "description": "Resolve a VS Code workspace file into a scan plan without scanning anything.\n\nThe MCP equivalent of `ash --workspace <file> --dry-run`. Reads the workspace\ndefinition and every project's own ASH config, then reports which directories\nbecame projects, what key each was given, which scanners its config enables,\nwhich severity threshold it will be judged against, and which projects were\ndropped and why. Nothing is scanned and no output tree is written, so this is\nthe cheap way to check a workspace before committing to N repository scans.\n\nCall this first when a workspace is unfamiliar, then run_ash_workspace_scan on\nthe same arguments: the scan resolves the same plan from the same inputs.\n\nArgs:\n    workspace_file: Absolute path to the .code-workspace file.\n    workspace_config: Optional path to a workspace policy file. Must exist if\n        given; ASH will not fall back to searching for one.\n    allow_missing_projects: Mark project directories that are absent or\n        unreadable as skipped instead of refusing the workspace.\n    config_overrides: Optional list of `key=value` config overrides, applied to\n        each project's config so the reported threshold is the enforced one.\n\nReturns:\n    Dict with `plan` (the rendered plan, for a human to read), `projects` (the\n    same decisions structured), and `exit_code` -- 0 on success, 4 for a\n    workspace definition or policy problem, 3 for a project whose own config is\n    invalid.",
+      "inputSchema": {
+        "properties": {
+          "allow_missing_projects": {
+            "default": false,
+            "title": "Allow Missing Projects",
+            "type": "boolean"
+          },
+          "config_overrides": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Config Overrides"
+          },
+          "workspace_config": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Workspace Config"
+          },
+          "workspace_file": {
+            "title": "Workspace File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace_file"
+        ],
+        "title": "resolve_ash_workspaceArguments",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "resolve_ash_workspaceOutput",
+        "type": "object"
+      }
+    },
+    "run_ash_scan": {
+      "description": "Start a security scan and return immediately.\n\nThis tool starts a scan and returns immediately with a scan ID.\nProgress updates will be reported through the MCP context.\n\nCRITICAL - Connection Management:\nASH scans take 30-120+ seconds. To prevent MCP connection timeout:\n- Poll get_scan_progress(scan_id) every 5 seconds (keeps connection alive)\n- Check progress['is_complete'] or progress['status'] for completion\n- DO NOT sleep for long periods without polling\n\nExample usage:\n    result = run_ash_scan(source_dir=\"/path/to/project\")\n    scan_id = result['scan_id']\n\n    # Poll progress to keep connection alive\n    while True:\n        progress = get_scan_progress(scan_id=scan_id)\n        if progress.get('is_complete'):\n            break\n        time.sleep(5)  # Poll every 5 seconds\n\n    # Get filtered results after completion\n    results = get_scan_results(\n        output_dir=progress['output_directory'],\n        filter_level=\"summary\",\n        actionable_only=True\n    )\n\nArgs:\n    source_dir: Path to the directory to scan. This should be the absolute path!\n        Omit it to scan a source tree this session delivered with\n        set_source_git or set_source_zip_finalize.\n    severity_threshold: Minimum severity threshold (LOW, MEDIUM, HIGH, CRITICAL)\n    config_path: Optional path to ASH configuration file\n    clean_output: Whether to clean up existing output files before starting the scan\n\nReturns:\n    Dict with scan_id, status, and connection management guidance",
+      "inputSchema": {
+        "properties": {
+          "clean_output": {
+            "default": true,
+            "title": "Clean Output",
+            "type": "boolean"
+          },
+          "config_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Config Path"
+          },
+          "severity_threshold": {
+            "default": "MEDIUM",
+            "title": "Severity Threshold",
+            "type": "string"
+          },
+          "source_dir": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source Dir"
+          }
+        },
+        "title": "run_ash_scanArguments",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "run_ash_scanOutput",
+        "type": "object"
+      }
+    },
+    "run_ash_workspace_scan": {
+      "description": "Scan every project in a VS Code workspace and return the per-project verdict.\n\nThe MCP equivalent of `ash --workspace <file>`. Each project is scanned with\nits own ASH config and its own severity threshold, a workspace policy file can\nimpose a ceiling over all of them, and the results are aggregated into one\nworkspace payload.\n\nUnlike run_ash_scan this call does not return early: it waits for the whole\nworkspace and returns the verdict. Progress is reported as completed projects\nover total projects, with the project key in the message, so a client watching\nprogress notifications can see which project is finishing.\n\nEvery project gets its own entry in the scan registry, so the `scan_ids` map in\nthe response can be used with get_scan_progress and get_scan_results per\nproject. A project skipped at resolution gets no entry and no id.\n\nConfinement: `ASH_MCP_ALLOWED_ROOTS` governs the project directories, and one\nproject outside the permitted roots refuses the whole workspace rather than\nscanning the rest -- a green result covering fewer projects than you asked for\nis the outcome that refusal exists to prevent. The .code-workspace file itself\nand the workspace policy file are config inputs and are not confined.\n\nNot available in container mode; workspace mode runs locally.\n\nArgs:\n    workspace_file: Absolute path to the .code-workspace file.\n    workspace_config: Optional path to a workspace policy file.\n    allow_missing_projects: Skip absent or unreadable project directories\n        rather than refusing the workspace.\n    config_overrides: Optional list of `key=value` config overrides.\n    output_dir: Where to write the workspace output tree. Defaults to\n        `<workspace root>/.ash/ash_output`.\n    scanners: Restrict every project to these scanner names.\n    excluded_scanners: Exclude these scanners from every project. Takes\n        precedence over `scanners`.\n    offline: Run without network access.\n    clean_output: Remove each project's previous aggregated-results file first.\n\nReturns:\n    Dict with `scan_ids` (project key to registry scan id), `projects` (each\n    project's status, finding counts and threshold verdict), `results_path`, and\n    `exit_code` -- 0 clean, 2 actionable findings above a threshold, 3 an\n    invalid project config, 4 a workspace definition, policy or confinement\n    refusal, 1 an internal error. `success` reports whether the scan ran; the\n    verdict is `exit_code`.",
+      "inputSchema": {
+        "properties": {
+          "allow_missing_projects": {
+            "default": false,
+            "title": "Allow Missing Projects",
+            "type": "boolean"
+          },
+          "clean_output": {
+            "default": true,
+            "title": "Clean Output",
+            "type": "boolean"
+          },
+          "config_overrides": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Config Overrides"
+          },
+          "excluded_scanners": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Excluded Scanners"
+          },
+          "offline": {
+            "default": false,
+            "title": "Offline",
+            "type": "boolean"
+          },
+          "output_dir": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Output Dir"
+          },
+          "scanners": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scanners"
+          },
+          "workspace_config": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Workspace Config"
+          },
+          "workspace_file": {
+            "title": "Workspace File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace_file"
+        ],
+        "title": "run_ash_workspace_scanArguments",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "run_ash_workspace_scanOutput",
+        "type": "object"
+      }
+    },
+    "set_source_git": {
+      "description": "Clone a repository into this session's workspace and make it the scan target.\n\nAfter this returns, call run_ash_scan() with no source_dir to scan the clone.\n\nArgs:\n    url: Remote URL to clone (https or ssh). Rejected if it begins with '-'\n         or uses the ext:: transport, both of which make git run a command.\n    ref: Optional branch, tag, or commit. Defaults to the remote's default branch.\n    ssh_key_id: Opaque identifier for a key the operator registered on the\n                server. Raw private keys are never accepted over the wire.\n    depth: Shallow-clone depth. Defaults to 1.\n\nReturns:\n    Dict with success and source_dir, or success=False and error.",
+      "inputSchema": {
+        "properties": {
+          "depth": {
+            "default": 1,
+            "title": "Depth",
+            "type": "integer"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ref"
+          },
+          "ssh_key_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ssh Key Id"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "set_source_gitArguments",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "set_source_gitOutput",
+        "type": "object"
+      }
+    },
+    "set_source_zip_chunk": {
+      "description": "Upload one base64 chunk of a zipped source tree.\n\nChunks must arrive in order, each at most 1 MiB once decoded. Send the final\nchunk with last=True, then call set_source_zip_finalize to verify and extract.\n\nArgs:\n    upload_id: Identifier you choose, scoping this one upload.\n    sequence: Zero-based ordinal of this chunk.\n    data_b64: Base64-encoded chunk payload.\n    last: True on the final chunk.\n\nReturns:\n    Dict with success, received, next_sequence and last; or success=False\n    and error on an out-of-order, oversize, or malformed chunk.",
+      "inputSchema": {
+        "properties": {
+          "data_b64": {
+            "title": "Data B64",
+            "type": "string"
+          },
+          "last": {
+            "title": "Last",
+            "type": "boolean"
+          },
+          "sequence": {
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "upload_id": {
+            "title": "Upload Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data_b64",
+          "last",
+          "sequence",
+          "upload_id"
+        ],
+        "title": "set_source_zip_chunkArguments",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "set_source_zip_chunkOutput",
+        "type": "object"
+      }
+    },
+    "set_source_zip_finalize": {
+      "description": "Verify an uploaded zip and extract it as this session's scan target.\n\nThe assembled zip must hash to expected_sha256. Entries with absolute paths,\n'..' components, or symlinks are refused before anything is extracted, and\nthe archive is capped at 100 MiB on the wire, 500 MiB extracted, and 50000\nentries. After this returns, call run_ash_scan() with no source_dir.\n\nArgs:\n    upload_id: The identifier used for the preceding chunk calls.\n    expected_sha256: Hex sha256 of the complete zip.\n\nReturns:\n    Dict with success and source_dir, or success=False and error.",
+      "inputSchema": {
+        "properties": {
+          "expected_sha256": {
+            "title": "Expected Sha256",
+            "type": "string"
+          },
+          "upload_id": {
+            "title": "Upload Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_sha256",
+          "upload_id"
+        ],
+        "title": "set_source_zip_finalizeArguments",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "set_source_zip_finalizeOutput",
+        "type": "object"
+      }
+    },
+    "suggest_suppression": {
+      "description": "Build a paste-ready AshSuppression entry for a specific finding.\n\nArgs:\n    finding_id: Stable hash ID of the finding (from get_scan_results or explain_finding).\n    results_path: Path to ash_aggregated_results.json. Defaults to\n                  .ash/ash_output/ash_aggregated_results.json in cwd.\n    expiration: Expiration date in YYYY-MM-DD format. Defaults to 90 days from today.\n    justification: Human-readable reason for the suppression.",
+      "inputSchema": {
+        "properties": {
+          "expiration": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expiration"
+          },
+          "finding_id": {
+            "title": "Finding Id",
+            "type": "string"
+          },
+          "justification": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Justification"
+          },
+          "results_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Results Path"
+          }
+        },
+        "required": [
+          "finding_id"
+        ],
+        "title": "suggest_suppressionArguments",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "suggest_suppressionOutput",
+        "type": "object"
+      }
+    },
+    "validate_config": {
+      "description": "Validate an ASH configuration file or content string.\n\nArgs:\n    config_content: YAML/JSON string to validate.\n    config_path: Path to the config file to validate.\n\nReturns:\n    Dict with valid (bool) and errors (list of {field, message, type}).",
+      "inputSchema": {
+        "properties": {
+          "config_content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Config Content"
+          },
+          "config_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Config Path"
+          }
+        },
+        "title": "validate_configArguments",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "validate_configOutput",
+        "type": "object"
+      }
+    }
+  }
+}
