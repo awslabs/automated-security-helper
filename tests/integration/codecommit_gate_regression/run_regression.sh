@@ -126,10 +126,17 @@ for spec in "vulnerable:feat/unsafe-subprocess" "clean:feat/safe-math"; do
     OVERALL=1
   fi
   # Record the verdict the gate would have derived, for the divergence check.
+  #
+  # The mapping comes from gate-contract.json, which gate_contract.py DERIVES by
+  # calling the gate's own _verdict(). It used to be read from a hand-typed copy
+  # in expected.json that stopped at exit code 3, so a run that exited 4 was
+  # scored by the `.get` default rather than by the gate's logic -- the same
+  # answer here, by luck, and not the gate's answer.
   VERDICTS[$case_name]="$(python3 -c "
-import json,sys
-m=json.load(open('$HERE/expected.json'))['verdict_mapping']
-print(m.get('$code','errored'))
+import json
+contract = json.load(open('$HERE/gate-contract.json'))
+mapping = contract['verdict_mapping']
+print(mapping.get('$code', mapping['unknown']))
 ")"
   echo "  full ASH output: $log"
   echo
