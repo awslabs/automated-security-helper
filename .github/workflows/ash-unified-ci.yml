@@ -860,10 +860,22 @@ jobs:
         env:
           METHOD: ${{ matrix.method }}
         run: |
+          # The arms are the `method` axis above, and nothing else. They were
+          # `pip | pipx | uvx | homebrew | pre-commit`, `podman | finch | nerdctl` and
+          # `mcp`, which was the axis before those five cheap methods became steps
+          # inside a single `bundle` leg. After that change the list named five values
+          # that can no longer occur while omitting the one that does, so every bundle
+          # leg -- 25 of the job's 33 -- fell through to the `*)` below and exited 1.
+          # Measured by extracting this shell and running it with METHOD=bundle.
+          #
+          # The five folded methods are NOT listed here. They are steps, and the steps
+          # carry their own `if: matrix.method == 'bundle'`; naming them would make this
+          # guard accept values the matrix cannot produce, which is the direction that
+          # hides a problem rather than causing one.
           case "${METHOD}" in
-            pip | pipx | uvx | homebrew | pre-commit) ;;
+            bundle) ;;
+            homebrew) ;;
             podman | finch | nerdctl) ;;
-            mcp) ;;
             *)
               echo "::error::install-validation has no validator for method '${METHOD}'. The routing conditions on the steps at the end of this job cover none of it, so this leg would run setup-python and then nothing, and exit 0. Route it to a composite action and add it to the case above."
               exit 1

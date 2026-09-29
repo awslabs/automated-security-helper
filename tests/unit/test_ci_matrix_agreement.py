@@ -101,12 +101,79 @@ _METHOD_ONLY_IN: dict[str, str] = {
         "validation is slow enough that the unconditional surface -- the one "
         "required-checks gates -- deliberately does not carry it."
     ),
+    # The six below are ONE fact, not six. ash-unified-ci.yml folded pip, pipx, uvx,
+    # pre-commit and mcp into a single `bundle` method run as five steps;
+    # ash-install-methods.yml still carries them as five separate methods. So each of
+    # those five names is now on one surface only, and `bundle` -- the value that
+    # replaced them -- is on the other.
+    #
+    # This is a deliberate split rather than drift, and no coverage is lost: all five
+    # still run on both surfaces, as steps here and as legs there. What differs is the
+    # granularity of the leg, which is what the collapse was for.
+    #
+    # WHAT IT DOES COST, STATED SO IT IS NOT REDISCOVERED
+    #
+    # test_the_shared_methods_run_exactly_the_same_legs_on_both_surfaces iterates the
+    # INTERSECTION of the two method sets, so it can no longer cover these five. A
+    # python-version or an OS added to one surface and not the other is still caught for
+    # `homebrew` and the three container runtimes, and is NOT caught for pip, pipx, uvx,
+    # pre-commit or mcp. test_the_axes_are_identical is what still covers them, since
+    # both surfaces draw their os and python-version from axes that must match.
+    #
+    # If that residual gap ever matters, the fix is to compare the unified surface's
+    # bundle STEP conditions against the install-methods legs, not to un-collapse the
+    # matrix.
+    "bundle": (
+        "ash-unified-ci.yml only. Not an install method but five of them run as steps in "
+        "one leg -- pip, pipx, uvx, pre-commit and mcp. ash-install-methods.yml keeps "
+        "those five as separate legs, so the two surfaces express the same coverage at "
+        "different granularity."
+    ),
+    "pip": (
+        "ash-install-methods.yml only as a METHOD. ash-unified-ci.yml runs it as a step "
+        "inside the `bundle` leg, so the coverage is on both surfaces and only the leg "
+        "granularity differs."
+    ),
+    "pipx": (
+        "ash-install-methods.yml only as a METHOD; a step inside `bundle` on "
+        "ash-unified-ci.yml. See the pip entry."
+    ),
+    "uvx": (
+        "ash-install-methods.yml only as a METHOD; a step inside `bundle` on "
+        "ash-unified-ci.yml, conditioned to 3.12 there because uvx brings its own "
+        "interpreter. See the pip entry."
+    ),
+    "pre-commit": (
+        "ash-install-methods.yml only as a METHOD; a step inside `bundle` on "
+        "ash-unified-ci.yml. See the pip entry."
+    ),
+    "mcp": (
+        "ash-install-methods.yml only as a METHOD; a step inside `bundle` on "
+        "ash-unified-ci.yml, routed to validate-mcp there. See the pip entry."
+    ),
 }
 
-# Floors for the positive controls. Deliberately far below the current values (113 and
-# 117 effective legs, 24 scan-validation rows, 9 install methods) so a legitimate matrix
-# change does not touch this file, while a matrix that collapsed to nothing does.
-_MINIMUM_INSTALL_LEGS = 40
+# Floors for the positive controls. Deliberately far below the current values (24
+# scan-validation rows, 9 install methods) so a legitimate matrix change does not touch
+# this file, while a matrix that collapsed to nothing does.
+#
+# _MINIMUM_INSTALL_LEGS was 40, derived from the 113 and 117 effective legs the two
+# surfaces carried when this file was written. Folding pip, pipx, uvx, pre-commit and mcp
+# into a single `bundle` method took ash-unified-ci.yml from 113 legs to 33 -- so a number
+# chosen as "far below the current value" ended up ABOVE it, and a positive control became
+# a ceiling. The check it guards then failed for a reason that had nothing to do with what
+# it measures.
+#
+# 15 restores the original intent against the lower of the two surfaces: comfortably under
+# 33, and still tripped by a matrix that collapsed to nothing or to the handful of cells a
+# broken axis would yield. It is deliberately not 30 -- a floor one leg under the current
+# value is a tripwire on ordinary matrix edits, which is what teaches people to edit the
+# constant instead of reading it.
+#
+# Current values, for whoever moves this next: ash-unified-ci.yml 33 effective legs,
+# ash-install-methods.yml 117. Re-derive rather than trusting these; the check is the
+# expansion, not the comment.
+_MINIMUM_INSTALL_LEGS = 15
 _MINIMUM_INSTALL_METHODS = 5
 _MINIMUM_SCAN_ROWS = 10
 
@@ -164,10 +231,23 @@ def _routed_methods(job: dict[str, Any]) -> set[str]:
 
     Read from the conditions rather than hardcoded, so the sets this file compares are
     all derived and none of them is yet another copy of the list.
+
+    Anchored on ``matrix.method ==`` rather than matching every quoted literal in the
+    expression. A bare quoted-string match was correct only while every validator step's
+    condition mentioned nothing but the method. Collapsing the cheap install methods into
+    one ``bundle`` leg gave the uvx step a second clause --
+    ``matrix.method == 'bundle' && matrix.python-version == '3.12'`` -- and this reader
+    began reporting ``3.12`` as a routed "method". No ``case`` arm can ever name a Python
+    version, so ``arms == routed`` became unsatisfiable rather than merely wrong. That is
+    the more dangerous shape: a test that cannot be made to pass creates pressure to
+    delete it, and deleting this one would remove the only check that the guard and the
+    routing are one statement.
     """
     methods: set[str] = set()
     for step in _validator_steps(job):
-        methods.update(re.findall(r"'([^']+)'", str(step.get("if", ""))))
+        methods.update(
+            re.findall(r"matrix\.method\s*==\s*'([^']+)'", str(step.get("if", "")))
+        )
     return methods
 
 
