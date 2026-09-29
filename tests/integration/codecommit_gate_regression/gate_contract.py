@@ -228,7 +228,23 @@ def _handler_namespace(source: str | None = None) -> dict:
         sys.modules["boto3"] = stub
     try:
         namespace: dict = {"__name__": "_ash_gate_handler"}
-        exec(compile(code, "<CODECOMMIT_GATE_HANDLER>", "exec"), namespace)
+        # B102 (exec_used) is correct that this is `exec`, and the `exec` is the
+        # point -- see "WHAT IS DERIVED, AND WHAT THAT BUYS" above. Suppressed on
+        # this line only, and only for this rule.
+        #
+        # What is executed: `code` is the CODECOMMIT_GATE_HANDLER template literal
+        # read out of the repo-tracked deploy/cdk/lib/ash-container-scripts.ts, and
+        # corroborated against the synthesized template by
+        # `handler_matches_deployed_template`. No caller supplies it -- the only
+        # parameter is `source`, every call site in this module reaches it through
+        # `extract_handler_source()`, and nothing outside this module calls
+        # `_handler_namespace`. Changing what runs here requires write access to
+        # this repository, which is the same access that could edit this file.
+        #
+        # Rejected: writing `code` to a temporary file and loading it with
+        # `importlib`. That runs the identical bytes while no longer matching B102,
+        # which hides the fact from the scanner instead of recording it.
+        exec(compile(code, "<CODECOMMIT_GATE_HANDLER>", "exec"), namespace)  # nosec B102
     finally:
         if injected:
             del sys.modules["boto3"]
