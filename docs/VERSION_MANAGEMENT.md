@@ -135,6 +135,22 @@ The system automatically detects and converts these patterns:
 - `--branch v3.0.1`
 - `version 3.0.1`
 - `ASH version 3.0.1`
+- `github:<owner>/automated-security-helper/v3.0.1` — a Nix flake reference
+
+The last entry uses a slash where the others use `@v`, and that difference is the
+reason it is listed. Every pattern here originally keyed on `@v`, as did
+`[tool.commitizen] version_files` and the tree walk in
+`tests/unit/test_agent_plugin_ash_version.py`, so a flake reference in
+`docs/content/docs/installation-guide.md` went two minor releases stale with every
+mechanism reporting the tree clean. A reference is a repository plus a ref; the
+delimiter between them is incidental, and encoding one delimiter in five places
+produced one shared blind spot. Anything added here that keys on a new delimiter
+needs its own positive control, because the existing floors count `@v` references
+and stay satisfied while a new pattern matches nothing.
+
+The owner is not anchored — `resolve_flake_ref()` builds its ref from
+`ASH_REPO_URL`, so a fork carries a fork's owner — but the repository name is, so a
+flake reference to an unrelated project is left alone.
 
 ## Development Workflow
 
