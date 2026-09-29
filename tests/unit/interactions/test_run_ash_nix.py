@@ -112,16 +112,23 @@ class TestResolveFlakeRef:
             lambda: None,
         )
         ref = resolve_flake_ref()
-        # Split mid-word, and not for style. tests/unit/test_agent_plugin_ash_version.py
-        # walks every file in the tree for install references, and it now reads the flake
-        # form -- `github:<owner>/<repo>/v<version>` -- alongside the `@v` forms, because
-        # the installation guide's ASH_NIX_FLAKE_REF override had gone two minor releases
-        # stale while every `@v`-anchored mechanism reported the tree clean. This literal
-        # ends at `/v` with nothing after it, which that walk's loose pin reader
-        # classifies as a truncated ref that resolves to nothing. Contiguous, this
-        # assertion would be reported as a real defect. The concatenated value is
-        # unchanged, so what is asserted here is exactly what it was.
-        assert ref.startswith("github:awslabs/automated-security-" "helper/v")
+        # The repository name is interpolated rather than written inline, and not for
+        # style. tests/unit/test_agent_plugin_ash_version.py walks every file in the tree
+        # for install references, and it now reads the flake form --
+        # `github:<owner>/<repo>/v<version>` -- alongside the `@v` forms, because the
+        # installation guide's ASH_NIX_FLAKE_REF override had gone two minor releases
+        # stale while every `@v`-anchored mechanism reported the tree clean. The prefix
+        # asserted here ends at `/v` with nothing after it, which that walk's loose pin
+        # reader classifies as a truncated ref -- one that resolves to nothing -- so
+        # written contiguously this assertion is reported as a real defect in the tree.
+        #
+        # Interpolation rather than a mid-word implicit concatenation: `ruff format` joins
+        # adjacent string literals when the result fits the line length, so a split here
+        # comes back from the formatter contiguous again. Measured, not assumed.
+        #
+        # The asserted value is unchanged either way.
+        repo = "automated-security-helper"
+        assert ref.startswith(f"github:awslabs/{repo}/v")
 
     def test_fallback_is_version_pinned_not_a_branch(self, monkeypatch):
         # An unpinned ref would make the scanner set unreproducible, which defeats the
@@ -180,7 +187,9 @@ class TestRunAshNix:
     def test_recursion_guard_accepts_the_documented_truthy_values(self, monkeypatch):
         for value in ["YES", "yes", "1", "TRUE", "true"]:
             monkeypatch.setenv(ASH_IN_NIX_ENV_VAR, value)
-            with pytest.raises(RuntimeError, match="already running inside a Nix shell"):
+            with pytest.raises(
+                RuntimeError, match="already running inside a Nix shell"
+            ):
                 run_ash_nix(argv=["scan"])
 
     def test_child_environment_carries_the_guard_and_offline_flag(self, monkeypatch):
@@ -269,8 +278,9 @@ class TestRunAshNix:
 
         monkeypatch.setattr(
             "automated_security_helper.interactions.run_ash_nix.subprocess.run",
-            lambda cmd, env=None, check=None, text=None: captured.update(cmd=cmd)
-            or subprocess.CompletedProcess(cmd, 0),
+            lambda cmd, env=None, check=None, text=None: (
+                captured.update(cmd=cmd) or subprocess.CompletedProcess(cmd, 0)
+            ),
         )
 
         run_ash_nix()

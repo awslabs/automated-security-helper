@@ -694,13 +694,19 @@ class TestInstallRefsParseAsVersions:
         helper/blob/main/README.md` and every other ordinary GitHub path read as a pin,
         and a check that reports source-browsing URLs as stale versions gets deleted.
         """
-        # Split mid-word for the same reason as the fixtures above: both walks read this
-        # file, so a contiguous literal here would be reported as a real reference in the
-        # tree and the test describing the hazard would BE the hazard.
-        shipped = (
-            'export ASH_NIX_FLAKE_REF="github:awslabs/automated-security-'
-            'helper/v3.5.9"'
-        )
+        # Interpolated, not split, and that distinction cost a round trip worth recording.
+        # Both walks read this file, so a contiguous literal here is reported as a real
+        # reference in the tree -- the test describing the hazard would BE the hazard,
+        # which is what the fixture above this class is split mid-word to avoid.
+        #
+        # A mid-word split does NOT survive here. `ruff format`, which this repository runs
+        # in pre-commit and CI, joins implicitly concatenated string literals whenever the
+        # result fits the line length -- measured: written as
+        # `'...automated-security-' 'helper/v3.5.9"'` this line came back from the formatter
+        # as one literal and the walk immediately reported it. The fixture above survives
+        # only because its joined form is too long to fit, which is luck rather than
+        # design. Interpolating `_REPO` cannot be folded, so it holds regardless of length.
+        shipped = f'export ASH_NIX_FLAKE_REF="github:awslabs/{_REPO}/v3.5.9"'
 
         assert _INSTALL_REF.search(shipped) is None
         assert _INSTALL_REF_PIN.search(shipped) is None
