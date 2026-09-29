@@ -263,6 +263,59 @@ runs:
         set -uo pipefail
 
         runtime="${RUNTIME:-docker}"
+
+        # EVERY EXPANSION OF `wrapper` IS GUARDED, BECAUSE IT IS USUALLY EMPTY
+        #
+        # `runner-wrapper` is empty for docker and podman -- only finch and nerdctl need
+        # sudo -- so this array normally has no elements at all. Under `set -u`, bash
+        # before 4.4 treats expanding an element-less array as an unbound variable and
+        # exits. From bash's own CHANGES for 4.4-rc2, under "3. New Features in Bash":
+        #
+        #     Using ${a[@]} or ${a[*]} with an array without any assigned elements when
+        #     the nounset option is enabled no longer throws an unbound variable error.
+        #
+        # macOS ships bash 3.2.57 and is not going to ship anything newer -- Apple stopped
+        # at the last GPLv2 release -- so an unguarded `${wrapper[*]}` is fatal there while
+        # being fine on the ubuntu runners and on any current development machine. Measured
+        # on #672: all ten `PyTest - macos-*` legs, 3.10 through 3.14 on both macos-14 and
+        # macos-latest, died on the first such expansion with
+        #
+        #     step.sh: line 93: wrapper[*]: unbound variable
+        #
+        # having issued no runtime call at all, which then failed every assertion
+        # downstream.
+        #
+        # This action is not itself scheduled on macOS: every macOS x {podman, finch,
+        # nerdctl} cell is excluded in both ash-unified-ci.yml and ash-install-methods.yml,
+        # hosted macOS runners having no nested virtualization, and run-scan-test skips the
+        # pre-pull for python-local. What ran on those legs was
+        # tests/unit/test_prepull_base_image_registry_fallback.py, which extracts this
+        # script and runs it under the host's bash. The guard is still the right fix rather
+        # than a test-only workaround: a step that silently requires bash 4.4+ is one
+        # runner-image change away from being a live failure, and the only thing standing
+        # between the two today is a matrix exclusion written for an unrelated reason.
+        #
+        # `${arr[@]+"${arr[@]}"}` is the portable spelling. `+` tests for set-ness, so it is
+        # exempt from nounset in every version, and it substitutes nothing when the array is
+        # empty. Guarded at every expansion rather than only at the one that failed: an
+        # unguarded site left behind does not remove the bug, it moves it to whichever code
+        # path reaches that line first.
+        #
+        # `[*]` stays `[*]` and `[@]` stays `[@]`. The three `[*]` uses sit inside a larger
+        # double-quoted string that has to stay one word -- an inspect-log line, the status
+        # line below and one annotation -- and `[@]` there would split each into several.
+        # The single `[@]` use is argv, where element boundaries are the whole point.
+        #
+        # Rejected: folding `${runtime}` into the array so it can never be empty and needs
+        # no guard anywhere. Shorter, and immune to this whole class rather than defended
+        # against it -- but the array is displayed as well as executed, and with the wrapper
+        # empty `${wrapper[*]} ${runtime}` renders as ` docker`, so collapsing the two would
+        # reword three log lines. Not worth spending the "nothing observable changed" claim
+        # on in a commit whose entire job is a portability fix.
+        #
+        # Rejected: dropping `set -u`. It is what makes a mistyped variable in a step that
+        # decides which registry a base image comes from fail loudly rather than expand to
+        # nothing.
         # shellcheck disable=SC2206
         wrapper=( ${WRAPPER} )
 
@@ -274,7 +327,7 @@ runs:
           exit 1
         fi
 
-        run_runtime() { "${wrapper[@]}" "${runtime}" "$@"; }
+        run_runtime() { "${wrapper[@]+"${wrapper[@]}"}" "${runtime}" "$@"; }
 
         # Every inspect this step issues is recorded here, each followed by whatever the
         # runtime wrote to stderr for it. The first version sent that stream to /dev/null, so
@@ -295,7 +348,7 @@ runs:
         image_id() {
           local ref out
           for ref in "$@"; do
-            printf '%s\n' "--- ${wrapper[*]} ${runtime} image inspect --format '{{.Id}}' ${ref}" \
+            printf '%s\n' "--- ${wrapper[*]+"${wrapper[*]}"} ${runtime} image inspect --format '{{.Id}}' ${ref}" \
               >> "${inspect_log}"
             out="$(run_runtime image inspect --format '{{.Id}}' "${ref}" 2>> "${inspect_log}")" || true
             # First line only, and not a Go template's way of spelling "that field was absent"
@@ -381,7 +434,7 @@ runs:
 
         echo "base image:    ${base}"
         echo "pinned digest: ${pin}"
-        echo "runtime:       ${wrapper[*]} ${runtime}"
+        echo "runtime:       ${wrapper[*]+"${wrapper[*]}"} ${runtime}"
         echo "registries:    ${primary_repo}${fallback_repo:+ then ${fallback_repo}}"
 
         # Already local AND already matching the pin is success, not a reason to hit a
@@ -500,7 +553,7 @@ runs:
             else
               unanswered="${repo}@${pin}, in any form this step knows to ask for it"
             fi
-            echo "::error::${wrapper[*]} ${runtime} reported no image id for \
+            echo "::error::${wrapper[*]+"${wrapper[*]}"} ${runtime} reported no image id for \
         ${unanswered} after pulling both, so the pinned digest cannot be checked. Refusing to \
         hand the build an unverified base image. This is a gap in this action's support for \
         '${runtime}', not a registry problem. Every inspect this step issued follows, in \

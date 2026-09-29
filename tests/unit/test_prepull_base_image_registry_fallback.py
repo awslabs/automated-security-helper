@@ -34,6 +34,12 @@ replaced by a stub that records its argv:
 7. a runtime that cannot inspect a ``repo@sha256:...`` reference is still able to verify the
    pin, and a runtime that cannot answer any form of the question is still refused.
 
+Plus one that is static rather than behavioural, because it has to be:
+
+8. every array expansion in the step is guarded against bash's pre-4.4 ``set -u`` treatment
+   of an element-less array. See ``TestTheStepRunsUnderTheBashMacOSShips`` for why no test
+   that merely runs the script can establish this on a modern bash.
+
 Cases 5 and 6 are the ones that matter most. 5 is the substitution the digest pin exists to
 stop. 6 is the failure mode a fallback introduces: trying the next registry on a real error
 turns a clear failure into a slow one and reports a typo in the tag as a quota problem.
@@ -248,8 +254,19 @@ SLEEP_STUB = r"""#!/usr/bin/env bash
 printf '%s\n' "$1" >> "$STUB_SLEEP_LOG"
 """
 
-# The pre-fallback script, verbatim from action.yml at 80371ea1 (PR #660). Frozen on purpose:
-# see "failure mode of this harness itself". The fallback assertions must fail against it.
+# The pre-fallback script from action.yml at 80371ea1 (PR #660). Frozen on purpose: see
+# "failure mode of this harness itself". The fallback assertions must fail against it.
+#
+# Not quite verbatim, and the one edit is deliberate: the two `"${wrapper[@]}"` expansions
+# carry the same `+` guard the shipped action now carries. ``WRAPPER`` is empty here, and on
+# bash before 4.4 -- macOS ships 3.2.57 -- expanding an element-less array under `set -u` is
+# an unbound variable error. Unguarded, this control dies at its first runtime call on every
+# macOS leg, which makes `test_the_frozen_single_registry_script_fails_the_fallback_assertions`
+# pass for the wrong reason and `test_the_frozen_script_also_fails_the_digest_assertions`
+# fail outright. What this copy is frozen *for* is the absence of a fallback and of a digest
+# check; the wrapper spelling is not one of the properties under control, so guarding it
+# keeps the control meaningful instead of preserving a byte that only decides whether the
+# control runs at all.
 FROZEN_SINGLE_REGISTRY_SCRIPT = r"""set -uo pipefail
 
 runtime="${RUNTIME:-docker}"
@@ -263,7 +280,7 @@ if [ -z "${base}" ]; then
 fi
 echo "base image: ${base}"
 
-if "${wrapper[@]}" "${runtime}" image inspect "${base}" >/dev/null 2>&1; then
+if "${wrapper[@]+"${wrapper[@]}"}" "${runtime}" image inspect "${base}" >/dev/null 2>&1; then
   echo "already present locally; not pulling"
   exit 0
 fi
@@ -271,7 +288,7 @@ fi
 log="$(mktemp)"
 for n in $(seq 1 "${ATTEMPTS}"); do
   echo "=== pull attempt ${n} of ${ATTEMPTS} ==="
-  if "${wrapper[@]}" "${runtime}" pull "${base}" 2>&1 | tee "${log}"; then
+  if "${wrapper[@]+"${wrapper[@]}"}" "${runtime}" pull "${base}" 2>&1 | tee "${log}"; then
     exit 0
   fi
   if grep -q 'Data limit exceeded' "${log}"; then
@@ -1188,4 +1205,130 @@ class TestNoPublishSurfacesAreAdded:
         script = _prepull_script()
         assert not re.search(r"(?m)^\s*(\S+\s+)*\S*\bpush\b", script), (
             "the step must not push the image to a registry"
+        )
+
+
+# ${name[@]} or ${name[*]} with a bare name subscript -- an array expansion. A numeric
+# subscript such as ${PIPESTATUS[0]} is not one of these and is not matched, and neither is
+# "$@", which nounset has always exempted.
+_ARRAY_EXPANSION = re.compile(r"\$\{([A-Za-z_]\w*)\[([@*])\]\}")
+
+# The same expansion wrapped in its own `+` guard: ${name[@]+"${name[@]}"}. The inner
+# quotes are optional here only so the check does not dictate a spelling it does not need
+# to; the shipped action quotes them.
+_GUARDED_ARRAY_EXPANSION = re.compile(
+    r"\$\{(?P<name>[A-Za-z_]\w*)\[(?P<sub>[@*])\]\+"
+    r'"?\$\{(?P=name)\[(?P=sub)\]\}"?\}'
+)
+
+
+def _shell_code_only(script: str) -> str:
+    """``script`` with whole-line ``#`` comments removed.
+
+    Needed for the same reason ``test_the_action_adds_no_cache_artifact_or_push`` reads the
+    parsed steps rather than the file text: the action explains this very rule in prose, and
+    quotes bash's CHANGES entry verbatim, so a scan over the raw text reports the
+    explanation as the violation.
+
+    Whole-line only, which is the honest limit: an unguarded expansion written in a trailing
+    comment would still be reported. That false positive costs one reworded comment to clear,
+    and it is worth having rather than parsing shell quoting to work out where a ``#`` really
+    does start a comment. An unguarded expansion in *code* on a line that also carries a
+    trailing comment is still caught, and ``${base##*:}`` is untouched because its ``#`` is
+    not the first character of the line.
+    """
+    return "\n".join(
+        line for line in script.split("\n") if not line.lstrip().startswith("#")
+    )
+
+
+def _unguarded_array_expansions(script: str) -> list[str]:
+    """Every array expansion in ``script``'s code that is not wrapped in a ``+`` guard."""
+    stripped = _GUARDED_ARRAY_EXPANSION.sub("", _shell_code_only(script))
+    return [f"${{{name}[{sub}]}}" for name, sub in _ARRAY_EXPANSION.findall(stripped)]
+
+
+class TestTheStepRunsUnderTheBashMacOSShips:
+    """No array expansion may be unguarded, because macOS bash is 3.2 and `set -u` is on.
+
+    WHY. ``runner-wrapper`` is empty for docker and podman, so ``wrapper`` is an array with
+    no elements on most legs. bash before 4.4 treats expanding an element-less array under
+    ``set -u`` as an unbound variable and exits; from bash's CHANGES for 4.4-rc2, under
+    "3. New Features in Bash":
+
+        Using ${a[@]} or ${a[*]} with an array without any assigned elements when the
+        nounset option is enabled no longer throws an unbound variable error.
+
+    macOS ships 3.2.57 -- Apple stopped at the last GPLv2 release -- so the unguarded form
+    is fatal there and fine everywhere else. Measured on #672: all ten ``PyTest - macos-*``
+    legs died with ``step.sh: line 93: wrapper[*]: unbound variable`` before issuing a single
+    runtime call, and every assertion about pulls and retags failed downstream.
+
+    WHAT THIS PROVES, AND WHAT IT DOES NOT. It is a static check, and it has to be, because
+    the machines this suite runs on outside macOS have bash 4.4 or newer: on those the
+    unguarded code is correct, so no test that merely *runs* the script can catch this.
+    ``BASH_COMPAT`` does not help -- measured on 5.2.15, every level from 31 to 44 still
+    accepts the unguarded empty expansion, so the 4.4 change is not gated on the compat
+    level and cannot be replayed.
+
+    So this proves only that no unguarded expansion survives in the script, which is enough
+    to make the 3.2 rule unreachable. It does not prove the guarded form behaves correctly
+    on 3.2 -- that rests on ``${p+word}`` being exempt from nounset, which is what the 4.4
+    entry above scopes its change *away* from. It does not check whether each array can
+    actually be empty; it is deliberately blunt and would flag one that never is. And it
+    says nothing about any other bash 4.x-only construct: nothing here would catch a
+    ``declare -A`` or a ``mapfile``. It is scoped to this action's shell, not to the other
+    composite actions in the repository.
+    """
+
+    def test_no_array_expansion_in_the_step_is_unguarded(self):
+        script = _prepull_script()
+        assert _unguarded_array_expansions(script) == [], (
+            "these array expansions are unguarded, and each is an `unbound variable` exit "
+            "on macOS's bash 3.2 whenever the array is empty -- which `wrapper` is on every "
+            'docker and podman leg. Spell them ${name[@]+"${name[@]}"}: '
+            f"{_unguarded_array_expansions(script)}"
+        )
+
+    def test_the_step_really_does_expand_some_arrays(self):
+        """Guard against the check passing because it matched nothing at all."""
+        guarded = _GUARDED_ARRAY_EXPANSION.findall(_shell_code_only(_prepull_script()))
+        assert len(guarded) >= 4, (
+            "the step is expected to expand `wrapper` four times -- once as argv and three "
+            "times into a message -- so finding fewer guarded expansions than that means "
+            f"this check is looking at something other than the action. Found: {guarded}"
+        )
+
+    def test_the_frozen_control_script_is_guarded_too(self):
+        """The pre-fallback control has to be able to run on macOS or it controls nothing.
+
+        Unguarded it dies at its first runtime call, which satisfies
+        ``test_the_frozen_single_registry_script_fails_the_fallback_assertions`` for the
+        wrong reason and breaks its sibling outright.
+        """
+        assert _unguarded_array_expansions(FROZEN_SINGLE_REGISTRY_SCRIPT) == [], (
+            "the frozen control expands an array unguarded, so on macOS it exits before it "
+            "reaches the behaviour it is frozen to demonstrate: "
+            f"{_unguarded_array_expansions(FROZEN_SINGLE_REGISTRY_SCRIPT)}"
+        )
+
+    def test_the_check_detects_an_unguarded_expansion(self):
+        """The control. A detector that matches nothing passes every input.
+
+        The input is the shipped script with the guards removed, rather than a hand-written
+        sample, so what this proves is that the check discriminates the defect as it was
+        actually written from the fix as it was actually applied.
+        """
+        code = _shell_code_only(_prepull_script())
+        unguarded, subs = _GUARDED_ARRAY_EXPANSION.subn(
+            lambda m: f"${{{m.group('name')}[{m.group('sub')}]}}", code
+        )
+        assert subs >= 4, (
+            "un-guarding matched fewer sites than the action has, so this control is built "
+            f"from a script it did not change. Substitutions: {subs}"
+        )
+        found = _unguarded_array_expansions(unguarded)
+        assert len(found) == subs, (
+            "the check must report every site whose guard was removed, and reported "
+            f"{len(found)} of {subs}: {found}"
         )
