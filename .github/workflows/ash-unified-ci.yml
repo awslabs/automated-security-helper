@@ -30,10 +30,14 @@ on:
   #
   # WHAT THIS COSTS, AND WHAT WAS REJECTED
   #
-  # Counted rather than estimated: this workflow expands to 169 jobs and
-  # ash-iac-drift.yml to 6, so a queued merge that also pushes to main is ~350 runner
-  # jobs instead of ~175. The duplicate verdict on a queued merge is the price of
-  # covering the bypassed one, and it was accepted deliberately.
+  # Sized off a count rather than a guess: this workflow expands to 90 jobs and
+  # ash-iac-drift.yml to 6, so a queued merge that also pushes to main is ~192 runner
+  # jobs instead of ~96. The duplicate verdict on a queued merge is the price of
+  # covering the bypassed one, and it was accepted deliberately. It used to be ~350
+  # against ~175, before install-validation's five cheap install methods stopped being
+  # 105 separate legs, which nearly halves what this deliberate duplication costs.
+  # The 90 is derived from a census rather than being one -- see the note on the
+  # required-checks job for which link in that chain was actually measured.
   #
   # Both counts are job counts, from
   # `gh api .../actions/runs/<run>/jobs --paginate --jq '.jobs[].name' | wc -l`
@@ -144,6 +148,31 @@ jobs:
           fi
       - name: Verify documentation freshness
         run: uv run python scripts/verify_docs_freshness.py
+
+      # Attached to `lint` rather than given its own job, deliberately. A new job
+      # here has to be added to required-checks' `needs` AND have
+      # EXPECTED_UPSTREAM_JOBS bumped to match, and forgetting the second half
+      # leaves a gate that reports success over a shrinking share of the suite.
+      # `lint` is already in that `needs`, carries no job-level `if:`, and this
+      # workflow puts no `paths` filter on pull_request -- so the check reports on
+      # every pull request and every merge_group entry without touching the count.
+      # It also already has the uv environment this script's yaml import needs,
+      # which is the same environment verify_docs_freshness.py above relies on.
+      #
+      # --self-test runs FIRST and is not decoration. The census is a scanner, and
+      # the failure mode of a scanner is matching nothing and exiting 0, which
+      # reads as evidence of a clean tree. The self-test drives synthetic
+      # fixtures through the same detector and comparator and asserts each one
+      # still comes back red, so a detector that has degenerated into
+      # always-passing fails here instead of at the next incident.
+      - name: Assert no unallowlisted artifact upload or cache
+        # `set -e` explicitly rather than leaning on the runner's default shell
+        # flags: without it a failing self-test would be followed by the census
+        # anyway, and the step's verdict would come from whichever ran last.
+        run: |
+          set -euo pipefail
+          uv run python .github/scripts/assert-publish-surfaces.py --self-test
+          uv run python .github/scripts/assert-publish-surfaces.py
 
   unit-test:
     name: "unit-test (${{ matrix.os }}, py${{ matrix.python-version }})"
@@ -644,16 +673,21 @@ jobs:
   #
   # Keep the `python-version` axes of the two identical, deliberately: a version
   # added to one and not the other leaves a supported interpreter untested on
-  # whichever surface was missed. The two install matrices agree exactly on
-  # macos-14 -- both keep macos-14 x {3.10, 3.11} for pip, pipx, pre-commit and
-  # mcp -- so the axes are the only thing needing that discipline.
+  # whichever surface was missed. The two still agree on which (os, python-version)
+  # cells pip, pipx, pre-commit and mcp cover, including macos-14 x {3.10, 3.11} --
+  # they just no longer agree on the SHAPE. ash-install-methods.yml keeps one leg
+  # per method; this job runs those four, plus uvx, as steps inside one `bundle`
+  # leg per cell (see the note above the job). So the thing to keep aligned is the
+  # cell coverage, not the leg names, and `method: [bundle, ...]` here against
+  # `method: [pip, pipx, ...]` there is not a drift to reconcile.
   #
   # `unit-test` above excludes macos-14 x {3.10, 3.11} on the grounds that macOS
   # ARM only has 3.12 and later. THAT REASON IS FALSE, measured two ways:
   #
   # 1. This job runs macos-14 x {3.10, 3.11} for pip, pipx, pre-commit and mcp on
   #    every pull request, and they pass. Sampled runs 35350532730 and
-  #    35351617775: 8 of 8 success in each.
+  #    35351617775: 8 of 8 success in each -- 8 legs then, the same 8 method-on-cell
+  #    runs inside 2 `bundle` legs now.
   # 2. The actions/python-versions manifest carries darwin/arm64 builds for
   #    3.10.11 and 3.11.9, so setup-python has something to resolve.
   #
@@ -662,19 +696,74 @@ jobs:
   # there, and no unit-test leg has ever executed on macos-14 below 3.12, so
   # dropping the exclusion would run them for the first time inside an unrelated
   # change. Un-excluding is its own change, with its own verdict to read.
+  #
+  # WHY `bundle` IS ONE LEG AND NOT FIVE
+  #
+  # pip, pipx, uvx, pre-commit and mcp used to be five values on the `method` axis,
+  # which made them 105 of this job's 113 legs. They are not 105 legs' worth of
+  # work: `validate-install` averages 21 seconds per invocation over 113 of them
+  # and `validate-mcp` 14 seconds. The cost was never the work, it was the leg
+  # count -- run 36089835349 spent 32.7 minutes of wall clock and 391.2 minutes of
+  # machine time behind 1178.2 minutes of queue, because every one of its 196 jobs
+  # waited about 6.5 minutes for a runner. Queue time was three times the machine
+  # time and it is charged per job, so those 105 legs held runners for 82 minutes
+  # of machine time (pip 22.9, pipx 20.3, mcp 30.2, pre-commit 5.9, uvx 3.0) after
+  # roughly 10.5 hours of queue, summed across the legs.
+  #
+  # So those five collapse into one `bundle` leg per (os, python-version), running
+  # each method as its own step. 113 legs -> 33, which is 80 fewer runners queued
+  # for and the same five methods still executed on all 25 cells. Nothing is
+  # cached and nothing is uploaded to get there, deliberately: on a public
+  # repository GitHub's caching and artifact-upload actions are both readable by
+  # anyone holding a read token, so nothing this repo builds may be put in either,
+  # and no image or wheel may be pushed anywhere. The saving is purely fewer queue
+  # waits. Do not "improve" it by adding a cache. The caching this workflow already
+  # has is setup-uv's `enable-cache` -- in the lint job and in
+  # .github/actions/setup-ash -- and it holds third-party wheels that are public
+  # already, which is why it is allowed to stay and why it must not be widened to
+  # cover anything ASH builds.
+  #
+  # TWO THINGS THE COLLAPSE HAD TO PRESERVE, both easy to lose silently:
+  #
+  # 1. Per-method verdicts. Five methods in one job would ordinarily stop at the
+  #    first failure, so a pip break would hide whether pipx also broke -- and a
+  #    red `bundle` leg that names one method out of five is worse to debug than
+  #    five red legs. Each method therefore carries `continue-on-error: true` and
+  #    an `id`, and the `bundle: verdict` step below reads every recorded outcome,
+  #    prints all five, and fails naming each one that did not match what it was
+  #    supposed to report. That step is the leg's verdict; the per-method steps
+  #    deliberately do not decide it.
+  #
+  # 2. Which install each method's `ash` actually is. Five methods in one job share
+  #    a PATH, and pip and pipx both put an `ash` on it. The step order below is
+  #    load-bearing for that reason: pipx runs FIRST, while its shim is the only
+  #    `ash` on the machine, so `pipx: verify` cannot be answered by pip's copy.
+  #    pip runs second, and setup-python writes its own bin directory to
+  #    GITHUB_PATH, which prepends ahead of the image's default PATH -- so pip's
+  #    entry point wins the lookup for every later step. Reordering these two
+  #    turns one of them into a duplicate of the other while staying green.
   install-validation:
     name: "${{ matrix.method }} (${{ matrix.os }}, py${{ matrix.python-version }})"
     runs-on: ${{ matrix.os }}
     # finch has been observed succeeding at 23 min and hanging past 280; podman is
-    # similarly slow. The other six methods peak under 3 min, so they keep a tight
-    # bound while the container runtimes get enough room to pass legitimately.
-    timeout-minutes: ${{ (matrix.method == 'podman' || matrix.method == 'finch' || matrix.method == 'nerdctl') && 45 || 20 }}
+    # similarly slow, so the container runtimes get enough room to pass
+    # legitimately. homebrew is `ruby -c` on one file and keeps the tight 20.
+    #
+    # `bundle` gets 30. The old 20 bounded a single install method, on the measured
+    # grounds that each peaks under 3 min; one leg now runs five of them back to
+    # back, so the same headroom needs a bigger number. 30 is still a real bound --
+    # a hung pipx build or npm install gets cut rather than burning the job's hour.
+    timeout-minutes: ${{ ((matrix.method == 'podman' || matrix.method == 'finch' || matrix.method == 'nerdctl') && 45) || (matrix.method == 'bundle' && 30) || 20 }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-14, windows-latest]
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
-        method: [pip, pipx, uvx, homebrew, pre-commit, podman, finch, nerdctl, mcp]
+        # `bundle` is pip + pipx + uvx + pre-commit + mcp, as steps. homebrew and
+        # the three container runtimes stay their own legs: they are already
+        # trimmed to a single Python version and carry OS-specific excludes, so
+        # they are 8 legs in total and none of them is the redundancy.
+        method: [bundle, homebrew, podman, finch, nerdctl]
         exclude:
           # Homebrew not on Windows
           - { os: windows-latest, method: homebrew }
@@ -736,55 +825,133 @@ jobs:
           - { os: macos-14, python-version: "3.13", method: homebrew }
           - { os: macos-14, python-version: "3.14", method: homebrew }
 
-          # uvx bundles its own Python -- only needs 3.12
-          - { os: ubuntu-latest, python-version: "3.10", method: uvx }
-          - { os: ubuntu-latest, python-version: "3.11", method: uvx }
-          - { os: ubuntu-latest, python-version: "3.13", method: uvx }
-          - { os: ubuntu-latest, python-version: "3.14", method: uvx }
-          - { os: ubuntu-24.04-arm, python-version: "3.10", method: uvx }
-          - { os: ubuntu-24.04-arm, python-version: "3.11", method: uvx }
-          - { os: ubuntu-24.04-arm, python-version: "3.13", method: uvx }
-          - { os: ubuntu-24.04-arm, python-version: "3.14", method: uvx }
-          - { os: macos-latest, python-version: "3.10", method: uvx }
-          - { os: macos-latest, python-version: "3.11", method: uvx }
-          - { os: macos-latest, python-version: "3.13", method: uvx }
-          - { os: macos-latest, python-version: "3.14", method: uvx }
-          - { os: macos-14, python-version: "3.10", method: uvx }
-          - { os: macos-14, python-version: "3.11", method: uvx }
-          - { os: macos-14, python-version: "3.13", method: uvx }
-          - { os: macos-14, python-version: "3.14", method: uvx }
-          - { os: windows-latest, python-version: "3.10", method: uvx }
-          - { os: windows-latest, python-version: "3.11", method: uvx }
-          - { os: windows-latest, python-version: "3.13", method: uvx }
-          - { os: windows-latest, python-version: "3.14", method: uvx }
+          # uvx used to need 20 exclude entries of its own to stay at 3.12, because
+          # it bundles its own interpreter and so does identical work on every
+          # python-version cell. It is now a step inside `bundle` carrying the same
+          # 3.12-only condition, so the exclusions are expressed once, at the step,
+          # instead of 20 times here. The `bundle` value itself is excluded nowhere:
+          # pip, pipx, pre-commit and mcp all ran on all 25 cells before this and
+          # all 25 after.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # Python setup (skip for uvx which bundles its own)
+      # Every method still on the axis needs an interpreter, so this is no longer
+      # conditional. The `matrix.method != 'uvx'` it used to carry existed solely
+      # for the uvx leg, and uvx is not a leg any more. It does mean uv now resolves
+      # against a Python that setup-python put there rather than whatever the image
+      # shipped -- the same uvx install and the same scan, from a slightly
+      # friendlier starting state than the old bare leg.
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        if: matrix.method != 'uvx'
         with:
           python-version: ${{ matrix.python-version }}
 
-      # Route to the right composite action based on method type
-      - uses: ./.github/actions/validate-install
-        if: matrix.method == 'pip' || matrix.method == 'pipx' || matrix.method == 'uvx' || matrix.method == 'homebrew' || matrix.method == 'pre-commit'
+      # --- bundle: five install methods, five recorded verdicts, one runner ------
+      #
+      # `continue-on-error: true` on each is what keeps the later methods running
+      # after an earlier one breaks. It makes the step's *conclusion* success while
+      # leaving its *outcome* failure, so `success()` still holds for the steps that
+      # follow and none of them gets skipped. The outcome is the part that matters
+      # and `bundle: verdict` is the only step that acts on it.
+      #
+      # pipx is deliberately first: see the ordering note above the job.
+      - name: pipx
+        id: pipx
+        if: matrix.method == 'bundle'
+        continue-on-error: true
+        uses: ./.github/actions/validate-install
         with:
-          method: ${{ matrix.method }}
+          method: pipx
+
+      - name: pip
+        id: pip
+        if: matrix.method == 'bundle'
+        continue-on-error: true
+        uses: ./.github/actions/validate-install
+        with:
+          method: pip
+
+      - name: mcp
+        id: mcp
+        if: matrix.method == 'bundle'
+        continue-on-error: true
+        uses: ./.github/actions/validate-mcp
+
+      - name: pre-commit
+        # The id has no hyphen on purpose. `steps.pre-commit.outcome` parses as a
+        # subtraction in a GitHub expression, not as a step lookup.
+        id: precommit
+        if: matrix.method == 'bundle'
+        continue-on-error: true
+        uses: ./.github/actions/validate-install
+        with:
+          method: pre-commit
+
+      - name: uvx
+        id: uvx
+        # 3.12 only, because uvx brings its own interpreter and the other four cells
+        # would repeat this run verbatim. This is the same coverage the 20 deleted
+        # `method: uvx` excludes bought: five uvx runs, one per OS.
+        if: matrix.method == 'bundle' && matrix.python-version == '3.12'
+        continue-on-error: true
+        uses: ./.github/actions/validate-install
+        with:
+          method: uvx
+
+      # The leg's actual verdict. Asserting an EXPECTED outcome per method, rather
+      # than "nothing said failure", is what stops this from failing open: a step
+      # whose `if` someone later breaks reports `skipped`, and a check that waves
+      # skipped through would keep printing green over a method that stopped
+      # running. Only uvx is allowed to be skipped, only off 3.12, and the
+      # expression below says so rather than the shell inferring it.
+      - name: "bundle: verdict"
+        if: matrix.method == 'bundle'
+        shell: bash
+        env:
+          # method, outcome, required outcome -- one method per line.
+          BUNDLE_OUTCOMES: |
+            pipx ${{ steps.pipx.outcome }} success
+            pip ${{ steps.pip.outcome }} success
+            mcp ${{ steps.mcp.outcome }} success
+            pre-commit ${{ steps.precommit.outcome }} success
+            uvx ${{ steps.uvx.outcome }} ${{ matrix.python-version == '3.12' && 'success' || 'skipped' }}
+        run: |
+          set -eu
+          # No bash arrays: hosted macOS runners are still on bash 3.2, where
+          # ${#arr[@]} on an empty array is an unbound-variable error under `set -u`.
+          failed=""
+          while read -r method outcome required; do
+            [ -n "$method" ] || continue
+            if [ "$outcome" = "$required" ]; then
+              printf '%-12s %s\n' "$method" "$outcome"
+            else
+              printf '%-12s %s   (required: %s)\n' "$method" "$outcome" "$required"
+              failed="$failed $method=$outcome"
+            fi
+          done <<EOF
+          $BUNDLE_OUTCOMES
+          EOF
+          if [ -n "$failed" ]; then
+            echo "::error::install-validation bundle failed:$failed"
+            exit 1
+          fi
+          echo "all five bundled install methods reported their required outcome"
+
+      # --- the legs that stay legs ---------------------------------------------
+      - uses: ./.github/actions/validate-install
+        if: matrix.method == 'homebrew'
+        with:
+          method: homebrew
 
       - uses: ./.github/actions/validate-container
         if: matrix.method == 'podman' || matrix.method == 'finch' || matrix.method == 'nerdctl'
         with:
           runtime: ${{ matrix.method }}
 
-      - uses: ./.github/actions/validate-mcp
-        if: matrix.method == 'mcp'
-
   # ---------------------------------------------------------------------------
   # One check name that can actually be required
   # ---------------------------------------------------------------------------
   #
-  # Every job above names itself from its matrix, so this workflow contributes 194 check runs
+  # Every job above names itself from its matrix, so this workflow contributes 115 check runs
   # to a pull request and not one of their names is stable. A ruleset's
   # required_status_checks list holds literal context strings with no wildcard, so requiring
   # `unit-test` means enumerating all 25 of its names -- and then any matrix edit either orphans
@@ -800,21 +967,26 @@ jobs:
   #   gh api repos/<owner>/<repo>/actions/runs/<run>/jobs --paginate --jq '.jobs[].name'
   #   gh api repos/<owner>/<repo>/commits/<sha>/check-runs --paginate --jq '.check_runs[].name'
   #
-  # 194 is this workflow's own contribution: 169 jobs, plus the 25 `PyTest - ...` check runs
+  # 115 is this workflow's own contribution: 90 jobs, plus the 25 `PyTest - ...` check runs
   # that mikepenz/action-junit-report publishes from inside the unit-test legs -- one per leg.
   # Those 25 are not jobs and land in a separate check suite, so a job census alone undercounts
   # what this file puts on a pull request -- that gap is most of why the old figure of 84 looked
   # defensible.
   #
-  # The 169 is measured, not only expanded: run 35370310502 reported `total_count` 168 with 168
-  # rows received, `unit-test` 25 and `install-validation` 113 by name, and `required-checks`
-  # absent because it is `needs`-gated and is not created until the run resolves. 168 + 1 = 169.
-  # The 25 `PyTest - ...` runs are derived from that leg count by the one-per-leg rule #602
-  # measured at 20 legs, not counted again.
+  # The 90 is arithmetic on a measured anchor, and the chain is worth keeping because each link
+  # is a different kind of claim. Run 35370310502 reported `total_count` 168 with 168 rows
+  # received, `unit-test` 25 and `install-validation` 113 by name, and `required-checks` absent
+  # because it is `needs`-gated and is not created until the run resolves: 168 + 1 = 169 jobs,
+  # measured. `integration-test` landed after that run, so the pre-collapse figure is 170, and
+  # the run has never been re-taken to confirm it. Folding pip, pipx, uvx, pre-commit and mcp
+  # into the single `bundle` method took install-validation from 113 legs to 33, so 170 - 80 = 90.
+  # Only the 169 was counted; 170 and 90 are derived, and a fresh census is what would settle
+  # them. The 25 `PyTest - ...` runs are derived from the unit-test leg count by the one-per-leg
+  # rule #602 measured at 20 legs, not counted again, and the collapse does not touch them.
   #
-  # Where 169 comes from, per job: lint 1, unit-test 25, scan-validation 24,
+  # Where 90 comes from, per job: lint 1, unit-test 25, scan-validation 24,
   # external-target-scan 2, multi-project-attribution 2, deploy-aws-helpers 1,
-  # install-validation 113, required-checks 1.
+  # integration-test 1, install-validation 33, required-checks 1.
   #
   # unit-test reached 25 from three independent changes that all had to land: adding 3.14 to the
   # axis (18 -> 23), removing the macos-14 exclusion for 3.10 and 3.11 (#599), and nothing in
@@ -830,7 +1002,11 @@ jobs:
   # pull requests. This file and ash-install-methods.yml name their install jobs from the same
   # template -- `${{ matrix.method }} (${{ matrix.os }}, py${{ matrix.python-version }})`, here
   # and at ash-install-methods.yml:34 -- so every cell the two matrices share produces two
-  # check runs under one name whenever both run. The collision is structural, not incidental.
+  # check runs under one name whenever both run. The collision is structural, not incidental,
+  # but the collapse shrank it: this file's install legs are now named `bundle (...)`,
+  # `homebrew (...)`, `podman (...)`, `finch (...)` and `nerdctl (...)`, and the only values
+  # ash-install-methods.yml still shares are those last four. Its pip, pipx, uvx, pre-commit,
+  # mcp and nix legs now have the namespace to themselves.
   # ash-install-methods.yml is path-filtered to pyproject.toml, hatch_build.py,
   # automated_security_helper/**, .pre-commit-hooks.yaml, Formula/** and itself, so whether it
   # runs is decided by whether the commit touches those paths. A CI-plumbing commit like the
@@ -848,9 +1024,10 @@ jobs:
   # The 186 and 185 above are left exactly as measured, on pull request 599 at b5111830, and are
   # NOT restated for this branch -- that commit predates Python 3.14, so re-labelling its numbers
   # would be inventing a measurement rather than citing one. What can be said is the delta this
-  # file contributes: 25 more jobs and 5 more `PyTest - ...` runs than at b5111830, so a
-  # comparable CI-plumbing commit would see 216 rather than 186. That is arithmetic on a measured
-  # baseline, not a count anyone has taken, and it is why the 186 keeps its own commit's name.
+  # file contributes: 25 more jobs and 5 more `PyTest - ...` runs than at b5111830, then one more
+  # job for integration-test and 80 fewer for the install-validation collapse, so a comparable
+  # CI-plumbing commit would see 137 rather than 186. That is arithmetic on a measured baseline,
+  # not a count anyone has taken, and it is why the 186 keeps its own commit's name.
   #
   # This job's name does not depend on the matrix, so it can be required once and stay correct
   # across matrix changes. It reports the verdict the individual legs already computed.
