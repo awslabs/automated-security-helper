@@ -149,6 +149,31 @@ jobs:
       - name: Verify documentation freshness
         run: uv run python scripts/verify_docs_freshness.py
 
+      # Attached to `lint` rather than given its own job, deliberately. A new job
+      # here has to be added to required-checks' `needs` AND have
+      # EXPECTED_UPSTREAM_JOBS bumped to match, and forgetting the second half
+      # leaves a gate that reports success over a shrinking share of the suite.
+      # `lint` is already in that `needs`, carries no job-level `if:`, and this
+      # workflow puts no `paths` filter on pull_request -- so the check reports on
+      # every pull request and every merge_group entry without touching the count.
+      # It also already has the uv environment this script's yaml import needs,
+      # which is the same environment verify_docs_freshness.py above relies on.
+      #
+      # --self-test runs FIRST and is not decoration. The census is a scanner, and
+      # the failure mode of a scanner is matching nothing and exiting 0, which
+      # reads as evidence of a clean tree. The self-test drives synthetic
+      # fixtures through the same detector and comparator and asserts each one
+      # still comes back red, so a detector that has degenerated into
+      # always-passing fails here instead of at the next incident.
+      - name: Assert no unallowlisted artifact upload or cache
+        # `set -e` explicitly rather than leaning on the runner's default shell
+        # flags: without it a failing self-test would be followed by the census
+        # anyway, and the step's verdict would come from whichever ran last.
+        run: |
+          set -euo pipefail
+          uv run python .github/scripts/assert-publish-surfaces.py --self-test
+          uv run python .github/scripts/assert-publish-surfaces.py
+
   unit-test:
     name: "unit-test (${{ matrix.os }}, py${{ matrix.python-version }})"
     runs-on: ${{ matrix.os }}
