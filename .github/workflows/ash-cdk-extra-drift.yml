@@ -14,9 +14,14 @@ name: CDK Extra Drift
 # requirement, an added requirement and a renamed package. Detection was never
 # the gap. The gap was that nothing repaired it: 200a6565 (#547) bumped
 # aws-cdk-lib in pyproject.toml alone, and every dependabot bump since has done
-# the same. dependabot/uv/scanner-minor broke that test on all 18 unit-test legs;
-# dependabot/uv/engine-minor broke it twice before that. Each time a human edited
-# the constant by hand.
+# the same. dependabot/uv/scanner-minor broke that test on every unit-test leg --
+# 18 of them at the time, 25 since ash-unified-ci.yml gained Python 3.14 and
+# dropped its macos-14 exclusions; dependabot/uv/engine-minor broke it twice
+# before that. Each time a human edited the constant by hand.
+#
+# The leg count is written as "every leg" plus the figures because the bare "18"
+# that used to stand here read as a current fact long after it stopped being one,
+# and the point of the sentence is the blast radius rather than the arithmetic.
 #
 # scripts/sync_cdk_extra_fallback.py --fix is the repair, wired into
 # .pre-commit-config.yaml so a bump fixes itself locally. This workflow is the
