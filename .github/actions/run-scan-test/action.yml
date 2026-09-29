@@ -98,6 +98,17 @@ runs:
       shell: bash
       run: mkdir -p .ash/ash_output
 
+    # Ahead of any build, so the twenty-odd container cells that start together do not all
+    # fetch the base image from ECR Public at once and cross its anonymous-pull data limit.
+    # Skipped for python-local, which builds no image. See the action for what it will and
+    # will not retry, and why it stores the image nowhere.
+    - name: Pre-pull the base image for the container legs
+      if: inputs.method != 'python-local'
+      uses: ./.github/actions/prepull-base-image
+      with:
+        oci-runner: ${{ inputs.oci-runner }}
+        runner-wrapper: ${{ (inputs.oci-runner == 'finch' || inputs.oci-runner == 'nerdctl') && 'sudo' || '' }}
+
     # cfn-nag is a Ruby gem, so `ash dependencies install` can only provision it
     # where a usable Ruby exists. This is the python-local legs' problem alone: the
     # container legs get cfn-nag from the image and are unaffected.
