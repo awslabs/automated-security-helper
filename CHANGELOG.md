@@ -116,9 +116,13 @@
   flip above, which is what puts every run on that path.
 
   Measured on this repository's own tree, so the scale is concrete rather than
-  hypothetical: cdk-nag **attempts 10 targets and cannot evaluate 4** of them, a
-  40% loss that nothing in the rendered output mentioned. ASH's own scan therefore
-  now exits 1 under the flag.
+  hypothetical: cdk-nag **attempted 11 targets and could not evaluate 4** of them, a
+  36% loss that nothing in the rendered output mentioned. That measurement is what
+  the gate surfaced on first contact, and both causes behind it are fixed in the two
+  cdk-nag entries under Fixes below — the same tree now reports 9 of 9 evaluated.
+  The number is kept here because it is the reason the gate earns its keep: it found
+  a real hole on the first repository it was pointed at, which happened to be ASH's
+  own.
 
   Note that cdk-nag's status here is `FAILED`, on 16 actionable findings at the
   `MEDIUM` threshold, both before and after this change. The point is not that a
@@ -127,14 +131,15 @@
   carried. A scanner reports a **complete** scan of its input whether it passed or
   failed on the part it read.
 
-  That 40% is not entirely spurious, and it is worth knowing the split before
-  dismissing it. Two of the four are real CloudFormation templates that genuinely
-  went unscanned (`test-yaml.template.json` and
-  `cfn-and-python-test-yaml.template.json`). The other two — a `tsconfig.json` and
-  a `mkdocs.yml` — were never templates at all and reach cdk-nag through a
-  separate target-selection bug, not fixed here. So half the number is real lost
-  coverage and half is noise, which is precisely why the counts are reported
-  rather than folded into a single percentage.
+  That 36% was not entirely spurious, and the split is worth knowing because the two
+  halves needed different fixes. Two of the four were real CloudFormation templates
+  that genuinely went unscanned (`test-yaml.template.json` and
+  `cfn-and-python-test-yaml.template.json`); both are CDK-synthesized and collided
+  with the wrapper's own bootstrap-version parameter. The other two — a
+  `tsconfig.json` and a `mkdocs.yml` — were never templates at all and were
+  misclassified as failed targets rather than skipped. So half the number was real
+  lost coverage and half was noise, which is precisely why the counts are reported
+  rather than folded into a single percentage. Both are fixed under Fixes below.
 
   A scanner that reports no target counts at all is unaffected — absent counters
   mean the scanner does not track targets, not that it lost them, so the nine
@@ -296,6 +301,72 @@
   the scanner. Reverting to the previous behavior means accepting a report that
   states coverage it does not have.
 
+### Fixes
+
+- **cdk-nag now evaluates CDK-synthesized CloudFormation templates.** A template
+  produced by `cdk synth` carries a `BootstrapVersion` parameter and a
+  `CheckBootstrapVersion` rule of its own. ASH re-includes a template under
+  `CfnInclude` into a fresh stack, and `DefaultStackSynthesizer` adds the same
+  parameter and rule to that stack, so the two collided with
+  `SectionAlreadyContains: section 'Parameters' already contains 'BootstrapVersion'`.
+
+  The collision was invisible. It raised inside `app.synth()`, which the wrapper
+  catches and logs at DEBUG — correctly, because cdk-nag reports violations *by*
+  raising there — so no `validation-report.json` was ever written and the only trace
+  left was `cdk-nag produced no validation report`. No rule ran against the template
+  and nothing above DEBUG said which rule, or that there had been a collision at all.
+
+  `WrapperStack` now synthesizes with `generate_bootstrap_version_rule=False`. The
+  bootstrap check is deploy-time machinery that refuses a deployment against a stale
+  CDK bootstrap stack; this wrapper synthesizes only so that the policy validation
+  plugins run and never deploys anything, so the parameter and rule were inert
+  scaffolding either way and no nag rule reads them.
+
+  Measured on this repository: the two affected templates went from unevaluated to 30
+  violations each across five packs. Measured as a control on a template that already
+  worked, the validation report is identical with the flag and without it — same
+  packs, same rules, same construct paths — so the change adds coverage without
+  moving any existing verdict. `BootstraplessSynthesizer` was the alternative and was
+  rejected: it also refuses file and Docker image assets, which would make an
+  asset-bearing template fail for a second, unrelated reason.
+
+- **A file cdk-nag cannot parse is a skip, not an unevaluated target.** cdk-nag's
+  scan set is every `*.json`, `*.yaml` and `*.yml` file in the tree, most of which
+  were never CloudFormation. A file that no YAML or JSON parser can load cannot carry
+  a `Resources` mapping, so it is not a candidate template — but the parse error
+  escaped the wrapper into `CdkNagScanner.scan()`'s broad `except Exception`, which
+  counts a **failed target**.
+
+  With `fail_on_incomplete_scanners` on by default, that made any repository holding
+  a JSON-with-comments file or a YAML with application-specific tags report
+  incomplete coverage for cdk-nag while containing nothing unscanned. In ASH's own
+  tree it was `deploy/cdk/tsconfig.json` (a `//` comment) and `mkdocs.yml`
+  (`!!python/name:` tags).
+
+  The sibling `cfn_nag_scanner` already classified this case as a skip over the same
+  scan set, calling the same `get_model_from_template`, and that function's docstring
+  already recorded the contract — "Exceptions from `load_yaml` propagate unchanged
+  ... and the two callers already classify that case for themselves." cdk-nag was the
+  caller that did not. This is convergence on a decision the codebase had already
+  made, not a new leniency.
+
+  **Narrow on purpose.** Only `YAMLError` and `UnicodeDecodeError` are reclassified.
+  `OSError` is not: an unreadable file is a target ASH was asked to scan and could
+  not, which is an incompleteness the gate should see. A document that *does* carry a
+  `Resources` mapping and cannot be modeled is not either — that stays a failed
+  target, with a test pinning it so the arm cannot be widened into a bare
+  `except Exception`.
+
+- **The Nix install-method CI job installs the `cdk` extra.** cdk-nag is the one
+  scanner Nix cannot supply — it runs in-process through jsii rather than as an
+  external binary, which is why `flake.nix` omits it — but "Nix does not supply it"
+  is not "it need not be installed". The job's `pip install .` left cdk-nag's three
+  distributions absent, so the scan selected it and recorded `MISSING`. Tolerable
+  while the completeness gate was opt-in; with the new default the scan exits 1 for a
+  reason that has nothing to do with Nix. `node` comes from `pkgs.nodejs` in the
+  flake's dev shell, already there for `npm audit`, and ASH re-execs itself inside
+  `nix develop`, so the in-process scanner finds it.
+
 ### Reporting changes
 
 - **Reports now say how much of its input each scanner evaluated.** Additive, but
@@ -307,8 +378,10 @@
     no claim" from "attempted none".
   - The console table and the markdown report gained an "Incomplete coverage"
     section, emitted only when there is something to report. Measured on this
-    repository, `ash.summary.md` gained `### Incomplete coverage` naming cdk-nag's
-    6 of 10.
+    repository it named cdk-nag's 7 of 11 when the section was added; with both
+    cdk-nag fixes under Fixes below in place the tree has nothing to report and the
+    section is absent again. It is the *conditional* emission that is the change
+    here, not a number.
   - cdk-nag's SARIF gained `runs[].invocations[].toolExecutionNotifications`, one
     per rule that raised instead of returning a verdict, at `level: error`.
     Measured on this repository: 11 notifications where there were previously

@@ -235,12 +235,35 @@ def cdk_doubles(monkeypatch):
         def __init__(self):
             self.children = []
 
+    class DefaultStackSynthesizer:
+        """Records only the flag the wrapper sets.
+
+        The real class emits a ``BootstrapVersion`` parameter and a
+        ``CheckBootstrapVersion`` rule into every synthesized template unless
+        ``generate_bootstrap_version_rule`` is False. A template that was itself
+        produced by ``cdk synth`` already carries both, so re-including one collided
+        with ``SectionAlreadyContains: section 'Parameters' already contains
+        'BootstrapVersion'`` -- raised inside ``app.synth()``, which the wrapper
+        swallows because a raise there is how cdk-nag reports violations. No report
+        was written and the template read as "produced no validation report".
+        Recording the flag is how a unit test can see the fix without synthesizing.
+        """
+
+        def __init__(self, *, generate_bootstrap_version_rule=True, **kwargs):
+            self.generate_bootstrap_version_rule = generate_bootstrap_version_rule
+            self.kwargs = kwargs
+
     class Stack(Construct):
         # `id` mirrors aws_cdk.Stack(scope, id), the signature this fake stands in
         # for. Renaming it would make the fake diverge from the real constructor.
-        def __init__(self, scope=None, id=None):  # noqa: A002
+        #
+        # `synthesizer` is keyword-only on the real Stack and is passed by keyword,
+        # so it is declared that way here. Defaulted rather than required so the
+        # fake still stands in for a plain Stack construction.
+        def __init__(self, scope=None, id=None, *, synthesizer=None):  # noqa: A002
             self.scope = scope
             self.id = id
+            self.synthesizer = synthesizer
             self.node = _Node()
             # Kept so a test can assert it stayed EMPTY. Under 2.x the packs landed here; if
             # they land here again the plugins never register and no rule is evaluated.
@@ -290,6 +313,7 @@ def cdk_doubles(monkeypatch):
     aws_cdk_mod.App = App
     aws_cdk_mod.Stack = Stack
     aws_cdk_mod.Validations = Validations
+    aws_cdk_mod.DefaultStackSynthesizer = DefaultStackSynthesizer
     # NOTE: no ``Aspects``. Its absence is the tripwire described in the module docstring.
 
     cfn_include_mod = types.ModuleType("aws_cdk.cloudformation_include")
@@ -1217,6 +1241,48 @@ def test_default_nag_pack_is_aws_solutions_checks(cdk_doubles, template_file, ou
 
     assert len(cdk_doubles.pack_instances) == 1
     assert type(cdk_doubles.pack_instances[0]).__name__ == "AwsSolutionsChecks"
+
+
+# ---------------------------------------------------------------------------
+# The wrapper stack must not emit a bootstrap-version parameter of its own
+# ---------------------------------------------------------------------------
+
+
+def test_the_wrapper_stack_turns_off_the_bootstrap_version_rule(
+    cdk_doubles, template_file, outdir
+):
+    """A CDK-synthesized template could not be scanned at all without this.
+
+    ``DefaultStackSynthesizer`` adds a ``BootstrapVersion`` parameter and a
+    ``CheckBootstrapVersion`` rule to every stack it synthesizes. A template produced by
+    ``cdk synth`` already carries both, so ``CfnInclude``-ing one into a fresh stack raised
+    ``SectionAlreadyContains: section 'Parameters' already contains 'BootstrapVersion'``.
+
+    The raise landed inside ``app.synth()``, which this wrapper catches and logs at DEBUG --
+    correctly, because cdk-nag reports violations BY raising there. So the collision was
+    swallowed, no ``validation-report.json`` was written, and the only trace left was "cdk-nag
+    produced no validation report". Measured on this repository: two of eleven cdk-nag targets,
+    both CDK-synthesized fixtures, half of the reported incompleteness. With the rule off they
+    evaluate and yield 30 violations each across five packs.
+
+    Asserted on the construction rather than on a synthesized template because the doubles here
+    do not implement CloudFormation section merging -- the real collision was measured end to
+    end instead. What this pins is that the wrapper keeps asking for it, which is the part a
+    later edit could quietly drop.
+    """
+    _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert cdk_doubles.stacks, "the wrapper built no stack"
+    synthesizer = cdk_doubles.stacks[-1].synthesizer
+    assert synthesizer is not None, (
+        "WrapperStack must pass an explicit synthesizer; with the default one a template that "
+        "was itself produced by `cdk synth` collides on BootstrapVersion and is never evaluated"
+    )
+    assert synthesizer.generate_bootstrap_version_rule is False, (
+        "generate_bootstrap_version_rule must be False. The bootstrap check is deploy-time "
+        "machinery and this wrapper never deploys; leaving it on re-adds the parameter that "
+        "collides with an already-synthesized template's own copy"
+    )
 
 
 # ---------------------------------------------------------------------------

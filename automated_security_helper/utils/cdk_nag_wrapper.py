@@ -34,6 +34,7 @@ from automated_security_helper.utils.cfn_template_model import (
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.schemas.sarif_schema_model import Location
 from cfn_tools import dump_yaml
+from yaml import YAMLError
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -753,6 +754,7 @@ def run_cdk_nag_against_cfn_template(
                 )
             from aws_cdk import (
                 App,
+                DefaultStackSynthesizer,
                 Stack,
                 Validations,
             )
@@ -774,7 +776,47 @@ def run_cdk_nag_against_cfn_template(
                         raise FileNotFoundError(
                             f"Template file does not exist: {template_path}"
                         )
-                    super().__init__(scope, construct_id)
+                    # WHY THE SYNTHESIZER IS OVERRIDDEN: A CDK-SYNTHESIZED TEMPLATE
+                    # COULD NOT BE SCANNED AT ALL
+                    # ------------------------------------------------------------
+                    # ``DefaultStackSynthesizer`` adds a ``BootstrapVersion`` parameter and
+                    # a ``CheckBootstrapVersion`` rule to every stack it synthesizes. A
+                    # template that was ITSELF produced by ``cdk synth`` already carries
+                    # both, so re-including one under ``CfnInclude`` collided:
+                    #
+                    #   RuntimeError: SectionAlreadyContains: section 'Parameters'
+                    #   already contains 'BootstrapVersion'
+                    #
+                    # The raise happened inside ``app.synth()``, which this wrapper catches
+                    # and logs at DEBUG because a raise there is the ORDINARY case -- cdk-nag
+                    # reports violations by raising. So the collision was swallowed, no
+                    # ``validation-report.json`` was ever written, and the template surfaced
+                    # only as "cdk-nag produced no validation report". Measured on ASH's own
+                    # repository: two of eleven targets, both CDK-synthesized fixtures, and
+                    # the pair accounted for half of the reported incompleteness. With the
+                    # override they evaluate and yield 30 violations each across five packs,
+                    # so this closed a real hole rather than quieting a message.
+                    #
+                    # Suppressing the rule is correct here and not merely convenient. The
+                    # bootstrap version check is deploy-time machinery: it makes a
+                    # CloudFormation deployment refuse to proceed against a stale CDK
+                    # bootstrap stack. This wrapper never deploys anything -- it synthesizes
+                    # only so that the policy validation plugins run -- so the parameter and
+                    # rule are inert scaffolding either way. Removing them cannot change
+                    # which rules fire or what they see, because no nag rule reads them.
+                    #
+                    # ``generate_bootstrap_version_rule=False`` rather than
+                    # ``BootstraplessSynthesizer``. The latter also refuses file and Docker
+                    # image assets, and while this wrapper adds none itself, a template
+                    # carrying asset-shaped metadata would then fail for a second reason.
+                    # This flag turns off exactly the one thing that collided.
+                    super().__init__(
+                        scope,
+                        construct_id,
+                        synthesizer=DefaultStackSynthesizer(
+                            generate_bootstrap_version_rule=False
+                        ),
+                    )
                     # Get the relative path to use as the logical ID
                     # CDK will replace path separators with
                     try:
@@ -801,6 +843,52 @@ def run_cdk_nag_against_cfn_template(
 
             try:
                 model = get_model_from_template(template_path)
+            except (YAMLError, UnicodeDecodeError) as exc:
+                # A file no YAML or JSON parser can load is not a CloudFormation
+                # template, so this is the same skip as "carries no Resources mapping"
+                # below and must not count a failed target.
+                #
+                # THE SIBLING SCANNER ALREADY CLASSIFIES IT THIS WAY
+                # -------------------------------------------------
+                # ``cfn_nag_scanner`` calls the same ``get_model_from_template`` over the
+                # same scan set, and its handler says so literally: "Everything else here
+                # comes out of load_yaml, i.e. the file is not parseable as YAML or JSON
+                # and so was never a candidate template." ``get_model_from_template``'s
+                # own docstring records the contract both callers are meant to honor --
+                # "Exceptions from ``load_yaml`` propagate unchanged ... and the two
+                # callers already classify that case for themselves." cdk-nag was the
+                # caller that did not: the parse error fell through to ``scan()``'s broad
+                # ``except Exception``, which increments ``targets_failed``. So this is
+                # cdk-nag catching up to a decision the repository had already made, not
+                # a new one.
+                #
+                # WHY IT MATTERS MORE THAN TWO FILES
+                # ---------------------------------
+                # cdk-nag's scan set is every ``*.json``, ``*.yaml`` and ``*.yml`` file in
+                # the tree, and most of them were never CloudFormation. Two in ASH's own
+                # repository do not parse: ``deploy/cdk/tsconfig.json``, which is JSON
+                # with ``//`` comments, and ``mkdocs.yml``, which carries
+                # ``!!python/name:`` tags that ``SafeLoader`` refuses. Neither is a
+                # coverage hole -- there is no CloudFormation in either to cover -- yet
+                # each counted as an unevaluated target, so ANY repository holding a
+                # JSON-with-comments file or a YAML with application-specific tags
+                # reported incomplete coverage for cdk-nag.
+                #
+                # NARROW ON PURPOSE. Only a parse failure is reclassified.
+                # ``UnicodeDecodeError`` comes from the ``open(...).read()`` inside
+                # ``get_model_from_template`` on a file that is not text at all, which is
+                # the same answer for the same reason. ``OSError`` is deliberately NOT
+                # caught: an unreadable file is a target ASH was asked to scan and could
+                # not, which is an incompleteness the gate should see. Neither is
+                # ``CloudFormationTemplateModelError``, handled below -- a document that
+                # DOES carry a ``Resources`` mapping is CloudFormation, and failing on it
+                # stays a failed target.
+                ASH_LOGGER.debug(
+                    f"{template_path} is not parseable as YAML or JSON "
+                    f"({type(exc).__name__}), so it is not a CloudFormation template "
+                    "and cdk-nag is skipped for it"
+                )
+                return None
             except CloudFormationTemplateModelError as exc:
                 # The fourth state that reaches ``failure``, and it is here rather than
                 # in the None branch below because the two answers are different facts.
