@@ -160,6 +160,11 @@ runs:
       if: inputs.runtime == 'podman'
       shell: bash
       run: podman --version
+    - name: "podman: pre-pull the base image"
+      if: inputs.runtime == 'podman'
+      uses: ./.github/actions/prepull-base-image
+      with:
+        oci-runner: podman
     - name: "podman: build image"
       if: inputs.runtime == 'podman'
       shell: bash
@@ -182,6 +187,12 @@ runs:
         finch vm start
     # OCI_RUNNER_WRAPPER comes from the resolve step above rather than an inline `env:`
     # here, so this build and the scan below read one value.
+    - name: "finch: pre-pull the base image"
+      if: inputs.runtime == 'finch'
+      uses: ./.github/actions/prepull-base-image
+      with:
+        oci-runner: finch
+        runner-wrapper: sudo
     - name: "finch: build image"
       if: inputs.runtime == 'finch'
       shell: bash
@@ -326,6 +337,16 @@ runs:
     # kind of GC backlog that would widen the window above. That is a hypothesis
     # about the trigger, not a measurement, and `apt-get remove` does not clear
     # /var/lib/containerd, so it is deliberately not acted on here.
+    # The retry loop below is keyed to the containerd snapshot GC race and deliberately
+    # refuses to retry anything else, so it never covered the registry rate limit. Pulling
+    # first keeps the two failures separate rather than widening that loop's condition, which
+    # would make a rate-limited build look like the GC race in the warnings.
+    - name: "nerdctl: pre-pull the base image"
+      if: inputs.runtime == 'nerdctl'
+      uses: ./.github/actions/prepull-base-image
+      with:
+        oci-runner: nerdctl
+        runner-wrapper: sudo
     - name: "nerdctl: build image"
       if: inputs.runtime == 'nerdctl'
       shell: bash
