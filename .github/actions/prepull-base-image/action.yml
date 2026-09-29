@@ -98,6 +98,104 @@ description: >-
 # image ids sidesteps this entirely: both ids come from the same runtime in the same format, so
 # only their equality is ever relied on.
 #
+# NERDCTL CANNOT INSPECT `repo@<digest>`, SO THE PINNED IMAGE IS LOOKED UP TWO WAYS
+#
+# The first version of this asked for the pinned image as `${repo}@${pin}` and nothing else.
+# That works on docker and it does not work on nerdctl, which is what finch runs. The finch leg
+# failed with this step's own "reported no image id" refusal, correctly, having pulled both
+# references successfully.
+#
+# The cause is in nerdctl's own resolver, `pkg/cmd/image/inspect.go`. `inspectIdentifier`
+# splits the argument into a name, a tag and a digest, and for `repo@sha256:...` the tag is
+# empty -- distribution/reference treats that form as canonical rather than tagged, so
+# nerdctl's `referenceutil.Parse` leaves `Tag` unset. `Inspect` then lists every image whose
+# containerd target digest equals the pin and keeps only candidates matching BOTH the requested
+# name and the requested tag, having first rewritten an empty requested tag to `latest`:
+#
+#     candidateTag := parsedReference.Tag
+#     // If the name had a digest, an empty tag is not normalized to latest, so, account
+#     // for that here
+#     if requestedTag == "" {
+#         requestedTag = "latest"
+#     }
+#     if parsedReference.Name() == requestedName && candidateTag == requestedTag {
+#
+# So `repo@<digest>` only ever resolves when a `repo:latest` record carrying that digest
+# happens to exist. This base image is pulled as `:3.12-slim-bookworm`, so no candidate has
+# tag `latest`, every candidate falls through, and `Inspect` returns `no such image`. Read at
+# v2.2.2 (what finch 1.19.0 ships, per NERDCTL_COMMIT/NERDCTL_RELEASE in finch-core's
+# deps/ubuntu-deps.conf), v2.3.5 (what scripts/setup-nerdctl-linux.sh installs) and v2.4.0:
+# identical in all three, so this is not a version to wait out.
+#
+# Dropping the repository name fixes it. With a bare `sha256:...` argument, nerdctl's
+# `referenceutil.Parse` takes the `digest.Parse` early return, the requested name comes back
+# empty, the name-and-tag branch is skipped entirely and the first candidate at that target
+# digest is returned. So the pinned image is asked for as `${repo}@${pin}` first -- unchanged,
+# and the only form docker accepts, since docker's `image inspect` resolves a bare digest
+# against image IDs (config digests) and never against an index digest -- and as a bare
+# `${pin}` only if that answered nothing.
+#
+# The second form is fail-safe rather than merely convenient, which is what makes it
+# acceptable here at all. It is a LOOKUP KEY, not a value being compared: the pin selects an
+# image record whose containerd target digest is the pin, and what gets compared is still two
+# ids the same runtime printed in the same format. A runtime whose stored target digest is the
+# per-platform manifest digest rather than the index digest therefore finds nothing and lands
+# on the refusal below. This form can turn a refusal into a pass only when the local store
+# really does hold the pinned content; it can never accept different content.
+#
+# Rejected: verifying the digest over the registry API with curl instead, which is genuinely
+# runtime-independent. It answers a different question. `pull ${repo}@${pin}` is
+# content-addressed, so the runtime itself verifies that the bytes in the local store hash to
+# the pin -- no registry round trip can establish that, and no registry round trip is needed
+# for it. What the id comparison adds is only "the tag currently resolves to the pinned
+# content", and moving that to curl would mean trusting a registry's answer to a manifest HEAD
+# about a tag, over a token endpoint and an Accept header for the index media types, instead of
+# trusting the local store the build is about to read. That is a weaker claim about a
+# less relevant object, for more moving parts.
+#
+# Rejected: tagging `${repo}@${pin}` under a throwaway local name and inspecting that. It
+# would work -- `nerdctl tag` resolves references through `pkg/idutil/imagewalker`, whose
+# `name==` filter does match a digest-suffixed record, which is why the fallback path's
+# existing `tag` call is unaffected by any of this. But it writes to the local image store on
+# the verification path, before anything has been verified, and "nothing was tagged" is one of
+# the properties a refusal here is supposed to guarantee.
+#
+# Rejected: `image inspect --mode=native --format '{{.Image.Target.Digest}}'`. nerdctl-only
+# spelling, and it puts a runtime's notion of "the digest" back into the comparison, which is
+# the thing the id comparison exists to avoid.
+#
+# podman needs neither form, and `{{.Id}}` IS THE LOAD-BEARING SPELLING FOR IT
+#
+# Established from source rather than assumed, because podman is the third runtime here and the
+# one this pre-pull reaches without a wrapper. Two things hold on podman 4.9.3, which is what
+# Ubuntu noble ships:
+#
+#   - `repo@<index digest>` resolves for an image pulled by tag. containers/image stores the
+#     top-level manifest under its own digest when it differs from the per-platform one
+#     (`storage/storage_dest.go`), containers/storage folds that into the image's digest index
+#     (`images.go`, recomputeDigests), and a digested reference that matches no name falls back
+#     to `ImagesByDigest` (`storage/storage_reference.go`, resolveImage). So the first form
+#     answers and the bare digest is never reached.
+#   - podman's inspect executes the template against a TYPED struct whose field is `ID`, so
+#     `{{.Id}}` only works because `cmd/podman/inspect/inspect.go` rewrites it, with a regex
+#     that matches the whole action and nothing else:
+#
+#         m := regexp.MustCompile(`{{\s*\.Id\s*}}`)
+#         row = m.ReplaceAllString(row, "{{.ID}}")
+#
+#     Which means `{{.Id}}` is safe and `{{.Id | something}}` or `{{printf "%s" .Id}}` is not:
+#     a pipeline is not rewritten, `.Id` is not a field of the struct, and podman would fail.
+#     If this format string ever needs to do more than name the field, spell it `{{.ID}}` --
+#     that is the real field on podman, the alias docker accepts, and the typed-pass spelling
+#     on nerdctl. It is left as `{{.Id}}` here only because that is what already ran green.
+#
+# All three runtimes' ids are the config blob digest, so they are comparable for the same
+# reason docker's are: podman's `Id` comes from `manifest.ImageID(diffIDs)`, and nerdctl's
+# dockercompat `Id` is `nativeImage.ImageConfigDesc.Digest` with an in-source comment saying it
+# is deliberately docker's notion rather than containerd's. Not that this action relies on
+# that -- it only ever compares two ids from one runtime -- but it is why a mismatch here means
+# what it says.
+#
 # Rejected: pulling only by digest and skipping step 1. It is shorter and it defeats a
 # substituting registry just as well, but it cannot see a tag bump. Move the Dockerfile to
 # python:3.13 and forget the pin, and a digest-only pre-pull fetches the 3.12 image and tags it
@@ -178,11 +276,40 @@ runs:
 
         run_runtime() { "${wrapper[@]}" "${runtime}" "$@"; }
 
+        # Every inspect this step issues is recorded here, each followed by whatever the
+        # runtime wrote to stderr for it. The first version sent that stream to /dev/null, so
+        # when finch refused the pinned reference the log said the id was empty and nothing at
+        # all about why -- the reason was one line on stderr, discarded. A refusal has to carry
+        # it, and it has to carry the argv too, because the step now asks more than one
+        # question and "which one failed" is half the diagnosis.
+        inspect_log="$(mktemp)"
+
         # Answers with an empty string rather than a non-zero exit on some runtimes, so every
         # caller has to reject emptiness explicitly. Two empty ids compare equal, and "the
         # comparison passed because neither side said anything" is the one outcome this action
         # must never have.
-        image_id() { run_runtime image inspect --format '{{.Id}}' "$1" 2>/dev/null; }
+        #
+        # Takes one or more references to ask about and returns the first id any of them
+        # yields, because no single spelling of "the pinned image" is accepted by every
+        # runtime; see the notes above for which spellings and why the order is what it is.
+        image_id() {
+          local ref out
+          for ref in "$@"; do
+            printf '%s\n' "--- ${wrapper[*]} ${runtime} image inspect --format '{{.Id}}' ${ref}" \
+              >> "${inspect_log}"
+            out="$(run_runtime image inspect --format '{{.Id}}' "${ref}" 2>> "${inspect_log}")" || true
+            # First line only, and not a Go template's way of spelling "that field was absent"
+            # -- `<no value>` is what text/template prints for a missing map key under the
+            # default missingkey mode, and it is not an image id.
+            out="${out%%$'\n'*}"
+            case "${out}" in
+              '' | '<no value>') continue ;;
+            esac
+            printf '%s\n' "${out}"
+            return 0
+          done
+          return 1
+        }
 
         # Read both pins from the Dockerfile rather than duplicating them here, so bumping
         # ARG BASE_IMAGE does not silently leave this step pulling the old image while the
@@ -262,11 +389,18 @@ runs:
         # pulled it. Unlike a bare existence probe this cannot accept an unverified image: if
         # the local tag is something other than the pinned content, the probe does not match
         # and the full path below runs.
+        #
+        # The pin is only asked about when the tag is local, which is both one fewer question
+        # on the common cold-runner path and what keeps the runtime measured working from
+        # being asked anything new: the second spelling of the pinned reference below is only
+        # reached when the first answered nothing, and on docker the first always answers.
         local_tag_id="$(image_id "${base}" || true)"
-        local_pin_id="$(image_id "${primary_repo}@${pin}" || true)"
-        if [ -n "${local_tag_id}" ] && [ "${local_tag_id}" = "${local_pin_id}" ]; then
-          echo "already present locally at the pinned digest; not pulling"
-          exit 0
+        if [ -n "${local_tag_id}" ]; then
+          local_pin_id="$(image_id "${primary_repo}@${pin}" "${pin}" || true)"
+          if [ "${local_tag_id}" = "${local_pin_id}" ]; then
+            echo "already present locally at the pinned digest; not pulling"
+            exit 0
+          fi
         fi
 
         # Grows for every pull the step issues, over every registry, so the log ends with one
@@ -342,7 +476,7 @@ runs:
         # 10 this registry refused; try the next one
         try_registry() {
           local repo="$1" kind="$2"
-          local rc=0 tag_id pin_id placed_id
+          local rc=0 tag_id pin_id placed_id unanswered
 
           pull_ref "${repo}:${tag}" "${kind}" || rc=$?
           [ "${rc}" -eq 0 ] || return "${rc}"
@@ -353,12 +487,26 @@ runs:
           [ "${rc}" -eq 0 ] || return "${rc}"
 
           tag_id="$(image_id "${repo}:${tag}" || true)"
-          pin_id="$(image_id "${repo}@${pin}" || true)"
+          pin_id="$(image_id "${repo}@${pin}" "${pin}" || true)"
           if [ -z "${tag_id}" ] || [ -z "${pin_id}" ]; then
+            # Naming the side that came back empty rather than both: the original of this
+            # message said "for X or Y", and on the finch failure that left whoever read it
+            # unable to tell that the tag was fine and only the pinned reference was not,
+            # which is the whole shape of the problem.
+            if [ -z "${tag_id}" ] && [ -z "${pin_id}" ]; then
+              unanswered="${repo}:${tag} or ${repo}@${pin}"
+            elif [ -z "${tag_id}" ]; then
+              unanswered="${repo}:${tag}"
+            else
+              unanswered="${repo}@${pin}, in any form this step knows to ask for it"
+            fi
             echo "::error::${wrapper[*]} ${runtime} reported no image id for \
-        ${repo}:${tag} or ${repo}@${pin} after pulling both, so the pinned digest cannot be \
-        checked. Refusing to hand the build an unverified base image. This is a gap in this \
-        action's support for '${runtime}', not a registry problem."
+        ${unanswered} after pulling both, so the pinned digest cannot be checked. Refusing to \
+        hand the build an unverified base image. This is a gap in this action's support for \
+        '${runtime}', not a registry problem. Every inspect this step issued follows, in \
+        order, each with anything the runtime wrote to stderr for it. The first entry is the \
+        warm-runner probe and is expected to miss on a cold runner."
+            cat "${inspect_log}"
             exit 1
           fi
 
