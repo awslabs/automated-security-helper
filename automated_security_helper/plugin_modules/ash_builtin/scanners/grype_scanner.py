@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Annotated, ClassVar, List, Literal
 
@@ -30,7 +31,18 @@ from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.package_identity import (
+    NpmLockIndex,
+    identity_properties,
+    install_path,
+)
 from automated_security_helper.utils.subprocess_utils import find_executable
+
+# The per-result message grype's SARIF presenter writes for a package match.
+_GRYPE_PACKAGE_MESSAGE = re.compile(
+    r"vulnerability in \S+ package: (?P<name>[^,\s]+), version (?P<version>\S+) "
+    r"was found at: "
+)
 
 
 class GrypeScannerConfigOptions(ScannerOptionsBase):
@@ -265,7 +277,49 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         final_args: List[str],
         target: Path,
     ) -> SarifReport:
-        """Strip leading slashes from artifact URIs across all results."""
+        """Strip leading slashes from artifact URIs and attach package identity."""
+        lock_index = NpmLockIndex(target)
         for result in sarif_report.get_all_results():
             self._normalize_result_uris(result)
+            self._attach_package_identity(result, lock_index)
         return sarif_report
+
+    @staticmethod
+    def _attach_package_identity(result, lock_index: NpmLockIndex) -> None:
+        """Record which package copy a grype result is about.
+
+        grype's SARIF puts every dependency finding at line 1 of the manifest,
+        and its rule's ``purls`` list is per rule, not per result, so the only
+        per-result statement of the package is the message grype writes:
+        ``A <sev> vulnerability in <type> package: <name>, version <version>
+        was found at: <path>``. When the message has another shape nothing is
+        attached, and a package-scoped suppression will not match the result.
+
+        For an npm lockfile the name and version are looked up among the
+        lockfile's entries; exactly one match gives ``package_path``. Two or
+        more (the same version installed at two places) give no path, because
+        grype's output does not say which copy it found.
+        """
+        message = result.message.root.text if result.message else None
+        match = _GRYPE_PACKAGE_MESSAGE.search(message or "")
+        if not match:
+            return
+        name, version = match.group("name"), match.group("version")
+
+        path = None
+        uri = None
+        if result.locations:
+            physical = result.locations[0].physicalLocation
+            if physical and physical.root and physical.root.artifactLocation:
+                uri = physical.root.artifactLocation.uri
+        if uri:
+            entry = lock_index.unique_by_name_version(uri, name, version)
+            if entry is not None:
+                path = install_path(uri, entry.key)
+
+        identity = identity_properties(name, version, path)
+        if result.properties is None:
+            result.properties = PropertyBag(**identity)
+        else:
+            for key, value in identity.items():
+                setattr(result.properties, key, value)

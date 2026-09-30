@@ -768,7 +768,7 @@ def test_a_failure_outside_the_per_package_guard_raises_scanner_error(
     node_project()
     subprocess_double.side_effect = emits(audit_json())
 
-    def _boom(self, npm_audit_results, target_path):
+    def _boom(self, npm_audit_results, target_path, **kwargs):
         raise RuntimeError("SARIF conversion failed")
 
     monkeypatch.setattr(NpmAuditScanner, "_convert_npm_audit_to_sarif", _boom)
