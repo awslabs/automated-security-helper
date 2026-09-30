@@ -488,9 +488,9 @@ If you encounter UV tool installation issues:
 3. **Use offline mode**: `ASH_OFFLINE=true` to skip installations
 4. **Pre-install tools manually**:
    ```bash
-   uv tool install bandit>=1.7.0
+   uv tool install bandit>=1.7.0,<2.0.0
    uv tool install checkov>=3.2.0,<4.0.0
-   uv tool install semgrep>=1.125.0
+   uv tool install semgrep>=1.125.0,<2.0.0
    ```
 5. **Increase timeout** for slow networks:
    ```yaml
@@ -505,9 +505,9 @@ For more detailed information about UV tool management, see the [UV Tool Managem
 
 ### UV Tool Behavior
 
-- **Bandit**: Automatically installed via `uv tool install bandit>=1.7.0` (default version constraint)
+- **Bandit**: Automatically installed via `uv tool install bandit>=1.7.0,<2.0.0` (default version constraint)
 - **Checkov**: Automatically installed via `uv tool install checkov>=3.2.0,<4.0.0` (default version constraint) with fallback to `uv tool run`
-- **Semgrep**: Automatically installed via `uv tool install semgrep>=1.125.0` (default version constraint) with fallback to `uv tool run`
+- **Semgrep**: Automatically installed via `uv tool install semgrep>=1.125.0,<2.0.0` (default version constraint) with fallback to `uv tool run`
 
 ### Version Constraint Configuration
 
@@ -537,9 +537,9 @@ If you encounter issues with UV tool management:
 3. **Offline Mode**: Use `ASH_OFFLINE=true` to skip tool downloads and rely on pre-installed tools
 4. **Manual Installation**: You can pre-install tools manually if needed:
    ```bash
-   uv tool install bandit>=1.7.0
+   uv tool install bandit>=1.7.0,<2.0.0
    uv tool install checkov>=3.2.0,<4.0.0
-   uv tool install semgrep>=1.125.0
+   uv tool install semgrep>=1.125.0,<2.0.0
    ```
 
 ## Advanced Configuration

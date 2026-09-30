@@ -72,7 +72,10 @@ class SemgrepScannerConfigOptions(ScannerOptionsBase):
     tool_version: Annotated[
         str | None,
         Field(
-            description="Specific version constraint for semgrep installation (e.g., '>=1.125.0')"
+            description=(
+                "Version constraint for semgrep installation, in pip requirement "
+                "syntax. Leave unset to use the scanner's own default constraint."
+            )
         ),
     ] = None
 

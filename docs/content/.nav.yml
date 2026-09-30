@@ -14,6 +14,7 @@ nav:
   - User Guide:
       - Configuration: docs/configuration-guide.md
       - CLI Reference: docs/cli-reference.md
+      - CLI Reference (generated): docs/cli-reference-generated.md
       - Output Formats: docs/output-formats.md
       - Suppressions: docs/suppressions.md
       - Configuration Overrides: docs/config-overrides.md
