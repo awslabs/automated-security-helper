@@ -151,7 +151,15 @@ dev = [
 ]
 
 [build-system]
-requires = [ "hatchling",]
+# Keep this specifier identical to the hatchling entry in [dependency-groups] dev.
+# Dependabot's uv updater treats both as requirements of one dependency, and rewrites each
+# by searching the whole file for a quoted hatchling string whose specifier equals the old
+# one. A bare name here is recorded as `*`, which matches nothing, so the updater falls back
+# to writing `*` over the first quoted hatchling string in the file. That is the dev entry,
+# and the result, hatchling followed by a bare `*`, is not valid PEP 508, so uv rejects it.
+# Identical specifiers are rewritten together and the fallback has nothing to clobber.
+# Do not quote the package name in this comment: the updater's search does not skip comments.
+requires = [ "hatchling>=1.32",]
 build-backend = "hatchling.build"
 
 [project.urls]
