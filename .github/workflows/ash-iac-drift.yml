@@ -823,8 +823,14 @@ jobs:
   # IS where its findings land. 3.x also ships a separate
   # WriteNagSuppressionsToCloudFormationAspect, because on that line suppressions
   # no longer serialize into the template by themselves -- on 2.x they always do,
-  # and 82 resources across the committed templates carry
-  # Metadata.cdk_nag.rules_to_suppress today.
+  # and 89 resources across the committed templates carry
+  # Metadata.cdk_nag.rules_to_suppress today: 10 in AshAgentCore, 7 in
+  # AshCodeCommitGate, 55 in AshDistributedPipeline, 9 in AshFargate and 8 in
+  # AshImagePipeline. The per-stack breakdown is here so the total can be checked
+  # rather than taken on faith -- it read 82 for several template regenerations,
+  # and a bare figure gives a reader no way to notice that. Re-derive with
+  # `jq '[.Resources[] | select(.Metadata.cdk_nag.rules_to_suppress)] | length'`
+  # over deploy/cdk/templates/*.template.json.
   #
   # So the defect was a gate written against the wrong major version, and the fix
   # is not "the plugin API is wrong" but "the plugin API is 3.x". IF THIS APP EVER

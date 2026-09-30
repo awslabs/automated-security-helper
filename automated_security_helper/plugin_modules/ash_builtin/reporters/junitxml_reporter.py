@@ -14,6 +14,10 @@ from automated_security_helper.core.constants import ASH_DEFAULT_SEVERITY_LEVEL
 from automated_security_helper.models.flat_vulnerability import (
     extract_workspace_project,
 )
+from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_skipped_rows import (
+    skipped_project_detail,
+    skipped_projects,
+)
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.severity_ladder import (
@@ -37,6 +41,17 @@ _FINDING_KINDS = frozenset({"fail", "open", "review"})
 # (cdk_nag_wrapper._level_and_kind), so rendering these as anything but a
 # passing test case would report a passed control as a problem.
 _NON_FINDING_KINDS = frozenset({"pass", "informational", "notApplicable"})
+
+#: The ``type`` attribute on a skipped project's ``<skipped>`` element. Distinct
+#: from the existing ``suppression`` and ``threshold`` types, which are both about
+#: a finding that exists; this one says no scan happened. Named on the module so a
+#: consumer and a test can select on it without matching the message text.
+SKIPPED_PROJECT_SKIP_TYPE = "project-skipped"
+
+#: The ``classname`` on a skipped project's test case. Not a scanner name, because
+#: no scanner ran: attributing the case to one would put a project nothing
+#: examined inside a tool's results.
+SKIPPED_PROJECT_CLASSNAME = "ash.workspace"
 
 
 def _normalized_threshold(value: object) -> str | None:
@@ -135,6 +150,14 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
 
     A single-directory scan is unaffected: with no project attribution the suite
     name stays the bare scanner name it has always been.
+
+    A skipped project gets a suite of its own, named after the project with no
+    scanner segment -- there is no scanner, since none ran -- holding one test case
+    marked ``<skipped>``. That is JUnit's own statement that a test did not run, so
+    every CI front end already counts it apart from failures and errors and the
+    project cannot turn a job red. Without it a skipped project has no findings, so
+    no test cases, so no suite, and vanishes from this artefact in the one way a
+    reader cannot notice. See ``workspace_skipped_rows``.
     """
 
     workspace_behaviour = ReporterWorkspaceBehaviour.MERGED
@@ -385,6 +408,35 @@ class JunitXmlReporter(ReporterPluginBase[JUnitXMLReporterConfig]):
         for suite_name, test_suite in test_suite_dict.items():
             del suite_name  # keyed for grouping; the name is already on the suite
             report.add_testsuite(test_suite)
+
+        # One suite per skipped project, added after the finding suites and
+        # OUTSIDE the `model.sarif is not None` block above. Both placements are
+        # load-bearing: a workspace whose scanned projects came back clean has no
+        # results and may have no SARIF at all, and that is exactly the artefact
+        # where losing the skip means the file says nothing whatever.
+        #
+        # Built separately rather than inserted into test_suite_dict, so a project
+        # name can never collide with a grouping key and silently replace a
+        # scanner's suite. It cannot today -- every workspace-mode finding suite
+        # carries a "<project>/<scanner>" name with a separator in it, and a bare
+        # project name has none -- but that is a property of the naming above
+        # rather than of anything enforced, and a merge that changed it would be
+        # invisible here.
+        for entry in skipped_projects(model):
+            suite = TestSuite(name=entry.project)
+            case = TestCase(
+                name=f"project skipped ({entry.reason.value})",
+                classname=SKIPPED_PROJECT_CLASSNAME,
+            )
+            case.result = [
+                Skipped(
+                    message=skipped_project_detail(entry),
+                    type_=SKIPPED_PROJECT_SKIP_TYPE,
+                )
+            ]
+            suite.add_testcase(case)
+            report.add_testsuite(suite)
+
         # Return the XML string representation of all test suites
         report_bytes: bytes = report.tostring()
         return report_bytes.decode("utf-8")

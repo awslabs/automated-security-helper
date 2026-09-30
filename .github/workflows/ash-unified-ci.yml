@@ -120,7 +120,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           enable-cache: true
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -207,23 +207,23 @@ jobs:
         # macos-latest, ubuntu-latest, ubuntu-24.04-arm and windows-latest. The
         # actions/python-versions manifest carries a darwin/arm64 build for 3.14.7,
         # the newest stable 3.14, which is what makes that resolvable.
-        include:
-          # Arch labels for artifact naming. These are hand-written labels, not
-          # values read from the runner, so they can disagree with the machine --
-          # and macos-latest did. It is an alias, and GitHub moved it to Apple
-          # silicon: the runner logs `Image: macos-26-arm64` and setup-python
-          # fetches python-3.10.11-darwin-arm64.tar.gz on it. It was labeled
-          # x86_64 here, so every macos-latest artifact and PyTest check run
-          # claimed an architecture the job did not have.
-          #
-          # Being an alias, macos-latest can move again. What would catch it is
-          # the runner's own `Image:` line, not this list, so treat a mismatch
-          # between the two as this list being stale.
-          - { os: ubuntu-latest, arch: x86_64 }
-          - { os: ubuntu-24.04-arm, arch: arm64 }
-          - { os: macos-latest, arch: arm64 }
-          - { os: macos-14, arch: arm64 }
-          - { os: windows-latest, arch: x86_64 }
+        # WHERE THE ARCH LABEL WENT
+        #
+        # There used to be a five-row `include:` here mapping each `os` to an `arch` label, for
+        # artifact and check-run naming. The comment on it was candid that the labels were
+        # hand-written rather than read from the runner, "so they can disagree with the machine --
+        # and macos-latest did": that label is an alias, GitHub moved it to Apple silicon, and the
+        # table said x86_64 while the runner logged `Image: macos-26-arm64`.
+        #
+        # That table was not merely cosmetic. .github/actions/run-unit-tests/action.yml selects
+        # the single leg that renders the coverage summary, and it selected it by comparing the
+        # arch LABEL, so a mislabelled Linux row would silently have dropped the step from every
+        # leg -- nothing renders it and nothing says so.
+        #
+        # The table is gone and run-unit-tests derives the label from `runner.arch` instead, so
+        # the name on an artifact is a statement the runner made about itself. Removing the
+        # include changes no leg count: every entry matched an existing `os` axis value and only
+        # added a key, so the matrix was 25 cells with it and is 25 cells without it.
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -234,7 +234,6 @@ jobs:
       - uses: ./.github/actions/run-unit-tests
         with:
           os: ${{ matrix.os }}
-          arch: ${{ matrix.arch }}
           python-version: ${{ matrix.python-version }}
 
   # ---------------------------------------------------------------------------
@@ -251,47 +250,79 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # WHY THERE IS NO `platform` KEY HERE ANY MORE
+        #
+        # Every row used to carry one -- `platform: linux/amd64` and so on -- and it was a pure
+        # function of `os`: the mapping was total and single-valued, so 24 rows restated four
+        # facts. The only consumer was five log lines in .github/actions/run-scan-test/action.yml
+        # ("Testing ASH using ... on <os> (<platform>)"), so a wrong value produced a log that
+        # lied while the leg stayed green.
+        #
+        # It was already wrong. `macos-latest` is an alias and GitHub moved it to Apple silicon:
+        # the runner logs `Image: macos-26-arm64` and setup-python fetches
+        # python-3.10.11-darwin-arm64.tar.gz on it, which is why the `unit-test` job above
+        # relabelled it arm64. These rows still said `darwin/amd64`. The same os-to-architecture
+        # fact was spelled twice in two vocabularies and the two had come to disagree.
+        #
+        # The fix is to stop spelling it here. GitHub Actions cannot compute one matrix key from
+        # another -- `include:` entries are literals and no expression context holds a sibling
+        # key -- so deriving it in YAML is not expressible. run-scan-test derives it instead from
+        # `runner.os` and `runner.arch`, which the runner reports about itself, so the log cannot
+        # disagree with the machine that printed it. That also fixes the vocabulary: the derived
+        # ARM value is `linux/arm64`, which is what an OCI platform string actually looks like,
+        # rather than the `linux/aarch64` that was written here.
+        #
+        # WHY THE python-local ROWS NO LONGER SAY `oci-runner: ""`
+        #
+        # Same shape, one dimension smaller: `oci-runner` was `""` on exactly the `python-local`
+        # rows and non-empty on every other row, so it too was a pure function of `method`. An
+        # absent key and an empty-string key render identically in every expression that reads it
+        # here -- the job name, the `timeout-minutes` conditional, the `OCI_RUNNER` env and the
+        # action input -- so dropping it changes no behaviour and removes the chance of a
+        # python-local row acquiring a runner, or a container row losing one, without anything
+        # noticing. tests/unit/test_ci_matrix_agreement.py asserts the invariant in both
+        # directions.
         include:
           # Linux x86 -- Docker
-          - { os: ubuntu-latest, method: bash, platform: linux/amd64, config-file: default, oci-runner: docker }
-          - { os: ubuntu-latest, method: powershell, platform: linux/amd64, config-file: default, oci-runner: docker }
-          - { os: ubuntu-latest, method: python-container, platform: linux/amd64, config-file: default, oci-runner: docker }
-          - { os: ubuntu-latest, method: python-local, platform: linux/amd64, config-file: default, oci-runner: "" }
+          - { os: ubuntu-latest, method: bash, config-file: default, oci-runner: docker }
+          - { os: ubuntu-latest, method: powershell, config-file: default, oci-runner: docker }
+          - { os: ubuntu-latest, method: python-container, config-file: default, oci-runner: docker }
+          - { os: ubuntu-latest, method: python-local, config-file: default }
           # Linux x86 -- Podman
-          - { os: ubuntu-latest, method: bash, platform: linux/amd64, config-file: default, oci-runner: podman }
-          - { os: ubuntu-latest, method: powershell, platform: linux/amd64, config-file: default, oci-runner: podman }
-          - { os: ubuntu-latest, method: python-container, platform: linux/amd64, config-file: default, oci-runner: podman }
+          - { os: ubuntu-latest, method: bash, config-file: default, oci-runner: podman }
+          - { os: ubuntu-latest, method: powershell, config-file: default, oci-runner: podman }
+          - { os: ubuntu-latest, method: python-container, config-file: default, oci-runner: podman }
           # Linux x86 -- Finch
-          - { os: ubuntu-latest, method: bash, platform: linux/amd64, config-file: default, oci-runner: finch }
-          - { os: ubuntu-latest, method: powershell, platform: linux/amd64, config-file: default, oci-runner: finch }
-          - { os: ubuntu-latest, method: python-container, platform: linux/amd64, config-file: default, oci-runner: finch }
+          - { os: ubuntu-latest, method: bash, config-file: default, oci-runner: finch }
+          - { os: ubuntu-latest, method: powershell, config-file: default, oci-runner: finch }
+          - { os: ubuntu-latest, method: python-container, config-file: default, oci-runner: finch }
 
           # Linux ARM -- Docker
-          - { os: ubuntu-24.04-arm, method: bash, platform: linux/aarch64, config-file: default, oci-runner: docker }
-          - { os: ubuntu-24.04-arm, method: powershell, platform: linux/aarch64, config-file: default, oci-runner: docker }
-          - { os: ubuntu-24.04-arm, method: python-container, platform: linux/aarch64, config-file: default, oci-runner: docker }
-          - { os: ubuntu-24.04-arm, method: python-local, platform: linux/aarch64, config-file: default, oci-runner: "" }
+          - { os: ubuntu-24.04-arm, method: bash, config-file: default, oci-runner: docker }
+          - { os: ubuntu-24.04-arm, method: powershell, config-file: default, oci-runner: docker }
+          - { os: ubuntu-24.04-arm, method: python-container, config-file: default, oci-runner: docker }
+          - { os: ubuntu-24.04-arm, method: python-local, config-file: default }
           # Linux ARM -- Podman
-          - { os: ubuntu-24.04-arm, method: bash, platform: linux/aarch64, config-file: default, oci-runner: podman }
-          - { os: ubuntu-24.04-arm, method: powershell, platform: linux/aarch64, config-file: default, oci-runner: podman }
-          - { os: ubuntu-24.04-arm, method: python-container, platform: linux/aarch64, config-file: default, oci-runner: podman }
+          - { os: ubuntu-24.04-arm, method: bash, config-file: default, oci-runner: podman }
+          - { os: ubuntu-24.04-arm, method: powershell, config-file: default, oci-runner: podman }
+          - { os: ubuntu-24.04-arm, method: python-container, config-file: default, oci-runner: podman }
           # Linux ARM -- Finch (x86_64 only, skip ARM)
-          # - { os: ubuntu-24.04-arm, method: python-container, platform: linux/aarch64, config-file: default, oci-runner: finch }
+          # - { os: ubuntu-24.04-arm, method: python-container, config-file: default, oci-runner: finch }
 
-          # macOS x86 -- python-local only (Docker disabled on hosted macOS)
-          - { os: macos-latest, method: python-local, platform: darwin/amd64, config-file: default, oci-runner: "" }
+          # macOS -- python-local only (Docker disabled on hosted macOS)
+          - { os: macos-latest, method: python-local, config-file: default }
 
           # Windows -- python-local only (Docker disabled on hosted Windows)
-          - { os: windows-latest, method: python-local, platform: windows/amd64, config-file: default, oci-runner: "" }
+          - { os: windows-latest, method: python-local, config-file: default }
 
           # Offline mode -- validates OFFLINE=YES Docker build (grype db + semgrep rulesets cached at build time)
-          - { os: ubuntu-latest, method: python-container, platform: linux/amd64, config-file: default, oci-runner: docker, offline: true }
+          - { os: ubuntu-latest, method: python-container, config-file: default, oci-runner: docker, offline: true }
 
           # Community plugins -- python-local on all platforms
-          - { os: ubuntu-latest, method: python-local, platform: linux/amd64, config-file: community, oci-runner: "" }
-          - { os: ubuntu-24.04-arm, method: python-local, platform: linux/aarch64, config-file: community, oci-runner: "" }
-          - { os: macos-latest, method: python-local, platform: darwin/amd64, config-file: community, oci-runner: "" }
-          - { os: windows-latest, method: python-local, platform: windows/amd64, config-file: community, oci-runner: "" }
+          - { os: ubuntu-latest, method: python-local, config-file: community }
+          - { os: ubuntu-24.04-arm, method: python-local, config-file: community }
+          - { os: macos-latest, method: python-local, config-file: community }
+          - { os: windows-latest, method: python-local, config-file: community }
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -314,7 +345,6 @@ jobs:
         with:
           method: ${{ matrix.method }}
           os: ${{ matrix.os }}
-          platform: ${{ matrix.platform }}
           config-file: ${{ matrix.config-file }}
           snyk-token: ${{ secrets.SNYK_TOKEN }}
           oci-runner: ${{ matrix.oci-runner }}
@@ -833,6 +863,51 @@ jobs:
           # pip, pipx, pre-commit and mcp all ran on all 25 cells before this and
           # all 25 after.
     steps:
+      # FAIL CLOSED BEFORE ANY OF THE ROUTING CONDITIONS BELOW
+      #
+      # The three `uses:` steps at the end of this job are mutually exclusive `if:`s with no
+      # else. A method that satisfies none of them -- a new entry on the `method` axis, or one
+      # renamed on the axis and not in the conditions -- runs checkout and setup-python, does no
+      # validation at all, and exits 0. `required-checks` then counts that leg as a success, so
+      # the method reads as validated on every pull request while nothing has ever installed it.
+      #
+      # This is the same guard .github/actions/validate-container/action.yml carries for its
+      # `runtime` input ("Assert this runtime has a scan leg"), for the same reason: a routing
+      # table with no default arm is a silent no-op, and a silent no-op inside a gate is worse
+      # than a missing leg because it reports the opposite of the truth.
+      #
+      # It runs first so the leg dies before spending a checkout on work it will not do.
+      # tests/unit/test_ci_matrix_agreement.py reconciles the arms below against the routing
+      # conditions AND against the `method` axis, so none of the three can drift from the other
+      # two without a unit-test failure.
+      - name: "Assert this install method is routed to a validator"
+        shell: bash
+        env:
+          METHOD: ${{ matrix.method }}
+        run: |
+          # The arms are the `method` axis above, and nothing else. They were
+          # `pip | pipx | uvx | homebrew | pre-commit`, `podman | finch | nerdctl` and
+          # `mcp`, which was the axis before those five cheap methods became steps
+          # inside a single `bundle` leg. After that change the list named five values
+          # that can no longer occur while omitting the one that does, so every bundle
+          # leg -- 25 of the job's 33 -- fell through to the `*)` below and exited 1.
+          # Measured by extracting this shell and running it with METHOD=bundle.
+          #
+          # The five folded methods are NOT listed here. They are steps, and the steps
+          # carry their own `if: matrix.method == 'bundle'`; naming them would make this
+          # guard accept values the matrix cannot produce, which is the direction that
+          # hides a problem rather than causing one.
+          case "${METHOD}" in
+            bundle) ;;
+            homebrew) ;;
+            podman | finch | nerdctl) ;;
+            *)
+              echo "::error::install-validation has no validator for method '${METHOD}'. The routing conditions on the steps at the end of this job cover none of it, so this leg would run setup-python and then nothing, and exit 0. Route it to a composite action and add it to the case above."
+              exit 1
+              ;;
+          esac
+          echo "${METHOD}: routed to a validator"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Every method still on the axis needs an interpreter, so this is no longer
@@ -1041,9 +1116,29 @@ jobs:
   #
   # The second way is drift: a job added to this workflow and not added to `needs` escapes the
   # gate silently, and the gate keeps reporting success over a shrinking share of the suite. So
-  # the count is asserted rather than assumed. A census beats a list that nobody re-checks --
+  # the census is asserted rather than assumed. A census beats a list that nobody re-checks --
   # the same reason .github/scripts/assert-coverage-completeness.mjs takes its file list from
   # `git ls-files` rather than from the coverage report.
+  #
+  # WHAT THE CENSUS REPLACED, AND WHY THE OLD FORM COULD ONLY CATCH THE HARMLESS DIRECTION
+  #
+  # This job used to carry `EXPECTED_UPSTREAM_JOBS: "8"` and compare it against `len(needs)`.
+  # Both sides of that comparison lived inside the gate job, so it was blind to the drift it
+  # existed to prevent: adding a tenth job to this workflow without adding it to `needs` leaves
+  # `len(needs)` at 8 and the literal at 8, and the check passes over shrunk coverage. The one
+  # direction it did catch -- updating `needs` and forgetting to bump the literal -- is the
+  # harmless one, because it fails loudly and the fix is to bump a number.
+  #
+  # The literal was never actually wrong on this tree: this workflow has 9 jobs, 8 of them are
+  # in `needs`, and the 9th is this gate itself, so coverage has been complete throughout. The
+  # defect was latent rather than a live hole, which is exactly why nothing surfaced it.
+  #
+  # .github/scripts/assert-required-checks-census.py now takes the census from this file's own
+  # `jobs:` mapping and requires every job other than the gate to be in `needs`, unless it is
+  # named in that script's `_UNGATED` map with a reason -- empty today, and re-checked for
+  # staleness on every run. So a new job is covered by construction, and a deliberately
+  # advisory one is covered by a written statement rather than by a count that cannot tell the
+  # two apart.
   required-checks:
     name: required-checks
     if: always()
@@ -1059,47 +1154,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Assert every upstream job succeeded
+      # This job needed no checkout while its only input was the `needs` context. It needs one
+      # now, because the census is this file, and the whole point is that the list of jobs is
+      # read from the workflow rather than restated inside the job that depends on them. A
+      # checkout that fails takes the gate red, which is the safe direction.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Assert this gate depends on every job in the workflow, and that all of them succeeded
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
-          # Bump deliberately when adding a job above, which is the point: the assertion below
-          # fails until this matches, so a new job cannot slip past the gate unnoticed.
-          EXPECTED_UPSTREAM_JOBS: "8"
+          # `github.job` is this job's own YAML key, so the script is told which job to exclude
+          # from the census by the run rather than by a third copy of the name. Passed through
+          # the environment rather than interpolated into the `run:` body, which is this
+          # repository's convention for every context value a shell reads.
+          GATE_JOB: ${{ github.job }}
         shell: bash
+        # The script is dependency-free on purpose -- see its module docstring for why the gate
+        # does not reach the network for PyYAML.
         run: |
-          python3 - <<'PY'
-          import json
-          import os
-          import sys
-
-          needs = json.loads(os.environ["NEEDS_JSON"])
-          expected = int(os.environ["EXPECTED_UPSTREAM_JOBS"])
-
-          for name, data in sorted(needs.items()):
-              print(f"{data.get('result', '?'):<10} {name}")
-
-          problems = []
-
-          if len(needs) != expected:
-              problems.append(
-                  f"this gate depends on {len(needs)} job(s) but expects {expected}. A job was "
-                  "added to the workflow without being added to this job's `needs`, so it is "
-                  "not covered by the required check. Add it and bump "
-                  "EXPECTED_UPSTREAM_JOBS."
-              )
-
-          # Every job in this workflow is unconditional -- none carries a job-level `if` -- so a
-          # result of anything other than success means something went wrong, including
-          # 'skipped'. Tolerating 'skipped' here would let a job that never ran read as a pass.
-          for name, data in sorted(needs.items()):
-              result = data.get("result")
-              if result != "success":
-                  problems.append(f"{name}: {result}")
-
-          if problems:
-              for problem in problems:
-                  print(f"::error::{problem}")
-              sys.exit(1)
-
-          print(f"all {len(needs)} upstream job(s) succeeded")
-          PY
+          python3 .github/scripts/assert-required-checks-census.py \
+            --workflow .github/workflows/ash-unified-ci.yml \
+            --gate-job "$GATE_JOB"

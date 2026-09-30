@@ -54,12 +54,32 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scann
 )
 
 
+def _canonical(name):
+    """Fold ``-`` and ``_`` the way ``importlib.metadata`` does.
+
+    The real ``importlib.metadata.version`` canonicalizes a distribution name before
+    looking it up, so ``version("cdk_nag")`` and ``version("cdk-nag")`` resolve the same
+    distribution. Verified against the live interpreter in
+    ``test_the_probe_reads_either_spelling`` rather than taken on trust, because the whole
+    point of a fake is that it behaves like the thing it replaces.
+
+    Without this fold the fake was STRICTER than reality, and that mattered: the probe now
+    takes its names from pyproject's spelling (``cdk-nag``) while the cases below name the
+    import spelling (``cdk_nag``), which is the pairing the real API is documented to
+    accept. An exact-match fake reported those cases missing and would have read as a
+    defect in the probe.
+    """
+    return None if name is None else name.replace("_", "-")
+
+
 def _fake_metadata(present):
     """Stand in for ``importlib.metadata.version``, resolving only ``present``."""
     from importlib.metadata import PackageNotFoundError
 
+    canonical = {_canonical(name) for name in present}
+
     def _version(name):
-        if name in present:
+        if _canonical(name) in canonical:
             return "9.9.9"
         raise PackageNotFoundError(name)
 
@@ -89,16 +109,41 @@ def metadata(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+def _others(*present):
+    """The probe's names minus ``present``, in declared order.
+
+    Expectations are expressed against ``_CDK_REQUIRED_DISTRIBUTIONS`` rather than as
+    literal lists because that tuple is now derived from the cdk extra: a fourth
+    dependency landed by ``sync_cdk_extra_fallback.py --fix`` widens the probe, and a
+    literal expectation here would turn that legitimate bump into a red test with no
+    defect behind it. Measured -- adding a fourth requirement to the extra broke exactly
+    these two assertions before they were written this way.
+
+    The two names the original defect was about are still asserted explicitly in the cases
+    below, so this helper reduces coupling to the list's LENGTH without giving up the
+    claim about its CONTENTS.
+    """
+    excluded = {_canonical(name) for name in present}
+    return [
+        name for name in _CDK_REQUIRED_DISTRIBUTIONS if _canonical(name) not in excluded
+    ]
+
+
 def test_a_partial_install_is_reported_missing(metadata):
     """cdk-nag alone is not enough, and this is the state the one-distribution probe passed."""
     metadata("cdk_nag")
 
-    assert _missing_cdk_distributions() == ["aws-cdk-lib", "constructs"]
+    expected = _others("cdk_nag")
+    assert {"aws-cdk-lib", "constructs"}.issubset(expected), (
+        "fixture check: the two distributions whose absence the one-distribution probe "
+        "waved through must still be among the ones expected missing here"
+    )
+    assert _missing_cdk_distributions() == expected
 
 
 def test_a_missing_aws_cdk_lib_alone_is_reported_missing(metadata):
-    """The reviewer's exact shape: two of three present."""
-    metadata("cdk_nag", "constructs")
+    """The reviewer's exact shape: every distribution present but one."""
+    metadata(*_others("aws-cdk-lib"))
 
     assert _missing_cdk_distributions() == ["aws-cdk-lib"]
 
@@ -159,6 +204,89 @@ def test_the_probe_covers_every_distribution_the_cdk_extra_installs():
     }, (
         "the availability probe and the cdk extra have diverged; a distribution the extra "
         "installs but the probe does not check is a partial install that reads as available"
+    )
+
+
+def test_the_probe_derives_its_names_rather_than_repeating_them():
+    """The probe's names must come from the fallback list, not from a literal beside it.
+
+    ``_CDK_REQUIRED_DISTRIBUTIONS`` used to be a hand-written tuple, which made it the
+    fourth copy of one package-name set. The test above would have reported a divergence,
+    but reporting is all it could do: a fourth dependency added to the extra needed a human
+    to remember this one line, in a file the dependency bump does not otherwise touch.
+
+    Deriving it from ``_CDK_EXTRA_FALLBACK_REQUIREMENTS`` -- which
+    ``scripts/sync_cdk_extra_fallback.py --fix`` rewrites from pyproject, and which
+    ``ash-cdk-extra-drift.yml`` gates -- makes the coverage automatic. This asserts the
+    derivation is live rather than coincidental: perturb the fallback and the names follow.
+
+    Deliberately NOT derived from ``_cdk_extra_requirements()``. That function reads
+    installed metadata and falls back when the read fails, so the probe's input would
+    depend on metadata being readable -- the exact thing the probe measures.
+    """
+    fallback = cdk_nag_scanner._CDK_EXTRA_FALLBACK_REQUIREMENTS
+    names = cdk_nag_scanner._CDK_REQUIRED_DISTRIBUTIONS
+
+    assert tuple(cdk_nag_scanner._distribution_name(item) for item in fallback) == names
+
+    # The live half. Equality between two module attributes is satisfiable by two literals
+    # that happen to agree, so this runs the derivation over a fallback list with one more
+    # entry and requires the extra name to appear. If `--fix` lands a fourth requirement,
+    # this is the step that carries it into the probe.
+    extended = [*fallback, "a-new-dep>=1,<2"]
+    derived = tuple(cdk_nag_scanner._distribution_name(item) for item in extended)
+    assert "a-new-dep" in derived, (
+        "the derivation must follow the fallback list; if this fails, _distribution_name "
+        "no longer reads what --fix writes"
+    )
+    assert "totally-unrelated-dist" not in names
+
+
+def test_an_empty_name_tuple_cannot_report_available():
+    """The hazard deriving the list introduces, and the guard that closes it.
+
+    ``_missing_cdk_distributions(())`` iterates nothing and returns ``[]``, so on the bare
+    ``not _CDK_MISSING_DISTRIBUTIONS`` test an empty name tuple read as "nothing missing" --
+    cdk-nag AVAILABLE with zero distributions probed. That is the same silent pass the
+    partial-install fix removed, reached from the other side. A literal tuple could not
+    empty itself; a derived one can, if ``--fix`` ever writes an empty fallback.
+    """
+    assert _missing_cdk_distributions(()) == [], (
+        "fixture check: an empty name tuple really does report nothing missing, which is "
+        "why availability cannot be computed from that answer alone"
+    )
+    assert cdk_nag_scanner._CDK_REQUIRED_DISTRIBUTIONS, (
+        "the derived name tuple is empty, so the probe covers nothing"
+    )
+
+    # The guard, exercised on the expression rather than trusted from reading it.
+    for names, missing, expected in (
+        ((), [], False),
+        (("cdk-nag",), [], True),
+        (("cdk-nag",), ["cdk-nag"], False),
+    ):
+        assert (bool(names) and not missing) is expected, (
+            f"names={names} missing={missing} must resolve availability to {expected}"
+        )
+
+
+def test_the_probe_reads_either_spelling():
+    """``cdk-nag`` and ``cdk_nag`` must resolve the same distribution.
+
+    The derived names carry pyproject's hyphenated spelling while this file's cases name
+    the import spelling, and the whole arrangement rests on ``importlib.metadata``
+    canonicalizing the two. Measured against the live interpreter on a distribution that is
+    genuinely installed, rather than asserted about the fake -- a fake agreeing with itself
+    proves nothing about the API it stands in for.
+    """
+    from importlib.metadata import version
+
+    hyphenated = version("automated-security-helper")
+    underscored = version("automated_security_helper")
+    assert hyphenated == underscored, (
+        "importlib.metadata stopped folding '-' and '_'. The probe's names come from "
+        "pyproject ('cdk-nag') while cdk-nag is imported as 'cdk_nag', so this fold is "
+        "what makes the derived names resolve at all."
     )
 
 

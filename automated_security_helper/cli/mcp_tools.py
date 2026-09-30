@@ -377,7 +377,9 @@ async def mcp_get_scan_progress(scan_id: str) -> Dict[str, Any]:
         )
 
 
-async def mcp_get_scan_results(output_dir: str) -> Dict[str, Any]:
+async def mcp_get_scan_results(
+    output_dir: str, session_id: Optional[str] = None
+) -> Dict[str, Any]:
     """
     Get final results for a completed scan using file-based tracking.
 
@@ -432,7 +434,12 @@ async def mcp_get_scan_results(output_dir: str) -> Dict[str, Any]:
         # bound what may be scanned bound what may be read back. A legitimate
         # output directory sits at <source_dir>/.ash/ash_output, beneath the scan
         # target, so a root that permits the scan permits its results too.
-        target_error = validate_scan_target(resolved_output_dir)
+        #
+        # The session id matters here for the same reason it does on the scan: a
+        # delivered tree's output lands inside this session's sandbox, which no
+        # operator grant names, so without it a client is refused the results of a
+        # scan it was permitted to run.
+        target_error = validate_scan_target(resolved_output_dir, session_id=session_id)
         if target_error:
             return create_error_response(
                 error=target_error,
@@ -1154,10 +1161,17 @@ def mcp_select_profile(
           replaced wholesale by the YAML, validated through `AshConfig`.
 
     `patch_ops` and `override_yaml` are mutually exclusive.
+
+    Every mode materializes the resolved config into the session's own sandbox
+    and records the path, which is what makes the binding observable: a later
+    scan that names no config is handed this path. Before that, the resolved
+    config was stored in a field nothing read, so this call returned
+    ``success: True`` and changed nothing a client could detect.
     """
     from automated_security_helper.cli.mcp.profile_registry import (
         bind_session_config,
         get_profile_registry,
+        materialize_session_config,
     )
     from automated_security_helper.config.runtime_patch import (
         RuntimePatchDeniedError,
@@ -1221,17 +1235,24 @@ def mcp_select_profile(
                 "success": False,
                 "error": f"override_yaml validation error: {exc.errors()}",
             }
+        materialized = _materialize_or_error(
+            materialize_session_config, session_id, new_cfg
+        )
+        if isinstance(materialized, dict):
+            return materialized
         bind_session_config(
             session_id,
             config=new_cfg,
             profile_name=profile_name,
             override_yaml=override_yaml,
+            config_path=materialized,
         )
         return {
             "success": True,
             "mode": "override",
             "profile_name": profile_name,
             "session_id": session_id or _default_session_id(),
+            "config_path": materialized,
         }
 
     if patch_ops is not None:
@@ -1245,30 +1266,76 @@ def mcp_select_profile(
             patched = apply_runtime_patch(base_cfg, patch_ops, allowlist=allowlist)
         except RuntimePatchDeniedError as exc:
             return {"success": False, "error": f"patch denied: {exc}"}
+        materialized = _materialize_or_error(
+            materialize_session_config, session_id, patched
+        )
+        if isinstance(materialized, dict):
+            return materialized
         bind_session_config(
             session_id,
             config=patched,
             profile_name=profile_name,
             patch_ops=patch_ops,
+            config_path=materialized,
         )
         return {
             "success": True,
             "mode": "inherit_and_patch",
             "profile_name": profile_name,
             "session_id": session_id or _default_session_id(),
+            "config_path": materialized,
         }
 
+    materialized = _materialize_or_error(
+        materialize_session_config, session_id, base_cfg
+    )
+    if isinstance(materialized, dict):
+        return materialized
     bind_session_config(
         session_id,
         config=base_cfg,
         profile_name=profile_name,
+        config_path=materialized,
     )
     return {
         "success": True,
         "mode": "static",
         "profile_name": profile_name,
         "session_id": session_id or _default_session_id(),
+        "config_path": materialized,
     }
+
+
+def _materialize_or_error(materialize, session_id, config):
+    """Write the resolved config out, or return this tool's failure shape.
+
+    Returns the path on success and an error dict on failure, which the caller
+    distinguishes with ``isinstance(..., dict)``. The alternative -- letting the
+    exception escape -- would surface as an unhandled error from a tool whose
+    other failure modes all return ``success: False``, so a client would need two
+    ways to detect the same class of problem.
+
+    Binding is NOT attempted when this fails. A bound config whose file does not
+    exist is worse than no binding: every later scan would be handed a path to a
+    missing file and fail with a config error naming a path the client never
+    supplied.
+    """
+    from automated_security_helper.core.resource_management.error_handling import (
+        ErrorCategory,
+    )
+
+    try:
+        return materialize(session_id, config)
+    except (OSError, RuntimeError) as exc:
+        _logger.error(f"Could not materialize the session config: {exc}")
+        return {
+            "success": False,
+            "error": (
+                f"Profile resolved, but its config could not be written to this "
+                f"session's workspace, so a scan could not be given it: {exc}"
+            ),
+            "error_category": ErrorCategory.UNEXPECTED_ERROR.value,
+        }
 
 
 def _default_session_id() -> str:

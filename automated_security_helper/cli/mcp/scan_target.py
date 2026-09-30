@@ -13,24 +13,39 @@ for the operator to say which parts of its filesystem are in play.
 list of directories; when it is set, a scan target must resolve to one of those
 directories or something beneath it, and everything else is refused.
 
-A caller that supplies a ``session_id`` additionally gets its own session
-workspace, ``<workspace_root>/<session_id>``, because ``set_source_git`` and
-``set_source_zip_finalize`` clone or extract into that workspace and hand the
-caller the resulting path to scan -- an allowlist naming only the operator's own
-repositories would otherwise refuse every uploaded tree. Only that one session's
-directory is allowed, never the shared workspace root: the root holds every
-other session's uploaded source, and ``_session_workspace`` exists in
-``source_delivery`` precisely to stop one session reaching a sibling's. A caller
-with no ``session_id`` gets no workspace allowance at all.
+Where the decision now lives
+----------------------------
+:func:`validate_scan_target` is the entry point every MCP tool calls, and it
+still is -- but the decision moved to ``cli/mcp/sandbox.py``, which resolves a
+per-session :class:`~automated_security_helper.cli.mcp.sandbox.SessionSandbox`
+and asks that. This module keeps the name, the signature, and the system-
+directory denylist that the sandbox falls back to on a local transport.
 
-When ``ASH_MCP_ALLOWED_ROOTS`` is unset, a short fixed list of system
-directories is refused instead. That default is a safety net, not a security
-boundary, and the distinction matters: it declines the handful of directories
-that hold host configuration and kernel interfaces rather than source code, and
-it says nothing whatever about the rest of the filesystem. Home directories,
-``/usr``, ``/var`` and everything else stay accepted, because that is where
-code lives. An operator who wants the scan surface actually bounded has to set
-``ASH_MCP_ALLOWED_ROOTS``; nothing else here does that job.
+The move fixed a hole this docstring used to describe as though it were closed.
+The claim was that only one session's own directory is allowed and never the
+shared workspace root -- true, but only inside the ``if allowed:`` branch. With
+``ASH_MCP_ALLOWED_ROOTS`` unset, which is the default, that branch was skipped
+and the denylist below was the only rule; it names six system directories and the
+MCP workspace root is not one of them. So on a default deployment one session
+could name another's delivered source tree and ASH would scan it. The sandbox
+refuses a sibling independent of the grant and of the transport, which is the
+only arrangement in which the claim above is actually true.
+
+The sandbox also confines *config inputs* -- ``validate_config_input`` -- which
+nothing here ever did. See that module's docstring for why an unconfined
+caller-named config path is a file-read oracle rather than a lesser hole.
+
+The fall-back default, unchanged
+--------------------------------
+When no grant applies and the transport is local, a short fixed list of system
+directories is refused and everything else is accepted. That default is a safety
+net, not a security boundary, and the distinction matters: it declines the
+handful of directories that hold host configuration and kernel interfaces rather
+than source code, and it says nothing whatever about the rest of the filesystem.
+Home directories, ``/usr``, ``/var`` and everything else stay accepted, because
+that is where code lives. An operator who wants the scan surface actually bounded
+sets ``ASH_MCP_ALLOWED_ROOTS``; on a network transport the sandbox bounds it
+without one.
 
 Setting the variable replaces the default list rather than adding to it, which
 is also how a deliberate scan of a system directory is arranged: name it as a
@@ -259,25 +274,8 @@ def validate_scan_target(
     also happens not to exist.
     """
 
-    resolved = Path(directory_path).resolve()
+    from automated_security_helper.cli.mcp.sandbox import (
+        validate_scan_target_in_sandbox,
+    )
 
-    allowed = _allowed_roots()
-    if allowed:
-        roots = list(allowed)
-        if session_id:
-            session_root = _session_workspace_root(session_id)
-            if session_root is not None:
-                roots.append(session_root)
-
-        if any(resolved == root or resolved.is_relative_to(root) for root in roots):
-            return None
-        return _refusal(directory_path, resolved)
-
-    if _is_filesystem_root(resolved):
-        return _refusal(directory_path, resolved)
-
-    for denied in _denied_roots():
-        if resolved == denied or resolved.is_relative_to(denied):
-            return _refusal(directory_path, resolved)
-
-    return None
+    return validate_scan_target_in_sandbox(directory_path, session_id=session_id)

@@ -37,6 +37,29 @@ and the scanner module into ``tmp_path`` and repoints the script's module-level
 checkout modified -- which matters more than usual for a script whose job is to
 rewrite tracked source.
 
+Why no specifier is spelled out in this file
+--------------------------------------------
+Every version bound below is read from ``pyproject.toml`` at run time rather than
+written as a literal, and that is a correctness requirement rather than a style
+preference. The script under test repairs the *constant*; it cannot repair a
+fixture. So a spelled-out ``aws-cdk-lib>=2.269.0,<3.0.0`` made the next dependabot
+bump fail four assertions in this file with ``_bump``'s own message -- "not in
+pyproject; the fixture drifted" -- and the documented repair,
+``sync_cdk_extra_fallback.py --fix``, cleared only the half it owns. A gate whose
+own test breaks on the event the gate exists to absorb teaches people to bypass it.
+
+Counted before the change: four assertions carried the ``aws-cdk-lib`` specifier,
+one the ``cdk-nag`` one, and three the ``constructs`` one.
+
+The perturbations are derived too. What each case needs is a specifier that
+*differs* from the declared one, not a specific other value, so ``_bumped`` and
+``_without_ceiling`` transform whatever pyproject currently says. That keeps each
+case's original intent -- a moved floor, a dropped ceiling -- while surviving any
+future bump.
+
+The anti-vacuity control keeps one thing NOT derived, deliberately; see
+``test_fix_is_not_satisfied_by_emptying_the_list``.
+
 Known limitation
 ----------------
 The round-trip test proves ``--fix`` reproduces the committed file byte for byte
@@ -47,11 +70,17 @@ and the fix is to update ``render()`` rather than to relax the assertion.
 from __future__ import annotations
 
 import importlib.util
+import re
 import shutil
 import sys
 from pathlib import Path
 
 import pytest
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:  # pragma: no cover - the whole module is skipped below on 3.10
+    tomllib = None  # type: ignore[assignment]
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "sync_cdk_extra_fallback.py"
@@ -101,6 +130,70 @@ def sandbox(tmp_path, monkeypatch):
     return script, pyproject, scanner
 
 
+#: The three distributions cdk-nag cannot evaluate a rule without: cdk_nag supplies the
+#: packs, aws-cdk-lib the App/Stack/CfnInclude the wrapper synthesizes, and constructs the
+#: base class both are built on. A fact about the wrapper, not about what pyproject
+#: currently lists, which is why the anti-vacuity control below is allowed to name them.
+_LOAD_BEARING = frozenset({"aws-cdk-lib", "cdk-nag", "constructs"})
+
+
+def _declared() -> list[str]:
+    """``[project.optional-dependencies] cdk``, read live from the real pyproject."""
+    with REAL_PYPROJECT.open("rb") as handle:
+        return list(tomllib.load(handle)["project"]["optional-dependencies"]["cdk"])
+
+
+def _distribution_of(requirement: str) -> str:
+    """The distribution name a requirement string names, normalized like pip does."""
+    return (
+        re.split(r"[<>=!~;\[ ]", requirement, maxsplit=1)[0].strip().replace("_", "-")
+    )
+
+
+def _requirement(distribution: str) -> str:
+    """The live specifier for ``distribution``, verbatim.
+
+    Read rather than spelled so a bump does not turn this file into the four red
+    assertions described in the module docstring.
+    """
+    wanted = distribution.replace("_", "-")
+    matches = [r for r in _declared() if _distribution_of(r) == wanted]
+    assert len(matches) == 1, (
+        f"expected exactly one {wanted!r} requirement in the cdk extra, found "
+        f"{matches}. If the extra genuinely dropped it, this test's premise moved and "
+        "needs a human, not a widened match."
+    )
+    return matches[0]
+
+
+def _bumped(requirement: str) -> str:
+    """``requirement`` with the last component of its first version incremented.
+
+    Any differing string would exercise the drift path; incrementing keeps the result
+    readable as a version bump, which is the event being simulated. The result need not
+    be satisfiable -- the script compares spellings and never resolves them.
+    """
+    head, separator, tail = requirement.partition(",")
+    numbers = list(re.finditer(r"\d+", head))
+    assert numbers, f"no numeric component to increment in {requirement!r}"
+    last = numbers[-1]
+    bumped = head[: last.start()] + str(int(last.group()) + 1) + head[last.end() :]
+    return bumped + separator + tail
+
+
+def _without_ceiling(requirement: str) -> str:
+    """``requirement`` with everything from its first comma onward removed.
+
+    The dropped-ceiling case. Asserted to change something, because a requirement that
+    never had a ceiling would make the case silently test nothing.
+    """
+    stripped = requirement.split(",")[0]
+    assert stripped != requirement, (
+        f"{requirement!r} has no ceiling to drop, so this case would perturb nothing"
+    )
+    return stripped
+
+
 def _bump(pyproject: Path, frm: str, to: str) -> None:
     text = pyproject.read_text(encoding="utf-8")
     assert frm in text, f"{frm!r} not in pyproject; the fixture drifted"
@@ -130,7 +223,8 @@ class TestADependabotBumpIsCaughtAndRepaired:
     def test_check_fails_and_changes_nothing(self, sandbox, monkeypatch):
         script, pyproject, scanner = sandbox
         before = scanner.read_bytes()
-        _bump(pyproject, "aws-cdk-lib>=2.269.0,<3.0.0", "aws-cdk-lib>=2.270.0,<3.0.0")
+        declared = _requirement("aws-cdk-lib")
+        _bump(pyproject, declared, _bumped(declared))
         monkeypatch.setattr(sys, "argv", ["x"])
 
         assert script.main() == 1
@@ -138,7 +232,9 @@ class TestADependabotBumpIsCaughtAndRepaired:
 
     def test_fix_repairs_the_constant(self, sandbox, monkeypatch):
         script, pyproject, scanner = sandbox
-        _bump(pyproject, "aws-cdk-lib>=2.269.0,<3.0.0", "aws-cdk-lib>=2.270.0,<3.0.0")
+        declared = _requirement("aws-cdk-lib")
+        moved = _bumped(declared)
+        _bump(pyproject, declared, moved)
         monkeypatch.setattr(sys, "argv", ["x", "--fix"])
 
         assert script.main() == 0
@@ -148,7 +244,7 @@ class TestADependabotBumpIsCaughtAndRepaired:
             )
             == script.declared_requirements()
         )
-        assert "aws-cdk-lib>=2.270.0,<3.0.0" in scanner.read_text(encoding="utf-8")
+        assert moved in scanner.read_text(encoding="utf-8")
 
     def test_fix_round_trips_to_the_committed_bytes(self, sandbox, monkeypatch):
         """``--fix`` on an already-correct file must be a no-op, byte for byte.
@@ -164,27 +260,40 @@ class TestADependabotBumpIsCaughtAndRepaired:
         assert scanner.read_bytes() == before
 
     @pytest.mark.parametrize(
-        "frm,to",
+        "distribution,perturb",
         [
-            ("cdk-nag>=3.0,<4.0.0", "cdk-nag>=4.0,<5.0.0"),
-            ("constructs>=10.8,<11.0.0", "constructs>=11.0,<12.0.0"),
-            ("aws-cdk-lib>=2.269.0,<3.0.0", "aws-cdk-lib>=2.269.0"),
+            ("cdk-nag", _bumped),
+            ("constructs", _bumped),
+            ("aws-cdk-lib", _without_ceiling),
+        ],
+        ids=[
+            "cdk-nag floor moves",
+            "constructs floor moves",
+            "aws-cdk-lib ceiling drops",
         ],
     )
-    def test_any_requirement_moving_is_caught(self, sandbox, monkeypatch, frm, to):
-        """Not just the aws-cdk-lib floor, which is the only one seen so far."""
+    def test_any_requirement_moving_is_caught(
+        self, sandbox, monkeypatch, distribution, perturb
+    ):
+        """Not just the aws-cdk-lib floor, which is the only one seen so far.
+
+        Parametrized over the distribution and the KIND of move rather than over literal
+        before/after pairs. The pairs were the thing a bump invalidated, and each one
+        carried the same information twice: the declared value, which pyproject already
+        holds, and the shape of the change, which is all the case is about.
+        """
         script, pyproject, _ = sandbox
-        _bump(pyproject, frm, to)
+        declared = _requirement(distribution)
+        _bump(pyproject, declared, perturb(declared))
         monkeypatch.setattr(sys, "argv", ["x"])
         assert script.main() == 1
 
     def test_a_requirement_added_to_the_extra_is_caught(self, sandbox, monkeypatch):
         script, pyproject, _ = sandbox
-        _bump(
-            pyproject,
-            '    "constructs>=10.8,<11.0.0",',
-            '    "constructs>=10.8,<11.0.0",\n    "some-new-dep>=1.0,<2.0.0",',
-        )
+        # Anchored on the quoted requirement rather than on a whole line with its
+        # indentation, so this survives a reformat of the extra as well as a bump of it.
+        existing = f'"{_requirement("constructs")}",'
+        _bump(pyproject, existing, f'{existing}\n    "some-new-dep>=1.0,<2.0.0",')
         monkeypatch.setattr(sys, "argv", ["x"])
         assert script.main() == 1
 
@@ -275,6 +384,28 @@ class TestTheGateCannotPassVacuously:
         sides to be empty. The scanner would then have no fallback at all, and
         ``_cdk_extra_requirements`` would hand an empty install list to pip, which
         reports success having installed nothing.
+
+        WHAT THIS ASSERTS AGAINST, AND WHY IT IS NOT READ FROM PYPROJECT
+        ---------------------------------------------------------------
+        The rest of this file reads its expectations from pyproject, which is right for
+        them: they check that ``--fix`` copies what pyproject says. This one may not, and
+        the reason is that deriving would make it circular. The claim being defended is
+        "``--fix`` did not produce a degenerate list", and a bound taken from the same
+        file ``--fix`` reads makes that claim "``--fix`` copied pyproject" -- which
+        ``test_fix_repairs_the_constant`` already establishes. A control satisfied by the
+        mechanism it controls is not a control.
+
+        So the floor is stated independently, and it is a fact about the cdk-nag wrapper
+        rather than about pyproject's current contents: the three distributions in
+        ``_LOAD_BEARING`` are the ones no rule can be evaluated without, which is
+        documented beside the availability probe in ``cdk_nag_scanner.py``. Those three
+        cannot leave the extra without cdk-nag ceasing to work at all.
+
+        A floor and a superset rather than the equality and exact set this used to assert.
+        ``len(after) == 3`` plus a literal name set meant adding a fourth requirement to
+        the extra broke the anti-vacuity control -- so the next legitimate dependency
+        would have arrived as a red control with no defect behind it, which is how a
+        control gets deleted instead of read.
         """
         script, _, scanner = sandbox
         monkeypatch.setattr(sys, "argv", ["x", "--fix"])
@@ -284,12 +415,14 @@ class TestTheGateCannotPassVacuously:
             scanner.read_text(encoding="utf-8").splitlines()
         )
         assert after, "--fix produced an empty fallback list"
-        assert len(after) == 3, after
-        assert {requirement.split(">")[0].split("<")[0] for requirement in after} == {
-            "aws-cdk-lib",
-            "cdk-nag",
-            "constructs",
-        }
+        assert len(after) >= len(_LOAD_BEARING), (
+            f"--fix produced {len(after)} requirement(s), below the {len(_LOAD_BEARING)} "
+            f"cdk-nag cannot run without: {after}"
+        )
+        assert _LOAD_BEARING.issubset({_distribution_of(item) for item in after}), (
+            "--fix dropped a distribution cdk-nag cannot evaluate a rule without; the "
+            f"fallback would install an unusable subset. Got {after}"
+        )
 
     def test_the_comparison_is_against_pyproject_and_not_itself(
         self, sandbox, monkeypatch
@@ -302,7 +435,10 @@ class TestTheGateCannotPassVacuously:
         to the test this script exists to stop breaking.
         """
         script, pyproject, scanner = sandbox
-        _bump(pyproject, "aws-cdk-lib>=2.269.0,<3.0.0", "aws-cdk-lib>=2.271.0,<3.0.0")
+        live = _requirement("aws-cdk-lib")
+        moved = _bumped(live)
+        assert moved != live, "the perturbation must actually change the specifier"
+        _bump(pyproject, live, moved)
 
         declared = script.declared_requirements()
         committed = script.committed_requirements(
@@ -310,5 +446,5 @@ class TestTheGateCannotPassVacuously:
         )
 
         assert declared != committed
-        assert any("2.271.0" in requirement for requirement in declared)
-        assert not any("2.271.0" in requirement for requirement in committed)
+        assert moved in declared
+        assert moved not in committed
