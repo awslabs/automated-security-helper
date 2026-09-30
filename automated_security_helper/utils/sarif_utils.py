@@ -747,6 +747,22 @@ def apply_suppressions_to_sarif(
                         package_name, package_version, package_path = (
                             extract_package_identity(result.properties)
                         )
+                        # package_path is compared in the form a suppression
+                        # writes it: relative to the scan root. Converters emit
+                        # it that way, but SARIF from an older ASH or another
+                        # tool may carry the absolute source-dir prefix (on
+                        # Windows, drive included), which is stripped here the
+                        # same way the location URI is. The basename argument
+                        # is None: that case exists for one scanner's location
+                        # URIs and would strip a real leading directory here.
+                        if package_path:
+                            package_path = _normalize_sarif_uri(
+                                package_path,
+                                _source_dir_prefix,
+                                _source_dir_prefix_with_slash,
+                                _source_dir_prefix_no_drive,
+                                None,
+                            )
 
                         flat_finding = FlatVulnerability(
                             package_name=package_name,

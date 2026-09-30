@@ -261,9 +261,16 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
                         else None
                     )
                     line = root.region.startLine if root and root.region else None
-                    entry = lock_index.by_line(uri, line) if uri and line else None
+                    # Relativized the same way as grype's, so package_path is
+                    # POSIX and scan-root-relative whatever form trivy used.
+                    lock_rel = lock_index.relative(uri) if uri else None
+                    entry = (
+                        lock_index.by_line(lock_rel, line)
+                        if lock_rel and line
+                        else None
+                    )
                     resolved.append(
-                        install_path(uri, entry.key) if entry is not None else None
+                        install_path(lock_rel, entry.key) if entry is not None else None
                     )
 
                 if resolved and all(resolved):

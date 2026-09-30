@@ -312,10 +312,16 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
             physical = result.locations[0].physicalLocation
             if physical and physical.root and physical.root.artifactLocation:
                 uri = physical.root.artifactLocation.uri
-        if uri:
-            entry = lock_index.unique_by_name_version(uri, name, version)
+        # grype's URI is not scan-root-relative on Windows: it is the scan root
+        # followed by a backslashed relative path, "D:/a/r/r/\\deploy\\cdk\\...".
+        # sanitize_sarif_paths fixes the location later, but package_path is
+        # built here, so the lockfile is relativized here too. None (outside
+        # the scan root) claims no path.
+        lock_rel = lock_index.relative(uri) if uri else None
+        if lock_rel:
+            entry = lock_index.unique_by_name_version(lock_rel, name, version)
             if entry is not None:
-                path = install_path(uri, entry.key)
+                path = install_path(lock_rel, entry.key)
 
         identity = identity_properties(name, version, path)
         if result.properties is None:

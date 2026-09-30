@@ -78,7 +78,10 @@ The package fields narrow a suppression to one copy:
   npm lockfile this is the lockfile's directory joined with the key of the
   copy's entry in the lockfile's `packages` map, for example
   `deploy/cdk/node_modules/aws-cdk-lib/node_modules/brace-expansion`. Glob, with
-  `**` support like `path`.
+  `**` support like `path`. ASH reports it with forward slashes and no drive
+  letter on every platform, so one entry works on Windows, Linux and macOS.
+  `path` and `package_path` treat `\` as a separator, so a pattern written with
+  backslashes compares the same way everywhere.
 
 Every package field you set has to match. A finding that doesn't report a field
 you set is not suppressed, so when a scanner can't tell which copy a finding

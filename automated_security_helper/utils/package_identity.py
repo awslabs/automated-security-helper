@@ -19,7 +19,10 @@ Converters record that in ``result.properties`` under three keys:
     Where the package is installed, relative to the scan root: the lockfile's
     directory joined with the lockfile's ``packages`` key, for example
     ``deploy/cdk/node_modules/aws-cdk-lib/node_modules/brace-expansion``. Only
-    set when the lockfile pins the finding to exactly one entry.
+    set when the lockfile pins the finding to exactly one entry. Always POSIX
+    form: forward slashes, no drive, no scan-root prefix, on every platform,
+    because a suppression's ``package_path`` is written that way once and read
+    on every platform. :func:`scan_relative_path` produces the lockfile part.
 
 Each key is written only when the converter knows it. A package-scoped
 suppression that asks for a key the finding does not carry does not match, so
@@ -35,9 +38,10 @@ from __future__ import annotations
 import json
 import posixpath
 import re
+from contextlib import suppress
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -129,12 +133,72 @@ def load_npm_lock_entries(lockfile: Path) -> Optional[List[NpmLockEntry]]:
     return entries
 
 
+def scan_relative_path(uri: str, root: PurePath) -> Optional[str]:
+    """A scanner-reported file location as a POSIX path relative to ``root``.
+
+    Scanners do not agree on how to spell a location, and neither do platforms.
+    On Windows grype reports ``D:/a/repo/repo/\\deploy\\cdk\\package-lock.json``:
+    the scan root it was given, then the relative path with backslashes. On
+    POSIX it reports ``/deploy/cdk/package-lock.json``, relative to the scan
+    root but with a leading slash. Both must become
+    ``deploy/cdk/package-lock.json``, or ``package_path`` carries the drive and
+    the runner's checkout directory and matches no suppression.
+
+    The URI is parsed with the path semantics of ``root``'s platform:
+    ``PureWindowsPath`` rules when ``root`` is a Windows path (a real
+    ``WindowsPath`` on Windows, or a ``PureWindowsPath`` in a test), POSIX rules
+    otherwise. So a backslash is a separator on Windows and an ordinary filename
+    character on POSIX, never rewritten by a textual replace.
+
+    Returns None when the location is not inside ``root``: an absolute path with
+    a drive or prefix outside it, or a relative path that climbs out with
+    ``..``. No path is then claimed, so a package-scoped suppression fails
+    closed rather than matching a package somewhere else.
+    """
+    if not uri:
+        return None
+    flavor = PureWindowsPath if isinstance(root, PureWindowsPath) else PurePosixPath
+    candidate = flavor(uri)
+    rel: Optional[PurePath] = None
+    if candidate.is_absolute():
+        with suppress(ValueError):
+            rel = candidate.relative_to(flavor(root))
+        if rel is None and isinstance(root, Path):
+            # Lexical comparison fails when the two sides are spelled
+            # differently for one directory: /tmp vs /private/tmp on macOS, an
+            # 8.3 short name on Windows. Resolving puts them in one namespace.
+            with suppress(ValueError, OSError):
+                rel = Path(uri).resolve().relative_to(root.resolve())
+        if rel is None and not candidate.drive:
+            # POSIX "/deploy/..." from grype: rooted, but relative to the scan
+            # root. A drive-qualified path outside the root is never this.
+            rel = candidate.relative_to(candidate.anchor)
+    elif candidate.anchor:
+        # Windows "\\deploy\\..." (rooted, no drive) or "D:deploy" (drive, not
+        # rooted): treated as relative to the scan root only when no drive
+        # names somewhere else.
+        if candidate.drive:
+            return None
+        rel = candidate.relative_to(candidate.anchor)
+    else:
+        rel = candidate
+    if rel is None or ".." in rel.parts or not rel.parts:
+        return None
+    return rel.as_posix()
+
+
 class NpmLockIndex:
     """Caches parsed lockfiles for one converter pass."""
 
-    def __init__(self, root: Path):
-        self.root = Path(root)
+    def __init__(self, root: Union[str, PurePath]):
+        # A PurePath is kept as given so its platform flavor survives; that is
+        # what lets a POSIX test host exercise Windows path semantics.
+        self.root = root if isinstance(root, PurePath) else Path(root)
         self._cache: Dict[str, Optional[List[NpmLockEntry]]] = {}
+
+    def relative(self, uri: str) -> Optional[str]:
+        """``uri`` relative to this index's scan root; see :func:`scan_relative_path`."""
+        return scan_relative_path(uri, self.root)
 
     def entries(self, lockfile_rel: str) -> Optional[List[NpmLockEntry]]:
         rel = lockfile_rel.lstrip("/")
@@ -171,8 +235,15 @@ class NpmLockIndex:
 
 
 def install_path(lockfile_rel: str, key: str) -> str:
-    """Join the lockfile's directory and a ``packages`` key into a posix path."""
-    directory = posixpath.dirname(lockfile_rel.replace("\\", "/").lstrip("/"))
+    """Join the lockfile's directory and a ``packages`` key into a posix path.
+
+    ``lockfile_rel`` must already be POSIX and relative to the scan root, as
+    :func:`scan_relative_path` or ``Path.relative_to(...).as_posix()`` returns
+    it. A scanner's raw URI is not: on Windows it can carry a drive and the scan
+    root, which this function has no way to remove. npm lockfile keys always use
+    forward slashes.
+    """
+    directory = posixpath.dirname(lockfile_rel)
     return posixpath.normpath(posixpath.join(directory, key)) if directory else key
 
 
