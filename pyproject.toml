@@ -41,6 +41,10 @@ dependencies = [
  # Transitive via pyjwt[crypto] <- mcp[crypto]; pinned to patch GHSA-g6cj-pr64-35w5.
  # >=50.0 keeps that floor: the advisory affects >= 44.0.0, < 50.0.0, so 50.0.0 is the fix.
  "cryptography>=50.0,<51",
+ # Transitive via mcp[crypto]. The floor keeps a resolver from picking 2.13.0, which ten
+ # advisories published 2026-09-29 cover (GHSA-ffc3-869f-jxw9 critical among them); every
+ # one of them is fixed in 2.14.0.
+ "pyjwt>=2.14,<3",
  "uvicorn>=0.53.0,<1",
  "jsonpatch>=1.33,<2",
 ]
