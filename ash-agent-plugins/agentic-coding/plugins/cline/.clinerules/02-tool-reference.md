@@ -5,7 +5,7 @@
      generator (prose and caveats live in its TOOL_NOTES table) and re-run it,
      then `agentic-plugins build` to propagate to every plugin backend. -->
 
-The ASH MCP server exposes twenty-one tools and five resources.
+The ASH MCP server exposes twenty-two tools and five resources.
 
 ## run_ash_scan
 
@@ -193,6 +193,7 @@ Resolve a VS Code workspace file into a scan plan without scanning anything.
 | `workspace_config` | string \| null | `null` | Optional path to a workspace policy file. Must exist if given; ASH will not fall back to searching for one. |
 | `allow_missing_projects` | boolean | `false` | Mark project directories that are absent or unreadable as skipped instead of refusing the workspace. |
 | `config_overrides` | array \| null | `null` | Optional list of `key=value` config overrides, applied to each project's config so the reported threshold is the enforced one. |
+| `profile` | string \| null | `null` | Name of a registered config profile to resolve under for this one call, instead of whatever select_profile bound to this session. Call list_profiles to see what the operator registered. |
 
 ## run_ash_workspace_scan
 
@@ -209,6 +210,17 @@ Scan every project in a VS Code workspace and return the per-project verdict.
 | `excluded_scanners` | array \| null | `null` | Exclude these scanners from every project. Takes precedence over `scanners`. |
 | `offline` | boolean | `false` | Run without network access. |
 | `clean_output` | boolean | `true` | Remove each project's previous aggregated-results file first. |
+| `profile` | string \| null | `null` | Name of a registered config profile to scan under for this one call, instead of whatever select_profile bound to this session. An unknown name refuses the whole scan; running N repository scans under the default config because a profile name was misspelled, and reporting success, is exactly what the confinement refusal above exists to prevent. |
+
+## select_profile
+
+Bind one of the operator's registered config profiles to this session.
+
+| Param | Type | Default | Notes |
+|-------|------|---------|-------|
+| `profile_name` | string | *required* | Name the operator registered the profile under. |
+| `patch_ops` | array \| null | `null` | JSON-Patch operations to apply to the profile's config. |
+| `override_yaml` | string \| null | `null` | Complete ASH config YAML replacing the profile's. |
 
 ## set_source_git
 
