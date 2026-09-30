@@ -23,7 +23,6 @@ from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
 )
 from automated_security_helper.core.resource_management.scan_tracking import (
-    check_scan_completion,
     create_scan_progress_from_files,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -614,20 +613,46 @@ class ScanRegistry:
                 raise error
 
             try:
-                # Check if scan has completed based on file existence
-                is_complete = check_scan_completion(output_dir)
-                if is_complete and entry.status != MCScanStatus.COMPLETED:
-                    # Update scan status to completed
-                    entry.mark_completed()
-
-                # Create scan progress object from files
+                # Create scan progress object from files. The response's status is
+                # the entry's, so the entry is reconciled with what the file says
+                # below rather than with the file merely existing: marking it
+                # completed on existence is how a file that did not parse came back
+                # as a completed scan with no scanners.
                 scan_progress = create_scan_progress_from_files(scan_id, output_dir)
 
-                # If scan is marked as completed in the registry, ensure it's also completed in the progress object
-                if (
-                    entry.status == MCScanStatus.COMPLETED
-                    and scan_progress.status != "completed"
-                ):
+                if scan_progress.status == "completed":
+                    if entry.status != MCScanStatus.COMPLETED:
+                        entry.mark_completed()
+                elif scan_progress.status == "failed":
+                    # The results file exists and cannot be read as results. A scan
+                    # that already failed or was cancelled keeps its own reason.
+                    if entry.status not in (
+                        MCScanStatus.FAILED,
+                        MCScanStatus.CANCELLED,
+                    ):
+                        entry.mark_failed(
+                            scan_progress.error_message
+                            or "Aggregated results file could not be read"
+                        )
+                elif scan_progress.results_pending:
+                    # The SCAN phase's interim document, without scanner_results.
+                    # While the scan runs that means "not finished"; once the entry
+                    # was closed as completed, the final document never arrived.
+                    if entry.status == MCScanStatus.COMPLETED:
+                        results_path = output_dir / "ash_aggregated_results.json"
+                        scan_progress.mark_failed()
+                        scan_progress.error_message = (
+                            f"Aggregated results file {results_path} has neither "
+                            "scanner_results nor sarif, and the scan has ended, so it "
+                            "never wrote its final results"
+                        )
+                        entry.mark_failed(scan_progress.error_message)
+                elif entry.status == MCScanStatus.COMPLETED:
+                    # No results file, and whoever ran the scan closed the entry as
+                    # completed. The entry owns the lifecycle here: a workspace
+                    # closes a project's entry this way when the run returned and
+                    # nothing says the project did not. This is the only case the
+                    # registry still overrides the file-derived status.
                     scan_progress.mark_completed()
 
                 # Convert scan progress to dictionary

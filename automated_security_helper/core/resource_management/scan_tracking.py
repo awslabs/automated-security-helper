@@ -202,6 +202,13 @@ class ScanProgress:
         self.duration: Optional[float] = None
         self.total_findings: int = 0
         self.severity_counts: Dict[str, int] = empty_severity_counts()
+        # Why the scan is "failed" when the aggregated results file could not be
+        # read as results. None otherwise.
+        self.error_message: Optional[str] = None
+        # The aggregated file exists but is not the final document yet; see
+        # create_scan_progress_from_files. The caller decides what that means,
+        # because only the registry knows whether the scan is still running.
+        self.results_pending: bool = False
 
     def add_scanner_progress(self, scanner_progress: ScannerProgress) -> None:
         """
@@ -323,6 +330,7 @@ class ScanProgress:
             "total_findings": self.total_findings,
             "severity_counts": self.severity_counts,
             "scanners": scanner_progress_dict,
+            "error_message": self.error_message,
         }
 
 
@@ -646,11 +654,107 @@ def parse_aggregated_results(
     return data
 
 
+class _UnusableResultsError(ValueError):
+    """The aggregated results document is the wrong shape somewhere specific."""
+
+
+def _add_aggregated_scanner_progress(
+    scan_progress: ScanProgress, results: Dict[str, Any]
+) -> None:
+    """Add one ScannerProgress per entry in an aggregated results document.
+
+    ``results`` has already passed ``validate_result_structure``. That checks the
+    containers, not the entries in them, so an entry that is not an object is
+    rejected here with its scanner named.
+    """
+    findings = []
+
+    # Try to extract findings from SARIF data if available
+    if "sarif" in results and results["sarif"] and "runs" in results["sarif"]:
+        for run in results["sarif"]["runs"]:
+            if "results" in run:
+                for result in run["results"]:
+                    # Convert SARIF result to a simplified finding
+                    finding = {
+                        "id": result.get("ruleId", "unknown"),
+                        "severity": result.get("level", "MEDIUM").upper(),
+                        "scanner": run.get("tool", {})
+                        .get("driver", {})
+                        .get("name", "unknown"),
+                    }
+                    findings.append(finding)
+
+    scanner_results = results.get("scanner_results") or {}
+    for scanner_name, scanner_info in scanner_results.items():
+        if not isinstance(scanner_info, dict):
+            raise _UnusableResultsError(
+                f"scanner_results[{scanner_name!r}] must be an object, found "
+                f"{type(scanner_info).__name__}"
+            )
+
+    # If no findings were found in SARIF, check scanner_results
+    if not findings:
+        for scanner_name, scanner_info in scanner_results.items():
+            # Create a finding for each scanner with severity counts
+            severity_counts = scanner_info.get("severity_counts", {})
+            for severity, count in severity_counts.items():
+                if count > 0:
+                    finding = {
+                        "id": f"{scanner_name}-{severity.lower()}",
+                        "severity": severity.upper(),
+                        "scanner": scanner_name,
+                        "count": count,
+                    }
+                    findings.append(finding)
+
+    # Create scanner progress objects for each completed scanner
+    for scanner_name, scanner_info in scanner_results.items():
+        # Filter findings for this scanner
+        scanner_findings = [f for f in findings if f.get("scanner") == scanner_name]
+
+        # Create scanner progress for source target
+        source_progress = ScannerProgress(
+            scanner_name=scanner_name,
+            target_type="source",
+            status=MCScannerStatus.COMPLETED,
+            finding_count=scanner_info.get("finding_count", 0),
+        )
+
+        # Update severity counts from scanner_info
+        if "severity_counts" in scanner_info:
+            source_progress.severity_counts = scanner_info["severity_counts"]
+        else:
+            source_progress.update_findings(scanner_findings)
+
+        source_progress.mark_completed()
+
+        # Add to scan progress
+        scan_progress.add_scanner_progress(source_progress)
+
+
 def create_scan_progress_from_files(
     scan_id: str, output_dir: Path | None = None
 ) -> ScanProgress:
     """
     Create a ScanProgress object by analyzing scan result files.
+
+    Once ``ash_aggregated_results.json`` exists, the progress is built from it, and
+    there are three outcomes:
+
+    * The file is a results document: ``completed``, with one entry per scanner.
+    * The file cannot be read as results -- it does not parse, is not a JSON object,
+      or has ``scanner_results``/``sarif`` of the wrong shape: ``failed``, with
+      ``error_message`` naming the file and what is wrong with it. Since the file is
+      replaced atomically (utils/atomic_write.py) a reader never sees a write in
+      progress, so this is a file that is corrupt, truncated on disk, or not ASH's.
+      It used to fall through to a completed scan with no scanners.
+    * The file is a JSON object with neither ``scanner_results`` nor ``sarif``:
+      ``results_pending`` is set and the status is left ``in_progress``. The SCAN
+      phase writes exactly that before the REPORT phase runs, because ``save_model``
+      dumps with ``exclude_unset`` and the scan fills ``scanner_results`` in place;
+      ``_run_local_mode`` replaces it with the full document at the end. Whether it
+      means "not finished yet" or "finished without results" depends on whether the
+      scan is still running, which only the registry knows, so the caller decides.
 
     Args:
         scan_id: ID of the scan
@@ -668,90 +772,51 @@ def create_scan_progress_from_files(
     scan_progress = ScanProgress(scan_id=scan_id)
 
     if is_complete:
-        try:
-            # Parse aggregated results for completed scans
-            results = parse_aggregated_results(output_dir)
+        aggregated_results_path = output_dir / "ash_aggregated_results.json"
 
-            if results:
-                # Update scan progress with aggregated results
-                scan_progress.mark_completed()
-
-                # Extract findings from aggregated results
-                findings = []
-
-                # Try to extract findings from SARIF data if available
-                if (
-                    "sarif" in results
-                    and results["sarif"]
-                    and "runs" in results["sarif"]
-                ):
-                    for run in results["sarif"]["runs"]:
-                        if "results" in run:
-                            for result in run["results"]:
-                                # Convert SARIF result to a simplified finding
-                                finding = {
-                                    "id": result.get("ruleId", "unknown"),
-                                    "severity": result.get("level", "MEDIUM").upper(),
-                                    "scanner": run.get("tool", {})
-                                    .get("driver", {})
-                                    .get("name", "unknown"),
-                                }
-                                findings.append(finding)
-
-                # If no findings were found in SARIF, check scanner_results
-                if not findings and "scanner_results" in results:
-                    for scanner_name, scanner_info in results[
-                        "scanner_results"
-                    ].items():
-                        # Create a finding for each scanner with severity counts
-                        severity_counts = scanner_info.get("severity_counts", {})
-                        for severity, count in severity_counts.items():
-                            if count > 0:
-                                finding = {
-                                    "id": f"{scanner_name}-{severity.lower()}",
-                                    "severity": severity.upper(),
-                                    "scanner": scanner_name,
-                                    "count": count,
-                                }
-                                findings.append(finding)
-
-                # Create scanner progress objects for each completed scanner
-                for scanner_name, scanner_info in results.get(
-                    "scanner_results", {}
-                ).items():
-                    # Filter findings for this scanner
-                    scanner_findings = [
-                        f for f in findings if f.get("scanner") == scanner_name
-                    ]
-
-                    # Create scanner progress for source target
-                    source_progress = ScannerProgress(
-                        scanner_name=scanner_name,
-                        target_type="source",
-                        status=MCScannerStatus.COMPLETED,
-                        finding_count=scanner_info.get("finding_count", 0),
-                    )
-
-                    # Update severity counts from scanner_info
-                    if "severity_counts" in scanner_info:
-                        source_progress.severity_counts = scanner_info[
-                            "severity_counts"
-                        ]
-                    else:
-                        source_progress.update_findings(scanner_findings)
-
-                    source_progress.mark_completed()
-
-                    # Add to scan progress
-                    scan_progress.add_scanner_progress(source_progress)
-
+        def unusable(reason: str) -> ScanProgress:
+            # Discard anything partially built, so a failed read never carries
+            # scanners that look like results.
+            scan_progress.scanners = {}
+            scan_progress.update_totals()
+            scan_progress.mark_failed()
+            scan_progress.error_message = (
+                f"Aggregated results file {aggregated_results_path} is not a usable "
+                f"results document: {reason}"
+            )
+            _logger.error(scan_progress.error_message)
             return scan_progress
 
+        try:
+            results = parse_aggregated_results(output_dir)
         except MCPResourceError as e:
-            # Handle errors parsing aggregated results
+            # safe_read_json_file's message already names the file and the parse
+            # error, e.g. "Invalid JSON format in file <path>: Expecting value: ...".
             _logger.error(f"Error parsing aggregated results: {str(e)}")
             scan_progress.mark_failed()
+            scan_progress.error_message = str(e)
             return scan_progress
+
+        if not isinstance(results, dict):
+            return unusable(f"expected a JSON object, found {type(results).__name__}")
+
+        if results.get("sarif") is None and results.get("scanner_results") is None:
+            scan_progress.results_pending = True
+            return scan_progress
+
+        is_valid, validation_error = validate_result_structure(results)
+        if not is_valid:
+            return unusable(str(validation_error))
+
+        try:
+            _add_aggregated_scanner_progress(scan_progress, results)
+        except _UnusableResultsError as e:
+            return unusable(str(e))
+        except (AttributeError, TypeError, ValueError) as e:
+            return unusable(f"{type(e).__name__}: {e}")
+
+        scan_progress.mark_completed()
+        return scan_progress
     else:
         # Find individual scanner result files
         scanner_results = find_scanner_result_files(output_dir)

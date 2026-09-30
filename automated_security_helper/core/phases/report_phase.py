@@ -10,6 +10,7 @@ from automated_security_helper.base.reporter_plugin import (
 )
 from automated_security_helper.core.enums import ExecutionPhase
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.utils.atomic_write import write_text_atomically
 from automated_security_helper.utils.log import ASH_LOGGER
 
 #: The reporter for this format is switched off in configuration. This is the
@@ -418,8 +419,11 @@ class ReportPhase(EnginePhase):
                         ASH_LOGGER.info(
                             f"Writing {display_name} report to {output_file}"
                         )
-                        with open(output_file, mode="w", encoding="utf-8") as f:
-                            f.write(report_result)
+                        # Atomically: open(path, "w") creates the file empty before
+                        # writing it, so a reader waiting for the report to exist
+                        # (an MCP client, or the integration fixture) could read it
+                        # empty or half-written. See utils/atomic_write.py.
+                        write_text_atomically(output_file, report_result)
 
                         results.append(report_result)
 

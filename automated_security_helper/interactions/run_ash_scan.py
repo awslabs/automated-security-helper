@@ -1148,9 +1148,12 @@ def _run_local_mode(
             )
             sarif_path = opts.output_dir / "reports" / "ash.sarif"
             if sarif_path.exists() and results.sarif:
-                sarif_path.write_text(
+                # Replaced atomically for the same reason as the aggregated file
+                # below: ash.sarif already exists, so a reader waiting on it would
+                # otherwise open it mid-rewrite.
+                write_text_atomically(
+                    sarif_path,
                     results.sarif.model_dump_json(indent=2, by_alias=True),
-                    encoding="utf-8",
                 )
 
         if isinstance(results, BaseModel):
