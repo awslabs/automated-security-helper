@@ -196,6 +196,14 @@ _NPM_CACHE_REASON = (
     "this project builds."
 )
 
+_GRYPE_DB_CACHE_REASON = (
+    "grype's published vulnerability database, fetched from upstream and "
+    "re-verified by grype on start. Third-party public data; this project builds "
+    "none of it. Saved from the default branch only, and keyed on a time bucket "
+    "derived from the bound grype enforces (automated_security_helper/utils/"
+    "content_databases.py), so no restored copy is older than that bound."
+)
+
 ALLOWLIST: tuple[Entry, ...] = (
     # -- Artifact uploads -----------------------------------------------------
     #
@@ -351,19 +359,50 @@ ALLOWLIST: tuple[Entry, ...] = (
         ),
     ),
     # -- Standalone caches ----------------------------------------------------
+    # The grype database: restored everywhere, saved only from a push to the default
+    # branch, keyed on the time bucket content_databases.py derives from the bound grype
+    # enforces. Four sites, one entry: the reusable scan workflow restores and (for a
+    # caller's default-branch push) saves; ash-repo-scan.yml's main-only job is this
+    # repository's writer, since the scan itself does not run on a push here.
     Entry(
         file=".github/workflows/run-ash-security-scan.yml",
         kind=KIND_CACHE,
-        action="actions/cache",
+        action="actions/cache/restore",
         publishes=(
             "path=~/.cache/grype/db "
-            "key=grype-db-${{ runner.os }}-${{ steps.cachekeys.outputs.day }}"
+            "key=grype-db-${{ runner.os }}-${{ steps.cachekeys.outputs.grype-db }}"
         ),
-        reason=(
-            "grype's published vulnerability database, fetched from upstream and "
-            "re-verified by grype on start. Third-party public data; this project "
-            "builds none of it."
+        reason=_GRYPE_DB_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/workflows/run-ash-security-scan.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=~/.cache/grype/db "
+            "key=grype-db-${{ runner.os }}-${{ steps.cachekeys.outputs.grype-db }}"
         ),
+        reason=_GRYPE_DB_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/workflows/ash-repo-scan.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/restore",
+        publishes=(
+            "path=~/.cache/grype/db "
+            "key=grype-db-${{ runner.os }}-${{ steps.key.outputs.grype-db }}"
+        ),
+        reason=_GRYPE_DB_CACHE_REASON + " A lookup-only probe; it downloads nothing.",
+    ),
+    Entry(
+        file=".github/workflows/ash-repo-scan.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=~/.cache/grype/db "
+            "key=grype-db-${{ runner.os }}-${{ steps.key.outputs.grype-db }}"
+        ),
+        reason=_GRYPE_DB_CACHE_REASON,
     ),
     Entry(
         file=".github/workflows/run-ash-security-scan.yml",

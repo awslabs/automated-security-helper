@@ -5,6 +5,11 @@ on:
       - "*"
   merge_group:
   workflow_dispatch: {}
+  # For the grype-db-cache job only. The scan job below skips pushes, so a merge does
+  # not run a second full scan; see that job for why main has to be where the grype
+  # database cache is written.
+  push:
+    branches: [main]
 env:
   PYTHON_VERSION: "3.12"
 
@@ -24,6 +29,10 @@ concurrency:
 
 jobs:
   ash:
+    # Not on push. The push trigger exists for grype-db-cache; running the scan there too
+    # would add a scan per merge and a code-scanning upload for main, neither of which
+    # this change is about.
+    if: github.event_name != 'push'
     # uses: awslabs/automated-security-helper/.github/workflows/run-ash-security-scan.yml@v3.0.0-beta
     uses: ./.github/workflows/run-ash-security-scan.yml
     permissions:
@@ -59,3 +68,94 @@ jobs:
       # scan -- correctly, because the CloudFormation in this repository was
       # never actually being checked.
       install-cfn-nag: true
+
+  # WHY THIS JOB EXISTS
+  #
+  # The grype database cache in run-ash-security-scan.yml is restored on every run
+  # and saved only from a push to the default branch, so pull requests stop writing
+  # one ~475 MB entry each. That workflow never runs on a push here, so without a
+  # writer on main no pull request would ever restore a warm database. This job is
+  # that writer: on each push to main it checks whether the current time bucket
+  # already has an entry, and if not, installs grype, fetches the database, checks
+  # it is fresh enough to be cached, and saves it under exactly the key the scan
+  # workflow restores.
+  #
+  # The bucket, the bound grype is told and the save-side age check all come from
+  # automated_security_helper/utils/content_databases.py, the same as in the scan
+  # workflow, so the two cannot disagree about the key or the bound.
+  #
+  # Cadence: one entry per bucket (a day, for grype's bound today), written by the first
+  # push to main in that bucket. Before this, the key rotated daily as well, but was
+  # written once per pull request per day.
+  grype-db-cache:
+    name: Refresh the grype database cache (main only)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      # No uv cache: this job adds no cache other than the grype database it exists for.
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+
+      - name: Compute the grype database cache key
+        id: key
+        run: |
+          set -euo pipefail
+          bucket="$(python -m automated_security_helper.utils.content_databases cache-key grype-db)"
+          echo "grype-db=${bucket}" >> "$GITHUB_OUTPUT"
+          echo "grype database cache bucket: ${bucket}"
+
+      - name: Look up the current bucket's entry
+        id: lookup
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/grype/db
+          key: grype-db-${{ runner.os }}-${{ steps.key.outputs.grype-db }}
+          lookup-only: true
+
+      - name: Install grype and fetch its database
+        if: steps.lookup.outputs.cache-hit != 'true'
+        env:
+          ASH_TOOL_BIN: ${{ runner.temp }}/ash-tools
+        run: |
+          set -euo pipefail
+          uvx --from . ash dependencies install --tool grype --bin-path "${ASH_TOOL_BIN}"
+          # The bound grype enforces, from the registry rather than grype's default.
+          while IFS= read -r assignment; do
+            export "${assignment?}"
+          done < <(python -m automated_security_helper.utils.content_databases bound-env grype-db)
+          "${ASH_TOOL_BIN}/grype" db update
+          "${ASH_TOOL_BIN}/grype" db status
+
+      - name: Check the grype database may be saved
+        id: fresh
+        if: steps.lookup.outputs.cache-hit != 'true'
+        env:
+          ASH_TOOL_BIN: ${{ runner.temp }}/ash-tools
+        run: |
+          set -uo pipefail
+          built="$("${ASH_TOOL_BIN}/grype" db status -o json 2>/dev/null \
+            | python -c 'import json,sys; print(json.load(sys.stdin).get("built",""))' 2>/dev/null)"
+          if [ -n "${built}" ] && python -m automated_security_helper.utils.content_databases \
+              check-age grype-db --built "${built}" --for save; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::not saving the grype database (built '${built:-unknown}'): too close to its bound to be cached."
+          fi
+
+      - name: Save the grype database cache (main only)
+        if: >-
+          steps.fresh.outputs.ok == 'true'
+          && github.event_name == 'push'
+          && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/grype/db
+          key: grype-db-${{ runner.os }}-${{ steps.key.outputs.grype-db }}

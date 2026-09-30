@@ -210,7 +210,10 @@ class TestValidateGrypeOfflineMode:
 
             assert is_valid  # Still valid, just warns
             assert len(messages) == 1
-            assert "Database is 10 days old, consider updating" in messages[0]
+            assert (
+                "Database is 10 days old, past the 120h bound, consider updating"
+                in messages[0]
+            )
 
     def test_multiple_database_file_types(self, tmp_path):
         """Test validation with different database file types."""
@@ -436,4 +439,7 @@ class TestIntegrationScenarios:
             # Should still be valid but with warning
             assert is_valid
             assert len(messages) == 1
-            assert "Database is 15 days old, consider updating" in messages[0]
+            assert (
+                "Database is 15 days old, past the 120h bound, consider updating"
+                in messages[0]
+            )
