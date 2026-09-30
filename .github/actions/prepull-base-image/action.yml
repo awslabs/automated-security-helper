@@ -70,6 +70,161 @@ description: >-
 # authoritative: the reference the build resolves is unchanged, and the common path is byte for
 # byte the path that ran before this fallback existed.
 #
+# HOW THE FALLBACK REACHES THE BUILD, AND WHY A LOCAL TAG IS NOT ENOUGH
+#
+# The first version of the fallback pulled from Docker Hub, tagged the result locally under
+# the ECR reference, and announced that "the build resolves it from the local store without
+# touching public.ecr.aws". That sentence was not something the step could guarantee, and it
+# is the reason a broken path looked healthy: the step exited 0, the log said the base image
+# was in place, and the build died seconds later still asking ECR Public for it:
+#
+#     >>> FROM ${BASE_IMAGE} AS uv-reqs
+#     error: failed to solve: public.ecr.aws/docker/library/python:3.12-slim-bookworm:
+#     failed to resolve source metadata for ...: 429 Too Many Requests
+#     toomanyrequests: Data limit exceeded
+#
+# An earlier version of this comment attributed that log to the finch leg and explained it by
+# finch running BuildKit's OCI worker. The explanation is wrong -- finch does not run that
+# worker, per the table below -- so the attribution is not repeated here. Which leg emitted it
+# is NOT established: the job logs were not re-read while correcting this, and the shape is
+# consistent with either an unconfigured nerdctl leg or a docker cell on a docker-container
+# builder, both of which genuinely cannot read the local tag. Recorded as unresolved rather
+# than reassigned to whichever runtime now fits, because guessing a second time is how the
+# first wrong attribution got written down as fact.
+#
+# WHAT ACTUALLY DECIDES IT, READ FROM BUILDKIT RATHER THAN INFERRED
+#
+# For a BuildKit builder the whole question is one guard in
+# sourceresolver/imageresolver.go's `ResolveImageMetadata` (quoted at v0.31.2, the version
+# nerdctl v2.3.5 pins). The registry is tried first; when that fails:
+#
+#     if rm != resolver.ResolveModeDefault || is.ImageStore == nil {
+#         return nil, err
+#     }
+#     localRslvr := rslvr.WithImageStore(is.ImageStore, resolver.ResolveModePreferLocal)
+#     if _, _, localErr := localRslvr.ResolveLocal(ctx, ref); localErr != nil {
+#         return nil, err
+#     }
+#
+# So the local store IS consulted after a registry refusal -- including a 429 -- but only when
+# BOTH hold: the resolve mode is the default (which it is, since nothing here passes `--pull`),
+# and the worker has an image store at all. `ImageStore` is the only variable, and it is a
+# property of which worker buildkitd is running:
+#
+#   worker/runc/runc.go        `ImageStore: nil, // explicitly`   -- upstream's own comment
+#   worker/containerd/...      bound to one containerd namespace
+#
+# Note which way that cuts: a non-nil store rescues the build on the PRIMARY path too, not just
+# the fallback path. If ECR Public serves this step's pull and then refuses buildkitd's own
+# resolve moments later -- different client, same shared address -- a worker with a store finds
+# the image this step just placed, and a worker without one fails at `FROM`.
+#
+# Per runtime, with how each was established:
+#
+#   plain `docker build`                     reads the local store   measured locally
+#   `docker buildx` on a docker-container    DOES NOT                measured locally
+#   podman / buildah                         reads it                read from source
+#   finch                                    reads it                read from source
+#   nerdctl 2.3.5, unconfigured              DOES NOT                the job log above
+#   nerdctl 2.3.5, as this repository now installs it                reads it
+#
+# finch is in the "reads it" column, which is a correction to what this comment said before.
+# finch ships /etc/finch/buildkit/buildkitd.toml setting `[worker.oci] enabled = false` and
+# `[worker.containerd] enabled = true, namespace = "finch"`, and its own nerdctl.toml sets the
+# same namespace -- so its buildkitd runs the containerd worker, bound to the store its CLI
+# writes to. The earlier claim that finch ignored the local tag attributed a job log to the
+# OCI worker without checking which worker finch runs; it does not run that one.
+#
+# nerdctl was the runtime that genuinely could not see it, and that was fixable rather than
+# inherent: a buildkitd with no config file resolves `--oci-worker` and `--containerd-worker`
+# independently -- both default to "auto", and there is no rule that enabling one disables the
+# other -- then makes the OCI worker default because it registers at priority 0 and
+# `GetDefault` returns index 0 ("currently, only the default worker can be used"). The
+# nerdctl-full bundle unpacks a static runc, so `validOCIBinary()` always succeeds and the OCI
+# worker always wins. scripts/setup-nerdctl-linux.sh now writes the same three settings finch
+# ships, with `namespace = "default"` to match the nerdctl CLI, and asserts the result with
+# `buildctl debug workers` so the config cannot silently fail to apply.
+#
+# `docker buildx` on a docker-container driver stays in the "does not" column and is NOT fixed
+# here. That driver runs buildkitd inside its own container, with its own OCI worker and no
+# access to the host's image store, and nothing this action can write changes that. So on the
+# primary path a docker cell can still be refused at `FROM` after this step succeeded -- the
+# override below only covers the path where the fallback actually fired. Closing that gap means
+# changing the builder driver or loading the base image into the builder, which is a different
+# change from this one.
+#
+# Docker's apparent immunity was also never exercised in CI. run-scan-test sets up
+# docker/setup-buildx-action, whose driver defaults to `docker-container`, and exports
+# ACTIONS_RUNTIME_TOKEN -- which is what makes ASH's build switch its argv to
+# `docker buildx build --load`. So every docker cell runs the configuration that ignores the
+# tag; none had happened to hit the quota yet.
+#
+# So the fix changes what `FROM` ASKS FOR rather than trying to satisfy the old ask out of a
+# store the builder may not consult. On the fallback path the step writes
+#
+#     ASH_BASE_IMAGE_OVERRIDE=<fallback repo>@<pin>
+#
+# to GITHUB_ENV, and each of the three build entrypoints -- run_ash_container.py's
+# `_build_image`, `./ash`, and utils/ash_helpers.ps1 -- passes it through as
+# `--build-arg BASE_IMAGE=...`. That is uniform across every runtime and every builder
+# driver, because no runtime has any say in which reference a build-arg names.
+#
+# The digest interaction is favourable rather than awkward. `FROM ${BASE_IMAGE}` accepts a
+# digest-suffixed value; only `docker tag` refuses one, which is why BASE_IMAGE_DIGEST sits on
+# its own Dockerfile line. So the fallback path is now MORE pinned than the primary: the
+# primary resolves a tag, the fallback resolves content.
+#
+# The local tag is still set, and is deliberately demoted rather than removed. It is what
+# keeps a consumer that does not read ASH_BASE_IMAGE_OVERRIDE working on docker and podman --
+# removing it would regress those from "works" to "broken everywhere" in exchange for
+# tidiness. What changed is that no message claims it is the mechanism.
+#
+# DONE, having previously been rejected on a premise that turned out to be false: switching
+# nerdctl's buildkitd to the containerd worker. The earlier reasoning was that the nerdctl-full
+# bundle ships the OCI worker, so configuring anything else "would test a configuration no user
+# runs". The second half does not hold. Rancher Desktop -- which is what this repository's own
+# support matrix lists for nerdctl, per the note in validate-container -- starts buildkitd with
+#
+#     buildkitd_opts="--addr=unix:///run/buildkit/buildkitd.sock --containerd-worker=true \
+#       --containerd-worker-addr=/run/k3s/containerd/containerd.sock --containerd-worker-gc \
+#       --oci-worker=false"
+#
+# in pkg/rancher-desktop/assets/scripts/buildkit.confd, identical at v1.24.0 and main. So the
+# containerd worker is what the documented nerdctl target runs, and the unconfigured OCI worker
+# was the configuration no user runs. Configuring it moves this leg toward the support matrix.
+#
+# Disclosed rather than buried, because it is a real consequence: this also changes the
+# nerdctl leg's OUTPUT path. nerdctl's `isImageSharable` (pkg/cmd/builder/build.go at v2.3.5)
+# requires five conjuncts -- executor == "containerd", matching containerd UUID, matching
+# namespace, matching snapshotter, and a default build platform. With the OCI worker none of
+# the containerd labels exist, so the `!ok` branch fires, nerdctl asks for
+# `--output type=docker` and imports the tarball itself through `loadImage`. With all five
+# satisfied it asks for `type=image,unpack=true` and buildkitd writes straight into the shared
+# store. Both directions work; what changes is which component creates the image and therefore
+# how a failure presents. The snapshotter conjunct matches by default (both sides use
+# containerd's `overlayfs`), the UUID matches because no separate `address` is configured, and
+# the platform conjunct holds because no entrypoint passes `--platform` -- which is now pinned
+# by tests/unit/test_local_base_image_resolution_is_not_defeated.py, since that one flag would
+# quietly move nerdctl back to the tarball path AND defeat podman's local hit.
+#
+# Still rejected, and for the original reason: pushing the fallback image into a
+# docker-container builder's store. That builder is a separate container with its own OCI
+# worker, so there is nothing to push into and no config here reaches it.
+#
+# Rejected: a BuildKit source policy (`--source-policy-file`, or
+# EXPERIMENTAL_BUILDKIT_SOURCE_POLICY) rewriting the ECR reference to the Docker Hub one. It
+# would work, and only for the BuildKit runtimes -- buildah has no equivalent -- so it is a
+# possible second layer, never the fix.
+#
+# Rejected: a composite-action `outputs:` value instead of GITHUB_ENV. The consumer is not the
+# workflow YAML; it is a build several layers inside three different entrypoints, reached by
+# `ash build-image`, `ash scan --mode container`, `./ash` and a PowerShell function. An output
+# would have to be threaded through every caller's argv, at six `uses:` sites across two
+# actions, each one a place to forget. GITHUB_ENV reaches every later step in the job whatever
+# the entrypoint, and it is already this repository's idiom for the same handoff --
+# run-scan-test exports ACTIONS_RUNTIME_TOKEN the same way, and ASH's build reads it from the
+# environment.
+#
 # WHY THE DIGEST PIN IS THE LOAD-BEARING PART
 #
 # A fallback that quietly accepts a different image is a supply-chain substitution, and strictly
@@ -397,9 +552,11 @@ runs:
         case "${base}" in
           *@*)
             echo "::error::ARG BASE_IMAGE in ${DOCKERFILE} is '${base}', which carries a \
-        digest. This step has to be able to tag a fallback pull under that exact reference so \
-        the build resolves it locally, and a digest-suffixed reference is not a valid tag \
-        target. Keep the digest in ARG BASE_IMAGE_DIGEST instead."
+        digest. The fallback path tags a Docker Hub pull under that exact reference, as the \
+        layer that keeps plain \`docker build\` and podman working, and a digest-suffixed \
+        reference is not a valid \`tag\` target. Keep the digest in ARG BASE_IMAGE_DIGEST \
+        instead; the build-arg this step exports carries it separately, and \`FROM\` accepts \
+        a digest there."
             exit 1
             ;;
         esac
@@ -529,7 +686,7 @@ runs:
         # 10 this registry refused; try the next one
         try_registry() {
           local repo="$1" kind="$2"
-          local rc=0 tag_id pin_id placed_id unanswered
+          local rc=0 tag_id pin_id placed_id unanswered override
 
           pull_ref "${repo}:${tag}" "${kind}" || rc=$?
           [ "${rc}" -eq 0 ] || return "${rc}"
@@ -577,13 +734,19 @@ runs:
           fi
 
           if [ "${repo}" != "${primary_repo}" ]; then
-            # The build resolves `FROM ${BASE_IMAGE}`, so the fallback's bytes have to appear
-            # under that exact reference. Tagging from the digest reference rather than from
-            # the fallback's tag keeps this pinned end to end, and works the same on docker,
-            # podman, finch and nerdctl because `tag` and `pull` are all it needs.
+            # Second layer, not the mechanism -- but a working second layer on every
+            # builder except a docker-container one. Plain `docker build`, podman, finch
+            # and (since scripts/setup-nerdctl-linux.sh configures its buildkitd) nerdctl
+            # all resolve `FROM ${BASE_IMAGE}` out of the local store after a registry
+            # refusal, so a tag under the Dockerfile's own reference keeps them working for
+            # any consumer that never reads ASH_BASE_IMAGE_OVERRIDE. See the notes above
+            # for the one guard in BuildKit that decides this.
+            # Tagging from the digest reference rather than from the fallback's tag keeps this
+            # pinned end to end, and works the same on docker, podman, finch and nerdctl
+            # because `tag` and `pull` are all it needs.
             if ! run_runtime tag "${repo}@${pin}" "${base}"; then
-              echo "::error::pulled ${repo}@${pin} but could not tag it as ${base}, so the \
-        build would go back to ${primary_repo} and be refused again. See the output above."
+              echo "::error::pulled ${repo}@${pin} but could not tag it as ${base}. See the \
+        output above."
               exit 1
             fi
             placed_id="$(image_id "${base}" || true)"
@@ -593,9 +756,51 @@ runs:
         that is not the pinned one."
               exit 1
             fi
-            echo "::notice::sourced ${base} from ${repo} at ${pin} and tagged it locally as \
-        ${base}; the build resolves it from the local store without touching \
-        ${primary_repo}."
+
+            # THE MECHANISM: tell the build which registry answered.
+            #
+            # Digest-pinned rather than the fallback's tag, because `FROM ${BASE_IMAGE}`
+            # accepts a digest-suffixed reference -- only `docker tag` above refuses one. So
+            # this path hands the build content rather than a name, which makes it strictly
+            # more pinned than the primary path it is standing in for.
+            override="${repo}@${pin}"
+
+            # GITHUB_ENV's `NAME=value` form is line-oriented, so a value carrying a newline
+            # would let this step inject an arbitrary second variable into the job. Neither
+            # component can carry one today -- `pin` is matched against
+            # ^sha256:[0-9a-f]{64}$ above and `repo` is derived from a single sed-extracted
+            # Dockerfile line with `*@*` already rejected -- so this guard has no reachable
+            # trigger. It is here anyway: the cost is three lines, and the thing on the other
+            # side of it is writing attacker-shaped text into the environment of every later
+            # step in the job.
+            case "${override}" in
+              *[!a-zA-Z0-9._:/@-]*)
+                echo "::error::refusing to export ASH_BASE_IMAGE_OVERRIDE='${override}': it \
+        contains a character that is not valid in an image reference. GITHUB_ENV is \
+        line-oriented, so this step will not write an unexpected value into it."
+                exit 1
+                ;;
+            esac
+
+            if [ -n "${GITHUB_ENV:-}" ]; then
+              printf '%s\n' "ASH_BASE_IMAGE_OVERRIDE=${override}" >> "${GITHUB_ENV}"
+              echo "::notice::sourced ${base} from ${repo} at ${pin}. The build is told to \
+        ask for ${override} directly, through ASH_BASE_IMAGE_OVERRIDE in the job environment, \
+        and that is what keeps it off ${primary_repo}. ${base} is also tagged locally as a \
+        second layer, which every builder here reads except a docker-container one -- that \
+        driver is a separate container with its own image-store-less worker, so the override \
+        rather than the tag is what this relies on."
+            else
+              # Not an error, because a hand-run of this script outside Actions is a
+              # legitimate way to use it. But it is the exact state the retag alone used to
+              # be mistaken for, so it says what breaks rather than that something is unset.
+              echo "::warning::sourced ${base} from ${repo} at ${pin} and tagged it locally, \
+        but GITHUB_ENV is not set, so the build cannot be told which registry answered. The \
+        local tag alone is enough on plain \`docker build\`, podman, finch, and a nerdctl whose \
+        buildkitd runs the containerd worker -- but \`docker buildx\` on a docker-container \
+        driver will go back to ${primary_repo} and be refused again, and so will any buildkitd \
+        left on its default OCI worker. Pass BASE_IMAGE=${override} to the build yourself."
+            fi
           fi
 
           return 0

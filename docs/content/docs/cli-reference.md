@@ -1017,12 +1017,38 @@ For more information, see:
 
 ASH supports additional environment variables that don't directly map to command-line parameters:
 
-| Variable                   | Description                            | Default                            |
-|----------------------------|----------------------------------------|------------------------------------|
-| `ASH_IMAGE_NAME`           | Name of ASH container image            | `automated-security-helper:latest` |
-| `ASH_CONTAINER_WORK_DIR`   | Working directory inside the container | `/work`                            |
-| `ASH_CONTAINER_SOURCE_DIR` | Source directory inside the container  | `/src`                             |
-| `ASH_CONTAINER_OUTPUT_DIR` | Output directory inside the container  | `/out`                             |
+| Variable                    | Description                                           | Default                            |
+|-----------------------------|-------------------------------------------------------|------------------------------------|
+| `ASH_IMAGE_NAME`            | Name of ASH container image                           | `automated-security-helper:latest` |
+| `ASH_CONTAINER_WORK_DIR`    | Working directory inside the container                | `/work`                            |
+| `ASH_CONTAINER_SOURCE_DIR`  | Source directory inside the container                 | `/src`                             |
+| `ASH_CONTAINER_OUTPUT_DIR`  | Output directory inside the container                 | `/out`                             |
+| `ASH_BASE_IMAGE_OVERRIDE`   | Registry to fetch the Dockerfile's base image from    | unset (the Dockerfile's own `ARG BASE_IMAGE`) |
+
+### `ASH_BASE_IMAGE_OVERRIDE`
+
+When set, this replaces the Dockerfile's `ARG BASE_IMAGE` default for the duration of the
+build, as `--build-arg BASE_IMAGE=<value>`. Every build entrypoint honours it: the Python CLI
+(`ash build-image` and `ash scan --mode container`), the `./ash` shell entrypoint, and
+`Invoke-ASH` in `utils/ash_helpers.ps1`.
+
+It exists for one reason. ECR Public meters anonymous pulls by monthly data volume as well as
+by rate, and a CI runner drawing from a shared egress pool can find that volume already spent
+by someone else. ASH's CI pre-pulls the base image and, when ECR Public refuses, sources it
+from Docker Hub instead, then sets this variable to the Docker Hub reference so the build asks
+the registry that actually answered. Tagging the fallback image locally under the ECR name is
+not sufficient: `nerdctl`, `finch`, and `docker buildx` on a `docker-container` driver all
+resolve `FROM` against the registry and never consult the local image store.
+
+Set it yourself if you mirror the base image into a registry of your own. A digest-suffixed
+reference is accepted and recommended:
+
+```bash
+export ASH_BASE_IMAGE_OVERRIDE="my-registry.example.com/python@sha256:<digest>"
+ash build-image
+```
+
+An explicit `--custom-build-arg BASE_IMAGE=...` takes precedence over this variable.
 
 ## Exit Codes
 

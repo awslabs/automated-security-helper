@@ -31,9 +31,22 @@ ARG BASE_IMAGE_DIGEST=sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523eb
 #
 # It is deliberately NOT folded into BASE_IMAGE as `repo:tag@sha256:...`. That form would let
 # Dependabot keep both in step, which is the one thing it has going for it, but `docker tag`
-# refuses a digest-suffixed target and the pre-pull's fallback path has to tag a Docker Hub
-# pull under the exact reference `FROM ${BASE_IMAGE}` resolves. The reference has to stay
-# taggable, so the digest has to live somewhere else.
+# refuses a digest-suffixed target, and the pre-pull's fallback path tags a Docker Hub pull
+# under the exact reference `FROM ${BASE_IMAGE}` resolves -- which is what keeps plain
+# `docker build` and podman working. The reference has to stay taggable, so the digest has to
+# live somewhere else.
+#
+# BASE_IMAGE IS ALSO AN OVERRIDE POINT, NOT ONLY A DEFAULT
+#
+# When the pre-pull's fallback fires it passes
+# `--build-arg BASE_IMAGE=docker.io/library/<name>@<this digest>`, so
+# `FROM ${BASE_IMAGE}` below asks Docker Hub for content rather than asking
+# ECR Public for a tag. `FROM` accepts a digest-suffixed value even though `docker tag` does
+# not, so the fallback is more tightly pinned than the default above rather than less. That
+# redirect exists because the BuildKit runtimes -- nerdctl, finch, and `docker buildx` on a
+# docker-container driver -- resolve `FROM` against the registry and never consult the local
+# store, so the local tag alone did not reach them. See the pre-pull action for the
+# measurement.
 
 # First stage: Build UV requirements
 FROM ${BASE_IMAGE} AS uv-reqs
