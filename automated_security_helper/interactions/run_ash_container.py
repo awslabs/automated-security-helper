@@ -527,6 +527,40 @@ def _build_image(
         ]
     )
 
+    # ASH_BASE_IMAGE_OVERRIDE redirects `FROM ${BASE_IMAGE}` at the registry that actually
+    # answered, and is set by .github/actions/prepull-base-image when ECR Public refuses the
+    # base image and Docker Hub serves it instead. It is a digest-pinned reference, so this
+    # path is more tightly pinned than the Dockerfile's own tag default, not less.
+    #
+    # It has to be a build-arg rather than only a local tag under the ECR name. BuildKit does
+    # consult a local store after a registry refusal, but only when the worker HAS one:
+    # `sourceresolver/imageresolver.go` gates that recovery behind
+    # `rm != ResolveModeDefault || is.ImageStore == nil`, and `worker/runc/runc.go` sets
+    # `ImageStore: nil, // explicitly`. A `docker buildx build` on a docker-container driver
+    # runs buildkitd in its own container with exactly that worker, so it never sees the host's
+    # image store -- measured: a build with the tag present still died at `FROM` asking the
+    # refusing registry. That driver cannot be configured out of it from here, so changing what
+    # FROM asks for is the one mechanism every runtime and every driver honours. See
+    # .github/actions/prepull-base-image for the full per-runtime table.
+    #
+    # Emitted BEFORE custom_build_arg, because a duplicate --build-arg is last-wins (measured
+    # on docker 25.0.16), so an explicit `--custom-build-arg BASE_IMAGE=...` from the caller
+    # still overrides this CI fallback rather than being silently discarded.
+    base_image_override = os.environ.get("ASH_BASE_IMAGE_OVERRIDE", "").strip()
+    if base_image_override:
+        typer.echo(
+            f"Base image redirected to {base_image_override} "
+            "by ASH_BASE_IMAGE_OVERRIDE in the environment."
+        )
+        build_cmd.extend(["--build-arg", f"BASE_IMAGE={base_image_override}"])
+
+    # `--custom-build-arg FOO=bar` was threaded from the CLI through run_ash_scan into this
+    # function's signature and then never appended to the command, so every value a caller
+    # passed was silently dropped. Appended here rather than alongside the fixed build-args
+    # above so that it lands last and therefore wins any collision with them.
+    for build_arg in custom_build_arg:
+        build_cmd.extend(["--build-arg", build_arg])
+
     extra_args: List[str] = []
     if force:
         extra_args.append("--no-cache")
