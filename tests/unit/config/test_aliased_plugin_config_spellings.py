@@ -85,7 +85,7 @@ def test_the_parametrization_is_not_empty():
 def _runtime_lookup_name(plugin_type: str, config_cls: type) -> str:
     """The name the scan and report phases look this plugin up by.
 
-    Both pass ``plugin_class.__name__.lower()``, so find the registered plugin
+    Both pass ``plugin_config_key(plugin_class)``, so find the registered plugin
     class whose ``config`` field is this config class.
     """
     import typing
@@ -93,13 +93,14 @@ def _runtime_lookup_name(plugin_type: str, config_cls: type) -> str:
     import automated_security_helper.plugin_modules.ash_builtin  # noqa: F401
     import automated_security_helper.plugin_modules.ash_builtin.reporters  # noqa: F401
     import automated_security_helper.plugin_modules.ash_builtin.scanners  # noqa: F401
+    from automated_security_helper.base.plugin_config import plugin_config_key
     from automated_security_helper.plugins import ash_plugin_manager
 
     for cls in ash_plugin_manager.plugin_modules(plugin_type):
         annotation = cls.model_fields["config"].annotation
         args = [a for a in typing.get_args(annotation) if a is not type(None)]
         if (args[0] if args else annotation) is config_cls:
-            return cls.__name__.lower()
+            return plugin_config_key(cls)
     raise AssertionError(f"no registered {plugin_type} uses {config_cls.__name__}")
 
 
@@ -112,9 +113,9 @@ def _load(tmp_path: Path, yaml_text: str) -> AshConfig:
 def _resolved(config, plugin_type, field_name, alias, config_cls) -> dict:
     """What the alias and field-name lookups resolve to, asserted to be one value.
 
-    The runtime lookup by class name is checked separately, in
-    test_the_runtime_lookup_finds_the_same_settings, because one plugin misses
-    it for a reason unrelated to spelling.
+    The runtime lookup is checked separately, in
+    test_the_runtime_lookup_finds_the_same_settings, and across every shipped
+    plugin in test_plugin_config_reaches_the_plugin.py.
     """
     names = [alias, field_name]
     found = {n: config.get_plugin_config(plugin_type, n) for n in names}
@@ -152,36 +153,16 @@ project_name: probe
     assert resolved["options"]["probe_marker"] == "from-the-file"
 
 
-def _runtime_lookup_cases():
-    cases = []
-    for param in ALIASED:
-        if param.id == "reporters.github-ghas":
-            # GHASReporter's lowercased class name, "ghasreporter", reduces to
-            # "ghas", and the key "github-ghas" reduces to "githubghas", so
-            # get_plugin_config never matches them and the reporter always runs
-            # with its defaults. That is a name-reduction defect in
-            # get_plugin_config, not the alias split this file covers. strict,
-            # so the fix turns this red and the mark has to come off.
-            param = pytest.param(
-                *param.values,
-                id=param.id,
-                marks=pytest.mark.xfail(
-                    strict=True,
-                    reason="get_plugin_config cannot match GHASReporter to github-ghas",
-                ),
-            )
-        cases.append(param)
-    return cases
-
-
 @pytest.mark.parametrize("spelling", ["alias", "field_name"])
-@pytest.mark.parametrize(
-    "segment, plugin_type, field_name, alias, config_cls", _runtime_lookup_cases()
-)
+@pytest.mark.parametrize("segment, plugin_type, field_name, alias, config_cls", ALIASED)
 def test_the_runtime_lookup_finds_the_same_settings(
     tmp_path, segment, plugin_type, field_name, alias, config_cls, spelling
 ):
-    """The scan and report phases look plugins up by lowercased class name."""
+    """The phases look plugins up by declared name, and it finds the same settings.
+
+    github-ghas failed this before the lookup keyed on declared names: its class
+    name reduced to "ghas" and never met the key.
+    """
     key = alias if spelling == "alias" else field_name
     config = _load(
         tmp_path,

@@ -7,6 +7,7 @@ from typing import Dict, List, Any, Tuple
 from pathlib import Path
 
 from automated_security_helper.base.engine_phase import EnginePhase
+from automated_security_helper.base.plugin_config import plugin_config_key
 from automated_security_helper.core.enums import ExecutionPhase, ScannerStatus
 from automated_security_helper.core.exceptions import ScannerSelectionError
 from automated_security_helper.models.asharp_model import (
@@ -248,7 +249,7 @@ class ScanPhase(EnginePhase):
                             config=(
                                 self.plugin_context.config.get_plugin_config(
                                     plugin_type="scanner",
-                                    plugin_name=plugin_name,
+                                    plugin_name=plugin_config_key(plugin_class),
                                 )
                                 if self.plugin_context.config is not None
                                 else None
