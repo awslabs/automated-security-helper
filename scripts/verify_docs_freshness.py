@@ -346,13 +346,69 @@ def _segment_names(segment: type) -> dict[str, str]:
     return names
 
 
+REPORTER_DOCS_GENERATOR = REPO_ROOT / "scripts" / "generate_reporter_docs.py"
+_reporter_generator_module = None
+
+
+def _reporter_generator():
+    """Load scripts/generate_reporter_docs.py by path, once.
+
+    By path because scripts/ is not a package, and this module is itself loaded
+    by path in the unit tests, where scripts/ is not on sys.path.
+    """
+    global _reporter_generator_module
+    if _reporter_generator_module is None:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "_ash_generate_reporter_docs", REPORTER_DOCS_GENERATOR
+        )
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"cannot load {REPORTER_DOCS_GENERATOR}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _reporter_generator_module = module
+    return _reporter_generator_module
+
+
+def reporter_names() -> dict[str, str]:
+    """Map each registered reporter's name to the class that registers it.
+
+    Read through the doc generator's own ``registered_reporters()``, which is
+    what writes the reporter-quick-reference table this check compares against.
+
+    This used to read the fields declared on ``ReporterConfigSegment``. That is
+    a different source, and the generator's docstring lists it among the seven
+    places that stated the reporter set and disagreed. It lags the registry for
+    any reporter that is configured only through the segment's ``extra="allow"``:
+    ``unused-suppressions`` is registered, gets a generated row, and has no
+    declared field, so this check reported the generated row as a leftover for a
+    removed reporter while ``generate_reporter_docs.py --check`` required it.
+    The two gates could not both pass. Calling the generator's function, rather
+    than re-deriving the registry here, is what keeps them from diverging again.
+
+    Whether every registered reporter should also be a declared field (and so
+    appear in the published AshConfig.json schema) is a separate property about
+    the config model, not about the docs. It is not checked here.
+    """
+    rows = _reporter_generator().registered_reporters()
+    return {row["name"]: f"registered class {row['class_name']}" for row in rows}
+
+
 def check_reporters() -> list[str]:
-    """The reporter inventory and the output-formats table must be the same set."""
-    from automated_security_helper.config.ash_config import ReporterConfigSegment
+    """The registered reporter set and the output-formats table must be the same set."""
+    names = reporter_names()
+    if not names:
+        return [
+            (
+                "Reporter: the plugin registry returned no reporters, so there is "
+                "nothing to compare the output-formats table against"
+            )
+        ]
 
     return compare_inventories(
         "Reporter",
-        _segment_names(ReporterConfigSegment),
+        names,
         read_text(OUTPUT_FORMATS_MD),
         "Format",
         "docs/content/docs/output-formats.md",

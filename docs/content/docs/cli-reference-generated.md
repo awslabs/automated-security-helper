@@ -380,6 +380,7 @@ Resolve a VS Code workspace file into a scan plan without scanning anything.
 | `workspace_config` | str |  | Optional path to a workspace policy file. Must exist if |
 | `allow_missing_projects` | bool | False | Mark project directories that are absent or |
 | `config_overrides` | list |  | Optional list of `key=value` config overrides, applied to |
+| `profile` | str |  | Name of a registered config profile to resolve under for this one |
 
 ### `run_ash_scan`
 
@@ -407,6 +408,17 @@ Scan every project in a VS Code workspace and return the per-project verdict.
 | `excluded_scanners` | list |  | Exclude these scanners from every project. Takes |
 | `offline` | bool | False | Run without network access. |
 | `clean_output` | bool | True | Remove each project's previous aggregated-results file first. |
+| `profile` | str |  | Name of a registered config profile to scan under for this one |
+
+### `select_profile`
+
+Bind one of the operator's registered config profiles to this session.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `profile_name` | str | *required* | Name the operator registered the profile under. |
+| `patch_ops` | list |  | JSON-Patch operations to apply to the profile's config. |
+| `override_yaml` | str |  | Complete ASH config YAML replacing the profile's. |
 
 ### `set_source_git`
 
