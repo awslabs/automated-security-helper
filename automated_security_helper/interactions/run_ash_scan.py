@@ -218,9 +218,9 @@ _COMPLETE_SCANNER_STATUSES = frozenset(
 
 #: Every remaining ScannerStatus member: today ERROR (ran and failed) and MISSING
 #: (selected, dependencies unavailable, never ran).
-_INCOMPLETE_SCANNER_STATUSES = frozenset(
-    {member.value for member in ScannerStatus}
-) - _COMPLETE_SCANNER_STATUSES
+_INCOMPLETE_SCANNER_STATUSES = (
+    frozenset({member.value for member in ScannerStatus}) - _COMPLETE_SCANNER_STATUSES
+)
 
 # The statuses that mean "this scanner executed and reached a verdict".
 #
@@ -1340,6 +1340,18 @@ def build_project_scan_settings(opts: ScanOptions) -> "ProjectScanSettings":
         max_parallel_projects=workspace_config.resolved_max_parallel_projects(),
         project_timeout=workspace_config.project_timeout,
         allow_missing_projects=opts.allow_missing_projects,
+        # ``opts.config`` in workspace mode is the fallback for a project that
+        # declares no config of its own, not a config for the workspace: each
+        # project's own ``.ash.yaml`` still wins, which is what makes one
+        # workspace scannable across differently-configured repositories.
+        #
+        # The caller has to pass the same value as ``resolve_workspace``'s
+        # ``default_config``, because the plan's reported threshold comes from
+        # resolution and the scan's config from execution. Dropping it here -- which
+        # this builder did -- made an MCP client's `profile` argument accepted,
+        # threaded through two layers, and silently ignored, which is the same
+        # shape of defect as the ``ASH_OFFLINE`` one recorded in cli/mcp/workspace.
+        default_config_path=opts.config,
     )
 
 

@@ -40,6 +40,11 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
+from automated_security_helper.cli.mcp.session_paths import (
+    session_directory,
+    validated_path_component,
+)
+
 if TYPE_CHECKING:
     from automated_security_helper.config.ash_config import AshConfig
 
@@ -147,12 +152,25 @@ class MCPSessionRegistry:
 
         Repeated calls with the same id return the same instance — the lock
         identity is preserved so per-session serialization works.
+
+        Raises:
+            ValueError: if ``session_id`` is not usable as a single path
+                component. The id becomes a directory this method creates and
+                ``disconnect`` removes, so it is validated here rather than
+                trusted from the caller; ``cli/mcp/session_paths.py`` holds the
+                rule, shared with the other surfaces that build a per-session
+                path.
+
+        Validated before the map lookup, not after. Checking only on the
+        create branch would admit the id for the lifetime of the process the
+        moment a first call had registered it.
         """
+        session_id = validated_path_component(session_id)
         with self._lock:
             existing = self._sessions.get(session_id)
             if existing is not None:
                 return existing
-            workspace = self._workspace_parent / session_id
+            workspace = session_directory(self._workspace_parent, session_id)
             workspace.mkdir(parents=True, exist_ok=True)
             session = MCPSession(id=session_id, workspace_root=workspace)
             self._sessions[session_id] = session

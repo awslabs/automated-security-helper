@@ -52,17 +52,74 @@ class TestResolveWorkspaceRoot:
 
 
 class TestSessionIdSanitization:
+    """These assert on ValueError rather than on the wording.
+
+    The rule moved into ``cli/mcp/session_paths.py`` and the message changed with
+    it. Matching the old text here would have coupled three call sites' tests to
+    one function's phrasing; ``test_session_paths.py`` owns the message.
+    """
+
     def test_traversal_session_id_rejected(self, tmp_path):
-        with pytest.raises(ValueError, match="path separators"):
+        with pytest.raises(ValueError):
             sd._session_workspace(tmp_path, "../escape")
 
     def test_absolute_session_id_rejected(self, tmp_path):
-        with pytest.raises(ValueError, match="path separators"):
+        with pytest.raises(ValueError):
             sd._session_workspace(tmp_path, "/etc")
 
     def test_empty_session_id_rejected(self, tmp_path):
         with pytest.raises(ValueError):
             sd._session_workspace(tmp_path, "")
+
+    @pytest.mark.parametrize("bad", ["D:x", "C:", "a b", "a?b", "a:b", "a\x00b"])
+    def test_a_session_id_outside_the_allowlist_is_rejected(self, tmp_path, bad):
+        """The site applies the rule, not merely the helper in isolation.
+
+        ``test_session_paths.py`` proves the allowlist works. This proves this
+        call site reaches it -- which is the half that goes wrong when one of
+        several similar sites is updated and the others are left behind.
+        """
+        with pytest.raises(ValueError):
+            sd._session_workspace(tmp_path, bad)
+
+    def test_an_ordinary_session_id_still_returns_the_child_path(self, tmp_path):
+        """Positive control, and it pins the unresolved return shape."""
+        assert sd._session_workspace(tmp_path, "session-a") == tmp_path / "session-a"
+
+    @pytest.mark.parametrize("bad", ["../elsewhere", "D:x", ".", "", "a b"])
+    @pytest.mark.parametrize("builder", ["_part_path", "_meta_path", "_final_zip_path"])
+    def test_an_upload_id_outside_the_allowlist_is_rejected(
+        self, tmp_path, builder, bad
+    ):
+        """All three upload-path builders, not just the one that used to check.
+
+        ``_part_path`` carried a check and its two siblings carried none, even
+        though all three build a filename from the same caller-supplied id and are
+        called independently -- ``_read_next_sequence`` reaches ``_meta_path``
+        without ``_part_path`` running first. Parametrized over the three so
+        adding a fourth builder without the check is a failing test rather than a
+        quiet gap.
+        """
+        with pytest.raises(ValueError):
+            getattr(sd, builder)(tmp_path, bad)
+
+    @pytest.mark.parametrize(
+        "builder,suffix",
+        [
+            ("_part_path", ".zip.part"),
+            ("_meta_path", ".next"),
+            ("_final_zip_path", ".zip"),
+        ],
+    )
+    def test_an_ordinary_upload_id_still_builds_its_path(
+        self, tmp_path, builder, suffix
+    ):
+        """Positive control for all three, so the parametrized refusal above
+        cannot be satisfied by a builder that raises unconditionally."""
+        got = getattr(sd, builder)(tmp_path, "upload-1")
+
+        assert got.name == f"upload-1{suffix}"
+        assert got.parent == tmp_path / "incoming"
 
 
 # ---------------------------------------------------------------------------

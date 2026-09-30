@@ -22,6 +22,10 @@ from typing import Annotated, List, Optional
 import typer
 from rich.console import Console
 
+from automated_security_helper.cli.mcp.profile_registry import (
+    register_profiles,
+    set_profile_registry,
+)
 from automated_security_helper.core.constants import ASH_REPO_URL
 from automated_security_helper.core.enums import AshLogLevel
 from automated_security_helper.core.exceptions import ScannerError, ASHValidationError
@@ -433,6 +437,18 @@ def mcp_command(
             "loopback, matching the MCP SDK's own default.",
         ),
     ] = None,
+    profile: Annotated[
+        Optional[List[str]],
+        typer.Option(
+            "--profile",
+            help="Register a named config profile as NAME=path/to/ash.yaml, "
+            "repeatable. Clients list them with the list_profiles tool and bind "
+            "one to their session with select_profile; a bound profile supplies "
+            "the config for every later call in that session that names none. "
+            "Each file is loaded and schema-validated now, so a typo fails "
+            "startup rather than a scan.",
+        ),
+    ] = None,
 ) -> None:
     """Start the ASH MCP server.
 
@@ -502,6 +518,39 @@ def mcp_command(
     except ASHValidationError as e:
         _stderr.print(f"[red]Validation Error: {str(e)}[/red]")
         raise typer.Exit(3)
+
+    # Deliberately NOT recording the transport here. The scan-target and
+    # config-input boundaries decide "is this caller remote" per call, from the
+    # session id the transport supplied -- see cli/mcp/sandbox.py::caller_is_remote
+    # -- which is request-scoped and needs nothing from this function.
+    #
+    # An earlier version did set it, and process-wide state turned out to be the
+    # wrong shape: the value outlives the server object, so a process that ran this
+    # command and then did anything else evaluated every later call as remote. That
+    # is fail-closed, so it surfaced as unrelated refusals rather than unsafe
+    # accepts -- 32 tests, none of them about transports -- but a boundary whose
+    # answer depends on what ran earlier in the process is not one worth having.
+    #
+    # ASH_MCP_TRANSPORT remains available as an operator override for the one gap
+    # the session-id signal leaves (an HTTP client that sends no session header at
+    # all). Like ASH_MCP_ALLOWED_ROOTS it is read and never written, which is what
+    # keeps it from leaking.
+
+    # Load and validate every --profile now, so an operator's typo fails startup
+    # with a message about the profile rather than surfacing later as a scan that
+    # ran under a config nobody chose. register_profiles raises
+    # ProfileRegistryError, a ValueError, for a malformed spec, a missing file,
+    # unparseable YAML, or an unknown top-level key.
+    if profile:
+        try:
+            set_profile_registry(register_profiles(list(profile)))
+        except ValueError as e:
+            _stderr.print(f"[red]Validation Error: {str(e)}[/red]")
+            raise typer.Exit(3)
+        if not quiet:
+            _stderr.print(
+                f"[green]Registered {len(profile)} config profile(s).[/green]"
+            )
 
     # Validate and configure logging options
     log_level_value = validate_log_options(verbose, debug, log_level)
