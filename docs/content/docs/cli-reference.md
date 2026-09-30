@@ -1046,6 +1046,7 @@ ASH supports additional environment variables that don't directly map to command
 | `ASH_DEBUG`           | Enable debug logging                                                 |                                              |
 | `ASH_VERBOSE`         | Enable verbose logging                                               |                                              |
 | `ASH_BASE_IMAGE_OVERRIDE` | Registry to fetch the Dockerfile's base image from                   | unset (the Dockerfile's own `ARG BASE_IMAGE`) |
+| `ASH_BASE_OCI_LAYOUT` | Verified OCI layout to build the base image from, with no registry call | unset |
 
 ### `ASH_BASE_IMAGE_OVERRIDE`
 
@@ -1071,6 +1072,26 @@ ash build-image
 ```
 
 An explicit `--custom-build-arg BASE_IMAGE=...` takes precedence over this variable.
+
+### `ASH_BASE_OCI_LAYOUT`
+
+`<layout dir>@sha256:<manifest digest>`: an OCI image layout holding the Dockerfile's base
+image, and the digest of the manifest for this machine's architecture inside it. ASH's CI sets
+it after restoring the base image from the Actions cache and verifying every blob against the
+Dockerfile's `ARG BASE_IMAGE_DIGEST`, so that a warm CI run makes no registry call for the base
+image at all. You do not normally set it yourself.
+
+What each entrypoint does with it depends on the builder:
+
+| Builder | What ASH passes |
+|---|---|
+| `docker buildx build` (docker-container builder) | `--build-context ash-base-image=oci-layout://<dir>@<digest>` and `--build-arg BASE_IMAGE=ash-base-image` |
+| `nerdctl`, `finch` | `--build-context ash-base-image=oci-layout://<dir>`, `--build-arg BASE_IMAGE=ash-base-image` and `--pull=false` |
+| plain `docker build`, `podman` | nothing: these read the base image from their local image store, where the CI step placed it |
+
+A value that is not `<dir>@sha256:<64 hex>` stops the build with an error rather than being
+ignored. When it applies, it takes the place of `ASH_BASE_IMAGE_OVERRIDE`; an explicit
+`--custom-build-arg BASE_IMAGE=...` still takes precedence over both.
 
 ## Exit Codes
 

@@ -148,7 +148,7 @@ runs:
     # Ahead of any build, so the twenty-odd container cells that start together do not all
     # fetch the base image from ECR Public at once and cross its anonymous-pull data limit.
     # Skipped for python-local, which builds no image. See the action for what it will and
-    # will not retry, and why it stores the image nowhere.
+    # will not retry, and for the verified base-image cache that makes a warm run pull nothing.
     - name: Pre-pull the base image for the container legs
       if: inputs.method != 'python-local'
       uses: ./.github/actions/prepull-base-image

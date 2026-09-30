@@ -127,6 +127,9 @@ fi
 
 # Resolve the OCI_RUNNER
 RESOLVED_OCI_RUNNER=${OCI_RUNNER:-$(command -v finch || command -v docker || command -v nerdctl || command -v podman)}
+# The runtime's own name, before any wrapper is prefixed, for the few decisions that differ by
+# runtime.
+OCI_RUNNER_NAME="$(basename "${RESOLVED_OCI_RUNNER:-none}")"
 # OCI_RUNNER_WRAPPER prefixes all OCI commands (like RUSTC_WRAPPER for cargo)
 # Example: OCI_RUNNER_WRAPPER=sudo makes all finch/docker calls use sudo
 if [[ -n "${OCI_RUNNER_WRAPPER:-}" ]]; then
@@ -170,8 +173,32 @@ else
       # both reachable here through OCI_RUNNER. Unquoted for the same reason as the two options
       # above: these expand to nothing when unset, and an image reference contains no
       # whitespace.
+      #
+      # ASH_BASE_OCI_LAYOUT=<layout dir>@<arch manifest digest> is the cache-hit hand-off from
+      # the same action: a layout it has verified against the Dockerfile's pinned digest. This
+      # entrypoint runs `<runner> build`, so on docker that is the docker driver, which turns an
+      # oci-layout context into a registry lookup (measured) -- the action loads the layout into
+      # the engine instead, and the driver prefers the local image. podman has no oci-layout
+      # context and gets the same treatment in its own store. nerdctl and finch take the layout
+      # as a build context, spelled without the digest because nerdctl reads the image from
+      # index.json and treats the rest of the value as the path, plus --pull=false, which nerdctl
+      # maps to image-resolve-mode=local. See .github/actions/prepull-base-image for the rest.
       BASE_IMAGE_OPTION=""
-      if [[ -n "${ASH_BASE_IMAGE_OVERRIDE:-}" ]]; then
+      if [[ -n "${ASH_BASE_OCI_LAYOUT:-}" ]]; then
+        if [[ ! "${ASH_BASE_OCI_LAYOUT}" =~ ^(.+)@(sha256:[0-9a-f]{64})$ ]]; then
+          echo "ERROR: ASH_BASE_OCI_LAYOUT is '${ASH_BASE_OCI_LAYOUT}', which is not <layout dir>@sha256:<64 hex>. Unset it to build from the Dockerfile's own base image reference." >&2
+          exit 1
+        fi
+        case "${OCI_RUNNER_NAME}" in
+          nerdctl | finch)
+            BASE_IMAGE_OPTION="--build-context ash-base-image=oci-layout://${BASH_REMATCH[1]} --build-arg BASE_IMAGE=ash-base-image --pull=false"
+            echo "Base image taken from the verified OCI layout named by ASH_BASE_OCI_LAYOUT, with no registry call."
+            ;;
+          *)
+            echo "Base image expected in ${OCI_RUNNER_NAME}'s local store, placed there from the verified OCI layout named by ASH_BASE_OCI_LAYOUT."
+            ;;
+        esac
+      elif [[ -n "${ASH_BASE_IMAGE_OVERRIDE:-}" ]]; then
         BASE_IMAGE_OPTION="--build-arg BASE_IMAGE=${ASH_BASE_IMAGE_OVERRIDE}"
         echo "Base image redirected to ${ASH_BASE_IMAGE_OVERRIDE} by ASH_BASE_IMAGE_OVERRIDE."
       fi
