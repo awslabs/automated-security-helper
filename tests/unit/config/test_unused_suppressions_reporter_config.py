@@ -10,18 +10,16 @@ segment's ``extra="allow"``. It ran, and ``get_plugin_config`` found it under
 either spelling, but it was missing from the published AshConfig.json schema and
 nothing validated its options until the reporter itself did.
 
-Declaring it changes three things that a config author can observe, and each is
-pinned here:
+What holds for every aliased plugin field (both spellings, both keys at once,
+``--config-overrides``, rejecting a bad ``enabled``) is in
+test_aliased_plugin_config_spellings.py, which covers this field with the rest.
+This file covers what is specific to this reporter:
 
-* Both spellings a config might use today, ``unused-suppressions`` and
-  ``unused_suppressions``, still load and resolve to the same settings under
-  every name ``get_plugin_config`` is asked for. Without the segment's
-  before-validator, the underscore key would land in the extras while the field
-  kept its defaults, and two lookups would disagree.
-* A bad option value is rejected when the config loads. That is a behavior
-  change: such a config used to load, and the reporter failed later.
+* Its own option is validated at load. That is a behavior change: such a config
+  used to load, and the reporter failed later.
 * A config that does not mention the reporter gets the reporter's own defaults,
   as it did before.
+* No committed config becomes invalid.
 """
 
 from pathlib import Path
@@ -30,8 +28,6 @@ import pytest
 from pydantic import ValidationError
 
 from automated_security_helper.config.ash_config import AshConfig
-from automated_security_helper.config.resolve_config import apply_config_overrides
-from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.plugin_modules.ash_builtin.reporters.unused_suppressions_reporter import (
     UnusedSuppressionsReporterConfig,
 )
@@ -63,116 +59,9 @@ def _resolved(config: AshConfig) -> dict:
 
 
 @pytest.mark.parametrize("key", ["unused-suppressions", "unused_suppressions"])
-def test_either_spelling_loads_validates_and_resolves_the_same(tmp_path, key):
-    config = _load(
-        tmp_path,
-        f"""
-project_name: probe
-reporters:
-  {key}:
-    enabled: false
-    options:
-      output_format: json
-""",
-    )
-    field = config.reporters.unused_suppressions
-    assert isinstance(field, UnusedSuppressionsReporterConfig)
-    assert field.enabled is False
-    assert field.options.output_format == "json"
-    # One copy of the settings, in the field: nothing left behind in the extras
-    # for a lookup to find instead.
-    assert not (config.reporters.__pydantic_extra__ or {})
-    resolved = _resolved(config)
-    assert resolved["enabled"] is False
-    assert resolved["options"]["output_format"] == "json"
-
-
-def test_both_spellings_merge_with_the_hyphenated_key_winning(tmp_path):
-    config = _load(
-        tmp_path,
-        """
-project_name: probe
-reporters:
-  unused_suppressions:
-    enabled: false
-    options:
-      output_format: markdown
-  unused-suppressions:
-    options:
-      output_format: json
-""",
-    )
-    resolved = _resolved(config)
-    # output_format is set by both, and the documented spelling wins.
-    assert resolved["options"]["output_format"] == "json"
-    # enabled is set only under the underscore key, and is kept.
-    assert resolved["enabled"] is False
-    assert not (config.reporters.__pydantic_extra__ or {})
-
-
-def test_an_override_keeps_the_rest_of_the_file_settings(tmp_path):
-    """apply_config_overrides round-trips the config through model_dump().
-
-    That dump is keyed by field name, so the file's settings come back as
-    ``unused_suppressions`` while an override written as documented adds
-    ``unused-suppressions`` with only the overridden key. Keeping just one of
-    the two would silently revert either the override or the file.
-    """
-    config = _load(
-        tmp_path,
-        """
-project_name: probe
-reporters:
-  unused-suppressions:
-    enabled: false
-""",
-    )
-    overridden = apply_config_overrides(
-        config, ["reporters.unused-suppressions.options.output_format=json"]
-    )
-    resolved = _resolved(overridden)
-    assert resolved["options"]["output_format"] == "json"
-    assert resolved["enabled"] is False
-
-
-def test_an_override_with_no_touch_to_the_reporter_keeps_its_settings(tmp_path):
-    config = _load(
-        tmp_path,
-        """
-project_name: probe
-reporters:
-  unused-suppressions:
-    enabled: false
-    options:
-      output_format: markdown
-""",
-    )
-    overridden = apply_config_overrides(config, ["fail_on_findings=false"])
-    resolved = _resolved(overridden)
-    assert resolved["enabled"] is False
-    assert resolved["options"]["output_format"] == "markdown"
-
-
-@pytest.mark.parametrize("key", ["unused-suppressions", "unused_suppressions"])
-@pytest.mark.parametrize(
-    "body, bad_path",
-    [
-        ("enabled: not-a-bool", "reporters.unused-suppressions.enabled"),
-        (
-            "options:\n      output_format: 5",
-            "reporters.unused-suppressions.options.output_format",
-        ),
-    ],
-)
-def test_an_invalid_option_is_rejected_when_the_config_loads(
-    tmp_path, key, body, bad_path
-):
-    """The validation gain, and the behavior change that comes with it.
-
-    Before the field was declared, both of these configs loaded: the values sat
-    unvalidated in the segment's extras until the reporter was built. Now the
-    load itself fails, and names the offending path.
-    """
+def test_its_output_format_option_is_validated_at_load(tmp_path, key):
+    """Before the field was declared, this config loaded and the value sat
+    unvalidated in the segment's extras until the reporter was built."""
     with pytest.raises(ValidationError) as excinfo:
         _load(
             tmp_path,
@@ -180,18 +69,26 @@ def test_an_invalid_option_is_rejected_when_the_config_loads(
 project_name: probe
 reporters:
   {key}:
-    {body}
+    options:
+      output_format: 5
 """,
         )
-    assert bad_path in str(excinfo.value)
+    assert "reporters.unused-suppressions.options.output_format" in str(excinfo.value)
 
 
-def test_an_invalid_override_is_rejected(tmp_path):
-    config = _load(tmp_path, "project_name: probe\n")
-    with pytest.raises(ASHConfigValidationError):
-        apply_config_overrides(
-            config, ["reporters.unused-suppressions.enabled=not-a-bool"]
-        )
+@pytest.mark.parametrize("key", ["unused-suppressions", "unused_suppressions"])
+def test_a_valid_output_format_reaches_every_lookup(tmp_path, key):
+    config = _load(
+        tmp_path,
+        f"""
+project_name: probe
+reporters:
+  {key}:
+    options:
+      output_format: json
+""",
+    )
+    assert _resolved(config)["options"]["output_format"] == "json"
 
 
 def test_a_config_that_does_not_mention_it_gets_the_reporter_defaults(tmp_path):
@@ -205,34 +102,6 @@ def test_a_config_that_does_not_mention_it_gets_the_reporter_defaults(tmp_path):
     assert _resolved(config) == UnusedSuppressionsReporterConfig().model_dump()
     assert config.reporters.unused_suppressions.enabled is True
     assert config.reporters.unused_suppressions.options.output_format == "both"
-
-
-def test_lint_still_steers_to_the_hyphen_and_says_what_happens(tmp_path):
-    """The underscore spelling is still a lint warning, with an accurate reason.
-
-    The generic message says a snake-form key lands in the extras and the
-    built-in keeps its defaults. For this key that is no longer true, so the
-    message must not claim it.
-    """
-    from automated_security_helper.config.config_linter import (
-        ConfigLinter,
-        LintCategory,
-    )
-
-    path = tmp_path / ".ash.yaml"
-    path.write_text(
-        "project_name: t\nreporters:\n  unused_suppressions:\n    enabled: false\n",
-        encoding="utf-8",
-    )
-    issues = [
-        i
-        for i in ConfigLinter.lint(path).issues
-        if i.category == LintCategory.LEGACY_NAME_VARIANT
-    ]
-    assert len(issues) == 1
-    assert "'unused-suppressions'" in issues[0].message
-    assert "ASH reads it as 'unused-suppressions'" in issues[0].message
-    assert "keeps its default config" not in issues[0].message
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
