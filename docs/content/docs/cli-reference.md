@@ -228,6 +228,16 @@ Not every format can be merged across projects, so each reporter declares what i
 
 Where the project appears depends on the format: a `workspace_project` column in `csv`, a field of the same name in `flat-json`, a per-project section in `html`, `markdown` and `text`, a `<project>/<scanner>` testsuite name in `junitxml`, and a `workspace_project:<key>` entry in `metadata.labels` for `ocsf`. Single-directory output is unchanged in every case.
 
+A skipped project has no findings, so in the three formats whose output is one record per finding it would have no record at all — indistinguishable from a project that came back clean. Each of those emits one record standing for the project instead, marked in that format's own vocabulary so a finding count can exclude it:
+
+| Format | Where the skipped project appears | How to exclude it from a finding count |
+| --- | --- | --- |
+| `csv` | A row whose `workspace_row_type` is `skipped-project`. That column is workspace-only, like `workspace_project`, and carries `finding` on every ordinary row | Filter `workspace_row_type == 'finding'`. The row's `severity` cell is also blank, so a severity rollup skips it |
+| `junitxml` | A testsuite named after the project, holding one `<skipped type="project-skipped">` test case | Count `<failure>` and `<error>`, which is what CI front ends already do. The suite reports `failures="0" errors="0" skipped="1"` |
+| `ocsf` | A record with `status_id` 99 (OCSF's "not mapped — see `status`"), `status` `Skipped`, severity 1 (Informational), an empty `vulnerabilities` array, and an `ash_row_type:workspace_skipped_project` label | Filter on the label or on `status_id`, or sum `vulnerabilities` lengths, which counts this record as zero |
+
+`html`, `markdown` and `text` show the project in their per-project section with its skip reason, and `flat-json` and `yaml` carry the typed `workspace.skipped_projects` payload. The reason is always stated: a `no-changes` skip is a successful optimisation and an `error` skip is a project that was never looked at, and the two must not read the same.
+
 A reporter is per project when merging would be wrong rather than merely unimplemented. `github-ghas` and `gitlab-sast` produce documents their consumers resolve against a single repository root, so a merged one would mis-locate findings. The three SBOM formats describe one deliverable each, and a workspace of independently versioned projects is N SBOMs. The AWS reporters publish side effects, which a second invocation would duplicate.
 
 `reports/workspace-reports.json` accounts for all of them, including the ones that deliberately produced nothing: what each reporter's behaviour is, the path of its workspace-level artefact or `null`, the per-project paths that replace it, which of those are missing, and why a reporter was not considered at all — `disabled`, `not-in-requested-output-formats`, or unsatisfied dependencies. A missing report is never silent.

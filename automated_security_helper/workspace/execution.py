@@ -18,31 +18,65 @@ and it does so only where an operator wrote a policy file saying so.
 
 Where policy enters, and where it deliberately does not
 ------------------------------------------------------
-Exactly one line applies it: the verdict reads ``project.gate_threshold`` rather
-than ``project.severity_threshold``, so a workspace severity ceiling decides which
-findings are actionable. Everything else about a project's scan -- which scanners
-run, what config they read, what they report -- is still the project's own.
+Four places, and no others:
 
-That single point is deliberate. The ceiling changes only the JUDGEMENT of
-findings, never their discovery, so a project scanned under a ceiling reports the
-same findings as ``ash --source-dir P`` and differs only in how many of them are
-counted actionable. An operator can therefore always reproduce a workspace
-verdict locally by passing the effective threshold, which ``--dry-run`` prints.
+* The verdict reads ``project.gate_threshold`` rather than
+  ``project.severity_threshold``, so a workspace severity ceiling decides which
+  findings are actionable. This one changes only the JUDGEMENT of findings, never
+  their discovery, so a project scanned under a ceiling reports the same findings
+  as ``ash --source-dir P`` and differs only in how many are counted actionable.
+* :func:`_project_config_with_policy` appends ``workspace.suppressions`` and
+  ``workspace.ignore_paths`` to the project's own lists, and switches on each
+  scanner in ``workspace.additional_scanners`` that the project had turned off.
+* :func:`_tag_policy_origin_findings` marks the findings that came from a scanner
+  only the policy asked for, so a reader can tell them from the project's own.
+* The verdict then excludes those findings unless ``policy_scanners_gate`` is
+  set -- BOTH halves of it, the threshold count and the completeness check. A
+  policy scanner whose tool is missing must not fail a project either, or the
+  flag is honoured for findings and ignored for the exit code.
 
-Two policy fields do NOT yet reach the scan, and the reason is a real constraint
-rather than an omission. ``workspace.suppressions``, ``workspace.ignore_paths``
-and ``workspace.additional_scanners`` have to be visible to the scanners
-themselves, which read them from the resolved ``AshConfig``.
-``ASHScanOrchestrator.__init__`` unconditionally overwrites its ``config`` field
-by calling ``resolve_config`` itself, so a caller cannot hand it a config with
-policy merged in. The other available channel, ``config_overrides``, is
-string-keyed and FAILS OPEN: ``apply_config_overrides`` logs a warning and
-returns the ORIGINAL config when an override does not parse or the result does
-not validate. Routing a security policy through it would mean a typo silently
-scans with no policy at all, which is the failure direction this whole feature
-exists to prevent. Those fields are resolved, validated, pushed down per project
-and recorded on the plan; wiring them into the scan needs the orchestrator to
-accept a pre-resolved config, which touches the single-project path.
+An operator can still reproduce a workspace verdict locally, now by passing the
+effective threshold and the same scanner set; ``--dry-run`` prints both.
+
+Why these fields were once withheld, and why that reasoning is dead
+-------------------------------------------------------------------
+This section used to explain that the three config-level policy fields could not
+reach the scan. Recorded here rather than deleted, because it was the only
+written account of the feature's absence and it was wrong on every count -- a
+reader who found it would have been talked out of work that was already
+unblocked. It claimed:
+
+* that ``ASHScanOrchestrator.__init__`` unconditionally overwrites ``config`` by
+  calling ``resolve_config``, so no caller could hand it a merged config. It does
+  not. ``orchestrator.py:257-261`` adopts ``resolved_config`` verbatim when one is
+  given, and resolves only in the ``else`` branch at ``:263``. The field exists
+  for precisely this purpose, and ``:200-228`` refuses the inputs to the
+  resolution it is being told to skip.
+* that the alternative channel ``config_overrides`` FAILS OPEN, logging a warning
+  and returning the original config. It does not. ``apply_config_overrides``
+  raises ``ASHConfigValidationError`` at ``resolve_config.py:154``, ``:161`` and
+  ``:169``. That channel is still unused here, but for the narrower reason that a
+  string-keyed ``key.path=value`` cannot express "append to this list" -- not
+  because it swallows errors.
+* that "Two policy fields" were affected, while naming three.
+
+The durable lesson is about the shape of such a record, not about these three
+facts. The natural reading is that the paragraph was once true and rotted, and
+that is not what happened: ``resolved_config`` landed in b52704b8 (#474) and the
+raising ``apply_config_overrides`` in fee0c695 (#475), both on 2026-08-26, and
+both are ancestors of 341e46fe (#456) -- the commit that wrote this paragraph on
+2026-08-27. So it described a tree that had already stopped existing, on the day
+it was written, and the three-named-as-two slip shipped in that same commit. The
+mechanism is a long-lived branch: prose written at branch point describes the
+tree as it was then, and merging does not re-check it. Nothing caught it because
+a docstring has no test, and a claim about two other modules is exactly what a
+reviewer of this one will not open.
+
+Which is why anything written in the form "X cannot be done because Y" belongs
+next to the file and line of Y. Not for the reader's convenience -- for the
+author's, because having to cite the line means having to look at it, and looking
+at ``orchestrator.py`` here would have shown ``resolved_config`` already sitting
+in the field list.
 
 How the scoping is achieved, and why it needs almost no new code
 ---------------------------------------------------------------
@@ -221,7 +255,7 @@ from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Event, Lock
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Set, Tuple
 
 from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.core.exceptions import (
@@ -249,7 +283,10 @@ from automated_security_helper.workspace.aggregation import (
     incomplete_scanners_for_project,
 )
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
-from automated_security_helper.workspace.policy import ceiling_unreachable_counts
+from automated_security_helper.workspace.policy import (
+    ceiling_unreachable_counts,
+    normalise_scanner_name,
+)
 from automated_security_helper.workspace.reporting import (
     WorkspaceReportOutcome,
     emit_workspace_reports,
@@ -265,6 +302,13 @@ _REPORT_PHASE = "report"
 
 #: The subtree each project's own output lands in.
 PROJECTS_DIR_NAME = "projects"
+
+#: Marks a finding that came from a scanner only ``workspace.additional_scanners``
+#: asked for, rather than one the project enables itself. Written to
+#: ``properties.origin`` on the SARIF result and added to ``properties.tags``.
+#: The spelling is the one the CLI reference and ``AshWorkspaceConfig.json``
+#: already document, so it is a constant rather than a literal at each use.
+POLICY_ORIGIN = "workspace-policy"
 
 OrchestratorFactory = Callable[..., Any]
 
@@ -619,18 +663,35 @@ def _scan_one_project(
 
         results = _filter_results_to_changed_files(results, changed, Path(project.path))
 
+    # Before _extract_run, so the tag is present in both the model written to
+    # projects/<key>/ and the dict carried into the unified file.
+    _tag_policy_origin_findings(results, project)
+
     run = _extract_run(results)
     results_list = list(run.get("results") or []) if run else []
 
     unsuppressed = [entry for entry in results_list if not entry.get("suppressions")]
+    policy_origin = [entry for entry in unsuppressed if _is_policy_origin(entry)]
+
+    # What the verdict is allowed to see. Findings from a scanner only the policy
+    # added are REPORTED either way -- they are in `unsuppressed` above and carry
+    # their tag -- but they decide nothing unless the operator set
+    # policy_scanners_gate. A workspace that adds a scanner to gather visibility
+    # must not thereby fail projects that never opted into it.
+    gating_results = (
+        results_list
+        if project.policy_scanners_gate
+        else [entry for entry in results_list if not _is_policy_origin(entry)]
+    )
+
     # gate_threshold, not severity_threshold: this is where a workspace severity
     # ceiling takes effect on the verdict. Reading the declared value here would
     # leave the ceiling visible in the plan and in --dry-run while changing
     # nothing about which projects fail.
     threshold = project.gate_threshold
-    actionable = count_actionable_results(results_list, threshold)
+    actionable = count_actionable_results(gating_results, threshold)
     if actionable and not has_finding_at_min_severity(
-        results_list, settings.min_severity
+        gating_results, settings.min_severity
     ):
         # --min-severity is a whole-scan switch in _compute_exit_code, not a
         # per-finding filter. Mirrored here so the verdict matches.
@@ -644,6 +705,23 @@ def _scan_one_project(
     # workspace layer mirrored only the threshold pass.
     incomplete = incomplete_scanners_for_project(results)
     fail_on_incomplete = _resolve_fail_on_incomplete_scanners(settings, results)
+    # The same policy_scanners_gate exclusion, applied to the completeness half.
+    # Without it the flag is honoured for findings and ignored for the exit code:
+    # a policy scanner whose tool is absent reads MISSING, MISSING fails the
+    # completeness gate, and a workspace adding a scanner "for visibility" would
+    # fail every project on every host lacking that tool -- with no finding
+    # involved at all. Still reported in `incomplete_scanners`, because an
+    # operator has not asked to be told a scan was complete when it was not.
+    gating_incomplete = incomplete
+    if incomplete and project.policy_scanners and not project.policy_scanners_gate:
+        policy_names = {
+            normalise_scanner_name(name) for name in project.policy_scanners
+        }
+        gating_incomplete = [
+            name
+            for name in incomplete
+            if normalise_scanner_name(name) not in policy_names
+        ]
 
     if abandoned is not None and abandoned.is_set():
         # Given up on while this was running. Do not write, and do not return an
@@ -679,6 +757,12 @@ def _scan_one_project(
             effective_threshold=threshold,
         )
 
+    statuses = _scanner_statuses(results)
+    # After the scan, because "no scanner of this name ran" is the only honest
+    # test for a policy scanner that does not exist -- the registry is per
+    # project, so nothing earlier can tell a typo from a plugin.
+    _warn_on_policy_scanners_that_never_ran(project, statuses)
+
     outcome = WorkspaceProjectResult(
         project=project.key,
         relative_path=project.relative_path,
@@ -687,12 +771,13 @@ def _scan_one_project(
         severity_threshold=threshold,
         finding_count=len(unsuppressed),
         actionable_finding_count=actionable,
+        policy_origin_finding_count=len(policy_origin),
         exceeds_threshold=bool(actionable) and fail_on_findings,
         duration_seconds=time.monotonic() - started,
         output_path=output_path,
-        scanners=_scanner_statuses(results),
+        scanners=statuses,
         incomplete_scanners=incomplete,
-        scan_incomplete=bool(incomplete) and fail_on_incomplete,
+        scan_incomplete=bool(gating_incomplete) and fail_on_incomplete,
         ceiling_unreachable_findings=unreachable,
     )
     return _ProjectRun(outcome=outcome, run=run)
@@ -722,7 +807,9 @@ def _project_config_with_policy(
     ``policy_suppressions`` and ``policy_ignore_paths`` are appended to whatever
     the project declared. Replacing either list would silently un-suppress
     findings the project's own config had suppressed -- a security-relevant
-    regression that raises no error.
+    regression that raises no error. ``policy_scanners`` is likewise additive:
+    it only ever sets ``enabled`` to True, and never to False, so a policy
+    cannot take away a scanner a project chose to run.
 
     Args:
         project: The resolved plan entry, carrying the pushed-down policy.
@@ -761,8 +848,199 @@ def _project_config_with_policy(
         config.global_settings.ignore_paths = list(
             config.global_settings.ignore_paths
         ) + list(project.policy_ignore_paths)
+    if project.policy_scanners:
+        _enable_policy_scanners(config, project.policy_scanners)
 
     return config
+
+
+def _enable_policy_scanners(config: Any, names: Iterable[str]) -> None:
+    """Switch on every scanner ``workspace.additional_scanners`` requires.
+
+    Why the config and not ``enabled_scanners``
+    ------------------------------------------
+    ``ScanPhase._execute_phase`` decides enablement as ``is_in_enabled_scanners
+    and is_enabled``, where ``is_enabled`` is ``plugin_instance.config.enabled``
+    -- reached from this object through ``AshConfig.get_plugin_config``. So this
+    is the half of that conjunction a policy is entitled to move.
+
+    The other half, ``enabled_scanners``, is deliberately left alone. It is the
+    operator's own ``--scanners`` allowlist, and a policy widening a run they
+    narrowed by hand is the one direction they cannot anticipate. The consequence
+    is a real limitation rather than an oversight: ``ash --workspace W --scanners
+    bandit`` runs bandit and nothing else, policy or no policy.
+    ``test_an_explicit_scanner_selection_still_bounds_the_run`` pins it so the
+    decision has to be changed rather than drifted out of.
+
+    Name folding, and why it cannot be a second copy of the rule
+    -----------------------------------------------------------
+    The policy names a scanner the way an operator types it (``cdk-nag``); the
+    config field is the Python name (``cdk_nag``) carrying that spelling as its
+    alias. Both are indexed here through
+    :func:`~automated_security_helper.workspace.policy.normalise_scanner_name`,
+    the same function the classifier used to decide this scanner was policy-added
+    in the first place. A private re-implementation would agree with it on every
+    unaliased name and disagree on exactly the aliased ones, producing a policy
+    that enables nothing while the plan reports that it enabled something.
+
+    A name matching no config entry
+    -------------------------------
+    An entry is created for it. ``policy.py`` deliberately does not validate
+    ``additional_scanners`` against the scanners ASH knows, because the plugin
+    registry is not loaded at resolution time and its contents depend on each
+    project's ``ash_plugin_modules``. So a name with no declared field is either a
+    plugin-provided scanner -- which needs a config entry to be enabled, exactly
+    as a hand-written one in the project's YAML would -- or a typo. The two are
+    not distinguishable here, so neither a refusal nor a warning is honest at this
+    point; :func:`_warn_on_policy_scanners_that_never_ran` reports it after the
+    scan, where "it produced no status at all" is a measurement rather than a
+    guess.
+
+    Args:
+        config: The project's resolved ``AshConfig``, mutated in place.
+        names: The policy scanner names, in the policy's own spelling.
+    """
+    segment = config.scanners
+    fields = type(segment).model_fields
+    extra = getattr(segment, "__pydantic_extra__", None) or {}
+
+    # Folded name -> the attribute to reach the entry through. Declared fields are
+    # indexed under both their Python name and their alias; setdefault keeps a
+    # declared field ahead of an extra key that folds to the same thing.
+    index: Dict[str, str] = {}
+    for field_name, field_info in fields.items():
+        index.setdefault(normalise_scanner_name(field_name), field_name)
+        if field_info.alias:
+            index.setdefault(normalise_scanner_name(field_info.alias), field_name)
+    for key in extra:
+        index.setdefault(normalise_scanner_name(key), key)
+
+    for name in names:
+        target = index.get(normalise_scanner_name(name))
+        if target is None:
+            # extra="allow" on ScannerConfigSegment, so this lands in
+            # __pydantic_extra__ and get_plugin_config finds it by key.
+            setattr(segment, name, {"name": name, "enabled": True})
+            ASH_LOGGER.verbose(
+                f"Workspace policy added scanner '{name}', which this project's "
+                f"configuration does not describe; it will run with default "
+                f"settings if a plugin provides it."
+            )
+            continue
+        entry = getattr(segment, target, None)
+        if entry is None:
+            setattr(segment, target, {"name": name, "enabled": True})
+        elif isinstance(entry, dict):
+            entry["enabled"] = True
+        else:
+            entry.enabled = True
+        ASH_LOGGER.verbose(
+            f"Workspace policy enabled scanner '{name}' for this project."
+        )
+
+
+def _is_policy_origin(result: Mapping[str, Any]) -> bool:
+    """Whether this SARIF result came from a scanner only the policy added."""
+    properties = result.get("properties")
+    if not isinstance(properties, Mapping):
+        return False
+    return properties.get("origin") == POLICY_ORIGIN
+
+
+def _tag_policy_origin_findings(results: Any, project: ProjectPlan) -> None:
+    """Mark findings from a policy-added scanner with ``origin: workspace-policy``.
+
+    Why here, and why on the model
+    ------------------------------
+    The results MODEL is mutated, not the dict :func:`_extract_run` produces from
+    it. Two artefacts are written from these results and an operator reads
+    whichever is nearer: ``projects/<key>/ash_aggregated_results.json`` comes from
+    the model, the unified workspace file from the extracted dict. Tagging the
+    dict alone would leave the per-project file reporting a policy finding as the
+    project's own, which is the reading that matters most -- that file is the one
+    this feature advertises as consumable by existing single-project tooling.
+
+    Why ``properties.scanner_name`` is the attribution
+    -------------------------------------------------
+    It is the only per-result one available. ``SarifReport.merge_sarif_report``
+    collapses every scanner into ``runs[0]``, so ``tool.driver.name`` names the
+    aggregate rather than the scanner that found any given result;
+    ``attach_scanner_details`` writes ``properties.scanner_name`` per result for
+    exactly this reason and every scanner goes through it. A result with no
+    properties is left alone rather than guessed at: nothing attributes it to a
+    scanner, so nothing justifies calling it policy-origin.
+
+    Both ``properties.origin`` and a ``workspace-policy`` entry in
+    ``properties.tags`` are written. ``origin`` is what the schema and the CLI
+    reference document; the tag is what reporters that group by tag can see, and
+    the existing tag list is extended rather than replaced so the scanner-name tag
+    survives.
+
+    Args:
+        results: One project's ``AshAggregatedResults``, mutated in place.
+        project: The plan entry, for ``policy_scanners``.
+    """
+    if not project.policy_scanners:
+        return
+
+    wanted = {normalise_scanner_name(name) for name in project.policy_scanners}
+    sarif = getattr(results, "sarif", None)
+    for run in getattr(sarif, "runs", None) or []:
+        for result in getattr(run, "results", None) or []:
+            properties = getattr(result, "properties", None)
+            if properties is None:
+                continue
+            scanner = getattr(properties, "scanner_name", None)
+            if not isinstance(scanner, str):
+                continue
+            if normalise_scanner_name(scanner) not in wanted:
+                continue
+            # PropertyBag is extra="allow", so this creates the field. Plain
+            # assignment rather than setattr: `origin` is a constant here, and
+            # setattr with a literal name reads as though the name were dynamic.
+            properties.origin = POLICY_ORIGIN
+            tags = list(getattr(properties, "tags", None) or [])
+            if POLICY_ORIGIN not in tags:
+                tags.append(POLICY_ORIGIN)
+            properties.tags = tags
+
+
+def _warn_on_policy_scanners_that_never_ran(
+    project: ProjectPlan, statuses: Mapping[str, str]
+) -> None:
+    """Name any policy scanner that produced no status at all.
+
+    The surfacing point ``policy.py`` promises. ``additional_scanners`` is not
+    validated against the scanners ASH knows -- it cannot be, at resolution time
+    -- and the documented consequence is that a typo "surfaces when execution
+    cannot find the scanner". Nothing actually surfaced it. A misspelled scanner
+    produced no entry, no message, and a project that passed while the operator
+    believed a required scanner had run.
+
+    A WARNING rather than a failure. The plugin registry is per project via
+    ``ash_plugin_modules``, so a CI matrix whose runners load different modules
+    can legitimately produce this shape for one project and not another -- the
+    same reasoning that makes a partly-unresolvable ``--scanners`` allowlist a
+    warning in ``ScanPhase``. Distinguished from MISSING deliberately: MISSING
+    means the scanner ran and its tool was absent, which ``incomplete_scanners``
+    already reports. This is the case where no scanner of that name exists.
+    """
+    if not project.policy_scanners:
+        return
+
+    present = {normalise_scanner_name(name) for name in statuses}
+    absent = [
+        name
+        for name in project.policy_scanners
+        if normalise_scanner_name(name) not in present
+    ]
+    if absent:
+        ASH_LOGGER.warning(
+            f"Project '{project.key}': workspace policy requires scanner(s) "
+            f"{', '.join(absent)}, but no scanner of that name ran. Check the "
+            f"spelling in the policy's additional_scanners, and that any plugin "
+            f"providing it is listed in ash_plugin_modules."
+        )
 
 
 def _extract_run(results: Any) -> Optional[Dict[str, Any]]:
