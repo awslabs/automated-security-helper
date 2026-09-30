@@ -63,6 +63,18 @@ def registry():
     return MagicMock(spec=ScanRegistry)
 
 
+def _status_transitions(registry):
+    """Every status change the runner made, in order.
+
+    The runner opens the entry with ``update_scan_status(RUNNING)`` and closes it
+    with ``finish_scan``, which leaves a scan something else already closed -- a
+    cancel -- as it is. Both are status changes, so both are read here.
+    """
+    return [
+        c for c in registry.mock_calls if c[0] in ("update_scan_status", "finish_scan")
+    ]
+
+
 def _entry(tmp_path, scan_id="scan-1"):
     return ScanRegistryEntry(
         scan_id=scan_id,
@@ -234,7 +246,7 @@ class TestRunScanAsync:
                 )
             )
 
-        statuses = [c.args[1] for c in registry.update_scan_status.call_args_list]
+        statuses = [c.args[1] for c in _status_transitions(registry)]
         assert statuses == [MCScanStatus.RUNNING, MCScanStatus.COMPLETED]
 
         kwargs = run_ash_scan.call_args.kwargs
@@ -397,7 +409,7 @@ class TestRunScanAsync:
                 )
             )
 
-        final = registry.update_scan_status.call_args_list[-1]
+        final = _status_transitions(registry)[-1]
         assert final.args[1] is MCScanStatus.FAILED
         assert final.args[2] == "Error executing scan: scanner crashed"
         assert "Scan scan-1 failed" in logger.error.call_args[0][0]

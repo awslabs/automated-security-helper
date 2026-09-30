@@ -266,6 +266,16 @@ class ScanProgress:
         # Ensure duration is at least a small positive value for cross-platform compatibility
         self.duration = max(duration, 0.001)
 
+    def mark_in_progress(self) -> None:
+        """Mark the scan as not finished, keeping whatever scanners were read.
+
+        For a scan whose runner has not closed it: a results file on disk is
+        partial results at most, whatever it says about itself.
+        """
+        self.status = "in_progress"
+        self.end_time = None
+        self.duration = None
+
     @property
     def completed_scanners(self) -> int:
         """
@@ -738,8 +748,12 @@ def create_scan_progress_from_files(
     """
     Create a ScanProgress object by analyzing scan result files.
 
-    Once ``ash_aggregated_results.json`` exists, the progress is built from it, and
-    there are three outcomes:
+    Once ``ash_aggregated_results.json`` exists, the progress is built from it.
+    What this returns describes the *file*. It is not the scan's status: the SCAN
+    phase writes a complete-looking results document before the REPORT phase runs,
+    so a readable file does not mean the scan has finished. ``check_scan_progress``
+    reconciles this with the registry entry, which knows whether a runner still
+    owns the scan. There are three outcomes:
 
     * The file is a results document: ``completed``, with one entry per scanner.
     * The file cannot be read as results -- it does not parse, is not a JSON object,
@@ -750,11 +764,12 @@ def create_scan_progress_from_files(
       It used to fall through to a completed scan with no scanners.
     * The file is a JSON object with neither ``scanner_results`` nor ``sarif``:
       ``results_pending`` is set and the status is left ``in_progress``. The SCAN
-      phase writes exactly that before the REPORT phase runs, because ``save_model``
-      dumps with ``exclude_unset`` and the scan fills ``scanner_results`` in place;
-      ``_run_local_mode`` replaces it with the full document at the end. Whether it
-      means "not finished yet" or "finished without results" depends on whether the
-      scan is still running, which only the registry knows, so the caller decides.
+      phase used to write exactly that, because ``save_model`` dumped with
+      ``exclude_unset`` and the scan fills ``scanner_results`` in place; it now
+      dumps the full model, so an ASH-written file always carries both. Whether such
+      a file means "not finished yet" or "finished without results" depends on
+      whether the scan has been closed, which only the registry knows, so the
+      caller decides.
 
     Args:
         scan_id: ID of the scan

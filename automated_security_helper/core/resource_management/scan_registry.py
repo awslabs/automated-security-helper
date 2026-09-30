@@ -375,17 +375,48 @@ class ScanRegistry:
             entry = self._registry.get(scan_id)
             if entry is None:
                 return False
+            self._apply_status(scan_id, entry, status, error_message)
+            return True
 
-            if status == MCScanStatus.RUNNING:
-                entry.mark_running()
-            elif status == MCScanStatus.COMPLETED:
-                entry.mark_completed()
-            elif status == MCScanStatus.FAILED:
-                entry.mark_failed(error_message or "Unknown error")
-            elif status == MCScanStatus.CANCELLED:
-                entry.mark_cancelled()
+    def _apply_status(
+        self,
+        scan_id: str,
+        entry: ScanRegistryEntry,
+        status: MCScanStatus,
+        error_message: Optional[str],
+    ) -> None:
+        """Move ``entry`` to ``status``. The caller holds ``_registry_lock``."""
+        if status == MCScanStatus.RUNNING:
+            entry.mark_running()
+        elif status == MCScanStatus.COMPLETED:
+            entry.mark_completed()
+        elif status == MCScanStatus.FAILED:
+            entry.mark_failed(error_message or "Unknown error")
+        elif status == MCScanStatus.CANCELLED:
+            entry.mark_cancelled()
 
-            self._logger.info(f"Updated scan {scan_id} status to {status.value}")
+        self._logger.info(f"Updated scan {scan_id} status to {status.value}")
+
+    def finish_scan(
+        self, scan_id: str, status: MCScanStatus, error_message: Optional[str] = None
+    ) -> bool:
+        """Close a scan as its runner, unless something already closed it.
+
+        For the code that ran the scan, when the run returns. ``update_scan_status``
+        overwrites whatever is there, so a runner finishing after ``cancel_scan``
+        turned a cancelled scan back into a completed one -- the cancel cannot stop
+        an in-process scan, only record that it was asked to. Checked and applied
+        under the registry lock, so a cancel landing between the two is not lost.
+
+        Returns:
+            True if the entry was closed, False if it was not found or had already
+            left the active states.
+        """
+        with self._registry_lock:
+            entry = self._registry.get(scan_id)
+            if entry is None or not entry.is_active():
+                return False
+            self._apply_status(scan_id, entry, status, error_message)
             return True
 
     def list_scans(
@@ -613,19 +644,28 @@ class ScanRegistry:
                 raise error
 
             try:
-                # Create scan progress object from files. The response's status is
-                # the entry's, so the entry is reconciled with what the file says
-                # below rather than with the file merely existing: marking it
-                # completed on existence is how a file that did not parse came back
-                # as a completed scan with no scanners.
+                # Create scan progress object from files, then reconcile it with
+                # the registry entry, whose status is the response's status.
+                #
+                # Who decides depends on whether anything owns the scan's
+                # lifecycle. A RUNNING entry has a runner that will close it, so the
+                # runner decides and the file is only partial results: the SCAN
+                # phase writes a parseable results file before the REPORT phase has
+                # run, and a previous scan's file can still be on disk. A FAILED or
+                # CANCELLED entry was closed by its runner, and a parseable file
+                # means results exist, not that the scan succeeded. Only a PENDING
+                # entry, which no runner has claimed, takes its status from the
+                # file. Marking the entry completed because the file merely existed
+                # is how a file that did not parse came back as a completed scan
+                # with no scanners.
                 scan_progress = create_scan_progress_from_files(scan_id, output_dir)
+                results_path = output_dir / "ash_aggregated_results.json"
 
-                if entry.status in (MCScanStatus.FAILED, MCScanStatus.CANCELLED):
-                    # Closed by its runner. A readable file means results exist,
-                    # not that the scan succeeded, so the runner's status and reason
-                    # stand; whatever scanners the file holds stay readable as
-                    # partial results. This used to fall into the branch below and
-                    # turn a failed or cancelled scan into a completed one.
+                if entry.status == MCScanStatus.RUNNING:
+                    scan_progress.mark_in_progress()
+                elif entry.status in (MCScanStatus.FAILED, MCScanStatus.CANCELLED):
+                    # The runner's terminal status and reason stand. Whatever
+                    # scanners the file holds stay readable as partial results.
                     pass
                 elif scan_progress.status == "completed":
                     if entry.status != MCScanStatus.COMPLETED:
@@ -634,14 +674,14 @@ class ScanRegistry:
                     # The results file exists and cannot be read as results.
                     entry.mark_failed(
                         scan_progress.error_message
-                        or "Aggregated results file could not be read"
+                        or f"Aggregated results file {results_path} could not be read"
                     )
                 elif scan_progress.results_pending:
-                    # The SCAN phase's interim document, without scanner_results.
-                    # While the scan runs that means "not finished"; once the entry
-                    # was closed as completed, the final document never arrived.
+                    # A JSON object with neither scanner_results nor sarif is not a
+                    # results document. Before anything has closed the entry that
+                    # is "not finished"; once it was closed as completed, the final
+                    # document never arrived.
                     if entry.status == MCScanStatus.COMPLETED:
-                        results_path = output_dir / "ash_aggregated_results.json"
                         scan_progress.mark_failed()
                         scan_progress.error_message = (
                             f"Aggregated results file {results_path} has neither "
@@ -653,8 +693,7 @@ class ScanRegistry:
                     # No results file, and whoever ran the scan closed the entry as
                     # completed. The entry owns the lifecycle here: a workspace
                     # closes a project's entry this way when the run returned and
-                    # nothing says the project did not. This is the only case the
-                    # registry still overrides the file-derived status.
+                    # nothing says the project did not.
                     scan_progress.mark_completed()
 
                 # Convert scan progress to dictionary

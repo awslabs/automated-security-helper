@@ -773,14 +773,18 @@ class AshAggregatedResults(BaseModel):
         # Save aggregated results as JSON. Atomically, because this file's existence is
         # what marks the scan complete and get_scan_progress parses it while the scan is
         # still running; see utils/atomic_write.py.
+        #
+        # The full model, not exclude_unset. The scan builds this model by mutating
+        # it in place -- scanner_results[name] = ..., appending SARIF results -- and
+        # pydantic records a field as set only when it is assigned or passed to the
+        # constructor. exclude_unset therefore dropped scanner_results and sarif from
+        # a model that had both, and the file said the scan had no scanners. Dumped
+        # the same way as the rewrite in _run_local_mode and a workspace's
+        # per-project file, so every writer of this file produces one shape.
         json_path = output_dir.joinpath("ash_aggregated_results.json")
         write_text_atomically(
             json_path,
-            self.model_dump_json(
-                by_alias=True,
-                exclude_unset=True,
-                exclude_none=True,
-            ),
+            self.model_dump_json(indent=2, by_alias=True),
         )
 
     def _populate_final_metrics(self) -> None:

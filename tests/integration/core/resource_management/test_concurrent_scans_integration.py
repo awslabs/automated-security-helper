@@ -20,6 +20,7 @@ fuller account.
 import json
 import time
 import asyncio
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
@@ -115,6 +116,39 @@ def output_directories(tmp_path):
     return directories
 
 
+def _close_like_the_runner(output_dir):
+    """The step _run_scan_async takes when run_ash_scan returns, for ``output_dir``.
+
+    A mock scan writes files; it is not the runner. The real runner closes the entry
+    with ``finish_scan(scan_id, COMPLETED)`` only after the whole run returns, and
+    until then ``check_scan_progress`` reports the scan as running whatever its
+    results file says -- the SCAN phase writes a readable one before the REPORT phase
+    has run. The mock returns this so a test can close the entry the way the runner
+    does, and assert on the state before it.
+    """
+
+    def close():
+        registry = get_scan_registry()
+        [scan] = [
+            scan
+            for scan in registry.list_scans()
+            if Path(scan["output_directory"]) == Path(output_dir)
+        ]
+        registry.finish_scan(scan["scan_id"], MCScanStatus.COMPLETED)
+
+    return close
+
+
+async def _assert_not_completed_until_the_runner_closes(scan_id):
+    """A results file on disk is not a finished scan while its runner is open."""
+    progress = await check_scan_progress(scan_id)
+    assert progress["status"] != "completed", (
+        "The results file exists but the runner has not closed the scan, and "
+        f"it was reported completed with scanners={progress.get('scanners')!r}."
+    )
+    assert progress["is_complete"] is False
+
+
 @pytest.fixture
 def mock_scan_process():
     """Mock function to simulate a scan process with variable duration and findings."""
@@ -183,6 +217,7 @@ def mock_scan_process():
             }
 
         write_aggregated_results(output_dir, scanner_results)
+        return _close_like_the_runner(output_dir)
 
     return create_mock_scan_results
 
@@ -255,8 +290,12 @@ class TestConcurrentScansIntegration:
                 assert "scanners" in progress
 
             # Wait for all mock scans to complete
-            for future in futures:
-                future.result()
+            closes = [future.result() for future in futures]
+
+        for scan_id in scan_ids:
+            await _assert_not_completed_until_the_runner_closes(scan_id)
+        for close in closes:
+            close()
 
         # Check each scan's progress after completion
         for i, scan_id in enumerate(scan_ids):
@@ -337,8 +376,15 @@ class TestConcurrentScansIntegration:
             assert cancel_result["status"] == "cancelled"
 
             # Wait for the remaining scans to complete
-            for future in futures:
-                future.result()
+            closes = [future.result() for future in futures]
+
+        # The cancelled scan stays cancelled; the other two are not complete until
+        # their runner closes them. All three runners return, as the real one does
+        # for a cancelled in-process scan, and the cancel must survive that.
+        for scan_id in (scan_ids[0], scan_ids[2]):
+            await _assert_not_completed_until_the_runner_closes(scan_id)
+        for close in closes:
+            close()
 
         # Check status of each scan
         # First scan should be completed
