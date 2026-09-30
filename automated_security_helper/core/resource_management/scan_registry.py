@@ -620,20 +620,22 @@ class ScanRegistry:
                 # as a completed scan with no scanners.
                 scan_progress = create_scan_progress_from_files(scan_id, output_dir)
 
-                if scan_progress.status == "completed":
+                if entry.status in (MCScanStatus.FAILED, MCScanStatus.CANCELLED):
+                    # Closed by its runner. A readable file means results exist,
+                    # not that the scan succeeded, so the runner's status and reason
+                    # stand; whatever scanners the file holds stay readable as
+                    # partial results. This used to fall into the branch below and
+                    # turn a failed or cancelled scan into a completed one.
+                    pass
+                elif scan_progress.status == "completed":
                     if entry.status != MCScanStatus.COMPLETED:
                         entry.mark_completed()
                 elif scan_progress.status == "failed":
-                    # The results file exists and cannot be read as results. A scan
-                    # that already failed or was cancelled keeps its own reason.
-                    if entry.status not in (
-                        MCScanStatus.FAILED,
-                        MCScanStatus.CANCELLED,
-                    ):
-                        entry.mark_failed(
-                            scan_progress.error_message
-                            or "Aggregated results file could not be read"
-                        )
+                    # The results file exists and cannot be read as results.
+                    entry.mark_failed(
+                        scan_progress.error_message
+                        or "Aggregated results file could not be read"
+                    )
                 elif scan_progress.results_pending:
                     # The SCAN phase's interim document, without scanner_results.
                     # While the scan runs that means "not finished"; once the entry

@@ -301,6 +301,20 @@ async def _run_scan_async(
         registry.update_scan_status(scan_id, MCScanStatus.COMPLETED)
         _logger.info(f"Scan {scan_id} completed successfully")
 
+    except SystemExit as e:
+        # run_ash_scan ends with sys.exit on a non-zero verdict and on every error
+        # path it handles itself. SystemExit is not an Exception, so without this
+        # arm it escaped the task and the entry stayed RUNNING for good: listed as
+        # active, blocking the next scan of the same directory, and never carrying
+        # the failure.
+        if e.code in (None, 0):
+            registry.update_scan_status(scan_id, MCScanStatus.COMPLETED)
+            _logger.info(f"Scan {scan_id} completed successfully")
+        else:
+            error_message = f"ASH exited with code {e.code}"
+            registry.update_scan_status(scan_id, MCScanStatus.FAILED, error_message)
+            _logger.error(f"Scan {scan_id} failed: {error_message}")
+
     except Exception as e:
         error_message = f"Error executing scan: {str(e)}"
         registry.update_scan_status(scan_id, MCScanStatus.FAILED, error_message)
