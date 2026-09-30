@@ -1494,6 +1494,14 @@
                 "top_hotspots_limit": 20
               }
             },
+            "unused-suppressions": {
+              "enabled": true,
+              "extension": "unused-suppressions.json",
+              "name": "unused-suppressions",
+              "options": {
+                "output_format": "both"
+              }
+            },
             "yaml": {
               "enabled": false,
               "extension": "yaml",
@@ -13762,6 +13770,18 @@
           },
           "description": "Configure the options for the Text reporter"
         },
+        "unused-suppressions": {
+          "$ref": "#/$defs/UnusedSuppressionsReporterConfig",
+          "default": {
+            "enabled": true,
+            "extension": "unused-suppressions.json",
+            "name": "unused-suppressions",
+            "options": {
+              "output_format": "both"
+            }
+          },
+          "description": "Configure the options for the Unused Suppressions reporter"
+        },
         "yaml": {
           "$ref": "#/$defs/YAMLReporterConfig",
           "default": {
@@ -19923,6 +19943,49 @@
       ],
       "title": "Unit1",
       "type": "string"
+    },
+    "UnusedSuppressionsReporterConfig": {
+      "additionalProperties": true,
+      "description": "Configuration for the Unused Suppressions reporter.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "extension": {
+          "default": "unused-suppressions.json",
+          "title": "Extension",
+          "type": "string"
+        },
+        "name": {
+          "const": "unused-suppressions",
+          "default": "unused-suppressions",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/UnusedSuppressionsReporterConfigOptions",
+          "default": {
+            "output_format": "both"
+          }
+        }
+      },
+      "title": "UnusedSuppressionsReporterConfig",
+      "type": "object"
+    },
+    "UnusedSuppressionsReporterConfigOptions": {
+      "additionalProperties": true,
+      "description": "Configuration options for the Unused Suppressions reporter.",
+      "properties": {
+        "output_format": {
+          "default": "both",
+          "title": "Output Format",
+          "type": "string"
+        }
+      },
+      "title": "UnusedSuppressionsReporterConfigOptions",
+      "type": "object"
     },
     "VersionControlDetails": {
       "additionalProperties": false,

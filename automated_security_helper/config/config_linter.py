@@ -943,6 +943,7 @@ class ConfigLinter:
         # Lazy import to avoid pulling the full config-segment graph on
         # module import.
         from automated_security_helper.config.ash_config import (
+            REPORTER_FIELD_NAME_SPELLINGS,
             ConverterConfigSegment,
             ReporterConfigSegment,
             ScannerConfigSegment,
@@ -1002,6 +1003,19 @@ class ConfigLinter:
                     continue
 
                 # Plain legacy variant — auto-fixable.
+                if (
+                    segment_name == "reporters"
+                    and REPORTER_FIELD_NAME_SPELLINGS.get(key) == swapped
+                ):
+                    consequence = (
+                        f"ASH reads it as {swapped!r}, but only the "
+                        f"canonical form is documented."
+                    )
+                else:
+                    consequence = (
+                        "The legacy form lands in __pydantic_extra__ and "
+                        "the real built-in keeps its default config."
+                    )
                 result.issues.append(
                     LintIssue(
                         severity=LintSeverity.WARNING,
@@ -1010,9 +1024,7 @@ class ConfigLinter:
                         message=(
                             f"{segment_name}.{key!r} uses the legacy "
                             f"snake/kebab variant; canonical form is "
-                            f"{swapped!r}. The legacy form lands in "
-                            f"__pydantic_extra__ and the real built-in "
-                            f"keeps its default config."
+                            f"{swapped!r}. {consequence}"
                         ),
                         fixable=True,
                     )

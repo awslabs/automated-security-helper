@@ -2,7 +2,14 @@ import json
 import os
 from pathlib import Path
 import re
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    ValidationError,
+    model_validator,
+)
 from typing import Annotated, Any, List, Dict, Literal, Optional
 
 import yaml
@@ -70,6 +77,9 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.sarif_report
 )
 from automated_security_helper.plugin_modules.ash_builtin.reporters.github_ghas_reporter import (
     GHASReporterConfig,
+)
+from automated_security_helper.plugin_modules.ash_builtin.reporters.unused_suppressions_reporter import (
+    UnusedSuppressionsReporterConfig,
 )
 from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
     BanditScannerConfig,
@@ -229,6 +239,36 @@ class ScannerConfigSegment(BaseModel):
     ] = SyftScannerConfig()
 
 
+# Reporter keys whose Python field-name spelling is read as the declared alias.
+# See ReporterConfigSegment._accept_unused_suppressions_field_name for why this
+# holds only unused-suppressions. The config linter reads it so its warning
+# about the field-name spelling says what actually happens to it.
+REPORTER_FIELD_NAME_SPELLINGS: Dict[str, str] = {
+    "unused_suppressions": "unused-suppressions",
+}
+
+
+def _merge_config_values(base: Any, overlay: Any) -> Any:
+    """Merge two raw config values, ``overlay`` winning key by key.
+
+    Model instances are dumped first so that a value built in Python merges the
+    same way as one read from YAML. Anything that is not a mapping on both sides
+    is replaced by ``overlay`` whole.
+    """
+    if isinstance(base, BaseModel):
+        base = base.model_dump()
+    if isinstance(overlay, BaseModel):
+        overlay = overlay.model_dump()
+    if not (isinstance(base, dict) and isinstance(overlay, dict)):
+        return overlay
+    merged = dict(base)
+    for key, value in overlay.items():
+        merged[key] = (
+            _merge_config_values(merged[key], value) if key in merged else value
+        )
+    return merged
+
+
 class ReporterConfigSegment(BaseModel):
     model_config = ConfigDict(
         str_strip_whitespace=True,
@@ -304,10 +344,60 @@ class ReporterConfigSegment(BaseModel):
         TextReporterConfig,
         Field(description="Configure the options for the Text reporter"),
     ] = TextReporterConfig()
+    unused_suppressions: Annotated[
+        UnusedSuppressionsReporterConfig,
+        Field(
+            description="Configure the options for the Unused Suppressions reporter",
+            alias="unused-suppressions",
+        ),
+    ] = UnusedSuppressionsReporterConfig()
     yaml: Annotated[
         YAMLReporterConfig,
         Field(description="Configure the options for the YAML reporter"),
     ] = YAMLReporterConfig()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_unused_suppressions_field_name(cls, data: Any) -> Any:
+        """Route the ``unused_suppressions`` spelling to the declared field.
+
+        Before this field was declared, the reporter was configured only through
+        ``extra="allow"``, and both ``unused-suppressions`` and
+        ``unused_suppressions`` loaded: ``get_plugin_config`` finds either one.
+        Declaring the field with the hyphenated alias would, on its own, split
+        them. This segment does not set ``populate_by_name``, so an underscore
+        key would land in the extras, unvalidated, while the field kept its
+        defaults under ``unused-suppressions``. The runtime lookup would read one
+        and a lookup by the registered name the other.
+
+        Renaming the key here keeps one copy of the settings, validated. It is
+        scoped to this field rather than done with ``populate_by_name`` because
+        that would also start validating the underscore spellings of the other
+        aliased reporters (``gitlab_sast`` and the rest), a behavior change this
+        field does not need.
+
+        If both spellings are present they are merged key by key, with the
+        hyphenated, documented spelling winning where both set the same key.
+        Both are present on every ``--config-overrides`` run that touches this
+        reporter, not only in a hand-written config: ``apply_config_overrides``
+        round-trips the config through ``model_dump()``, which is keyed by field
+        name, so the file's settings come back as ``unused_suppressions`` while
+        the override adds ``unused-suppressions`` holding only the overridden
+        key. Keeping either one whole would silently revert the other. A
+        hand-written config with both is flagged by ``ash config lint``.
+        """
+        if not isinstance(data, dict):
+            return data
+        for field_spelling, alias in REPORTER_FIELD_NAME_SPELLINGS.items():
+            if field_spelling not in data:
+                continue
+            data = dict(data)
+            field_spelling_value = data.pop(field_spelling)
+            if alias in data:
+                data[alias] = _merge_config_values(field_spelling_value, data[alias])
+            else:
+                data[alias] = field_spelling_value
+        return data
 
 
 class MCPResourceManagementConfig(BaseModel):
