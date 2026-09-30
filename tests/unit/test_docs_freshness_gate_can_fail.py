@@ -42,6 +42,8 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -168,11 +170,73 @@ def test_config_path_check_can_fail(gate, tmp_path, monkeypatch):
     assert "ash-config.yaml" in invented[0]
 
 
+def _generator():
+    """The reporter doc generator, loaded by path the same way the gate is."""
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    path = REPO_ROOT / "scripts" / "generate_reporter_docs.py"
+    spec = importlib.util.spec_from_file_location("_ash_reporter_docs_gen", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_reporter_check_passes_on_the_generated_table():
+    """The gate must accept the table the generator writes.
+
+    The reporter-quick-reference block in output-formats.md is written by
+    scripts/generate_reporter_docs.py from the plugin registry. The gate used to
+    build its reporter list from the fields declared on ReporterConfigSegment
+    instead, a different source, and the two disagree about any reporter that
+    reaches configuration only through ``extra="allow"``. unused-suppressions is
+    one: the generator gave it a row, the gate called that row a leftover for a
+    removed reporter, and `generate_reporter_docs.py --check` and
+    `verify_docs_freshness.py` could not both pass on any version of the doc.
+
+    Nothing in the unit suite ran check_reporters against the real doc, which is
+    how the gate failed on main while the suite was green. This test is that run.
+
+    In a fresh interpreter, the way CI runs the gate. The plugin registry is
+    process-global, and in a shared test worker it also holds reporters that
+    other tests imported (the AWS plugin package registers aws-security-hub, s3
+    and others), so an in-process run would demand rows for plugins the
+    generator never sees.
+    """
+    code = (
+        "import importlib.util, json, sys\n"
+        f"sys.path.insert(0, {str(REPO_ROOT)!r})\n"
+        f"spec = importlib.util.spec_from_file_location('g', {str(SCRIPT)!r})\n"
+        "g = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(g)\n"
+        "print(json.dumps(g.check_reporters()))\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    failures = json.loads(result.stdout.strip().splitlines()[-1])
+    assert failures == []
+
+
+def test_reporter_check_reads_the_generators_registry(gate):
+    """The gate's reporter inventory is the generator's, not a second opinion.
+
+    Asserted as set equality with the generator's own function, so the gate
+    reverting to any other source (config fields, ASH_REPORTERS, the package
+    ``__all__``) that happens to disagree with the registry fails here by name.
+    """
+    expected = {row["name"] for row in _generator().registered_reporters()}
+    assert expected, "the registry returned no reporters; nothing is being compared"
+    assert set(gate.reporter_names()) == expected
+
+
 def test_reporter_check_can_fail_in_both_directions(gate, tmp_path, monkeypatch):
     """A row naming a removed reporter used to pass; that was the whole defect."""
-    from automated_security_helper.config.ash_config import ReporterConfigSegment
-
-    names = sorted(gate._segment_names(ReporterConfigSegment))
+    names = sorted(gate.reporter_names())
 
     def publish(rows):
         doc = tmp_path / "output-formats.md"
@@ -185,7 +249,7 @@ def test_reporter_check_can_fail_in_both_directions(gate, tmp_path, monkeypatch)
     assert publish(names) == [], "the complete reporter table was rejected"
 
     # docs -> code: the direction that was never checked.
-    ghost = publish(names + ["cloudwatch-logs"])
+    ghost = publish(names + ["carrier-pigeon"])
     assert ghost, "a table row naming a nonexistent reporter was accepted"
     assert any("names nothing in the code" in f for f in ghost)
 
@@ -193,6 +257,75 @@ def test_reporter_check_can_fail_in_both_directions(gate, tmp_path, monkeypatch)
     dropped = publish(names[1:])
     assert dropped, "a reporter missing from the table was accepted"
     assert any(names[0] in f for f in dropped)
+
+
+def test_reporter_check_fails_when_a_real_row_is_deleted(gate, tmp_path, monkeypatch):
+    """Against a copy of the real page, not a synthetic table.
+
+    The synthetic test above builds its rows from the same inventory the check
+    reads, so on its own it cannot tell a working comparison from a list compared
+    with itself. Here the doc side is the committed page with one row removed.
+    """
+    real = gate.OUTPUT_FORMATS_MD.read_text(encoding="utf-8")
+    row = next(line for line in real.splitlines() if "(`unused-suppressions`)" in line)
+    doc = tmp_path / "output-formats.md"
+    doc.write_text(real.replace(row + "\n", ""), encoding="utf-8")
+    monkeypatch.setattr(gate, "OUTPUT_FORMATS_MD", doc)
+
+    failures = gate.check_reporters()
+    assert any("'unused-suppressions'" in f and "no row" in f for f in failures), (
+        f"deleting a registered reporter's row was accepted: {failures}"
+    )
+
+
+def test_reporter_check_fails_for_a_registered_reporter_with_no_row(gate, monkeypatch):
+    """The other half: the registry grows and the committed page does not."""
+    generator = gate._reporter_generator()
+    real_rows = generator.registered_reporters()
+    extra = {
+        "name": "carrier-pigeon",
+        "extension": "pigeon.json",
+        "enabled": False,
+        "class_name": "CarrierPigeonReporter",
+    }
+    monkeypatch.setattr(generator, "registered_reporters", lambda: real_rows + [extra])
+
+    failures = gate.check_reporters()
+    assert any(
+        "'carrier-pigeon'" in f and "CarrierPigeonReporter" in f for f in failures
+    ), f"a registered reporter with no table row was accepted: {failures}"
+
+
+def test_reporter_check_fails_closed_on_an_empty_registry(gate, monkeypatch):
+    generator = gate._reporter_generator()
+    monkeypatch.setattr(generator, "registered_reporters", list)
+    failures = gate.check_reporters()
+    assert failures and "no reporters" in failures[0]
+
+
+def test_every_declared_reporter_config_field_is_a_registered_reporter(gate):
+    """What the old config-field source checked incidentally, kept explicitly.
+
+    When check_reporters read ReporterConfigSegment, a declared field left
+    behind for a removed reporter had no doc row and failed the gate. Reading
+    the registry drops that, so it is pinned here: every declared field must
+    name a registered reporter.
+
+    Deliberately one direction only. The reverse, every registered reporter is
+    a declared field, is false today: unused-suppressions is registered and is
+    configured only through extra="allow", so it is absent from the published
+    AshConfig.json schema. Closing that means adding a field, which changes the
+    schema, and is left as a decision rather than asserted here.
+    """
+    from automated_security_helper.config.ash_config import ReporterConfigSegment
+
+    declared = set(gate._segment_names(ReporterConfigSegment))
+    registered = set(gate.reporter_names())
+    assert declared, "ReporterConfigSegment declares no fields; nothing compared"
+    assert declared <= registered, (
+        "ReporterConfigSegment declares fields for reporters the plugin registry "
+        f"does not register: {sorted(declared - registered)}"
+    )
 
 
 def test_scanner_check_can_fail(gate, tmp_path, monkeypatch):
