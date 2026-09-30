@@ -30,6 +30,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
     Tool,
     ToolComponent,
 )
+from automated_security_helper.utils.atomic_write import write_text_atomically
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -769,14 +770,17 @@ class AshAggregatedResults(BaseModel):
         report_dir = output_dir.joinpath("reports")
         report_dir.mkdir(parents=True, exist_ok=True)
 
-        # Save aggregated results as JSON
+        # Save aggregated results as JSON. Atomically, because this file's existence is
+        # what marks the scan complete and get_scan_progress parses it while the scan is
+        # still running; see utils/atomic_write.py.
         json_path = output_dir.joinpath("ash_aggregated_results.json")
-        json_path.write_text(
+        write_text_atomically(
+            json_path,
             self.model_dump_json(
                 by_alias=True,
                 exclude_unset=True,
                 exclude_none=True,
-            )
+            ),
         )
 
     def _populate_final_metrics(self) -> None:

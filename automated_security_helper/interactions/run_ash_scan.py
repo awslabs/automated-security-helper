@@ -42,6 +42,7 @@ from automated_security_helper.interactions.run_ash_container import run_ash_con
 from automated_security_helper.interactions.run_ash_nix import run_ash_nix
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.workspace import WorkspaceExitCode
+from automated_security_helper.utils.atomic_write import write_text_atomically
 from automated_security_helper.utils.log import NO_MARKUP, escape_markup
 from automated_security_helper.workspace.plan import WorkspacePlan
 
@@ -1157,9 +1158,11 @@ def _run_local_mode(
         else:
             content = json.dumps(results, indent=2, default=str)
 
+        # This rewrite lands after the REPORT phase, while an MCP client that has seen
+        # the reports appear may already be re-reading this file for progress. A
+        # truncating open() hands that reader an empty file, so replace it atomically.
         output_file = opts.output_dir / "ash_aggregated_results.json"
-        with open(output_file, mode="w", encoding="utf-8") as f:
-            f.write(content)
+        write_text_atomically(output_file, content)
 
         return results, _config_fail_on_findings
 
