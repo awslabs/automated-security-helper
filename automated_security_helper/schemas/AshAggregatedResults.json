@@ -1578,7 +1578,8 @@
                   "version": null
                 },
                 "scan_timeout": 1800,
-                "severity_threshold": null
+                "severity_threshold": null,
+                "skip_generated_lockfiles": true
               }
             },
             "grype": {
@@ -5678,7 +5679,8 @@
               "version": null
             },
             "scan_timeout": 1800,
-            "severity_threshold": null
+            "severity_threshold": null,
+            "skip_generated_lockfiles": true
           },
           "description": "Configure detect-secrets scanner"
         }
@@ -5750,6 +5752,12 @@
           "default": null,
           "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
           "title": "Severity Threshold"
+        },
+        "skip_generated_lockfiles": {
+          "default": true,
+          "description": "Skip machine-generated dependency lockfiles (package-lock.json, yarn.lock, poetry.lock, and similar) before scanning. These are dense with integrity hashes and are regenerated rather than hand-edited, so findings in them are usually noise. Hand-authored dependency declarations such as requirements.txt, Pipfile and environment.yml are always scanned and are not affected by this option. Set to false to scan generated lockfiles as well.",
+          "title": "Skip Generated Lockfiles",
+          "type": "boolean"
         }
       },
       "title": "DetectSecretsScannerConfigOptions",
@@ -15964,7 +15972,8 @@
                 "version": null
               },
               "scan_timeout": 1800,
-              "severity_threshold": null
+              "severity_threshold": null,
+              "skip_generated_lockfiles": true
             }
           },
           "description": "Configure the options for DetectSecrets"

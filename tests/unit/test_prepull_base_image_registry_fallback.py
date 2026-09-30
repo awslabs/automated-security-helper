@@ -21,28 +21,36 @@ authoritative for the build that follows.
 
 What this asserts
 -----------------
-Seven behaviours, one class each, by running the action's own shell with the container runtime
+Eight behaviours, one class each, by running the action's own shell with the container runtime
 replaced by a stub that records its argv:
 
-1. the primary answering means one registry is touched and nothing is retagged;
+1. the primary answering means one registry is touched, nothing is retagged, and no base-image
+   override is exported -- the common path's build argv is byte for byte what it was;
 2. the primary refusing with the ``Data limit exceeded`` signature falls through to Docker Hub
    and tags the result under the exact reference the Dockerfile's ``FROM`` resolves;
-3. the primary refusing with the bare rate-limit signature retries the primary first;
-4. both registries refusing fails, naming both;
-5. a registry whose tag does not resolve to the pinned digest is refused, with nothing tagged;
-6. a non-quota error fails on the first attempt without trying the fallback;
-7. a runtime that cannot inspect a ``repo@sha256:...`` reference is still able to verify the
+3. the fallback actually REACHES the build, by exporting a digest-pinned
+   ``ASH_BASE_IMAGE_OVERRIDE``, because the local tag in 2 does not reach three of the four
+   runtimes. See ``TestTheFallbackReachesTheBuild`` for the measurement;
+4. the primary refusing with the bare rate-limit signature retries the primary first;
+5. both registries refusing fails, naming both;
+6. a registry whose tag does not resolve to the pinned digest is refused, with nothing tagged
+   and nothing exported;
+7. a non-quota error fails on the first attempt without trying the fallback;
+8. a runtime that cannot inspect a ``repo@sha256:...`` reference is still able to verify the
    pin, and a runtime that cannot answer any form of the question is still refused.
 
 Plus one that is static rather than behavioural, because it has to be:
 
-8. every array expansion in the step is guarded against bash's pre-4.4 ``set -u`` treatment
+9. every array expansion in the step is guarded against bash's pre-4.4 ``set -u`` treatment
    of an element-less array. See ``TestTheStepRunsUnderTheBashMacOSShips`` for why no test
    that merely runs the script can establish this on a modern bash.
 
-Cases 5 and 6 are the ones that matter most. 5 is the substitution the digest pin exists to
-stop. 6 is the failure mode a fallback introduces: trying the next registry on a real error
-turns a clear failure into a slow one and reports a typo in the tag as a quota problem.
+Cases 3, 6 and 7 are the ones that matter most. 6 is the substitution the digest pin exists to
+stop. 7 is the failure mode a fallback introduces: trying the next registry on a real error
+turns a clear failure into a slow one and reports a typo in the tag as a quota problem. 3 is
+the one this file learned the hard way -- 2 held for months while the build it was meant to
+unblock failed anyway, because a step that exits 0 having placed an image somewhere nobody
+reads is indistinguishable in a log from a step that worked.
 
 The script is not copied into this file. It is extracted from the YAML, so the action and the
 test cannot drift apart while the test stays green.
@@ -346,11 +354,15 @@ class Result:
         calls: list[str],
         sleeps: list[str],
         present: list[str],
+        exported: dict[str, str],
     ):
         self.proc = proc
         self.calls = calls
         self.sleeps = sleeps
         self.present = present
+        # What the step wrote to $GITHUB_ENV, which is how it hands the build the reference to
+        # resolve. Parsed as `NAME=value` per line, the only form the step emits.
+        self.exported = exported
 
     @property
     def ok(self) -> bool:
@@ -396,6 +408,7 @@ class Result:
             f"exit={self.proc.returncode}\n"
             "runtime calls:\n  " + ("\n  ".join(self.calls) or "(none)") + "\n"
             f"sleeps: {self.sleeps or '(none)'}\n"
+            f"exported to GITHUB_ENV: {self.exported or '(nothing)'}\n"
             f"output:\n{self.output}"
         )
 
@@ -415,6 +428,7 @@ def _run(
     blank_ids: bool = False,
     dockerfile_text: str | None = None,
     digest_inspect: str = "docker",
+    github_env: bool = True,
 ) -> Result:
     """Run the action's shell against the stub runtime.
 
@@ -423,7 +437,9 @@ def _run(
     reference to the image id the runtime reports for it; anything absent reports the pinned
     id, so a test only has to name the reference it wants to diverge. ``digest_inspect``
     selects which runtime's answer to a digest-bearing inspect argument the stub gives:
-    ``docker``, ``nerdctl`` or ``neither``.
+    ``docker``, ``nerdctl`` or ``neither``. ``github_env=False`` runs with ``GITHUB_ENV``
+    unset, which is a hand-run of the script outside Actions and the one configuration in
+    which the step cannot tell the build which registry answered.
     """
     script = _prepull_script() if script is None else script
     assert "${{" not in script, (
@@ -484,6 +500,13 @@ def _run(
         "STUB_BLANK_IDS": "1" if blank_ids else "0",
         "STUB_DIGEST_INSPECT": digest_inspect,
     }
+    # Actions always sets GITHUB_ENV for a composite `run:` step and the file already exists,
+    # so the harness supplies both rather than letting the step create the file -- a test that
+    # passed only because `>>` created a missing path would not be measuring production.
+    github_env_file = work / "github_env"
+    github_env_file.write_text("", encoding="utf-8")
+    if github_env:
+        env["GITHUB_ENV"] = str(github_env_file)
     # The shell Actions gives a composite `shell: bash` step. `-e` in particular is not
     # optional: the script relies on it, so a harness without it would be running a more
     # forgiving shell than production.
@@ -494,6 +517,13 @@ def _run(
         text=True,
         timeout=120,
     )
+    exported: dict[str, str] = {}
+    for line in github_env_file.read_text(encoding="utf-8").splitlines():
+        if not line:
+            continue
+        name, _, value = line.partition("=")
+        exported[name] = value
+
     return Result(
         proc,
         [line for line in log.read_text(encoding="utf-8").splitlines() if line],
@@ -503,6 +533,7 @@ def _run(
             for line in present_file.read_text(encoding="utf-8").splitlines()
             if line
         ],
+        exported,
     )
 
 
@@ -534,6 +565,39 @@ class TestThePrimaryRegistryIsUnchanged:
         assert result.tags == [], (
             "the Dockerfile's reference already names the primary, so a successful primary "
             f"pull needs no local tag\n{result.describe()}"
+        )
+
+    def test_no_base_image_override_is_exported_when_the_primary_answers(
+        self, tmp_path: Path
+    ):
+        """The common path must leave the build's argv byte for byte what it already was.
+
+        The fallback hands the build a rewritten reference through
+        ``ASH_BASE_IMAGE_OVERRIDE``. Exporting it when nothing was rewritten would add a
+        ``--build-arg BASE_IMAGE=`` to every container build in the repository, on the path
+        that is supposed to be unchanged, and would make the Dockerfile's own default
+        unreachable in CI.
+        """
+        result = _run(tmp_path)
+
+        assert result.pulls(PRIMARY_TAG_REF), (
+            f"positive evidence first: the step must have pulled\n{result.describe()}"
+        )
+        assert "ASH_BASE_IMAGE_OVERRIDE" not in result.exported, (
+            "the primary answered, so the Dockerfile's own ARG BASE_IMAGE default is correct "
+            f"and nothing should redirect it\n{result.describe()}"
+        )
+
+    def test_the_warm_short_circuit_exports_no_override_either(self, tmp_path: Path):
+        """The other path that never reaches a fallback."""
+        result = _run(tmp_path, present=[PRIMARY_TAG_REF, PRIMARY_PIN_REF])
+
+        assert "already present locally at the pinned digest" in result.output, (
+            f"positive evidence the short-circuit is the path taken\n{result.describe()}"
+        )
+        assert result.exported == {}, (
+            "an image already local at the pinned digest is under the primary reference, so "
+            f"there is nothing to redirect\n{result.describe()}"
         )
 
     def test_the_pinned_digest_is_fetched_by_digest(self, tmp_path: Path):
@@ -624,6 +688,224 @@ class TestTheDataLimitFallsThroughToDockerHub:
         assert FALLBACK_TAG_REF not in sources, (
             "tagging from the fallback's tag reference would place whatever that tag happens "
             f"to resolve to; the digest reference is the pinned one\n{result.describe()}"
+        )
+
+
+class TestTheFallbackReachesTheBuild:
+    """The local tag is not how the build finds the fallback image. Measured, not assumed.
+
+    Why this class exists
+    ---------------------
+    The first fallback pulled from Docker Hub, tagged the result under the ECR reference, and
+    announced that "the build resolves it from the local store without touching
+    public.ecr.aws". A build then died at the Dockerfile's first instruction still asking ECR
+    Public::
+
+        >>> FROM ${BASE_IMAGE} AS uv-reqs
+        error: failed to solve: public.ecr.aws/docker/library/python:3.12-slim-bookworm:
+        failed to resolve source metadata for ...: 429 Too Many Requests
+
+    What decides whether a local tag is visible, read from BuildKit
+    --------------------------------------------------------------
+    One guard in ``sourceresolver/imageresolver.go``'s ``ResolveImageMetadata``, at v0.31.2 --
+    the version nerdctl v2.3.5 pins. The registry is tried first, and when it fails::
+
+        if rm != resolver.ResolveModeDefault || is.ImageStore == nil {
+            return nil, err
+        }
+        localRslvr := rslvr.WithImageStore(is.ImageStore, resolver.ResolveModePreferLocal)
+        if _, _, localErr := localRslvr.ResolveLocal(ctx, ref); localErr != nil {
+            return nil, err
+        }
+
+    So a local tag IS consulted after a registry refusal, 429 included -- but only when the
+    resolve mode is the default (it is; nothing here passes ``--pull``) and the worker has an
+    image store. ``ImageStore`` is the only variable, and it depends on the worker:
+    ``worker/runc/runc.go`` sets ``ImageStore: nil, // explicitly``, while the containerd
+    worker binds it to one containerd namespace.
+
+    That correction matters for this class's own history. An earlier version of this docstring
+    attributed the log above to finch and explained it with the OCI worker's nil store. finch
+    does not run that worker: it ships ``/etc/finch/buildkit/buildkitd.toml`` with
+    ``[worker.oci] enabled = false`` and ``[worker.containerd] ... namespace = "finch"``, and
+    its own nerdctl.toml sets the same namespace, so its buildkitd reads the store its CLI
+    writes to. The runtime that genuinely could not see the tag was **nerdctl**, whose
+    buildkitd had no config file at all and therefore defaulted to the OCI worker;
+    ``scripts/setup-nerdctl-linux.sh`` now configures it the way finch does, and asserts the
+    result with ``buildctl debug workers``.
+
+    ``docker buildx`` on a ``docker-container`` driver remains genuinely unable to read it --
+    measured locally, and inherent rather than configurable, since that driver is a separate
+    container with its own OCI worker. Every docker cell here runs that driver, because
+    run-scan-test sets up ``docker/setup-buildx-action`` (driver defaults to
+    ``docker-container``) and exports ``ACTIONS_RUNTIME_TOKEN``, which switches ASH's build to
+    ``docker buildx build --load``.
+
+    So the step exports ``ASH_BASE_IMAGE_OVERRIDE`` and the three build entrypoints pass it
+    through as ``--build-arg BASE_IMAGE=``. Changing what ``FROM`` asks for is uniform across
+    every runtime, because no runtime has a say in what a build-arg names. The local tag is the
+    second layer, and it is now a working second layer on four of the five builders rather than
+    two.
+
+    What is measured here and what is measured elsewhere
+    ---------------------------------------------------
+    This class pins the part that is this repository's: the variable is exported, digest-
+    pinned, only on the fallback path, and the message no longer claims an outcome the step
+    cannot guarantee. Whether a given builder consults a local tag is a property of BuildKit and
+    buildah, so asserting it here would be measuring them rather than the action. The docker
+    measurement is recorded in
+    ``tests/unit/test_base_image_override_reaches_every_build_entrypoint.py`` -- four runs of
+    one instrument, including the control that proves the instrument can see a local tag at all.
+
+    Not covered here or there: nerdctl, finch and podman have no binary on the machine this was
+    developed on. Their rows rest on upstream source, quoted above and in the action, plus the
+    ``buildctl debug workers`` assertion that now runs in the nerdctl leg itself. Only CI closes
+    the rest.
+    """
+
+    pytestmark = _REQUIRES_BASH
+
+    @pytest.fixture
+    def result(self, tmp_path: Path) -> Result:
+        return _run(
+            tmp_path,
+            rules={PRIMARY_TAG_REF: "datalimit", PRIMARY_PIN_REF: "datalimit"},
+        )
+
+    def test_the_build_is_told_which_registry_answered(self, result: Result):
+        assert result.ok, f"{result.describe()}"
+        assert result.exported.get("ASH_BASE_IMAGE_OVERRIDE") == FALLBACK_PIN_REF, (
+            "the fallback has to reach the build by changing what FROM asks for, because the "
+            "BuildKit runtimes never consult the local store; expected "
+            f"ASH_BASE_IMAGE_OVERRIDE={FALLBACK_PIN_REF}\n{result.describe()}"
+        )
+
+    def test_the_exported_reference_is_digest_pinned(self, result: Result):
+        """More pinned than the primary path, not less.
+
+        ``FROM ${BASE_IMAGE}`` accepts a digest-suffixed value; only ``docker tag`` refuses
+        one, which is why ARG BASE_IMAGE_DIGEST is a separate Dockerfile line. So the fallback
+        can hand the build content rather than a name, and exporting the fallback's *tag*
+        would throw that away for nothing.
+        """
+        override = result.exported.get("ASH_BASE_IMAGE_OVERRIDE", "")
+        assert override.endswith(f"@{BASE_IMAGE_DIGEST}"), (
+            "the exported reference must carry the pinned digest, so that a Docker Hub tag "
+            f"moving between the check and the build cannot change the base image\n"
+            f"{result.describe()}"
+        )
+        assert override != FALLBACK_TAG_REF, (
+            f"exporting the fallback's tag would be less pinned than the digest that was "
+            f"just verified\n{result.describe()}"
+        )
+
+    def test_the_notice_no_longer_claims_the_local_store_resolves_it(
+        self, result: Result
+    ):
+        """The exact sentence that made a broken path look healthy for hours.
+
+        Asserted as an absence rather than left to review, because it exited 0 and read as a
+        success: nothing about the log said the build was about to go back to the registry
+        that had just refused.
+        """
+        assert "resolves it from the local store" not in result.output, (
+            "this step cannot guarantee that any builder resolves FROM from the local store, "
+            "and claiming it is what hid the finch failure. State the mechanism actually "
+            f"relied on instead\n{result.describe()}"
+        )
+
+    def test_the_notice_names_the_mechanism_it_does_rely_on(self, result: Result):
+        assert "ASH_BASE_IMAGE_OVERRIDE" in result.output, (
+            "an operator reading this log has to be able to see how the fallback reaches the "
+            f"build, so the notice has to name the variable\n{result.describe()}"
+        )
+
+    def test_the_local_tag_is_kept_as_a_second_layer(self, result: Result):
+        """Demoted, not removed.
+
+        Plain ``docker build`` and podman do resolve FROM from the local store, so the tag is
+        what keeps any consumer that never reads ASH_BASE_IMAGE_OVERRIDE working on those two.
+        Dropping it would trade a working path for tidiness.
+        """
+        assert (FALLBACK_PIN_REF, BASE_IMAGE) in result.tags, (
+            f"the local tag under {BASE_IMAGE} is still worth its one metadata write\n"
+            f"{result.describe()}"
+        )
+
+    def test_a_refused_fallback_exports_nothing(self, tmp_path: Path):
+        """Nothing may be handed to the build on a path that ended in a refusal."""
+        result = _run(
+            tmp_path,
+            rules={
+                PRIMARY_TAG_REF: "datalimit",
+                PRIMARY_PIN_REF: "datalimit",
+                FALLBACK_TAG_REF: "hub429",
+                FALLBACK_PIN_REF: "hub429",
+            },
+        )
+
+        assert not result.ok, (
+            f"both registries refused; the step must fail\n{result.describe()}"
+        )
+        assert result.exported == {}, (
+            "no registry served the image, so redirecting the build at one of them would "
+            f"point it at a reference that is not in the local store\n{result.describe()}"
+        )
+
+    def test_a_fallback_at_the_wrong_digest_exports_nothing(self, tmp_path: Path):
+        """The substitution the pin exists to stop must not be handed to the build either."""
+        result = _run(
+            tmp_path,
+            rules={PRIMARY_TAG_REF: "datalimit", PRIMARY_PIN_REF: "datalimit"},
+            ids={FALLBACK_TAG_REF: ID_OTHER},
+        )
+
+        assert not result.ok, (
+            f"a fallback whose tag is not the pinned content must be refused\n"
+            f"{result.describe()}"
+        )
+        assert result.exported == {}, (
+            "the digest check failed, so the build must not be redirected at the registry "
+            f"that offered the wrong content\n{result.describe()}"
+        )
+
+    def test_without_github_env_the_degradation_is_announced(self, tmp_path: Path):
+        """A hand-run outside Actions cannot export, and must say what that costs.
+
+        Not an error: running this script directly is a legitimate way to use it. But it is
+        exactly the state the retag alone used to be mistaken for, so the warning names the
+        runtimes that will still fail rather than merely reporting an unset variable.
+        """
+        result = _run(
+            tmp_path,
+            rules={PRIMARY_TAG_REF: "datalimit", PRIMARY_PIN_REF: "datalimit"},
+            github_env=False,
+        )
+
+        assert result.ok, (
+            f"the image was sourced and tagged; that is still a success\n{result.describe()}"
+        )
+        assert "::warning::" in result.output and "GITHUB_ENV" in result.output, (
+            "the step could not tell the build which registry answered, which is the failure "
+            f"mode this whole change exists to remove; it has to say so\n{result.describe()}"
+        )
+        for runtime in ("nerdctl", "finch", "buildx"):
+            assert runtime in result.output, (
+                f"the warning has to name {runtime} as still affected, or whoever reads it "
+                f"cannot tell whether their own leg is broken\n{result.describe()}"
+            )
+
+    def test_the_exported_line_cannot_carry_a_second_variable(self, tmp_path: Path):
+        """GITHUB_ENV is line-oriented, so one value per line is a property worth pinning."""
+        result = _run(
+            tmp_path,
+            rules={PRIMARY_TAG_REF: "datalimit", PRIMARY_PIN_REF: "datalimit"},
+        )
+
+        assert list(result.exported) == ["ASH_BASE_IMAGE_OVERRIDE"], (
+            "the step must write exactly one variable; anything else means a value carried a "
+            f"newline into an environment every later step in the job reads\n"
+            f"{result.describe()}"
         )
 
 
@@ -1165,6 +1447,45 @@ class TestTheHarnessCanFail:
         assert not real.ok, (
             "and the shipped script must refuse the same input -- that gap is the whole "
             f"assertion\n{real.describe()}"
+        )
+
+    def test_a_mutant_that_only_retags_is_caught(self, tmp_path: Path):
+        """The state the action was actually in, applied on purpose.
+
+        The shipped action before this change pulled from Docker Hub, tagged the result under
+        the ECR reference, and told nobody. That exited 0 and the build then died at
+        ``FROM ${BASE_IMAGE}`` still asking the registry that had refused. So the mutation is
+        that exact regression -- drop the export, keep the retag -- and the control is that
+        ``TestTheFallbackReachesTheBuild`` must be able to tell the two apart.
+        """
+        script = _prepull_script()
+        mutant, subs = re.subn(
+            r'printf \'%s\\n\' "ASH_BASE_IMAGE_OVERRIDE=\$\{override\}" '
+            r'>> "\$\{GITHUB_ENV\}"',
+            ":",
+            script,
+        )
+        assert subs == 1, (
+            "the mutation matched nothing, so this control is checking a script it did not "
+            f"change. Re-derive the pattern from the action. Substitutions: {subs}"
+        )
+
+        fallback = {PRIMARY_TAG_REF: "datalimit", PRIMARY_PIN_REF: "datalimit"}
+        weakened = _run(tmp_path, rules=fallback, script=mutant)
+        real = _run(tmp_path, rules=fallback)
+
+        assert weakened.ok and weakened.tags, (
+            "the mutant still pulls and still retags, which is precisely why the regression "
+            f"was invisible; if it fails outright the control proves nothing\n"
+            f"{weakened.describe()}"
+        )
+        assert "ASH_BASE_IMAGE_OVERRIDE" not in weakened.exported, (
+            f"the mutation is supposed to remove the export\n{weakened.describe()}"
+        )
+        assert real.exported.get("ASH_BASE_IMAGE_OVERRIDE") == FALLBACK_PIN_REF, (
+            "and the shipped script must export it -- that gap is the whole assertion, and it "
+            f"is the difference between a green step and a build that works\n"
+            f"{real.describe()}"
         )
 
     def test_the_stub_refuses_an_invocation_it_was_not_taught(self, tmp_path: Path):
