@@ -6,10 +6,23 @@ ASH v3 uses a YAML configuration file to control its behavior. This guide explai
 
 By default, ASH looks for a configuration file in the following locations (in order):
 
-1. `.ash/.ash.yaml`
+1. `.ash.yml`
 2. `.ash/.ash.yml`
 3. `.ash.yaml`
-4. `.ash.yml`
+4. `.ash/.ash.yaml`
+5. `.ash.json`
+6. `.ash/.ash.json`
+7. `ash.yml`
+8. `.ash/ash.yml`
+9. `ash.yaml`
+10. `.ash/ash.yaml`
+11. `ash.json`
+12. `.ash/ash.json`
+
+The first match wins. The order is per-filename, not per-directory: for each name
+in turn ASH checks the source directory and then its `.ash/` subdirectory, so
+`.ash.yml` in the source directory beats `.ash/.ash.yaml`. The list comes from
+`ASH_CONFIG_FILE_NAMES` in `automated_security_helper/core/constants.py`.
 
 You can also specify a custom configuration file path using the `--config` option:
 

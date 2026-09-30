@@ -254,10 +254,16 @@ ALLOWLIST: tuple[Entry, ...] = (
         kind=KIND_UPLOAD,
         action=_UPLOAD,
         publishes=(
-            "name=test-results-${{ inputs.os }}-${{ inputs.arch }}-"
+            "name=test-results-${{ inputs.os }}-"
+            "${{ steps.runner-arch.outputs.label }}-"
             "py${{ inputs.python-version }} path=test-results/"
         ),
-        reason="Test results and coverage data. No build output.",
+        reason=(
+            "Test results and coverage data. No build output. The arch component "
+            "of the name moved from an `arch` input to a label this action derives "
+            "from RUNNER_ARCH, so the same bytes from the same path are published "
+            "under the same names; only the source of the arch string changed."
+        ),
     ),
     Entry(
         file=".github/workflows/ash-typescript-ci.yml",

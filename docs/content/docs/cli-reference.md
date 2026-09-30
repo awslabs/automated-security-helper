@@ -33,7 +33,7 @@ These parameters are available across multiple ASH commands:
 | `--formats` | The output formats to use (comma-separated). | |  | `scan` |
 | `--min-severity` | Minimum severity to trigger non-zero exit code (critical, high, medium, low, none). | |  | `scan` |
 | `--progress` | Show progress of each job live in the console. Defaults to True. | |  | `scan` |
-| `--python-based-plugins-only` | Exclude execution of any plugins or tools that have depencies external to Python. | |  | `scan` |
+| `--python-based-plugins-only` / `--all-enabled-plugins` | Exclude execution of any plugins or tools that have depencies external to Python. Also spelled `--python-only` / `--full`, and `--python-based-scanners-only` / `--all-enabled-scanners`; all three name the same option, and the `plugins` spelling is preferred because the option covers converters and reporters too. | |  | `scan` |
 | `--runner` | Use the specified OCI runner instead of docker to run the containerized tools | | `OCI_RUNNER` | `scan` |
 | `--show-summary` | Show metrics table and results summary | |  | `scan` |
 | `--simple` | Simplified output mode with minimal logging | |  | `scan` |

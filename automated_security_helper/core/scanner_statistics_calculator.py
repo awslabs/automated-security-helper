@@ -38,6 +38,7 @@ from automated_security_helper.models.asharp_model import (
 )
 from automated_security_helper.schemas.sarif_schema_model import PropertyBag
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.scanner_names import SCANNER_TAG_NAMES
 
 
 class ScannerStatisticsCalculator:
@@ -396,18 +397,10 @@ class ScannerStatisticsCalculator:
         # Check for tags that might indicate scanner name
         if result.properties and hasattr(result.properties, "tags"):
             for tag in result.properties.tags:
-                # Common scanner names that might appear in tags
-                if tag.lower() in [
-                    "bandit",
-                    "semgrep",
-                    "checkov",
-                    "cfn-nag",
-                    "cdk-nag",
-                    "detect-secrets",
-                    "grype",
-                    "syft",
-                    "npm-audit",
-                ]:
+                # Shared with models/flat_vulnerability.py rather than repeated here.
+                # This list and that one were both written before opengrep shipped and
+                # neither was updated, so the two agreed only by both being wrong.
+                if tag.lower() in SCANNER_TAG_NAMES:
                     return tag
 
         # If we can't determine the scanner from the result, return None

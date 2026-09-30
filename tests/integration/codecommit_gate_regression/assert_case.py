@@ -29,7 +29,32 @@ import json
 import pathlib
 import sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+
 FAULT_STATUSES = {"MISSING", "ERROR"}
+
+
+def verdict_mapping(spec):
+    """Return the gate's exit-code-to-verdict mapping, DERIVED not transcribed.
+
+    Read from gate-contract.json, which gate_contract.py produces by calling
+    `_verdict()` out of CODECOMMIT_GATE_HANDLER itself. expected.json used to
+    carry a hand-typed copy that had already drifted -- it stopped at exit code 3
+    and so had no answer for 4.
+
+    Fails closed. If the contract is unreadable this raises rather than falling
+    back to a copy in `spec`, because a stale fallback is how the transcription
+    problem would come back.
+    """
+    from gate_contract import load_contract
+
+    if "verdict_mapping" in spec:
+        raise AssertionError(
+            "expected.json carries a verdict_mapping again. It is derived into "
+            "gate-contract.json; a second copy here would be free to disagree "
+            "with the gate, which is what this arrangement removed."
+        )
+    return load_contract()["verdict_mapping"]
 
 
 class Failures:
@@ -356,7 +381,7 @@ def run(args):
         args.exit_code == case["expected_ash_exit_code"],
         f"exit code is {args.exit_code}, expected {case['expected_ash_exit_code']}",
     )
-    verdict = derive_verdict(args.exit_code, spec["verdict_mapping"])
+    verdict = derive_verdict(args.exit_code, verdict_mapping(spec))
     failures.check(
         verdict == case["expected_verdict"],
         f"verdict is '{verdict}', expected '{case['expected_verdict']}'",

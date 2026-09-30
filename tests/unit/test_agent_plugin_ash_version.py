@@ -80,6 +80,18 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"
 BASE_DIR = REPO_ROOT / "ash-agent-plugins" / "agentic-coding" / "transpiler" / "_base"
 
+# This repository's name, held in a constant rather than written inline in the
+# slash-delimited patterns below. Both walks read this file like any other, and a line
+# carrying the project name followed immediately by `/v` would be reported as a real
+# reference in the tree -- the same hazard the fixtures further down are split mid-word
+# for. Interpolating keeps every pattern's source free of that sequence.
+#
+# The owner is deliberately NOT pinned anywhere below. `resolve_flake_ref()` builds its
+# ref from `ASH_REPO_URL`, so a fork's docs carry a fork's owner and the patterns have
+# to keep working there. The repository name is what makes a reference ASH's to keep
+# current, and it is what distinguishes one from a flake ref to nixpkgs.
+_REPO = "automated-security-helper"
+
 # An ASH install reference: the repository URL, optionally with a `.git` suffix,
 # followed by `@v` and a release version. Deliberately written so this pattern
 # does not match itself -- it carries no version literal, so this file cannot
@@ -87,6 +99,36 @@ BASE_DIR = REPO_ROOT / "ash-agent-plugins" / "agentic-coding" / "transpiler" / "
 _INSTALL_REF = re.compile(
     r"automated-security-helper(?:\.git)?@v(?P<version>\d+\.\d+\.\d+)"
 )
+
+# A Nix flake reference to this repository, which pins the ref with a SLASH rather than
+# an `@`.
+#
+# WHY THIS SHAPE NEEDED ITS OWN PATTERN
+# -------------------------------------
+# Every mechanism in this repository that maintained a version pin keyed on `@v`: the
+# three patterns above and below this one, all four patterns in
+# `scripts/version_template_manager.py`'s `find_version_references`, and every
+# `[tool.commitizen] version_files` regex that names a ref. That was not a decision, it
+# was an accident of history -- every pin anyone had written so far used an `@`, so the
+# delimiter got encoded five separate times as though it were part of what a reference
+# IS.
+#
+# `docs/content/docs/installation-guide.md` documented an `ASH_NIX_FLAKE_REF` override
+# using the flake form, under a heading reading "Override it with:", as a runnable
+# copy-paste. It sat at 3.5.9 while the repository shipped 3.7.0 -- two minor releases
+# behind -- and not one of those five mechanisms could see it, because all five asked
+# the same question about the same character. `nix develop` resolves a git ref like
+# every other consumer here, so it succeeded and supplied an old ASH with an old
+# scanner set. Measured before the fix: `_INSTALL_REF`, `_INSTALL_REF_PIN`,
+# `_CASE_WRONG_V_REF` and `find_version_references` each returned no match on that
+# exact line, and the whole file passed.
+#
+# The lesson generalizes past this one shape: a reference is a repository plus a ref,
+# and the delimiter between them is the incidental part. Anything added here that keys
+# on a delimiter needs a positive control of its own -- see `_MINIMUM_FLAKE_REFS`,
+# which exists because the two floors already in this file count `@v` references and
+# stay satisfied while a slash-shaped pattern matches nothing at all.
+_FLAKE_REF = re.compile(rf"github:[\w.-]+/{_REPO}/v(?P<version>\d+\.\d+\.\d+)")
 
 # The same reference, but reading whatever follows `@v` instead of only a
 # well-formed version. `_INSTALL_REF` above requires `\d+\.\d+\.\d+`, so a pin that
@@ -107,6 +149,14 @@ _INSTALL_REF_PIN = re.compile(
     r"""automated-security-helper(?:\.git)?@v(?P<pin>[^\s`'"),;\]]*)"""
 )
 
+# The loose reader for the flake shape, standing in the same relation to `_FLAKE_REF` as
+# `_INSTALL_REF_PIN` does to `_INSTALL_REF`: a flake ref pinned to something that is not
+# a parseable version is a ref `nix develop` cannot resolve, and a pattern requiring
+# three numeric components cannot report what it cannot match. The character class is
+# identical, so `{{VERSION}}` in the `.md.template` reads as the placeholder it is and
+# stays exempt through `_pin_is_a_version_attempt`.
+_FLAKE_REF_PIN = re.compile(rf"""github:[\w.-]+/{_REPO}/v(?P<pin>[^\s`'"),;\]]*)""")
+
 # Every published tag is lowercase `v3.7.0`, and git refs are case sensitive, so
 # `@V3.7.0` resolves to nothing. It is invisible to `_INSTALL_REF_PIN` above -- that
 # pattern anchors on a lowercase `@v`, so a capital never reaches the pin classifier
@@ -114,6 +164,22 @@ _INSTALL_REF_PIN = re.compile(
 # the alternative and was rejected: capturing everything after `@` as the ref would
 # make `@V3.7.0` read as the perfectly well-formed pin `3.7.0` and pass.
 _CASE_WRONG_V_REF = re.compile(r"automated-security-helper(?:\.git)?@V\d")
+
+# The same question for the flake shape, and unreachable from the pattern above for the
+# same structural reason `_CASE_WRONG_V_REF` is unreachable from `_INSTALL_REF_PIN`: the
+# pin reader anchors on a lowercase `v`, so a capital produces no match and therefore no
+# pin to classify. Added with the flake patterns rather than left until it bites, because
+# the whole finding here was five mechanisms that each covered one delimiter and left the
+# other uncovered.
+_CASE_WRONG_FLAKE_REF = re.compile(rf"github:[\w.-]+/{_REPO}/V\d")
+
+# The reference shapes each walk below iterates. Grouped into tuples rather than
+# hardcoded call sites so adding a sixth shape does not mean remembering three
+# functions -- which is the same class of omission as a hand-maintained file list, at a
+# smaller scale.
+_REF_PATTERNS = (_INSTALL_REF, _FLAKE_REF)
+_REF_PIN_PATTERNS = (_INSTALL_REF_PIN, _FLAKE_REF_PIN)
+_CASE_WRONG_PATTERNS = (_CASE_WRONG_V_REF, _CASE_WRONG_FLAKE_REF)
 
 # A release pin: exactly three numeric components.
 _SEMVER_PIN = re.compile(r"^\d+\.\d+\.\d+$")
@@ -146,6 +212,19 @@ _PLACEHOLDER_PINS = (
 # Floor for the positive control on the well-formedness walk. The tree carries over
 # a hundred `@v<version>` pins today; this sits far below that and far above zero.
 _MINIMUM_VERSION_PINS = 20
+
+# Floor for the flake shape's own positive control, and the reason it is separate.
+#
+# `_MINIMUM_FILES_WITH_REFS` and `_MINIMUM_VERSION_PINS` are both dominated by `@v`
+# references -- the generated plugin trees alone put them far past 20 -- so either stays
+# satisfied while `_FLAKE_REF` matches nothing whatsoever. A shared floor cannot control
+# a pattern whose contribution is rounding error against the total, and a pattern with no
+# control is the state this whole class of drift was found in.
+#
+# One rather than two: the `.md.template` carries `{{VERSION}}` and so is invisible to
+# the strict pattern by design, leaving the generated doc as the single literal. A floor
+# of one still discriminates the case that matters -- the pattern matching nothing.
+_MINIMUM_FLAKE_REFS = 1
 
 # Directories with no hand-maintained sources: virtualenvs, caches, build output
 # and scan artifacts. Anything installed under these can carry install refs for
@@ -253,8 +332,9 @@ def _install_refs():
             continue
         relative = path.relative_to(REPO_ROOT).as_posix()
         for number, line in enumerate(text.splitlines(), 1):
-            for match in _INSTALL_REF.finditer(line):
-                yield relative, number, match.group("version")
+            for pattern in _REF_PATTERNS:
+                for match in pattern.finditer(line):
+                    yield relative, number, match.group("version")
 
 
 def _version_pins():
@@ -272,8 +352,31 @@ def _version_pins():
             continue
         relative = path.relative_to(REPO_ROOT).as_posix()
         for number, line in enumerate(text.splitlines(), 1):
-            for match in _INSTALL_REF_PIN.finditer(line):
-                yield relative, number, match.group("pin"), line.strip()
+            for pattern in _REF_PIN_PATTERNS:
+                for match in pattern.finditer(line):
+                    yield relative, number, match.group("pin"), line.strip()
+
+
+def _refs_matching(pattern: "re.Pattern[str]"):
+    """Every (relative path, line number) in the tree matched by one `pattern`.
+
+    Exists so a single reference shape can have a positive control of its own. The floors
+    on `_install_refs` and `_version_pins` are aggregates, and an aggregate cannot tell
+    you that one contributor to it has stopped contributing.
+    """
+    found = []
+    for path in _candidate_files():
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        if _REPO not in text:
+            continue
+        relative = path.relative_to(REPO_ROOT).as_posix()
+        for number, line in enumerate(text.splitlines(), 1):
+            if pattern.search(line):
+                found.append((relative, number))
+    return found
 
 
 def _pin_is_a_version_attempt(pin: str) -> bool:
@@ -347,7 +450,7 @@ def _case_wrong_v_refs():
             continue
         relative = path.relative_to(REPO_ROOT).as_posix()
         for number, line in enumerate(text.splitlines(), 1):
-            if _CASE_WRONG_V_REF.search(line):
+            if any(pattern.search(line) for pattern in _CASE_WRONG_PATTERNS):
                 found.append((relative, number, line.strip()))
     return found
 
@@ -402,6 +505,24 @@ class TestInstallRefsTrackPackagedVersion:
             f"the floor of {_MINIMUM_FILES_WITH_REFS}. The generated plugin trees "
             "alone account for more than that, so the walk is probably not reaching "
             "the tree: check _SKIP_DIRS, the UTF-8 guard, and _INSTALL_REF."
+        )
+
+    def test_the_flake_shape_is_reached_by_the_walk(self):
+        """A positive control for `_FLAKE_REF` specifically, not for the walk at large.
+
+        The floor above counts FILES and is met many times over by `@v` references, so it
+        would stay green with the flake pattern matching nothing -- which is precisely the
+        state this file was in while the installation guide pinned a two-release-old flake
+        ref. Controlling a newly added pattern with a total dominated by the old ones is
+        how a blind spot gets a green check written over it.
+        """
+        found = _refs_matching(_FLAKE_REF)
+
+        assert len(found) >= _MINIMUM_FLAKE_REFS, (
+            f"The walk found {len(found)} flake reference(s), below the floor of "
+            f"{_MINIMUM_FLAKE_REFS}. docs/content/docs/installation-guide.md documents an "
+            "ASH_NIX_FLAKE_REF override as a runnable copy-paste, so zero means _FLAKE_REF "
+            "stopped matching -- not that the tree stopped carrying one."
         )
 
     def test_the_allowlist_still_describes_real_files(self):
@@ -558,6 +679,58 @@ class TestInstallRefsParseAsVersions:
         assert not (
             _SEMVER_PIN.match(candidate) or _FLOATING_MAJOR_PIN.match(candidate)
         ), f"{pin!r} must not parse as a version, so it gets reported"
+
+    def test_the_flake_shape_is_unreachable_by_the_at_v_patterns(self):
+        """The blind spot, as a unit on the patterns rather than on the tree.
+
+        The walks only fail while a stale flake ref is in the tree; once fixed they pass
+        forever and stop being evidence that the gap was ever real. This pins the
+        measurement directly: the exact line that shipped is matched by no `@v` pattern in
+        this file, which is why a slash-delimited shape needed one of its own rather than a
+        looser version of an existing one.
+
+        Looser was considered and rejected. Dropping the delimiter -- reading anything
+        after the repository name as a possible ref -- would make `automated-security-
+        helper/blob/main/README.md` and every other ordinary GitHub path read as a pin,
+        and a check that reports source-browsing URLs as stale versions gets deleted.
+        """
+        # Interpolated, not split, and that distinction cost a round trip worth recording.
+        # Both walks read this file, so a contiguous literal here is reported as a real
+        # reference in the tree -- the test describing the hazard would BE the hazard,
+        # which is what the fixture above this class is split mid-word to avoid.
+        #
+        # A mid-word split does NOT survive here. `ruff format`, which this repository runs
+        # in pre-commit and CI, joins implicitly concatenated string literals whenever the
+        # result fits the line length -- measured: written as
+        # `'...automated-security-' 'helper/v3.5.9"'` this line came back from the formatter
+        # as one literal and the walk immediately reported it. The fixture above survives
+        # only because its joined form is too long to fit, which is luck rather than
+        # design. Interpolating `_REPO` cannot be folded, so it holds regardless of length.
+        shipped = f'export ASH_NIX_FLAKE_REF="github:awslabs/{_REPO}/v3.5.9"'
+
+        assert _INSTALL_REF.search(shipped) is None
+        assert _INSTALL_REF_PIN.search(shipped) is None
+        assert _CASE_WRONG_V_REF.search(shipped) is None
+
+        assert _FLAKE_REF.search(shipped).group("version") == "3.5.9"
+        assert _FLAKE_REF_PIN.search(shipped).group("pin") == "3.5.9"
+
+        # A fork's owner must keep matching: resolve_flake_ref() builds the ref from
+        # ASH_REPO_URL, so the owner is not this pattern's business.
+        assert _FLAKE_REF.search(shipped.replace("awslabs", "a-fork")) is not None
+
+        # A flake ref to an unrelated project is not ASH's pin to keep current, which is
+        # why the repository name is anchored even though the owner is not.
+        assert _FLAKE_REF.search("github:nixos/nixpkgs/v1.2.3") is None
+
+        # The placeholder the `.md.template` now carries: invisible to the strict pattern,
+        # and exempt from the well-formedness one. Without both halves the template file
+        # itself would be reported as a defect.
+        templated = shipped.replace("3.5.9", "{{VERSION}}")
+        assert _FLAKE_REF.search(templated) is None
+        assert not _pin_is_a_version_attempt(
+            _FLAKE_REF_PIN.search(templated).group("pin")
+        )
 
     def test_no_install_ref_names_a_capital_v_tag(self):
         """`@V3.7.0` names a tag that does not exist.
@@ -740,4 +913,187 @@ class TestCommitizenMaintainsTheReferences:
             f"is {commitizen_version}. commitizen bumps from the latter, so the "
             "package would build one version and release another. Set both to the "
             "same value."
+        )
+
+
+class TestOneAuthorityForTheVersion:
+    """Every mechanism that reads the release version must read the same field.
+
+    The test above asserts the two pyproject version fields agree. This class asserts that
+    nothing depends on that agreement to be correct -- which is a different claim, and the
+    one that was false.
+
+    `scripts/verify_docs_freshness.py` read `[project] version` and compared docs against
+    it. That is a third opinion about one fact: commitizen bumps from
+    `[tool.commitizen] version`, this file reads it, and
+    `tests/unit/test_version_template_round_trip.py` reads it. The three agreed only
+    because `pyproject.toml:^version` matches both lines so a bump moves them together,
+    and because the test above fails if a hand edit desyncs them. A verdict resting on
+    another test's guarantee is a verdict that goes wrong at the moment that guarantee
+    breaks, and the failure would arrive as "every doc is stale" rather than as the one
+    line that is actually wrong.
+    """
+
+    @staticmethod
+    def _docs_freshness_module():
+        """Import the script by path; `scripts/` is not a package.
+
+        Same approach as `tests/unit/test_version_template_round_trip.py`, and under a
+        distinct `sys.modules` name so no other worker picks up a half-initialised module.
+        """
+        import importlib.util
+
+        path = REPO_ROOT / "scripts" / "verify_docs_freshness.py"
+        spec = importlib.util.spec_from_file_location(
+            "ash_verify_docs_freshness_for_test", path
+        )
+        assert spec is not None and spec.loader is not None, path
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        return module
+
+    def test_the_docs_freshness_check_reads_the_commitizen_field(self):
+        """Asserted against a DESYNCED copy, because agreement makes it vacuous.
+
+        On the committed tree both fields hold the same value, so any assertion that this
+        script "reads the authority" passes whichever field it reads. The only way to
+        observe the choice is to make the two disagree, which is exactly the state the
+        choice matters in.
+        """
+        module = self._docs_freshness_module()
+
+        assert module.get_version_from_pyproject() == _packaged_version(), (
+            "on the committed tree the script must report the packaged version"
+        )
+
+        import tempfile
+
+        text = PYPROJECT_PATH.read_text(encoding="utf-8")
+        current = _packaged_version()
+        marker = f'[tool.commitizen]\nname = "cz_conventional_commits"\nversion = "{current}"'
+        assert marker in text, (
+            "fixture check: the [tool.commitizen] header no longer looks the way this "
+            "test rewrites it, so the desync below would be a no-op and the assertion "
+            "would pass without testing anything"
+        )
+        desynced = text.replace(marker, marker.replace(f'"{current}"', '"9.9.9"'), 1)
+
+        with tempfile.TemporaryDirectory() as directory:
+            copy = Path(directory) / "pyproject.toml"
+            copy.write_text(desynced, encoding="utf-8")
+            module.PYPROJECT_TOML = copy
+            try:
+                observed = module.get_version_from_pyproject()
+            finally:
+                module.PYPROJECT_TOML = PYPROJECT_PATH
+
+        assert observed == "9.9.9", (
+            f"With [tool.commitizen] version at 9.9.9 and [project] version at {current}, "
+            f"verify_docs_freshness reported {observed!r}. It is reading [project] "
+            "version, which is not what `cz bump` moves or what `cz version --project` "
+            "reports, so its verdict about documentation would be measured against a "
+            "version nothing releases."
+        )
+
+
+class TestTheTwoMaintenanceMechanismsDoNotOverlap:
+    """A file must be maintained by exactly one mechanism, and which one is not free.
+
+    Two lists cover this class of fact. `[tool.commitizen] version_files` rewrites a
+    literal in place at bump time; `scripts/version_template_manager.py`'s `target_files`
+    keeps a `.md.template` carrying `{{VERSION}}` and re-renders the doc. They are
+    disjoint today -- nine entries and ten, zero overlap -- and that disjointness is the
+    correct state rather than an accident, but nothing asserted it.
+
+    WHY OVERLAP IS A DEFECT AND NOT MERELY REDUNDANT
+    -----------------------------------------------
+    Both mechanisms write the generated doc, and at release time the template renders
+    LAST: `cz bump` rewrites version_files, then ash-create-release.yml runs
+    `version_template_manager.py generate`. So for a doc in both lists, commitizen's
+    rewrite is discarded -- harmlessly while the template still carries `{{VERSION}}`,
+    because the rendered result matches. Replace that placeholder with a literal and the
+    two mechanisms silently disagree, with the template winning, and every existing check
+    keeps passing: `test_every_version_files_entry_rewrites_a_line` confirms commitizen
+    CAN rewrite the line, not that the rewrite survives, and the round-trip test confirms
+    the doc matches its template, which it does -- at the stale value.
+
+    The reverse arrangement fails loudly and needs no guard: a `.template` listed in
+    version_files holds no version literal for commitizen to find, so
+    `test_every_version_files_entry_rewrites_a_line` reports it inert.
+    """
+
+    @staticmethod
+    def _template_targets() -> list[str]:
+        import importlib.util
+
+        path = REPO_ROOT / "scripts" / "version_template_manager.py"
+        spec = importlib.util.spec_from_file_location(
+            "ash_version_template_manager_for_test", path
+        )
+        assert spec is not None and spec.loader is not None, path
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        return list(module.VersionTemplateManager(REPO_ROOT).target_files)
+
+    def test_no_file_is_claimed_by_both_mechanisms(self):
+        version_files = {
+            _split_entry(entry)[0] for entry in _commitizen_settings()["version_files"]
+        }
+        overlap = sorted(version_files.intersection(self._template_targets()))
+
+        assert not overlap, (
+            "These files are maintained by both mechanisms at once: "
+            f"{overlap}\n\n"
+            "At release time `cz bump` rewrites version_files first and "
+            "`version_template_manager.py generate` renders templates after, so the "
+            "template wins and commitizen's rewrite is thrown away. That is invisible "
+            "while the template holds {{VERSION}} and silent once it holds a literal. "
+            "Pick one: leave the file to the template and drop the version_files entry, "
+            "or drop the template and let `cz bump` own the literal."
+        )
+
+    def test_no_version_files_target_has_a_template_sibling(self):
+        """The same claim, checked against the tree rather than against the other list.
+
+        `target_files` is what `generate` iterates, but a `.md.template` sitting beside a
+        version_files target is the hazard regardless of whether anyone remembered to list
+        it -- someone runs `version_template_manager.py convert` on a file, the template
+        appears, and the doc now has two owners.
+        """
+        shadowed = sorted(
+            path
+            for path in (
+                _split_entry(entry)[0]
+                for entry in _commitizen_settings()["version_files"]
+            )
+            if (REPO_ROOT / f"{path}.template").is_file()
+        )
+
+        assert not shadowed, (
+            f"These version_files targets have a .template sibling: {shadowed}. The "
+            "template is rendered over the file after `cz bump` rewrites it, so the "
+            "commitizen entry is maintaining a value the release discards."
+        )
+
+    def test_both_lists_are_populated(self):
+        """Positive control. Disjointness of two sets is satisfied by either being empty.
+
+        Emptying `version_files`, or breaking the import of `target_files`, would make the
+        two assertions above pass while nothing at all was maintained.
+        """
+        version_files = _commitizen_settings()["version_files"]
+        targets = self._template_targets()
+
+        assert len(version_files) >= 5, (
+            f"[tool.commitizen] version_files has {len(version_files)} entries; the four "
+            "transpiler _base/ sources and Formula/ash.rb alone account for five, so "
+            "fewer means entries were dropped rather than that the list shrank honestly."
+        )
+        assert len(targets) >= 5, (
+            f"VersionTemplateManager.target_files names {len(targets)} file(s). "
+            "tests/unit/test_version_template_round_trip.py holds the real floor of ten; "
+            "this one only has to be far enough above zero that the disjointness "
+            "assertions above cannot pass vacuously."
         )
