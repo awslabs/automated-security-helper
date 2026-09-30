@@ -11,9 +11,13 @@ global_settings:
   suppressions:
     # === Time-boxed: brace-expansion bundled inside aws-cdk-lib (expires 2026-10-30) ===
     # Remove when an aws-cdk-lib release bundles brace-expansion >= 5.0.12 and the
-    # lockfiles move to it. Tighten to package-aware matching once ASH supports it.
+    # lockfiles move to it. Each entry is scoped to the bundled package copy with
+    # package_name, package_version and package_path.
     - rule_id: "GHSA-6j4f-fj2g-mc7p-brace-expansion"
       path: "deploy/cdk/package-lock.json"
+      package_name: "brace-expansion"
+      package_version: "5.0.9"
+      package_path: "deploy/cdk/node_modules/aws-cdk-lib/node_modules/brace-expansion"
       expiration: "2026-10-30"
       reason: >-
         brace-expansion 5.0.9 is bundled inside aws-cdk-lib (inBundle: true in the
@@ -23,11 +27,18 @@ global_settings:
         https://github.com/aws/aws-cdk/pull/38929, tracked in
         https://github.com/aws/aws-cdk/issues/38932. Time-boxed risk acceptance
         approved by the maintainer.
-        Known limit: the matcher keys on rule id and path only, so this entry covers
-        this advisory for ANY brace-expansion copy in this lockfile, not just the
-        bundled one; a vulnerable copy reintroduced here before expiry would be hidden.
+        Scope: the package fields limit this entry to the bundled copy at
+        package_path. Any other brace-expansion copy in this lockfile, at any
+        version, is still reported, which closes the lockfile-wide gap this entry
+        had when it matched on rule id and path alone. grype only reports
+        package_path when the name and version occur once in the lockfile, so if
+        a second 5.0.9 copy is added here this entry stops matching and the scan
+        fails instead of hiding it.
     - rule_id: "GHSA-qhr7-859c-m2p7-brace-expansion"
       path: "deploy/cdk/package-lock.json"
+      package_name: "brace-expansion"
+      package_version: "5.0.9"
+      package_path: "deploy/cdk/node_modules/aws-cdk-lib/node_modules/brace-expansion"
       expiration: "2026-10-30"
       reason: >-
         brace-expansion 5.0.9 is bundled inside aws-cdk-lib (inBundle: true in the
@@ -37,11 +48,18 @@ global_settings:
         https://github.com/aws/aws-cdk/pull/38929, tracked in
         https://github.com/aws/aws-cdk/issues/38932. Time-boxed risk acceptance
         approved by the maintainer.
-        Known limit: the matcher keys on rule id and path only, so this entry covers
-        this advisory for ANY brace-expansion copy in this lockfile, not just the
-        bundled one; a vulnerable copy reintroduced here before expiry would be hidden.
+        Scope: the package fields limit this entry to the bundled copy at
+        package_path. Any other brace-expansion copy in this lockfile, at any
+        version, is still reported, which closes the lockfile-wide gap this entry
+        had when it matched on rule id and path alone. grype only reports
+        package_path when the name and version occur once in the lockfile, so if
+        a second 5.0.9 copy is added here this entry stops matching and the scan
+        fails instead of hiding it.
     - rule_id: "GHSA-q2hr-2g5m-vwhr-brace-expansion"
       path: "deploy/cdk/package-lock.json"
+      package_name: "brace-expansion"
+      package_version: "5.0.9"
+      package_path: "deploy/cdk/node_modules/aws-cdk-lib/node_modules/brace-expansion"
       expiration: "2026-10-30"
       reason: >-
         brace-expansion 5.0.9 is bundled inside aws-cdk-lib (inBundle: true in the
@@ -51,11 +69,18 @@ global_settings:
         https://github.com/aws/aws-cdk/pull/38929, tracked in
         https://github.com/aws/aws-cdk/issues/38932. Time-boxed risk acceptance
         approved by the maintainer.
-        Known limit: the matcher keys on rule id and path only, so this entry covers
-        this advisory for ANY brace-expansion copy in this lockfile, not just the
-        bundled one; a vulnerable copy reintroduced here before expiry would be hidden.
+        Scope: the package fields limit this entry to the bundled copy at
+        package_path. Any other brace-expansion copy in this lockfile, at any
+        version, is still reported, which closes the lockfile-wide gap this entry
+        had when it matched on rule id and path alone. grype only reports
+        package_path when the name and version occur once in the lockfile, so if
+        a second 5.0.9 copy is added here this entry stops matching and the scan
+        fails instead of hiding it.
     - rule_id: "GHSA-6j4f-fj2g-mc7p"
       path: "node_modules/aws-cdk-lib/brace-expansion/package.json"
+      package_name: "brace-expansion"
+      package_version: "5.0.9"
+      package_path: "deploy/cdk/node_modules/aws-cdk-lib/node_modules/brace-expansion"
       expiration: "2026-10-30"
       reason: >-
         brace-expansion 5.0.9 is bundled inside aws-cdk-lib (inBundle: true in the
@@ -65,11 +90,15 @@ global_settings:
         https://github.com/aws/aws-cdk/pull/38929, tracked in
         https://github.com/aws/aws-cdk/issues/38932. Time-boxed risk acceptance
         approved by the maintainer.
-        Scope: npm-audit reports the bundled copy at this path and every other copy at a
-        different one, so this entry matches only the aws-cdk-lib-bundled copy (in any
-        tree whose aws-cdk-lib bundles it).
+        Scope: the package fields limit this entry to the bundled copy at
+        package_path. npm-audit reports this same path for the bundled copy in
+        every tree, so without package_path one entry covered both deploy/cdk and
+        deploy/cdk-constructs; each tree now has its own entry.
     - rule_id: "GHSA-qhr7-859c-m2p7"
       path: "node_modules/aws-cdk-lib/brace-expansion/package.json"
+      package_name: "brace-expansion"
+      package_version: "5.0.9"
+      package_path: "deploy/cdk/node_modules/aws-cdk-lib/node_modules/brace-expansion"
       expiration: "2026-10-30"
       reason: >-
         brace-expansion 5.0.9 is bundled inside aws-cdk-lib (inBundle: true in the
@@ -79,11 +108,15 @@ global_settings:
         https://github.com/aws/aws-cdk/pull/38929, tracked in
         https://github.com/aws/aws-cdk/issues/38932. Time-boxed risk acceptance
         approved by the maintainer.
-        Scope: npm-audit reports the bundled copy at this path and every other copy at a
-        different one, so this entry matches only the aws-cdk-lib-bundled copy (in any
-        tree whose aws-cdk-lib bundles it).
+        Scope: the package fields limit this entry to the bundled copy at
+        package_path. npm-audit reports this same path for the bundled copy in
+        every tree, so without package_path one entry covered both deploy/cdk and
+        deploy/cdk-constructs; each tree now has its own entry.
     - rule_id: "GHSA-q2hr-2g5m-vwhr"
       path: "node_modules/aws-cdk-lib/brace-expansion/package.json"
+      package_name: "brace-expansion"
+      package_version: "5.0.9"
+      package_path: "deploy/cdk/node_modules/aws-cdk-lib/node_modules/brace-expansion"
       expiration: "2026-10-30"
       reason: >-
         brace-expansion 5.0.9 is bundled inside aws-cdk-lib (inBundle: true in the
@@ -93,9 +126,64 @@ global_settings:
         https://github.com/aws/aws-cdk/pull/38929, tracked in
         https://github.com/aws/aws-cdk/issues/38932. Time-boxed risk acceptance
         approved by the maintainer.
-        Scope: npm-audit reports the bundled copy at this path and every other copy at a
-        different one, so this entry matches only the aws-cdk-lib-bundled copy (in any
-        tree whose aws-cdk-lib bundles it).
+        Scope: the package fields limit this entry to the bundled copy at
+        package_path. npm-audit reports this same path for the bundled copy in
+        every tree, so without package_path one entry covered both deploy/cdk and
+        deploy/cdk-constructs; each tree now has its own entry.
+    - rule_id: "GHSA-6j4f-fj2g-mc7p"
+      path: "node_modules/aws-cdk-lib/brace-expansion/package.json"
+      package_name: "brace-expansion"
+      package_version: "5.0.9"
+      package_path: "deploy/cdk-constructs/node_modules/aws-cdk-lib/node_modules/brace-expansion"
+      expiration: "2026-10-30"
+      reason: >-
+        brace-expansion 5.0.9 is bundled inside aws-cdk-lib (inBundle: true in the
+        lockfile). No aws-cdk-lib release ships a fixed copy: 2.272.0, the latest when
+        this was written, still bundles 5.0.9. npm `overrides` cannot rewrite a bundled
+        dependency, so this repository has no way to remove it. Upstream fix:
+        https://github.com/aws/aws-cdk/pull/38929, tracked in
+        https://github.com/aws/aws-cdk/issues/38932. Time-boxed risk acceptance
+        approved by the maintainer.
+        Scope: the package fields limit this entry to the bundled copy at
+        package_path. npm-audit reports this same path for the bundled copy in
+        every tree, so without package_path one entry covered both deploy/cdk and
+        deploy/cdk-constructs; each tree now has its own entry.
+    - rule_id: "GHSA-qhr7-859c-m2p7"
+      path: "node_modules/aws-cdk-lib/brace-expansion/package.json"
+      package_name: "brace-expansion"
+      package_version: "5.0.9"
+      package_path: "deploy/cdk-constructs/node_modules/aws-cdk-lib/node_modules/brace-expansion"
+      expiration: "2026-10-30"
+      reason: >-
+        brace-expansion 5.0.9 is bundled inside aws-cdk-lib (inBundle: true in the
+        lockfile). No aws-cdk-lib release ships a fixed copy: 2.272.0, the latest when
+        this was written, still bundles 5.0.9. npm `overrides` cannot rewrite a bundled
+        dependency, so this repository has no way to remove it. Upstream fix:
+        https://github.com/aws/aws-cdk/pull/38929, tracked in
+        https://github.com/aws/aws-cdk/issues/38932. Time-boxed risk acceptance
+        approved by the maintainer.
+        Scope: the package fields limit this entry to the bundled copy at
+        package_path. npm-audit reports this same path for the bundled copy in
+        every tree, so without package_path one entry covered both deploy/cdk and
+        deploy/cdk-constructs; each tree now has its own entry.
+    - rule_id: "GHSA-q2hr-2g5m-vwhr"
+      path: "node_modules/aws-cdk-lib/brace-expansion/package.json"
+      package_name: "brace-expansion"
+      package_version: "5.0.9"
+      package_path: "deploy/cdk-constructs/node_modules/aws-cdk-lib/node_modules/brace-expansion"
+      expiration: "2026-10-30"
+      reason: >-
+        brace-expansion 5.0.9 is bundled inside aws-cdk-lib (inBundle: true in the
+        lockfile). No aws-cdk-lib release ships a fixed copy: 2.272.0, the latest when
+        this was written, still bundles 5.0.9. npm `overrides` cannot rewrite a bundled
+        dependency, so this repository has no way to remove it. Upstream fix:
+        https://github.com/aws/aws-cdk/pull/38929, tracked in
+        https://github.com/aws/aws-cdk/issues/38932. Time-boxed risk acceptance
+        approved by the maintainer.
+        Scope: the package fields limit this entry to the bundled copy at
+        package_path. npm-audit reports this same path for the bundled copy in
+        every tree, so without package_path one entry covered both deploy/cdk and
+        deploy/cdk-constructs; each tree now has its own entry.
     # === detect-secrets: broad patterns by path (no inline nosec support) ===
     - rule_id: "SECRET-*"
       path: "tests/**"
