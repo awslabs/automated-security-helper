@@ -21,6 +21,8 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_con
     JupyterConverterConfig,
 )
 from automated_security_helper.core.constants import (
+    ASH_CONFIG_ENV_VAR_ALLOWLIST,
+    ASH_CONFIG_ENV_VAR_PREFIX,
     ASH_CONFIG_FILE_NAMES,
     ASH_DEFAULT_SEVERITY_LEVEL,
 )
@@ -100,6 +102,40 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner 
     SyftScannerConfig,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+
+
+def config_env_var_is_interpolatable(var_name: str) -> bool:
+    """Whether a config file's ``!ENV`` reference to ``var_name`` may read it.
+
+    The set and the reasoning behind it live on
+    ``ASH_CONFIG_ENV_VAR_PREFIX`` / ``ASH_CONFIG_ENV_VAR_ALLOWLIST`` in
+    ``core/constants.py``. This function is the single place that consults them,
+    so ``constructor_env_variables`` below cannot drift from the tests.
+
+    The comparison is against the name exactly as the config file wrote it, with
+    no case folding.
+
+    Case folding was tried and withdrawn. The argument for it was Windows, which
+    ASH v3 supports directly in local mode and where ``os.environ`` upper-cases
+    its keys, so ``os.environ.get("aws_secret_access_key")`` returns what
+    ``AWS_SECRET_ACCESS_KEY`` holds. That is true of ``os.environ`` and changes
+    nothing here, because the names this function admits are those beginning with
+    a literal ``ASH_`` plus three exact upper-case entries, and on Windows each of
+    those reads back the variable it names. No spelling passes the check and then
+    reads something outside it, so folding admitted more spellings without
+    excluding any.
+
+    The consequence is worth naming rather than hiding: on Windows a config
+    writing ``${aws_region:None}`` does not resolve, even though Windows itself
+    would find that variable. The reference is left as a literal and a warning
+    names it, the docs and ASH's own config write these names in upper case, and
+    ``tests/unit/config/test_config_env_interpolation.py`` pins both directions so
+    that reintroducing folding is a decision rather than a drift.
+    """
+    return (
+        var_name.startswith(ASH_CONFIG_ENV_VAR_PREFIX)
+        or var_name in ASH_CONFIG_ENV_VAR_ALLOWLIST
+    )
 
 
 # Define BuildConfig class
@@ -812,6 +848,24 @@ class AshConfig(BaseModel):
                         for g in match:
                             ASH_LOGGER.debug(f"Evaluating env var match: {g}")
                             var_name = g[0] if isinstance(g, tuple) else g
+                            if not config_env_var_is_interpolatable(var_name):
+                                # Left exactly as written rather than replaced
+                                # with its default. A literal that still reads
+                                # as a reference is visible in the artifact and
+                                # refused by any typed field, whereas the
+                                # default is indistinguishable from the variable
+                                # simply not being set. See
+                                # ASH_CONFIG_ENV_VAR_ALLOWLIST in
+                                # core/constants.py for which names resolve.
+                                ASH_LOGGER.warning(
+                                    f"Not reading environment variable {var_name} "
+                                    "into the configuration. A configuration file "
+                                    "may reference names beginning with "
+                                    f"{ASH_CONFIG_ENV_VAR_PREFIX} and these names: "
+                                    f"{', '.join(ASH_CONFIG_ENV_VAR_ALLOWLIST)}. "
+                                    "The reference is left as written."
+                                )
+                                continue
                             default_val = g[1] if isinstance(g, tuple) else None
                             if default_val == "None":
                                 default_val = None
@@ -839,7 +893,7 @@ class AshConfig(BaseModel):
                     return value
 
                 _AshConfigLoader.add_constructor("!ENV", constructor_env_variables)
-                config_data = yaml.load(f, Loader=_AshConfigLoader)  # nosec B506 - This is using a custom SafeLoader to enable support of !ENV tag evaluation
+                config_data = yaml.load(f, Loader=_AshConfigLoader)  # nosec B506 - This is using a custom SafeLoader to enable support of !ENV tag evaluation, bounded to ASH_CONFIG_ENV_VAR_PREFIX/ASH_CONFIG_ENV_VAR_ALLOWLIST by constructor_env_variables above
         return cls.model_validate(config_data, strict=True)
 
     def save(self, config_path: Path):
