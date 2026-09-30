@@ -463,6 +463,69 @@ def _gha_layer_cache_args(
     ]
 
 
+# The build-context name the cached base-image layout is attached under, and therefore the value
+# `FROM ${BASE_IMAGE}` is pointed at. Not a registry reference: nothing named this exists on any
+# registry, so a builder that ignored the context and went to the network would fail rather
+# than quietly resolve something.
+BASE_OCI_LAYOUT_CONTEXT = "ash-base-image"
+_BASE_OCI_LAYOUT_VALUE = re.compile(r"^(?P<dir>.+)@(?P<digest>sha256:[0-9a-f]{64})$")
+
+
+def _base_oci_layout_args(resolved_oci_runner: str, buildx: bool) -> List[str]:
+    """Build arguments that hand the build the base image from a verified OCI layout.
+
+    ``ASH_BASE_OCI_LAYOUT=<layout dir>@<arch manifest digest>`` is set by
+    ``.github/actions/prepull-base-image`` on a cache hit, after it has verified every blob in
+    the layout against the Dockerfile's pinned digest. What each runtime needs differs, and the
+    action's header carries the measurements behind each row:
+
+    - ``docker buildx build`` (a docker-container builder, which cannot see the engine's image
+      store): ``--build-context ash-base-image=oci-layout://DIR@DIGEST`` plus
+      ``--build-arg BASE_IMAGE=ash-base-image``.
+    - plain ``docker build`` (the docker driver): nothing. That driver turns an oci-layout
+      context into a registry lookup, so the action loads the layout into the engine instead
+      and the driver's default prefers the local image.
+    - nerdctl and finch: the same context spelled ``oci-layout://DIR`` -- nerdctl treats
+      everything after the prefix as the path and reads the image from index.json -- plus
+      ``--pull=false``, which nerdctl maps to ``image-resolve-mode=local``.
+    - podman: nothing. It has no oci-layout build context; the action imports the layout into
+      podman's store and ``podman build``'s default ``--pull=missing`` uses it.
+
+    Empty when the variable is unset or empty. A malformed value raises rather than being
+    ignored, because ignoring it would send the build to the registry the variable exists to
+    avoid, with nothing in the log saying why.
+    """
+    value = os.environ.get("ASH_BASE_OCI_LAYOUT", "").strip()
+    if not value:
+        return []
+    match = _BASE_OCI_LAYOUT_VALUE.match(value)
+    if match is None:
+        raise ValueError(
+            f"ASH_BASE_OCI_LAYOUT is '{value}', which is not <layout dir>@sha256:<64 hex>. "
+            "It is set by .github/actions/prepull-base-image; unset it to build from the "
+            "Dockerfile's own base image reference."
+        )
+    layout_dir, digest = match.group("dir"), match.group("digest")
+    runner = Path(resolved_oci_runner).stem
+    if runner == "docker":
+        if not buildx:
+            return []
+        context = f"oci-layout://{layout_dir}@{digest}"
+        extra: List[str] = []
+    elif runner in ("nerdctl", "finch"):
+        context = f"oci-layout://{layout_dir}"
+        extra = ["--pull=false"]
+    else:
+        return []
+    return [
+        "--build-context",
+        f"{BASE_OCI_LAYOUT_CONTEXT}={context}",
+        "--build-arg",
+        f"BASE_IMAGE={BASE_OCI_LAYOUT_CONTEXT}",
+        *extra,
+    ]
+
+
 def _build_image(
     oci_command_prefix: List[str],
     resolved_oci_runner: str,
@@ -546,8 +609,22 @@ def _build_image(
     # Emitted BEFORE custom_build_arg, because a duplicate --build-arg is last-wins (measured
     # on docker 25.0.16), so an explicit `--custom-build-arg BASE_IMAGE=...` from the caller
     # still overrides this CI fallback rather than being silently discarded.
+    #
+    # ASH_BASE_OCI_LAYOUT, when this runtime can take it, replaces the override: it is only set
+    # on a cache hit, where the pre-pull made no registry call and exported no override, so the
+    # two do not meet in CI. If both were set by hand, the verified layout wins, since it names
+    # content the override would have to fetch.
+    base_layout_args = _base_oci_layout_args(
+        resolved_oci_runner, buildx=bool(cache_args)
+    )
     base_image_override = os.environ.get("ASH_BASE_IMAGE_OVERRIDE", "").strip()
-    if base_image_override:
+    if base_layout_args:
+        typer.echo(
+            "Base image taken from the verified OCI layout named by ASH_BASE_OCI_LAYOUT, "
+            "with no registry call."
+        )
+        build_cmd.extend(base_layout_args)
+    elif base_image_override:
         typer.echo(
             f"Base image redirected to {base_image_override} "
             "by ASH_BASE_IMAGE_OVERRIDE in the environment."

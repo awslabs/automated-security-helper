@@ -42,6 +42,14 @@ The flags, and what each one breaks
     Resolves base-image manifests independently of the pull policy, so it reaches the registry
     whatever ``--pull`` says.
 
+The one pull flag that is allowed, and only where it is allowed
+---------------------------------------------------------------
+``--pull=false`` on nerdctl and finch, and only while ``ASH_BASE_OCI_LAYOUT`` names a verified
+base-image layout. It is the opposite of the flags above: nerdctl maps it to
+``image-resolve-mode=local`` (``pkg/cmd/builder/build.go`` at v2.3.5), which forbids the
+registry rather than forcing it. It is never emitted for podman, whose ``--pull=false`` is not
+that, and never without the layout. ``TestTheLocalOnlyPullFlag`` pins all three conditions.
+
 What this does NOT assert
 -------------------------
 It does not assert that any runtime honours a local tag -- that is a property of buildah and of
@@ -90,6 +98,10 @@ FORBIDDEN_EXACT = frozenset(
     }
 )
 FORBIDDEN_PREFIXES = ("--pull=", "--platform=", "--arch=", "--os=")
+
+# The single exception, and the conditions it is allowed under; see the module docstring.
+LOCAL_ONLY_PULL = "--pull=false"
+LAYOUT_VALUE = "/runner/temp/ash-base-image-oci@sha256:" + "c" * 64
 
 
 def _offending_tokens(argv: List[str]) -> List[str]:
@@ -154,6 +166,7 @@ class TestThePythonEntrypoint:
     def _clean_env(self, monkeypatch):
         """Pin the environment this argv depends on, so the result is not machine-dependent."""
         monkeypatch.delenv("ASH_BASE_IMAGE_OVERRIDE", raising=False)
+        monkeypatch.delenv("ASH_BASE_OCI_LAYOUT", raising=False)
         monkeypatch.delenv("ACTIONS_RUNTIME_TOKEN", raising=False)
         monkeypatch.delenv("ACTIONS_CACHE_URL", raising=False)
 
@@ -236,6 +249,58 @@ class TestThePythonEntrypoint:
         )
 
 
+class TestTheLocalOnlyPullFlag:
+    """``--pull=false`` appears on nerdctl and finch with a verified layout, and nowhere else.
+
+    Asserted in ``_build_image`` directly. The same three conditions for ``./ash`` and
+    ``ash_helpers.ps1`` are pinned in
+    ``test_base_oci_layout_reaches_every_build_entrypoint.py``, which runs ``./ash`` under a
+    runner named ``nerdctl`` and reads the PowerShell branch.
+    """
+
+    @pytest.fixture
+    def dockerfile(self, tmp_path):
+        path = tmp_path / "Dockerfile"
+        path.write_text("FROM scratch\n", encoding="utf-8")
+        return path
+
+    @pytest.fixture(autouse=True)
+    def _clean_env(self, monkeypatch):
+        monkeypatch.delenv("ASH_BASE_IMAGE_OVERRIDE", raising=False)
+        monkeypatch.delenv("ASH_BASE_OCI_LAYOUT", raising=False)
+        monkeypatch.delenv("ACTIONS_RUNTIME_TOKEN", raising=False)
+        monkeypatch.delenv("ACTIONS_CACHE_URL", raising=False)
+
+    @pytest.mark.parametrize("runner", ["nerdctl", "finch"])
+    def test_it_is_the_only_pull_flag_on_nerdctl_and_finch_with_a_layout(
+        self, monkeypatch, recorded_commands, dockerfile, runner
+    ):
+        monkeypatch.setenv("ASH_BASE_OCI_LAYOUT", LAYOUT_VALUE)
+        _build_image(**_build_image_kwargs(dockerfile, resolved_oci_runner=runner))
+
+        argv = recorded_commands[0]
+        assert argv.count(LOCAL_ONLY_PULL) == 1, argv
+        others = [t for t in _offending_tokens(argv) if t != LOCAL_ONLY_PULL]
+        assert others == [], f"only {LOCAL_ONLY_PULL} is allowed here, found {others}"
+
+    @pytest.mark.parametrize("runner", ["podman", "docker"])
+    def test_it_is_never_emitted_for_podman_or_docker(
+        self, monkeypatch, recorded_commands, dockerfile, runner
+    ):
+        monkeypatch.setenv("ASH_BASE_OCI_LAYOUT", LAYOUT_VALUE)
+        _build_image(**_build_image_kwargs(dockerfile, resolved_oci_runner=runner))
+
+        assert _offending_tokens(recorded_commands[0]) == [], recorded_commands[0]
+
+    @pytest.mark.parametrize("runner", ["nerdctl", "finch"])
+    def test_it_is_never_emitted_without_a_layout(
+        self, recorded_commands, dockerfile, runner
+    ):
+        _build_image(**_build_image_kwargs(dockerfile, resolved_oci_runner=runner))
+
+        assert _offending_tokens(recorded_commands[0]) == [], recorded_commands[0]
+
+
 _REQUIRES_BASH = [
     pytest.mark.skipif(
         os.name == "nt",
@@ -281,6 +346,7 @@ class TestTheBashEntrypoint:
             "ARGV_LOG": str(argv_log),
         }
         env.pop("ASH_BASE_IMAGE_OVERRIDE", None)
+        env.pop("ASH_BASE_OCI_LAYOUT", None)
         # A developer with this exported would otherwise have their own flags asserted.
         env.pop("DOCKER_EXTRA_ARGS", None)
 
@@ -339,6 +405,26 @@ class TestThePowerShellEntrypoint:
             f"utils/ash_helpers.ps1 appends {offending} to a build command. The powershell scan "
             "legs run podman and finch, both of which resolve the pre-pulled base image locally "
             "only while these flags are absent."
+        )
+
+    def test_the_local_only_pull_flag_sits_inside_the_nerdctl_finch_layout_branch(self):
+        """``"--pull=false"`` is the one pull flag allowed, and only in that branch.
+
+        Text, like the check above: the literal must appear exactly once, after the
+        ``ASH_BASE_OCI_LAYOUT`` test and the nerdctl/finch test, and before the else-branch that
+        handles every other runtime.
+        """
+        body = PS1.read_text(encoding="utf-8")
+        assert body.count(f'"{LOCAL_ONLY_PULL}"') == 1, (
+            "expected exactly one --pull=false"
+        )
+        at = body.index(f'"{LOCAL_ONLY_PULL}"')
+        layout_at = body.index("if ($env:ASH_BASE_OCI_LAYOUT)")
+        runner_at = body.index("if ($ociRunnerName -in @('nerdctl', 'finch'))")
+        else_at = body.index("else", runner_at)
+        assert layout_at < runner_at < at < else_at, (
+            "--pull=false must only be appended inside the nerdctl/finch branch of the "
+            "ASH_BASE_OCI_LAYOUT block"
         )
 
 

@@ -149,9 +149,9 @@ description: >-
 # here. That driver runs buildkitd inside its own container, with its own OCI worker and no
 # access to the host's image store, and nothing this action can write changes that. So on the
 # primary path a docker cell can still be refused at `FROM` after this step succeeded -- the
-# override below only covers the path where the fallback actually fired. Closing that gap means
-# changing the builder driver or loading the base image into the builder, which is a different
-# change from this one.
+# override below only covers the path where the fallback actually fired. On a warm run that gap
+# is now closed differently: the builder is handed the cached OCI layout as a build context,
+# which it reads without a registry. See THE ACTIONS CACHE below. A cold run keeps the gap.
 #
 # Docker's apparent immunity was also never exercised in CI. run-scan-test sets up
 # docker/setup-buildx-action, whose driver defaults to `docker-container`, and exports
@@ -362,14 +362,87 @@ description: >-
 # same upstream tag, so it would report the same digest; and falling through on a real error
 # turns a clear failure into a slow, confusing one.
 #
+# THE ACTIONS CACHE: ZERO REGISTRY CALLS ON A WARM RUN
+#
+# Pulling once per job still makes at least one registry call per job, and a metadata-only call
+# is not safe: once a shared egress address has spent ECR Public's anonymous 500 GB/month, a
+# manifest lookup is refused as well (`failed to resolve source metadata ... 429 ... Data limit
+# exceeded`, seen in this repository's own logs). So on a warm run this action makes no
+# registry call at all, and neither does the build after it.
+#
+# This used to say the image is never cached, because a cache on a public repository is
+# readable by anyone with a token. The maintainer approved this one case explicitly: the bytes
+# are a third-party public image, byte-identical to docker.io at the pinned digest, and they
+# are hash-verified before use. The approval is for exactly this and nothing wider -- ASH's own
+# built image and layers are not cached, and no other cache is added. The same decision is
+# recorded against these two steps in .github/scripts/assert-publish-surfaces.py.
+#
+# How it is built:
+#
+#   key      tag + pin + RUNNER_ARCH, read from the Dockerfile by oci_layout.py. No network, so
+#            the restore can run first on every run. A new pin is a new key, so a bumped base
+#            image can never be served an old entry.
+#   format   an OCI image layout, not a `docker save` tar. A layout is content-addressed --
+#            each blob is named by its own sha256 -- so it can be checked against the pin. A
+#            `docker save` tar holds uncompressed layers and runtime-made manifests whose
+#            digests no registry served, so there is nothing in it the pin can vouch for.
+#   restore  `actions/cache/restore`, exact key only, on every run.
+#   verify   on a hit, before anything reads it: every blob's filename equals its sha256,
+#            blobs/sha256/<pin> exists and is an image index, the index lists exactly one
+#            linux manifest for this arch, and that manifest's config and layers are present
+#            at the sizes it declares. Anything else in the layout (a stray file, a symlink,
+#            a second hash algorithm) fails it. A failure DISCARDS the entry and falls through
+#            to the pull path below, which is exactly what ran before the cache existed.
+#   use      the build is handed the verified layout, per runtime (table below).
+#   save     only on a push to refs/heads/main, and only after a miss: the pull path runs as
+#            it always did, oci_layout.py then fetches the pinned index, this arch's manifest,
+#            config and layers by digest and verifies them, and `actions/cache/save` stores
+#            the layout. Pull-request runs restore and never save, so a pull request cannot
+#            write an entry any other run will read.
+#
+# How each runtime is handed the layout on a hit, measured or read from source as noted:
+#
+#   docker, `docker build` (docker driver)   ./ash and ash_helpers.ps1. The layout is loaded
+#       into the engine as a docker-archive tagged under the Dockerfile's FROM reference, and
+#       the engine's builder prefers a local image by default (measured: with the tag present
+#       and its registry host unresolvable, the build succeeds). The oci-layout context is
+#       NOT usable on this driver: measured on docker 25.0.16 / buildx 0.12.1, the docker
+#       driver turned `--build-context x=oci-layout://DIR@sha256:...` into a registry lookup
+#       of docker.io/library/x and failed. So the entrypoints do not pass it here.
+#   docker, `docker buildx build` on a docker-container builder   run_ash_container.py when
+#       ACTIONS_RUNTIME_TOKEN is present. That builder cannot see the engine's store, so it is
+#       given `--build-context ash-base-image=oci-layout://DIR@<arch manifest digest>` and
+#       `--build-arg BASE_IMAGE=ash-base-image`. Measured: the build reports
+#       `[context ash-base-image] OCI load from client` and succeeds, and the name it prints
+#       (docker.io/library/ash-base-image) is not a repository that exists, so a registry
+#       resolve would have failed.
+#   nerdctl and finch   same build context, spelled `oci-layout://DIR` with no digest, plus
+#       `--pull=false` (nerdctl maps it to `image-resolve-mode=local`). nerdctl's parser
+#       (pkg/cmd/builder/build.go, parseBuildContextFromOCILayout, identical at v2.2.2 and
+#       v2.3.5) takes the whole value after the prefix as a path and picks the image from
+#       index.json itself, so a `@digest` suffix would be read as part of the path. finch
+#       1.19.0 on Linux passes `build` flags through to nerdctl unmodified except `--load`
+#       (cmd/finch/nerdctl.go argHandlerMap, cmd/finch/nerdctl_native.go), so both flags
+#       reach it.
+#   podman   cannot take this build context: podman's and buildah's documentation list no
+#       `oci-layout://` form for `--build-context`. The layout is imported with the `oci:`
+#       transport instead and tagged under the FROM reference, and `podman build`'s default
+#       pull policy is `missing`, which returns before any registry I/O on a local hit (see
+#       tests/unit/test_local_base_image_resolution_is_not_defeated.py).
+#
+# The hand-off is ASH_BASE_OCI_LAYOUT=<layout dir>@<arch manifest digest> in GITHUB_ENV, read
+# by the same three entrypoints that read ASH_BASE_IMAGE_OVERRIDE. Only this action sets it.
+#
+# PROOF, NOT A GREEN LEG: on a hit this action also points the registry hosts at 0.0.0.0 in
+# /etc/hosts -- and inside a running buildx builder container, which has its own -- for the
+# rest of the job. A build that still reached a registry for the base image would then fail,
+# so a green warm leg is evidence of zero registry contact rather than of a registry that
+# happened to answer. It is on by default; `block-registries-on-hit: "false"` turns it off.
+#
 # WHAT THIS DELIBERATELY DOES NOT DO
 #
-# It does not save, cache, or upload the image anywhere. Sharing one pull across jobs would
-# remove the concurrency entirely, but every mechanism for it -- actions/upload-artifact,
-# actions/cache, a registry -- puts the image somewhere a person can fetch it. On a public
-# repository artifact download needs only read access, and a cache is reachable through the
-# Actions API by anyone with a token. The requirement is that the image is obtainable only by
-# the pipeline, and the only way to honor that is for it never to leave the job that pulled it.
+# It does not upload the image as an artifact, push it to a registry, or cache anything but
+# the verified base-image layout.
 #
 # It also does not authenticate. Authenticating to ECR Public raises the limit and stores
 # nothing, which would satisfy the same requirement more durably, but it needs an IAM role and
@@ -403,11 +476,69 @@ inputs:
     description: "Where to read the BASE_IMAGE and BASE_IMAGE_DIGEST defaults from."
     required: false
     default: "Dockerfile"
+  block-registries-on-hit:
+    description: >-
+      When the build is handed the cached layout, point the base image's registry hosts at
+      0.0.0.0 for the rest of the job, so any registry call for it fails the build instead of
+      passing unnoticed. See the notes above.
+    required: false
+    default: "true"
+
+outputs:
+  cache-used:
+    description: >-
+      'true' when the build was handed a verified base image from the Actions cache and this
+      action made no registry call.
+    value: ${{ steps.hit.outputs.used }}
 
 runs:
   using: "composite"
   steps:
+    # Never fails the job. A key that cannot be computed means the Dockerfile's two ARG lines
+    # are malformed, and the pull step below already reports each of those cases precisely; a
+    # second, vaguer error here would only put itself ahead of the useful one.
+    - name: Compute the base-image cache key
+      id: key
+      shell: bash
+      env:
+        DOCKERFILE: ${{ inputs.dockerfile }}
+        HELPER: ${{ github.action_path }}/oci_layout.py
+      run: |
+        set -uo pipefail
+        if key="$(python3 "${HELPER}" key --dockerfile "${DOCKERFILE}" --arch "${RUNNER_ARCH}")"; then
+          echo "key=${key}" >> "${GITHUB_OUTPUT}"
+          echo "base-image cache key: ${key}"
+        else
+          echo "::warning::could not compute the base-image cache key; the cache is skipped \
+        and the pull path below runs, which reports what is wrong with ${DOCKERFILE}."
+        fi
+
+    - name: Restore the base image from the Actions cache
+      id: restore
+      if: steps.key.outputs.key != ''
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/ash-base-image-oci
+        key: ${{ steps.key.outputs.key }}
+
+    - name: Verify the cached base image and hand it to the build
+      id: hit
+      if: steps.restore.outputs.cache-hit == 'true'
+      shell: bash
+      env:
+        RUNTIME: ${{ inputs.oci-runner }}
+        WRAPPER: ${{ inputs.runner-wrapper }}
+        DOCKERFILE: ${{ inputs.dockerfile }}
+        HELPER: ${{ github.action_path }}/oci_layout.py
+        LAYOUT_DIR: ${{ runner.temp }}/ash-base-image-oci
+        BLOCK_REGISTRIES: ${{ inputs.block-registries-on-hit }}
+      run: |
+        set -uo pipefail
+        bash "${GITHUB_ACTION_PATH}/use_cached_layout.sh"
+
     - name: Pre-pull the build base image
+      id: pull
+      if: steps.hit.outputs.used != 'true'
       shell: bash
       env:
         ATTEMPTS: ${{ inputs.attempts }}
@@ -588,6 +719,13 @@ runs:
         mirror pairing."
             ;;
         esac
+
+        # For the step that writes the cache layout on main, which fetches by digest from the
+        # same registries in the same order. Unset outside Actions, which a hand-run is.
+        if [ -n "${GITHUB_OUTPUT:-}" ]; then
+          printf '%s\n' "primary-repo=${primary_repo}" "fallback-repo=${fallback_repo}" \
+            >> "${GITHUB_OUTPUT}"
+        fi
 
         echo "base image:    ${base}"
         echo "pinned digest: ${pin}"
@@ -845,3 +983,58 @@ runs:
         an OIDC trust on a public repository, or sourcing the base image from a registry \
         that does not meter anonymous clients at all."
         exit 1
+
+    # Main only, and only after a miss. The pull above has already verified that the tag
+    # resolves to the pin; this fetches the pinned index, this arch's manifest, its config and
+    # its layers by digest into a fresh layout, verifying every digest as it downloads, and
+    # then verifies the finished layout the same way a restore is verified. It asks the
+    # registries the pull step used, in the same order -- everything is addressed by digest,
+    # so which one answers cannot change the bytes.
+    #
+    # Never fails the job: a layout that cannot be written costs the next run a pull, which is
+    # what every run cost before the cache existed.
+    - name: Write the base image as an OCI layout for the cache (main only)
+      id: write
+      if: >-
+        steps.pull.outcome == 'success'
+        && steps.key.outputs.key != ''
+        && steps.restore.outputs.cache-hit != 'true'
+        && github.event_name == 'push'
+        && github.ref == 'refs/heads/main'
+      shell: bash
+      env:
+        DOCKERFILE: ${{ inputs.dockerfile }}
+        HELPER: ${{ github.action_path }}/oci_layout.py
+        LAYOUT_DIR: ${{ runner.temp }}/ash-base-image-oci
+        PRIMARY_REPO: ${{ steps.pull.outputs.primary-repo }}
+        FALLBACK_REPO: ${{ steps.pull.outputs.fallback-repo }}
+      run: |
+        set -uo pipefail
+        pin="$(sed -n '/^ARG BASE_IMAGE_DIGEST=/{s/^ARG BASE_IMAGE_DIGEST=//;p;q;}' "${DOCKERFILE}")"
+        rm -rf "${LAYOUT_DIR}"
+        repos=(--repo "${PRIMARY_REPO}")
+        [ -n "${FALLBACK_REPO}" ] && repos+=(--repo "${FALLBACK_REPO}")
+        if manifest="$(python3 "${HELPER}" fetch "${repos[@]}" --pin "${pin}" \
+            --arch "${RUNNER_ARCH}" --out "${LAYOUT_DIR}")"; then
+          echo "wrote a verified layout of ${pin} (${RUNNER_ARCH} manifest ${manifest}) to ${LAYOUT_DIR}"
+          echo "ready=true" >> "${GITHUB_OUTPUT}"
+        else
+          rm -rf "${LAYOUT_DIR}"
+          echo "::warning::could not write a verified base-image layout for the cache. This \
+        run is unaffected; the next run on this key pulls from a registry, as every run did \
+        before the cache existed."
+        fi
+
+    # `actions/cache/save` rather than `actions/cache`, so the save is a step with its own
+    # condition instead of a post-job hook that fires wherever the restore ran. The condition
+    # repeats the event and ref test deliberately: this is the one line that decides what may
+    # write to the default branch's cache scope, and it should say so where it stands.
+    - name: Save the base image to the Actions cache (main only)
+      if: >-
+        steps.write.outputs.ready == 'true'
+        && github.event_name == 'push'
+        && github.ref == 'refs/heads/main'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/ash-base-image-oci
+        key: ${{ steps.key.outputs.key }}

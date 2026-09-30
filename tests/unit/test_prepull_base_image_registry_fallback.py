@@ -335,12 +335,22 @@ FALLBACK_PIN_REF = f"{FALLBACK_REPO}@{BASE_IMAGE_DIGEST}"
 
 
 def _prepull_script() -> str:
-    """The action's one shell step, located by content rather than by name."""
+    """The action's registry-pull step, located by its step id.
+
+    The action used to have one shell step and this located it by being the only one. It now
+    also computes a cache key, verifies a cache hit and writes the cache layout on main, each
+    its own step, so the pull step is found by ``id: pull`` -- the id the other steps'
+    conditions already reference, so renaming it would break the action before this.
+    """
     doc = yaml.safe_load(ACTION.read_text(encoding="utf-8"))
-    steps = [s for s in doc["runs"]["steps"] if isinstance(s, dict) and s.get("run")]
+    steps = [
+        s
+        for s in doc["runs"]["steps"]
+        if isinstance(s, dict) and s.get("id") == "pull" and s.get("run")
+    ]
     assert len(steps) == 1, (
-        f"expected exactly one shell step in {ACTION.name}, found {len(steps)}. "
-        "The harness runs that step; more than one means it is running part of the action."
+        f"expected exactly one shell step with id 'pull' in {ACTION.name}, found "
+        f"{len(steps)}. The harness runs that step and nothing else."
     )
     return steps[0]["run"]
 
@@ -1495,38 +1505,104 @@ class TestTheHarnessCanFail:
             f"expected the stub to reject an unknown subcommand\n{result.describe()}"
         )
 
-    def test_the_action_has_exactly_one_shell_step(self):
-        """The locator resolves the step by having a `run`; more than one and it is ambiguous."""
+    def test_the_pull_step_is_the_one_that_pulls(self):
+        """The locator resolves the step by id, so the id has to be on the step that pulls.
+
+        Every other shell step in the action is checked to issue no `pull` of its own, so a
+        pull cannot move into a step this harness never runs.
+        """
         doc = yaml.safe_load(ACTION.read_text(encoding="utf-8"))
         runs = [s for s in doc["runs"]["steps"] if isinstance(s, dict) and s.get("run")]
-        assert len(runs) == 1, f"found {len(runs)} shell steps in {ACTION.name}"
+        pulling = [s.get("id") for s in runs if "run_runtime pull" in s["run"]]
+        assert pulling == ["pull"], (
+            f"expected only the step with id 'pull' to call `run_runtime pull`; found {pulling}"
+        )
 
 
 class TestNoPublishSurfacesAreAdded:
-    """The image must never leave the job that pulled it. This repository is public."""
+    """Only the approved base-image cache may leave the job. This repository is public.
 
-    def test_the_action_adds_no_cache_artifact_or_push(self):
-        """Read the parsed steps, not the file text.
+    This class used to forbid ``actions/cache`` in the action outright. The maintainer has since
+    approved exactly one cache here -- the base image as a verified OCI layout, restored
+    everywhere, saved only from a push to main -- so the assertion is now that the action's
+    ``uses:`` steps are that and nothing else: one restore, one save, the save gated on a push
+    to refs/heads/main, the path the layout directory, and no artifact upload or registry push
+    anywhere.
+    """
 
-        The comment block names actions/cache and actions/upload-artifact in the course of
-        explaining why neither is used, so a text search over the whole file reports the
-        explanation as the violation. What matters is what the action *runs*.
-        """
-        doc = yaml.safe_load(ACTION.read_text(encoding="utf-8"))
-        steps = doc["runs"]["steps"]
+    LAYOUT_PATH = "${{ runner.temp }}/ash-base-image-oci"
+    MAIN_PUSH = ("github.event_name == 'push'", "github.ref == 'refs/heads/main'")
 
-        used = [s.get("uses", "") for s in steps if isinstance(s, dict)]
-        for forbidden in ("actions/cache", "upload-artifact", "download-artifact"):
-            offenders = [u for u in used if forbidden in u]
-            assert offenders == [], (
-                f"{forbidden} would put the base image somewhere any read token can fetch it; "
-                f"on a public repository that publishes it. Found: {offenders}"
-            )
+    @pytest.fixture
+    def steps(self):
+        return yaml.safe_load(ACTION.read_text(encoding="utf-8"))["runs"]["steps"]
 
-        script = _prepull_script()
-        assert not re.search(r"(?m)^\s*(\S+\s+)*\S*\bpush\b", script), (
-            "the step must not push the image to a registry"
+    def test_the_only_actions_used_are_one_cache_restore_and_one_cache_save(
+        self, steps
+    ):
+        used = sorted(
+            s["uses"].split("@", 1)[0]
+            for s in steps
+            if isinstance(s, dict) and s.get("uses")
         )
+        assert used == ["actions/cache/restore", "actions/cache/save"], (
+            "the approved design is one restore and one save of the verified base-image "
+            f"layout; anything else is a new publishing surface. Found: {used}"
+        )
+
+    def test_both_cache_steps_hold_only_the_layout_directory(self, steps):
+        for step in steps:
+            if isinstance(step, dict) and step.get("uses", "").startswith(
+                "actions/cache"
+            ):
+                assert step["with"]["path"].strip() == self.LAYOUT_PATH, (
+                    f"{step['name']} caches {step['with']['path']!r}; only the base-image "
+                    "layout is approved"
+                )
+                assert "restore-keys" not in step["with"], (
+                    "a prefix match could hand the build an entry for another pin; the key "
+                    "is exact by design"
+                )
+
+    def test_the_save_is_gated_on_a_push_to_main(self, steps):
+        (save,) = [
+            s
+            for s in steps
+            if isinstance(s, dict)
+            and s.get("uses", "").startswith("actions/cache/save")
+        ]
+        condition = " ".join(save.get("if", "").split())
+        for clause in self.MAIN_PUSH:
+            assert clause in condition, (
+                f"the save must require {clause!r}; a pull request must never write an entry "
+                f"another run reads. Condition was: {condition!r}"
+            )
+        assert "||" not in condition, (
+            f"an `||` could satisfy the save without the push-to-main clauses: {condition!r}"
+        )
+
+    def test_the_restore_is_not_gated_on_the_event(self, steps):
+        (restore,) = [
+            s
+            for s in steps
+            if isinstance(s, dict)
+            and s.get("uses", "").startswith("actions/cache/restore")
+        ]
+        condition = restore.get("if", "")
+        assert "event_name" not in condition and "github.ref" not in condition, (
+            f"the restore runs on every run, pull requests included: {condition!r}"
+        )
+
+    def test_nothing_uploads_or_pushes(self, steps):
+        used = [s.get("uses", "") for s in steps if isinstance(s, dict)]
+        for forbidden in ("upload-artifact", "download-artifact"):
+            offenders = [u for u in used if forbidden in u]
+            assert offenders == [], f"{forbidden} in the action: {offenders}"
+        for step in steps:
+            if isinstance(step, dict) and step.get("run"):
+                assert not re.search(r"(?m)^\s*(\S+\s+)*\S*\bpush\b", step["run"]), (
+                    f"step {step.get('name')!r} must not push the image to a registry"
+                )
 
 
 # ${name[@]} or ${name[*]} with a bare name subscript -- an array expansion. A numeric
