@@ -120,7 +120,10 @@ class CheckovScannerConfigOptions(ScannerOptionsBase):
     tool_version: Annotated[
         str | None,
         Field(
-            description="Specific version constraint for checkov installation (e.g., '>=3.2.0,<4.0.0')"
+            description=(
+                "Version constraint for checkov installation, in pip requirement "
+                "syntax. Leave unset to use the scanner's own default constraint."
+            )
         ),
     ] = None
     install_timeout: Annotated[
@@ -169,7 +172,9 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         """Get version constraint for checkov installation.
 
         Returns:
-            Version constraint string for checkov (e.g., ">=3.2.0,<4.0.0") or None for latest
+            The configured ``tool_version`` constraint if set, otherwise the
+            default returned below. The literal is deliberately stated once, in
+            the return statement, rather than repeated here where it could drift.
         """
         # Use configured tool version if provided, otherwise use default
         if self.config and self.config.options.tool_version:

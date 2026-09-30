@@ -398,9 +398,9 @@ scanners:
 
 - name: Pre-install Security Tools
   run: |
-    uv tool install "bandit>=1.7.0"
-    uv tool install "checkov>=3.2.0"
-    uv tool install "semgrep>=1.125.0"
+    uv tool install "bandit>=1.7.0,<2.0.0"
+    uv tool install "checkov>=3.2.0,<4.0.0"
+    uv tool install "semgrep>=1.125.0,<2.0.0"
 
 - name: Run ASH Security Scan
   run: |

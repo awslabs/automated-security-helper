@@ -70,9 +70,12 @@ Scanners that use UV tool management:
 
 | Scanner | Default Version Constraint | Installation Method |
 |---------|----------------------------|-------------------|
-| Bandit | `>=1.7.0` | `uv tool install bandit>=1.7.0` |
+| Bandit | `>=1.7.0,<2.0.0` | `uv tool install bandit>=1.7.0,<2.0.0` |
 | Checkov | `>=3.2.0,<4.0.0` | `uv tool install checkov>=3.2.0,<4.0.0` |
-| Semgrep | `>=1.125.0` | `uv tool install semgrep>=1.125.0` |
+| Semgrep | `>=1.125.0,<2.0.0` | `uv tool install semgrep>=1.125.0,<2.0.0` |
+
+Each upper bound is enforced by the scanner, not advisory: a constraint without it
+resolves to the next major version, which the scanner deliberately excludes.
 
 ### Scanner Configuration
 
@@ -221,9 +224,9 @@ Pre-install tools to avoid automatic installation:
 
 ```bash
 # Install specific versions
-uv tool install bandit>=1.7.0
+uv tool install bandit>=1.7.0,<2.0.0
 uv tool install checkov>=3.2.0,<4.0.0
-uv tool install semgrep>=1.125.0
+uv tool install semgrep>=1.125.0,<2.0.0
 
 # List installed tools
 uv tool list

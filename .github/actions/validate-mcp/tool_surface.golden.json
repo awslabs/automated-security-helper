@@ -385,7 +385,7 @@
       }
     },
     "resolve_ash_workspace": {
-      "description": "Resolve a VS Code workspace file into a scan plan without scanning anything.\n\nThe MCP equivalent of `ash --workspace <file> --dry-run`. Reads the workspace\ndefinition and every project's own ASH config, then reports which directories\nbecame projects, what key each was given, which scanners its config enables,\nwhich severity threshold it will be judged against, and which projects were\ndropped and why. Nothing is scanned and no output tree is written, so this is\nthe cheap way to check a workspace before committing to N repository scans.\n\nCall this first when a workspace is unfamiliar, then run_ash_workspace_scan on\nthe same arguments: the scan resolves the same plan from the same inputs.\n\nArgs:\n    workspace_file: Absolute path to the .code-workspace file.\n    workspace_config: Optional path to a workspace policy file. Must exist if\n        given; ASH will not fall back to searching for one.\n    allow_missing_projects: Mark project directories that are absent or\n        unreadable as skipped instead of refusing the workspace.\n    config_overrides: Optional list of `key=value` config overrides, applied to\n        each project's config so the reported threshold is the enforced one.\n\nReturns:\n    Dict with `plan` (the rendered plan, for a human to read), `projects` (the\n    same decisions structured), and `exit_code` -- 0 on success, 4 for a\n    workspace definition or policy problem, 3 for a project whose own config is\n    invalid.",
+      "description": "Resolve a VS Code workspace file into a scan plan without scanning anything.\n\nThe MCP equivalent of `ash --workspace <file> --dry-run`. Reads the workspace\ndefinition and every project's own ASH config, then reports which directories\nbecame projects, what key each was given, which scanners its config enables,\nwhich severity threshold it will be judged against, and which projects were\ndropped and why. Nothing is scanned and no output tree is written, so this is\nthe cheap way to check a workspace before committing to N repository scans.\n\nCall this first when a workspace is unfamiliar, then run_ash_workspace_scan on\nthe same arguments: the scan resolves the same plan from the same inputs.\n\nArgs:\n    workspace_file: Absolute path to the .code-workspace file.\n    workspace_config: Optional path to a workspace policy file. Must exist if\n        given; ASH will not fall back to searching for one.\n    allow_missing_projects: Mark project directories that are absent or\n        unreadable as skipped instead of refusing the workspace.\n    config_overrides: Optional list of `key=value` config overrides, applied to\n        each project's config so the reported threshold is the enforced one.\n    profile: Name of a registered config profile to resolve under for this one\n        call, instead of whatever select_profile bound to this session. Call\n        list_profiles to see what the operator registered.\n\nReturns:\n    Dict with `plan` (the rendered plan, for a human to read), `projects` (the\n    same decisions structured), `session_config_path` (the config a scan of\n    this plan would run under, or null), and `exit_code` -- 0 on success, 4 for\n    a workspace definition, policy or confinement problem, 3 for a project\n    whose own config is invalid or an unknown profile.",
       "inputSchema": {
         "properties": {
           "allow_missing_projects": {
@@ -405,6 +405,18 @@
             ],
             "default": null,
             "title": "Config Overrides"
+          },
+          "profile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Profile"
           },
           "workspace_config": {
             "anyOf": [
@@ -502,7 +514,7 @@
       }
     },
     "run_ash_workspace_scan": {
-      "description": "Scan every project in a VS Code workspace and return the per-project verdict.\n\nThe MCP equivalent of `ash --workspace <file>`. Each project is scanned with\nits own ASH config and its own severity threshold, a workspace policy file can\nimpose a ceiling over all of them, and the results are aggregated into one\nworkspace payload.\n\nUnlike run_ash_scan this call does not return early: it waits for the whole\nworkspace and returns the verdict. Progress is reported as completed projects\nover total projects, with the project key in the message, so a client watching\nprogress notifications can see which project is finishing.\n\nEvery project gets its own entry in the scan registry, so the `scan_ids` map in\nthe response can be used with get_scan_progress and get_scan_results per\nproject. A project skipped at resolution gets no entry and no id.\n\nConfinement: `ASH_MCP_ALLOWED_ROOTS` governs the project directories, and one\nproject outside the permitted roots refuses the whole workspace rather than\nscanning the rest -- a green result covering fewer projects than you asked for\nis the outcome that refusal exists to prevent. The .code-workspace file itself\nand the workspace policy file are config inputs and are not confined.\n\nNot available in container mode; workspace mode runs locally.\n\nArgs:\n    workspace_file: Absolute path to the .code-workspace file.\n    workspace_config: Optional path to a workspace policy file.\n    allow_missing_projects: Skip absent or unreadable project directories\n        rather than refusing the workspace.\n    config_overrides: Optional list of `key=value` config overrides.\n    output_dir: Where to write the workspace output tree. Defaults to\n        `<workspace root>/.ash/ash_output`.\n    scanners: Restrict every project to these scanner names.\n    excluded_scanners: Exclude these scanners from every project. Takes\n        precedence over `scanners`.\n    offline: Run without network access.\n    clean_output: Remove each project's previous aggregated-results file first.\n\nReturns:\n    Dict with `scan_ids` (project key to registry scan id), `projects` (each\n    project's status, finding counts and threshold verdict), `results_path`, and\n    `exit_code` -- 0 clean, 2 actionable findings above a threshold, 3 an\n    invalid project config, 4 a workspace definition, policy or confinement\n    refusal, 1 an internal error. `success` reports whether the scan ran; the\n    verdict is `exit_code`.",
+      "description": "Scan every project in a VS Code workspace and return the per-project verdict.\n\nThe MCP equivalent of `ash --workspace <file>`. Each project is scanned with\nits own ASH config and its own severity threshold, a workspace policy file can\nimpose a ceiling over all of them, and the results are aggregated into one\nworkspace payload.\n\nUnlike run_ash_scan this call does not return early: it waits for the whole\nworkspace and returns the verdict. Progress is reported as completed projects\nover total projects, with the project key in the message, so a client watching\nprogress notifications can see which project is finishing.\n\nEvery project gets its own entry in the scan registry, so the `scan_ids` map in\nthe response can be used with get_scan_progress and get_scan_results per\nproject. A project skipped at resolution gets no entry and no id.\n\nConfinement: `ASH_MCP_ALLOWED_ROOTS` governs the project directories, plus this\nsession's own workspace so a tree delivered with set_source_git or\nset_source_zip_finalize is scannable. One project outside the permitted roots\nrefuses the whole workspace rather than scanning the rest -- a green result\ncovering fewer projects than you asked for is the outcome that refusal exists to\nprevent. The .code-workspace file and the workspace policy file are config\ninputs, governed by `ASH_MCP_ALLOWED_CONFIG_ROOTS` on a network transport.\n\nNot available in container mode; workspace mode runs locally.\n\nArgs:\n    workspace_file: Absolute path to the .code-workspace file.\n    workspace_config: Optional path to a workspace policy file.\n    allow_missing_projects: Skip absent or unreadable project directories\n        rather than refusing the workspace.\n    config_overrides: Optional list of `key=value` config overrides.\n    output_dir: Where to write the workspace output tree. Defaults to\n        `<workspace root>/.ash/ash_output`.\n    scanners: Restrict every project to these scanner names.\n    excluded_scanners: Exclude these scanners from every project. Takes\n        precedence over `scanners`.\n    offline: Run without network access.\n    clean_output: Remove each project's previous aggregated-results file first.\n    profile: Name of a registered config profile to scan under for this one\n        call, instead of whatever select_profile bound to this session. An\n        unknown name refuses the whole scan; running N repository scans under\n        the default config because a profile name was misspelled, and\n        reporting success, is exactly what the confinement refusal above\n        exists to prevent.\n\nReturns:\n    Dict with `scan_ids` (project key to registry scan id), `projects` (each\n    project's status, finding counts and threshold verdict), `results_path`,\n    `session_config_path` (the config the scan ran under, or null), and\n    `exit_code` -- 0 clean, 2 actionable findings above a threshold, 3 an\n    invalid project config or an unknown profile, 4 a workspace definition,\n    policy or confinement refusal, 1 an internal error. `success` reports\n    whether the scan ran; the verdict is `exit_code`.",
       "inputSchema": {
         "properties": {
           "allow_missing_projects": {
@@ -558,6 +570,18 @@
             "default": null,
             "title": "Output Dir"
           },
+          "profile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Profile"
+          },
           "scanners": {
             "anyOf": [
               {
@@ -606,6 +630,61 @@
           "result"
         ],
         "title": "run_ash_workspace_scanOutput",
+        "type": "object"
+      }
+    },
+    "select_profile": {
+      "description": "Bind one of the operator's registered config profiles to this session.\n\nEvery later call in this session that does not name a config of its own runs\nunder the bound one: run_ash_scan, resolve_ash_workspace and\nrun_ash_workspace_scan all pick it up. Call list_profiles first to see what\nthe operator registered with `ash mcp --profile NAME=path`.\n\nThree modes, distinguished by which optional argument you pass:\n\n* Neither: bind the profile as the operator wrote it.\n* patch_ops: apply a JSON-Patch document to it first. Each op is checked\n  against the server's runtime-override allowlist, and one rejected op fails\n  the whole call without changing the session's config.\n* override_yaml: replace it wholesale with your own YAML, still validated.\n\npatch_ops and override_yaml are mutually exclusive.\n\nBinding replaces any previous binding for this session. Sessions do not share\na binding, and a config bound by one session is not readable by another.\n\nArgs:\n    profile_name: Name the operator registered the profile under.\n    patch_ops: JSON-Patch operations to apply to the profile's config.\n    override_yaml: Complete ASH config YAML replacing the profile's.\n\nReturns:\n    Dict with success, mode ('static', 'inherit_and_patch' or 'override'),\n    profile_name, session_id, and config_path -- the file inside this\n    session's workspace that later scans will be handed. On failure,\n    success=False and error, for an unknown profile, a denied patch op, or\n    YAML that does not validate.",
+      "inputSchema": {
+        "properties": {
+          "override_yaml": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Override Yaml"
+          },
+          "patch_ops": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Patch Ops"
+          },
+          "profile_name": {
+            "title": "Profile Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "profile_name"
+        ],
+        "title": "select_profileArguments",
+        "type": "object"
+      },
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "select_profileOutput",
         "type": "object"
       }
     },

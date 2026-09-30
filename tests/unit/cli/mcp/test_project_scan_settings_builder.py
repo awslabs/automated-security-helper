@@ -159,7 +159,19 @@ def _opts(tmp_path: Path) -> ScanOptions:
     return ScanOptions(
         source_dir=root,
         output_dir=tmp_path / "out",
-        config=None,
+        # Non-None, so the ``default_config_path`` entry below discriminates
+        # against the dataclass default the way every other entry here does. In
+        # workspace mode this is the fallback config for a project that declares
+        # none of its own -- the MCP server passes a profile a client bound with
+        # select_profile -- and the builder dropped it entirely until recently,
+        # which made that argument accepted and silently ignored.
+        #
+        # The real file rather than an invented path, because
+        # _resolve_workspace_execution_config reads opts.config when it is set and
+        # only searches the root when it is None. A path that does not exist makes
+        # it warn and fall back to defaults, which changes max_parallel_projects
+        # and project_timeout and breaks two unrelated entries in the table.
+        config=str(root / ".ash.yaml"),
         config_overrides=["global_settings.severity_threshold=HIGH"],
         offline=True,
         strategy=ExecutionStrategy.SEQUENTIAL,
@@ -224,6 +236,7 @@ def _expected(tmp_path: Path) -> Dict[str, Any]:
         "max_parallel_projects": 7,
         "project_timeout": 90.0,
         "allow_missing_projects": True,
+        "default_config_path": str(tmp_path / "work" / ".ash.yaml"),
     }
 
 

@@ -1,0 +1,48 @@
+{
+  "_comment": [
+    "DERIVED FILE -- do not hand-edit. Regenerate with:",
+    "  python tests/integration/codecommit_gate_regression/gate_contract.py",
+    "",
+    "Every value here is read out of the gate itself:",
+    "  verdict_mapping     -- by CALLING _verdict() from",
+    "                         CODECOMMIT_GATE_HANDLER for each code in",
+    "                         ASH_EXIT_CODES, so the fallback arm is",
+    "                         covered and exit code 4 appears.",
+    "  scan_flags          -- from the argv construction in handler().",
+    "  min_severity_default-- from the MinSeverity parameter of the",
+    "                         synthesized AshCodeCommitGate template.",
+    "",
+    "tests/integration/codecommit_gate_regression/",
+    "test_codecommit_gate_regression.py re-derives all of it and fails if",
+    "this file disagrees, so it cannot drift from the gate unnoticed."
+  ],
+  "min_severity_default": "medium",
+  "min_severity_invocation": [
+    "--min-severity",
+    "medium"
+  ],
+  "scan_flags": {
+    "base": [
+      "--source-dir",
+      "--output-dir",
+      "--no-progress",
+      "--simple",
+      "--compact-report"
+    ],
+    "changed_files_only": [
+      "--changed-files-only",
+      "--base-ref"
+    ],
+    "min_severity": [
+      "--min-severity"
+    ]
+  },
+  "verdict_mapping": {
+    "0": "passed",
+    "1": "errored",
+    "2": "failed",
+    "3": "errored",
+    "4": "errored",
+    "unknown": "errored"
+  }
+}

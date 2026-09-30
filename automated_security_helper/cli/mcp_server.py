@@ -35,6 +35,7 @@ from automated_security_helper.cli.mcp_tools import (
     mcp_set_source_zip_finalize,
     mcp_clear_source,
     mcp_list_profiles,
+    mcp_select_profile,
 )
 from automated_security_helper.core.constants import ASH_EXIT_CODES
 from automated_security_helper.models.workspace import WorkspaceExitCode
@@ -52,7 +53,11 @@ from automated_security_helper.core.resource_management.result_filters import (
     apply_content_filters,
     add_findings_list,
 )
+from automated_security_helper.cli.mcp.profile_registry import (
+    resolve_session_config_path,
+)
 from automated_security_helper.cli.mcp.progress_monitor import monitor_scan_progress
+from automated_security_helper.cli.mcp.sandbox import validate_config_input
 from automated_security_helper.cli.mcp.scan_target import validate_scan_target
 from automated_security_helper.cli.mcp.session_identity import resolve_session_id
 from automated_security_helper.cli.mcp.source_delivery import (
@@ -255,6 +260,34 @@ async def run_ash_scan(
         if not Path(source_dir).is_absolute():
             source_dir = str(Path.cwd() / source_dir)
 
+        # A profile this session bound with select_profile supplies the config
+        # when the caller names none. The caller's own config_path wins, because
+        # naming one on the call is the more specific statement and silently
+        # replacing it would make the explicit argument a lie.
+        #
+        # Nothing is invented for an unbound session: config_path stays None and
+        # ASH's own discovery finds an in-tree .ash.yaml as it always has.
+        if config_path is None:
+            config_path = resolve_session_config_path(session_id)
+            if config_path is not None:
+                await ctx.info(
+                    f"Using the config bound to this session by select_profile: "
+                    f"{config_path}"
+                )
+        else:
+            # Caller-named, so it is caller-supplied input and gets the same
+            # boundary the workspace tools' config inputs get. Without this the
+            # scan tool would be the one unconfined config read left.
+            config_error = validate_config_input(config_path, session_id=session_id)
+            if config_error:
+                await ctx.error(str(config_error))
+                return {
+                    "success": False,
+                    "error": str(config_error),
+                    "error_type": "config_input_not_permitted",
+                    "error_category": config_error.context["error_category"],
+                }
+
         # Check the root policy before acting on the target in any way. The
         # clean_output branch below deletes a file inside the caller-named
         # directory, so it must not run for a target the policy refuses.
@@ -374,6 +407,7 @@ async def resolve_ash_workspace(
     workspace_config: Optional[str] = None,
     allow_missing_projects: bool = False,
     config_overrides: Optional[list] = None,
+    profile: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Resolve a VS Code workspace file into a scan plan without scanning anything.
 
@@ -395,13 +429,23 @@ async def resolve_ash_workspace(
             unreadable as skipped instead of refusing the workspace.
         config_overrides: Optional list of `key=value` config overrides, applied to
             each project's config so the reported threshold is the enforced one.
+        profile: Name of a registered config profile to resolve under for this one
+            call, instead of whatever select_profile bound to this session. Call
+            list_profiles to see what the operator registered.
 
     Returns:
         Dict with `plan` (the rendered plan, for a human to read), `projects` (the
-        same decisions structured), and `exit_code` -- 0 on success, 4 for a
-        workspace definition or policy problem, 3 for a project whose own config is
-        invalid.
+        same decisions structured), `session_config_path` (the config a scan of
+        this plan would run under, or null), and `exit_code` -- 0 on success, 4 for
+        a workspace definition, policy or confinement problem, 3 for a project
+        whose own config is invalid or an unknown profile.
     """
+    try:
+        session_id = resolve_session_id(ctx.headers)
+    except ValueError as e:
+        await ctx.error(str(e))
+        return _session_error(e)
+
     try:
         await ctx.info(f"Resolving ASH workspace: {workspace_file}")
         response = await mcp_resolve_workspace(
@@ -409,6 +453,8 @@ async def resolve_ash_workspace(
             workspace_config=workspace_config,
             allow_missing_projects=allow_missing_projects,
             config_overrides=list(config_overrides) if config_overrides else None,
+            session_id=session_id,
+            profile=profile,
         )
         if not response.get("success", False):
             await ctx.error(str(response.get("error", "Unknown error")))
@@ -436,6 +482,7 @@ async def run_ash_workspace_scan(
     excluded_scanners: Optional[list] = None,
     offline: bool = False,
     clean_output: bool = True,
+    profile: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Scan every project in a VS Code workspace and return the per-project verdict.
 
@@ -453,11 +500,13 @@ async def run_ash_workspace_scan(
     the response can be used with get_scan_progress and get_scan_results per
     project. A project skipped at resolution gets no entry and no id.
 
-    Confinement: `ASH_MCP_ALLOWED_ROOTS` governs the project directories, and one
-    project outside the permitted roots refuses the whole workspace rather than
-    scanning the rest -- a green result covering fewer projects than you asked for
-    is the outcome that refusal exists to prevent. The .code-workspace file itself
-    and the workspace policy file are config inputs and are not confined.
+    Confinement: `ASH_MCP_ALLOWED_ROOTS` governs the project directories, plus this
+    session's own workspace so a tree delivered with set_source_git or
+    set_source_zip_finalize is scannable. One project outside the permitted roots
+    refuses the whole workspace rather than scanning the rest -- a green result
+    covering fewer projects than you asked for is the outcome that refusal exists to
+    prevent. The .code-workspace file and the workspace policy file are config
+    inputs, governed by `ASH_MCP_ALLOWED_CONFIG_ROOTS` on a network transport.
 
     Not available in container mode; workspace mode runs locally.
 
@@ -474,15 +523,28 @@ async def run_ash_workspace_scan(
             precedence over `scanners`.
         offline: Run without network access.
         clean_output: Remove each project's previous aggregated-results file first.
+        profile: Name of a registered config profile to scan under for this one
+            call, instead of whatever select_profile bound to this session. An
+            unknown name refuses the whole scan; running N repository scans under
+            the default config because a profile name was misspelled, and
+            reporting success, is exactly what the confinement refusal above
+            exists to prevent.
 
     Returns:
         Dict with `scan_ids` (project key to registry scan id), `projects` (each
-        project's status, finding counts and threshold verdict), `results_path`, and
+        project's status, finding counts and threshold verdict), `results_path`,
+        `session_config_path` (the config the scan ran under, or null), and
         `exit_code` -- 0 clean, 2 actionable findings above a threshold, 3 an
-        invalid project config, 4 a workspace definition, policy or confinement
-        refusal, 1 an internal error. `success` reports whether the scan ran; the
-        verdict is `exit_code`.
+        invalid project config or an unknown profile, 4 a workspace definition,
+        policy or confinement refusal, 1 an internal error. `success` reports
+        whether the scan ran; the verdict is `exit_code`.
     """
+    try:
+        session_id = resolve_session_id(ctx.headers)
+    except ValueError as e:
+        await ctx.error(str(e))
+        return _session_error(e)
+
     try:
         await ctx.info(f"Starting ASH workspace scan: {workspace_file}")
         # No filesystem work happens here. The confinement check needs the
@@ -501,6 +563,8 @@ async def run_ash_workspace_scan(
             offline=offline,
             clean_output=clean_output,
             progress_reporter=ctx.report_progress,
+            session_id=session_id,
+            profile=profile,
         )
         if not response.get("success", False):
             await ctx.error(str(response.get("error", "Unknown error")))
@@ -673,6 +737,12 @@ async def get_scan_results(
                         that have been marked as false positives or accepted risks. Default is False.
     """
     try:
+        session_id = resolve_session_id(ctx.headers)
+    except ValueError as e:
+        await ctx.error(str(e))
+        return _session_error(e)
+
+    try:
         if not Path(output_dir).is_absolute():
             output_dir = str(Path.cwd() / output_dir)
 
@@ -688,7 +758,15 @@ async def get_scan_results(
             f"Getting results from ASH scan in directory: {output_dir} ({filter_info})"
         )
 
-        results = await mcp_get_scan_results(output_dir=output_dir)
+        # The session is passed so a results directory inside this session's own
+        # sandbox is readable. A delivered tree's output lands at
+        # <sandbox>/source/.ash/ash_output, which no operator grant names, so
+        # without the id a client could scan a tree it delivered and then be
+        # refused its own results. It also keeps a sibling session from reading
+        # them, which the shared-workspace deny rule enforces either way.
+        results = await mcp_get_scan_results(
+            output_dir=output_dir, session_id=session_id
+        )
 
         if "error" in results or not results.get("success"):
             return results
@@ -1404,6 +1482,76 @@ async def list_profiles() -> Dict[str, Any]:
             "error": f"Error listing profiles: {str(e)}",
             "error_type": type(e).__name__,
         }
+
+
+@mcp.tool()
+async def select_profile(
+    ctx: Context,
+    profile_name: str,
+    patch_ops: Optional[list] = None,
+    override_yaml: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Bind one of the operator's registered config profiles to this session.
+
+    Every later call in this session that does not name a config of its own runs
+    under the bound one: run_ash_scan, resolve_ash_workspace and
+    run_ash_workspace_scan all pick it up. Call list_profiles first to see what
+    the operator registered with `ash mcp --profile NAME=path`.
+
+    Three modes, distinguished by which optional argument you pass:
+
+    * Neither: bind the profile as the operator wrote it.
+    * patch_ops: apply a JSON-Patch document to it first. Each op is checked
+      against the server's runtime-override allowlist, and one rejected op fails
+      the whole call without changing the session's config.
+    * override_yaml: replace it wholesale with your own YAML, still validated.
+
+    patch_ops and override_yaml are mutually exclusive.
+
+    Binding replaces any previous binding for this session. Sessions do not share
+    a binding, and a config bound by one session is not readable by another.
+
+    Args:
+        profile_name: Name the operator registered the profile under.
+        patch_ops: JSON-Patch operations to apply to the profile's config.
+        override_yaml: Complete ASH config YAML replacing the profile's.
+
+    Returns:
+        Dict with success, mode ('static', 'inherit_and_patch' or 'override'),
+        profile_name, session_id, and config_path -- the file inside this
+        session's workspace that later scans will be handed. On failure,
+        success=False and error, for an unknown profile, a denied patch op, or
+        YAML that does not validate.
+    """
+    try:
+        session_id = resolve_session_id(ctx.headers)
+    except ValueError as e:
+        await ctx.error(str(e))
+        return _session_error(e)
+
+    try:
+        result = mcp_select_profile(
+            profile_name,
+            patch_ops=patch_ops,
+            override_yaml=override_yaml,
+            session_id=session_id,
+        )
+    except Exception as e:
+        logger.exception(f"Error in select_profile: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Error selecting profile: {str(e)}",
+            "error_type": type(e).__name__,
+        }
+
+    if result.get("success"):
+        await ctx.info(
+            f"Profile {profile_name!r} bound to session {session_id} "
+            f"({result.get('mode')})"
+        )
+    else:
+        await ctx.error(str(result.get("error", "select_profile failed")))
+    return _with_session(result, session_id)
 
 
 def _build_ash_exit_codes() -> str:

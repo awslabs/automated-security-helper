@@ -47,21 +47,49 @@ class TestGetOrCreate:
         s2 = registry.get_or_create("conn-a")
         assert s1 is s2
 
-    def test_distinct_ids_get_distinct_sessions(
-        self, registry: MCPSessionRegistry
-    ):
+    def test_distinct_ids_get_distinct_sessions(self, registry: MCPSessionRegistry):
         s1 = registry.get_or_create("conn-a")
         s2 = registry.get_or_create("conn-b")
         assert s1 is not s2
         assert s1.lock is not s2.lock
 
-    def test_lock_identity_preserved_across_calls(
-        self, registry: MCPSessionRegistry
-    ):
+    def test_lock_identity_preserved_across_calls(self, registry: MCPSessionRegistry):
         s1 = registry.get_or_create("conn-a")
         s2 = registry.get_or_create("conn-a")
         # Identical lock object — critical for serialization correctness.
         assert s1.lock is s2.lock
+
+    @pytest.mark.parametrize(
+        "bad", ["..", ".", "", "a/b", "a\\b", "D:x", "C:", "a b", "a?b", "a:b"]
+    )
+    def test_a_session_id_outside_the_allowlist_is_rejected(
+        self, registry: MCPSessionRegistry, bad: str
+    ):
+        """The id becomes a directory this registry creates, so it is validated.
+
+        ``get_or_create`` took the id straight from its caller and joined it onto
+        the workspace parent, with no check of any kind -- the only reason some
+        forms failed was the filesystem refusing them at ``mkdir``. The rule lives
+        in ``cli/mcp/session_paths.py`` and is shared with the other surfaces that
+        build a per-session path.
+        """
+        with pytest.raises(ValueError):
+            registry.get_or_create(bad)
+
+    def test_the_workspace_stays_under_the_parent(
+        self, registry: MCPSessionRegistry, tmp_path: Path
+    ):
+        """The property the validation protects, stated on its own.
+
+        ``parent`` is taken from the fixture's own construction rather than from
+        the session's workspace, because deriving the expected container from the
+        value under test would hold for any path at all.
+        """
+        parent = (tmp_path / "sessions").resolve()
+        workspace = registry.get_or_create("conn-a").workspace_root.resolve()
+
+        assert workspace != parent
+        assert workspace.is_relative_to(parent)
 
 
 class TestWorkspaceRoot:
@@ -78,17 +106,13 @@ class TestWorkspaceRoot:
         assert s_a.workspace_root.parent == parent
         assert s_b.workspace_root.parent == parent
 
-    def test_workspace_id_matches_session_id(
-        self, registry: MCPSessionRegistry
-    ):
+    def test_workspace_id_matches_session_id(self, registry: MCPSessionRegistry):
         s = registry.get_or_create("conn-a")
         assert s.workspace_root.name == "conn-a"
 
 
 class TestDisconnect:
-    def test_disconnect_removes_from_registry(
-        self, registry: MCPSessionRegistry
-    ):
+    def test_disconnect_removes_from_registry(self, registry: MCPSessionRegistry):
         registry.get_or_create("conn-a")
         assert "conn-a" in registry
         registry.disconnect("conn-a")
@@ -104,9 +128,7 @@ class TestDisconnect:
         assert not s.workspace_root.exists()
         assert not marker.exists()
 
-    def test_disconnect_unknown_id_is_noop(
-        self, registry: MCPSessionRegistry
-    ):
+    def test_disconnect_unknown_id_is_noop(self, registry: MCPSessionRegistry):
         # Must not raise.
         registry.disconnect("never-existed")
         assert len(registry) == 0
@@ -327,9 +349,7 @@ class TestDefaultRegistry:
 
 
 class TestSessionFieldDefaults:
-    def test_optional_fields_default_to_none(
-        self, registry: MCPSessionRegistry
-    ):
+    def test_optional_fields_default_to_none(self, registry: MCPSessionRegistry):
         s = registry.get_or_create("conn-a")
         assert s.source_dir is None
         assert s.config is None

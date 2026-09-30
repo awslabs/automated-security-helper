@@ -86,6 +86,7 @@ EXPECTED_TOOLS = {
     "resolve_ash_workspace",
     "run_ash_scan",
     "run_ash_workspace_scan",
+    "select_profile",
     "set_source_git",
     "set_source_zip_chunk",
     "set_source_zip_finalize",
