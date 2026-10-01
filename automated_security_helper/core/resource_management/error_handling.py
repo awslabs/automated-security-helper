@@ -19,6 +19,7 @@ from typing import Dict, List, Optional, Any, Tuple, Union
 from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
 )
+from automated_security_helper.utils.atomic_write import read_text_of_replaced_file
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -98,24 +99,41 @@ def safe_read_json_file(
             )
             return None, error
 
-        # Read and parse the file
-        with open(path_obj, "r", encoding="utf-8") as f:
-            try:
-                data = json.load(f)
-                return data, None
-            except json.JSONDecodeError as e:
-                error = MCPResourceError(
-                    f"Invalid JSON format in file {path_obj}: {str(e)}",
-                    context={
-                        "cwd": str(Path.cwd()),
-                        "file_path": str(path_obj),
-                        "error_category": ErrorCategory.INVALID_FORMAT.value,
-                        "json_error": str(e),
-                        "error_line": e.lineno,
-                        "error_column": e.colno,
-                    },
-                )
-                return None, error
+        # Read and parse the file. Result files are replaced atomically while scans
+        # run, and on Windows an open that lands inside the replace fails with a
+        # transient PermissionError; the helper retries that instead of reporting it.
+        # One that outlasts the retry is a read error, reported as such and not as
+        # a file that failed to parse.
+        try:
+            text = read_text_of_replaced_file(path_obj, encoding="utf-8")
+        except PermissionError as e:
+            error = MCPResourceError(
+                f"Permission denied: Cannot read file {path_obj}: {str(e)}",
+                context={
+                    "cwd": str(Path.cwd()),
+                    "file_path": str(path_obj),
+                    "error_category": ErrorCategory.PERMISSION_DENIED.value,
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                },
+            )
+            return None, error
+        try:
+            data = json.loads(text)
+            return data, None
+        except json.JSONDecodeError as e:
+            error = MCPResourceError(
+                f"Invalid JSON format in file {path_obj}: {str(e)}",
+                context={
+                    "cwd": str(Path.cwd()),
+                    "file_path": str(path_obj),
+                    "error_category": ErrorCategory.INVALID_FORMAT.value,
+                    "json_error": str(e),
+                    "error_line": e.lineno,
+                    "error_column": e.colno,
+                },
+            )
+            return None, error
 
     except Exception as e:
         error = MCPResourceError(
