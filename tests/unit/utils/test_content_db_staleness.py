@@ -25,14 +25,19 @@ The fake tools are faithful to what the real ones print. The grype payload is th
 ``grype db status -o json`` printed at v0.111.0 for a database rewritten to be built 10
 days ago, including the non-zero exit it uses for a database past grype's own bound; the
 trivy payload is ``trivy version --format json`` at v0.69.3 against a month-old database.
+Each fake is a Python script behind the launcher a real install leaves on PATH: an
+executable file on POSIX, a ``.cmd`` shim on Windows, where a shebang script cannot be
+started. They are not skipped on any platform.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import platform
 import re
 import stat
+import sys
 import typing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -67,10 +72,33 @@ _MODULE = "automated_security_helper.interactions.run_ash_scan"
 # --------------------------------------------------------------------------- fake tools
 
 
-def _executable(path: Path, body: str) -> Path:
-    path.write_text(body, encoding="utf-8")
-    path.chmod(path.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
-    return path
+def _executable(bin_dir: Path, name: str, source: str) -> Path:
+    """Install a fake ``name`` in ``bin_dir`` that runs ``source`` with this interpreter.
+
+    The behaviour lives in a Python script so that it is the same program on every
+    platform; what differs is the launcher, which is shaped like the one a real install
+    would leave on PATH. On POSIX that is an executable file named ``name``. On Windows a
+    shebang script cannot be started at all -- ``CreateProcess`` rejects it with
+    ``[WinError 193] %1 is not a valid Win32 application`` -- so the launcher is a
+    ``name.cmd`` shim, the same form npm installs. ``find_executable`` tries ``.exe``,
+    ``.bat`` and ``.cmd`` before the bare name on Windows, and ``subprocess.run`` with a
+    list starts a ``.cmd`` directly, so the scanner's own lookup and invocation are the
+    ones under test rather than a patched-out subprocess call.
+
+    Returns the launcher's path, which is what a scanner's ``find_executable`` would return.
+    """
+    script = bin_dir / f"_fake_{name}.py"
+    script.write_text(source, encoding="utf-8")
+    if platform.system().lower() == "windows":
+        launcher = bin_dir / f"{name}.cmd"
+        launcher.write_text(f'@"{sys.executable}" "{script}" %*\n', encoding="utf-8")
+        return launcher
+    launcher = bin_dir / name
+    launcher.write_text(
+        f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n', encoding="utf-8"
+    )
+    launcher.chmod(launcher.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    return launcher
 
 
 def _ts(moment: datetime) -> str:
@@ -102,16 +130,22 @@ def fake_grype(bin_dir: Path, built: datetime) -> Path:
         ],
     }
     return _executable(
-        bin_dir / "grype",
-        "#!/bin/sh\n"
-        'if [ "$1" = "db" ] && [ "$2" = "status" ]; then\n'
-        f"  printf '%s\\n' '{json.dumps(status)}'\n"
-        f"  exit {1 if stale else 0}\n"
-        "fi\n"
-        'if [ "$1" = "version" ]; then echo "Version: 0.111.0"; exit 0; fi\n'
-        'out=""\n'
-        'while [ "$#" -gt 0 ]; do [ "$1" = "--file" ] && out="$2"; shift; done\n'
-        f"printf '%s' '{json.dumps(sarif)}' > \"$out\"\n",
+        bin_dir,
+        "grype",
+        "import sys\n"
+        "args = sys.argv[1:]\n"
+        'if args[:2] == ["db", "status"]:\n'
+        f"    print({json.dumps(status)!r})\n"
+        f"    sys.exit({1 if stale else 0})\n"
+        'if args[:1] == ["version"]:\n'
+        '    print("Version: 0.111.0")\n'
+        "    sys.exit(0)\n"
+        'out = ""\n'
+        "for i, arg in enumerate(args):\n"
+        '    if arg == "--file" and i + 1 < len(args):\n'
+        "        out = args[i + 1]\n"
+        'with open(out, "w", encoding="utf-8") as f:\n'
+        f"    f.write({json.dumps(sarif)!r})\n",
     )
 
 
@@ -125,10 +159,7 @@ def fake_trivy(bin_dir: Path, updated: datetime | None) -> Path:
             "UpdatedAt": _ts(updated),
             "DownloadedAt": _ts(updated + timedelta(hours=6)),
         }
-    return _executable(
-        bin_dir / "trivy",
-        f"#!/bin/sh\nprintf '%s\\n' '{json.dumps(payload)}'\n",
-    )
+    return _executable(bin_dir, "trivy", f"print({json.dumps(payload)!r})\n")
 
 
 def ruleset_dir(root: Path, fetched: datetime | None, mtime: datetime | None = None):
@@ -491,7 +522,10 @@ def offline_grype(tmp_path, monkeypatch, test_plugin_context):
     monkeypatch.setattr(subprocess_utils, "_find_executable_cache", {})
 
     def make(age: timedelta, policy: str = cdb.DEFAULT_STALENESS_POLICY):
-        fake_grype(bin_dir, datetime.now(UTC) - age)
+        launcher = fake_grype(bin_dir, datetime.now(UTC) - age)
+        # The scanner must find THIS fake by its own lookup, not some other grype on PATH.
+        found = subprocess_utils.find_executable("grype")
+        assert found and Path(found).samefile(launcher), (found, launcher)
         config = GrypeScannerConfig(options=GrypeScannerConfigOptions(offline=True))
         test_plugin_context.config = apply_config_overrides(
             get_default_config(), [f"content_db_staleness={policy}"]
