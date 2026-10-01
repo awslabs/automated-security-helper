@@ -2,7 +2,14 @@ import json
 import os
 from pathlib import Path
 import re
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    ValidationError,
+    model_validator,
+)
 from typing import Annotated, Any, List, Dict, Literal, Optional
 
 import yaml
@@ -70,6 +77,9 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.sarif_report
 )
 from automated_security_helper.plugin_modules.ash_builtin.reporters.github_ghas_reporter import (
     GHASReporterConfig,
+)
+from automated_security_helper.plugin_modules.ash_builtin.reporters.unused_suppressions_reporter import (
+    UnusedSuppressionsReporterConfig,
 )
 from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
     BanditScannerConfig,
@@ -160,7 +170,83 @@ class BuildConfig(BaseModel):
     ] = []
 
 
-class ConverterConfigSegment(BaseModel):
+def _merge_config_values(base: Any, overlay: Any) -> Any:
+    """Merge two raw config values, ``overlay`` winning key by key.
+
+    Model instances are dumped first so that a value built in Python merges the
+    same way as one read from YAML. Anything that is not a mapping on both sides
+    is replaced by ``overlay`` whole.
+    """
+    if isinstance(base, BaseModel):
+        base = base.model_dump()
+    if isinstance(overlay, BaseModel):
+        overlay = overlay.model_dump()
+    if not (isinstance(base, dict) and isinstance(overlay, dict)):
+        return overlay
+    merged = dict(base)
+    for key, value in overlay.items():
+        merged[key] = (
+            _merge_config_values(merged[key], value) if key in merged else value
+        )
+    return merged
+
+
+def field_name_spellings(segment_cls: type[BaseModel]) -> Dict[str, str]:
+    """Map each declared field name to its alias, where the two differ.
+
+    Read from ``model_fields``, so a plugin field declared with an alias later is
+    covered without being listed anywhere. The config linter reads this too, so
+    its warning about the field-name spelling says what actually happens to it.
+    """
+    return {
+        field_name: info.alias
+        for field_name, info in segment_cls.model_fields.items()
+        if info.alias and info.alias != field_name
+    }
+
+
+class _PluginConfigSegment(BaseModel):
+    """Base for the scanner, reporter and converter config segments.
+
+    A plugin field declared with a hyphenated alias (``gitlab-sast``) differs from
+    its Python field name (``gitlab_sast``), and these segments do not set
+    ``populate_by_name``. Without the validator below, a key written with the
+    field name landed in the ``extra="allow"`` bucket, unvalidated, while the
+    declared field kept its defaults. ``get_plugin_config`` by the alias then
+    returned the defaults, while the runtime lookup by class name could reach the
+    extras copy -- for a scanner it did not, so ``cdk_nag: {enabled: false}``
+    left cdk-nag enabled.
+
+    ``populate_by_name`` is not the fix, because of the case where both keys are
+    present. That happens on every ``--config-overrides`` run that touches an
+    aliased plugin, not only in a hand-written config: ``apply_config_overrides``
+    round-trips through ``model_dump()``, which is keyed by field name, so the
+    file's settings come back under ``gitlab_sast`` while the override adds
+    ``gitlab-sast`` holding only the overridden key. Pydantic would keep one of
+    the two whole, silently reverting either the override or the rest of the
+    file. They are merged key by key instead, the alias -- the documented
+    spelling -- winning where both set the same key. A hand-written config with
+    both is also flagged by ``ash config lint``.
+    """
+
+    @model_validator(mode="before")
+    @classmethod
+    def _read_field_name_spellings_as_aliases(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        for field_name, alias in field_name_spellings(cls).items():
+            if field_name not in data:
+                continue
+            data = dict(data)
+            field_name_value = data.pop(field_name)
+            if alias in data:
+                data[alias] = _merge_config_values(field_name_value, data[alias])
+            else:
+                data[alias] = field_name_value
+        return data
+
+
+class ConverterConfigSegment(_PluginConfigSegment):
     model_config = ConfigDict(
         str_strip_whitespace=True,
         arbitrary_types_allowed=True,
@@ -180,7 +266,7 @@ class ConverterConfigSegment(BaseModel):
     ] = JupyterConverterConfig()
 
 
-class ScannerConfigSegment(BaseModel):
+class ScannerConfigSegment(_PluginConfigSegment):
     model_config = ConfigDict(
         str_strip_whitespace=True,
         arbitrary_types_allowed=True,
@@ -229,7 +315,7 @@ class ScannerConfigSegment(BaseModel):
     ] = SyftScannerConfig()
 
 
-class ReporterConfigSegment(BaseModel):
+class ReporterConfigSegment(_PluginConfigSegment):
     model_config = ConfigDict(
         str_strip_whitespace=True,
         arbitrary_types_allowed=True,
@@ -304,6 +390,13 @@ class ReporterConfigSegment(BaseModel):
         TextReporterConfig,
         Field(description="Configure the options for the Text reporter"),
     ] = TextReporterConfig()
+    unused_suppressions: Annotated[
+        UnusedSuppressionsReporterConfig,
+        Field(
+            description="Configure the options for the Unused Suppressions reporter",
+            alias="unused-suppressions",
+        ),
+    ] = UnusedSuppressionsReporterConfig()
     yaml: Annotated[
         YAMLReporterConfig,
         Field(description="Configure the options for the YAML reporter"),

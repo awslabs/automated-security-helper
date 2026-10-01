@@ -189,10 +189,11 @@ def test_reporter_check_passes_on_the_generated_table():
     scripts/generate_reporter_docs.py from the plugin registry. The gate used to
     build its reporter list from the fields declared on ReporterConfigSegment
     instead, a different source, and the two disagree about any reporter that
-    reaches configuration only through ``extra="allow"``. unused-suppressions is
-    one: the generator gave it a row, the gate called that row a leftover for a
-    removed reporter, and `generate_reporter_docs.py --check` and
-    `verify_docs_freshness.py` could not both pass on any version of the doc.
+    reaches configuration only through ``extra="allow"``. unused-suppressions was
+    one until it was declared: the generator gave it a row, the gate called that
+    row a leftover for a removed reporter, and `generate_reporter_docs.py
+    --check` and `verify_docs_freshness.py` could not both pass on any version
+    of the doc.
 
     Nothing in the unit suite ran check_reporters against the real doc, which is
     how the gate failed on main while the suite was green. This test is that run.
@@ -303,28 +304,72 @@ def test_reporter_check_fails_closed_on_an_empty_registry(gate, monkeypatch):
     assert failures and "no reporters" in failures[0]
 
 
-def test_every_declared_reporter_config_field_is_a_registered_reporter(gate):
-    """What the old config-field source checked incidentally, kept explicitly.
+BUILTIN_REPORTER_MODULE_PREFIX = "automated_security_helper.plugin_modules.ash_builtin."
 
-    When check_reporters read ReporterConfigSegment, a declared field left
-    behind for a removed reporter had no doc row and failed the gate. Reading
-    the registry drops that, so it is pinned here: every declared field must
-    name a registered reporter.
 
-    Deliberately one direction only. The reverse, every registered reporter is
-    a declared field, is false today: unused-suppressions is registered and is
-    configured only through extra="allow", so it is absent from the published
-    AshConfig.json schema. Closing that means adding a field, which changes the
-    schema, and is left as a decision rather than asserted here.
+def _builtin_registered_reporter_names() -> set[str]:
+    """Names of the registered reporters that this package itself ships.
+
+    The plugin registry is process-global. In a shared test worker it also holds
+    reporters that other tests imported -- the AWS plugin package registers
+    aws-security-hub, s3 and others, and community plugins register their own.
+    Those declare their config in their own packages and do not belong in core's
+    ReporterConfigSegment, so the reverse check is scoped to the ash_builtin
+    modules, by the module each registered class is defined in.
+    """
+    import typing
+
+    import automated_security_helper.plugin_modules.ash_builtin.reporters  # noqa: F401
+    from automated_security_helper.plugins import ash_plugin_manager
+
+    names = set()
+    for cls in ash_plugin_manager.plugin_modules("reporter"):
+        if not cls.__module__.startswith(BUILTIN_REPORTER_MODULE_PREFIX):
+            continue
+        annotation = cls.model_fields["config"].annotation
+        args = [a for a in typing.get_args(annotation) if a is not type(None)]
+        config_cls = args[0] if args else annotation
+        names.add(config_cls().name)
+    return names
+
+
+def test_declared_reporter_fields_match_the_builtin_registry(gate):
+    """ReporterConfigSegment and the built-in reporter registry agree, both ways.
+
+    Declared -> registered is what the old config-field source checked
+    incidentally. When check_reporters read ReporterConfigSegment, a declared
+    field left behind for a removed reporter had no doc row and failed the gate.
+    Reading the registry dropped that, so it is pinned here: every declared field
+    must name a registered reporter. This direction is against the whole
+    registry, as it was before.
+
+    Built-in registered -> declared is the reverse. A registered reporter with no
+    declared field still runs -- its config is kept through extra="allow" and
+    get_plugin_config finds it -- but it is missing from the published
+    AshConfig.json schema, so editors reading that schema do not offer it, and
+    its options are not validated when the config loads. unused-suppressions was
+    in exactly that state until it was declared. This direction is scoped to the
+    reporters this package ships; see _builtin_registered_reporter_names.
     """
     from automated_security_helper.config.ash_config import ReporterConfigSegment
 
     declared = set(gate._segment_names(ReporterConfigSegment))
     registered = set(gate.reporter_names())
+    builtin = _builtin_registered_reporter_names()
     assert declared, "ReporterConfigSegment declares no fields; nothing compared"
+    assert builtin, "no built-in reporters are registered; nothing compared"
+    # The reverse direction is only meaningful if the scoping kept the reporter
+    # that motivated it, rather than filtering the registry down to nothing.
+    assert "unused-suppressions" in builtin
+
     assert declared <= registered, (
         "ReporterConfigSegment declares fields for reporters the plugin registry "
         f"does not register: {sorted(declared - registered)}"
+    )
+    assert builtin <= declared, (
+        "built-in reporters with no declared ReporterConfigSegment field, so "
+        "they are missing from the published AshConfig.json schema: "
+        f"{sorted(builtin - declared)}"
     )
 
 

@@ -4,6 +4,7 @@ from pathlib import Path
 import traceback
 from typing import Dict, Iterable, List, Sequence
 from automated_security_helper.base.engine_phase import EnginePhase
+from automated_security_helper.base.plugin_config import plugin_config_key
 from automated_security_helper.base.reporter_plugin import (
     reporter_format_name,
     reporter_matches_requested_formats,
@@ -252,11 +253,10 @@ class ReportPhase(EnginePhase):
         all_reporter_instances = []
         for plugin_class in reporter_classes:
             try:
-                plugin_name = getattr(plugin_class, "__name__", "Unknown")
                 plugin_config = (
                     self.plugin_context.config.get_plugin_config(
                         plugin_type="reporter",
-                        plugin_name=plugin_name.lower(),
+                        plugin_name=plugin_config_key(plugin_class),
                     )
                     if self.plugin_context.config is not None
                     else None

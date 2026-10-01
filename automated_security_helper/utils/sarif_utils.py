@@ -29,6 +29,7 @@ from automated_security_helper.utils.suppression_matcher import (
     should_suppress_finding,
 )
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+from automated_security_helper.utils.package_identity import extract_package_identity
 from automated_security_helper.models.asharp_model import ScannerSeverityCount
 from automated_security_helper.utils.secret_masking import mask_secret_in_text
 from automated_security_helper.utils.suppression_matcher import file_path_matches
@@ -743,7 +744,30 @@ def apply_suppressions_to_sarif(
                             line_start = location.physicalLocation.root.region.startLine
                             line_end = location.physicalLocation.root.region.endLine
 
+                        package_name, package_version, package_path = (
+                            extract_package_identity(result.properties)
+                        )
+                        # package_path is compared in the form a suppression
+                        # writes it: relative to the scan root. Converters emit
+                        # it that way, but SARIF from an older ASH or another
+                        # tool may carry the absolute source-dir prefix (on
+                        # Windows, drive included), which is stripped here the
+                        # same way the location URI is. The basename argument
+                        # is None: that case exists for one scanner's location
+                        # URIs and would strip a real leading directory here.
+                        if package_path:
+                            package_path = _normalize_sarif_uri(
+                                package_path,
+                                _source_dir_prefix,
+                                _source_dir_prefix_with_slash,
+                                _source_dir_prefix_no_drive,
+                                None,
+                            )
+
                         flat_finding = FlatVulnerability(
+                            package_name=package_name,
+                            package_version=package_version,
+                            package_path=package_path,
                             id=get_finding_id(result.ruleId, uri, line_start, line_end),
                             title=(
                                 result.message.root.text

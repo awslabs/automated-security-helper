@@ -267,6 +267,14 @@
                 "top_hotspots_limit": 20
               }
             },
+            "unused-suppressions": {
+              "enabled": true,
+              "extension": "unused-suppressions.json",
+              "name": "unused-suppressions",
+              "options": {
+                "output_format": "both"
+              }
+            },
             "yaml": {
               "enabled": false,
               "extension": "yaml",
@@ -566,6 +574,45 @@
           "default": null,
           "description": "(Optional) Starting line number",
           "title": "Line Start"
+        },
+        "package_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Only suppress findings about this package (glob, case-insensitive). Findings that do not report a package name never match.",
+          "title": "Package Name"
+        },
+        "package_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Only suppress findings about the package copy installed at this path, relative to the scan root (glob, supports **), e.g. 'deploy/cdk/node_modules/aws-cdk-lib/node_modules/brace-expansion'. Separates two copies with the same name and version. Findings that do not report an install path never match.",
+          "title": "Package Path"
+        },
+        "package_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Only suppress findings about this installed package version (glob, case-insensitive). Findings that do not report an installed version never match.",
+          "title": "Package Version"
         },
         "path": {
           "description": "Path or pattern to exclude",
@@ -2838,6 +2885,18 @@
           },
           "description": "Configure the options for the Text reporter"
         },
+        "unused-suppressions": {
+          "$ref": "#/$defs/UnusedSuppressionsReporterConfig",
+          "default": {
+            "enabled": true,
+            "extension": "unused-suppressions.json",
+            "name": "unused-suppressions",
+            "options": {
+              "output_format": "both"
+            }
+          },
+          "description": "Configure the options for the Unused Suppressions reporter"
+        },
         "yaml": {
           "$ref": "#/$defs/YAMLReporterConfig",
           "default": {
@@ -3968,6 +4027,49 @@
         "key"
       ],
       "title": "ToolExtraArg",
+      "type": "object"
+    },
+    "UnusedSuppressionsReporterConfig": {
+      "additionalProperties": true,
+      "description": "Configuration for the Unused Suppressions reporter.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "extension": {
+          "default": "unused-suppressions.json",
+          "title": "Extension",
+          "type": "string"
+        },
+        "name": {
+          "const": "unused-suppressions",
+          "default": "unused-suppressions",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/UnusedSuppressionsReporterConfigOptions",
+          "default": {
+            "output_format": "both"
+          }
+        }
+      },
+      "title": "UnusedSuppressionsReporterConfig",
+      "type": "object"
+    },
+    "UnusedSuppressionsReporterConfigOptions": {
+      "additionalProperties": true,
+      "description": "Configuration options for the Unused Suppressions reporter.",
+      "properties": {
+        "output_format": {
+          "default": "both",
+          "title": "Output Format",
+          "type": "string"
+        }
+      },
+      "title": "UnusedSuppressionsReporterConfigOptions",
       "type": "object"
     },
     "WorkspaceExecutionConfig": {

@@ -97,6 +97,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from automated_security_helper.base.plugin_config import plugin_config_key
 from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterWorkspaceBehaviour,
@@ -290,7 +291,7 @@ def _build_instance(
     try:
         return reporter_class(
             context=context,
-            config=config_lookup(plugin_name.lower()),
+            config=config_lookup(plugin_config_key(reporter_class)),
         )
     except Exception as exc:  # noqa: BLE001 -- mirrors ReportPhase's tolerance
         ASH_LOGGER.error(

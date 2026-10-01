@@ -134,7 +134,7 @@ reporters:
 **Configuration**:
 ```yaml
 reporters:
-  gitlab-sast:            # Note the hyphen; 'gitlab_sast' is not a reporter name
+  gitlab-sast:            # Note the hyphen; 'gitlab_sast' is read the same, but the linter flags it
     enabled: true
     options:
       exclude_suppressed: false

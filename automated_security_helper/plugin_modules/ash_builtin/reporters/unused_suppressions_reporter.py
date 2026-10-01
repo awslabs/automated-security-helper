@@ -16,7 +16,10 @@ from automated_security_helper.base.reporter_plugin import (
 )
 from automated_security_helper.models.workspace import is_workspace_scan
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
-from automated_security_helper.models.core import AshSuppression
+from automated_security_helper.models.core import (
+    PACKAGE_SUPPRESSION_FIELDS,
+    AshSuppression,
+)
 
 
 def _one_line(text: str | None) -> str:
@@ -180,8 +183,13 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
 
     @staticmethod
     def _suppression_to_dict(suppression: AshSuppression) -> Dict[str, Any]:
-        """Convert a suppression to a dictionary for JSON serialization."""
-        return {
+        """Convert a suppression to a dictionary for JSON serialization.
+
+        Package fields are included only when set, so the report for a
+        suppression without them is unchanged, and so the config linter can
+        rebuild the same id from the report that ``AshSuppression.id`` gives.
+        """
+        data: Dict[str, Any] = {
             "path": suppression.path,
             "rule_id": suppression.rule_id,
             "line_start": suppression.line_start,
@@ -189,6 +197,11 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
             "reason": suppression.reason,
             "expiration": suppression.expiration,
         }
+        for field in PACKAGE_SUPPRESSION_FIELDS:
+            value = getattr(suppression, field)
+            if value is not None:
+                data[field] = value
+        return data
 
     @staticmethod
     def _generate_markdown_report(
@@ -249,6 +262,15 @@ class UnusedSuppressionsReporter(ReporterPluginBase[UnusedSuppressionsReporterCo
                         lines.append(f"- **Line**: {suppression.line_start}")
                 else:
                     lines.append("- **Lines**: Any")
+
+                for field, label in (
+                    ("package_name", "Package"),
+                    ("package_version", "Package version"),
+                    ("package_path", "Package path"),
+                ):
+                    value = getattr(suppression, field)
+                    if value is not None:
+                        lines.append(f"- **{label}**: `{value}`")
 
                 lines.append(f"- **Reason**: {_one_line(suppression.reason)}")
 

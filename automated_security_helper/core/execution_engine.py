@@ -7,6 +7,7 @@ import platform
 from typing import List, Optional, Literal
 
 
+from automated_security_helper.base.plugin_config import plugin_config_key
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.core.enums import ExecutionPhase, ExecutionStrategy
 from automated_security_helper.core.exceptions import ScannerSelectionError
@@ -310,7 +311,8 @@ class ScanExecutionEngine:
                     context=self._context,
                     config=(
                         self._context.config.get_plugin_config(
-                            plugin_type="scanner", plugin_name=lookup_name
+                            plugin_type="scanner",
+                            plugin_name=plugin_config_key(scanner_class),
                         )
                         if self._context.config
                         else None
