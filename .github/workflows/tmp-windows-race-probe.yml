@@ -1,0 +1,58 @@
+# Temporary: measures the Windows aggregated-results race with and without the reader
+# fix. Removed before review.
+name: tmp windows race probe
+on:
+  push:
+    branches: [fix/windows-atomic-replace-reader]
+permissions:
+  contents: read
+jobs:
+  probe:
+    name: "probe (${{ matrix.variant }}, py${{ matrix.python-version }})"
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        variant: [fixed, reverted]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-ash
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Revert the reader fix (control)
+        if: matrix.variant == 'reverted'
+        shell: bash
+        run: |
+          git checkout origin/main -- \
+            automated_security_helper/core/resource_management/error_handling.py \
+            automated_security_helper/utils/atomic_write.py
+          git status --short
+      - name: Run the race tests 10 rounds x 4 concurrent processes
+        shell: bash
+        run: |
+          uv sync --extra cdk
+          fails=0; runs=0
+          for round in $(seq 1 10); do
+            pids=()
+            for p in 1 2 3 4; do
+              uv run --no-sync --extra cdk pytest \
+                tests/unit/core/resource_management/test_aggregated_results_rewrite_race.py \
+                -k "rewrites_the_results" -p no:cacheprovider -o addopts="" -q \
+                --basetemp="$RUNNER_TEMP/race-r${round}-p${p}" \
+                > "$RUNNER_TEMP/race-r${round}-p${p}.log" 2>&1 &
+              pids+=($!)
+            done
+            for i in "${!pids[@]}"; do
+              runs=$((runs+1))
+              if ! wait "${pids[$i]}"; then
+                fails=$((fails+1))
+                grep -E "^FAILED|Error parsing|Permission denied" "$RUNNER_TEMP/race-r${round}-p$((i+1)).log" | head -3
+              fi
+              tail -n 1 "$RUNNER_TEMP/race-r${round}-p$((i+1)).log"
+            done
+          done
+          echo "RESULT variant=${{ matrix.variant }} py=${{ matrix.python-version }} failed_runs=$fails of $runs"
+          if [ "${{ matrix.variant }}" = "fixed" ] && [ "$fails" -ne 0 ]; then exit 1; fi
