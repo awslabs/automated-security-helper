@@ -14,7 +14,7 @@ dependencies = [
  "importlib-metadata>=9.0.1,<10.0.0",
  "cattrs>=26.2.0,<27.0.0",
  "docker>=7.2,<8.0.0",
- "GitPython>=3.1.61,<4.0.0",  # floor is advisory-driven: GHSA-wvpp-8hx9-p66j and others affect <= 3.1.57
+ "GitPython>=3.1.62,<4.0.0",  # floor is advisory-driven: GHSA-59cr-6r3x-644w affects <= 3.1.61
  "gitdb>=4.0,<5.0.0",
  "pyrsistent>=0.20,<1.0.0",
  # Was "pydantic[email]". Split into two bare requirements because Dependabot could not compute

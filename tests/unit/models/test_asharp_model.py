@@ -117,26 +117,25 @@ def test_ash_aggregated_results_to_simple_dict():
     ]
 
 
-@patch("pathlib.Path.mkdir")
-@patch("pathlib.Path.write_text")
-def test_ash_aggregated_results_save_model(mock_write_text, mock_mkdir):
+def test_ash_aggregated_results_save_model(tmp_path):
     """Test AshAggregatedResults save_model method."""
     results = AshAggregatedResults(name="Test Report", description="Test Description")
 
-    output_dir = Path("/test/output")
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
     results.save_model(output_dir)
 
-    # Check that directories were created
-    mock_mkdir.assert_called_with(parents=True, exist_ok=True)
+    # Check that the reports directory was created
+    assert (output_dir / "reports").is_dir()
 
-    # Check that the file was written
-    mock_write_text.assert_called_once()
-
-    # Verify the content of the written file
-    args, _ = mock_write_text.call_args
-    content = args[0]
+    # Verify the content of the written file, and that nothing else was left beside it
+    content = (output_dir / "ash_aggregated_results.json").read_text(encoding="utf-8")
     assert "Test Report" in content
     assert "Test Description" in content
+    assert sorted(p.name for p in output_dir.iterdir()) == [
+        "ash_aggregated_results.json",
+        "reports",
+    ]
 
 
 @patch("builtins.open", new_callable=MagicMock)

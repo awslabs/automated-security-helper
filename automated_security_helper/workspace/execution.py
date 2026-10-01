@@ -274,6 +274,7 @@ from automated_security_helper.utils.get_scan_set import (
     get_changed_files,
     git_repository_root,
 )
+from automated_security_helper.utils.atomic_write import write_text_atomically
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.workspace.aggregation import (
     RESULTS_FILENAME,
@@ -1142,7 +1143,9 @@ def _write_project_results(project_output: Path, results: Any) -> None:
     except AttributeError:
         content = json.dumps(results, indent=2, default=str)
     project_output.mkdir(parents=True, exist_ok=True)
-    (project_output / RESULTS_FILENAME).write_text(content, encoding="utf-8")
+    # Atomically: this directory is the project's registry entry's output tree, so
+    # get_scan_progress may parse this file while the workspace is still running.
+    write_text_atomically(project_output / RESULTS_FILENAME, content)
 
 
 def execute_workspace(

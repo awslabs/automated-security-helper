@@ -42,6 +42,45 @@
           "description": "(Optional) Starting line number",
           "title": "Line Start"
         },
+        "package_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Only suppress findings about this package (glob, case-insensitive). Findings that do not report a package name never match.",
+          "title": "Package Name"
+        },
+        "package_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Only suppress findings about the package copy installed at this path, relative to the scan root (glob, supports **), e.g. 'deploy/cdk/node_modules/aws-cdk-lib/node_modules/brace-expansion'. Separates two copies with the same name and version. Findings that do not report an install path never match.",
+          "title": "Package Path"
+        },
+        "package_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Only suppress findings about this installed package version (glob, case-insensitive). Findings that do not report an installed version never match.",
+          "title": "Package Version"
+        },
         "path": {
           "description": "Path or pattern to exclude",
           "title": "Path",

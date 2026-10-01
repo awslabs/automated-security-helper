@@ -15,7 +15,7 @@ Key differences:
 |-------------|------------------------------|-------------------------------------------------|
 | Scope       | Entire files/directories     | Specific findings                               |
 | Visibility  | Files not scanned at all     | Findings still visible but marked as suppressed |
-| Granularity | File-level only              | Rule ID, file path, and line number             |
+| Granularity | File-level only              | Rule ID, file path, line number, and package    |
 | Tracking    | No tracking of ignored files | Suppressed findings are tracked and reported    |
 | Expiration  | No expiration mechanism      | Can set expiration dates                        |
 
@@ -49,12 +49,101 @@ Each suppression rule can include the following properties:
 | `line_start` | No       | Starting line number for the suppression       |
 | `line_end`   | No       | Ending line number for the suppression         |
 | `expiration` | No       | Date when the suppression expires (YYYY-MM-DD) |
+| `package_name`    | No  | Only suppress findings about this package (dependency scanners) |
+| `package_version` | No  | Only suppress findings about this installed version of the package |
+| `package_path`    | No  | Only suppress findings about the package copy installed at this path |
 
 ### Matching Rules
 
 - **Rule ID**: Must match exactly the rule ID reported by the scanner
 - **File Path**: Supports glob patterns (e.g., `src/*.js`, `**/*.py`)
 - **Line Range**: If specified, only findings within this line range will be suppressed
+- **Package fields**: If specified, only findings about that package copy will be suppressed. See [Suppressing one package copy](#suppressing-one-package-copy).
+
+## Suppressing one package copy
+
+Dependency scanners report one finding per advisory per installed copy of a
+package, but the location they report is the lockfile. grype puts every finding
+at line 1 of it. Two copies of the same package in one lockfile, such as a
+top-level `brace-expansion` and another copy bundled inside `aws-cdk-lib`, then
+have the same rule ID, path and line, and a suppression written with only
+those fields covers both copies.
+
+The package fields narrow a suppression to one copy:
+
+- `package_name`: the package name. Glob, case-insensitive.
+- `package_version`: the installed version, not the advisory's vulnerable
+  range. Glob, case-insensitive.
+- `package_path`: where the copy is installed, relative to the scan root. For an
+  npm lockfile this is the lockfile's directory joined with the key of the
+  copy's entry in the lockfile's `packages` map, for example
+  `deploy/cdk/node_modules/aws-cdk-lib/node_modules/brace-expansion`. Glob, with
+  `**` support like `path`. ASH reports it with forward slashes and no drive
+  letter on every platform, so one entry works on Windows, Linux and macOS.
+  `path` and `package_path` treat `\` as a separator, so a pattern written with
+  backslashes compares the same way everywhere.
+
+Every package field you set has to match. A finding that doesn't report a field
+you set is not suppressed, so when a scanner can't tell which copy a finding
+is about, the finding stays visible and nothing is hidden by mistake. A
+suppression that sets none of the package fields matches the same findings it
+always did.
+
+```yaml
+suppressions:
+  # Suppresses the copy bundled inside aws-cdk-lib in any lockfile. A top-level
+  # brace-expansion at the same version is still reported.
+  - rule_id: 'GHSA-6j4f-fj2g-mc7p*'
+    path: '*'
+    package_name: 'brace-expansion'
+    package_version: '5.0.9'
+    package_path: '**/node_modules/aws-cdk-lib/node_modules/brace-expansion'
+    reason: 'Bundled by aws-cdk-lib; no fixed release yet'
+    expiration: '2026-10-30'
+```
+
+Here `path: '*'` is safe because `package_path` does the narrowing. It is
+there because npm-audit and grype report different paths for the same finding
+(see below), so one entry can cover both.
+
+### What each scanner reports
+
+| Scanner    | `package_name` | `package_version`       | `package_path`                                     |
+|------------|----------------|-------------------------|----------------------------------------------------|
+| npm-audit  | Yes            | Yes, from the lockfile  | Yes, for every node npm audit lists                |
+| trivy-repo | Yes            | Yes                     | npm lockfiles only                                 |
+| grype      | Yes            | Yes                     | npm lockfiles only, and only when the name and version occur once in the lockfile |
+
+The rule IDs also differ: grype appends the package name to the advisory
+(`GHSA-6j4f-fj2g-mc7p-brace-expansion`), npm-audit uses the bare GHSA ID, and
+trivy-repo uses the CVE alias when the advisory has one. A glob such as
+`GHSA-6j4f-fj2g-mc7p*` covers the first two. trivy-repo needs its own entry keyed
+on the CVE.
+
+Paths differ too. grype and trivy-repo report the lockfile, for example
+`deploy/cdk/package-lock.json`. npm-audit reports
+`node_modules/<path>/package.json` with each `node_modules/` segment removed
+from the middle, and without the lockfile's directory. That shape predates the
+package fields and is unchanged so existing suppressions keep matching. Use
+`package_path` to tell trees apart.
+
+Known limits:
+
+- When the same name and version is installed at two places in one lockfile,
+  grype reports two findings that are identical in its output, so ASH cannot
+  say which one is which. Neither gets a `package_path`, and a suppression
+  that sets `package_path` matches neither. `package_name` and
+  `package_version` alone would match both.
+- trivy-repo reports that case as one finding with one location per copy.
+  ASH splits it into one finding per copy, each with its own `package_path`,
+  when every location can be resolved to a lockfile entry.
+- `package_path` is only available for npm lockfiles (`package-lock.json` and
+  `npm-shrinkwrap.json`, format v2 and later). Other ecosystems get
+  `package_name` and `package_version` only.
+- ASH versions without these fields ignore unknown suppression keys, so an
+  older ASH reading a package-scoped suppression applies it without the
+  package fields, which is broader. Make sure every environment that reads the
+  config runs a version that supports them.
 
 ## Examples
 
