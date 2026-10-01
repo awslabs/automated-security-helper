@@ -315,7 +315,9 @@ class TestRunLocalModeNoChdir:
                     return_value=mock_orchestrator,
                 ):
                     # _run_local_mode writes results to disk — patch open
-                    with patch("builtins.open", MagicMock()):
+                    with patch("builtins.open", MagicMock()), patch(
+                        "automated_security_helper.interactions.run_ash_scan.write_text_atomically"
+                    ):
                         with patch("pathlib.Path.exists", return_value=False):
                             result, _cfg_fof = _run_local_mode(opts, mock_logger)
 
@@ -351,7 +353,9 @@ class TestRunLocalModeTupleUnpacking:
             "automated_security_helper.core.orchestrator.ASHScanOrchestrator.create",
             return_value=mock_orchestrator,
         ):
-            with patch("builtins.open", MagicMock()):
+            with patch("builtins.open", MagicMock()), patch(
+                "automated_security_helper.interactions.run_ash_scan.write_text_atomically"
+            ):
                 with patch("pathlib.Path.exists", return_value=False):
                     result, cfg_fof = _run_local_mode(opts, mock_logger)
 
@@ -385,7 +389,9 @@ class TestRunLocalModeTupleUnpacking:
             "automated_security_helper.core.orchestrator.ASHScanOrchestrator.create",
             return_value=mock_orchestrator,
         ):
-            with patch("builtins.open", MagicMock()):
+            with patch("builtins.open", MagicMock()), patch(
+                "automated_security_helper.interactions.run_ash_scan.write_text_atomically"
+            ):
                 with patch("pathlib.Path.exists", return_value=False):
                     result, _ = _run_local_mode(opts, mock_logger)
 

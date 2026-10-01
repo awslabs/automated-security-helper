@@ -65,6 +65,7 @@ def test_run_ash_scan_local_mode(mock_logger, mock_orchestrator, ash_temp_path):
             return_value=Path("/fake/cwd"),
         ),
         patch("builtins.open", mock_open()),
+        patch("automated_security_helper.interactions.run_ash_scan.write_text_atomically"),
         patch(
             "automated_security_helper.models.asharp_model.AshAggregatedResults"
         ) as mock_results,
@@ -148,6 +149,7 @@ def test_run_ash_scan_with_actionable_findings(
         ),
         patch("os.chdir"),
         patch("builtins.open", mock_open()),
+        patch("automated_security_helper.interactions.run_ash_scan.write_text_atomically"),
         patch(
             "automated_security_helper.models.asharp_model.AshAggregatedResults"
         ) as mock_results,
@@ -195,6 +197,7 @@ def test_run_ash_scan_with_custom_phases(mock_logger, mock_orchestrator, ash_tem
         ),
         patch("os.chdir"),
         patch("builtins.open", mock_open()),
+        patch("automated_security_helper.interactions.run_ash_scan.write_text_atomically"),
         patch(
             "automated_security_helper.models.asharp_model.AshAggregatedResults"
         ) as mock_results,

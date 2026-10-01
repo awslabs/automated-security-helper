@@ -52,7 +52,9 @@ class TestScanSucceedsWhenCwdDiffersFromSourceDir:
                 "automated_security_helper.core.orchestrator.ASHScanOrchestrator.create",
                 return_value=mock_orchestrator,
             ):
-                with patch("builtins.open", MagicMock()):
+                with patch("builtins.open", MagicMock()), patch(
+                    "automated_security_helper.interactions.run_ash_scan.write_text_atomically"
+                ):
                     with patch("pathlib.Path.exists", return_value=False):
                         result, _cfg_fof = _run_local_mode(opts, MagicMock())
 

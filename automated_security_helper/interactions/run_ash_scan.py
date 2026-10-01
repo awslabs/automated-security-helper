@@ -42,6 +42,7 @@ from automated_security_helper.interactions.run_ash_container import run_ash_con
 from automated_security_helper.interactions.run_ash_nix import run_ash_nix
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.workspace import WorkspaceExitCode
+from automated_security_helper.utils.atomic_write import write_text_atomically
 from automated_security_helper.utils.content_db_staleness import (
     stale_content_databases,
 )
@@ -1174,9 +1175,12 @@ def _run_local_mode(
             )
             sarif_path = opts.output_dir / "reports" / "ash.sarif"
             if sarif_path.exists() and results.sarif:
-                sarif_path.write_text(
+                # Replaced atomically for the same reason as the aggregated file
+                # below: ash.sarif already exists, so a reader waiting on it would
+                # otherwise open it mid-rewrite.
+                write_text_atomically(
+                    sarif_path,
                     results.sarif.model_dump_json(indent=2, by_alias=True),
-                    encoding="utf-8",
                 )
 
         if isinstance(results, BaseModel):
@@ -1184,9 +1188,11 @@ def _run_local_mode(
         else:
             content = json.dumps(results, indent=2, default=str)
 
+        # This rewrite lands after the REPORT phase, while an MCP client that has seen
+        # the reports appear may already be re-reading this file for progress. A
+        # truncating open() hands that reader an empty file, so replace it atomically.
         output_file = opts.output_dir / "ash_aggregated_results.json"
-        with open(output_file, mode="w", encoding="utf-8") as f:
-            f.write(content)
+        write_text_atomically(output_file, content)
 
         return results, _config_fail_on_findings
 
