@@ -904,19 +904,9 @@ class ConfigLinter:
     @classmethod
     def _make_suppression_id(cls, suppression: Dict[str, Any]) -> str:
         """Create a unique identifier for a suppression (matches reporter logic)."""
-        line_start = suppression.get("line_start")
-        line_end = suppression.get("line_end")
+        from automated_security_helper.models.core import suppression_id
 
-        # If line_start is specified but line_end is not, use line_start for both
-        line_end_val = line_end if line_end is not None else line_start
-
-        parts = [
-            suppression.get("path", ""),
-            suppression.get("rule_id") or "*",
-            str(line_start) if line_start is not None else "*",
-            str(line_end_val) if line_end_val is not None else "*",
-        ]
-        return "|".join(parts)
+        return suppression_id(suppression)
 
     @classmethod
     def _check_legacy_name_variants(

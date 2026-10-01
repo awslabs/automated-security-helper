@@ -25,7 +25,13 @@ from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
     Invocation,
+    PropertyBag,
     SarifReport,
+)
+from automated_security_helper.utils.package_identity import (
+    NpmLockIndex,
+    identity_properties,
+    install_path,
 )
 from automated_security_helper.utils.download_utils import (
     pinned_tool_install_commands,
@@ -206,6 +212,89 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
 
         return super()._process_config_options()
 
+    @staticmethod
+    def _package_from_message(message: str | None) -> tuple[str | None, str | None]:
+        """Name and version from trivy's vulnerability message.
+
+        trivy writes ``Package: <name>`` and ``Installed Version: <version>``
+        as their own lines. A message without them (a misconfiguration or
+        secret finding) is not about a package.
+        """
+        name = version = None
+        for line in (message or "").splitlines():
+            if line.startswith("Package: "):
+                name = line[len("Package: ") :].strip() or None
+            elif line.startswith("Installed Version: "):
+                version = line[len("Installed Version: ") :].strip() or None
+        return name, version
+
+    def _attach_package_identity(
+        self, sarif_report: SarifReport, target: Path
+    ) -> SarifReport:
+        """Give each dependency result one package copy and say which it is.
+
+        trivy groups packages by name and version before matching, so the same
+        version installed at two places in one lockfile becomes ONE result with
+        one location per copy. No suppression can then cover one copy and not
+        the other. For npm lockfiles, each location's line is the line of that
+        copy's ``packages`` key, so such a result is split into one result per
+        location, each with ``package_path``. Results whose locations do not
+        all resolve to a lockfile entry are left whole.
+        """
+        lock_index = NpmLockIndex(target)
+        for run in sarif_report.runs or []:
+            new_results = []
+            for result in run.results or []:
+                message = result.message.root.text if result.message else None
+                name, version = self._package_from_message(message)
+                if name is None:
+                    new_results.append(result)
+                    continue
+
+                resolved = []
+                for location in result.locations or []:
+                    physical = location.physicalLocation
+                    root = physical.root if physical else None
+                    uri = (
+                        root.artifactLocation.uri
+                        if root and root.artifactLocation
+                        else None
+                    )
+                    line = root.region.startLine if root and root.region else None
+                    # Relativized the same way as grype's, so package_path is
+                    # POSIX and scan-root-relative whatever form trivy used.
+                    lock_rel = lock_index.relative(uri) if uri else None
+                    entry = (
+                        lock_index.by_line(lock_rel, line)
+                        if lock_rel and line
+                        else None
+                    )
+                    resolved.append(
+                        install_path(lock_rel, entry.key) if entry is not None else None
+                    )
+
+                if resolved and all(resolved):
+                    for location, path in zip(result.locations, resolved):
+                        copy = result.model_copy(deep=True)
+                        copy.locations = [location.model_copy(deep=True)]
+                        self._set_identity(copy, name, version, path)
+                        new_results.append(copy)
+                else:
+                    path = resolved[0] if len(resolved) == 1 else None
+                    self._set_identity(result, name, version, path)
+                    new_results.append(result)
+            run.results = new_results
+        return sarif_report
+
+    @staticmethod
+    def _set_identity(result, name, version, path) -> None:
+        identity = identity_properties(name, version, path)
+        if result.properties is None:
+            result.properties = PropertyBag(**identity)
+        else:
+            for key, value in identity.items():
+                setattr(result.properties, key, value)
+
     def _execute_scan(self, target, target_type, global_ignore_paths):  # type: ignore[override]
         """Abstract stub — TrivyRepoScanner overrides scan() directly; this is unreachable."""
         raise NotImplementedError(
@@ -303,6 +392,7 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
                     sarif_report: SarifReport = SarifReport.model_validate(
                         scanner_results
                     )
+                    sarif_report = self._attach_package_identity(sarif_report, target)
 
                     # Attach scanner details for proper identification
                     sarif_report = attach_scanner_details(
