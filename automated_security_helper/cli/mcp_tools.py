@@ -245,18 +245,15 @@ async def _run_scan_async(
         _logger.error(f"Scan {scan_id} not found in registry")
         return
 
-    # Mark the scan as running
-    registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
-
-    # Log the scan start
-    _logger.info(
-        f"Starting scan process for scan {scan_id} in directory {directory_path}"
-    )
-
     # Resolve the per-session lock if a session_id was supplied. The lock is
     # acquired inside the executor wrapper below — we MUST NOT hold it on the
     # event-loop thread, since the underlying ``run_ash_scan`` blocks for the
     # full scan duration.
+    #
+    # Resolved before the entry is marked RUNNING, so that nothing which can
+    # raise sits between marking it and the try below that closes it.
+    # check_scan_progress lets a RUNNING entry's runner decide its status, so an
+    # entry left RUNNING would read as running forever.
     session_lock = None
     if session_id is not None:
         from automated_security_helper.cli.mcp.sessions import (
@@ -264,6 +261,14 @@ async def _run_scan_async(
         )
 
         session_lock = _get_session_registry().get_or_create(session_id).lock
+
+    # Mark the scan as running
+    registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
+
+    # Log the scan start
+    _logger.info(
+        f"Starting scan process for scan {scan_id} in directory {directory_path}"
+    )
 
     def _scan_under_session_lock() -> None:
         """Acquire the session lock (if any) and run the scan synchronously.
@@ -298,13 +303,38 @@ async def _run_scan_async(
         await loop.run_in_executor(None, _scan_under_session_lock)
 
         # Update scan status based on result
-        registry.update_scan_status(scan_id, MCScanStatus.COMPLETED)
+        registry.finish_scan(scan_id, MCScanStatus.COMPLETED)
         _logger.info(f"Scan {scan_id} completed successfully")
+
+    except SystemExit as e:
+        # run_ash_scan ends with sys.exit on a non-zero verdict and on every error
+        # path it handles itself. SystemExit is not an Exception, so without this
+        # arm it escaped the task and the entry stayed RUNNING for good: listed as
+        # active, blocking the next scan of the same directory, never carrying the
+        # failure, and -- since a RUNNING entry's runner decides its status --
+        # reading as running forever.
+        if e.code in (None, 0):
+            registry.finish_scan(scan_id, MCScanStatus.COMPLETED)
+            _logger.info(f"Scan {scan_id} completed successfully")
+        else:
+            error_message = f"ASH exited with code {e.code}"
+            registry.finish_scan(scan_id, MCScanStatus.FAILED, error_message)
+            _logger.error(f"Scan {scan_id} failed: {error_message}")
 
     except Exception as e:
         error_message = f"Error executing scan: {str(e)}"
-        registry.update_scan_status(scan_id, MCScanStatus.FAILED, error_message)
+        registry.finish_scan(scan_id, MCScanStatus.FAILED, error_message)
         _logger.error(f"Scan {scan_id} failed: {error_message}")
+
+    except BaseException as e:
+        # asyncio.CancelledError (server shutdown, a cancelled task) and
+        # KeyboardInterrupt. The scan did not produce a verdict, so the entry is
+        # closed as failed, and the exception is re-raised so cancellation still
+        # propagates.
+        error_message = f"Scan task ended without a result: {type(e).__name__}"
+        registry.finish_scan(scan_id, MCScanStatus.FAILED, error_message)
+        _logger.error(f"Scan {scan_id} failed: {error_message}")
+        raise
 
 
 async def mcp_get_scan_progress(scan_id: str) -> Dict[str, Any]:
