@@ -916,9 +916,10 @@ class ConfigLinter:
 
         Operators sometimes type the snake_case Python field name when the
         canonical input form for a built-in plugin is the kebab-case alias
-        (e.g. ``cdk_nag:`` instead of ``cdk-nag:``). The snake form silently
-        lands in ``__pydantic_extra__`` and the real built-in keeps its
-        default config — silent mis-configuration.
+        (e.g. ``cdk_nag:`` instead of ``cdk-nag:``). The segments' shared
+        before-validator reads that spelling as the alias, so it configures
+        the built-in, but only the alias is documented. It used to land in
+        ``__pydantic_extra__`` while the built-in kept its default config.
 
         Walks the ``scanners``, ``reporters``, and ``converters`` segments,
         compares each key against the segment's declared canonical input
@@ -936,6 +937,7 @@ class ConfigLinter:
             ConverterConfigSegment,
             ReporterConfigSegment,
             ScannerConfigSegment,
+            field_name_spellings,
         )
 
         segment_specs = (
@@ -992,6 +994,20 @@ class ConfigLinter:
                     continue
 
                 # Plain legacy variant — auto-fixable.
+                if field_name_spellings(segment_cls).get(key) == swapped:
+                    # The field-name spelling of an aliased field: the
+                    # segment's before-validator reads it as the alias.
+                    consequence = (
+                        f"ASH reads it as {swapped!r}, but only the "
+                        f"canonical form is documented."
+                    )
+                else:
+                    # The kebab spelling of a field declared without an
+                    # alias: nothing maps it, so it is a separate extra key.
+                    consequence = (
+                        "The legacy form lands in __pydantic_extra__ and "
+                        "the real built-in keeps its default config."
+                    )
                 result.issues.append(
                     LintIssue(
                         severity=LintSeverity.WARNING,
@@ -1000,9 +1016,7 @@ class ConfigLinter:
                         message=(
                             f"{segment_name}.{key!r} uses the legacy "
                             f"snake/kebab variant; canonical form is "
-                            f"{swapped!r}. The legacy form lands in "
-                            f"__pydantic_extra__ and the real built-in "
-                            f"keeps its default config."
+                            f"{swapped!r}. {consequence}"
                         ),
                         fixable=True,
                     )

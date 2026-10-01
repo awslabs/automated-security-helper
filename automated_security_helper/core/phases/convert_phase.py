@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from automated_security_helper.base.engine_phase import EnginePhase
+from automated_security_helper.base.plugin_config import plugin_config_key
 from automated_security_helper.core.enums import ExecutionPhase
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
@@ -44,13 +45,12 @@ class ConvertPhase(EnginePhase):
         all_converter_instances = []
         for plugin_class in converter_classes:
             try:
-                plugin_name = getattr(plugin_class, "__name__", "Unknown")
                 plugin_instance = plugin_class(
                     context=self.plugin_context,
                     config=(
                         self.plugin_context.config.get_plugin_config(
                             plugin_type="converter",
-                            plugin_name=plugin_name.lower(),
+                            plugin_name=plugin_config_key(plugin_class),
                         )
                         if self.plugin_context.config is not None
                         else None
