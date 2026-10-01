@@ -4,7 +4,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Annotated, ClassVar, List, Literal
+from typing import Annotated, ClassVar, List, Literal, Mapping
 
 from pydantic import Field, model_validator
 from automated_security_helper.base.options import ScannerOptionsBase
@@ -70,6 +70,34 @@ class GrypeScannerConfig(ScannerPluginConfigBase):
     options: Annotated[
         GrypeScannerConfigOptions, Field(description="Configure Grype scanner")
     ] = GrypeScannerConfigOptions()
+
+
+def _declared_grype_db_bound(
+    environ: Mapping[str, str], grype_config: Path | None
+) -> dict[str, str]:
+    """The grype-db bound from the registry, minus anything the user set themselves."""
+    from automated_security_helper.utils.content_databases import get
+
+    user_config_keys: set[str] = set()
+    if grype_config is not None:
+        try:
+            import yaml
+
+            loaded = yaml.safe_load(grype_config.read_text(encoding="utf-8")) or {}
+            db_section = loaded.get("db") if isinstance(loaded, dict) else None
+            if isinstance(db_section, dict):
+                user_config_keys = {str(key) for key in db_section}
+        except Exception as exc:  # nosec B110 - an unreadable config is grype's to report
+            ASH_LOGGER.debug(f"Could not read {grype_config} for db settings: {exc}")
+    config_key_for_env = {
+        "GRYPE_DB_MAX_ALLOWED_BUILT_AGE": "max-allowed-built-age",
+        "GRYPE_DB_VALIDATE_AGE": "validate-age",
+    }
+    return {
+        name: value
+        for name, value in get("grype-db").bound_env.items()
+        if name not in environ and config_key_for_env.get(name) not in user_config_keys
+    }
 
 
 @ash_scanner_plugin
@@ -180,22 +208,46 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         # exist: .ash/.grype.yaml", producing no SARIF -- so the scanner reported
         # EXECUTION FAILED with zero findings while grype itself was fine.
         source_dir = Path(self.context.source_dir)
+        resolved_config: Path | None = None
         for conf_path in possible_config_paths:
             candidate = Path(conf_path)
             if not candidate.is_absolute():
                 candidate = source_dir / candidate
             if candidate.exists():
+                resolved_config = candidate.resolve()
                 self.args.extra_args.append(
                     ToolExtraArg(
                         key="--config",
-                        value=candidate.resolve().as_posix(),
+                        value=resolved_config.as_posix(),
                     )
                 )
                 break
 
+        # Online, the database's age bound is DECLARED rather than inherited: the
+        # value comes from utils/content_databases.py, the same entry the CI cache
+        # key and its freshness guard are computed from, so the cache window and
+        # the bound grype enforces are one number. It equals grype's own default
+        # today (the registry cites where), so this changes no verdict; it makes
+        # the equality something a test can hold rather than a coincidence.
+        #
+        # An explicit choice still wins. A user who exported one of these, or
+        # set `db.max-allowed-built-age` / `db.validate-age` in the grype config
+        # ASH passes above, asked for that bound; grype puts the environment
+        # above the config file, so setting the variable here regardless would
+        # silently override their file.
+        if not self.config.options.offline:
+            self.extra_env.update(_declared_grype_db_bound(os.environ, resolved_config))
+
         # Handle offline mode. Stash offline-mode env vars on the instance
         # rather than writing to os.environ — scanners run concurrently
         # in thread pools and would race on the shared parent env.
+        #
+        # KNOWN GAP, recorded in utils/content_databases.py and not changed
+        # here: GRYPE_DB_VALIDATE_AGE=false means grype uses a database of any
+        # age in offline mode (its validateAge returns nil when disabled), and
+        # validate_grype_offline_mode below only warns. Enforcing the bound
+        # offline would make an air-gapped image stop scanning five days after
+        # it was built, which is a product decision rather than a CI one.
         if self.config.options.offline:
             self.extra_env.update(
                 {

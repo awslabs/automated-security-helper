@@ -195,6 +195,21 @@ _NPM_CACHE_REASON = (
     "packages already published on the npm registry, so it redistributes nothing "
     "this project builds."
 )
+_BASE_IMAGE_CACHE_REASON = (
+    "Third-party public image, byte-identical to docker.io at the pinned digest, "
+    "hash-verified before use; saved on main only; approved by the maintainer. The "
+    "Dockerfile's base image (ARG BASE_IMAGE at ARG BASE_IMAGE_DIGEST) as an OCI layout: "
+    "prepull-base-image checks every blob against its sha256 and the index against the pin "
+    "before any build reads it, and discards the entry on any mismatch."
+)
+
+_GRYPE_DB_CACHE_REASON = (
+    "grype's published vulnerability database, fetched from upstream and "
+    "re-verified by grype on start. Third-party public data; this project builds "
+    "none of it. Saved from the default branch only, and keyed on a time bucket "
+    "derived from the bound grype enforces (automated_security_helper/utils/"
+    "content_databases.py), so no restored copy is older than that bound."
+)
 
 ALLOWLIST: tuple[Entry, ...] = (
     # -- Artifact uploads -----------------------------------------------------
@@ -351,19 +366,50 @@ ALLOWLIST: tuple[Entry, ...] = (
         ),
     ),
     # -- Standalone caches ----------------------------------------------------
+    # The grype database: restored everywhere, saved only from a push to the default
+    # branch, keyed on the time bucket content_databases.py derives from the bound grype
+    # enforces. Four sites, one entry: the reusable scan workflow restores and (for a
+    # caller's default-branch push) saves; ash-repo-scan.yml's main-only job is this
+    # repository's writer, since the scan itself does not run on a push here.
     Entry(
         file=".github/workflows/run-ash-security-scan.yml",
         kind=KIND_CACHE,
-        action="actions/cache",
+        action="actions/cache/restore",
         publishes=(
             "path=~/.cache/grype/db "
-            "key=grype-db-${{ runner.os }}-${{ steps.cachekeys.outputs.day }}"
+            "key=grype-db-${{ runner.os }}-${{ steps.cachekeys.outputs.grype-db }}"
         ),
-        reason=(
-            "grype's published vulnerability database, fetched from upstream and "
-            "re-verified by grype on start. Third-party public data; this project "
-            "builds none of it."
+        reason=_GRYPE_DB_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/workflows/run-ash-security-scan.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=~/.cache/grype/db "
+            "key=grype-db-${{ runner.os }}-${{ steps.cachekeys.outputs.grype-db }}"
         ),
+        reason=_GRYPE_DB_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/workflows/ash-repo-scan.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/restore",
+        publishes=(
+            "path=~/.cache/grype/db "
+            "key=grype-db-${{ runner.os }}-${{ steps.key.outputs.grype-db }}"
+        ),
+        reason=_GRYPE_DB_CACHE_REASON + " A lookup-only probe; it downloads nothing.",
+    ),
+    Entry(
+        file=".github/workflows/ash-repo-scan.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=~/.cache/grype/db "
+            "key=grype-db-${{ runner.os }}-${{ steps.key.outputs.grype-db }}"
+        ),
+        reason=_GRYPE_DB_CACHE_REASON,
     ),
     Entry(
         file=".github/workflows/run-ash-security-scan.yml",
@@ -378,6 +424,30 @@ ALLOWLIST: tuple[Entry, ...] = (
             "verified before install. A third-party binary that is already "
             "publicly downloadable, not one this project produced."
         ),
+    ),
+    # The build base image, as a verified OCI layout. The only cache the maintainer has
+    # approved for image bytes, and deliberately not ASH's own image or layers. Restore runs
+    # on every run; save is gated to a push to refs/heads/main in the action itself, so a
+    # pull request can read the entry and can never write one.
+    Entry(
+        file=".github/actions/prepull-base-image/action.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/restore",
+        publishes=(
+            "path=${{ runner.temp }}/ash-base-image-oci "
+            "key=${{ steps.key.outputs.key }}"
+        ),
+        reason=_BASE_IMAGE_CACHE_REASON,
+    ),
+    Entry(
+        file=".github/actions/prepull-base-image/action.yml",
+        kind=KIND_CACHE,
+        action="actions/cache/save",
+        publishes=(
+            "path=${{ runner.temp }}/ash-base-image-oci "
+            "key=${{ steps.key.outputs.key }}"
+        ),
+        reason=_BASE_IMAGE_CACHE_REASON,
     ),
     # -- Built-in caches on setup-* actions -----------------------------------
     #
@@ -898,6 +968,21 @@ def self_test() -> int:
 """
     )
 
+    # (c1) the same through `actions/cache/save`, the split form the base-image cache uses.
+    # A separate case because the subpath is a different `uses:` string, and a detector
+    # that matched only the bare `actions/cache` would miss it.
+    new_cache_save = dict(baseline)
+    new_cache_save[_SELF_TEST_CLEAN_FILE] = (
+        _SELF_TEST_CLEAN_YAML
+        + """
+      - name: Save the built image layers
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /tmp/ash-image-layers
+          key: ash-image-${{ github.sha }}
+"""
+    )
+
     # (c2) the same thing through an action's built-in cache rather than a
     # `uses: actions/cache` line, which is what a buildx `cache-to: type=gha`
     # looks like -- a built container image into the public cache with no new
@@ -931,6 +1016,7 @@ def self_test() -> int:
         ("(b) second upload in an allowed file", second_upload, 1, 0),
         ("(b2) duplicate of an allowed upload", duplicate_upload, 1, 0),
         ("(c) new actions/cache", new_cache, 1, 0),
+        ("(c1) new actions/cache/save", new_cache_save, 1, 0),
         ("(c2) built-in cache via cache-to", builtin_cache, 1, 0),
         ("(d) allowed upload repointed", repointed, 1, 1),
         ("(e) allowlisted site deleted", deleted, 0, 2),

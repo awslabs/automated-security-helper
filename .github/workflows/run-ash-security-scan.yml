@@ -162,31 +162,53 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
 
+      # THE GRYPE DATABASE CACHE IS TIME-BOUNDED BY THE SAME NUMBER GRYPE ENFORCES
+      #
+      # The key's time bucket is computed by ASH's content-database registry,
+      # automated_security_helper/utils/content_databases.py, from the same entry
+      # ASH passes to grype as GRYPE_DB_MAX_ALLOWED_BUILT_AGE. It is never typed
+      # here, and .github/scripts/assert-content-db-caches.py fails the build if it
+      # is. That module's `bucket_width` carries the argument for why a bucket of
+      # one fifth of the bound, plus a save-side age check, keeps every restored
+      # database inside the bound -- and why a bucket equal to the bound would not.
+      #
+      # There is no restore-keys prefix fallback any more. It restored older
+      # buckets, which is exactly the unbounded case.
+      #
+      # Restored everywhere, saved only from a push to the default branch, so a
+      # pull request never writes an entry another run reads, and the cache holds
+      # one entry per bucket instead of one per pull request.
+      #
+      # If the ASH revision in use predates the registry, the key comes back empty
+      # and the grype cache is simply skipped: grype then downloads its database,
+      # as it does on any miss.
       - name: Compute cache keys
         id: cachekeys
+        env:
+          INSTALL_GRYPE: ${{ inputs.install-grype }}
         run: |
           set -euo pipefail
-          # The grype database key rotates daily. grype refuses a database older
-          # than db.max-allowed-built-age (default 120h), so a key that never
-          # rotated would keep restoring an archive grype then rejects.
-          echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
           # Tool binaries rotate weekly, so a cache cannot pin a security scanner
           # to one build indefinitely.
           echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+          if [ "${INSTALL_GRYPE}" = "true" ]; then
+            if grype_db="$(uv run --no-project --with "${ASH_UVX_SOURCE}" -- \
+                python -m automated_security_helper.utils.content_databases cache-key grype-db)"; then
+              echo "grype-db=${grype_db}" >> "$GITHUB_OUTPUT"
+              echo "grype database cache bucket: ${grype_db}"
+            else
+              echo "::warning::this ASH revision declares no content-database registry, so the grype database is not cached on this run"
+            fi
+          fi
 
-      - name: Cache the grype vulnerability database
-        if: inputs.install-grype
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Restore the grype vulnerability database
+        id: grype-db-restore
+        if: inputs.install-grype && steps.cachekeys.outputs.grype-db != ''
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           # grype's db.cache-dir default; equivalently GRYPE_DB_CACHE_DIR.
           path: ~/.cache/grype/db
-          key: grype-db-${{ runner.os }}-${{ steps.cachekeys.outputs.day }}
-          # Falling back to an earlier day is safe: grype sets
-          # validate-by-hash-on-start and auto-update by default (throttled to
-          # max-update-check-frequency, 2h), so a slightly older database is
-          # verified and refreshed rather than trusted blindly.
-          restore-keys: |
-            grype-db-${{ runner.os }}-
+          key: grype-db-${{ runner.os }}-${{ steps.cachekeys.outputs.grype-db }}
 
       - name: Cache the OpenGrep binary
         if: inputs.install-opengrep
@@ -229,6 +251,29 @@ jobs:
             --tool grype \
             --bin-path "${ASH_TOOL_BIN}"
           echo "${ASH_TOOL_BIN}" >> "$GITHUB_PATH"
+
+      # A restored database is used only if it is inside the declared bound NOW.
+      # The key already guarantees that for an entry this workflow saved; this is
+      # the check that does not depend on the key being right. A database that
+      # fails it is deleted, so grype downloads a fresh one rather than being
+      # handed a stale one -- and if that download then fails, grype fails the
+      # scan (validate-age is on and ASH passes the bound), which is loud.
+      - name: Refuse a restored grype database older than its declared bound
+        if: inputs.install-grype && steps.grype-db-restore.outputs.cache-hit == 'true'
+        env:
+          ASH_TOOL_BIN: ${{ runner.temp }}/ash-tools
+        run: |
+          set -uo pipefail
+          built="$("${ASH_TOOL_BIN}/grype" db status -o json 2>/dev/null \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin).get("built",""))' 2>/dev/null)"
+          if [ -n "${built}" ] && uv run --no-project --with "${ASH_UVX_SOURCE}" -- \
+              python -m automated_security_helper.utils.content_databases \
+              check-age grype-db --built "${built}" --for use; then
+            echo "restored grype database built ${built} is inside its bound; using it"
+          else
+            echo "::warning::discarding the restored grype database (built '${built:-unknown}'): it is not inside the bound ASH declares for it. grype will download a fresh one."
+            rm -rf ~/.cache/grype/db
+          fi
 
       - name: Install Syft
         if: inputs.install-syft
@@ -432,6 +477,44 @@ jobs:
         run: |-
           uvx --reinstall --from ${ASH_UVX_SOURCE} ash \
             --source-dir . --output-dir ${ASH_OUTPUT_DIR} ${ASH_ARGS} --no-progress ${FAIL_ON_FINDINGS_PARAM} --build-target ci --mode ${ASH_MODE} ${VERBOSE:+--verbose} ${CHANGED_FILES_ONLY:+${CHANGED_FILES_ONLY} --base-ref "${BASE_REF}"}
+
+      # Default branch only, after the scan, so what is saved is the database grype
+      # actually scanned with. The save is refused unless that database is at most
+      # (bound - bucket width) old; content_databases.bucket_width says why that
+      # margin is what keeps a restored entry inside the bound.
+      - name: Check the grype database may be saved (default branch only)
+        id: grype-db-fresh
+        if: >-
+          !cancelled()
+          && inputs.install-grype
+          && steps.cachekeys.outputs.grype-db != ''
+          && steps.grype-db-restore.outputs.cache-hit != 'true'
+          && github.event_name == 'push'
+          && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        env:
+          ASH_TOOL_BIN: ${{ runner.temp }}/ash-tools
+        run: |
+          set -uo pipefail
+          built="$("${ASH_TOOL_BIN}/grype" db status -o json 2>/dev/null \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin).get("built",""))' 2>/dev/null)"
+          if [ -n "${built}" ] && uv run --no-project --with "${ASH_UVX_SOURCE}" -- \
+              python -m automated_security_helper.utils.content_databases \
+              check-age grype-db --built "${built}" --for save; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::not saving the grype database (built '${built:-unknown}'): too close to its bound to be cached."
+          fi
+
+      - name: Save the grype vulnerability database (default branch only)
+        if: >-
+          !cancelled()
+          && steps.grype-db-fresh.outputs.ok == 'true'
+          && github.event_name == 'push'
+          && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/grype/db
+          key: grype-db-${{ runner.os }}-${{ steps.cachekeys.outputs.grype-db }}
 
       - name: Show ASH Summary Report
         if: success() || failure()

@@ -184,8 +184,8 @@ async def _drive_one_scan(source: Path) -> Dict[str, Any]:
 
         # is_complete does NOT mean the report files are on disk, and this wait is here
         # because that bit me. check_scan_progress decides completion by testing for
-        # ash_aggregated_results.json, which the REPORT phase writes before it writes
-        # any report, so the documented poll-then-read loop can reach the read while
+        # ash_aggregated_results.json, which the SCAN phase writes before the REPORT
+        # phase writes any report, so the documented poll-then-read loop can reach the read while
         # the reporters are still running. Measured: get_scan_result_paths reported
         # ash.sarif as `exists: False` on a scan whose own log shows it written 40ms
         # later. The scan passed in isolation and failed when a sibling module shifted
@@ -198,14 +198,19 @@ async def _drive_one_scan(source: Path) -> Dict[str, Any]:
         # waiting forever.
         await _await_report_files(Path(output_dir))
 
-        # Re-read progress once the tree has settled, and use *that* as the progress the
-        # tests assert against. The first response that said is_complete was produced
-        # while the REPORT phase was still running, and create_scan_progress_from_files
-        # builds its per-scanner section by reading the aggregated results file -- which
-        # at that moment may be half-written. Under 192 xdist workers the poll landed
-        # there and the per-scanner section came back empty, failing a test that had
-        # passed every single-worker run. Re-reading after the reports exist is also what
-        # a client would do, so this is the observation worth pinning.
+        # Re-read progress once the reports exist, and use *that* as the progress the
+        # tests assert against, because it is what a client following the documented
+        # loop would do next.
+        #
+        # This read used to fail intermittently with an empty per-scanner section, and
+        # the cause was the product, not this harness. create_scan_progress_from_files
+        # builds that section by parsing ash_aggregated_results.json, and run_ash_scan
+        # rewrote the file with a truncating open() *after* the reports were written --
+        # measured 20-70ms after ash.flat.json, exactly when this read lands. A read in
+        # that window parsed an empty file and got status "completed" with no scanners.
+        # The file is now replaced atomically (utils/atomic_write.py), and
+        # tests/unit/core/resource_management/test_aggregated_results_rewrite_race.py
+        # pins that without depending on this module's timing.
         settled = await client.call_tool("get_scan_progress", {"scan_id": scan_id})
         progress = settled.structured_content["result"]
 
@@ -516,8 +521,8 @@ async def test_completion_is_reported_from_the_aggregated_file_alone(
     ``run_ash_scan``'s docstring tells a client to poll ``get_scan_progress`` until
     ``is_complete`` and then read results. ``check_scan_progress`` decides completion by
     calling ``check_scan_completion``, which tests for ``ash_aggregated_results.json``
-    and nothing else -- and the REPORT phase writes that file before it writes any of
-    the ten reports. So a client that follows the documented loop can call
+    and nothing else -- and the SCAN phase writes that file before the REPORT phase
+    writes any of the ten reports. So a client that follows the documented loop can call
     ``get_scan_result_paths`` and be told ``ash.sarif`` does not exist, on a scan that
     writes it moments later.
 

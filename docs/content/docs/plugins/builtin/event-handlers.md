@@ -55,7 +55,7 @@ The offline mode validation system has been enhanced with emoji-prefixed logging
 - `Semgrep offline mode: Found 150 rule files in cache`
 - `Semgrep offline mode: SEMGREP_RULES_CACHE_DIR not set, falling back to p/ci`
 - `Grype offline mode: Cache directory validated with 5 files`
-- `Grype offline mode: Database is 45 days old, consider updating`
+- `Grype offline mode: Database is 45 days old, past the 120h bound grype enforces online; consider updating`
 
 ## Custom Event Handlers
 

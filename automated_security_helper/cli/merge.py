@@ -165,6 +165,7 @@ from automated_security_helper.core.unified_metrics import (
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.loader import load_plugins
+from automated_security_helper.utils.atomic_write import write_text_atomically
 from automated_security_helper.utils.log import get_logger
 
 #: The filename every ASH scan writes its aggregated results to. A ``--results``
@@ -1113,7 +1114,7 @@ def merge_command(
     # post-suppression one -- two artifacts of the same run disagreeing about
     # which findings are actionable.
     merged_file = output_dir_path.joinpath(RESULTS_FILE_NAME)
-    merged_file.write_text(merged.model_dump_json(indent=2), encoding="utf-8")
+    write_text_atomically(merged_file, merged.model_dump_json(indent=2))
     logger.info(f"Wrote merged results to {merged_file}")
 
     ash_plugin_manager.set_context(plugin_context)
