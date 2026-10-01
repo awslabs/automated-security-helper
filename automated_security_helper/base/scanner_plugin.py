@@ -167,6 +167,36 @@ class ScannerPluginBase(PluginBase, Generic[T]):
         found = find_executable(self.command)
         return found is not None
 
+    def content_databases_in_use(self) -> list:
+        """The declared content databases this scanner's last scan read.
+
+        Defaults to every entry in ``utils/content_databases.py`` whose ``scanner`` is this
+        scanner's config name. A scanner that reads its database only in some modes -- the
+        semgrep and opengrep offline rulesets -- overrides this to say so. The executor
+        holds each one to its declared age bound after the scan; see
+        ``utils/content_db_staleness.py``.
+        """
+        from automated_security_helper.utils.content_databases import CONTENT_DATABASES
+
+        name = str(getattr(self.config, "name", "") or "")
+        return [entry for entry in CONTENT_DATABASES if entry.scanner == name]
+
+    def content_database_probe_context(self):
+        """How to read this scanner's database: its binary, and the env its scan ran with.
+
+        The env is the scanner's own ``extra_env`` over the process environment, so the
+        probe sees the same cache directory and settings the scan did.
+        """
+        from automated_security_helper.utils.content_db_staleness import (
+            ProbeContext,
+            probe_env,
+        )
+
+        return ProbeContext(
+            env=probe_env(getattr(self, "extra_env", None)),
+            executable=find_executable(self.command) if self.command else None,
+        )
+
     def _process_config_options(self) -> None:
         """By default, returns False to indicate that the scanner did not perform any
         configuration option processing.

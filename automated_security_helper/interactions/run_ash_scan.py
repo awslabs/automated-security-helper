@@ -42,6 +42,9 @@ from automated_security_helper.interactions.run_ash_container import run_ash_con
 from automated_security_helper.interactions.run_ash_nix import run_ash_nix
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.workspace import WorkspaceExitCode
+from automated_security_helper.utils.content_db_staleness import (
+    stale_content_databases,
+)
 from automated_security_helper.utils.log import NO_MARKUP, escape_markup
 from automated_security_helper.workspace.plan import WorkspacePlan
 
@@ -452,6 +455,28 @@ def incomplete_scanners(
     if results is None:
         return []
 
+    # A scanner that ran against a content database past its declared bound, under the
+    # default `content_db_staleness: fail`, is incomplete in the sense this function
+    # means: its findings are real, and its silence about anything published since the
+    # database was built is not. Listed here so the incompleteness report names it. The
+    # exit code does NOT depend on this arm alone -- `_compute_exit_code` fails on it
+    # unconditionally, because `fail_on_incomplete_scanners` still defaults off on main
+    # and the staleness default is fail. Under `warn` the record is not enforced and is
+    # not listed.
+    #
+    # FOLLOW-UP for #640: once its default-on `fail_on_incomplete_scanners` lands, this
+    # arm is what carries the stale database into that model, and the separate exit arm
+    # in `_compute_exit_code` can be reduced to the case where the gate is turned off.
+    stale_by_scanner: dict[str, list[str]] = {}
+    for record in stale_content_databases(results, enforced_only=True):
+        stale_by_scanner.setdefault(record.scanner, []).append(record.name)
+
+    def _with_stale(name: str, status: str) -> tuple[str, str]:
+        names = stale_by_scanner.pop(name, None)
+        if names:
+            status = f"{status} (stale content database: {', '.join(names)})"
+        return (name, status)
+
     listed: list[tuple[str, str]] = []
     for metric in get_unified_scanner_metrics(asharp_model=results):
         # Against the allowlist, not against _INCOMPLETE_SCANNER_STATUSES, and the
@@ -470,21 +495,23 @@ def incomplete_scanners(
         # this is the arm an ERROR or MISSING with no denominator falls to.
         if shortfall is None:
             if status_is_incomplete:
-                listed.append((metric.scanner_name, metric.status))
+                listed.append(_with_stale(metric.scanner_name, metric.status))
+            elif metric.scanner_name in stale_by_scanner:
+                listed.append(_with_stale(metric.scanner_name, metric.status))
             continue
 
         attempted, failed = shortfall
         # Total loss, and a status that already says so. The counts would add a
         # parenthetical that repeats the status.
         if status_is_incomplete and failed >= attempted:
-            listed.append((metric.scanner_name, metric.status))
+            listed.append(_with_stale(metric.scanner_name, metric.status))
             continue
 
         # A partial shortfall against a known denominator, whatever the status.
         # Selecting on status ahead of this is what dropped the counts from the
         # measured case.
         listed.append(
-            (
+            _with_stale(
                 metric.scanner_name,
                 f"{metric.status} ({failed} of {attempted} targets unevaluated)",
             )
@@ -1643,6 +1670,31 @@ def _compute_exit_code(
         )
         return 1
 
+    # A scanner's content database past its declared bound, under the default
+    # `content_db_staleness: fail`. Same placement and the same 1 as the gate above, for
+    # the same reasons: not behind fail_on_incomplete_scanners, because nothing about an
+    # operator's environment makes a stale vulnerability database a clean result, and
+    # ahead of the fail_on_findings early return, because turning findings-gating off is
+    # not asking to be told nothing about the database the findings came from.
+    #
+    # Read from the SARIF notification's level, which the scan set from the policy it ran
+    # under, rather than re-resolving the policy here. That keeps the decision with the
+    # results: container mode's host and `ash merge` both arrive here with a results
+    # model and no reliable view of the config the inner scan used. The opt-out is
+    # `--allow-stale-content-db` or `content_db_staleness: warn`, which writes the same
+    # notification at level warning so it reaches the reports without failing the scan.
+    stale = stale_content_databases(results, enforced_only=True)
+    if stale:
+        logger = logging.getLogger(__name__)
+        logger.error(
+            "Scan failed: %d content database(s) are past their declared age bound: %s",
+            len(stale),
+            ", ".join(record.name for record in stale),
+        )
+        for record in stale:
+            logger.error(record.message())
+        return 1
+
     final_fail_on_findings: bool
     if opts.fail_on_findings is not None:
         final_fail_on_findings = opts.fail_on_findings
@@ -2079,6 +2131,8 @@ def run_ash_scan(
         # chosen from the cause rather than the code. Printing "an exception
         # occurred" for a run whose scanners simply were not installed sends the
         # operator looking for a traceback that does not exist.
+        _stale = stale_content_databases(results, enforced_only=True)
+        _stale_scanners = {record.scanner for record in _stale}
         _incomplete = (
             incomplete_scanners(results)
             if _resolve_fail_on_incomplete_scanners(
@@ -2086,6 +2140,27 @@ def run_ash_scan(
             )
             else []
         )
+        # A scanner listed ONLY for its stale database is reported by the block below,
+        # with the refresh and opt-out advice that fits it; the incompleteness advice
+        # (install the tool, exclude the target) would be the wrong turn for it.
+        _incomplete = [
+            (_name, _status)
+            for _name, _status in _incomplete
+            if not (
+                _name in _stale_scanners
+                and _status.count(" (") == 1
+                and "(stale content database:" in _status
+                and _status.split(" (", 1)[0] in _COMPLETE_SCANNER_STATUSES
+            )
+        ]
+        if _stale:
+            print(
+                "\n[bold red]ERROR (1) Exiting because "
+                f"{len(_stale)} content database(s) are past their declared age "
+                "bound[/bold red]"
+            )
+            for _record in _stale:
+                print(f"  [red]{escape_markup(_record.message())}[/red]")
         if _incomplete:
             # "did not run" would be false for the coverage case: that scanner ran,
             # reported a status, and could not read some of its targets. Sending an
@@ -2106,7 +2181,7 @@ def run_ash_scan(
                 "with --exclude-scanners, or drop --fail-on-incomplete-scanners to "
                 "accept a partial scan.[/yellow]"
             )
-        else:
+        elif not _stale:
             print(
                 "[bold red]ERROR (1) Exiting due to exception during ASH scan[/bold red]"
             )

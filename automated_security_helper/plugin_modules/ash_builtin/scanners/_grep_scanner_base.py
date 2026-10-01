@@ -89,6 +89,22 @@ class GrepScannerBase(ScannerPluginBase[C], Generic[C]):
         """
         return None
 
+    def content_databases_in_use(self) -> list:
+        """The offline ruleset, and only in offline mode.
+
+        Online, the rules come from the registry at scan time and no local copy is read,
+        so there is nothing whose age could make the result stale.
+        """
+        if not getattr(self.config.options, "offline", False):  # type: ignore[union-attr]
+            return []
+        return super().content_databases_in_use()
+
+    def content_database_probe_context(self):
+        """The rules cache directory the offline scan passed as ``--config``."""
+        context = super().content_database_probe_context()
+        context.cache_dir = os.environ.get(self.cache_dir_env_var(), "") or None
+        return context
+
     # ---------------------------------------------------------------
     # Shared arg-building (was duplicated in each scanner).
     # ---------------------------------------------------------------

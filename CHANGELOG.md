@@ -160,6 +160,49 @@
 
 ### Breaking changes
 
+- **A scan against a content database past its declared age bound now exits 1 by
+  default, online and offline. An air-gapped image stops passing once its database
+  is too old: for grype, 5 days after the database was built.**
+
+  Measured with grype 0.111.0 under ASH's offline settings (`GRYPE_DB_VALIDATE_AGE=false`,
+  auto-update off), a database built 10 days earlier scanned with exit 0 and no
+  warning; ASH's own offline check called it "0 days old" because it read file mtime.
+  trivy's `--skip-db-update` did the same, and the offline semgrep and opengrep
+  rulesets never aged out. For a security scanner a clean-looking result from a stale
+  database is the worst outcome, because nothing distinguishes it from a clean target.
+
+  After each scanner that reads one, ASH now reads the database's own build time and
+  holds it to the bound declared in `automated_security_helper/utils/content_databases.py`:
+
+  | Database | Bound | Source of the bound | Age read from |
+  | --- | --- | --- | --- |
+  | grype | 120h | grype's own default (`curator.go:58` at v0.111.0) | `built` in `grype db status -o json` |
+  | trivy (trivy-repo plugin) | 24h | trivy's `NextUpdate` rule; the published database sets it 24h after `UpdatedAt` | `VulnerabilityDB.UpdatedAt` in `trivy version --format json` |
+  | semgrep / opengrep offline rulesets | 30 days | ASH's own choice; neither tool has a staleness notion for local rules | `.ash-rules-fetched-at`, written by the offline image build, else the oldest rules file's mtime |
+
+  Past the bound the scanner's findings are kept and the scan exits 1, with a message
+  naming the database, its build time, its age, the bound, and how to refresh it. It
+  does not depend on `fail_on_incomplete_scanners`, and it outranks findings (1, not 2).
+  Workspace mode reports such a project `scan_incomplete: true`. A database whose build
+  time cannot be read counts as stale.
+
+  **Who it affects.** Anyone running offline images, or the trivy plugin, with
+  databases older than the bounds above. Online grype and trivy scans already refresh
+  a stale database themselves and fail if they cannot, so they are unaffected unless
+  the refresh is disabled.
+
+  **What to do.** Refresh the database: rebuild the offline image with
+  `ash build-image --offline` (it downloads a current grype database and current
+  rulesets, and records their download time), run `grype db update` or
+  `trivy image --download-db-only` where there is network access, and move the result
+  across the air gap at least every 5 days for grype. To scan with an older database
+  anyway, pass `--allow-stale-content-db` or set `content_db_staleness: warn`: the scan
+  then passes, and the warning is in the log, a `### Stale content databases` section
+  of `ash.summary.md`, `ash.summary.txt`, a `toolConfigurationNotifications` entry
+  (descriptor `ASH-CONTENT-DB-STALE`) on the scanner's invocation in `ash.sarif`, and
+  the `content_databases` list in `ash.flat.json`. The CLI flag wins over the config in
+  both directions; an MCP runtime patch cannot change it.
+
 - **A rule's CVSS base score is now authoritative over a scanner's SARIF `level`,
   for every scanner, and this changes gate outcomes with nothing to opt into.**
 
@@ -246,6 +289,14 @@
   states coverage it does not have.
 
 ### Reporting changes
+
+- **Reports now carry the age of every content database a scan used.** Additive:
+  `ash.flat.json` gains a top-level `content_databases` list (an empty list when no
+  scanner read one), each entry with `built`, `age`, `max_age`, `stale`, `policy` and
+  `enforced`; each such scanner's SARIF invocation gains an `ash_content_databases`
+  property and, when stale, a `toolConfigurationNotifications` entry; and the markdown
+  and text summaries and the console gain a stale-database section, emitted only when
+  there is one. See the breaking change above.
 
 - **Reports now say how much of its input each scanner evaluated.** Additive, but
   it does change bytes, so it is listed rather than left to be discovered:

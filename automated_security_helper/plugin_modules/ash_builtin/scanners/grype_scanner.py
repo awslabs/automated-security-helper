@@ -230,12 +230,12 @@ class GrypeScanner(ScannerPluginBase[GrypeScannerConfig]):
         # rather than writing to os.environ — scanners run concurrently
         # in thread pools and would race on the shared parent env.
         #
-        # KNOWN GAP, recorded in utils/content_databases.py and not changed
-        # here: GRYPE_DB_VALIDATE_AGE=false means grype uses a database of any
-        # age in offline mode (its validateAge returns nil when disabled), and
-        # validate_grype_offline_mode below only warns. Enforcing the bound
-        # offline would make an air-gapped image stop scanning five days after
-        # it was built, which is a product decision rather than a CI one.
+        # GRYPE_DB_VALIDATE_AGE=false stays: with it true, grype answers a stale
+        # database by trying to download a new one, which an air-gapped host
+        # cannot do. The bound is held instead by ASH's own check after the scan
+        # (utils/content_db_staleness.py), which reads `built` from
+        # `grype db status` the same way online and offline, and fails the scan
+        # by default once the database is past the registry's bound.
         if self.config.options.offline:
             self.extra_env.update(
                 {

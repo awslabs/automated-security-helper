@@ -13,6 +13,9 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterWorkspaceBehaviour,
 )
 from automated_security_helper.core.unified_metrics import coverage_shortfalls
+from automated_security_helper.utils.content_db_staleness import (
+    stale_content_databases,
+)
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
     ReportContentEmitter,
 )
@@ -260,6 +263,28 @@ class MarkdownReporter(ReporterPluginBase[MarkdownReporterConfig]):
                     md_parts.append(
                         f"- **{scanner_name}**: evaluated {attempted - failed} of {attempted} "
                         f"target(s); {failed} could not be evaluated"
+                    )
+                md_parts.append("")
+
+            # Same placement and the same reasoning as the coverage section above: no status
+            # value carries "the database this scanner matched against was out of date", the
+            # summary is what gets pasted into a pull request, and compact mode must not hide
+            # it. Under `content_db_staleness: warn` this section is the only place a reader of
+            # the report learns the scan ran against a stale database.
+            stale_dbs = stale_content_databases(model)
+            if stale_dbs:
+                md_parts.append("### Stale content databases")
+                md_parts.append("")
+                md_parts.append(
+                    "These scanners matched against a content database older than its declared "
+                    "bound. A clean result from them is not evidence of a clean target:"
+                )
+                md_parts.append("")
+                for record in stale_dbs:
+                    verdict = "failed the scan" if record.enforced else "warning only"
+                    md_parts.append(
+                        f"- **{record.name}** ({record.scanner}, {verdict}): "
+                        f"{record.message()}"
                     )
                 md_parts.append("")
 

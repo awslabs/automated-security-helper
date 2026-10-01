@@ -22,6 +22,7 @@ These parameters are available across multiple ASH commands:
 | `--version`            | Print the installed ASH version and exit                   |                   |                      | `scan`                               |
 | `--ash-revision-to-install` | ASH branch or tag to install in the container image for usage during containerized scans | |  | `scan` |
 | `--base-ref` | Git ref to diff against when --changed-files-only is set. | | `ASH_BASE_REF` | `scan` |
+| `--allow-stale-content-db` / `--no-allow-stale-content-db` | Let the scan pass when a scanner's content database is past its declared age bound (for grype, 5 days after it was built), recording a warning in the log and the reports. Without it such a scan exits 1. Takes precedence over the `content_db_staleness` config value; see [Failing on a stale content database](configuration-guide.md#failing-on-a-stale-content-database). | Unset: the `content_db_staleness` config value, then `fail` |  | `scan` |
 | `--changed-files-only` | Limit the scan to files changed between the base branch and HEAD. | | `ASH_CHANGED_FILES_ONLY` | `scan` |
 | `--color` | Enable/disable colorized output | |  | `scan` |
 | `--compact-report` | Produce a shorter markdown report suitable for PR comments. | |  | `scan` |
@@ -1179,3 +1180,27 @@ can hold both outcomes at once, and leading with the unknown would let A's absen
 tool suppress B's findings. A single-project scan has no second project to
 suppress, which is why it can afford to lead with the unknown. Exit `4` is
 unaffected either way — it means no project was attempted at all.
+
+### A scan against a stale database is not a clean scan
+
+A vulnerability database only describes the advisories published before it was
+built. Measured with grype 0.111.0 under ASH's offline settings, a database built
+10 days earlier scanned with exit 0 and no warning. ASH now reads each content
+database's own build time after its scanner runs and exits 1 when it is past the
+declared bound (grype 120h, trivy 24h, the offline semgrep and opengrep rulesets
+30 days):
+
+```console
+$ ash scan --offline
+ERROR    Content database grype-db (grype) is stale: built 2026-09-21T13:13:21Z,
+         10d 0h old, past its 120h bound (grype's own bound); age read from `built`
+         in `grype db status -o json`. The scan fails: ...
+```
+
+This does not depend on `--fail-on-incomplete-scanners`, and it takes precedence
+over `--fail-on-findings` the same way. `--allow-stale-content-db` (config:
+`content_db_staleness: warn`) lets the scan pass and records the warning in the
+summary reports, the SARIF and `ash.flat.json` instead. Workspace mode applies it
+per project, reporting the project `scan_incomplete: true`. See
+[Failing on a stale content database](configuration-guide.md#failing-on-a-stale-content-database)
+for the bounds, where each comes from, and how to refresh each database.

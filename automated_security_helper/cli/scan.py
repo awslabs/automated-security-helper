@@ -28,6 +28,11 @@ from automated_security_helper.interactions.run_ash_scan import (
 )
 from automated_security_helper.core.enums import ExportFormat
 from automated_security_helper.models.workspace import WorkspaceExitCode
+from automated_security_helper.utils.content_databases import (
+    content_db_staleness_override,
+    get as get_content_database,
+    go_duration,
+)
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.workspace.plan import WorkspacePlan
 from automated_security_helper.workspace.resolver import resolve_workspace
@@ -350,6 +355,23 @@ def run_ash_scan_cli_command(
             )
         ),
     ] = None,
+    allow_stale_content_db: Annotated[
+        bool | None,
+        typer.Option(
+            help=(
+                "Let the scan pass when a scanner's content database (grype's or "
+                "trivy's vulnerability database, the offline semgrep/opengrep "
+                "rulesets) is older than its declared bound -- for grype, "
+                f"{go_duration(get_content_database('grype-db').max_age)} after the "
+                "database was built. Without it such a scan exits 1. With it the "
+                "scan proceeds and the warning is recorded in the log and in the "
+                "reports. --no-allow-stale-content-db forces the default failure. "
+                "Defaults to unset, which prefers the `content_db_staleness` config "
+                "value and then 'fail'; either form of the flag takes precedence over "
+                "the config."
+            )
+        ),
+    ] = None,
     simple: Annotated[
         bool,
         typer.Option(
@@ -568,6 +590,14 @@ def run_ash_scan_cli_command(
         config_overrides = []
     if compact_report:
         config_overrides.append("reporters.markdown.options.compact=true")
+    # The same route as --compact-report, for the same reason and one more: as a config
+    # override it reaches every mode unchanged -- local, nix, workspace, and the container,
+    # which is handed config_overrides verbatim -- and overrides are applied after the
+    # config file, which is what makes the flag win over `content_db_staleness` there.
+    if allow_stale_content_db is not None:
+        config_overrides.append(
+            content_db_staleness_override(allow_stale=allow_stale_content_db)
+        )
 
     workspace_plan: WorkspacePlan | None = None
     if workspace is not None:

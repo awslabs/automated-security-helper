@@ -96,6 +96,50 @@ false` still reports an incomplete scan, and when both would fail the exit code 
 the scan complete. See
 [An incomplete scan is not a clean scan](cli-reference.md#an-incomplete-scan-is-not-a-clean-scan).
 
+### Failing on a stale content database
+
+`content_db_staleness` is a top-level key, and it defaults to `fail`. After each
+scanner that matches against a content database, ASH reads that database's own
+build time and compares it to the bound declared for it in
+`automated_security_helper/utils/content_databases.py`. Past the bound, the scan
+exits 1 and names the database, when it was built, how old it is, the bound, and
+how to refresh it. This happens in online and offline mode alike.
+
+| Database | Scanner | Bound | Where the bound comes from | Age read from |
+| --- | --- | --- | --- | --- |
+| `grype-db` | grype | 120h (5 days) | grype's own default, `db.max-allowed-built-age` | `built` in `grype db status -o json` |
+| `trivy-db` | trivy-repo | 24h | trivy's own rule: a database is current until its `NextUpdate`, which the published database sets 24h after `UpdatedAt` | `VulnerabilityDB.UpdatedAt` in `trivy version --format json` |
+| `semgrep-offline-rules` | semgrep (offline only) | 720h (30 days) | ASH's own choice; semgrep has no staleness notion for local rules | `.ash-rules-fetched-at` in `$SEMGREP_RULES_CACHE_DIR`, else the oldest rules file's mtime |
+| `opengrep-offline-rules` | opengrep (offline only) | 720h (30 days) | ASH's own choice; opengrep has no staleness notion for local rules | `.ash-rules-fetched-at` in `$OPENGREP_RULES_CACHE_DIR`, else the oldest rules file's mtime |
+
+A database whose build time cannot be read is treated as stale, because an
+unmeasurable database is not evidence of a fresh one.
+
+To let one scan run against a stale database, pass `--allow-stale-content-db`, or
+set:
+
+```yaml
+content_db_staleness: warn
+```
+
+Under `warn` the scan proceeds, and the warning is written to the log and into the
+reports: a `### Stale content databases` section in `ash.summary.md`, a `STALE
+CONTENT DATABASES` section in `ash.summary.txt`, a `toolConfigurationNotifications`
+entry with descriptor id `ASH-CONTENT-DB-STALE` on the scanner's invocation in
+`ash.sarif`, and a `content_databases` list in `ash.flat.json` with `stale: true`
+and `enforced: false`. A reader of any of those can see the scan ran against an
+out-of-date database.
+
+The CLI flag takes precedence over the config value in both directions:
+`--no-allow-stale-content-db` restores `fail` for one scan even when the config
+says `warn`. Like `fail_on_incomplete_scanners`, it cannot be changed by an MCP
+runtime patch.
+
+This gate is independent of `fail_on_incomplete_scanners` and does not need it
+turned on. When the scan also has actionable findings, the exit code is 1 rather
+than 2: clearing the reported findings would not make a scan against a stale
+database trustworthy.
+
 ### Global Settings
 
 The `global_settings` section controls general behavior:

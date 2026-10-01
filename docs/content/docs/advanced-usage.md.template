@@ -99,6 +99,14 @@ ash build-image --offline --offline-semgrep-rulesets p/ci
 ash --mode container --offline
 ```
 
+An offline image's databases are frozen at build time, and ASH fails a scan whose
+database is past its bound: grype's 5 days (120h) after it was built, the offline
+semgrep and opengrep rulesets 30 days after they were downloaded. Rebuild the image
+(`ash build-image --offline`) at least that often. To scan with an older image
+anyway, pass `--allow-stale-content-db` or set `content_db_staleness: warn`; the scan
+then passes and every report names the stale database. See
+[Failing on a stale content database](configuration-guide.md#failing-on-a-stale-content-database).
+
 ## Customizing Scan Phases
 
 ASH v3 executes scans in phases:

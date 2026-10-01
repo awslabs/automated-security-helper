@@ -329,6 +329,13 @@ RUN grype --version
 # semgrep or opengrep rules cache. CI never caught it because the only offline leg
 # in the matrix is `oci-runner: docker`, where SHELL is honoured and bash runs it.
 # The exposure was users building offline images with a non-docker runtime.
+#
+# .ash-rules-fetched-at records when the rulesets were downloaded. A rules file has no
+# build time of its own, and ASH fails a scan whose offline rules are past the bound in
+# automated_security_helper/utils/content_databases.py (RULESET_FETCHED_AT_FILE there),
+# so the download time is written down rather than inferred from mtime, which a copy
+# resets. The grype database needs no such file: `grype db status` reports its own
+# build time.
 RUN set -uex; if [ "${OFFLINE}" = "YES" ]; then \
     with-retry 'grype db update' && \
     mkdir -p ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR} && \
@@ -337,6 +344,9 @@ RUN set -uex; if [ "${OFFLINE}" = "YES" ]; then \
         with-retry "curl -sSf https://semgrep.dev/c/${i} -o ${outfile}"; \
         cp "${outfile}" "${OPENGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; \
     done && \
+    fetched_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" && \
+    printf '%s\n' "${fetched_at}" > "${SEMGREP_RULES_CACHE_DIR}/.ash-rules-fetched-at" && \
+    printf '%s\n' "${fetched_at}" > "${OPENGREP_RULES_CACHE_DIR}/.ash-rules-fetched-at" && \
     chmod -R 777 ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}; \
     fi
 

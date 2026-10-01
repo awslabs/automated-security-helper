@@ -20,6 +20,9 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.report_conte
     ReportContentEmitter,
 )
 from automated_security_helper.core.unified_metrics import format_duration
+from automated_security_helper.utils.content_db_staleness import (
+    stale_content_databases,
+)
 
 
 class TextReporterConfigOptions(ReporterOptionsBase):
@@ -197,6 +200,16 @@ class TextReporter(ReporterPluginBase[TextReporterConfig]):
                 )
 
             text_parts.append("")
+
+            # See the matching section in the markdown reporter: no status value carries this.
+            stale_dbs = stale_content_databases(model)
+            if stale_dbs:
+                text_parts.append("STALE CONTENT DATABASES")
+                text_parts.append("-----------------------")
+                for record in stale_dbs:
+                    verdict = "FAILED THE SCAN" if record.enforced else "WARNING"
+                    text_parts.append(f"- [{verdict}] {record.message()}")
+                text_parts.append("")
 
             # Add top hotspots (files with most findings)
             top_hotspots = emitter.get_top_hotspots(

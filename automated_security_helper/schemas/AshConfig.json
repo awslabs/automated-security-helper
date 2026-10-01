@@ -54,6 +54,16 @@
           "default": null,
           "description": "Build-time configuration settings"
         },
+        "content_db_staleness": {
+          "default": "fail",
+          "description": "What a scan does when a scanner's content database (grype's or trivy's vulnerability database, the offline semgrep/opengrep rulesets) was built longer ago than the bound declared for it in automated_security_helper/utils/content_databases.py. 'fail' (the default) keeps the scanner's findings and exits 1, naming the database, its build time, its age and the bound. 'warn' lets the scan pass and records the same warning in the log and in the reports (summary, SARIF invocation notifications, flat JSON). The CLI flag --allow-stale-content-db sets 'warn' for one scan and takes precedence over this value; --no-allow-stale-content-db sets 'fail'.",
+          "enum": [
+            "fail",
+            "warn"
+          ],
+          "title": "Content Db Staleness",
+          "type": "string"
+        },
         "converters": {
           "$ref": "#/$defs/ConverterConfigSegment",
           "default": {
@@ -104,6 +114,7 @@
                 "denied_paths": [
                   "/fail_on_findings",
                   "/fail_on_incomplete_scanners",
+                  "/content_db_staleness",
                   "/global_settings/ignore_paths",
                   "/global_settings/suppressions",
                   "/reporters/bedrock-summary-reporter/options/aws_*",
@@ -450,6 +461,7 @@
               "denied_paths": [
                 "/fail_on_findings",
                 "/fail_on_incomplete_scanners",
+                "/content_db_staleness",
                 "/global_settings/ignore_paths",
                 "/global_settings/suppressions",
                 "/reporters/bedrock-summary-reporter/options/aws_*",
@@ -498,6 +510,7 @@
             "denied_paths": [
               "/fail_on_findings",
               "/fail_on_incomplete_scanners",
+              "/content_db_staleness",
               "/global_settings/ignore_paths",
               "/global_settings/suppressions",
               "/reporters/bedrock-summary-reporter/options/aws_*",
@@ -2901,6 +2914,7 @@
           "default": [
             "/fail_on_findings",
             "/fail_on_incomplete_scanners",
+            "/content_db_staleness",
             "/global_settings/ignore_paths",
             "/global_settings/suppressions",
             "/reporters/bedrock-summary-reporter/options/aws_*",

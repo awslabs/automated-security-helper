@@ -12,7 +12,9 @@ This gate is what keeps the YAML honest about it. For every `actions/cache`,
 `actions/cache/restore` and `actions/cache/save` step under .github/, it checks:
 
   1. A step whose path is a registered database's cache path:
-     - the database must declare a max age (an unbounded database may not be cached at all);
+     - the database must be declared `cacheable_in_ci`, which only one with CI age guards
+       is; every database declares a max age, but that bounds what a scan accepts, not what
+       a cache hands out;
      - the step must be a restore or a save, not the combined `actions/cache`, whose post-job
        save fires on pull requests too;
      - there must be no `restore-keys`: a prefix fallback restores an older bucket, which is
@@ -150,9 +152,9 @@ def check_text(rel_path: str, text: str, registry) -> list[Violation]:
                 for entry in registered:
                     if not entry.cacheable:
                         fail(
-                            f"caches {entry.name}, which declares no max age: nothing "
-                            "enforces how old a restored copy may be, so it must not be "
-                            "cached"
+                            f"caches {entry.name}, which is not declared cacheable in CI "
+                            "(cacheable_in_ci): no CI guard holds a restored copy to its "
+                            "max age, so it must not be cached"
                         )
                         continue
                     if action == "actions/cache":
@@ -301,7 +303,7 @@ def self_test(registry) -> int:
             1,
         ),
         (
-            "a registered database with no max age",
+            "a registered database not declared cacheable in CI",
             _variant("path: ~/.opengrep/cli/latest", "path: /deps/.semgrep"),
             1,
         ),
@@ -353,7 +355,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"FAILED: {len(violations)} content-database cache violation(s).")
         return 1
     registered = ", ".join(
-        f"{e.name} ({'max age ' + registry.go_duration(e.max_age) if e.max_age else 'not cacheable'})"
+        f"{e.name} (max age {registry.go_duration(e.max_age)}, "
+        f"{'cacheable in CI' if e.cacheable else 'not cacheable in CI'})"
         for e in registry.CONTENT_DATABASES
     )
     print(
