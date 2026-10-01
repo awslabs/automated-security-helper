@@ -52,6 +52,31 @@ def write_text_atomically(path: Path, content: str, encoding: str = "utf-8") -> 
         raise
 
 
+def read_text_of_replaced_file(path: Path, encoding: str = "utf-8") -> str:
+    """Read a file that ``write_text_atomically`` may be replacing at this moment.
+
+    The rename is atomic for readers on POSIX, but not on Windows. There ``os.replace``
+    holds the file open without read sharing while it swaps it, so a reader whose open
+    lands in that window gets a sharing violation, which Python raises as
+    ``PermissionError``. The file is not unreadable: a moment later it is the new
+    complete file. Treating that error as a read failure is how a progress poll
+    reported a finished scan as ``failed`` with no scanners on Windows CI.
+
+    So on Windows a ``PermissionError`` is retried for the same bounded time the writer
+    allows itself. A file that is still unreadable after that raises the error, so a
+    real permission problem is reported, only later. POSIX never retries.
+    """
+    path = Path(path)
+    for attempt in range(_REPLACE_ATTEMPTS):
+        try:
+            return path.read_text(encoding=encoding)
+        except PermissionError:
+            if sys.platform != "win32" or attempt == _REPLACE_ATTEMPTS - 1:
+                raise
+            time.sleep(_REPLACE_BACKOFF_SECONDS)
+    raise AssertionError("unreachable: the last attempt returns or raises")
+
+
 def _replace(staging: Path, target: Path) -> None:
     for attempt in range(_REPLACE_ATTEMPTS):
         try:

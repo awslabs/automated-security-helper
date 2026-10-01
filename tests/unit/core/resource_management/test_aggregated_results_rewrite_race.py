@@ -34,6 +34,11 @@ deterministic in the direction that matters: it cannot fail on correct code.
 
 from __future__ import annotations
 
+import contextlib
+import io
+import json
+import os
+import sys
 import threading
 import time
 from pathlib import Path
@@ -200,6 +205,97 @@ def test_a_failed_atomic_write_keeps_the_old_file_and_removes_the_staging_file(
 
     assert target.read_text(encoding="utf-8") == "old"
     assert sorted(p.name for p in tmp_path.iterdir()) == [target.name]
+
+
+class _SharingViolationOnOpen:
+    """Fail the first ``failures`` opens of one file the way Windows does mid-replace.
+
+    ``os.replace`` on Windows holds the file without read sharing while it swaps it,
+    and a reader's open in that window raises ``PermissionError`` (errno 13). That is
+    what the race tests above hit on the Windows legs. Both ``builtins.open`` and
+    ``io.open`` are wrapped so the fault reaches the reader whichever one it calls.
+    """
+
+    def __init__(self, target: Path, failures: int) -> None:
+        self.target = Path(target)
+        self.remaining = failures
+        self.opens_of_target = 0
+        self._real_open = io.open
+
+    def __call__(self, file, *args, **kwargs):
+        if isinstance(file, (str, os.PathLike)) and Path(file) == self.target:
+            self.opens_of_target += 1
+            if self.remaining > 0:
+                self.remaining -= 1
+                raise PermissionError(13, "Permission denied", str(file))
+        return self._real_open(file, *args, **kwargs)
+
+    def installed(self):
+        stack = contextlib.ExitStack()
+        stack.enter_context(patch("builtins.open", self))
+        stack.enter_context(patch("io.open", self))
+        stack.enter_context(
+            patch("automated_security_helper.utils.atomic_write.time.sleep")
+        )
+        return stack
+
+
+def _results_file(tmp_path: Path) -> Path:
+    target = tmp_path / "ash_aggregated_results.json"
+    target.write_text(json.dumps({"scanner_results": {"bandit": {}}}), "utf-8")
+    return target
+
+
+def test_a_windows_read_that_lands_inside_a_replace_is_retried(tmp_path: Path) -> None:
+    """The reader half of the race: a transient sharing violation is not a bad file."""
+    from automated_security_helper.core.resource_management.error_handling import (
+        safe_read_json_file,
+    )
+
+    target = _results_file(tmp_path)
+    fault = _SharingViolationOnOpen(target, failures=3)
+
+    with fault.installed(), patch.object(sys, "platform", "win32"):
+        data, error = safe_read_json_file(target)
+
+    assert error is None, error
+    assert data == {"scanner_results": {"bandit": {}}}
+    # Control: the fault fired three times, so the read was retried, not unaffected.
+    assert fault.opens_of_target == 4
+
+
+def test_a_windows_file_that_stays_unreadable_is_still_an_error(tmp_path: Path) -> None:
+    """The retry is bounded, so a real permission problem is reported, only later."""
+    from automated_security_helper.core.resource_management.error_handling import (
+        safe_read_json_file,
+    )
+    from automated_security_helper.utils.atomic_write import _REPLACE_ATTEMPTS
+
+    target = _results_file(tmp_path)
+    fault = _SharingViolationOnOpen(target, failures=10_000)
+
+    with fault.installed(), patch.object(sys, "platform", "win32"):
+        data, error = safe_read_json_file(target)
+
+    assert data is None
+    assert error is not None and "Permission denied" in str(error)
+    assert fault.opens_of_target == _REPLACE_ATTEMPTS
+
+
+def test_a_posix_permission_error_is_not_retried(tmp_path: Path) -> None:
+    from automated_security_helper.core.resource_management.error_handling import (
+        safe_read_json_file,
+    )
+
+    target = _results_file(tmp_path)
+    fault = _SharingViolationOnOpen(target, failures=1)
+
+    with fault.installed(), patch.object(sys, "platform", "linux"):
+        data, error = safe_read_json_file(target)
+
+    assert data is None
+    assert error is not None and "Permission denied" in str(error)
+    assert fault.opens_of_target == 1
 
 
 def test_an_atomic_write_gets_the_same_mode_as_a_plain_write(tmp_path: Path) -> None:
