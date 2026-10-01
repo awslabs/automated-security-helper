@@ -33,6 +33,7 @@ Known limitations
   added ``curl -f`` makes a 404 an error instead of a schema file full of HTML.
 """
 
+import fnmatch
 import json
 import re
 from pathlib import Path
@@ -40,6 +41,7 @@ from pathlib import Path
 from automated_security_helper.plugin_modules.ash_builtin.reporters.gitlab_sast_reporter import (
     GITLAB_SAST_SCHEMA_VERSION,
 )
+from tests.utils.helpers import iter_repo_files
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCAN_TEST_ACTION = REPO_ROOT / ".github/actions/run-scan-test/action.yml"
@@ -184,10 +186,15 @@ class TestTheCommittedReportFixtureAgrees:
     """
 
     def test_any_committed_gl_sast_fixture_declares_the_same_version(self):
+        # iter_repo_files rather than rglob: rglob raised FileNotFoundError from
+        # os.scandir on tests/pytest-temp/<uuid> when another xdist worker's
+        # teardown removed that directory mid-walk (unit-test windows-latest
+        # py3.10). The scratch tree holds no committed fixtures, so pruning it
+        # is also the right scope for this check.
         fixtures = sorted(
             p
-            for p in (REPO_ROOT / "tests").rglob("*gl-sast-report*.json")
-            if p.is_file()
+            for p in iter_repo_files(REPO_ROOT / "tests")
+            if fnmatch.fnmatch(p.name, "*gl-sast-report*.json") and p.is_file()
         )
         if not fixtures:
             # Nothing to check. Stated rather than skipped so the absence is visible in
