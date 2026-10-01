@@ -69,7 +69,8 @@ def read_text_of_replaced_file(path: Path, encoding: str = "utf-8") -> str:
     path = Path(path)
     for attempt in range(_REPLACE_ATTEMPTS):
         try:
-            return path.read_text(encoding=encoding)
+            with open(path, encoding=encoding) as handle:
+                return handle.read()
         except PermissionError:
             if sys.platform != "win32" or attempt == _REPLACE_ATTEMPTS - 1:
                 raise
