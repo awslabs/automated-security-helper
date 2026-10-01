@@ -379,17 +379,19 @@ def reporter_names() -> dict[str, str]:
 
     This used to read the fields declared on ``ReporterConfigSegment``. That is
     a different source, and the generator's docstring lists it among the seven
-    places that stated the reporter set and disagreed. It lags the registry for
-    any reporter that is configured only through the segment's ``extra="allow"``:
-    ``unused-suppressions`` is registered, gets a generated row, and has no
+    places that stated the reporter set and disagreed. It lagged the registry for
+    any reporter configured only through the segment's ``extra="allow"``:
+    ``unused-suppressions`` was registered, got a generated row, and had no
     declared field, so this check reported the generated row as a leftover for a
     removed reporter while ``generate_reporter_docs.py --check`` required it.
     The two gates could not both pass. Calling the generator's function, rather
     than re-deriving the registry here, is what keeps them from diverging again.
 
-    Whether every registered reporter should also be a declared field (and so
-    appear in the published AshConfig.json schema) is a separate property about
-    the config model, not about the docs. It is not checked here.
+    Whether every built-in reporter is also a declared field (and so appears in
+    the published AshConfig.json schema) is a property of the config model, not
+    of the docs, so it is not checked here. It is pinned in both directions by
+    test_declared_reporter_fields_match_the_builtin_registry in
+    tests/unit/test_docs_freshness_gate_can_fail.py.
     """
     rows = _reporter_generator().registered_reporters()
     return {row["name"]: f"registered class {row['class_name']}" for row in rows}

@@ -590,6 +590,14 @@ def _register_projects(
         for scan_id in registered.values():
             registry.update_scan_status(scan_id, MCScanStatus.CANCELLED)
         raise
+    # Claimed as RUNNING, because this call owns every entry's lifecycle from here
+    # and closes each one in _close_registrations. That matters to
+    # check_scan_progress: an unclaimed PENDING entry takes its status from the
+    # results file, and a project's SCAN phase writes a readable one before its
+    # REPORT phase has run, so a PENDING project would read as completed while its
+    # reports were still being written.
+    for scan_id in registered.values():
+        registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
     return registered
 
 
@@ -613,9 +621,7 @@ def _close_registrations(
     )
     for key, scan_id in registered.items():
         if error is not None:
-            registry.update_scan_status(
-                scan_id, MCScanStatus.FAILED, error_message=error
-            )
+            registry.finish_scan(scan_id, MCScanStatus.FAILED, error_message=error)
             continue
         outcome = outcomes.get(key)
         if outcome is None:
@@ -630,15 +636,15 @@ def _close_registrations(
             # ``.get(None, COMPLETED)``: that reached the same result by looking a
             # None key up in a dict keyed by ProjectRunStatus, which is a type
             # error that happened to behave.
-            registry.update_scan_status(scan_id, MCScanStatus.COMPLETED)
+            registry.finish_scan(scan_id, MCScanStatus.COMPLETED)
             continue
         status = _REGISTRY_STATUS_BY_PROJECT_STATUS.get(
             outcome.status, MCScanStatus.COMPLETED
         )
         if status is MCScanStatus.FAILED:
-            registry.update_scan_status(scan_id, status, error_message=outcome.error)
+            registry.finish_scan(scan_id, status, error_message=outcome.error)
         else:
-            registry.update_scan_status(scan_id, status)
+            registry.finish_scan(scan_id, status)
 
 
 def _project_verdicts(
@@ -977,6 +983,17 @@ async def mcp_scan_workspace(
     except Exception as exc:  # noqa: BLE001 -- mapped to an exit code, never raised
         _close_registrations(registered, None, error=str(exc))
         return _error_response(exc, "scan_workspace")
+    except BaseException as exc:
+        # asyncio.CancelledError, KeyboardInterrupt, SystemExit. _register_projects
+        # claimed these entries as RUNNING, and a RUNNING entry's runner decides
+        # its status, so leaving them open would read as running forever. Closed
+        # as failed, then re-raised so cancellation still propagates.
+        _close_registrations(
+            registered,
+            None,
+            error=f"Workspace scan ended without a result: {type(exc).__name__}",
+        )
+        raise
 
     _close_registrations(registered, result.payload)
 

@@ -99,21 +99,40 @@ def _recursive_glob_match(path: str, pattern: str) -> bool:
     return True
 
 
+def _match_form(value: str) -> str:
+    """One spelling of a path or pattern for comparison on every platform.
+
+    Lowercased, and with backslashes as forward slashes. The same suppression
+    file is read on Windows and POSIX, and a config author may write either
+    separator, so a backslash in a suppression path or pattern is treated as a
+    separator everywhere. Applied to both sides, so it can never make a path
+    and a pattern that were equal compare unequal.
+    """
+    return value.lower().replace("\\", "/")
+
+
 def _path_pattern_matches(file_path: Optional[str], pattern: str) -> bool:
-    """Case-insensitive path match supporting ``**`` recursive globs."""
+    """Case-insensitive path match supporting ``**`` recursive globs.
+
+    Gives the same answer on every platform. ``fnmatch.fnmatch`` does not: it
+    runs both sides through ``os.path.normcase``, which on Windows turns ``/``
+    into ``\\`` and on POSIX does nothing, so ``deploy\\cdk\\x`` matched
+    ``deploy/cdk/x`` on Windows and not on Linux. Both sides are put in
+    :func:`_match_form` and compared with ``fnmatchcase``, which skips normcase.
+    """
     if file_path is None:
         return False
 
-    finding_lower = file_path.lower()
-    pattern_lower = pattern.lower()
+    finding_norm = _match_form(file_path)
+    pattern_norm = _match_form(pattern)
 
-    if finding_lower == pattern_lower:
+    if finding_norm == pattern_norm:
         return True
 
-    if "**" in pattern_lower:
-        return _recursive_glob_match(finding_lower, pattern_lower)
+    if "**" in pattern_norm:
+        return _recursive_glob_match(finding_norm, pattern_norm)
 
-    return fnmatch.fnmatch(finding_lower, pattern_lower)
+    return fnmatch.fnmatchcase(finding_norm, pattern_norm)
 
 
 def match_glob(path: str, pattern: str) -> bool:
