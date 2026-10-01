@@ -102,7 +102,22 @@ def safe_read_json_file(
         # Read and parse the file. Result files are replaced atomically while scans
         # run, and on Windows an open that lands inside the replace fails with a
         # transient PermissionError; the helper retries that instead of reporting it.
-        text = read_text_of_replaced_file(path_obj, encoding="utf-8")
+        # One that outlasts the retry is a read error, reported as such and not as
+        # a file that failed to parse.
+        try:
+            text = read_text_of_replaced_file(path_obj, encoding="utf-8")
+        except PermissionError as e:
+            error = MCPResourceError(
+                f"Permission denied: Cannot read file {path_obj}: {str(e)}",
+                context={
+                    "cwd": str(Path.cwd()),
+                    "file_path": str(path_obj),
+                    "error_category": ErrorCategory.PERMISSION_DENIED.value,
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                },
+            )
+            return None, error
         try:
             data = json.loads(text)
             return data, None

@@ -279,6 +279,9 @@ def test_a_windows_file_that_stays_unreadable_is_still_an_error(tmp_path: Path) 
 
     assert data is None
     assert error is not None and "Permission denied" in str(error)
+    # A read error, not a parse error: the file was never read, so nothing about
+    # its contents is known.
+    assert error.context["error_category"] == "permission_denied"
     assert fault.opens_of_target == _REPLACE_ATTEMPTS
 
 
@@ -295,6 +298,9 @@ def test_a_posix_permission_error_is_not_retried(tmp_path: Path) -> None:
 
     assert data is None
     assert error is not None and "Permission denied" in str(error)
+    # A read error, not a parse error: the file was never read, so nothing about
+    # its contents is known.
+    assert error.context["error_category"] == "permission_denied"
     assert fault.opens_of_target == 1
 
 
