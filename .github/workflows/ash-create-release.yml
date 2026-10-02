@@ -197,6 +197,72 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           echo "increment=MINOR" >> "$GITHUB_OUTPUT"
 
+      # Contributors write release notes by hand under `## Unreleased` in
+      # CHANGELOG.md. In incremental mode commitizen treats that heading as its
+      # own placeholder and replaces the whole section with the generated entry,
+      # so a bump would silently delete the hand-written text (measured on the
+      # 3.8.0 candidate: 539 lines removed). This step moves the section's body
+      # into .github/release-notes/<next tag>.md, after any curated notes already
+      # there, and removes the section. The changelog template includes that
+      # file under the new version heading, and ash-tag-on-merge.yml publishes
+      # the same entry as the GitHub Release body.
+      #
+      # Exercised against the real CHANGELOG.md by
+      # tests/unit/test_release_line_workflow.py.
+      - name: Fold Unreleased notes into the release notes
+        id: unreleased
+        env:
+          INCREMENT: ${{ steps.line.outputs.increment }}
+        run: |
+          BODY_FILE=$(mktemp)
+          awk '
+            /^## / { if (inside) exit; if ($0 ~ /^## Unreleased[[:space:]]*$/) { inside = 1; next } }
+            inside { print }
+          ' CHANGELOG.md > "$BODY_FILE"
+
+          if ! grep -q '[^[:space:]]' "$BODY_FILE"; then
+            echo "::notice::CHANGELOG.md has no Unreleased notes to carry into the release."
+            exit 0
+          fi
+
+          # The notes file is loaded as a Jinja template by the changelog
+          # template, so a delimiter in it would be evaluated, or break the render.
+          if grep -nE '\{\{|\{%|\{#' "$BODY_FILE"; then
+            echo "::error::The Unreleased section of CHANGELOG.md contains a Jinja delimiter ({{, {% or {#) on the lines above. It would be evaluated by the changelog template. Escape or reword it, then rerun."
+            exit 1
+          fi
+
+          # The same increment the bump step passes, so the tag named here is
+          # the tag the bump creates.
+          NEXT_TAG=""
+          if DRY_RUN=$(uv run cz bump --dry-run --yes ${INCREMENT:+--increment "$INCREMENT"} 2>&1); then
+            NEXT_TAG=$(printf '%s\n' "$DRY_RUN" | sed -n 's/^tag to create: //p' | head -n 1)
+          fi
+          if [[ ! "$NEXT_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            echo "::error::CHANGELOG.md has Unreleased notes, but the next tag could not be determined (commitizen reported '${NEXT_TAG}'). Refusing to bump, because the bump would delete them."
+            printf '%s\n' "$DRY_RUN"
+            exit 1
+          fi
+
+          NOTES=".github/release-notes/${NEXT_TAG}.md"
+          mkdir -p "$(dirname "$NOTES")"
+          if [[ -s "$NOTES" ]]; then
+            printf '\n' >> "$NOTES"
+          fi
+          # Leading and trailing blank lines dropped; everything between is kept
+          # as written.
+          awk 'NF { for (; blanks > 0; blanks--) print ""; print; started = 1; next }
+               started { blanks++ }' "$BODY_FILE" >> "$NOTES"
+
+          awk '
+            /^## / { if (inside) inside = 0; else if ($0 ~ /^## Unreleased[[:space:]]*$/) { inside = 1; next } }
+            !inside { print }
+          ' CHANGELOG.md > "${BODY_FILE}.changelog"
+          mv "${BODY_FILE}.changelog" CHANGELOG.md
+
+          LINES=$(grep -c . "$BODY_FILE" || true)
+          echo "::notice::Moved ${LINES} non-blank Unreleased line(s) from CHANGELOG.md into ${NOTES} for ${NEXT_TAG}."
+
       - name: Determine bump and create release artifacts
         id: bump
         env:

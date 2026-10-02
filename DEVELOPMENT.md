@@ -245,6 +245,8 @@ uv run cz bump --changelog --dry-run
 
 A release whose version understates it can carry hand-written notes in `.github/release-notes/<tag>.md`. The changelog template (`.github/changelog/CHANGELOG.md.j2`) renders that file under the version heading, and the tag workflow publishes that version's `CHANGELOG.md` entry, curated notes included, at the top of the GitHub Release body, ahead of GitHub's generated notes. `v3.8.0.md` lists the behavior changes that 3.8.0 ships in a minor release, with their opt-outs.
 
+Hand-written notes go under `## Unreleased` in `CHANGELOG.md`. commitizen would replace that section with the generated entry, so before bumping, the workflow moves its body into `.github/release-notes/<next tag>.md`, below any curated notes already there, and removes the section. The new entry then carries the curated notes, the hand-written notes, and the generated sections, and so does the GitHub Release. The step fails before bumping if that text contains a Jinja delimiter (`{{`, `{%`, `{#`) or if the next tag cannot be determined. An empty or absent section is left alone.
+
 To cut 4.0.0 once v4 is on `main`: set `RELEASE_LINE` to `auto` in the change that lands v4, then run the workflow. Once the version is 4.x, `3.x` refuses to run, so a setting left at `3.x` fails loudly rather than capping 4.x.
 
 Preview either line locally:
