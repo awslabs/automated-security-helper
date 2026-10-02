@@ -775,13 +775,14 @@ jobs:
           python-version: "3.12"
           install-ash: "false"
       - name: Install dependencies
-        run: uv sync --extra cdk
+        run: uv sync --extra cdk --extra symbols
       # ASH_REQUIRE_CDK_EXTRA turns a missing cdk extra into a hard failure rather than a
       # skip, so this job cannot quietly stop testing the cdk-nag path if the install above
-      # changes.
+      # changes. ASH_REQUIRE_SYMBOLS_EXTRA does the same for the symbol-suppression scan.
       - name: Run the integration suite
         env:
           ASH_REQUIRE_CDK_EXTRA: "1"
+          ASH_REQUIRE_SYMBOLS_EXTRA: "1"
         run: |
           uv run pytest \
             tests/integration \

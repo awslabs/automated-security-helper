@@ -15,7 +15,7 @@ Key differences:
 |-------------|------------------------------|-------------------------------------------------|
 | Scope       | Entire files/directories     | Specific findings                               |
 | Visibility  | Files not scanned at all     | Findings still visible but marked as suppressed |
-| Granularity | File-level only              | Rule ID, file path, line number, and package    |
+| Granularity | File-level only              | Rule ID, file path, line number, package, symbol |
 | Tracking    | No tracking of ignored files | Suppressed findings are tracked and reported    |
 | Expiration  | No expiration mechanism      | Can set expiration dates                        |
 
@@ -52,6 +52,7 @@ Each suppression rule can include the following properties:
 | `package_name`    | No  | Only suppress findings about this package (dependency scanners) |
 | `package_version` | No  | Only suppress findings about this installed version of the package |
 | `package_path`    | No  | Only suppress findings about the package copy installed at this path |
+| `symbol`          | No  | Only suppress findings inside the function or class with this qualified name |
 
 ### Matching Rules
 
@@ -59,6 +60,7 @@ Each suppression rule can include the following properties:
 - **File Path**: Supports glob patterns (e.g., `src/*.js`, `**/*.py`)
 - **Line Range**: If specified, only findings within this line range will be suppressed
 - **Package fields**: If specified, only findings about that package copy will be suppressed. See [Suppressing one package copy](#suppressing-one-package-copy).
+- **Symbol**: If specified, only findings inside that function, method or class will be suppressed, wherever it sits in the file. See [Suppressing by symbol](#suppressing-by-symbol).
 
 ## Suppressing one package copy
 
@@ -145,6 +147,127 @@ Known limits:
   package fields, which is broader. Make sure every environment that reads the
   config runs a version that supports them.
 
+## Suppressing by symbol
+
+A suppression with `line_start` and `line_end` covers whatever is on those
+lines. Add a line above them and it covers the wrong code. `symbol` names a
+definition instead, so the suppression follows the code when it moves within
+the file, and across files when `path` is a glob.
+
+```yaml
+suppressions:
+  - rule_id: 'B602'
+    path: 'src/deploy.py'
+    symbol: 'Deployer.run_hook'
+    reason: 'hook command comes from the signed manifest, never from input'
+```
+
+This suppresses B602 findings in `src/deploy.py` only when the finding's lines
+are inside the `run_hook` method of class `Deployer`. A B602 finding in another
+method of `Deployer`, or at module level, is still reported.
+
+### Installing the extra
+
+Symbol suppressions parse source files with
+[tree-sitter](https://tree-sitter.github.io/), which ASH installs as an optional
+extra:
+
+```bash
+pip install "automated-security-helper[symbols]"
+# or
+uv tool install "automated-security-helper[symbols]"
+```
+
+The ASH container image includes it. Without it, an entry that sets `symbol`
+matches nothing: the findings it names stay visible, the scan logs a warning
+naming the missing extra, the entry shows up in the unused-suppressions report,
+and `ash config lint` warns about it.
+
+### Supported languages
+
+| Language   | Extensions                      | Definitions that have a name |
+|------------|---------------------------------|------------------------------|
+| Python     | `.py`, `.pyi`                   | `def`, `async def`, `class` |
+| JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs`   | function and class declarations, class methods and fields, `const f = () => ...` and other functions or classes assigned to a variable |
+| TypeScript | `.ts`, `.mts`, `.cts`, `.tsx`   | as JavaScript, plus abstract classes, interfaces, enums, namespaces, overload signatures and method signatures |
+| Java       | `.java`                         | classes, interfaces, enums, records, annotation types, methods and constructors |
+
+A file with any other extension can't be resolved, so a symbol entry never
+matches in it.
+
+### How names are written
+
+A qualified name is the chain of definition names from the top of the file down
+to the symbol, joined with dots:
+
+- `module_function`: a function at the top of a file.
+- `MyClass.my_method`: a method.
+- `Outer.Inner.method`: a method of a nested class.
+- `outer_function.inner_function`: a function defined inside another one.
+
+Names are exact and case-sensitive. There are no wildcards and no suffix
+matching, so `my_method` alone names only a top-level `my_method`, never
+`MyClass.my_method`. Only definitions add to the name. A function defined inside
+an `if` or `try` block at module level is just `name`. Python's `<locals>`
+marker is not part of it.
+
+A `symbol` that isn't a dotted list of identifiers, such as
+`MyClass.my_method()` or `MyClass::my_method`, is an error in `ash config lint`,
+and a scan refuses to load a config that contains one.
+
+### What counts as inside
+
+- A finding matches when every line it reports, from its start line to its end
+  line, is between the symbol's first and last line. A finding that starts
+  inside the symbol and ends after it doesn't match.
+- The first and last lines count. Decorators and Java annotations are part of
+  the symbol, and so is `export` in front of a JavaScript or TypeScript
+  declaration, so a finding reported on a decorator line is inside.
+- A symbol contains everything nested in it. `MyClass` covers findings in all of
+  its methods.
+- When several definitions share a name, the name covers all of them. That
+  includes a Python property's getter and setter, `typing.overload` stubs,
+  Java and TypeScript overloads, and a function defined twice in one file.
+- A finding with no line number never matches.
+- `symbol` combines with every other field: `rule_id`, `path`, the line range,
+  the package fields and `expiration` all still have to match.
+
+### When ASH can't find the span
+
+In each of these cases the entry doesn't match in that file, the finding stays
+visible, and the scan logs a warning that names the file and the reason:
+
+- the `symbols` extra is not installed;
+- the file's extension has no grammar (see the table above);
+- the file can't be read, or resolves to a path outside the scan root;
+- tree-sitter reports a syntax error anywhere in the file. ASH doesn't use a
+  partial parse, because an error can cut a definition short and give it the
+  wrong span.
+
+A symbol that no longer exists in the file matches nothing and is listed in the
+unused-suppressions report, the same as an entry for a deleted file.
+
+Line endings don't matter: LF, CRLF and bare CR files give the same spans. A file
+that isn't valid UTF-8 still parses when its identifiers are ASCII, as with a
+Latin-1 Python file whose non-ASCII text is all in strings and comments. A
+UTF-16 file doesn't parse.
+
+ASH parses a file only when a symbol entry has matched a finding in it on every
+other field, and parses it once per scan however many findings it has.
+
+Known limits:
+
+- A JavaScript method in an object literal (`const api = { handle() {} }`) has
+  no qualified name, because neither `api` nor `handle` is a class or function
+  definition. Computed and string-named methods (`[Symbol.iterator]()`,
+  `'name'()`) have none either.
+- Anonymous definitions, such as `export default class {}`, add no segment;
+  their methods are named as if they were at the enclosing level.
+- ASH versions without `symbol` ignore unknown suppression keys, so an older
+  ASH reading a symbol-scoped entry applies it to the whole file, which is
+  broader. Make sure every environment that reads the config runs a version
+  that supports it.
+
 ## Examples
 
 ### Suppress a Specific Rule in a File
@@ -216,7 +339,7 @@ This helps ensure that temporary exceptions don't become permanent security gaps
 
 1. **Always provide a reason**: Document why the finding is being suppressed
 2. **Use expiration dates**: Set an expiration date for temporary suppressions
-3. **Be specific**: Use line numbers when possible to limit the scope of suppressions
+3. **Be specific**: Use `symbol`, or line numbers, to limit the scope of suppressions. A symbol keeps pointing at the same code when lines move
 4. **Regular review**: Periodically review suppressions to ensure they're still valid
 5. **Document approvals**: Include reference to security review or approval in the reason
 
@@ -286,7 +409,7 @@ For each unused suppression, determine the appropriate action:
 
 1. **File no longer exists**: Remove the suppression from your configuration
 2. **Finding was fixed**: Remove the suppression as it's no longer needed
-3. **Path/rule/line mismatch**: Update the suppression to match the current code structure
+3. **Path/rule/line/symbol mismatch**: Update the suppression to match the current code structure. An entry whose `symbol` was renamed or removed lands here
 4. **Still needed**: Verify the suppression is correctly configured (check path, rule_id, line numbers)
 
 Example cleanup workflow:
