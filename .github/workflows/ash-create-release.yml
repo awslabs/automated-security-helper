@@ -2,6 +2,31 @@ name: ASH - Create Release
 
 on:
   workflow_dispatch:
+    inputs:
+      # main carries feat! commits (#640, #696) whose changes ship as 3.x by
+      # maintainer decision: 4.0.0 is reserved for the v4 packaging work. Left to
+      # itself, commitizen reads those commits and bumps 3.7.0 to 4.0.0.
+      #
+      # `3.x` keeps the release on the 3.x line. When commitizen detects a MAJOR
+      # increment it is capped to MINOR with `cz bump --increment MINOR`, and the
+      # run logs a warning naming every breaking commit it overrode. A PATCH or
+      # MINOR increment passes through untouched. The commits themselves are never
+      # rewritten, so their BREAKING CHANGE notes still render in CHANGELOG.md.
+      #
+      # `auto` is commitizen's own semver: a breaking commit produces a major.
+      #
+      # The cap is bounded. `3.x` refuses to run once the current version is not
+      # 3.x, so it cannot hold a future line back by accident, and after a bump it
+      # fails the job if the new version left 3.x. To cut 4.0.0 once v4 is on
+      # main, change the default below to `auto` in the change that lands v4, or
+      # dispatch with `release-line: auto`. See DEVELOPMENT.md "Releasing".
+      release-line:
+        description: "3.x caps a breaking-change bump to a minor; auto lets commitizen pick (a breaking change makes a major)"
+        type: choice
+        options:
+          - "3.x"
+          - "auto"
+        default: "3.x"
 
 permissions:
   contents: write
@@ -98,10 +123,89 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+      # Decides whether commitizen's own increment is used or capped, and says so
+      # in the log either way. Exercised end to end, against a real commitizen in
+      # a scratch repository, by tests/unit/test_release_line_workflow.py.
+      - name: Resolve release line
+        id: line
+        env:
+          RELEASE_LINE: ${{ inputs.release-line }}
+        run: |
+          OLD_VERSION=$(uv run cz version --project)
+          OLD_MAJOR="${OLD_VERSION%%.*}"
+
+          case "$RELEASE_LINE" in
+            auto)
+              echo "::notice::release-line is auto: commitizen picks the increment, so a breaking change produces a major release."
+              echo "increment=" >> "$GITHUB_OUTPUT"
+              echo "line_major=" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+            3.x)
+              LINE_MAJOR=3
+              ;;
+            *)
+              echo "::error::Unknown release-line '${RELEASE_LINE}'. Expected 3.x or auto."
+              exit 1
+              ;;
+          esac
+
+          if [[ "$OLD_MAJOR" != "$LINE_MAJOR" ]]; then
+            echo "::error::release-line is ${RELEASE_LINE}, but the current version is ${OLD_VERSION}. The cap only applies while the project is on ${LINE_MAJOR}.x; dispatch with release-line auto."
+            exit 1
+          fi
+          echo "line_major=${LINE_MAJOR}" >> "$GITHUB_OUTPUT"
+
+          # A dry run reports the increment commitizen would choose without
+          # touching the tree. If it fails (for example, nothing to bump), no
+          # override is needed and the real bump below reports the same thing.
+          DETECTED=""
+          if DRY_RUN=$(uv run cz bump --dry-run --yes 2>&1); then
+            DETECTED=$(printf '%s\n' "$DRY_RUN" | sed -n 's/^increment detected: //p' | head -n 1)
+          fi
+          echo "commitizen would apply: ${DETECTED:-no increment}"
+
+          if [[ "$DETECTED" != "MAJOR" ]]; then
+            echo "::notice::release-line is ${RELEASE_LINE} and commitizen detected ${DETECTED:-no} increment, so no override is applied."
+            echo "increment=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Name the commits that asked for the major, using the same markers
+          # commitizen reads: a `!` before the colon, or a BREAKING CHANGE footer.
+          LAST_TAG="v${OLD_VERSION}"
+          if ! git rev-parse -q --verify "refs/tags/${LAST_TAG}" >/dev/null; then
+            echo "::error::Tag ${LAST_TAG} for the current version does not exist, so the breaking commits cannot be listed. Refusing to override a major bump without naming what it overrides."
+            exit 1
+          fi
+          BREAKING=""
+          for SHA in $(git rev-list "${LAST_TAG}..HEAD"); do
+            SUBJECT=$(git log -1 --format=%s "$SHA")
+            if [[ "$SUBJECT" =~ ^[A-Za-z]+(\([^\)]*\))?!: ]] \
+              || git log -1 --format=%b "$SHA" | grep -qE '^BREAKING[ -]CHANGE:'; then
+              BREAKING+="$(git log -1 --format='%h %s' "$SHA")"$'\n'
+            fi
+          done
+
+          COUNT=$(printf '%s' "$BREAKING" | grep -c . || true)
+          echo "::warning::release-line is ${RELEASE_LINE}: overriding commitizen's MAJOR bump to MINOR. ${COUNT} commit(s) since ${LAST_TAG} are marked breaking and will ship in a ${LINE_MAJOR}.x minor release; their notes still render in CHANGELOG.md."
+          echo "Breaking commits overridden:"
+          printf '%s' "$BREAKING" | sed 's/^/  /'
+          {
+            echo "### Release line ${RELEASE_LINE}: major bump overridden to minor"
+            echo
+            echo "commitizen detected a MAJOR increment from these commits since \`${LAST_TAG}\`:"
+            echo
+            printf '%s' "$BREAKING" | sed 's/^/- /'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "increment=MINOR" >> "$GITHUB_OUTPUT"
+
       - name: Determine bump and create release artifacts
         id: bump
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INCREMENT: ${{ steps.line.outputs.increment }}
+          LINE_MAJOR: ${{ steps.line.outputs.line_major }}
         run: |
           OLD_VERSION=$(uv run cz version --project)
           echo "old_version=$OLD_VERSION" >> "$GITHUB_OUTPUT"
@@ -124,9 +228,20 @@ jobs:
           # unmaintained. tests/unit/test_agent_plugin_ash_version.py asserts
           # every configured path exists, which is the half of the problem this
           # flag cannot see.
-          uv run cz bump --changelog --yes --check-consistency
+          #
+          # INCREMENT is empty unless the release line capped a major (see the
+          # step above), in which case it is MINOR.
+          uv run cz bump --changelog --yes --check-consistency ${INCREMENT:+--increment "$INCREMENT"}
           NEW_VERSION=$(uv run cz version --project)
           echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+
+          # The release line's own backstop, independent of how the increment was
+          # chosen. Nothing has been pushed or tagged remotely yet, so failing here
+          # costs a rerun, not a published release.
+          if [[ -n "$LINE_MAJOR" && "${NEW_VERSION%%.*}" != "$LINE_MAJOR" ]]; then
+            echo "::error::release-line ${LINE_MAJOR}.x is selected, but the bump produced ${NEW_VERSION}. Refusing to open a release PR that leaves the ${LINE_MAJOR}.x line."
+            exit 1
+          fi
 
           if [[ "$OLD_VERSION" == "$NEW_VERSION" ]]; then
             echo "::notice::No version bump needed (no conventional commits since last tag)"
@@ -157,7 +272,13 @@ jobs:
           OLD_VERSION: ${{ steps.bump.outputs.old_version }}
           NEW_VERSION: ${{ steps.bump.outputs.new_version }}
           ACTOR: ${{ github.actor }}
+          RELEASE_LINE: ${{ inputs.release-line }}
+          INCREMENT: ${{ steps.line.outputs.increment }}
         run: |
+          BODY="Automated release PR. Merging this will trigger tag creation and GitHub Release publishing."
+          if [[ -n "$INCREMENT" ]]; then
+            BODY+=$'\n\n'"Release line ${RELEASE_LINE}: commitizen detected a major bump from breaking commits, and it was capped to a minor. The workflow run summary lists the commits. Check that CHANGELOG.md calls out each behavior change, because the version number will not."
+          fi
           BRANCH="release/v${NEW_VERSION}"
           git checkout -b "$BRANCH"
           git add -A
@@ -167,6 +288,6 @@ jobs:
 
           gh pr create \
             --title "chore(release): ${OLD_VERSION} -> ${NEW_VERSION}" \
-            --body "Automated release PR. Merging this will trigger tag creation and GitHub Release publishing." \
+            --body "$BODY" \
             --base main \
             --head "$BRANCH"
