@@ -270,6 +270,9 @@ from automated_security_helper.models.workspace import (
     WorkspaceResults,
     workspace_exit_code,
 )
+from automated_security_helper.utils.content_db_staleness import (
+    stale_content_databases,
+)
 from automated_security_helper.utils.get_scan_set import (
     get_changed_files,
     git_repository_root,
@@ -788,7 +791,11 @@ def _scan_one_project(
         output_path=output_path,
         scanners=statuses,
         incomplete_scanners=incomplete,
-        scan_incomplete=bool(gating_incomplete) and fail_on_incomplete,
+        # A stale content database under `content_db_staleness: fail` fails the project
+        # whatever fail_on_incomplete says, matching _compute_exit_code's own arm for it:
+        # `ash --source-dir P` exits 1 on it, so P inside a workspace must not pass.
+        scan_incomplete=(bool(gating_incomplete) and fail_on_incomplete)
+        or bool(stale_content_databases(results, enforced_only=True)),
         ceiling_unreachable_findings=unreachable,
     )
     return _ProjectRun(outcome=outcome, run=run)

@@ -627,6 +627,54 @@ class TestScannerCompleteness:
         assert entry.incomplete_scanners == ["cfn-nag"]
         assert entry.scan_incomplete is True
 
+    @pytest.mark.parametrize(
+        "policy,incomplete,code",
+        [
+            ("fail", True, WorkspaceExitCode.INTERNAL_ERROR),
+            ("warn", False, WorkspaceExitCode.SUCCESS),
+        ],
+    )
+    def test_a_stale_content_database_follows_its_policy_not_the_flag(
+        self, tmp_path, policy, incomplete, code
+    ):
+        """`ash --source-dir P` exits 1 on a stale database; P inside a workspace must too.
+
+        With the completeness gate explicitly off, so only the staleness arm can move it.
+        """
+        from datetime import datetime, timedelta, timezone
+
+        from automated_security_helper.schemas.sarif_schema_model import SarifReport
+        from automated_security_helper.utils import content_db_staleness as staleness
+        from automated_security_helper.utils.content_databases import get
+
+        entry = get("grype-db")
+        now = datetime.now(timezone.utc)
+        record = staleness.ContentDbAgeRecord(
+            name=entry.name,
+            scanner=entry.scanner,
+            built=now - timedelta(days=10),
+            measured_by=entry.age_source,
+            max_age=entry.max_age,
+            measured_at=now,
+            policy=policy,
+            bound_source=entry.bound_source,
+            bound_is_tool_default=entry.bound_is_tool_default,
+            refresh=entry.refresh,
+        )
+        report = SarifReport.model_validate(_sarif(count=0))
+        staleness.attach_records(report, [record])
+
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        FakeOrchestrator.behaviour["api"] = {
+            "sarif": json.loads(
+                report.model_dump_json(by_alias=True, exclude_none=True)
+            ),
+            "scanner_results": {"grype": _scanner("PASSED")},
+        }
+        outcome = _run(tmp_path, plan, fail_on_incomplete_scanners=False)
+        assert outcome.payload.projects[0].scan_incomplete is incomplete
+        assert outcome.exit_code == code
+
     def test_an_error_scanner_stops_a_clean_project_reporting_success(self, tmp_path):
         """ERROR and MISSING are the same news: the scanner did not complete."""
         _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))

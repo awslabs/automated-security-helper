@@ -70,9 +70,15 @@ class TestTheRegistry:
     @pytest.mark.parametrize(
         "name", ["trivy-db", "semgrep-offline-rules", "opengrep-offline-rules"]
     )
-    def test_databases_with_no_enforced_bound_are_not_cacheable(self, name):
+    def test_databases_without_ci_guards_are_not_cacheable(self, name):
+        """Each now declares a max age for the scan-time check, which is not a CI guard.
+
+        The bound decides what a scan accepts. What a CI cache may hand out is decided by
+        the restore and save guards, which exist for grype alone, so a declared bound must
+        not make these cacheable.
+        """
         entry = cdb.get(name)
-        assert entry.max_age is None and not entry.cacheable
+        assert entry.max_age is not None and not entry.cacheable
         with pytest.raises(ValueError):
             cdb.bucket_width(entry)
 
@@ -286,11 +292,19 @@ class TestGrypeIsToldTheDeclaredBound:
         declared = _declared_grype_db_bound({}, config)
         assert declared == {"GRYPE_DB_VALIDATE_AGE": "true"}
 
-    def test_offline_is_unchanged_and_the_gap_is_recorded(self, grype_scanner):
+    def test_offline_still_skips_grypes_check_and_ash_holds_the_bound(
+        self, grype_scanner
+    ):
+        """grype's own check stays off offline (it would try to download); ASH's holds it.
+
+        The gap this used to record is closed by utils/content_db_staleness.py; its tests
+        are in test_content_db_staleness.py, including the 10-day offline case.
+        """
         scanner = grype_scanner(offline=True)
         assert scanner.extra_env.get("GRYPE_DB_VALIDATE_AGE") == "false"
         assert "GRYPE_DB_MAX_ALLOWED_BUILT_AGE" not in scanner.extra_env
-        assert "Where a stale database is used SILENTLY" in REGISTRY.read_text()
+        assert [e.name for e in scanner.content_databases_in_use()] == ["grype-db"]
+        assert "Where a stale database used to be used SILENTLY" in REGISTRY.read_text()
 
 
 class TestTheOfflineValidatorWarnsAgainstTheSameBound:
@@ -488,7 +502,7 @@ class TestTheCommandLineInProcess:
         assert (
             cdb.main(["check-age", "trivy-db", "--built", built, "--for", "use"]) == 1
         )
-        assert "none declared" in capsys.readouterr().out
+        assert "not cacheable in CI" in capsys.readouterr().out
 
     def test_a_timestamp_without_a_zone_is_rejected(self):
         with pytest.raises(ValueError, match="no timezone"):

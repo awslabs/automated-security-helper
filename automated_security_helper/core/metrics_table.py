@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 from rich.text import Text
 from rich.panel import Panel
@@ -200,6 +201,28 @@ def print_coverage_shortfalls(
         )
 
 
+def print_stale_content_databases(
+    asharp_model: AshAggregatedResults, console: Console
+) -> None:
+    """One line per scanner content database past its declared bound, after the table.
+
+    Printed under both policies. Under `content_db_staleness: fail` the scan is about to exit
+    1 and this says why next to the row that otherwise reads PASSED; under `warn` the scan
+    passes and this is the console's only statement that it ran against a stale database.
+    """
+    from automated_security_helper.utils.content_db_staleness import (
+        stale_content_databases,
+    )
+
+    for record in stale_content_databases(asharp_model):
+        label = (
+            "[bold red]Stale content database:[/bold red]"
+            if record.enforced
+            else "[bold yellow]Stale content database (warning):[/bold yellow]"
+        )
+        console.print(f"{label} {escape(record.message())}")
+
+
 def display_metrics_table(
     asharp_model: AshAggregatedResults,
     source_dir: str | Path | None = None,
@@ -296,6 +319,7 @@ def display_metrics_table(
             # guarded block because it writes to the same console: a closed stdout has to be
             # handled identically for both, and a shortfall notice is not worth failing a scan.
             print_coverage_shortfalls(asharp_model, console)
+            print_stale_content_databases(asharp_model, console)
         except (ValueError, OSError, BrokenPipeError) as io_error:
             # stdout/stderr may be closed (e.g., in MCP server context)
             # Log the error but don't fail the scan

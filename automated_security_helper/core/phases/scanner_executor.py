@@ -142,6 +142,25 @@ class ScannerExecutor:
         """Forward to the injected process function, or no-op if not wired."""
         return self._process_fn(results, aggregated_results)
 
+    def _assess_content_databases(self, scanner_plugin: Any, raw_results: Any) -> None:
+        """Hold the scanner's content databases to their declared age bounds.
+
+        Here, at the one place every scanner's result passes through, rather than in each
+        scanner's ``scan()``: trivy overrides ``scan()`` entirely, and a check that lived in
+        the base template would silently skip it. Only a SARIF result is assessed; see
+        ``utils/content_db_staleness.py`` for what is measured and where it is recorded.
+        """
+        from automated_security_helper.schemas.sarif_schema_model import SarifReport
+        from automated_security_helper.utils.content_db_staleness import (
+            assess_scanner,
+            resolve_policy,
+        )
+
+        if not isinstance(raw_results, SarifReport):
+            return
+        policy = resolve_policy(getattr(self.plugin_context, "config", None))
+        assess_scanner(scanner_plugin, raw_results, policy)
+
     # ------------------------------------------------------------------
     # Single-scanner execution
     # ------------------------------------------------------------------
@@ -195,6 +214,7 @@ class ScannerExecutor:
                             target_type=target_type,
                             global_ignore_paths=self._global_ignore_paths,
                         )
+                        self._assess_content_databases(scanner_plugin, raw_results)
                     else:
                         ASH_LOGGER.warning(f"{scanner_config_name} is not enabled!")
                 except Exception as e:

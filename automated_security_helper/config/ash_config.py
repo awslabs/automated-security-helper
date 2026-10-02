@@ -598,6 +598,9 @@ class RuntimeOverridesConfig(BaseModel):
         # Same class of field, same reason: a client that could turn the
         # completeness gate off could make a scan where nothing ran report clean.
         "/fail_on_incomplete_scanners",
+        # And the staleness policy: flipping it to warn would let a scan against an
+        # out-of-date vulnerability database pass.
+        "/content_db_staleness",
         # Suppressions and ignore paths can hide findings outright.
         "/global_settings/ignore_paths",
         "/global_settings/suppressions",
@@ -861,6 +864,24 @@ class AshConfig(BaseModel):
             )
         ),
     ] = False
+
+    content_db_staleness: Annotated[
+        Literal["fail", "warn"],
+        Field(
+            description=(
+                "What a scan does when a scanner's content database (grype's or "
+                "trivy's vulnerability database, the offline semgrep/opengrep "
+                "rulesets) was built longer ago than the bound declared for it in "
+                "automated_security_helper/utils/content_databases.py. 'fail' (the "
+                "default) keeps the scanner's findings and exits 1, naming the "
+                "database, its build time, its age and the bound. 'warn' lets the scan "
+                "pass and records the same warning in the log and in the reports "
+                "(summary, SARIF invocation notifications, flat JSON). The CLI flag "
+                "--allow-stale-content-db sets 'warn' for one scan and takes "
+                "precedence over this value; --no-allow-stale-content-db sets 'fail'."
+            )
+        ),
+    ] = "fail"
 
     ash_plugin_modules: Annotated[
         List[str],

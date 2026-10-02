@@ -1480,6 +1480,14 @@ export TRIVY_OFFLINE_SCAN=true
 ash --scanners trivy-repo
 ```
 
+The copied database has to be current. After the scan ASH reads its `UpdatedAt`
+(from `trivy version --format json`) and exits 1 once it is more than 24 hours old,
+which is trivy's own rule: the published database sets `NextUpdate` 24 hours after
+`UpdatedAt`, and trivy online replaces it after that. Offline, `--skip-db-update`
+bypasses that rule, so ASH applies it instead. Repeat steps 1 and 2 to refresh the
+database, or pass `--allow-stale-content-db` (config: `content_db_staleness: warn`)
+to scan with an older one and have the reports say so.
+
 ### Advanced Suppression Strategies
 
 #### Rule-Based Suppressions
