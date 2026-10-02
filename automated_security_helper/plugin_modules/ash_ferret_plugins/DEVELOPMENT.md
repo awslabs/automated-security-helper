@@ -182,6 +182,7 @@ UNSUPPORTED_FERRET_OPTIONS = {
     # ... more options
 }
 
+
 @model_validator(mode="before")
 @classmethod
 def validate_no_unsupported_options(cls, data: Any) -> Any:
@@ -347,17 +348,21 @@ The tests are organized into classes by functionality:
 def mock_plugin_context(tmp_path):
     """Creates a mock PluginContext with temp directories."""
 
+
 @pytest.fixture
 def default_ferret_config():
     """Returns default FerretScannerConfig."""
+
 
 @pytest.fixture
 def custom_ferret_config():
     """Returns FerretScannerConfig with custom options."""
 
+
 @pytest.fixture
 def mock_sarif_response():
     """Returns a valid SARIF response dict."""
+
 
 @pytest.fixture
 def mock_ferret_config_file(mock_plugin_context):
@@ -407,9 +412,7 @@ When making changes to the plugin:
 2. Add processing in `_process_config_options()`:
    ```python
    if options.new_option:
-       self.args.extra_args.append(
-           ToolExtraArg(key="--new-option", value=None)
-       )
+       self.args.extra_args.append(ToolExtraArg(key="--new-option", value=None))
    ```
 
 3. Add tests in `test_ferret_scanner.py`
@@ -772,6 +775,7 @@ Example skeleton:
 # ----------------------------------------------------------------------------
 # 10. Your new check description
 # ----------------------------------------------------------------------------
+
 
 @check("NEW-CHECK: brief description of what it catches")
 def check_new_thing():

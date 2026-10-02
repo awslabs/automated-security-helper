@@ -18,10 +18,6 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
 )
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
-from automated_security_helper.schemas.sarif_schema_model import (
-    SarifReport,
-)
-from automated_security_helper.utils.get_shortest_name import get_shortest_name
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.uv_tool_runner import get_uv_tool_command
 

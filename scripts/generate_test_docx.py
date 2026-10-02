@@ -86,20 +86,20 @@ LAST_NAMES = [
 
 
 def fake_name():
-    return f"{random.choice(FIRST_NAMES)} {random.choice(LAST_NAMES)}" # nosec B311
+    return f"{random.choice(FIRST_NAMES)} {random.choice(LAST_NAMES)}"  # nosec B311
 
 
 def fake_ssn():
     """Generate a fake SSN (uses 900-999 area numbers which are not assigned)."""
-    area = random.randint(900, 999) # nosec B311
-    group = random.randint(10, 99) # nosec B311
-    serial = random.randint(1000, 9999) # nosec B311
+    area = random.randint(900, 999)  # nosec B311
+    group = random.randint(10, 99)  # nosec B311
+    serial = random.randint(1000, 9999)  # nosec B311
     return f"{area}-{group}-{serial}"
 
 
 def fake_visa():
     """Generate a fake Visa-like number (starts with 4, random digits)."""
-    digits = "4" + "".join(str(random.randint(0, 9)) for _ in range(15)) # nosec B311
+    digits = "4" + "".join(str(random.randint(0, 9)) for _ in range(15))  # nosec B311
     return f"{digits[0:4]}-{digits[4:8]}-{digits[8:12]}-{digits[12:16]}"
 
 
@@ -107,40 +107,40 @@ def fake_mastercard():
     """Generate a fake MasterCard-like number (starts with 5)."""
     digits = (
         "5"
-        + str(random.randint(1, 5)) # nosec B311
-        + "".join(str(random.randint(0, 9)) for _ in range(14)) # nosec B311
+        + str(random.randint(1, 5))  # nosec B311
+        + "".join(str(random.randint(0, 9)) for _ in range(14))  # nosec B311
     )
     return f"{digits[0:4]}-{digits[4:8]}-{digits[8:12]}-{digits[12:16]}"
 
 
 def fake_amex():
     """Generate a fake AMEX-like number (starts with 37)."""
-    digits = "37" + "".join(str(random.randint(0, 9)) for _ in range(13)) # nosec B311
+    digits = "37" + "".join(str(random.randint(0, 9)) for _ in range(13))  # nosec B311
     return f"{digits[0:4]}-{digits[4:10]}-{digits[10:15]}"
 
 
 def fake_discover():
     """Generate a fake Discover-like number (starts with 6011, random digits)."""
-    digits = "6011" + "".join(str(random.randint(0, 9)) for _ in range(12)) # nosec B311
+    digits = "6011" + "".join(str(random.randint(0, 9)) for _ in range(12))  # nosec B311
     return f"{digits[0:4]} {digits[4:8]} {digits[8:12]} {digits[12:16]}"
 
 
 def fake_email(name):
     first, last = name.lower().split()
     domains = ["example.com", "test.org", "sample.net", "demo.io"]
-    return f"{first}.{last}@{random.choice(domains)}" # nosec B311
+    return f"{first}.{last}@{random.choice(domains)}"  # nosec B311
 
 
 def fake_phone():
-    area = random.randint(200, 999) # nosec B311
-    prefix = random.randint(200, 999) # nosec B311
-    line = random.randint(1000, 9999) # nosec B311
+    area = random.randint(200, 999)  # nosec B311
+    prefix = random.randint(200, 999)  # nosec B311
+    line = random.randint(1000, 9999)  # nosec B311
     return f"({area}) {prefix}-{line}"
 
 
 def fake_passport():
-    letter = random.choice(string.ascii_uppercase) # nosec B311
-    digits = "".join(str(random.randint(0, 9)) for _ in range(8)) # nosec B311
+    letter = random.choice(string.ascii_uppercase)  # nosec B311
+    digits = "".join(str(random.randint(0, 9)) for _ in range(8))  # nosec B311
     return f"{letter}{digits}"
 
 
@@ -206,18 +206,30 @@ def main():
 
     # Free-text narratives with embedded PII (generated to avoid hardcoded secrets)
     narratives = [
-        f"Customer {fake_name()} (SSN: {fake_ssn()}) reported unauthorized charges "
-        f"on Visa card {fake_visa()}. Contact at {fake_phone()}.",
-        f"Employee {fake_name()} submitted expense report. Corporate MasterCard "
-        f"{fake_mastercard()} used for travel. Phone: {fake_phone()}.",
-        f"Account holder {fake_name()} requested replacement AMEX card {fake_amex()}. "
-        f"Verified identity with SSN {fake_ssn()} and passport {fake_passport()}.",
-        f"HR record for {fake_name()}: SSN {fake_ssn()}, phone {fake_phone()}. "
-        f"Travel document: passport {fake_passport()}. Company Visa: {fake_visa()}.",
-        f"Please charge Visa card {fake_visa()} for the full amount. "
-        f"The MasterCard ending in 3020 ({fake_mastercard()}) has been approved.",
-        f"AMEX: {fake_amex()} - Expiration: 12/25. "
-        f"Discover card {fake_discover()} authorized for recurring payments.",
+        (
+            f"Customer {fake_name()} (SSN: {fake_ssn()}) reported unauthorized charges "
+            f"on Visa card {fake_visa()}. Contact at {fake_phone()}."
+        ),
+        (
+            f"Employee {fake_name()} submitted expense report. Corporate MasterCard "
+            f"{fake_mastercard()} used for travel. Phone: {fake_phone()}."
+        ),
+        (
+            f"Account holder {fake_name()} requested replacement AMEX card {fake_amex()}. "
+            f"Verified identity with SSN {fake_ssn()} and passport {fake_passport()}."
+        ),
+        (
+            f"HR record for {fake_name()}: SSN {fake_ssn()}, phone {fake_phone()}. "
+            f"Travel document: passport {fake_passport()}. Company Visa: {fake_visa()}."
+        ),
+        (
+            f"Please charge Visa card {fake_visa()} for the full amount. "
+            f"The MasterCard ending in 3020 ({fake_mastercard()}) has been approved."
+        ),
+        (
+            f"AMEX: {fake_amex()} - Expiration: 12/25. "
+            f"Discover card {fake_discover()} authorized for recurring payments."
+        ),
     ]
     for n in narratives:
         doc.add_paragraph(n)

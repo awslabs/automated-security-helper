@@ -235,10 +235,35 @@ def cdk_doubles(monkeypatch):
         def __init__(self):
             self.children = []
 
+    class DefaultStackSynthesizer:
+        """Records only the flag the wrapper sets.
+
+        The real class emits a ``BootstrapVersion`` parameter and a
+        ``CheckBootstrapVersion`` rule into every synthesized template unless
+        ``generate_bootstrap_version_rule`` is False. A template that was itself
+        produced by ``cdk synth`` already carries both, so re-including one collided
+        with ``SectionAlreadyContains: section 'Parameters' already contains
+        'BootstrapVersion'`` -- raised inside ``app.synth()``, which the wrapper
+        swallows because a raise there is how cdk-nag reports violations. No report
+        was written and the template read as "produced no validation report".
+        Recording the flag is how a unit test can see the fix without synthesizing.
+        """
+
+        def __init__(self, *, generate_bootstrap_version_rule=True, **kwargs):
+            self.generate_bootstrap_version_rule = generate_bootstrap_version_rule
+            self.kwargs = kwargs
+
     class Stack(Construct):
-        def __init__(self, scope=None, id=None):
+        # `id` mirrors aws_cdk.Stack(scope, id), the signature this fake stands in
+        # for. Renaming it would make the fake diverge from the real constructor.
+        #
+        # `synthesizer` is keyword-only on the real Stack and is passed by keyword,
+        # so it is declared that way here. Defaulted rather than required so the
+        # fake still stands in for a plain Stack construction.
+        def __init__(self, scope=None, id=None, *, synthesizer=None):  # noqa: A002
             self.scope = scope
             self.id = id
+            self.synthesizer = synthesizer
             self.node = _Node()
             # Kept so a test can assert it stayed EMPTY. Under 2.x the packs landed here; if
             # they land here again the plugins never register and no rule is evaluated.
@@ -246,7 +271,10 @@ def cdk_doubles(monkeypatch):
             recorder.stacks.append(self)
 
     class CfnInclude:
-        def __init__(self, scope, id, template_file):
+        # `id` is required, not stylistic: the code under test calls
+        # CfnInclude(self, id=logical_id, template_file=...) with id as a KEYWORD,
+        # so renaming this parameter breaks the call this fake is here to receive.
+        def __init__(self, scope, id, template_file):  # noqa: A002
             self.scope = scope
             self.id = id
             self.template_file = template_file
@@ -285,6 +313,7 @@ def cdk_doubles(monkeypatch):
     aws_cdk_mod.App = App
     aws_cdk_mod.Stack = Stack
     aws_cdk_mod.Validations = Validations
+    aws_cdk_mod.DefaultStackSynthesizer = DefaultStackSynthesizer
     # NOTE: no ``Aspects``. Its absence is the tripwire described in the module docstring.
 
     cfn_include_mod = types.ModuleType("aws_cdk.cloudformation_include")
@@ -364,6 +393,42 @@ def test_template_without_resources_returns_none(cdk_doubles, tmp_path, outdir):
 
     assert _run(not_a_template, outdir) is None
     # The wrapper bailed before building an app.
+    assert recorder_is_untouched(cdk_doubles)
+
+
+def test_a_template_the_model_rejects_returns_a_failure_not_a_skip(
+    cdk_doubles, tmp_path, outdir
+):
+    """A Resources mapping ASH cannot model is a fourth ``failure`` state.
+
+    The counterpart to the test above, and the reason the bare-None return needed a
+    companion rather than a wider net. This file is CloudFormation -- Resources holds a
+    mapping -- so cdk-nag was asked to evaluate a real template and evaluated nothing.
+    Returning None here made the scanner take its documented not-a-CloudFormation-file
+    branch, which *decrements* ``targets_attempted``; a scan set in which every template
+    tripped the model therefore ended at zero attempts and reported SKIPPED with exit
+    code 0.
+
+    The resource type here fails the model's own pattern rather than testing a charset
+    question: ``get_model_from_template`` now admits _, @ and - because CloudFormation
+    documents them, so a space is used to get a rejection that is unambiguous.
+    """
+    unmodelable = tmp_path / "unmodelable.yaml"
+    unmodelable.write_text(
+        "Resources:\n  Bad:\n    Type: 'invalid type with spaces'\n", encoding="utf-8"
+    )
+
+    response = _run(unmodelable, outdir)
+
+    assert response is not None, (
+        "a template ASH could not model must not arrive as the not-a-template skip"
+    )
+    assert response.failure is not None
+    assert "could not be modeled" in response.failure
+    # The reason, not just the fact: the scanner writes this string into its error list
+    # and that is the operator's only record of why the template went unevaluated.
+    assert "ValidationError" in response.failure
+    # Nothing was synthesized, so the empty results say nothing about compliance.
     assert recorder_is_untouched(cdk_doubles)
 
 
@@ -1179,6 +1244,48 @@ def test_default_nag_pack_is_aws_solutions_checks(cdk_doubles, template_file, ou
 
 
 # ---------------------------------------------------------------------------
+# The wrapper stack must not emit a bootstrap-version parameter of its own
+# ---------------------------------------------------------------------------
+
+
+def test_the_wrapper_stack_turns_off_the_bootstrap_version_rule(
+    cdk_doubles, template_file, outdir
+):
+    """A CDK-synthesized template could not be scanned at all without this.
+
+    ``DefaultStackSynthesizer`` adds a ``BootstrapVersion`` parameter and a
+    ``CheckBootstrapVersion`` rule to every stack it synthesizes. A template produced by
+    ``cdk synth`` already carries both, so ``CfnInclude``-ing one into a fresh stack raised
+    ``SectionAlreadyContains: section 'Parameters' already contains 'BootstrapVersion'``.
+
+    The raise landed inside ``app.synth()``, which this wrapper catches and logs at DEBUG --
+    correctly, because cdk-nag reports violations BY raising there. So the collision was
+    swallowed, no ``validation-report.json`` was written, and the only trace left was "cdk-nag
+    produced no validation report". Measured on this repository: two of eleven cdk-nag targets,
+    both CDK-synthesized fixtures, half of the reported incompleteness. With the rule off they
+    evaluate and yield 30 violations each across five packs.
+
+    Asserted on the construction rather than on a synthesized template because the doubles here
+    do not implement CloudFormation section merging -- the real collision was measured end to
+    end instead. What this pins is that the wrapper keeps asking for it, which is the part a
+    later edit could quietly drop.
+    """
+    _run(template_file, outdir, nag_packs=["AwsSolutionsChecks"])
+
+    assert cdk_doubles.stacks, "the wrapper built no stack"
+    synthesizer = cdk_doubles.stacks[-1].synthesizer
+    assert synthesizer is not None, (
+        "WrapperStack must pass an explicit synthesizer; with the default one a template that "
+        "was itself produced by `cdk synth` collides on BootstrapVersion and is never evaluated"
+    )
+    assert synthesizer.generate_bootstrap_version_rule is False, (
+        "generate_bootstrap_version_rule must be False. The bootstrap check is deploy-time "
+        "machinery and this wrapper never deploys; leaving it on re-adds the parameter that "
+        "collides with an already-synthesized template's own copy"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Process-state hygiene: env vars and stderr must not leak
 # ---------------------------------------------------------------------------
 
@@ -1256,7 +1363,10 @@ class _FailingShortestName:
         self._exc = exc
         self.calls = 0
 
-    def __call__(self, input):
+    # `input` is required: this stands in for get_shortest_name, which the code
+    # under test calls as get_shortest_name(input=...). See the A002 note in
+    # utils/get_shortest_name.py for why that keyword cannot be renamed.
+    def __call__(self, input):  # noqa: A002
         self.calls += 1
         if self.calls <= self._failures:
             raise self._exc

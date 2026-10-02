@@ -31,6 +31,7 @@ from automated_security_helper.workspace.aggregation import (
     count_actionable_results,
     has_finding_at_min_severity,
     incomplete_scanners_for_project,
+    no_scanner_ran_for_project,
     project_relative_uri,
     project_root_uri,
     rebase_run_for_project,
@@ -753,6 +754,107 @@ class TestCompletenessParityWithComputeExitCode:
         claim about the same event.
         """
         assert incomplete_scanners_for_project(None) == []
+        assert no_scanner_ran_for_project(None) is False
+
+    def test_a_project_whose_every_scanner_was_skipped_is_seen_by_both(self, tmp_path):
+        """The set-level half, which the per-entry helper structurally cannot see.
+
+        ``incomplete_scanners`` tolerates SKIPPED one entry at a time, because that
+        is how an exclusion and another shard's ownership are recorded. So a project
+        in which *every* entry is SKIPPED clears that pass having measured nothing,
+        and before ``no_scanner_ran_for_project`` existed the workspace layer had no
+        second question to ask: the project reported zero findings and COMPLETED
+        while ``ash --source-dir P`` on the same project exited 1.
+
+        Asserted through the same agreement the rest of this class uses, so a
+        workspace-side derivation that stopped answering cannot keep this passing.
+        """
+        statuses = {"bandit": ("SKIPPED", True, True)}
+        standalone = self._standalone_exit_code(tmp_path, statuses)
+        model = self._model(statuses)
+
+        assert standalone == 1
+        assert incomplete_scanners_for_project(model) == []
+        assert no_scanner_ran_for_project(model) is True
+
+    def test_a_project_with_one_scanner_that_ran_is_clean_to_both(self, tmp_path):
+        """The control for the case above, at the boundary that decides it.
+
+        One PASSED entry beside the SKIPPED ones is the difference between a scan
+        that measured nothing and a scan that measured something and was narrowed.
+        Without this the set-level gate could be stuck at always-fail and the test
+        above would still pass.
+        """
+        statuses = {
+            "bandit": ("PASSED", False, True),
+            "cfn-nag": ("SKIPPED", True, True),
+        }
+        standalone = self._standalone_exit_code(tmp_path, statuses)
+        model = self._model(statuses)
+
+        assert standalone == 0
+        assert incomplete_scanners_for_project(model) == []
+        assert no_scanner_ran_for_project(model) is False
+
+    def test_an_empty_scanner_set_with_no_roster_is_not_read_as_nothing_having_run(
+        self, tmp_path
+    ):
+        """A results file recording no scanners *and no roster* is a different claim.
+
+        ``--phases convert`` legitimately produces one, and ``no_scanner_ran``
+        returns False for it so that a phase-limited run does not become an error.
+        Pinned here because the workspace helper delegates, and a mirrored copy that
+        tested emptiness instead would fail every convert-only project in a
+        workspace.
+
+        The absent roster is what makes this benign, and it is why the assertion
+        cannot stop at emptiness -- see the test below.
+        """
+        model = self._model({})
+        assert not getattr(model.metadata, "expected_scanners", None), (
+            "premise: this model records no roster, which is what the benign "
+            "reading depends on"
+        )
+
+        assert no_scanner_ran_for_project(model) is False
+
+    def test_an_empty_scanner_set_with_a_roster_is_seen_by_both(self, tmp_path):
+        """The state an empty set alone cannot distinguish.
+
+        ``no_scanner_ran`` gained a second condition and a second parameter for
+        this: an empty scanner set covers both "the scan phase was not requested",
+        which is benign, and "the scan phase ran and had nothing to run", which is
+        the silent zero. ``metadata.expected_scanners`` separates them, because
+        ``ScanPhase`` is what records it -- a roster means the phase ran.
+
+        The workspace helper called the delegate with one argument, so it answered
+        the benign reading for both states while ``ash --source-dir P`` on the same
+        project answered 1. That is the same divergence this class was opened for,
+        reappearing through a caller left on the older signature.
+        """
+        statuses: dict = {}
+        model = self._model(statuses)
+        model.metadata.expected_scanners = ["bandit", "cfn-nag"]
+
+        standalone_model = self._model(statuses)
+        standalone_model.metadata.expected_scanners = ["bandit", "cfn-nag"]
+        from automated_security_helper.interactions.run_ash_scan import (
+            ScanOptions,
+            _compute_exit_code,
+        )
+
+        standalone = _compute_exit_code(
+            standalone_model,
+            ScanOptions(
+                source_dir=tmp_path,
+                output_dir=tmp_path,
+                fail_on_incomplete_scanners=True,
+            ),
+            None,
+        )
+
+        assert standalone == 1
+        assert no_scanner_ran_for_project(model) is True
 
 
 class TestAggregatorOutput:

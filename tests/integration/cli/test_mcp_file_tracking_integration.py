@@ -88,7 +88,12 @@ async def test_file_based_tracking_workflow(test_directory, mock_scan_process):
 
     # Create output directory structure to simulate scan progress
     output_dir = Path(entry.output_directory)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # Blocking I/O in an async test body. Deferred, not fixed: this is fixture
+    # setup, so stalling the test's own event loop has no effect on what is being
+    # asserted, and wrapping it in asyncio.to_thread would add concurrency noise to
+    # code whose job is to be obviously correct. Tracked with the source-side
+    # ASYNC230/ASYNC240 sites.
+    output_dir.mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240
 
     scanners_dir = output_dir / "scanners"
     scanners_dir.mkdir(exist_ok=True)

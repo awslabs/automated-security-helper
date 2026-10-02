@@ -141,6 +141,13 @@ def test_a_failed_changed_files_sarif_rewrite_leaves_the_previous_sarif_intact(
             "automated_security_helper.core.orchestrator.ASHScanOrchestrator.create",
             return_value=orchestrator,
         ),
+        # The changed-files filter anchors the diff on the repository root and
+        # falls back to a full scan when there is none, which tmp_path is not.
+        # Pinned so the rewrite under test actually runs.
+        patch(
+            "automated_security_helper.utils.get_scan_set.git_repository_root",
+            return_value=tmp_path,
+        ),
         patch(
             "automated_security_helper.utils.get_scan_set.get_changed_files",
             return_value=["a.py"],

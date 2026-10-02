@@ -254,7 +254,5 @@ class TestAddSuppressionToConfig:
 
         # Must parse, and the reason must survive verbatim.
         data = yaml.safe_load(config_path.read_text())
-        entries = {
-            s["rule_id"]: s for s in data["global_settings"]["suppressions"]
-        }
+        entries = {s["rule_id"]: s for s in data["global_settings"]["suppressions"]}
         assert entries["Q-1"]["reason"] == reason

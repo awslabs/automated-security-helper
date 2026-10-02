@@ -12,31 +12,37 @@ and two tables inside ``run_ash_scan._compute_exit_code``. A finding could
 therefore be counted as gate-failing by the exit code and reported as a
 passing test in the same run.
 
-Phase 0 unifies TWO of those four. ``determine_status`` and the junitxml
-reporter now both call this module. The two tables inside
-``_compute_exit_code`` -- ``_THRESHOLD_QUALIFYING_LEVELS`` at
-run_ash_scan.py:528 and the rank pair at run_ash_scan.py:538-543 -- are still
-inline and are NOT consumed from here, so this is not yet the single source of
-truth for the whole codebase. Converting them means touching the exit-code
-path, which is out of scope for a phase that ships no user-visible change.
+``determine_status``, the junitxml reporter and
+``ScannerStatisticsCalculator.calculate_actionable_count`` all call this module.
+The two tables inside ``_compute_exit_code`` -- ``_THRESHOLD_QUALIFYING_LEVELS``
+and the severity-rank pair beside it -- are still inline and are NOT consumed
+from here, so this is not yet the single source of truth for the whole codebase.
 
-The remaining two agree with this module for all five real threshold values,
-which is why nothing is currently broken. They diverge only off-table, and both
-divergences are latent because ``global_settings.severity_threshold`` is a
-``Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"]`` that cannot hold an
-off-table value:
+Those two agree with this module for all five real threshold values, and diverge
+off-table: an unrecognised threshold gates ``{error}`` here (CRITICAL, matching
+the historical ``determine_status`` cascade) but ``{"error", "warning"}`` and
+rank ``.get(..., 2)`` there -- MEDIUM.
 
-* An unrecognised threshold gates ``{error}`` here (CRITICAL, matching the
-  historical ``determine_status`` cascade) but ``{"error", "warning"}`` at
-  run_ash_scan.py:536, and rank 4 here against ``.get(..., 2)`` at
-  run_ash_scan.py:544 -- MEDIUM.
-* run_ash_scan.py:525 calls ``.upper()`` on the configured value; this module is
-  case-sensitive, for the reason in "Failure modes" below.
+An earlier revision of this docstring called those divergences latent, on the
+grounds that ``global_settings.severity_threshold`` is a
+``Literal["ALL", "LOW", "MEDIUM", "HIGH", "CRITICAL"]`` and so cannot hold an
+off-table value. That premise was false, and the field is the reason: its default
+was an unvalidated ``os.environ`` read, and ``pydantic`` does not validate a
+default no caller supplied. With ``ASH_DEFAULT_SEVERITY_LEVEL=INFO`` set,
+``AshConfig().global_settings.severity_threshold`` really was ``"INFO"`` while
+passing the identical value explicitly raised ``ValidationError``. Reproduce
+against a tree predating that fix with::
 
-If either table is ever fed a value from outside that Literal -- a
-workspace-level per-project threshold would do it -- the two paths will disagree
-before anyone notices, because the disagreement is silent: the exit code and the
-report simply describe different runs.
+    ASH_DEFAULT_SEVERITY_LEVEL=INFO uv run python -c "import automated_security_helper.config.ash_config as c; c.AshConfig.model_rebuild(); print(c.AshConfig().global_settings.severity_threshold)"
+
+Two changes now hold the premise up instead of assuming it. ``core.constants``
+normalizes the environment value through :func:`normalize_threshold` before it
+becomes a default, and ``AshConfigGlobalSettingsSection`` sets
+``validate_default=True`` so a future off-table default fails where it is
+written. The remaining off-table routes are a per-scanner
+``options.severity_threshold`` and a workspace-level per-project threshold, so
+the divergence above is still reachable and still worth closing -- what has
+changed is that it can no longer arrive from the environment.
 
 The direction is counter-intuitive: RAISING the threshold LOOSENS the gate
 ------------------------------------------------------------------------
@@ -141,6 +147,32 @@ _SARIF_LEVEL_TO_SEVERITY: Dict[str, str] = {
 
 # A missing or unrecognised level is read as `note`, matching run_ash_scan.
 _DEFAULT_SARIF_LEVEL = "note"
+
+
+def normalize_threshold(value: object) -> Optional[str]:
+    """Upper-case and strip *value* if it names a threshold, else return None.
+
+    The predicate for every boundary where a threshold arrives as free text: an
+    environment variable, a config file, a CLI argument. Returning None rather
+    than a fallback is deliberate -- the caller is the only party that knows what
+    to substitute and whether to warn -- so this function cannot hide the fact
+    that it did not recognise the value.
+
+    Normalising here and not inside :func:`severity_fails_threshold` is the whole
+    design. Threshold matching stays case-sensitive in the comparison (see
+    "Failure modes" above), so upper-casing in one consumer and not another is
+    exactly how the same configured string comes to gate differently in the exit
+    code and the report. Callers normalise once, at the edge, and pass a ladder
+    value inward.
+
+    ``plugin_modules.ash_builtin.reporters.junitxml_reporter._normalized_threshold``
+    is this same predicate, written before this function existed; it is left in
+    place here only because that file is outside this change's scope.
+    """
+    if not value:
+        return None
+    upper = str(value).strip().upper()
+    return upper if upper in SEVERITY_THRESHOLDS else None
 
 
 def _strictness_key(threshold: Optional[str]) -> Tuple[int, str]:

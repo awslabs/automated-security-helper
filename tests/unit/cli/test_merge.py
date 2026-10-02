@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Dict, List, Sequence, Tuple
 
 import pytest
+from pydantic import ValidationError
 from typer.testing import CliRunner
 
 from automated_security_helper.base.plugin_context import PluginContext
@@ -101,6 +102,42 @@ FINDINGS: Dict[str, List[Tuple[str, str]]] = {
 #: ends up in extensions once merging starts -- so the union has to cope with the
 #: same component arriving from several shards with different rules.
 SHARED_COMPONENT = ("ash-core", "ASH core rules", "test")
+
+
+@pytest.fixture
+def capture(caplog):
+    """Route the module's logger at WARNING into caplog.
+
+    ASH's configured handler renders to a console and leaves nothing in
+    ``caplog.records``, so its handlers are swapped for pytest's capture handlers
+    for the duration.
+
+    At module scope rather than on one class because two disclosures are asserted
+    from it now: the scanners no shard intended to run, and the never-attempted
+    orphans ``_verify_scanner_union`` exempts from its refusal. A second copy of
+    this handler swap would be two fixtures that have to stay in step.
+    """
+    import logging
+
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    saved_handlers = ASH_LOGGER.handlers
+    saved_propagate = ASH_LOGGER.propagate
+    capture_handlers = [
+        handler
+        for handler in saved_handlers
+        if isinstance(handler, type(caplog.handler))
+    ]
+    if caplog.handler not in capture_handlers:
+        capture_handlers.append(caplog.handler)
+    ASH_LOGGER.handlers = capture_handlers
+    ASH_LOGGER.propagate = False
+    caplog.set_level(logging.WARNING, logger=ASH_LOGGER.name)
+    try:
+        yield caplog
+    finally:
+        ASH_LOGGER.handlers = saved_handlers
+        ASH_LOGGER.propagate = saved_propagate
 
 
 def _build_config(fail_on_findings=None, suppressions=None):
@@ -638,6 +675,197 @@ class TestCoverageIsRefused:
         with pytest.raises(ShardCoverageError, match=r"no shard was assigned them"):
             merge_shard_results(as_loaded(shards))
 
+    def _orphan_grype_with_status(self, shards, status: str, name: str = "grype"):
+        """Drop grype from every assignment and record *name* under *status* instead.
+
+        The shape a scanner takes when it failed to construct on every executor: the
+        name is absent from ``assigned_scanners`` -- that list is built from
+        ``scanner_instances``, and a class whose constructor raised never becomes an
+        instance -- while a row for it exists in every shard's results. Passing *name*
+        covers the other shape, a plugin module that failed to import, which ScanPhase
+        records under its dotted module path.
+        """
+        for model in shards:
+            assignment = read_shard_assignment(model)
+            assignment.assigned_scanners = [
+                scanner
+                for scanner in assignment.assigned_scanners
+                if scanner != "grype"
+            ]
+            assignment.candidate_scanners = None
+            stamp_shard_assignment(model, assignment)
+            model.scanner_results[name] = ScannerStatusInfo(
+                status=status, excluded=False, dependencies_satisfied=True
+            )
+            model.additional_reports[name] = {
+                "None": {"scanner_name": name, "status": status, "excluded": False}
+            }
+        return shards
+
+    @pytest.mark.parametrize("status", ["ERROR", "MISSING"])
+    def test_a_never_attempted_orphan_is_not_a_shard_coverage_failure(self, status):
+        """The row already says never-attempted, so refusing the merge adds nothing.
+
+        This is the case the scan phase records for a scanner that failed to construct.
+        Before the narrowing it reached ``ShardCoverageError``, which no flag gates and
+        which attributed the loss to a partitioning disagreement that had not happened.
+        The scanner is still reported -- through ``incomplete_scanners`` and
+        ``--fail-on-incomplete-scanners`` -- which is the channel that exists for it.
+        """
+        shards = self._orphan_grype_with_status(build_shards(3), status)
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        assert merged.scanner_results["grype"].status == status, (
+            "exempting the row from the coverage refusal must not drop it: the whole "
+            "point is that it survives to be reported through the gated path"
+        )
+
+    @pytest.mark.parametrize("status", ["ERROR", "MISSING"])
+    def test_an_exempted_orphan_is_named_at_warning(self, status, capture):
+        """The exemption has to leave a trace that no flag can switch off.
+
+        Before the narrowing, an unclaimed ERROR or MISSING row refused the merge
+        whatever flags were passed, because ``_verify_scanner_union`` is called
+        unconditionally. The exemption moves the signal onto
+        ``--fail-on-incomplete-scanners`` -- and ``--no-fail-on-incomplete-scanners``
+        turns that off, taking the refusal and the exit code with it. This line is
+        then the only record that a scanner appeared in the results which no shard
+        was ever assigned, so it is emitted from inside the check rather than left
+        to the gate.
+
+        Asserted on the scanner name and its status, not merely on some warning
+        being present: a message that does not name which scanner it is about
+        cannot be acted on.
+        """
+        shards = self._orphan_grype_with_status(build_shards(3), status)
+
+        merge_shard_results(as_loaded(shards))
+
+        notices = [
+            record.getMessage()
+            for record in capture.records
+            if "no shard was assigned" in record.getMessage()
+        ]
+        assert notices, (
+            f"a {status} scanner appeared in shard results that no shard was "
+            f"assigned, and the merge continued without saying so"
+        )
+        assert any("grype" in message for message in notices), (
+            f"no notice named the scanner: {notices}"
+        )
+        assert any(status in message for message in notices), (
+            f"no notice named the status, so a reader cannot tell why the merge was "
+            f"not refused: {notices}"
+        )
+
+    def test_a_clean_shard_set_is_not_warned_about(self, capture):
+        """The disclosure is conditional. A merge with nothing unclaimed must be
+        quiet, or the line becomes noise and stops being read."""
+        merge_shard_results(as_loaded(build_shards(3)))
+
+        assert [
+            record.getMessage()
+            for record in capture.records
+            if "no shard was assigned" in record.getMessage()
+        ] == []
+
+    def test_a_failed_plugin_module_row_is_not_a_shard_coverage_failure(self):
+        """The other row shape, keyed by a dotted module path.
+
+        A module can never appear in ``assigned_scanners``, so before the narrowing
+        this refused unconditionally rather than only when no shard owned the name. It
+        is the common case of the two, because an import failure is a property of the
+        image rather than of one host.
+
+        Assignments are left INTACT here, unlike the sibling tests. Dropping grype as
+        well made an earlier version of this test pass its module-path assertion and
+        then fail on grype instead -- the refusal named ``grype (PASSED, SKIPPED)``,
+        which is the other scenario entirely. The module path has to be the only
+        unclaimed name for this to be measuring what it says.
+        """
+        module = "automated_security_helper.plugin_modules.ash_builtin.scanners"
+        shards = build_shards(3)
+        for model in shards:
+            model.scanner_results[module] = ScannerStatusInfo(
+                status=ScannerStatus.ERROR, excluded=False, dependencies_satisfied=True
+            )
+            model.additional_reports[module] = {
+                "None": {"scanner_name": module, "status": "ERROR", "excluded": False}
+            }
+
+        merged = merge_shard_results(as_loaded(shards))
+
+        assert merged.scanner_results[module].status == ScannerStatus.ERROR
+
+    @pytest.mark.parametrize("status", ["PASSED", "FAILED", "SKIPPED"])
+    def test_an_orphan_claiming_a_known_outcome_is_still_refused(self, status):
+        """The signal the narrowing must not lose.
+
+        A row asserting its scanner reached a verdict, with no shard owning it, is the
+        original defect: merging adopts that claim and reports a scanner nobody ran as
+        one that ran. SKIPPED is included and is the shape the sibling test above
+        exercises through the legacy path -- it means "not selected here", which
+        merging would read as "deliberately skipped" for a scanner no shard selected
+        anywhere.
+        """
+        shards = self._orphan_grype_with_status(build_shards(3), status)
+
+        with pytest.raises(ShardCoverageError, match=r"no shard was assigned them"):
+            merge_shard_results(as_loaded(shards))
+
+    def test_an_unrecognised_status_cannot_reach_the_union_check_at_all(self):
+        """Why the unknown-status case is defensive rather than load-bearing.
+
+        The exemption is spelled as a denylist of the two never-attempted statuses and
+        not as ``not _completed(entry)``, because that helper returns False for a
+        status it has never heard of -- fail-closed where it is used, fail-OPEN here,
+        where False would mean "exempt". That polarity argument is correct, but it is
+        not what keeps this safe, and the difference is worth recording rather than
+        implying a guard is doing work it is not.
+
+        ``ScannerStatusInfo.status`` is enum-typed, so an unrecognised status is
+        refused at model-validation time -- both when constructing one and when
+        loading a shard written by a newer ASH. It never reaches
+        ``_verify_scanner_union``. The denylist costs nothing and is the right shape if
+        that ever stops being true; today the enum is the guarantee.
+        """
+        with pytest.raises(ValidationError):
+            ScannerStatusInfo(
+                status="QUARANTINED", excluded=False, dependencies_satisfied=True
+            )
+
+    def test_one_shard_claiming_a_verdict_defeats_another_shards_error(self):
+        """Every status a name carries has to qualify, not just one of them.
+
+        A name recorded PASSED by one shard and ERROR by another is the original
+        defect, and taking the ERROR as permission to exempt would hide it.
+        """
+        shards = self._orphan_grype_with_status(build_shards(3), "ERROR")
+        shards[0].scanner_results["grype"] = ScannerStatusInfo(
+            status=ScannerStatus.PASSED, excluded=False, dependencies_satisfied=True
+        )
+
+        with pytest.raises(ShardCoverageError, match=r"no shard was assigned them"):
+            merge_shard_results(as_loaded(shards))
+
+    def test_the_refusal_names_each_orphans_status(self):
+        """The message must not assert a cause it cannot know.
+
+        It read "Every shard excluded these scanners", which is false for a scanner
+        that failed to construct on every executor -- nobody excluded it. Naming the
+        status lets the reader tell the causes apart instead of being sent to look for
+        an ``--exclude-scanners`` setting that does not exist.
+        """
+        shards = self._orphan_grype_with_status(build_shards(3), "SKIPPED")
+
+        with pytest.raises(ShardCoverageError) as excinfo:
+            merge_shard_results(as_loaded(shards))
+
+        message = str(excinfo.value)
+        assert "SKIPPED" in message
+        assert "Every shard excluded these scanners" not in message
+
     def test_executors_resolving_different_scanner_sets_are_refused(self):
         # The disagreement itself, rather than its consequence: one executor was
         # missing a plugin module, so its candidate set is short. Neither shard's
@@ -946,16 +1174,23 @@ class TestExitCode:
         assert _merged_exit_code(merged, tmp_path, "low", True) == 2
 
     def test_min_severity_gates_the_verdict(self, tmp_path):
-        # Parity with `ash scan --min-severity`. The gate in _compute_exit_code
-        # reads the SARIF *level*, not issue_severity, so downgrading every
-        # finding to warning puts them all at medium: actionable against the
-        # config's MEDIUM threshold, but below a critical floor. Without
-        # min_severity reaching _compute_exit_code both floors would answer 2,
-        # and the second answer would be wrong.
+        # Parity with `ash scan --min-severity`. Downgrading every finding to
+        # MEDIUM puts them all above the config's MEDIUM threshold and below a
+        # critical floor. Without min_severity reaching _compute_exit_code both
+        # floors would answer 2, and the second answer would be wrong.
+        #
+        # issue_severity is downgraded alongside the level, and the level alone is
+        # not enough. This used to set only `result.level = "warning"` and lean on
+        # _compute_exit_code's min_severity gate reading the level while ignoring
+        # issue_severity -- which left the fixture's HIGH and CRITICAL severities in
+        # place and made the assertion depend on the one severity resolver in ASH
+        # that disagreed with the others. That resolver now reads issue_severity, so
+        # a fixture that downgrades only the level is no longer downgrading anything.
         shards = build_shards(3)
         for model in shards:
             for result in model.sarif.runs[0].results:
                 result.level = "warning"
+                result.properties.issue_severity = "MEDIUM"
         merged = merge_shard_results(as_loaded(shards))
 
         assert merged.metadata.summary_stats.actionable > 0
@@ -1280,22 +1515,105 @@ class TestMergeCli:
         # reads as a complete scan.
         assert not (tmp_path / "merged" / RESULTS_FILE_NAME).exists()
 
-    def test_the_same_shards_merge_by_default(self, tmp_path):
+    def test_an_output_dir_equal_to_the_cwd_is_relocated(self, tmp_path, monkeypatch):
+        """``ash merge --output-dir .`` must not write over the tree it reports on.
+
+        ``ash scan`` has relocated a colliding ``--output-dir`` since before this
+        command existed, and says so loudly (``cli/scan.py``). ``ash merge`` took the
+        operator's value verbatim and built its ``PluginContext`` with
+        ``source_dir=Path.cwd()``, so the two coincided and ASH wrote its reports
+        into the directory it was treating as the source tree.
+
+        Worse than untidy. ``apply_suppressions_to_sarif`` drops findings whose
+        location resolves inside ``output_dir`` and outside its work directory; with
+        ``output_dir`` equal to ``source_dir``, that is every finding. The merged
+        report came out empty at exit 0, which is what a clean scan looks like.
+        """
+        workdir = tmp_path / "collector"
+        workdir.mkdir()
+        shard_paths = write_shards(tmp_path / "artifacts", build_shards(3))
+        monkeypatch.chdir(workdir)
+
+        args = []
+        for path in shard_paths:
+            args += ["--results", path]
+        args += ["--output-dir", ".", "--output-formats", "sarif"]
+
+        result = self._invoke(args)
+
+        assert result.exit_code == 2, result.output
+        relocated = workdir / ".ash" / "ash_output"
+        assert (relocated / RESULTS_FILE_NAME).is_file(), result.output
+        assert not (workdir / RESULTS_FILE_NAME).exists()
+        assert "output-dir" in result.output
+
+        # The findings survived. Without the relocation the suppression pass would
+        # have excluded every one of them and this would be an empty report at
+        # exit 0.
+        reloaded = AshAggregatedResults.model_validate_json(
+            (relocated / RESULTS_FILE_NAME).read_text(encoding="utf-8")
+        )
+        assert finding_keys(reloaded) == finding_keys(build_unsharded())
+
+    def test_an_output_dir_containing_the_cwd_is_relocated(self, tmp_path, monkeypatch):
+        """Containment, which ``ash scan``'s equality check does not cover.
+
+        ``--output-dir ..`` from a subdirectory reaches the same destructive state
+        without the two paths ever being equal, so the check has to be "equal to or
+        an ancestor of" rather than "equal to".
+        """
+        workdir = tmp_path / "collector" / "nested"
+        workdir.mkdir(parents=True)
+        shard_paths = write_shards(tmp_path / "artifacts", build_shards(3))
+        monkeypatch.chdir(workdir)
+
+        args = []
+        for path in shard_paths:
+            args += ["--results", path]
+        args += ["--output-dir", "..", "--output-formats", "sarif"]
+
+        result = self._invoke(args)
+
+        assert result.exit_code == 2, result.output
+        relocated = tmp_path / "collector" / ".ash" / "ash_output"
+        assert (relocated / RESULTS_FILE_NAME).is_file(), result.output
+        assert not (tmp_path / "collector" / RESULTS_FILE_NAME).exists()
+
+    def test_an_ordinary_output_dir_is_left_alone(self, tmp_path, monkeypatch):
+        """The control. A relocation that always fires would move every merge."""
+        workdir = tmp_path / "collector"
+        workdir.mkdir()
+        shard_paths = write_shards(tmp_path / "artifacts", build_shards(3))
+        monkeypatch.chdir(workdir)
+        output_dir = tmp_path / "merged"
+
+        args = []
+        for path in shard_paths:
+            args += ["--results", path]
+        args += ["--output-dir", str(output_dir), "--output-formats", "sarif"]
+
+        result = self._invoke(args)
+
+        assert result.exit_code == 2, result.output
+        assert (output_dir / RESULTS_FILE_NAME).is_file()
+        assert not (output_dir / ".ash").exists()
+
+    def test_the_same_shards_are_refused_by_default(self, tmp_path):
         """The default half of the pair, through the same CLI path.
 
-        The gate is opt-in, so with no flag the merge succeeds and the other shards'
-        findings decide the verdict -- exit 2 -- while the shard that ran nothing is
-        invisible to it. That is the false green the flag exists to close, and it is
-        recorded here as the current default rather than as a fixed defect, because
-        enabling the gate by default is blocked on this repository being able to pass
-        it: cdk-nag leaves 4 of its 10 targets unevaluated, which reddens every scan
-        leg on every platform.
+        No flag, same shards, same refusal. This test asserted exit 2 and a written
+        artifact while the default was off: the merge succeeded, the other shards'
+        findings decided the verdict, and the shard that had run nothing was
+        invisible to it. Nothing about that outcome was ever correct -- it was
+        recorded as the default rather than as a defect -- and the flag's default
+        moving to on is what closes it. ``--output-formats sarif`` is still passed so
+        that the refusal is shown to happen before any report is written, which is
+        what stops a downstream job reading the artifact instead of the exit code.
 
-        Kept alongside ``test_the_negated_flag_merges_the_same_shards`` even though
-        the two now assert the same outcome. They exercise different inputs -- an
-        absent option versus typer's generated ``--no-`` form -- and only the second
-        would catch a mistake in the negated option's name. If the default is turned
-        on again, this one regains its independent value with no edit.
+        Kept alongside ``test_the_negated_flag_merges_the_same_shards``, which is now
+        the other direction rather than a duplicate: an absent option refuses, and
+        typer's generated ``--no-`` form merges. While both merged, only the second
+        could catch a mistake in the negated option's name.
         """
         shards = build_shards(3)
         _make_shard_contribute_nothing(shards[1])
@@ -1307,9 +1625,9 @@ class TestMergeCli:
 
         result = self._invoke(args)
 
-        assert result.exit_code == 2, result.output
-        assert "completed none" not in result.output
-        assert (tmp_path / "merged" / RESULTS_FILE_NAME).exists()
+        assert result.exit_code == 1, result.output
+        assert "completed none" in result.output
+        assert not (tmp_path / "merged" / RESULTS_FILE_NAME).exists()
 
     def test_the_negated_flag_merges_the_same_shards(self, tmp_path):
         """The opt-out, through typer, so its option name is exercised too.
@@ -1506,9 +1824,111 @@ class TestRequireScannerCompletionResolution:
             shard.ash_config = MagicMock()
             shard.ash_config.fail_on_incomplete_scanners = "false"
 
-        assert _resolve_require_scanner_completion(as_loaded(shards), None) is AshConfig(
-            project_name="x"
-        ).fail_on_incomplete_scanners
+        assert (
+            _resolve_require_scanner_completion(as_loaded(shards), None)
+            is AshConfig(project_name="x").fail_on_incomplete_scanners
+        )
+
+
+class TestScannersNoShardIntendedToRunAreNamed:
+    """A scanner assigned to a shard, selected by none, ran nowhere -- say so.
+
+    ``assigned_scanners`` is taken before the selection filters, so it names
+    scanners the shard never intended to run. Each such scanner is recorded SKIPPED,
+    which ``_completed`` counts as a known outcome, so the merged report presents it
+    as deliberately skipped. Sometimes it was: a config-disabled scanner is skipped
+    on every shard and that is the operator's choice. Sometimes it was not: two jobs
+    given different ``--scanners`` values resolve the same registered set, agree on
+    the candidate set, produce a partition that unions to it, and one of them
+    silently dropped a scanner the other kept.
+
+    The provenance cannot tell those apart -- a shard knows nothing about scanners it
+    does not own -- so this is a disclosure and not a refusal. Refusing would break
+    every merge on a host where a scanner's config disables it, which is the trap
+    narrowing ``assigned_scanners`` would also have walked into.
+    """
+
+    @staticmethod
+    def _select(shards, selections):
+        """Record each shard's intended selection, keyed by shard index."""
+        from automated_security_helper.cli.merge import read_shard_assignment
+
+        for index, selected in selections.items():
+            read_shard_assignment(shards[index]).selected_scanners = list(selected)
+        return shards
+
+    @staticmethod
+    def _notices(capture):
+        return [
+            record.getMessage()
+            for record in capture.records
+            if "no shard intended to run" in record.getMessage()
+        ]
+
+    def test_a_scanner_selected_by_no_shard_is_named(self, capture):
+        from automated_security_helper.cli.merge import merge_shard_results
+
+        shards = build_shards(3)
+        dropped = partition_scanners(SCANNERS, 0, 3)[0]
+        selections = {
+            index: [
+                name
+                for name in partition_scanners(SCANNERS, index, 3)
+                if name != dropped
+            ]
+            for index in range(3)
+        }
+
+        merge_shard_results(as_loaded(self._select(shards, selections)))
+
+        notices = self._notices(capture)
+        assert notices, [r.getMessage() for r in capture.records]
+        assert dropped in notices[0]
+
+    def test_a_fully_selected_set_is_quiet(self, capture):
+        """The control. A notice on every merge is noise, and noise gets filtered."""
+        from automated_security_helper.cli.merge import merge_shard_results
+
+        shards = build_shards(3)
+        selections = {
+            index: partition_scanners(SCANNERS, index, 3) for index in range(3)
+        }
+
+        merge_shard_results(as_loaded(self._select(shards, selections)))
+
+        assert self._notices(capture) == []
+
+    def test_shards_without_the_record_are_quiet(self, capture):
+        """The fixtures and every pre-upgrade results file are in this state.
+
+        With no selection recorded anywhere there is nothing to compare, and
+        inferring a hole from the absence would name every scanner on every merge of
+        an older fan-out's artifacts.
+        """
+        from automated_security_helper.cli.merge import merge_shard_results
+
+        merge_shard_results(as_loaded(build_shards(3)))
+
+        assert self._notices(capture) == []
+
+    def test_the_merge_still_succeeds(self, capture):
+        """A disclosure, not a refusal -- asserted rather than left implied."""
+        from automated_security_helper.cli.merge import merge_shard_results
+
+        shards = build_shards(3)
+        dropped = partition_scanners(SCANNERS, 1, 3)[0]
+        selections = {
+            index: [
+                name
+                for name in partition_scanners(SCANNERS, index, 3)
+                if name != dropped
+            ]
+            for index in range(3)
+        }
+
+        merged = merge_shard_results(as_loaded(self._select(shards, selections)))
+
+        assert finding_keys(merged) == finding_keys(build_unsharded())
 
 
 class TestCompletedClassifiesUnknownStatusesAsIncomplete:
@@ -1701,14 +2121,13 @@ class TestShardContributionIsRefused:
         to restate a default that ``_resolve_require_scanner_completion`` already
         owns. The user-visible default lives there and in ``AshConfig``.
 
-        THE GATE IS PASSED EXPLICITLY, because the user-visible default is off. It
-        was on for part of this branch's life and had to be reverted: this repository
-        cannot pass its own completeness gate while cdk-nag leaves 4 of its 10
-        targets unevaluated, which reddens every scan leg on every platform. What
-        this test pins is unchanged by that -- the verdict for a union missing a
-        shard's worth of scanners, once an operator has asked to be told. The
-        default's own value is pinned by
-        ``test_fail_on_incomplete_scanners.py::test_the_default_is_off_and_the_opt_in_is_what_gates``.
+        THE GATE IS PASSED EXPLICITLY even though it is now the default, so that what
+        this test pins does not depend on the default's value: the verdict for a union
+        missing a shard's worth of scanners, asked for outright. That has held through
+        the default being off and on again. The default's own value is pinned by
+        ``test_fail_on_incomplete_scanners.py::test_config_field_defaults_to_on``, and
+        the default path through this CLI by
+        ``test_the_same_shards_are_refused_by_default`` above.
         """
         shards = build_shards(3)
         for model in shards:

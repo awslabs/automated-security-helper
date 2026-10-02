@@ -54,6 +54,11 @@ NON_CFN_YAML = "services:\n  web:\n    image: nginx\n"
 
 MALFORMED_YAML = "Resources:\n  - this: [is\n   not: valid yaml\n"
 
+# A Resources mapping this repository's pydantic model cannot represent. It is
+# CloudFormation -- the Resources key holds a mapping -- so it is a failed target
+# rather than the not-a-template skip.
+UNMODELABLE_CFN = "Resources:\n  Bad:\n    Type: 'invalid type with spaces'\n"
+
 
 def cfn_nag_sarif(rule_id="F38", uri="MyRole.yaml", start_line=3):
     """A SARIF document shaped the way cfn_nag emits one."""
@@ -90,6 +95,38 @@ def cfn_nag_sarif(rule_id="F38", uri="MyRole.yaml", start_line=3):
                             ],
                         }
                     ],
+                }
+            ],
+        }
+    )
+
+
+def cfn_nag_sarif_no_results():
+    """A SARIF document shaped the way cfn_nag emits one for an unevaluated template.
+
+    This is the exact shape measured from ``cfn_nag_scan --output-format sarif`` on a
+    template carrying a ``!Ref`` to an undeclared logical id: a complete document, a
+    fully populated rule driver, and an empty result array. It is byte-for-byte the
+    same size as the document a genuinely clean template produces, which is why the
+    exit code is the only thing that can tell them apart. Reproduce with::
+
+        cfn_nag_scan --print-suppression --output-format sarif --input-path <template>
+    """
+    return json.dumps(
+        {
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {
+                        "driver": {
+                            "name": "cfn_nag",
+                            "rules": [
+                                {"id": "F38", "shortDescription": {"text": "a rule"}},
+                                {"id": "W48", "shortDescription": {"text": "another"}},
+                            ],
+                        }
+                    },
+                    "results": [],
                 }
             ],
         }
@@ -161,10 +198,47 @@ def test_scanner_configures_its_command_and_tool_type(scanner):
 
     keys = [arg.key for arg in scanner.args.extra_args]
     assert "--print-suppression" in keys
-    assert "--ignore-fatal" in keys
     assert "--rule-directory" in keys
     rule_dir = next(a for a in scanner.args.extra_args if a.key == "--rule-directory")
     assert rule_dir.value.endswith("appsec_cfn_rules")
+
+
+def test_ignore_fatal_is_not_passed(scanner):
+    """``--ignore-fatal`` must be absent, and its absence is the whole signal.
+
+    The inverse of this assertion used to stand here. cfn_nag's exit status is its
+    failing-violation count, and a FATAL violation -- what cfn-model raises for an
+    unresolved Ref or GetAtt -- carries no logical resource ids, so SARIF renders
+    it as nothing at all. ``--ignore-fatal`` additionally prunes it from the
+    failure count, which drops the exit status to 0 and leaves a document
+    indistinguishable from a clean template. Measured on both shapes with::
+
+        cfn_nag_scan --print-suppression [--ignore-fatal] \
+            --output-format sarif --input-path <template>
+
+    With the flag, an unresolved-Ref template and a clean template both give exit 0
+    and zero results. Without it, the unresolved-Ref template gives exit 1 and zero
+    results while the clean one gives exit 0, so the pair is separable.
+    """
+    keys = [arg.key for arg in scanner.args.extra_args]
+    assert "--ignore-fatal" not in keys, (
+        "passing --ignore-fatal erases the only signal that distinguishes a "
+        f"template cfn_nag could not parse from a clean one; keys were {keys}"
+    )
+
+
+def test_custom_rule_exceptions_are_isolated(scanner):
+    """A raising custom rule must cost that rule, not the template's whole scan.
+
+    cfn_nag's CustomRuleLoader re-raises a rule's exception unless this flag is
+    passed, and the exception escapes every rescue clause above it, so the process
+    dies before rendering any output. The blast radius is every rule's verdict on
+    that template, not just the broken rule's.
+    """
+    keys = [arg.key for arg in scanner.args.extra_args]
+    assert "--isolate-custom-rule-exceptions" in keys, (
+        f"a defect in one shipped rule must not destroy the scan; keys were {keys}"
+    )
 
 
 @pytest.mark.parametrize(
@@ -416,22 +490,31 @@ def test_unparseable_yaml_is_skipped_without_failing_the_scan(
     assert [r.ruleId for r in report.runs[0].results] == ["F38"]
 
 
-def test_empty_stdout_yields_no_findings_and_no_exception(
+def test_empty_stdout_is_a_hard_scanner_failure(
     scanner, deps_available, subprocess_double, caplog
 ):
-    """cfn_nag exiting 0 with no output is recorded, not treated as clean.
+    """cfn_nag writing nothing is a tool fault, so the scanner fails, not the target.
 
-    The subprocess is still invoked -- the emptiness is in its output, which
-    is exactly the case that must not silently become a passing scan.
+    This test's predecessor asserted the opposite -- that the scan returned a report
+    and raised nothing -- and that is the behavior being corrected. Counting it as
+    one failed target among many left ``targets_failed < targets_attempted``, so a
+    repository with one crashed template and nine clean ones reported PASSED with
+    the crashed template's findings silently absent. An invocation that renders zero
+    bytes did not fail to find anything; it failed to run, and the process dying
+    before rendering is a property of the tool rather than of that one template.
+
+    The subprocess is still invoked -- the emptiness is in its output, which is
+    exactly the case that must not silently become a passing scan.
     """
     (scanner.context.work_dir / "role.yaml").write_text(CFN_TEMPLATE)
     subprocess_double.return_value = {"stdout": "   ", "stderr": "", "returncode": 0}
 
     with caplog.at_level(logging.DEBUG):
-        report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+        with pytest.raises(ScannerError) as excinfo:
+            scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     assert subprocess_double.call_count == 1
-    assert report.runs[0].results == []
+    assert "role.yaml" in str(excinfo.value)
     assert any("returned no stdout" in record.message for record in caplog.records), (
         "an empty-stdout scan must leave a trace in the log"
     )
@@ -617,15 +700,23 @@ def _status_for(scanner_plugin):
     return container.determine_status("MEDIUM"), container
 
 
-def test_empty_stdout_is_recorded_as_a_failed_target(
+def test_empty_stdout_is_recorded_as_a_failed_target_and_then_raises(
     scanner, deps_available, subprocess_double, caplog
 ):
-    """cfn_nag producing nothing must not resolve to a passing scan."""
+    """cfn_nag producing nothing must not resolve to a passing scan.
+
+    The counter assertions are the ones this test always made and they still hold.
+    What changed is the tail: the scan now raises rather than returning, because the
+    counters alone only reach ERROR when *every* template is in this state. The
+    counters are still set so the failure is also visible to
+    ``--fail-on-incomplete-scanners``, which reads ``targets_failed``.
+    """
     (scanner.context.work_dir / "role.yaml").write_text(CFN_TEMPLATE)
     subprocess_double.return_value = {"stdout": "   ", "stderr": "", "returncode": 1}
 
     with caplog.at_level(logging.ERROR):
-        scanner.scan(target=scanner.context.work_dir, target_type="converted")
+        with pytest.raises(ScannerError):
+            scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     assert scanner.targets_attempted == 1
     assert scanner.targets_failed == 1
@@ -637,6 +728,110 @@ def test_empty_stdout_is_recorded_as_a_failed_target(
     status, container = _status_for(scanner)
     assert not container.scan_succeeded
     assert status == ScannerStatus.ERROR
+
+
+def test_one_empty_stdout_among_two_templates_still_fails_the_scanner(
+    scanner, deps_available, subprocess_double
+):
+    """The case the counters alone cannot reach.
+
+    One crashed template of two leaves ``targets_failed`` (1) below
+    ``targets_attempted`` (2), so ``determine_status`` falls through to the severity
+    gate over the surviving findings and reports PASSED. This is the specific hole
+    that makes an empty-stdout invocation a scanner failure rather than a target
+    statistic, and it is why the two tests above were inverted.
+    """
+    (scanner.context.work_dir / "role.yaml").write_text(CFN_TEMPLATE)
+    (scanner.context.work_dir / "queue.yaml").write_text(SECOND_CFN_TEMPLATE)
+    subprocess_double.side_effect = stdout_sequence(
+        cfn_nag_sarif(rule_id="F38", uri="role.yaml"), ""
+    )
+
+    with pytest.raises(ScannerError):
+        scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    # Both templates were attempted before the verdict; only the crashed one failed,
+    # which is precisely the ratio that used to read as a successful scan.
+    assert (scanner.targets_attempted, scanner.targets_failed) == (2, 1)
+    assert _status_for(scanner)[1].scan_succeeded, (
+        "the counters alone still read this as a succeeded scan, which is why the "
+        "raise is the load-bearing part of the fix"
+    )
+
+
+def test_a_template_the_model_rejects_is_counted_as_a_failed_target(
+    scanner, deps_available, subprocess_double, caplog
+):
+    """A Resources mapping ASH cannot model is a failure, not an un-counted skip.
+
+    Before the sentinel was split, ``get_model_from_template`` answered None for
+    this file just as it does for a file that is not CloudFormation, and the
+    ``continue`` sat above ``targets_attempted += 1``. A scan set in which every
+    template tripped the model therefore ended at zero attempts, which the
+    container reports as SKIPPED with exit code 0 -- and SKIPPED is on the
+    completeness allowlist on the grounds that the scanner was not selected, which
+    is not what happened.
+    """
+    (scanner.context.work_dir / "unmodelable.yaml").write_text(UNMODELABLE_CFN)
+
+    with caplog.at_level(logging.ERROR):
+        scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    subprocess_double.assert_not_called()
+    assert (scanner.targets_attempted, scanner.targets_failed) == (1, 1)
+    assert any("unmodelable.yaml" in err for err in scanner.errors), scanner.errors
+    assert _status_for(scanner)[0] == ScannerStatus.ERROR
+
+
+def test_a_non_zero_exit_with_no_results_is_a_failed_target(
+    scanner, deps_available, subprocess_double, caplog
+):
+    """The pruned-FATAL shape: schema-valid SARIF, zero results, non-zero exit.
+
+    cfn-model raises on a ``!Ref`` or ``!GetAtt`` to a logical id not declared in
+    the file, cfn_nag turns that into a FATAL violation, and a FATAL violation
+    carries no logical resource ids -- so the SARIF renderer, which iterates those
+    ids, emits nothing for it. The document is complete and its rule driver is fully
+    populated. No rule ran against the template, and without this guard the run is
+    indistinguishable from a compliant one.
+    """
+    (scanner.context.work_dir / "badref.yaml").write_text(CFN_TEMPLATE)
+    subprocess_double.return_value = {
+        "stdout": cfn_nag_sarif_no_results(),
+        "stderr": "",
+        "returncode": 1,
+    }
+
+    with caplog.at_level(logging.ERROR):
+        scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert (scanner.targets_attempted, scanner.targets_failed) == (1, 1)
+    assert any("badref.yaml" in err for err in scanner.errors), scanner.errors
+    assert _status_for(scanner)[0] == ScannerStatus.ERROR
+
+
+def test_a_clean_template_with_no_results_is_not_a_failed_target(
+    scanner, deps_available, subprocess_double
+):
+    """Positive control for the guard above: the same empty SARIF at exit 0 passes.
+
+    Without this the guard could be satisfied by rejecting every zero-result run,
+    which would fail every compliant template in existence. Measured: a compliant
+    template and an unresolved-Ref template produce SARIF documents of identical
+    size with zero results each, and differ only in the exit status.
+    """
+    (scanner.context.work_dir / "clean.yaml").write_text(CFN_TEMPLATE)
+    subprocess_double.return_value = {
+        "stdout": cfn_nag_sarif_no_results(),
+        "stderr": "",
+        "returncode": 0,
+    }
+
+    report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert report.runs[0].results == []
+    assert (scanner.targets_attempted, scanner.targets_failed) == (1, 0)
+    assert _status_for(scanner)[1].scan_succeeded
 
 
 def test_unparseable_stdout_is_recorded_as_a_failed_target(

@@ -43,7 +43,9 @@ class TestMonitorScanProgress:
         mock_ctx.error.assert_awaited()
 
     @pytest.mark.asyncio
-    async def test_completes_when_aggregated_results_file_appears(self, mock_ctx, tmp_path):
+    async def test_completes_when_aggregated_results_file_appears(
+        self, mock_ctx, tmp_path
+    ):
         output_dir = tmp_path / ".ash" / "ash_output"
         output_dir.mkdir(parents=True)
         aggregated = output_dir / "ash_aggregated_results.json"
@@ -56,7 +58,11 @@ class TestMonitorScanProgress:
             call_count += 1
             if call_count == 1:
                 return {"success": True, "directory_path": str(tmp_path)}
-            return {"success": True, "status": "running", "directory_path": str(tmp_path)}
+            return {
+                "success": True,
+                "status": "running",
+                "directory_path": str(tmp_path),
+            }
 
         with (
             patch(
@@ -66,7 +72,11 @@ class TestMonitorScanProgress:
             patch(
                 "automated_security_helper.cli.mcp.progress_monitor.mcp_get_scan_results",
                 new=AsyncMock(
-                    return_value={"success": True, "findings_count": 0, "severity_counts": {}}
+                    return_value={
+                        "success": True,
+                        "findings_count": 0,
+                        "severity_counts": {},
+                    }
                 ),
             ),
         ):
@@ -139,7 +149,7 @@ class TestMonitorScanProgress:
             call_count += 1
             if call_count == 1:
                 return {"success": True, "directory_path": str(tmp_path)}
-            raise asyncio.CancelledError()
+            raise asyncio.CancelledError
 
         with patch(
             "automated_security_helper.cli.mcp.progress_monitor.mcp_get_scan_progress",
@@ -154,7 +164,9 @@ class TestMonitorScanProgress:
         scanners_dir = output_dir / "scanners" / "bandit" / "source"
         scanners_dir.mkdir(parents=True)
         result_file = scanners_dir / "ASH.ScanResults.json"
-        result_file.write_text(json.dumps({"severity_counts": {"high": 2, "medium": 1}}))
+        result_file.write_text(
+            json.dumps({"severity_counts": {"high": 2, "medium": 1}})
+        )
 
         aggregated = output_dir / "ash_aggregated_results.json"
 
@@ -167,7 +179,11 @@ class TestMonitorScanProgress:
                 return {"success": True, "directory_path": str(tmp_path)}
             if call_count >= 3:
                 aggregated.write_text("{}")
-            return {"success": True, "status": "running", "directory_path": str(tmp_path)}
+            return {
+                "success": True,
+                "status": "running",
+                "directory_path": str(tmp_path),
+            }
 
         with (
             patch(

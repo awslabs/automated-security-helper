@@ -187,7 +187,13 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
     # Dependency resolution
     # ---------------------------------------------------------------
 
-    def validate_plugin_dependencies(self) -> bool:
+    def _validate_tool_dependencies(self) -> bool:
+        """Opengrep's tool-reachability check.
+
+        Named for the ``GrepScannerBase`` hook rather than overriding
+        ``validate_plugin_dependencies`` directly: the base method now consults the
+        offline-cache verdict first, and an override here would skip it.
+        """
         found = find_executable(self.command)
         ASH_LOGGER.verbose(f"Found opengrep executable at: {found}")
         return found is not None
@@ -270,5 +276,7 @@ class OpengrepScanner(GrepScannerBase[OpengrepScannerConfig]):
         if self.config.options.patterns:
             results_file = results_file.parent / "opengrep_results.json"
             # Re-resolve final_args so output_arg uses the json path.
-            final_args = self._resolve_arguments(target=target, results_file=results_file)
+            final_args = self._resolve_arguments(
+                target=target, results_file=results_file
+            )
         return final_args, results_file, env

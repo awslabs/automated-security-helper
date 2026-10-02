@@ -162,12 +162,20 @@ Returns:
   "output_directory": "/path/to/.ash/ash_output",
   "start_time": "<iso8601>",
   "end_time": "<iso8601 | null>",
-  "status": "running | completed | failed | cancelled",
+  "status": "pending | running | completed | incomplete | failed | cancelled",
   "severity_threshold": "MEDIUM",
   "config_path": "<path | null>",
   "warnings": [...],
   "error_message": "<str | null>",
   "is_complete": bool,
+  "coverage_complete": "bool | null",
+  "incomplete_scanners": [
+    { "scanner": "grype", "status": "MISSING", "reason": "missing_dependencies", "detail": "MISSING" }
+  ],
+  "no_scanner_ran": bool,
+  "incomplete_converters": [{ "converter": "...", "reason": "..." }],
+  "unevaluated_rules": ["..."],
+  "stale_content_databases": [{ "name": "grype-db", "scanner": "grype", "built": "<iso8601 | null>", "age": "...", "max_age": "...", "refresh": "..." }],
   "completed_scanners": int,
   "total_scanners": int,
   "total_findings": int,
@@ -184,9 +192,11 @@ There is no overall percentage field. To compute progress, use `completed_scanne
 
 There is no top-level `duration` field — derive elapsed time from `start_time` and `end_time` (or from current time while running).
 
-**`is_complete` does not flip to `True` for cancelled scans** — it returns `True` only for `completed` and `failed`. Always check `status` independently: stop polling when `status` is `completed`, `failed`, or `cancelled`. Polling on `is_complete` alone will loop forever on a cancelled scan.
+**`is_complete` does not flip to `True` for cancelled scans** — it returns `True` for `completed` and `incomplete`, and for `failed` once a results file exists. Always check `status` independently: stop polling when `status` is `completed`, `incomplete`, `failed`, or `cancelled`. Polling on `is_complete` alone will loop forever on a cancelled scan.
 
-**Status enum:** the documented values are `pending | running | completed | failed | cancelled`. The registry uses `pending` briefly while a scan is queued, transitions to `running` once execution begins, and may also expose the legacy `in_progress` string from older `ScanProgress` instances. Treat `pending`, `running`, and `in_progress` as equivalent "not done yet" states.
+**`incomplete` is terminal, with partial coverage.** The run finished and its results are readable, but a selected scanner was `MISSING` or `ERROR` (or lost targets), no scanner reached a verdict, a converter did not run, a rule could not be evaluated, or a content database was past its declared age bound. `incomplete_scanners` names each scanner and why, and `stale_content_databases` each stale database. The findings are real but partial, so read them, and do not report the target as clean. `failed` means the run crashed or left no readable results. `coverage_complete` is `null` while running and for `failed` or `cancelled`; with `fail_on_incomplete_scanners: false` a scan is `completed` with `coverage_complete: false` when scanners did not run.
+
+**Status enum:** the documented values are `pending | running | completed | incomplete | failed | cancelled`. The registry uses `pending` briefly while a scan is queued, transitions to `running` once execution begins, and may also expose the legacy `in_progress` string from older `ScanProgress` instances. Treat `pending`, `running`, and `in_progress` as equivalent "not done yet" states.
 
 ## get_scan_results
 
@@ -201,6 +211,8 @@ Fetch finalized results with filtering. Run only after `get_scan_progress` repor
 | `actionable_only` | boolean | `false` | Drop suppressed findings |
 
 Returns full or filtered findings depending on `filter_level`.
+
+`status` is `completed` or `incomplete`, decided by the same rule as the scan's exit code, with `coverage_complete` and `incomplete_scanners` as in `get_scan_progress`. An `incomplete` scan's findings are returned in full.
 
 ## get_scan_summary
 

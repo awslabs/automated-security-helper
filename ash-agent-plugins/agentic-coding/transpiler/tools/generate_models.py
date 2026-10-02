@@ -11,6 +11,7 @@ Run via:
 The generated_models/ directory is committed (so CI doesn't need datamodel-code-
 generator), but should only be regenerated after a corresponding schema refresh.
 """
+
 from __future__ import annotations
 
 import json
@@ -19,8 +20,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent          # transpiler/tools
-TRANSPILER_DIR = HERE.parent                     # transpiler/
+HERE = Path(__file__).resolve().parent  # transpiler/tools
+TRANSPILER_DIR = HERE.parent  # transpiler/
 SCHEMAS_DIR = TRANSPILER_DIR / "schemas"
 SCHEMAS_INDEX = SCHEMAS_DIR / "schemas.json"
 MODELS_DIR = TRANSPILER_DIR / "generated_models"
@@ -65,23 +66,32 @@ def main() -> int:
         filename = entry["filename"]
         schema_path = SCHEMAS_DIR / filename
         if not schema_path.exists():
-            sys.stderr.write(f"  SKIP: {filename} not yet vendored — run refresh-schemas first\n")
+            sys.stderr.write(
+                f"  SKIP: {filename} not yet vendored — run refresh-schemas first\n"
+            )
             continue
         module_name = _slug_to_module(filename)
         out_path = MODELS_DIR / f"{module_name}.py"
-        print(f"Generating {out_path.relative_to(TRANSPILER_DIR)} from {schema_path.relative_to(TRANSPILER_DIR)}")
+        print(
+            f"Generating {out_path.relative_to(TRANSPILER_DIR)} from {schema_path.relative_to(TRANSPILER_DIR)}"
+        )
         try:
             subprocess.run(
                 [
                     codegen,
-                    "--input", str(schema_path),
-                    "--input-file-type", "jsonschema",
-                    "--output", str(out_path),
-                    "--output-model-type", "pydantic_v2.BaseModel",
+                    "--input",
+                    str(schema_path),
+                    "--input-file-type",
+                    "jsonschema",
+                    "--output",
+                    str(out_path),
+                    "--output-model-type",
+                    "pydantic_v2.BaseModel",
                     "--use-schema-description",
                     "--use-field-description",
                     "--use-default-kwarg",
-                    "--target-python-version", "3.11",
+                    "--target-python-version",
+                    "3.11",
                     "--use-standard-collections",
                     "--use-union-operator",
                 ],
@@ -97,7 +107,9 @@ def main() -> int:
     if failures:
         print(f"FAILED: {len(failures)} schema(s): {failures}")
         return 1
-    print("Done. Run `uv run --project agentic-coding/transpiler agentic-plugins check` to confirm validation still passes.")
+    print(
+        "Done. Run `uv run --project agentic-coding/transpiler agentic-plugins check` to confirm validation still passes."
+    )
     return 0
 
 

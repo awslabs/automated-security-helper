@@ -3,6 +3,7 @@
 Emits agent.json (Amazon Q agent definition) and an install.sh that copies
 it into ~/.aws/amazonq/cli-agents/.
 """
+
 from __future__ import annotations
 
 import json
@@ -70,7 +71,7 @@ class AmazonqBackend(BaseBackend):
         # WARNING / Error prefixes that indicate validation failure.
         output = result.get("stdout", "")
         for line in output.splitlines():
-            if line.startswith("WARNING ") or line.startswith("Error: "):
+            if line.startswith(("WARNING ", "Error: ")):
                 return {
                     "ok": False,
                     "reason": f"q agent validate flagged: {line.strip()[:200]}",

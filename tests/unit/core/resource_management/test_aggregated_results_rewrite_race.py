@@ -70,7 +70,12 @@ def _results() -> AshAggregatedResults:
         name: ScannerTargetStatusInfo(status=ScannerStatus.PASSED)
         for name in SCANNER_NAMES
     }
-    model.additional_reports = {"pad": "x" * PAD_BYTES}
+    # Padded through `description`, a plain string with no meaning to any reader.
+    # It was `additional_reports = {"pad": ...}`, and additional_reports is keyed by
+    # scanner name: the unified metrics read "pad" as a scanner with no result and
+    # graded it ERROR. Once progress reported coverage, the settled control below
+    # read that phantom scanner as an incomplete scan.
+    model.description = "x" * PAD_BYTES
     return model
 
 

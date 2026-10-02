@@ -18,9 +18,7 @@ def _collect_imports(tree: ast.Module) -> list[str]:
 
 def test_no_core_imports_cli():
     core_root = (
-        Path(__file__).parent.parent.parent
-        / "automated_security_helper"
-        / "core"
+        Path(__file__).parent.parent.parent / "automated_security_helper" / "core"
     )
     violations = []
     for py_file in core_root.rglob("*.py"):
@@ -33,6 +31,6 @@ def test_no_core_imports_cli():
             if "automated_security_helper.cli" in imp:
                 violations.append(f"{py_file}: imports {imp!r}")
 
-    assert not violations, (
-        "core/ must not import from cli/. Violations:\n" + "\n".join(violations)
+    assert not violations, "core/ must not import from cli/. Violations:\n" + "\n".join(
+        violations
     )

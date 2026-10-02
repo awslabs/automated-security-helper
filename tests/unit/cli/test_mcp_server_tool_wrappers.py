@@ -159,10 +159,28 @@ class TestRunAshScanReportingPaths:
 
 class TestGetScanProgressFileWalk:
     def _run(self, ctx, registry, output_dir):
+        """Stub the producer's real shape, which carries no ``success`` key.
+
+        This stub used to return ``{"success": True, "status": "running"}``. The
+        real producer -- ``ScanRegistry.check_scan_progress``, by way of
+        ``mcp_get_scan_progress`` -- sets ``success`` only on failure, so the
+        injected key made ``get_scan_progress``'s guard fall through under test
+        while it returned early in production. Every test in this class passed
+        over a dead code path.
+
+        The guard now discriminates instead of testing presence, so the honest
+        shape reaches the walk below. Keeping the stub honest is what stops the
+        next regression in that guard from passing here: with the key injected,
+        a guard rewritten back to ``not progress_info.get("success")`` would
+        still satisfy this class.
+
+        ``tests/unit/cli/mcp/test_mcp_response_contracts.py`` covers the same
+        wrapper with no stub at all, driving the real registry.
+        """
         with (
             patch(
                 f"{_SERVER}.mcp_get_scan_progress",
-                AsyncMock(return_value={"success": True, "status": "running"}),
+                AsyncMock(return_value={"status": "running"}),
             ),
             patch(f"{_SERVER}.get_scan_registry", return_value=registry),
         ):
@@ -236,10 +254,21 @@ class TestGetScanProgressFileWalk:
 
 
 class TestGetScanResults:
+    """The stubs here return the producer's real shape, with no ``success`` key.
+
+    ``get_scan_results_with_error_handling`` returns a nine-key payload that does
+    not include ``success``, so stubbing it with a dict that does carry the key
+    hid the defect in ``get_scan_results``'s guard: under test the guard fell
+    through and the filters ran, while on a real scan it returned early and every
+    filter was inert. These two tests only assert on the progress message, but a
+    stub that lies about the shape makes them useless as a regression net for the
+    guard itself.
+    """
+
     def test_severity_filter_is_named_in_the_progress_message(self, ctx, tmp_path):
         with patch(
             f"{_SERVER}.mcp_get_scan_results",
-            AsyncMock(return_value={"success": True, "status": "completed"}),
+            AsyncMock(return_value={"status": "completed"}),
         ):
             asyncio.run(
                 get_scan_results(
@@ -258,7 +287,7 @@ class TestGetScanResults:
     def test_actionable_only_is_named_in_the_progress_message(self, ctx, tmp_path):
         with patch(
             f"{_SERVER}.mcp_get_scan_results",
-            AsyncMock(return_value={"success": True, "status": "completed"}),
+            AsyncMock(return_value={"status": "completed"}),
         ):
             asyncio.run(
                 get_scan_results(

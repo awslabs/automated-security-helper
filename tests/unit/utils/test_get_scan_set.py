@@ -1,9 +1,5 @@
 """Tests for utils/get_scan_set.py — covers scan set detection logic."""
 
-from pathlib import Path
-from unittest.mock import patch, MagicMock
-import pytest
-
 from automated_security_helper.utils.get_scan_set import scan_set
 
 

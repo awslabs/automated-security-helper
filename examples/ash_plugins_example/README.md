@@ -55,10 +55,11 @@ Event subscribers are registered using the `ASH_EVENT_HANDLERS` dictionary:
 ```python
 def handle_scan_complete(**kwargs):
     """Example event handler for scan complete event."""
-    scanner = kwargs.get('scanner', 'Unknown')
-    remaining_count = kwargs.get('remaining_count', 0)
+    scanner = kwargs.get("scanner", "Unknown")
+    remaining_count = kwargs.get("remaining_count", 0)
     print(f"Scanner '{scanner}' completed!")
     return True
+
 
 # Event callback registry
 ASH_EVENT_HANDLERS = {

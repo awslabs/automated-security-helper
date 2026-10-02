@@ -74,6 +74,61 @@ def test_report_command_basic(
     mock_reporter_plugin.report.assert_called_once()
 
 
+@patch("automated_security_helper.cli.report.load_plugins")
+@patch("automated_security_helper.cli.report.ash_plugin_manager")
+@patch("automated_security_helper.cli.report.PluginContext")
+@patch("automated_security_helper.cli.report.AshAggregatedResults")
+@patch("automated_security_helper.cli.report.print")
+def test_a_reporter_that_returns_none_exits_non_zero(
+    mock_print,
+    mock_results_class,
+    mock_plugin_context,
+    mock_plugin_manager,
+    mock_load_plugins,
+):
+    """``report`` is ``-> str | None``, and None must not be printed as text.
+
+    Without the guard the None falls through to ``print(report_content)``, so the
+    command writes the literal "None" to stdout and exits 0. A caller redirecting
+    stdout to a file then has a four-byte report and a success status, which is
+    the same silent-clean-report failure the reporters themselves were fixed for.
+    """
+    mock_plugin_context.return_value = MagicMock()
+
+    mock_reporter_plugin = MagicMock()
+    mock_reporter_plugin.config.name = "github-ghas"
+    mock_reporter_plugin.report.return_value = None
+
+    mock_plugin_class = MagicMock()
+    mock_plugin_class.__name__ = "MockReporterPlugin"
+    mock_plugin_class.return_value = mock_reporter_plugin
+    mock_plugin_manager.plugin_modules.return_value = [mock_plugin_class]
+
+    mock_file = MagicMock()
+    mock_file.__enter__.return_value.read.return_value = "{}"
+    mock_results_class.model_validate_json.return_value = MagicMock()
+
+    with patch("automated_security_helper.cli.report.Path") as mock_path:
+        mock_path_instance = MagicMock()
+        mock_path_instance.exists.return_value = True
+        mock_path.return_value = mock_path_instance
+
+        with patch("builtins.open", return_value=mock_file):
+            with pytest.raises(typer.Exit) as exit_info:
+                report_command(
+                    report_format="github-ghas",
+                    output_dir="/test/output",
+                )
+
+    assert exit_info.value.exit_code == 1
+    printed = " ".join(str(call) for call in mock_print.call_args_list)
+    assert "None" not in printed.replace("produced no report", ""), printed
+    assert "produced no report" in printed
+    # The deliberate exit must not be relabelled by the generic handler, which
+    # catches Exception and typer.Exit subclasses RuntimeError.
+    assert "Error generating report" not in printed
+
+
 def test_report_command_with_resilient_parsing():
     """Test report command with resilient parsing."""
     # Call report_command with no arguments (resilient parsing)

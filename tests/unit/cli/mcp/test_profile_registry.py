@@ -92,9 +92,7 @@ class TestRegisterProfiles:
         assert len(entry.path_sha256) == 64
         assert all(c in "0123456789abcdef" for c in entry.path_sha256)
 
-    def test_multiple_profiles_register_independently(
-        self, tmp_path: Path
-    ) -> None:
+    def test_multiple_profiles_register_independently(self, tmp_path: Path) -> None:
         a = _write_yaml(tmp_path / "a.yaml", _valid_config_yaml("a"))
         b = _write_yaml(tmp_path / "b.yaml", _valid_config_yaml("b"))
         registry = register_profiles([f"alpha={a}", f"beta={b}"])
@@ -137,9 +135,7 @@ class TestRegisterProfiles:
             register_profiles([f"badschema={bad}"])
         assert "badschema" in str(exc.value)
 
-    def test_atomic_failure_does_not_partially_install(
-        self, tmp_path: Path
-    ) -> None:
+    def test_atomic_failure_does_not_partially_install(self, tmp_path: Path) -> None:
         # The registry singleton must remain empty when registration fails;
         # callers like ``mcp_command`` rely on "all-or-nothing" so a half-
         # registered set never leaks into the running server.
@@ -184,9 +180,7 @@ class TestRegistrySingleton:
         clear_profile_registry()
         assert get_profile_registry() == {}
 
-    def test_register_profiles_does_not_install_until_set(
-        self, tmp_path: Path
-    ) -> None:
+    def test_register_profiles_does_not_install_until_set(self, tmp_path: Path) -> None:
         # ``register_profiles`` is pure — the caller decides when to flip
         # the singleton via ``set_profile_registry``. This separation lets
         # ``mcp_command`` keep "validation" and "install" distinct, so a

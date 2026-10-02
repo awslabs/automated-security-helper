@@ -62,8 +62,11 @@ def test_run_ash_scan_local_mode(mock_orchestrator_class, mock_get_logger):
     mock_orchestrator.execute_scan.return_value = mock_results
 
     # Mock the open function
-    with patch("builtins.open", mock_open()), patch(
-        "automated_security_helper.interactions.run_ash_scan.write_text_atomically"
+    with (
+        patch("builtins.open", mock_open()),
+        patch(
+            "automated_security_helper.interactions.run_ash_scan.write_text_atomically"
+        ),
     ):
         # Call the function
         result = run_ash_scan(
@@ -135,15 +138,21 @@ def test_run_ash_scan_with_custom_phases(mock_orchestrator_class, mock_get_logge
     mock_orchestrator.execute_scan.return_value = mock_results
 
     # Mock the open function
-    with patch("builtins.open", mock_open()), patch(
-        "automated_security_helper.interactions.run_ash_scan.write_text_atomically"
+    with (
+        patch("builtins.open", mock_open()),
+        patch(
+            "automated_security_helper.interactions.run_ash_scan.write_text_atomically"
+        ),
     ):
         # Call the function with custom phases
         result = run_ash_scan(
             mode=RunMode.local,
             source_dir="/test/source",
             output_dir="/test/output",
-            phases=[ExecutionPhase.CONVERT, ExecutionPhase.REPORT],  # Only convert and report
+            phases=[
+                ExecutionPhase.CONVERT,
+                ExecutionPhase.REPORT,
+            ],  # Only convert and report
         )
 
     # Verify orchestrator was created
@@ -183,8 +192,11 @@ def test_run_ash_scan_with_actionable_findings(
     ]
 
     # Mock the open function
-    with patch("builtins.open", mock_open()), patch(
-        "automated_security_helper.interactions.run_ash_scan.write_text_atomically"
+    with (
+        patch("builtins.open", mock_open()),
+        patch(
+            "automated_security_helper.interactions.run_ash_scan.write_text_atomically"
+        ),
     ):
         # Mock sys.exit to prevent test from exiting
         with patch("sys.exit") as mock_exit:

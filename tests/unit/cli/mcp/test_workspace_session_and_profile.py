@@ -31,6 +31,7 @@ argued where it happens -- see ``TestTheWorkspaceFileIsNowConfined``.
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
 from pathlib import Path
@@ -366,9 +367,12 @@ class TestABoundProfileReachesAWorkspaceScan:
         assert response["success"] is True, response.get("error")
         _plan, settings = executions[0]
         assert settings.default_config_path is not None
-        assert "picked-per-call" in Path(settings.default_config_path).read_text(
-            "utf-8"
+        # Read off the event loop: a blocking pathlib call inside an async test is
+        # what ASYNC240 flags, and to_thread satisfies it without a suppression.
+        config_text = await asyncio.to_thread(
+            Path(settings.default_config_path).read_text, "utf-8"
         )
+        assert "picked-per-call" in config_text
 
     @pytest.mark.asyncio
     async def test_an_unknown_profile_is_refused_and_nothing_is_scanned(

@@ -678,7 +678,18 @@ def test_a_non_gating_policy_scanner_cannot_fail_the_completeness_gate(tmp_path)
                     status=ScannerStatus.MISSING,
                     excluded=False,
                     dependencies_satisfied=False,
-                )
+                ),
+                # A project scanner that ran and passed. Without it the missing
+                # policy scanner is the only entry, so nothing measured anything
+                # and the no-scanner-ran gate fails the project on its own --
+                # correctly, and pinned by the test below. This test is about the
+                # policy exclusion, so the project has to have measured something
+                # for the exclusion to be the only thing deciding the verdict.
+                "bandit": ScannerTargetStatusInfo(
+                    status=ScannerStatus.PASSED,
+                    excluded=False,
+                    dependencies_satisfied=True,
+                ),
             }
             return results
 
@@ -689,9 +700,49 @@ def test_a_non_gating_policy_scanner_cannot_fail_the_completeness_gate(tmp_path)
         "the scanner's absence must still be REPORTED; "
         f"incomplete_scanners={entry.incomplete_scanners}"
     )
+    assert entry.no_scanner_ran is False
     assert entry.scan_incomplete is False, (
         "a non-gating policy scanner that could not run must not fail the "
         "project, or policy_scanners_gate: false fails projects anyway"
+    )
+
+
+def test_a_missing_policy_scanner_alone_is_a_project_that_measured_nothing(tmp_path):
+    """The exclusion excuses the policy scanner; it does not count it as having run.
+
+    A non-gating policy scanner that is MISSING is dropped from the completeness
+    verdict. When it is the only scanner the project recorded, what is left is a
+    project in which no scanner reached a verdict, and that fails the same way
+    ``ash --source-dir P`` on it does. Pins the case the test above had to add a
+    passing scanner to avoid.
+    """
+    from automated_security_helper.core.enums import ScannerStatus
+    from automated_security_helper.models.asharp_model import ScannerTargetStatusInfo
+
+    _project(tmp_path, "api", f"scanners:\n  {SCANNER}:\n    enabled: false\n")
+    _policy(tmp_path, f"workspace:\n  additional_scanners:\n    - {SCANNER}\n")
+    plan = resolve_workspace(_workspace(tmp_path, ["api"]))
+
+    class OnlyTheMissingPolicyScanner(RecordingOrchestrator):
+        def execute_scan(self, phases=None):
+            results = super().execute_scan(phases)
+            results.scanner_results = {
+                SCANNER: ScannerTargetStatusInfo(
+                    status=ScannerStatus.MISSING,
+                    excluded=False,
+                    dependencies_satisfied=False,
+                )
+            }
+            return results
+
+    entry = _results_of(
+        _run(tmp_path, plan, factory=OnlyTheMissingPolicyScanner.create)
+    )
+
+    assert entry.no_scanner_ran is True
+    assert entry.scan_incomplete is True, (
+        "a project whose only recorded scanner never ran measured nothing, and "
+        "must fail even though that scanner is a non-gating policy scanner"
     )
 
 

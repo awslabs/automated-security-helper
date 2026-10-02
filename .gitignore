@@ -90,8 +90,16 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# Anchored to the repository root. A gitignore directory pattern with no leading
+# slash matches at every depth, so a bare `lib/` also matched deploy/cdk/lib --
+# the whole source directory of the CDK application. deploy/cdk/.gitignore
+# carries a `!lib/` negation for that, which is enough for git and not enough for
+# ASH: get_scan_set prunes directories during its walk using the root .gitignore
+# alone, so it never descends into deploy/cdk/lib and never reads the negation.
+# ASH did not scan its own CDK sources. These two rules exist for the build
+# directory distutils drops beside pyproject.toml, which is only ever at the root.
+/lib/
+/lib64/
 parts/
 sdist/
 var/

@@ -76,6 +76,21 @@ _LEVEL_TO_SECURITY_SEVERITY: Dict[str, str] = {
 }
 
 
+def _level_value(level: Any) -> str:
+    """Render a SARIF level as its wire value.
+
+    ``Level`` is a ``(str, Enum)`` mixin, so ``Enum.__str__`` wins and
+    ``str(Level.error)`` is "Level.error" -- not a member of the SARIF 2.1.0
+    level enum, and not a key in ``_LEVEL_TO_SECURITY_SEVERITY``. The field holds
+    a member whenever it was not validated: a result or defaultConfiguration that
+    omits the optional ``level`` key takes the field default, and assignment is
+    unvalidated too. Writing that into the uploaded document hands GitHub a
+    schema-invalid value at the field it reads to set alert severity, and drops
+    the rule to the 6.0 Medium fallback on the way.
+    """
+    return str(getattr(level, "value", level))
+
+
 class GHASReporterConfigOptions(ReporterOptionsBase):
     exclude_suppressed: Annotated[
         bool,
@@ -111,8 +126,35 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             self.config = GHASReporterConfig()
         return super().model_post_init(context)
 
-    def report(self, model: "AshAggregatedResults") -> str:
-        """Generate a GitHub-optimized SARIF report."""
+    def report(self, model: "AshAggregatedResults") -> str | None:
+        """Generate a GitHub-optimized SARIF report, or None if it cannot be built.
+
+        None, and not an empty report, and that distinction is the point
+        ------------------------------------------------------------------
+        The handler below used to return ``_empty_report()``. That is a non-empty
+        truthy string, so ``ReportPhase`` took its write branch: it wrote a
+        schema-valid SARIF document asserting zero findings, logged the write at
+        INFO, marked the reporter task green, and counted it among the successful
+        reports. The bytes are identical to the legitimate-empty case at the top
+        of this method -- ``TestEmptyAndErrorPaths`` asserts they differ now, and
+        that assertion is the inversion of one that used to require them to match
+        -- so the only thing separating "ASH could not transform these findings"
+        from "this repository is clean" was one ERROR line in a log that nothing
+        downstream reads.
+
+        Returning None means ``ReportPhase`` writes no file. That is the
+        conservative outcome for two independent reasons. Nothing is uploaded, so
+        whatever GitHub Code Scanning already holds for this tool and category is
+        left exactly as it was -- a weaker and more defensible claim than
+        reasoning about how the platform reconciles an empty analysis, which is
+        not observable from this repository. And a missing artefact is a loud
+        failure in any pipeline step that uploads it, where a present one
+        asserting zero findings is a silent pass.
+
+        The two legitimate empty inputs below keep ``_empty_report()``: a model
+        with no SARIF at all, and one with no runs, are genuinely nothing to
+        report rather than a transform that failed.
+        """
         try:
             sarif = model.sarif
             if not sarif or not sarif.runs:
@@ -131,8 +173,8 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             rule_level_from_results: Dict[str, str] = {}
             for result in run.results or []:
                 if result.ruleId and result.ruleId not in rule_level_from_results:
-                    level_val = result.level if result.level else "error"
-                    rule_level_from_results[result.ruleId] = str(level_val)
+                    level_val = result.level or "error"
+                    rule_level_from_results[result.ruleId] = _level_value(level_val)
 
             # 3. Ensure every rule has security-severity
             slim_rules = self._build_slim_rules(rules_map, rule_level_from_results)
@@ -165,8 +207,12 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             return json.dumps(report_dict, separators=(",", ":"))
 
         except Exception as e:
+            # Caught rather than propagated because an exception here aborts the
+            # whole report phase and costs the operator every other reporter's
+            # output. Returning None rather than an empty report is what keeps the
+            # failure legible; see this method's docstring.
             ASH_LOGGER.error(f"Failed to create GHAS SARIF report: {e}")
-            return self._empty_report()
+            return None
 
     def _collect_rules(
         self, tool_component, rules_map: Dict[str, Dict[str, Any]]
@@ -195,7 +241,7 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             # Get the default level from the rule configuration
             default_level = None
             if rule.defaultConfiguration and rule.defaultConfiguration.level:
-                default_level = str(rule.defaultConfiguration.level)
+                default_level = _level_value(rule.defaultConfiguration.level)
 
             rules_map[rule.id] = {
                 "id": rule.id,
@@ -296,7 +342,7 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
             # If this result references a rule we haven't seen, create a
             # synthetic entry so the rule list stays complete
             if result.ruleId and result.ruleId not in rules_map:
-                level_val = str(result.level) if result.level else "error"
+                level_val = _level_value(result.level) if result.level else "error"
                 rules_map[result.ruleId] = {
                     "id": result.ruleId,
                     "security_severity": None,
@@ -315,7 +361,7 @@ class GHASReporter(ReporterPluginBase[GHASReporterConfig]):
                 result_dict["ruleId"] = result.ruleId
 
             # Map level
-            level_val = str(result.level) if result.level else "error"
+            level_val = _level_value(result.level) if result.level else "error"
             result_dict["level"] = level_val
 
             # Message

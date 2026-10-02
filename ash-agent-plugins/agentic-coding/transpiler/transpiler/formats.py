@@ -13,6 +13,7 @@ emission still runs through the existing section-emitter dispatcher reading
 class-var sections on each BaseBackend. This lets the Format abstraction land
 incrementally without rewriting every backend at once.
 """
+
 from __future__ import annotations
 
 from .core import Format
@@ -190,7 +191,7 @@ GOOSE_CONFIG = Format(
     description=(
         "~/.config/goose/config.yaml extensions block. Renames "
         "`command`→`cmd` and `env`→`envs` (different from a key swap). "
-        "Goose natively reads AGENTS.md (default `[\"AGENTS.md\", \".goosehints\"]`). "
+        'Goose natively reads AGENTS.md (default `["AGENTS.md", ".goosehints"]`). '
         "Validator: `goose recipe validate <wrapper.yaml>` works only on "
         "recipes, so extension validation requires wrapping as a minimal recipe."
     ),
@@ -216,10 +217,20 @@ AIDER_CONFIG = Format(
 # ---------------------------------------------------------------------------
 
 ALL_FORMATS = (
-    CLAUDE_MARKETPLACE, AMAZONQ_AGENT, AGENTSKILLS,
-    MCPB_BUNDLE, GEMINI_EXTENSION, CONTINUE_CONFIG, OPENCODE_CONFIG,
-    VSCODE_MCP, CURSOR_RULES, WINDSURF_RULES, CLINE_RULES, ROO_RULES,
-    GOOSE_CONFIG, AIDER_CONFIG,
+    CLAUDE_MARKETPLACE,
+    AMAZONQ_AGENT,
+    AGENTSKILLS,
+    MCPB_BUNDLE,
+    GEMINI_EXTENSION,
+    CONTINUE_CONFIG,
+    OPENCODE_CONFIG,
+    VSCODE_MCP,
+    CURSOR_RULES,
+    WINDSURF_RULES,
+    CLINE_RULES,
+    ROO_RULES,
+    GOOSE_CONFIG,
+    AIDER_CONFIG,
 )
 
 FORMATS_BY_NAME = {f.name: f for f in ALL_FORMATS}

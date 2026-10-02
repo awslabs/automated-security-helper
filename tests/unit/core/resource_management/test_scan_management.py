@@ -1,9 +1,7 @@
 """Tests for core/resource_management/scan_management.py — covers async scan management functions."""
 
 import asyncio
-from datetime import datetime
-from pathlib import Path
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import patch, MagicMock
 import pytest
 
 from automated_security_helper.core.resource_management.scan_management import (
@@ -87,11 +85,14 @@ class TestCancelScan:
             assert result["status"] == "cancelled"
 
     def test_cancel_returns_result(self):
-        with patch(
-            "automated_security_helper.core.resource_management.scan_management.get_scan_registry"
-        ) as mock_get, patch(
-            "automated_security_helper.core.resource_management.error_handling.validate_scan_id",
-            return_value=None,
+        with (
+            patch(
+                "automated_security_helper.core.resource_management.scan_management.get_scan_registry"
+            ) as mock_get,
+            patch(
+                "automated_security_helper.core.resource_management.error_handling.validate_scan_id",
+                return_value=None,
+            ),
         ):
             mock_registry = MagicMock()
             mock_registry.get_scan_info.return_value = {

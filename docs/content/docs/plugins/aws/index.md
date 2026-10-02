@@ -248,6 +248,7 @@ import subprocess
 import boto3
 from pathlib import Path
 
+
 def lambda_handler(event, context):
     # Download code from S3 or CodeCommit
     # Run ASH scan
@@ -255,38 +256,43 @@ def lambda_handler(event, context):
 
     try:
         # Example: Scan code from S3 trigger
-        bucket = event['Records'][0]['s3']['bucket']['name']
-        key = event['Records'][0]['s3']['object']['key']
+        bucket = event["Records"][0]["s3"]["bucket"]["name"]
+        key = event["Records"][0]["s3"]["object"]["key"]
 
         # Download and extract code
-        s3 = boto3.client('s3')
-        s3.download_file(bucket, key, '/tmp/code.zip')
+        s3 = boto3.client("s3")
+        s3.download_file(bucket, key, "/tmp/code.zip")
 
         # Extract and scan
-        subprocess.run(['unzip', '/tmp/code.zip', '-d', '/tmp/code'])
+        subprocess.run(["unzip", "/tmp/code.zip", "-d", "/tmp/code"])
 
         # Run ASH with AWS reporters
-        result = subprocess.run([
-            'ash', 'scan', '/tmp/code',
-            '--reporters', 'aws-security-hub,cloudwatch-logs',
-            '--config', '/opt/ash-lambda-config.yml'
-        ], capture_output=True, text=True)
+        result = subprocess.run(
+            [
+                "ash",
+                "scan",
+                "/tmp/code",
+                "--reporters",
+                "aws-security-hub,cloudwatch-logs",
+                "--config",
+                "/opt/ash-lambda-config.yml",
+            ],
+            capture_output=True,
+            text=True,
+        )
 
         return {
-            'statusCode': 200,
-            'body': json.dumps({
-                'message': 'Scan completed successfully',
-                'findings_count': result.stdout.count('finding')
-            })
+            "statusCode": 200,
+            "body": json.dumps(
+                {
+                    "message": "Scan completed successfully",
+                    "findings_count": result.stdout.count("finding"),
+                }
+            ),
         }
 
     except Exception as e:
-        return {
-            'statusCode': 500,
-            'body': json.dumps({
-                'error': str(e)
-            })
-        }
+        return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
 ```
 
 ## Monitoring and Alerting

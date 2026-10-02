@@ -121,7 +121,7 @@ def fake_metadata(monkeypatch):
         monkeypatch.setattr(
             cdk_nag_scanner, "packages_distributions", lambda: {ROOT: dist_names}
         )
-        monkeypatch.setattr(cdk_nag_scanner, "distributions", lambda: [])
+        monkeypatch.setattr(cdk_nag_scanner, "distributions", list)
 
         def _fake_requires(name):
             outcome = requires_by_name[name]
@@ -243,8 +243,8 @@ class TestUnreadableMetadata:
         it from ``direct_url.json``. Without this the test would receive real
         metadata while asserting the fallback.
         """
-        monkeypatch.setattr(cdk_nag_scanner, "packages_distributions", lambda: {})
-        monkeypatch.setattr(cdk_nag_scanner, "distributions", lambda: [])
+        monkeypatch.setattr(cdk_nag_scanner, "packages_distributions", dict)
+        monkeypatch.setattr(cdk_nag_scanner, "distributions", list)
         assert _cdk_extra_requirements() == list(_CDK_EXTRA_FALLBACK_REQUIREMENTS)
 
     def test_requires_returning_none_falls_back(self, fake_metadata) -> None:

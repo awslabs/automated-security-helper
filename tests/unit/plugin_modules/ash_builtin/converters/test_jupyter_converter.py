@@ -758,3 +758,102 @@ class TestConvert:
             "source": converter.context.source_dir,
             "output": converter.context.output_dir,
         }
+
+
+class TestCandidateInputCount:
+    """Whether an unavailable nbconvert cost any coverage, answered without nbconvert.
+
+    WHY IT HAS TO BE TOOL-FREE
+    --------------------------
+    A converter whose tool is missing is dropped by ``filter_enabled_plugins`` before it
+    ever runs, so by the time the completeness gate asks "did conversion lose coverage?"
+    the converter has not looked at the tree. In ``--mode nix`` that is every run: the dev
+    shell supplies scanner binaries and exports ``ASH_OFFLINE=YES``, which correctly
+    refuses ``uv tool install nbconvert``. Both nix CI legs on #654 exited 1 on a fixture
+    holding no notebooks at all, because the gate could not tell "nothing to convert" from
+    "could not convert".
+
+    So these tests never touch subprocess, and that is the property under test as much as
+    the numbers are -- ``test_counting_never_invokes_nbconvert`` is the one that pins it.
+    """
+
+    def test_no_notebooks_is_a_positive_zero(self, converter):
+        """0, not None. The gate exempts a row only on an explicit zero."""
+        (converter.context.source_dir).mkdir(parents=True, exist_ok=True)
+        (converter.context.source_dir / "template.yaml").write_text(
+            "Resources: {}\n", encoding="utf-8"
+        )
+
+        assert converter.candidate_input_count() == 0
+
+    def test_notebooks_present_are_counted(self, converter):
+        """The control for the test above: with inputs, the count is non-zero.
+
+        This is what keeps the exemption narrow. If this ever returned 0, an unavailable
+        nbconvert would stop failing a scan whose notebooks went unscanned, which is the
+        defect the completeness gate exists to catch.
+        """
+        write_notebook(converter.context.source_dir, "one.ipynb")
+        write_notebook(converter.context.source_dir, "two.ipynb")
+
+        assert converter.candidate_input_count() == 2
+
+    def test_counting_never_invokes_nbconvert(self, converter, monkeypatch):
+        """The tool is absent in the case this exists for, so the count must not need it."""
+        write_notebook(converter.context.source_dir, "nb.ipynb")
+
+        def _explode(*args, **kwargs):  # pragma: no cover - must not be reached
+            raise AssertionError(
+                "candidate_input_count invoked a subprocess; it must answer without "
+                "nbconvert, because the case it exists for is nbconvert being absent"
+            )
+
+        monkeypatch.setattr(subprocess, "run", _explode)
+
+        assert converter.candidate_input_count() == 1
+
+    def test_an_unreadable_scan_set_reports_no_count_rather_than_zero(
+        self, converter, monkeypatch
+    ):
+        """A count that failed is not evidence of an empty tree.
+
+        Resolving to 0 here would exempt the row from the completeness gate on the
+        strength of a failure, which is the inverse of failing closed.
+        """
+
+        def _raise(**kwargs):
+            raise OSError("scan set unreadable")
+
+        monkeypatch.setattr(f"{MODULE}.scan_set", _raise)
+
+        assert converter.candidate_input_count() is None
+
+    def test_convert_and_the_count_read_the_same_selection(
+        self, converter, monkeypatch
+    ):
+        """One predicate, not two copies that can drift apart.
+
+        The count decides whether a missing nbconvert costs coverage, so a second copy of
+        the ``.ipynb`` selection would let the gate fire over files ``convert`` would not
+        have touched, or stay quiet about ones it would.
+        """
+        write_notebook(converter.context.source_dir, "nb.ipynb")
+        (converter.context.source_dir / "notes.txt").write_text("x", encoding="utf-8")
+
+        calls = []
+        real = converter._notebooks_in_scan_set
+
+        def _spy():
+            calls.append(1)
+            return real()
+
+        monkeypatch.setattr(converter, "_notebooks_in_scan_set", _spy)
+
+        with patch(f"{MODULE}.subprocess.run", nbconvert_double()):
+            converter.convert()
+        converter.candidate_input_count()
+
+        assert len(calls) == 2, (
+            "both convert() and candidate_input_count() must go through "
+            "_notebooks_in_scan_set, or the two selections can drift"
+        )

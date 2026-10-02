@@ -1,10 +1,7 @@
 """Tests for cli/config.py — covers init, get, update, validate commands."""
 
-import os
 import yaml
-from pathlib import Path
-from unittest.mock import patch, MagicMock
-import pytest
+from unittest.mock import patch
 from typer.testing import CliRunner
 
 from automated_security_helper.cli.config import config_app, IndentableYamlDumper

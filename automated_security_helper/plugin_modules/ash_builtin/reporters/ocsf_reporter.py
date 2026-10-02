@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import Literal, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from automated_security_helper.models.asharp_model import AshAggregatedResults
@@ -734,7 +734,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
 
     def _serialize_skipped_project_findings(
         self, findings: list[VulnerabilityFinding]
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """*findings* as dumped dicts, with the same options the real records use.
 
         Same ``by_alias``/``exclude_none``/``exclude_unset`` triple, so a project
@@ -822,9 +822,7 @@ class OcsfReporter(ReporterPluginBase[OCSFReporterConfig]):
         all_results = model.sarif.get_all_results()
 
         if not all_results:
-            ASH_LOGGER.info(
-                "No SARIF results found in any run - returning empty array"
-            )
+            ASH_LOGGER.info("No SARIF results found in any run - returning empty array")
             return _only_skipped_projects()
 
         total_results_count = len(all_results)

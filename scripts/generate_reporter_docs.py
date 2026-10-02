@@ -345,14 +345,22 @@ def render_builtin_index_counts(rows: list[dict]) -> str:
         [
             "| Category | Purpose | Count | Location |",
             "|----------|---------|-------|----------|",
-            f"| **[Scanners](scanners.md)** | Analyze code and infrastructure for "
-            f"security vulnerabilities | {counts['scanners']} | `scanners/` |",
-            f"| **[Reporters](reporters.md)** | Generate scan results in various "
-            f"output formats | {counts['reporters']} | `reporters/` |",
-            f"| **[Converters](converters.md)** | Process and prepare files for "
-            f"scanning | {counts['converters']} | `converters/` |",
-            f"| **[Event Handlers](event-handlers.md)** | Handle scan lifecycle "
-            f"events and notifications | {counts['event_handlers']} | `event_handlers/` |",
+            (
+                f"| **[Scanners](scanners.md)** | Analyze code and infrastructure for "
+                f"security vulnerabilities | {counts['scanners']} | `scanners/` |"
+            ),
+            (
+                f"| **[Reporters](reporters.md)** | Generate scan results in various "
+                f"output formats | {counts['reporters']} | `reporters/` |"
+            ),
+            (
+                f"| **[Converters](converters.md)** | Process and prepare files for "
+                f"scanning | {counts['converters']} | `converters/` |"
+            ),
+            (
+                f"| **[Event Handlers](event-handlers.md)** | Handle scan lifecycle "
+                f"events and notifications | {counts['event_handlers']} | `event_handlers/` |"
+            ),
         ]
     )
 

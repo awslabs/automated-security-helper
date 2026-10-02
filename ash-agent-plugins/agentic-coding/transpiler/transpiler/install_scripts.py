@@ -1,6 +1,7 @@
 """Install-script generators for backends whose MCP config lives outside the repo
 (user-level config dirs, VS Code globalStorage, etc.). Bash with conditional
 logic is clearer here than Jinja templating."""
+
 from __future__ import annotations
 
 import json
@@ -19,7 +20,7 @@ def windsurf(m: Manifest, base_dir: Path) -> str:
     body = [
         'TARGET="$HOME/.codeium/windsurf/mcp_config.json"',
         'mkdir -p "$(dirname "$TARGET")"',
-        f'cat > "$TARGET" <<\'EOF\'\n{mcp_json}\nEOF',
+        f"cat > \"$TARGET\" <<'EOF'\n{mcp_json}\nEOF",
         'echo "Wrote Windsurf MCP config to $TARGET"',
         'echo "Restart Windsurf for changes to take effect."',
     ]
@@ -34,14 +35,14 @@ def cline(m: Manifest, base_dir: Path) -> str:
         '  Darwin) BASE="$HOME/Library/Application Support/Code" ;;',
         '  Linux) BASE="$HOME/.config/Code" ;;',
         '  *) echo "Unsupported OS: $(uname -s). Edit $BASE manually." >&2; exit 1 ;;',
-        'esac',
+        "esac",
         'TARGET="$BASE/$EXT_DIR/cline_mcp_settings.json"',
         'if [[ ! -d "$BASE/$EXT_DIR" ]]; then',
         '  echo "Cline VS Code extension not detected at $BASE/$EXT_DIR" >&2',
         '  echo "Install Cline first, then re-run this script." >&2',
-        '  exit 1',
-        'fi',
-        f'cat > "$TARGET" <<\'EOF\'\n{mcp_json}\nEOF',
+        "  exit 1",
+        "fi",
+        f"cat > \"$TARGET\" <<'EOF'\n{mcp_json}\nEOF",
         'echo "Wrote Cline MCP settings to $TARGET"',
         'echo "Reload the VS Code window for changes to take effect."',
     ]
@@ -55,10 +56,10 @@ def gemini(m: Manifest, base_dir: Path) -> str:
         'mkdir -p "$(dirname "$TARGET")"',
         'if [[ -f "$TARGET" ]]; then',
         '  echo "Existing $TARGET found. Merge MCP config manually:" >&2',
-        f'  cat <<\'EOF\'\n{mcp_json}\nEOF',
-        '  exit 0',
-        'fi',
-        f'cat > "$TARGET" <<\'EOF\'\n{mcp_json}\nEOF',
+        f"  cat <<'EOF'\n{mcp_json}\nEOF",
+        "  exit 0",
+        "fi",
+        f"cat > \"$TARGET\" <<'EOF'\n{mcp_json}\nEOF",
         'echo "Wrote Gemini settings to $TARGET"',
         'echo "Or install as an extension: gemini extensions install $SCRIPT_DIR"',
     ]
@@ -71,8 +72,8 @@ def goose(m: Manifest, base_dir: Path) -> str:
         'mkdir -p "$(dirname "$TARGET")"',
         'if [[ -f "$TARGET" ]] && grep -q "^extensions:" "$TARGET"; then',
         '  echo "Existing extensions block in $TARGET. Merge manually from $SCRIPT_DIR/extension.yaml" >&2',
-        '  exit 0',
-        'fi',
+        "  exit 0",
+        "fi",
         'cat "$SCRIPT_DIR/extension.yaml" >> "$TARGET"',
         'echo "Appended extension to $TARGET"',
         'echo "Restart Goose to load the extension."',
