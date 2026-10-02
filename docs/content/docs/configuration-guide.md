@@ -174,7 +174,9 @@ global_settings:
 Omitting `line_end` does **not** suppress only `line_start`. A suppression with
 `line_start` and no `line_end` matches every finding from that line to the end of
 the file, including findings introduced later. To suppress a single line, set
-`line_end` to the same value as `line_start`:
+`line_end` to the same value as `line_start`. To follow a function or class
+when lines move, use `symbol` instead; see
+[Suppressing by symbol](suppressions.md#suppressing-by-symbol).
 
 ```yaml
     - rule_id: 'RULE-123'
@@ -185,6 +187,10 @@ the file, including findings introduced later. To suppress a single line, set
     - rule_id: 'RULE-456'
       path: 'src/*.js'  # Glob pattern matching all JS files in src/
       reason: 'Known issue, planned for fix in v2.0'
+    - rule_id: 'B602'
+      path: 'src/deploy.py'
+      symbol: 'Deployer.run_hook'  # Only findings inside this method; needs the [symbols] extra
+      reason: 'Hook command comes from the signed manifest'
 
   # Whether to fail with non-zero exit code if actionable findings are found
   fail_on_findings: true

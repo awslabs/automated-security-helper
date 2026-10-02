@@ -636,6 +636,19 @@
           "default": null,
           "description": "Rule ID to suppress",
           "title": "Rule Id"
+        },
+        "symbol": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "(Optional) Only suppress findings whose lines lie inside the definition with this qualified name, e.g. 'MyClass.my_method', in the finding's file. Names are dotted from the top of the file, exact and case-sensitive. Resolved by parsing the file with tree-sitter (Python, JavaScript, TypeScript, Java), which needs the 'symbols' extra; a finding whose file cannot be parsed never matches.",
+          "title": "Symbol"
         }
       },
       "required": [
