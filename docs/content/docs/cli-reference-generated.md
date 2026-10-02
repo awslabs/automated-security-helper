@@ -68,6 +68,8 @@ Runs an ASH scan against the source-dir, outputting results to the output-dir.
 | `--ash-revision-to-install` | str |  |  | ASH branch or tag to install in the container image for usage during containerized scans |
 | `--custom-containerfile` | str |  |  | Path to a custom container definition (e.g. Dockerfile) that you would like to build *after* the ASH container image builds. This is typically used when building a custom container image for ASH and including custom tooling that ASH does not come with by default. The fully qualified image name for the ASH image is passed in as the `ASH_BASE_IMAGE` build-arg so you can use it as a base. IMPORTANT: When a custom_containerfile path is provided, the build-target is set to `ci` so the container run-as configuration is not shifted to the non-root user. If you are using this parameter, you are responsible for securing your final container as appropriate. |
 | `--custom-build-arg` | List[str] |  |  | Custom build arguments to pass to the container build |
+| `--cli-json-input` | str |  |  | Read parameter values from a JSON object: a path, a file:// URI, or '-' for stdin. Keys are parameter names (output_dir) or long flag spellings (--output-dir). Flags given on the command line override the file; the file overrides environment variables. Run with --generate-cli-skeleton for a template. |
+| `--generate-cli-skeleton` | bool |  |  | Print a JSON template for --cli-json-input, listing every parameter of this command with its default, and exit. |
 
 ### `ash build-image`
 
@@ -95,6 +97,8 @@ Builds the ASH container image then runs a scan with it.
 | `--verbose`, `-v` | bool | False |  | Enable verbose logging |
 | `--debug`, `-d` | bool | False |  | Enable debug logging |
 | `--color` | bool | True |  | Enable/disable colorized output |
+| `--cli-json-input` | str |  |  | Read parameter values from a JSON object: a path, a file:// URI, or '-' for stdin. Keys are parameter names (output_dir) or long flag spellings (--output-dir). Flags given on the command line override the file; the file overrides environment variables. Run with --generate-cli-skeleton for a template. |
+| `--generate-cli-skeleton` | bool |  |  | Print a JSON template for --cli-json-input, listing every parameter of this command with its default, and exit. |
 
 ### `ash report`
 
@@ -110,6 +114,8 @@ Generate a report from ASH scan results using the specified reporter plugin.
 | `--verbose`, `-v` | bool | False |  | Enable verbose logging |
 | `--debug`, `-d` | bool | False |  | Enable debug logging |
 | `--color` | bool | True |  | Enable/disable colorized output |
+| `--cli-json-input` | str |  |  | Read parameter values from a JSON object: a path, a file:// URI, or '-' for stdin. Keys are parameter names (output_dir) or long flag spellings (--output-dir). Flags given on the command line override the file; the file overrides environment variables. Run with --generate-cli-skeleton for a template. |
+| `--generate-cli-skeleton` | bool |  |  | Print a JSON template for --cli-json-input, listing every parameter of this command with its default, and exit. |
 
 ### `ash merge`
 
@@ -128,6 +134,8 @@ Merges the results of a sharded scan into one unified report.
 | `--verbose`, `-v` | bool | False |  | Enable verbose logging |
 | `--debug`, `-d` | bool | False |  | Enable debug logging |
 | `--color` | bool | True |  | Enable/disable colorized output |
+| `--cli-json-input` | str |  |  | Read parameter values from a JSON object: a path, a file:// URI, or '-' for stdin. Keys are parameter names (output_dir) or long flag spellings (--output-dir). Flags given on the command line override the file; the file overrides environment variables. Run with --generate-cli-skeleton for a template. |
+| `--generate-cli-skeleton` | bool |  |  | Print a JSON template for --cli-json-input, listing every parameter of this command with its default, and exit. |
 
 ### `ash mcp`
 
