@@ -1321,6 +1321,25 @@
           },
           "description": "Converter configurations by name."
         },
+        "extends": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Base config file(s) this config extends: a path, or a list of paths applied in order, relative to this file. Mappings merge key by key; lists and scalars from this file replace the base's. Paths must stay inside the repository being scanned; URLs are refused.",
+          "title": "Extends"
+        },
         "external_reports_to_include": {
           "default": [],
           "description": "List of external reports to include in the final report. These can be paths to SARIF or CycloneDX reports produced by other tools.",
@@ -1388,6 +1407,23 @@
             "thread_pool_max_workers": 4
           },
           "description": "Configuration for MCP server resource management and limits"
+        },
+        "patch": {
+          "anyOf": [
+            {
+              "items": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "RFC 6902 JSON-Patch operations (add, remove, replace, test) applied after this file is merged over its bases. Use 'add' at '/global_settings/suppressions/-' to append to a base's list.",
+          "title": "Patch"
         },
         "project_name": {
           "default": "ash-scan",
