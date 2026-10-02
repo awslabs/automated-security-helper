@@ -264,6 +264,10 @@ pre_bump_hooks = [
 ]
 tag_format = "v$version"
 changelog_file = "CHANGELOG.md"
+# commitizen's stock template plus an include for hand-written release notes in
+# .github/release-notes/<tag>.md. v3.8.0 ships breaking changes as a minor
+# (release-line 3.x in ash-create-release.yml), so its entry has to state them.
+template = ".github/changelog/CHANGELOG.md.j2"
 update_changelog_on_bump = true
 legacy_tag_formats = [
     "$version-e-$prerelease",
