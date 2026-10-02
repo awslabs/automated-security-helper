@@ -214,9 +214,9 @@ _GRYPE_DB_CACHE_REASON = (
 ALLOWLIST: tuple[Entry, ...] = (
     # -- Artifact uploads -----------------------------------------------------
     #
-    # The wheel and the sdist are the only entries here that publish something
-    # this project BUILT. Everything else is a report, a test result, or scan
-    # output kept as evidence from a red run.
+    # Three entries here publish something this project BUILT: the wheel and
+    # sdist, the .msix, and the .vsix. Everything else is a report, a test
+    # result, or scan output kept as evidence from a red run.
     Entry(
         file=".github/workflows/ash-package.yml",
         kind=KIND_UPLOAD,
@@ -233,6 +233,56 @@ ALLOWLIST: tuple[Entry, ...] = (
             "gated separately by .github/scripts/assert-artifact-contents.py, "
             "which self-tests before the build and then checks the real artifact. "
             "Widening what this publishes is a packaging decision, not a CI one."
+        ),
+    ),
+    Entry(
+        file=".github/workflows/ash-package.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=ash-msix-${{ github.sha }}-attempt-${{ github.run_attempt }} "
+            "path=build/msix/*.msix"
+        ),
+        reason=(
+            "BUILT BYTES: the MSIX package the msix job builds, installs and scans "
+            "with on windows-latest. Uploaded because packaging/winget/ declares this "
+            "filename as its installer, and this is the only place the code that "
+            "decides the filename produces it. The package wraps the same wheel the "
+            "build job already publishes above plus the launcher compiled from "
+            "packaging/msix/AshLauncher.cs, so it widens the format, not the "
+            "content. Signed with the repository's MSIX_SIGNING_PFX secret when set "
+            "and a throwaway self-signed certificate otherwise, which Windows will "
+            "not trust; it is evidence for the winget manifest, not a release asset. "
+            "Exactly one .msix is uploaded, asserted by verify-on-windows.ps1, with "
+            "if-no-files-found: error and 14-day retention."
+        ),
+    ),
+    Entry(
+        file=".github/workflows/ash-vscode-extension.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes="name=ash-vscode-extension path=editors/vscode/ash-vscode.vsix",
+        reason=(
+            "BUILT BYTES: the VS Code extension archive packaged from editors/vscode. "
+            "The step before it reads the archive with an independent zip reader and "
+            "fails on any member under node_modules/ (no bundled third-party code) "
+            "and on a missing extension/out/extension.js, so what is published is the "
+            "extension's own compiled TypeScript and manifest. Not published to the "
+            "Marketplace from here; 7-day retention, if-no-files-found: error."
+        ),
+    ),
+    Entry(
+        file=".github/workflows/ash-jetbrains-ci.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes=(
+            "name=jetbrains-reports-${{ github.sha }}-attempt-${{ github.run_attempt }} "
+            "path=editors/jetbrains/build/reports/|editors/jetbrains/build/test-results/"
+        ),
+        reason=(
+            "Failure evidence only (if: failure()): Gradle's test and coverage "
+            "reports for the JetBrains plugin. Named report directories, not "
+            "build/libs or build/distributions, so the plugin jar is not in it."
         ),
     ),
     Entry(
@@ -285,12 +335,14 @@ ALLOWLIST: tuple[Entry, ...] = (
         kind=KIND_UPLOAD,
         action=_UPLOAD,
         publishes=(
-            "name=ts-coverage-${{ matrix.package }} "
-            "path=deploy/${{ matrix.package }}/coverage/"
+            "name=ts-coverage-${{ matrix.package }} path=${{ matrix.dir }}/coverage/"
         ),
         reason=(
             "Coverage report for the TypeScript packages. Instrumented-line data "
-            "over tracked source, not the compiled bundle."
+            "over tracked source, not the compiled bundle. The path moved from "
+            "deploy/${{ matrix.package }} to ${{ matrix.dir }} when editors/vscode "
+            "joined the matrix beside deploy/cdk and deploy/cdk-constructs; the "
+            "directory is still each package's own coverage/ output."
         ),
     ),
     Entry(
@@ -487,7 +539,25 @@ ALLOWLIST: tuple[Entry, ...] = (
         kind=KIND_BUILTIN_CACHE,
         action=_SETUP_UV,
         publishes="enable-cache=true",
-        reason=_UV_CACHE_REASON,
+        count=3,
+        reason=_UV_CACHE_REASON + " Three times: the build, msix and winget jobs.",
+    ),
+    Entry(
+        file=".github/workflows/ash-actions-pinned.yml",
+        kind=KIND_BUILTIN_CACHE,
+        action=_SETUP_UV,
+        publishes="enable-cache=true",
+        reason=(
+            _UV_CACHE_REASON + " Here it holds only PyYAML, for the "
+            "`uv run --no-project --with pyyaml` workflow-structure check."
+        ),
+    ),
+    Entry(
+        file=".github/workflows/ash-vscode-extension.yml",
+        kind=KIND_BUILTIN_CACHE,
+        action=_SETUP_NODE,
+        publishes="cache=npm cache-dependency-path=editors/vscode/package-lock.json",
+        reason=_NPM_CACHE_REASON,
     ),
     Entry(
         file=".github/workflows/ash-repo-docs.yml",
@@ -544,11 +614,11 @@ ALLOWLIST: tuple[Entry, ...] = (
         file=".github/workflows/ash-typescript-ci.yml",
         kind=KIND_BUILTIN_CACHE,
         action=_SETUP_NODE,
-        publishes=(
-            "cache=npm "
-            "cache-dependency-path=deploy/${{ matrix.package }}/package-lock.json"
+        publishes="cache=npm cache-dependency-path=${{ matrix.dir }}/package-lock.json",
+        reason=(
+            _NPM_CACHE_REASON + " Keyed on ${{ matrix.dir }} since editors/vscode "
+            "joined deploy/cdk and deploy/cdk-constructs in the matrix."
         ),
-        reason=_NPM_CACHE_REASON,
     ),
 )
 
