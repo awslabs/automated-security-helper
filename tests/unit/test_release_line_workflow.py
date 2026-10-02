@@ -7,8 +7,8 @@ Why this file exists
 --------------------
 ``main`` carries ``feat!`` commits (#640, #696) whose changes ship as 3.x by
 maintainer decision, because 4.0.0 is reserved for the v4 packaging work. Left to
-itself, ``cz bump`` reads those commits and produces 4.0.0. The ``release-line``
-input on ``.github/workflows/ash-create-release.yml`` caps that to a minor. A
+itself, ``cz bump`` reads those commits and produces 4.0.0. The ``RELEASE_LINE``
+setting in ``.github/workflows/ash-create-release.yml`` caps that to a minor. A
 mistake there is silent in the worst direction: the workflow would open a 4.0.0
 release PR, and a merge would publish a ``v4`` tag that the v4 work then collides
 with.
@@ -35,8 +35,8 @@ hand-written v3.8.0 notes land under the v3.8.0 heading and nowhere else.
 
 What it deliberately does not check
 -----------------------------------
-That Actions passes the input through, or that the release PR gets created. A pass
-here means "given this input and this history, the shell picks this version".
+That Actions passes the setting through, or that the release PR gets created. A pass
+here means "given this setting and this history, the shell picks this version".
 """
 
 from __future__ import annotations
@@ -340,14 +340,17 @@ class TestTheBumpStepBackstop:
         assert "bumped" not in bump.outputs, "the step went on to report a bump"
 
 
-class TestTheWorkflowInput:
-    def test_three_x_is_the_default_and_auto_is_offered(self):
+class TestTheReleaseLineSetting:
+    def test_the_line_is_committed_as_three_x(self):
+        doc = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+        assert doc["env"]["RELEASE_LINE"] == "3.x"
+
+    def test_it_is_not_a_dispatch_input(self):
+        """checkov's CKV_GHA_7 fails the repository scan on any dispatch input."""
         doc = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
         # PyYAML reads the bare `on:` key as the boolean True.
         trigger = doc.get("on", doc.get(True))
-        spec = trigger["workflow_dispatch"]["inputs"]["release-line"]
-        assert spec["default"] == "3.x"
-        assert set(spec["options"]) == {"3.x", "auto"}
+        assert not (trigger["workflow_dispatch"] or {}).get("inputs")
 
 
 class TestTheChangelogTemplate:

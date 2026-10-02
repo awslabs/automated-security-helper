@@ -2,31 +2,30 @@ name: ASH - Create Release
 
 on:
   workflow_dispatch:
-    inputs:
-      # main carries feat! commits (#640, #696) whose changes ship as 3.x by
-      # maintainer decision: 4.0.0 is reserved for the v4 packaging work. Left to
-      # itself, commitizen reads those commits and bumps 3.7.0 to 4.0.0.
-      #
-      # `3.x` keeps the release on the 3.x line. When commitizen detects a MAJOR
-      # increment it is capped to MINOR with `cz bump --increment MINOR`, and the
-      # run logs a warning naming every breaking commit it overrode. A PATCH or
-      # MINOR increment passes through untouched. The commits themselves are never
-      # rewritten, so their BREAKING CHANGE notes still render in CHANGELOG.md.
-      #
-      # `auto` is commitizen's own semver: a breaking commit produces a major.
-      #
-      # The cap is bounded. `3.x` refuses to run once the current version is not
-      # 3.x, so it cannot hold a future line back by accident, and after a bump it
-      # fails the job if the new version left 3.x. To cut 4.0.0 once v4 is on
-      # main, change the default below to `auto` in the change that lands v4, or
-      # dispatch with `release-line: auto`. See DEVELOPMENT.md "Releasing".
-      release-line:
-        description: "3.x caps a breaking-change bump to a minor; auto lets commitizen pick (a breaking change makes a major)"
-        type: choice
-        options:
-          - "3.x"
-          - "auto"
-        default: "3.x"
+
+# The release line is committed here rather than offered as a dispatch input, so
+# the version a release gets is decided in reviewed history, not by whoever runs
+# the workflow. (checkov's CKV_GHA_7 rejects workflow_dispatch inputs for the same
+# reason: a build's output should not depend on a parameter typed at run time.)
+#
+# main carries feat! commits (#640, #696) whose changes ship as 3.x by maintainer
+# decision: 4.0.0 is reserved for the v4 packaging work. Left to itself,
+# commitizen reads those commits and bumps 3.7.0 to 4.0.0.
+#
+# `3.x` keeps the release on the 3.x line. When commitizen detects a MAJOR
+# increment it is capped to MINOR with `cz bump --increment MINOR`, and the run
+# logs a warning naming every breaking commit it overrode. A PATCH or MINOR
+# increment passes through untouched. The commits themselves are never rewritten,
+# so their BREAKING CHANGE notes still render in CHANGELOG.md.
+#
+# `auto` is commitizen's own semver: a breaking commit produces a major.
+#
+# The cap is bounded. `3.x` refuses to run once the current version is not 3.x,
+# so it cannot hold a future line back by accident, and after a bump it fails the
+# job if the new version left 3.x. To cut 4.0.0 once v4 is on main, set this to
+# `auto` in the change that lands v4. See DEVELOPMENT.md "Release line".
+env:
+  RELEASE_LINE: "3.x"
 
 permissions:
   contents: write
@@ -128,8 +127,6 @@ jobs:
       # a scratch repository, by tests/unit/test_release_line_workflow.py.
       - name: Resolve release line
         id: line
-        env:
-          RELEASE_LINE: ${{ inputs.release-line }}
         run: |
           OLD_VERSION=$(uv run cz version --project)
           OLD_MAJOR="${OLD_VERSION%%.*}"
@@ -151,7 +148,7 @@ jobs:
           esac
 
           if [[ "$OLD_MAJOR" != "$LINE_MAJOR" ]]; then
-            echo "::error::release-line is ${RELEASE_LINE}, but the current version is ${OLD_VERSION}. The cap only applies while the project is on ${LINE_MAJOR}.x; dispatch with release-line auto."
+            echo "::error::release-line is ${RELEASE_LINE}, but the current version is ${OLD_VERSION}. The cap only applies while the project is on ${LINE_MAJOR}.x; set RELEASE_LINE to auto in this workflow."
             exit 1
           fi
           echo "line_major=${LINE_MAJOR}" >> "$GITHUB_OUTPUT"
