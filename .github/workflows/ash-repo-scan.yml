@@ -77,6 +77,11 @@ jobs:
   #
   # Runs when the scan failed as well as when it passed, because a scan that fails
   # on findings has still written its report. Skipped with the scan on push.
+  #
+  # Fork and Dependabot pull requests still start. The startup check compares what
+  # the called workflow requests with what this job DECLARES; the read-only
+  # downgrade for those events is applied to the token afterwards. The scan job
+  # has always relied on the same thing for checks and pull-requests: write.
   sarif:
     needs: ash
     if: needs.ash.result == 'success' || needs.ash.result == 'failure'
