@@ -192,7 +192,7 @@ class TestHomebrewFormulaVendorsItsDependencies:
             assert _canonical(formula) in declared, (
                 f"{requirement!r} is exempt from needing a `resource` because "
                 f"the Homebrew formula {formula!r} is supposed to supply it, but "
-                f"Formula/ash.rb has no `depends_on \"{formula}\"`. Either add the "
+                f'Formula/ash.rb has no `depends_on "{formula}"`. Either add the '
                 "dependency back or remove the exemption and add a resource."
             )
 

@@ -124,7 +124,9 @@ def main(argv: list[str]) -> int:
             "NO-SOURCE and reports success, which is why this is checked from outside the task."
         )
 
-    result_files = sorted(results_dir.glob("TEST-*.xml")) if results_dir.is_dir() else []
+    result_files = (
+        sorted(results_dir.glob("TEST-*.xml")) if results_dir.is_dir() else []
+    )
     if not result_files:
         problems.append(
             f"no JUnit XML results under {results_dir}. No test JVM started, so nothing was "
@@ -182,7 +184,9 @@ def main(argv: list[str]) -> int:
             sys.stderr.write(f"  - {problem}\n")
         return 1
 
-    print(f"  OK: every compiled suite reported, including {len(args.require_suite)} required")
+    print(
+        f"  OK: every compiled suite reported, including {len(args.require_suite)} required"
+    )
     return 0
 
 

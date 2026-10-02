@@ -66,7 +66,9 @@ import yaml
 from defusedxml import ElementTree
 
 PACKAGE_IDENTIFIER = "Amazon.AutomatedSecurityHelper"
-RELEASE_ASSET_BASE = "https://github.com/awslabs/automated-security-helper/releases/download"
+RELEASE_ASSET_BASE = (
+    "https://github.com/awslabs/automated-security-helper/releases/download"
+)
 MANIFEST_SUFFIXES = ("", ".installer", ".locale.en-US")
 
 
@@ -157,9 +159,14 @@ def replace_one(text: str, pattern: str, replacement: str, what: str) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--msix", required=True, type=Path, help="the built .msix package")
     parser.add_argument(
-        "--out-dir", required=True, type=Path, help="directory to write the filled manifests to"
+        "--msix", required=True, type=Path, help="the built .msix package"
+    )
+    parser.add_argument(
+        "--out-dir",
+        required=True,
+        type=Path,
+        help="directory to write the filled manifests to",
     )
     parser.add_argument(
         "--source-dir",
@@ -225,7 +232,10 @@ def main() -> int:
     # was wrong on the first attempt and replace_one's count check is what reported it,
     # which is the whole reason that check exists.
     filled = replace_one(
-        filled, r"^- Architecture: .*$", f"- Architecture: {architecture}", "Architecture"
+        filled,
+        r"^- Architecture: .*$",
+        f"- Architecture: {architecture}",
+        "Architecture",
     )
     filled = replace_one(
         filled,
@@ -234,10 +244,16 @@ def main() -> int:
         "MinimumOSVersion",
     )
     filled = replace_one(
-        filled, r"^  InstallerUrl: .*$", f"  InstallerUrl: {installer_url}", "InstallerUrl"
+        filled,
+        r"^  InstallerUrl: .*$",
+        f"  InstallerUrl: {installer_url}",
+        "InstallerUrl",
     )
     filled = replace_one(
-        filled, r"^  InstallerSha256: .*$", f"  InstallerSha256: {digest}", "InstallerSha256"
+        filled,
+        r"^  InstallerSha256: .*$",
+        f"  InstallerSha256: {digest}",
+        "InstallerSha256",
     )
 
     out_dir.mkdir(parents=True, exist_ok=True)

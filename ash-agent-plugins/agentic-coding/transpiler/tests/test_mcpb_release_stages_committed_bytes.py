@@ -38,6 +38,7 @@ at different times. The workflow asserts it on the exact bytes about to be
 uploaded, which is the last possible moment; this asserts it on every pull request
 through the transpiler suite, which is early enough to be cheap to fix.
 """
+
 from __future__ import annotations
 
 import zipfile

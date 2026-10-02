@@ -90,16 +90,13 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-if sys.version_info >= (3, 11):
-    import tomllib
-else:  # pragma: no cover - exercised only on 3.10
-    import tomli as tomllib
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FORMULA_PATH = REPO_ROOT / "Formula" / "ash.rb"
 PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"
 
-BEGIN_MARKER = "  # BEGIN generated resources -- packaging/homebrew/refresh-resources.py"
+BEGIN_MARKER = (
+    "  # BEGIN generated resources -- packaging/homebrew/refresh-resources.py"
+)
 END_MARKER = "  # END generated resources"
 
 # Every platform Homebrew supports, as uv spells them. The resolution is run

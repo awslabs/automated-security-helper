@@ -62,6 +62,7 @@ found no workflows at all. A gate that scanned nothing must fail rather than pas
 
 Usage: assert-workflows-well-formed.py [--self-test]
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -115,8 +116,14 @@ def check(name: str, doc: object) -> list[str]:
             bad.append(f"{where}: missing-runs-on")
         for i, step in enumerate(steps):
             if not isinstance(step, dict) or not ({"run", "uses"} & set(step)):
-                label = (step or {}).get("name", f"index {i}") if isinstance(step, dict) else f"index {i}"
-                bad.append(f"{where}: empty-step -- step {label} has neither run: nor uses:")
+                label = (
+                    (step or {}).get("name", f"index {i}")
+                    if isinstance(step, dict)
+                    else f"index {i}"
+                )
+                bad.append(
+                    f"{where}: empty-step -- step {label} has neither run: nor uses:"
+                )
     return bad
 
 
@@ -151,14 +158,18 @@ def self_test() -> int:
         if not hit:
             failures += 1
     clean = check("fixture", yaml.safe_load(GOOD))
-    print(f"  self-test {'well-formed':18s} "
-          f"{'accepted' if not clean else 'WRONGLY REJECTED: ' + str(clean)}")
+    print(
+        f"  self-test {'well-formed':18s} "
+        f"{'accepted' if not clean else 'WRONGLY REJECTED: ' + str(clean)}"
+    )
     if clean:
         failures += 1
     if failures:
         print(f"self-test FAILED: {failures} rule(s) do not work", file=sys.stderr)
         return 1
-    print("self-test OK: every rule fires on its own fixture, and a good workflow passes")
+    print(
+        "self-test OK: every rule fires on its own fixture, and a good workflow passes"
+    )
     return 0
 
 
@@ -169,8 +180,11 @@ def main() -> int:
     print(f"scanning {WORKFLOW_DIR}")
     paths = sorted(WORKFLOW_DIR.glob("*.yml")) + sorted(WORKFLOW_DIR.glob("*.yaml"))
     if not paths:
-        print(f"FAIL: no workflows found under {WORKFLOW_DIR}. A gate that scanned "
-              "nothing must fail rather than pass.", file=sys.stderr)
+        print(
+            f"FAIL: no workflows found under {WORKFLOW_DIR}. A gate that scanned "
+            "nothing must fail rather than pass.",
+            file=sys.stderr,
+        )
         return 2
 
     findings: list[str] = []
@@ -187,14 +201,19 @@ def main() -> int:
         for p in paths
     )
     if findings:
-        print(f"\nworkflow structure FAILED: {len(findings)} finding(s) across "
-              f"{len(paths)} file(s)", file=sys.stderr)
+        print(
+            f"\nworkflow structure FAILED: {len(findings)} finding(s) across "
+            f"{len(paths)} file(s)",
+            file=sys.stderr,
+        )
         for f in findings:
             print(f"  - {f}", file=sys.stderr)
         return 1
 
-    print(f"workflow structure OK: {len(paths)} workflow(s), {jobs} job(s), "
-          "every job has a body")
+    print(
+        f"workflow structure OK: {len(paths)} workflow(s), {jobs} job(s), "
+        "every job has a body"
+    )
     return 0
 
 

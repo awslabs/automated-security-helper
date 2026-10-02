@@ -67,7 +67,7 @@ import json
 import pathlib
 import subprocess
 import sys
-import xml.etree.ElementTree as ElementTree
+import xml.etree.ElementTree as ET
 
 # Parsing goes through defusedxml. Only the reading entry point comes from it -- defusedxml
 # does not re-export Element or ParseError, both of which are used below, so the stdlib module
@@ -115,7 +115,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def load_report(path: pathlib.Path) -> ElementTree.Element:
+def load_report(path: pathlib.Path) -> ET.Element:
     """Reads the JaCoCo XML report, treating absence as a failure rather than a skip."""
     if not path.exists():
         raise Failure(
@@ -150,7 +150,7 @@ def load_report(path: pathlib.Path) -> ElementTree.Element:
 
     try:
         return fromstring(text)
-    except ElementTree.ParseError as error:
+    except ET.ParseError as error:
         raise Failure(f"{path} is not parseable XML: {error}") from error
 
 
@@ -158,7 +158,7 @@ class Failure(Exception):
     """A condition that stops the checks from being meaningful. Exit code 2."""
 
 
-def counter(element: ElementTree.Element, kind: str) -> tuple[int, int]:
+def counter(element: ET.Element, kind: str) -> tuple[int, int]:
     """Returns (covered, missed) for a JaCoCo counter, or (0, 0) when it is absent.
 
     Absent is not the same as zero, and the difference matters for BRANCH: a class with no
@@ -234,15 +234,15 @@ def is_excluded(class_name: str, exclusions: list[dict]) -> bool:
     return False
 
 
-def measured_classes(report: ElementTree.Element) -> list[ElementTree.Element]:
+def measured_classes(report: ET.Element) -> list[ET.Element]:
     """Every class in the report, from every package."""
-    classes: list[ElementTree.Element] = []
+    classes: list[ET.Element] = []
     for package in report.findall("package"):
         classes.extend(package.findall("class"))
     return classes
 
 
-def class_name_of(element: ElementTree.Element) -> str:
+def class_name_of(element: ET.Element) -> str:
     # JaCoCo writes the internal name with slashes, and a nested class with a dollar sign.
     # Both are converted so a pattern in the exclusions file can be written the way a Java
     # developer would write it.
@@ -250,7 +250,7 @@ def class_name_of(element: ElementTree.Element) -> str:
 
 
 def check_coverage(
-    report: ElementTree.Element, exclusions: list[dict], args: argparse.Namespace
+    report: ET.Element, exclusions: list[dict], args: argparse.Namespace
 ) -> list[str]:
     """The threshold and the denominator floors, over the non-excluded classes only."""
     problems: list[str] = []
@@ -288,7 +288,9 @@ def check_coverage(
     if line_ratio < args.min_line_ratio:
         worst = sorted(p for p in per_class if p[2] > 0)
         worst.sort(key=lambda p: p[1])
-        detail = ", ".join(f"{n.rsplit('.', 1)[-1]} {r * 100:.0f}%" for n, r, _ in worst[:5])
+        detail = ", ".join(
+            f"{n.rsplit('.', 1)[-1]} {r * 100:.0f}%" for n, r, _ in worst[:5]
+        )
         problems.append(
             f"line coverage {line_ratio * 100:.2f}% is below the required "
             f"{args.min_line_ratio * 100:.2f}%. Least covered: {detail}"
@@ -315,7 +317,7 @@ def check_coverage(
 
 
 def check_exclusions_are_still_true(
-    report: ElementTree.Element, exclusions: list[dict], repo_root: pathlib.Path
+    report: ET.Element, exclusions: list[dict], repo_root: pathlib.Path
 ) -> list[str]:
     """Re-tests every exclusion, so one that stopped being true fails instead of persisting."""
     problems: list[str] = []
@@ -361,7 +363,7 @@ def matches(class_name: str, pattern: str) -> bool:
 
 
 def check_census(
-    report: ElementTree.Element,
+    report: ET.Element,
     exclusions: list[dict],
     repo_root: pathlib.Path,
     source_root: str,
@@ -402,7 +404,9 @@ def check_census(
         for element in package.findall("class"):
             source = element.get("sourcefilename")
             if source:
-                reported_sources.add(f"{package_path}/{source}" if package_path else source)
+                reported_sources.add(
+                    f"{package_path}/{source}" if package_path else source
+                )
 
     for tracked in sorted(tracked_files(repo_root)):
         if not tracked.startswith(prefix) or not tracked.endswith(".java"):
@@ -411,7 +415,7 @@ def check_census(
             continue
         # The path relative to the source root IS the package path plus the file name, which is
         # exactly the key built above. That equivalence is what a Java source layout guarantees.
-        if tracked[len(prefix):] not in reported_sources:
+        if tracked[len(prefix) :] not in reported_sources:
             problems.append(
                 f"{tracked} is tracked but appears in neither the coverage report nor "
                 "coverage-exclusions.json. Either it is not being compiled into the measured "

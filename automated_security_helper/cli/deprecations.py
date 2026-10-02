@@ -16,6 +16,7 @@ apart.
 """
 
 import sys
+from typing import Iterable, Optional, TextIO
 
 # Deprecated spelling -> the canonical spelling that replaces it.
 DEPRECATED_OPTION_SPELLINGS = {
@@ -24,7 +25,9 @@ DEPRECATED_OPTION_SPELLINGS = {
 }
 
 
-def warn_deprecated_option_spellings(argv=None, stream=None):
+def warn_deprecated_option_spellings(
+    argv: Optional[Iterable[str]] = None, stream: Optional[TextIO] = None
+) -> None:
     """Warn once for each deprecated option spelling present in ``argv``.
 
     Matched against ``argv`` rather than against the parsed value because click
@@ -42,7 +45,7 @@ def warn_deprecated_option_spellings(argv=None, stream=None):
     """
     args = sys.argv[1:] if argv is None else list(argv)
     out = stream if stream is not None else sys.stderr
-    warned = set()
+    warned: set[str] = set()
     for token in args:
         # Split so `--ash-revision=v1` is recognized as well as `--ash-revision v1`.
         spelling = token.split("=", 1)[0]

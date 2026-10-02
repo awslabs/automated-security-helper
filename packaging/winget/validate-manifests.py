@@ -163,12 +163,16 @@ def fetch_schema(manifest_type: str, version: str) -> dict[str, Any]:
             f"    Expected it to name the URL it was fetched from."
         )
 
-    schema_version = schema.get("properties", {}).get("ManifestVersion", {}).get("default")
+    schema_version = (
+        schema.get("properties", {}).get("ManifestVersion", {}).get("default")
+    )
     if schema_version != version:
         raise Failure(
             f"{url} declares ManifestVersion default {schema_version!r}, expected {version!r}."
         )
-    print(f"   {manifest_type}: {len(body)} bytes, $id and ManifestVersion default agree")
+    print(
+        f"   {manifest_type}: {len(body)} bytes, $id and ManifestVersion default agree"
+    )
     return schema
 
 
@@ -192,7 +196,9 @@ def load_manifest(path: Path) -> tuple[dict[str, Any], str]:
     return document, version_match.group(1)
 
 
-def break_manifest(manifest_type: str, document: dict[str, Any]) -> tuple[dict[str, Any], str, str]:
+def break_manifest(
+    manifest_type: str, document: dict[str, Any]
+) -> tuple[dict[str, Any], str, str]:
     """Return a copy of a manifest with one field corrupted, a label, and the field name.
 
     Each corruption is chosen to fail through a different part of the schema, so a pass
@@ -291,7 +297,9 @@ def main() -> int:
                 f"file against a different schema than winget does."
             )
         documents[manifest_type] = document
-        print(f"   {path.name}: ManifestType and ManifestVersion agree with the $schema comment")
+        print(
+            f"   {path.name}: ManifestType and ManifestVersion agree with the $schema comment"
+        )
 
     print(f"== fetching the published {MANIFEST_VERSION} schemas")
     schemas = {t: fetch_schema(t, MANIFEST_VERSION) for t in MANIFEST_TYPES}
@@ -310,7 +318,9 @@ def main() -> int:
                 # ITS error first, because the broken copy carries both problems. Ask the
                 # uncorrupted document which it is.
                 try:
-                    jsonschema.validate(instance=document, schema=schemas[manifest_type])
+                    jsonschema.validate(
+                        instance=document, schema=schemas[manifest_type]
+                    )
                 except jsonschema.ValidationError as real_exc:
                     raise invalid(manifest_type, real_exc) from real_exc
                 raise Failure(
@@ -399,7 +409,7 @@ def main() -> int:
     build_ps1 = repo / "packaging" / "msix" / "build.ps1"
     body = build_ps1.read_text(encoding="utf-8")
     match = re.search(
-        r'''\$msix\s*=\s*Join-Path\s+\$OutputDirectory\s*\(\s*"([^"]+)"\s*\+\s*'''
+        r"""\$msix\s*=\s*Join-Path\s+\$OutputDirectory\s*\(\s*"([^"]+)"\s*\+\s*"""
         r"""\$version\s*\+\s*"([^"]+)"\s*\)""",
         body,
     )

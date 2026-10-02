@@ -90,12 +90,12 @@ import struct
 import sys
 import zlib
 from pathlib import Path
-from xml.etree import ElementTree
+from xml.etree import ElementTree as ET
 
 # Parsing goes through defusedxml; everything else still comes from the stdlib module
 # above. The split is not stylistic -- defusedxml re-exports only the entry points that
-# read a document, and this file also needs ElementTree.Element for annotations,
-# ElementTree.register_namespace and a tree's own write(), none of which defusedxml
+# read a document, and this file also needs ET.Element for annotations,
+# ET.register_namespace and a tree's own write(), none of which defusedxml
 # provides. ParseError is deliberately still caught off the stdlib module: defusedxml
 # raises that same class, so the existing except clauses keep working unchanged.
 from defusedxml.ElementTree import iterparse, parse
@@ -209,7 +209,9 @@ REQUIRED_VISUAL_ELEMENT_ATTRIBUTES = (
 
 # The wheel filename shape, matching the sed expression in packaging/rpm/build.sh:20 so both
 # packages read a version from a wheel the same way.
-WHEEL_NAME = re.compile(r"^automated_security_helper-(?P<version>.+)-py3-none-any\.whl$")
+WHEEL_NAME = re.compile(
+    r"^automated_security_helper-(?P<version>.+)-py3-none-any\.whl$"
+)
 
 # ASH's version as MSIX will accept it: three numeric parts, and nothing else. A PEP 440
 # pre-release or local version (3.7.0rc1, 3.7.0+local) has no quad notation representation,
@@ -276,15 +278,17 @@ def validate_manifest(manifest_path: Path) -> list[str]:
     try:
         declarations = _declared_namespaces(manifest_path)
         tree = parse(str(manifest_path))
-    except ElementTree.ParseError as error:
+    except ET.ParseError as error:
         message = str(error)
         # An unbound prefix is the specific corruption worth naming, because it is what
         # happens when someone adds `uap8:Something` without adding the matching xmlns. The
         # parser's own wording ("unbound prefix") does not say what to do about it.
         if "unbound prefix" in message:
             return [
-                f"undeclared-namespace-prefix: {message}. A prefix used in the manifest has "
-                "no matching xmlns declaration on the Package element."
+                (
+                    f"undeclared-namespace-prefix: {message}. A prefix used in the manifest has "
+                    "no matching xmlns declaration on the Package element."
+                )
             ]
         return [f"not-well-formed: {message}"]
 
@@ -328,15 +332,17 @@ def validate_manifest(manifest_path: Path) -> list[str]:
     return failures
 
 
-def _check_child_order(root: ElementTree.Element) -> list[str]:
+def _check_child_order(root: ET.Element) -> list[str]:
     seen = [_local_name(child.tag) for child in root]
     positions = []
     for name in seen:
         if name not in PACKAGE_CHILD_ORDER:
             return [
-                f"unknown-package-child: <{name}> is not a Package child this validator "
-                "knows. Add it to PACKAGE_CHILD_ORDER, in the right position, in the same "
-                "commit that adds it to the manifest."
+                (
+                    f"unknown-package-child: <{name}> is not a Package child this validator "
+                    "knows. Add it to PACKAGE_CHILD_ORDER, in the right position, in the same "
+                    "commit that adds it to the manifest."
+                )
             ]
         positions.append(PACKAGE_CHILD_ORDER.index(name))
     if positions != sorted(positions):
@@ -350,7 +356,7 @@ def _check_child_order(root: ElementTree.Element) -> list[str]:
     return []
 
 
-def _check_identity(root: ElementTree.Element) -> list[str]:
+def _check_identity(root: ET.Element) -> list[str]:
     failures: list[str] = []
     identity = root.find(_qualify(FOUNDATION, "Identity"))
     if identity is None:
@@ -358,7 +364,9 @@ def _check_identity(root: ElementTree.Element) -> list[str]:
 
     for attribute in ("Name", "Version", "Publisher", "ProcessorArchitecture"):
         if not identity.get(attribute):
-            failures.append(f"missing-identity-attribute: Identity/@{attribute} is required.")
+            failures.append(
+                f"missing-identity-attribute: Identity/@{attribute} is required."
+            )
 
     version = identity.get("Version") or ""
     parts = version.split(".")
@@ -373,7 +381,9 @@ def _check_identity(root: ElementTree.Element) -> list[str]:
 
     numbers = [int(part) for part in parts]
     if numbers[0] == 0:
-        failures.append("version-major-zero: the first component of Identity/@Version cannot be 0.")
+        failures.append(
+            "version-major-zero: the first component of Identity/@Version cannot be 0."
+        )
     if any(number > 65535 for number in numbers):
         failures.append(
             f"version-component-too-large: Identity/@Version is {version}; each component "
@@ -399,7 +409,7 @@ def _check_identity(root: ElementTree.Element) -> list[str]:
     return failures
 
 
-def _check_properties(root: ElementTree.Element) -> list[str]:
+def _check_properties(root: ET.Element) -> list[str]:
     properties = root.find(_qualify(FOUNDATION, "Properties"))
     if properties is None:
         return ["missing-properties: <Properties> is required and absent."]
@@ -411,13 +421,15 @@ def _check_properties(root: ElementTree.Element) -> list[str]:
     return failures
 
 
-def _check_dependencies(root: ElementTree.Element) -> list[str]:
+def _check_dependencies(root: ET.Element) -> list[str]:
     dependencies = root.find(_qualify(FOUNDATION, "Dependencies"))
     if dependencies is None:
         return ["missing-dependencies: <Dependencies> is required and absent."]
     families = dependencies.findall(_qualify(FOUNDATION, "TargetDeviceFamily"))
     if not families:
-        return ["missing-target-device-family: Dependencies needs a TargetDeviceFamily."]
+        return [
+            "missing-target-device-family: Dependencies needs a TargetDeviceFamily."
+        ]
     failures = []
     for family in families:
         for attribute in ("Name", "MinVersion", "MaxVersionTested"):
@@ -434,12 +446,14 @@ def _check_dependencies(root: ElementTree.Element) -> list[str]:
     return failures
 
 
-def _check_capabilities(root: ElementTree.Element) -> list[str]:
+def _check_capabilities(root: ET.Element) -> list[str]:
     capabilities = root.find(_qualify(FOUNDATION, "Capabilities"))
     if capabilities is None:
         return [
-            "missing-capabilities: <Capabilities> is absent, so neither runFullTrust nor "
-            "broadFileSystemAccess is declared."
+            (
+                "missing-capabilities: <Capabilities> is absent, so neither runFullTrust nor "
+                "broadFileSystemAccess is declared."
+            )
         ]
 
     declared = {
@@ -457,7 +471,8 @@ def _check_capabilities(root: ElementTree.Element) -> list[str]:
         wrong_namespace = [
             element
             for element in capabilities.iter()
-            if element.get("Name") == name and element.tag != _qualify(RESCAP, "Capability")
+            if element.get("Name") == name
+            and element.tag != _qualify(RESCAP, "Capability")
         ]
         if wrong_namespace:
             failures.append(
@@ -482,7 +497,9 @@ def _check_capabilities(root: ElementTree.Element) -> list[str]:
     # Restricted capabilities must precede CustomCapability and DeviceCapability. Asserted
     # rather than assumed because it becomes true the moment either is added.
     children = [_local_name(child.tag) for child in capabilities]
-    late = [name for name in ("CustomCapability", "DeviceCapability") if name in children]
+    late = [
+        name for name in ("CustomCapability", "DeviceCapability") if name in children
+    ]
     if late:
         first_late = min(children.index(name) for name in late)
         if any(
@@ -496,10 +513,12 @@ def _check_capabilities(root: ElementTree.Element) -> list[str]:
     return failures
 
 
-def _check_applications(root: ElementTree.Element) -> list[str]:
+def _check_applications(root: ET.Element) -> list[str]:
     applications_element = root.find(_qualify(FOUNDATION, "Applications"))
     if applications_element is None:
-        return ["missing-applications: <Applications> is absent, so the package runs nothing."]
+        return [
+            "missing-applications: <Applications> is absent, so the package runs nothing."
+        ]
 
     applications = applications_element.findall(_qualify(FOUNDATION, "Application"))
     if not applications:
@@ -514,7 +533,9 @@ def _check_applications(root: ElementTree.Element) -> list[str]:
         identifiers.append(identifier)
         executable = application.get("Executable") or ""
         if not executable:
-            failures.append(f"missing-executable: Application {identifier} has no Executable.")
+            failures.append(
+                f"missing-executable: Application {identifier} has no Executable."
+            )
             continue
         if not executable.endswith(".exe"):
             failures.append(
@@ -550,7 +571,9 @@ def _check_applications(root: ElementTree.Element) -> list[str]:
         failures.extend(_check_alias(application, identifier, executable))
 
     if len(set(identifiers)) != len(identifiers):
-        failures.append(f"duplicate-application-id: Application/@Id values are {identifiers}.")
+        failures.append(
+            f"duplicate-application-id: Application/@Id values are {identifiers}."
+        )
 
     # The check that ties this manifest to the entry point contract. Three console scripts are
     # declared in [project.scripts] and all three have to be reachable on Windows; the long
@@ -578,7 +601,7 @@ def _check_applications(root: ElementTree.Element) -> list[str]:
 
 
 def _check_alias(
-    application: ElementTree.Element, identifier: str, executable: str
+    application: ET.Element, identifier: str, executable: str
 ) -> list[str]:
     extensions = application.find(_qualify(FOUNDATION, "Extensions"))
     aliases: list[str] = []
@@ -594,30 +617,38 @@ def _check_alias(
 
     if not aliases:
         return [
-            f"missing-execution-alias: Application {identifier} declares no "
-            "uap5:ExecutionAlias, so its name is not on PATH and the entry point is "
-            "unreachable from a shell."
+            (
+                f"missing-execution-alias: Application {identifier} declares no "
+                "uap5:ExecutionAlias, so its name is not on PATH and the entry point is "
+                "unreachable from a shell."
+            )
         ]
     if len(aliases) != 1:
         return [
-            f"too-many-execution-aliases: Application {identifier} declares {len(aliases)} "
-            "aliases. MSIX documents one per Application; use one Application per name."
+            (
+                f"too-many-execution-aliases: Application {identifier} declares {len(aliases)} "
+                "aliases. MSIX documents one per Application; use one Application per name."
+            )
         ]
 
     alias = aliases[0]
     if not alias.endswith(".exe"):
         return [
-            f"alias-not-exe: Application {identifier} has Alias={alias!r}; the schema "
-            "requires a name ending in .exe."
+            (
+                f"alias-not-exe: Application {identifier} has Alias={alias!r}; the schema "
+                "requires a name ending in .exe."
+            )
         ]
     # The alias and the launcher filename must agree, because each launcher decides which venv
     # console script to run by reading its OWN filename. If they diverge, `ashv3` would run
     # ash and the deprecation warning would silently vanish.
     if alias != executable:
         return [
-            f"alias-does-not-match-executable: Application {identifier} has "
-            f"Alias={alias!r} and Executable={executable!r}. The launcher derives the venv "
-            "console script from its own filename, so these have to be the same name."
+            (
+                f"alias-does-not-match-executable: Application {identifier} has "
+                f"Alias={alias!r} and Executable={executable!r}. The launcher derives the venv "
+                "console script from its own filename, so these have to be the same name."
+            )
         ]
     return []
 
@@ -702,7 +733,9 @@ def _check_mapping(layout: Path) -> list[str]:
 
     declared: set[str] = set()
     section = None
-    for number, line in enumerate(mapping_path.read_text(encoding="utf-8").splitlines(), 1):
+    for number, line in enumerate(
+        mapping_path.read_text(encoding="utf-8").splitlines(), 1
+    ):
         stripped = line.strip()
         if not stripped:
             continue
@@ -714,8 +747,10 @@ def _check_mapping(layout: Path) -> list[str]:
         quoted = re.findall(r'"([^"]*)"', stripped)
         if len(quoted) != 2:
             return [
-                f"malformed-mapping-line: {mapping_path}:{number} is {stripped!r}; a [Files] "
-                'entry is two quoted paths, "source" "destination".'
+                (
+                    f"malformed-mapping-line: {mapping_path}:{number} is {stripped!r}; a [Files] "
+                    'entry is two quoted paths, "source" "destination".'
+                )
             ]
         declared.add(quoted[1].replace("\\", "/"))
 
@@ -756,9 +791,13 @@ def _solid_png(size: int, rgba: tuple[int, int, int, int]) -> bytes:
 
     def chunk(kind: bytes, payload: bytes) -> bytes:
         body = kind + payload
-        return struct.pack(">I", len(payload)) + body + struct.pack(">I", zlib.crc32(body))
+        return (
+            struct.pack(">I", len(payload)) + body + struct.pack(">I", zlib.crc32(body))
+        )
 
-    header = struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0)  # 8-bit RGBA, no interlace
+    header = struct.pack(
+        ">IIBBBBB", size, size, 8, 6, 0, 0, 0
+    )  # 8-bit RGBA, no interlace
     return (
         b"\x89PNG\r\n\x1a\n"
         + chunk(b"IHDR", header)
@@ -812,7 +851,7 @@ def stage(wheel: Path, out: Path, publisher: str | None) -> Path:
     # ns1, ns2 and so on. That output is valid XML meaning the same thing, and it is
     # unreadable, so the prefixes are registered before writing.
     for prefix, uri in EXPECTED_NAMESPACES.items():
-        ElementTree.register_namespace(prefix, uri)
+        ET.register_namespace(prefix, uri)
 
     manifest_out = layout / "AppxManifest.xml"
     tree.write(str(manifest_out), encoding="utf-8", xml_declaration=True)
@@ -827,7 +866,9 @@ def stage(wheel: Path, out: Path, publisher: str | None) -> Path:
         "Square44x44Logo.png": 44,
     }
     for name, size in assets.items():
-        (layout / "assets" / name).write_bytes(_solid_png(size, (0x23, 0x2F, 0x3E, 0xFF)))
+        (layout / "assets" / name).write_bytes(
+            _solid_png(size, (0x23, 0x2F, 0x3E, 0xFF))
+        )
 
     scripts = sorted(_console_scripts(_pyproject()))
     entries: list[tuple[str, str]] = [("AppxManifest.xml", "AppxManifest.xml")]
@@ -850,7 +891,9 @@ def stage(wheel: Path, out: Path, publisher: str | None) -> Path:
     print(f"  version:   {version} -> Identity/@Version {quad}")
     print(f"  publisher: {identity.get('Publisher')}")
     print(f"  wheel:     {wheel.name}")
-    print(f"  launchers: {', '.join(script + '.exe' for script in scripts)} (compiled by build.ps1)")
+    print(
+        f"  launchers: {', '.join(script + '.exe' for script in scripts)} (compiled by build.ps1)"
+    )
     return layout
 
 
@@ -874,7 +917,9 @@ def main(argv: list[str] | None = None) -> int:
         help="a staged layout, to additionally check referenced files and the wheel count",
     )
 
-    stage_parser = subparsers.add_parser("stage", help="build the layout and mapping file")
+    stage_parser = subparsers.add_parser(
+        "stage", help="build the layout and mapping file"
+    )
     stage_parser.add_argument("--wheel", type=Path, required=True)
     stage_parser.add_argument("--out", type=Path, required=True)
     stage_parser.add_argument(
