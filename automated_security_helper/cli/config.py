@@ -62,7 +62,7 @@ def _print_source_chain(config_path: Path) -> None:
     from automated_security_helper.core.exceptions import ASHConfigSourceError
 
     try:
-        chain = ConfigValidator.resolve_source_chain(config_path, Path.cwd())
+        chain = ConfigValidator.resolve_source_chain(config_path)
     except (ASHConfigSourceError, OSError, ValueError, yaml.YAMLError):
         # The validator or linter has already reported why it does not resolve.
         return
@@ -276,7 +276,11 @@ def update(
 
     # Find the config file if not specified
     if config_path is None:
-        found = find_config_file()
+        try:
+            found = find_config_file()
+        except ASHConfigValidationError as e:
+            typer.secho(f"Error locating config file: {e}", fg=typer.colors.RED)
+            raise typer.Exit(1)
         if found is not None:
             logger.info(f"Using config file found at: {found.as_posix()}")
             config_path = found.as_posix()
@@ -593,7 +597,6 @@ def lint(
         config_path=config_path,
         output_dir=output_dir_path,
         check_unused=fix_unused,  # Only check unused when explicitly requested
-        source_dir=Path.cwd(),
     )
     _print_source_chain(config_path)
 
@@ -1102,9 +1105,7 @@ def validate(
             fg=typer.colors.BLUE,
         )
 
-        is_valid, errors = ConfigValidator.validate_config_file(
-            config_path, source_dir=Path.cwd()
-        )
+        is_valid, errors = ConfigValidator.validate_config_file(config_path)
         _print_source_chain(config_path)
 
         if is_valid:

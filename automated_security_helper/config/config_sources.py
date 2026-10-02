@@ -209,10 +209,17 @@ def is_pyproject(path: Path) -> bool:
     return Path(path).name == ASH_PYPROJECT_FILE_NAME
 
 
+def _read_toml_text(path: Path) -> str:
+    """A TOML file's text. A leading UTF-8 byte order mark is dropped, since
+    tomllib rejects it and editors on some platforms write one."""
+    text = Path(path).read_text(encoding="utf-8")
+    return text.removeprefix("\ufeff")
+
+
 def _tool_ash_line(path: Path) -> Optional[int]:
     try:
-        text = Path(path).read_text(encoding="utf-8")
-    except OSError:
+        text = _read_toml_text(path)
+    except (OSError, UnicodeDecodeError):
         return None
     match = _TOOL_ASH_PATTERN.search(text)
     if match is None:
@@ -251,11 +258,21 @@ class ConfigDiscovery:
 def pyproject_has_ash_table(path: Path) -> bool:
     """Whether `path` is a pyproject.toml that configures ASH.
 
-    A pyproject.toml that does not parse is skipped unless its text declares a
-    ``tool.ash`` table, in which case it is an error: skipping it would scan
-    with the default config while the repository's own config sat unread.
+    A pyproject.toml that does not parse (including one that is not UTF-8,
+    which TOML requires) is skipped unless its text declares a ``tool.ash``
+    table, in which case it is an error: skipping it would scan with the default
+    config while the repository's own config sat unread. Read errors propagate.
     """
-    text = Path(path).read_text(encoding="utf-8")
+    try:
+        text = _read_toml_text(path)
+    except UnicodeDecodeError as exc:
+        # Latin-1 decodes any byte string, which is all the pattern needs.
+        if _TOOL_ASH_PATTERN.search(Path(path).read_bytes().decode("latin-1")):
+            raise ASHConfigSourceError(
+                f"{describe_config_path(path)} declares an ASH configuration but "
+                f"is not valid UTF-8, which TOML requires: {exc}"
+            ) from exc
+        return False
     try:
         document = _parse_toml(text)
     except _TOMLDecodeError as exc:
@@ -281,6 +298,35 @@ def pyproject_has_ash_table(path: Path) -> bool:
     return True
 
 
+def _pyproject_is_a_source(path: Path, found_before: List[ConfigSource]) -> bool:
+    """Probe pyproject.toml without letting it break an unrelated config.
+
+    When a higher-precedence source already exists, pyproject.toml is probed
+    only to report it as ignored, so nothing about it may fail the load: before
+    #313 a repository with .ash/.ash.yaml was unaffected by whatever its
+    pyproject.toml held. When it would be the selected source, a pyproject that
+    declares [tool.ash] but cannot be parsed fails closed. One that cannot be
+    read at all is skipped with a warning either way, because there is no way
+    to tell whether it configures ASH, and most pyproject.toml files do not.
+    """
+    try:
+        return pyproject_has_ash_table(path)
+    except OSError as exc:
+        ASH_LOGGER.warning(
+            f"Could not read {path.as_posix()} ({exc}); it is not used as an ASH "
+            "config source."
+        )
+        return False
+    except ASHConfigSourceError as exc:
+        if not found_before:
+            raise
+        ASH_LOGGER.warning(
+            f"Ignoring {path.as_posix()}: {found_before[0].label} takes precedence, "
+            f"and the [tool.ash] table there could not be read ({exc})."
+        )
+        return False
+
+
 def discover_config_source(search_dir: Path) -> ConfigDiscovery:
     """Find every config source in `search_dir` and select one by precedence."""
     search_dir = Path(search_dir)
@@ -294,19 +340,26 @@ def discover_config_source(search_dir: Path) -> ConfigDiscovery:
         if candidate.is_file():
             found.append(ConfigSource(candidate, SOURCE_KIND_ASHRC))
     pyproject = search_dir / ASH_PYPROJECT_FILE_NAME
-    if pyproject.is_file() and pyproject_has_ash_table(pyproject):
+    if pyproject.is_file() and _pyproject_is_a_source(pyproject, found):
         found.append(ConfigSource(pyproject, SOURCE_KIND_PYPROJECT))
     if not found:
         return ConfigDiscovery()
     return ConfigDiscovery(selected=found[0], ignored=found[1:])
 
 
-def log_config_discovery(discovery: ConfigDiscovery) -> None:
-    """Say which source is used and which were found but ignored."""
+def log_config_discovery(
+    discovery: ConfigDiscovery, announce_selected: bool = True
+) -> None:
+    """Say which source is used and which were found but ignored.
+
+    ``announce_selected`` is False for a caller that reports the selected file
+    through its own logger; the ignored sources are always reported here.
+    """
     selected = discovery.selected
     if selected is None:
         return
-    ASH_LOGGER.info(f"Using ASH configuration from {selected.label}")
+    if announce_selected:
+        ASH_LOGGER.info(f"Using ASH configuration from {selected.label}")
     for other in discovery.ignored:
         message = (
             f"Ignoring ASH configuration at {other.label}: {selected.label} takes "
@@ -348,7 +401,13 @@ def read_config_file(path: Path) -> Any:
         with open(path, mode="r", encoding="utf-8") as f:
             return json.load(f)
     if path.name.endswith(".toml"):
-        text = path.read_text(encoding="utf-8")
+        try:
+            text = _read_toml_text(path)
+        except UnicodeDecodeError as exc:
+            raise ASHConfigSourceError(
+                f"{describe_config_path(path)} is not valid UTF-8, which TOML "
+                f"requires: {exc}"
+            ) from exc
         try:
             document = _parse_toml(text)
         except _TOMLDecodeError as exc:
@@ -441,18 +500,32 @@ def _resolve_base_path(ref: str, extending: Path, root: Path) -> Path:
             "a URL. ASH does not fetch remote configs; copy the file into the "
             "repository and extend it by path."
         )
+    if "\x00" in ref:
+        raise ASHConfigSourceError(
+            f"'{EXTENDS_KEY}' in {describe_config_path(extending)} contains a NUL "
+            "character"
+        )
     candidate = Path(ref)
-    if not candidate.is_absolute():
+    relative = not candidate.is_absolute()
+    if relative:
         candidate = extending.parent / candidate
+    lexical = Path(os.path.normpath(candidate))
+    # Refused before resolve() touches the filesystem when the spelling alone
+    # leaves the root. For a relative ref that is a `..` escape. On Windows it
+    # also covers an absolute ref, because resolving a UNC path opens a
+    # connection to the host it names. A POSIX absolute ref is resolved first,
+    # since it may name a location inside the root through a symlinked prefix.
+    if not lexical.is_relative_to(root) and (relative or os.name == "nt"):
+        raise ASHConfigSourceError(
+            f"'{EXTENDS_KEY}: {ref}' in {describe_config_path(extending)} names "
+            f"{lexical.as_posix()}, which is outside the directory config bases "
+            f"must stay inside ({root.as_posix()})."
+        )
     resolved = candidate.resolve()
     if not resolved.is_relative_to(root):
         # `extending` is already resolved, so a lexically normalized candidate
         # that is inside the root got out only by following a symlink.
-        how = (
-            " through a symlink"
-            if Path(os.path.normpath(candidate)).is_relative_to(root)
-            else ""
-        )
+        how = " through a symlink" if lexical.is_relative_to(root) else ""
         raise ASHConfigSourceError(
             f"'{EXTENDS_KEY}: {ref}' in {describe_config_path(extending)} resolves"
             f"{how} to {resolved.as_posix()}, which is outside the directory "
@@ -502,7 +575,7 @@ def _normalize_pointer(document: Any, pointer: str) -> str:
         if isinstance(current, dict):
             segment = _resolve_dict_key(current, segment)
             current = current.get(segment)
-        elif isinstance(current, list) and segment.isdigit():
+        elif isinstance(current, list) and segment.isascii() and segment.isdigit():
             index = int(segment)
             current = current[index] if index < len(current) else None
         else:
@@ -525,7 +598,8 @@ def _apply_patch(document: Dict[str, Any], ops: Any, path: Path) -> Any:
                 f"'{PATCH_KEY}' entry {index} in {where} must be a mapping with "
                 f"'op' and 'path', got {op!r}"
             )
-        if op.get("op") not in _PATCH_OPS:
+        op_name = op.get("op")
+        if not isinstance(op_name, str) or op_name not in _PATCH_OPS:
             raise ASHConfigSourceError(
                 f"'{PATCH_KEY}' entry {index} in {where} uses op {op.get('op')!r}; "
                 f"allowed ops are {', '.join(sorted(_PATCH_OPS))}"
@@ -533,6 +607,13 @@ def _apply_patch(document: Dict[str, Any], ops: Any, path: Path) -> Any:
         normalized = dict(op, path=_normalize_pointer(result, op["path"]))
         try:
             result = jsonpatch.apply_patch(result, [normalized], in_place=False)
+        except jsonpatch.JsonPatchTestFailed as exc:
+            # jsonpatch's own message quotes the value it found, which may come
+            # from a base the author of this file did not write.
+            raise ASHConfigSourceError(
+                f"'{PATCH_KEY}' entry {index} in {where}: the value at "
+                f"{op['path']!r} does not equal the value the test op gives"
+            ) from exc
         except (jsonpatch.JsonPatchException, jsonpatch.JsonPointerException) as exc:
             raise ASHConfigSourceError(
                 f"'{PATCH_KEY}' entry {index} in {where} ({op!r}) failed: {exc}"
@@ -597,18 +678,30 @@ def _resolve(
         state.order.append(real)
         return data
 
-    own = dict(data)
-    refs = _extends_refs(own.pop(EXTENDS_KEY, None), real)
-    ops = own.pop(PATCH_KEY, None)
-    merged: Any = {}
-    for base_ref in refs:
-        base_path = _resolve_base_path(base_ref, real, state.root)
-        merged = deep_merge(
-            merged, _resolve(base_path, stack + (real,), state, base_ref)
-        )
-    merged = deep_merge(merged, own)
-    if ops is not None:
-        merged = _apply_patch(merged, ops, real)
+    try:
+        own = dict(data)
+        refs = _extends_refs(own.pop(EXTENDS_KEY, None), real)
+        ops = own.pop(PATCH_KEY, None)
+        merged: Any = {}
+        for base_ref in refs:
+            base_path = _resolve_base_path(base_ref, real, state.root)
+            merged = deep_merge(
+                merged, _resolve(base_path, stack + (real,), state, base_ref)
+            )
+        merged = deep_merge(merged, own)
+        if ops is not None:
+            merged = _apply_patch(merged, ops, real)
+    except ASHConfigSourceError:
+        raise
+    except Exception as exc:  # noqa: BLE001 -- see below
+        # Anything unforeseen while following `extends` or applying `patch`
+        # (an OSError from resolve(), a malformed value no check above caught)
+        # must not reach resolve_config's catch-all, which returns the default
+        # config. The file was not loaded as written, so it is an error.
+        raise ASHConfigSourceError(
+            f"Could not resolve '{EXTENDS_KEY}'/'{PATCH_KEY}' in "
+            f"{describe_config_path(real)}: {type(exc).__name__}: {exc}"
+        ) from exc
     state.order.append(real)
     return merged
 

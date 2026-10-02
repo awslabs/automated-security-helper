@@ -217,6 +217,12 @@ def resolve_config(
                 return apply_config_overrides(config, config_overrides)
             return config
 
+        # Only a source_dir the caller passed may widen where `extends` bases
+        # may live. The cwd fallback below must not: `ash report --config
+        # <file>` run from a home directory would otherwise let that file's
+        # bases reach anywhere under it.
+        confinement_source_dir = source_dir
+
         # Resolve cwd default at call time, not import time.
         if source_dir is None:
             source_dir = Path.cwd()
@@ -271,7 +277,9 @@ def resolve_config(
 
             ASH_LOGGER.debug("Validating file config")
             if confine_to is None:
-                confine_to = default_confinement_root(config_path, source_dir)
+                confine_to = default_confinement_root(
+                    config_path, confinement_source_dir
+                )
             config = AshConfig.from_file(
                 config_path=Path(config_path), confine_to=confine_to
             )
