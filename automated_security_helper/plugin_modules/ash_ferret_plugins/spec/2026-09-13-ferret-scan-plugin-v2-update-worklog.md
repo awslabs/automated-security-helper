@@ -245,3 +245,34 @@ sections are schema-opaque, so unrecognized keys can't be warned about today).
 - No code/behaviour change; the plugin policy is unchanged. An upstream feature request
   against `awslabs/ferret-scan` remains an option (not yet filed).
 - Commit: `9ca137e4`
+
+### WL-15 — Window raised to 2.5.x (#684) (2026-10-02)
+WL-1's `<2.5.0` cap was a "tested line" pin, not a known incompatibility. Raising it
+needed both binaries run through ASH, which found two 2.5.x shape changes and one
+version-independent defect.
+- Range: `MAX 2.5.0→2.6.0`, `DEFAULT_VERSION_CONSTRAINT` now derived from MIN/MAX,
+  `RECOMMENDED 2.4.5→2.5.2`. The minor-line cap follows the existing convention; note
+  that ferret-scan 2.5.1 shipped a breaking json/yaml/csv path change as a patch, so a
+  future 2.5.x patch is not guaranteed safe. SARIF is what ASH parses, and the plugin now
+  accepts both location shapes.
+- SARIF (ferret-scan #720, 2.5.1): locations became `{"uri": rel, "uriBaseId":
+  "%SRCROOT%"}` plus `run.originalUriBaseIds`. ASH's aggregated SARIF does not carry
+  `originalUriBaseIds`, so `ash.sarif` held a dangling `%SRCROOT%`. Added
+  `_resolve_sarif_uri_base_ids`, which resolves them back to absolute `file://` URIs.
+  Measured on the same fixture: every ASH report (sarif, flat json, gitlab-sast) has
+  identical paths under 2.4.5 and 2.5.2, including a directory name with a space.
+- `--exclude` (ferret-scan #682 in 2.5.0, #736 in 2.5.2): no substring branch. Under
+  2.4.5, ASH's `.git` ignore skipped `.github/`, and `test-results/**` and
+  `tests/pytest-temp/**` excluded nothing. The 2.5.2 self-scan therefore reports one new
+  API_KEY_OR_SECRET false positive in `.github/actions/run-scan-test/action.yml` (a comment
+  quoting the trigger shape); suppressed by path in `.ash/.ash_community_plugins.yaml`.
+  Self-scan with the community config: PASSED under both, 26 (2.4.5) / 27 (2.5.2)
+  suppressed, 0 actionable.
+- Detection on `tests/test_data/scanners/ferret-scan/sample.txt`: 2.5.2's results are a
+  subset of 2.4.5's (117 → 108); the 9 dropped are PHONE hits on card numbers and IBANs.
+- Pre-commit mode: `PRE_COMMIT=1` (and, before 2.5.2, `PRE_COMMIT_HOME`) switched
+  ferret-scan into pre-commit mode, exit 1 on findings and a narrower profile. Measured on
+  both binaries; `FERRET_PRECOMMIT=0` restores exit 0 and the full result set. The plugin
+  now always sets it.
+- Unchanged and re-checked on 2.5.2: every flag ASH emits, the 19 `--help checks` names,
+  all `confidence_levels` values, and the bundled config's warnings (identical to 2.4.5).

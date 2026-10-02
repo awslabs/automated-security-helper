@@ -88,7 +88,8 @@ global_settings:
     # validator, so an ordinary identifier whose NAME is a secret keyword (session,
     # token, secret, ...) sitting next to an assignment now reads as API_KEY_OR_SECRET
     # at HIGH confidence. Bumping the plugin's supported binary to v2.4.5 surfaced the
-    # six high-confidence hits below. The type CANNOT be turned off in config:
+    # high-confidence hits below; the action.yml entry was added for 2.5.x, which
+    # scans `.github/` where 2.4.x did not. The type CANNOT be turned off in config:
     # ferret-scan honours validators.<name> disabled_types ONLY for intellectual_
     # property, never for secrets (verified against v2.4.5). Per the plugin design
     # decision (ash_ferret_plugins/DEVELOPMENT.md → "API_KEY_OR_SECRET policy"), the
@@ -130,6 +131,15 @@ global_settings:
         documentation, not a secret. Scoped to this file rather than tests/** so a
         genuinely hardcoded credential added to another test later is not silently
         suppressed.
+    - path: .github/actions/run-scan-test/action.yml
+      rule_id: API_KEY_OR_SECRET
+      reason: >-
+        False positive. The match is a shell comment in the ferret-scan install step
+        that quotes, in backticks, the generated-schema field shape this detector
+        misreads, as the record of why the install is pinned. It is prose, not a
+        credential. ferret-scan 2.4.x never scanned this file: its --exclude also
+        matched raw substrings, so ASH's `.git` ignore path skipped `.github/` too.
+        2.5.x matches path segments, scans `.github/`, and reports this line.
     # === ferret-scan API_KEY_OR_SECRET: pinned release checksums ===
     # Separate from the block above and for a different reason. Those are identifiers
     # whose NAMES match a secret keyword; this one is a table of values that genuinely
@@ -458,7 +468,9 @@ global_settings:
     # of this file). With those suppressions applied it reaches status PASSED rather
     # than MISSING or SKIPPED. Note this corrects an earlier claim that ferret-scan
     # "contributes nothing" — that held for the pre-2.x binary but not for v2.4.5,
-    # which is why the API_KEY_OR_SECRET suppressions now exist.
+    # which is why the API_KEY_OR_SECRET suppressions now exist. v2.5.2 reports the
+    # same set plus one API_KEY_OR_SECRET hit in .github/actions/run-scan-test/
+    # action.yml, a directory 2.4.x skipped (see that entry's reason).
     #
     # PATHS ARE NAMED FILE BY FILE. A trailing `**` is a whole-subtree match, so a
     # sixth template or a new terraform module would inherit a suppression nobody
