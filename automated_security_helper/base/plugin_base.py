@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from typing import Annotated, Callable, Dict, List, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from automated_security_helper.base.plugin_config import PluginConfigBase
 from automated_security_helper.base.plugin_context import PluginContext
@@ -205,6 +205,10 @@ class PluginBase(UVToolMixin, BaseModel):
     # UV special use cases
     uv_tool_package_name: str | None = None
 
+    # Seconds after which this plugin's most recent timed-out subprocess was
+    # killed, or None. See scan_timed_out_after.
+    _scan_timed_out_after: float | None = PrivateAttr(default=None)
+
     # Installation-related properties
     dependencies: Annotated[
         Dict[str, Dict[str, List[PluginDependency]]],
@@ -322,6 +326,40 @@ class PluginBase(UVToolMixin, BaseModel):
             self.exit_code, abs(new_code) if new_code < 0 else new_code
         )
 
+    @property
+    def scan_timed_out_after(self) -> float | None:
+        """The timeout a subprocess of this plugin was killed at, or None.
+
+        Set by ``_run_subprocess``, which every scanner's tool invocation goes
+        through on both the uv and the direct path. It exists for the scanners
+        that override ``scan()``: they never reach the template's own timeout
+        check, so their failure reads as whatever the missing output caused, and
+        ``ScannerExecutor`` uses this to report the timeout instead.
+        """
+        return self._scan_timed_out_after
+
+    def clear_scan_timeout(self) -> None:
+        """Forget a recorded timeout, so one target's timeout is not charged to the
+        next. ``ScannerExecutor`` calls this before each ``scan()``."""
+        self._scan_timed_out_after = None
+
+    def _record_timeout(self, response: Dict, timeout: float | None) -> None:
+        """Name the scanner and the limit when its tool was killed at the timeout.
+
+        ``run_command_with_output_handling`` already logs the command that timed
+        out, but not which scanner it belonged to, and a scanner that swallows
+        the failure leaves that line as the only trace.
+        """
+        if not isinstance(response, dict) or response.get("timed_out") is not True:
+            return
+        self._scan_timed_out_after = timeout
+        self._plugin_log(
+            f"timed out after {timeout}s and was killed. Raise "
+            f"scanners.{getattr(self.config, 'name', '<scanner>')}.options."
+            "scan_timeout if this target legitimately needs longer.",
+            level=logging.ERROR,
+        )
+
     def _run_subprocess(
         self,
         command: List[str],
@@ -385,6 +423,7 @@ class PluginBase(UVToolMixin, BaseModel):
                         timeout=timeout,
                     )
                     if uv_result is not None:
+                        self._record_timeout(uv_result, timeout)
                         return uv_result
                     # If UV execution failed, continue with direct execution fallback
 
@@ -404,6 +443,7 @@ class PluginBase(UVToolMixin, BaseModel):
             )
 
             self._process_command_response(response)
+            self._record_timeout(response, timeout)
 
             return response
 

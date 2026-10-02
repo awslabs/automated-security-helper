@@ -560,6 +560,8 @@ class UVToolRunner:
             CompletedProcess result with enhanced output handling
         """
         from automated_security_helper.utils.subprocess_utils import (
+            TIMEOUT_RETURNCODE,
+            TimedOutProcess,
             run_command_with_output_handling,
         )
         import os
@@ -633,8 +635,16 @@ class UVToolRunner:
                     timeout=timeout,
                 )
 
-                # Create a CompletedProcess-like object from the response
-                result = subprocess.CompletedProcess(
+                # TimedOutProcess keeps the timeout through this conversion. The
+                # dict says timed_out and CompletedProcess has no field for it, so
+                # rebuilding a plain one made a killed scanner indistinguishable
+                # from one that exited 124 by itself.
+                result_type = (
+                    TimedOutProcess
+                    if response.get("timed_out")
+                    else subprocess.CompletedProcess
+                )
+                result = result_type(
                     args=command,
                     returncode=response.get("returncode", 0),
                     stdout=response.get("stdout", ""),
@@ -671,6 +681,20 @@ class UVToolRunner:
             return result
         except subprocess.CalledProcessError as e:
             raise UVToolRunnerError(f"UV tool run failed for {tool_name}: {e}")
+        except subprocess.TimeoutExpired as e:
+            # Returned, not raised: a raise reached the mixin's catch-all, which
+            # falls back to direct execution and runs the tool a second time.
+            def _text(captured) -> str:
+                if isinstance(captured, bytes):
+                    return captured.decode("utf-8", errors="replace")
+                return captured or ""
+
+            return TimedOutProcess(
+                args=command,
+                returncode=TIMEOUT_RETURNCODE,
+                stdout=_text(e.stdout),
+                stderr=f"{_text(e.stderr)}\nCommand timed out after {timeout}s".strip(),
+            )
 
     def get_tool_installation_info(
         self, tool_name: str, package_name: Optional[str] = None

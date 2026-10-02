@@ -589,6 +589,34 @@ class ScannerPluginBase(PluginBase, Generic[T]):
             "or override scan() directly."
         )
 
+    def _output_dir_inside(self, target: "Path") -> Optional["Path"]:
+        """ASH's output directory relative to ``target``, when it sits inside it.
+
+        ASH writes its output under the source tree by default, so a scanner that
+        walks the whole target reads ASH's previous reports back in.
+        ``scan_set`` and detect-secrets drop those files by testing each one
+        against the output directory; a scanner that hands a directory to its
+        tool cannot do that and has to tell the tool to skip it instead, which
+        needs this path.
+
+        None when the output directory is the target, outside it, or contains it.
+        The last is the converted target, ``work_dir``, which lives under
+        ``output_dir``: excluding the output directory there would exclude
+        everything the converters produced.
+
+        ``absolute()`` on both sides and not ``resolve()``, as in detect-secrets:
+        the tool sees the target path as given, symlinked prefix and all, and a
+        containment test that resolves only one side answers a different question.
+        """
+        output_dir = getattr(self.context, "output_dir", None)
+        if output_dir is None:
+            return None
+        output_abs = Path(output_dir).absolute()
+        target_abs = Path(target).absolute()
+        if output_abs == target_abs or not output_abs.is_relative_to(target_abs):
+            return None
+        return output_abs.relative_to(target_abs)
+
     def _effective_scan_timeout(self) -> float | None:
         """Seconds to allow this scanner's tool, or None to leave it unbounded.
 
