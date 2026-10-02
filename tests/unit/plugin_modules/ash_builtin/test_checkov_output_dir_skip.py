@@ -20,6 +20,10 @@ from pathlib import Path
 
 import pytest
 
+# checkov joins walked paths with os.sep; the exclusion is POSIX-only, and on
+# Windows nothing is emitted (see test_nothing_is_emitted_on_windows).
+posix_only = pytest.mark.skipif(os.sep != "/", reason="exclusion is POSIX-only")
+
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
@@ -60,6 +64,7 @@ def tree(tmp_path):
     return source, output
 
 
+@posix_only
 def test_an_output_dir_inside_the_source_is_skipped(tree):
     source, output = tree
     argv, _, _ = _scanner(source, output)._execute_scan(source, "source", [])
@@ -73,6 +78,7 @@ def test_an_output_dir_inside_the_source_is_skipped(tree):
     assert not _skipped(patterns, os.path.join(root, "main.tf"))
 
 
+@posix_only
 def test_a_nested_output_dir_is_matched_where_checkov_walks_it(tmp_path):
     source = tmp_path / "src"
     output = source / "build" / "ash"
@@ -146,5 +152,20 @@ def test_a_path_checkov_cannot_take_is_not_emitted(tmp_path):
     output = source / "ash-out"
     output.mkdir(parents=True)
     argv, _, _ = _scanner(source, output)._execute_scan(source, "source", [])
+
+    assert not any("ash-out" in v for v in _skip_values(argv))
+
+
+def test_nothing_is_emitted_on_windows(tree, monkeypatch):
+    """Run on every OS by faking the separator, so the branch is not only
+    exercised on the Windows legs."""
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        checkov_scanner,
+    )
+
+    source, output = tree
+    scanner = _scanner(source, output)
+    monkeypatch.setattr(checkov_scanner.os, "sep", "\\")
+    argv, _, _ = scanner._execute_scan(source, "source", [])
 
     assert not any("ash-out" in v for v in _skip_values(argv))

@@ -1,6 +1,7 @@
 """Module containing the Checkov security scanner implementation."""
 
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Annotated, ClassVar, List, Literal
@@ -126,7 +127,8 @@ class CheckovScannerConfigOptions(ScannerOptionsBase):
             description=(
                 "Skip ASH's own output directory when it sits inside the scanned "
                 "directory, so Checkov does not parse ASH's previous reports. "
-                "Defaults to true; set to false to scan it anyway."
+                "Defaults to true; set to false to scan it anyway. Has no effect "
+                "on Windows, where Checkov's --skip-path matching is unreliable."
             ),
         ),
     ] = True
@@ -395,6 +397,7 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         3.x when an escaped, grouped pattern was tried first. For the same reason a
         path containing anything beyond word characters, ``.``, ``/``, ``:`` and
         ``-`` is not emitted at all; the warning names ``skip_path`` instead.
+        Nothing is emitted on Windows, where checkov's walked paths use ``\\``.
         """
         options = getattr(self.config, "options", None)
         if not getattr(options, "skip_ash_output_dir", True):
@@ -402,6 +405,17 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         scanner_name = getattr(self.config, "name", "checkov")
         relative = self._output_dir_inside(target)
         if relative is None:
+            return None
+        if os.sep != "/":
+            # checkov joins walked paths with os.sep, so on Windows the value
+            # would have to carry backslashes, which are regex escapes to the
+            # re.search half of its match and to the module finder's joined
+            # regex. checkov documents --skip-path as unreliable on Windows
+            # (the TODO in filter_ignored_paths); leave the previous behavior.
+            ASH_LOGGER.debug(
+                f"Not excluding ASH's output directory from {scanner_name} on "
+                "Windows; add it to scanners.checkov.options.skip_path if needed."
+            )
             return None
         output_path = f"{Path(target).as_posix()}/{relative.as_posix()}/"
         if not _CHECKOV_SAFE_SKIP_PATH.match(output_path):

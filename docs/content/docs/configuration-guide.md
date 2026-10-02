@@ -468,7 +468,7 @@ scanners:
       frameworks: ['all']  # Frameworks to scan (plural; 'framework' is not a field)
       skip_frameworks: []  # Frameworks to exclude
       skip_path: []  # Paths to skip, matched as regular expressions
-      skip_ash_output_dir: true  # Skip ASH's output directory when it is inside the source
+      skip_ash_output_dir: true  # Skip ASH's output directory when it is inside the source (not on Windows)
       offline: false  # Run in offline mode
       additional_formats: ['cyclonedx_json']  # Additional output formats
       tool_version: null  # Version constraint (e.g., '>=3.2.0,<4.0.0')

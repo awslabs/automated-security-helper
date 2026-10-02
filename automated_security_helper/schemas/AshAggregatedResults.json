@@ -2822,7 +2822,7 @@
         },
         "skip_ash_output_dir": {
           "default": true,
-          "description": "Skip ASH's own output directory when it sits inside the scanned directory, so Checkov does not parse ASH's previous reports. Defaults to true; set to false to scan it anyway.",
+          "description": "Skip ASH's own output directory when it sits inside the scanned directory, so Checkov does not parse ASH's previous reports. Defaults to true; set to false to scan it anyway. Has no effect on Windows, where Checkov's --skip-path matching is unreliable.",
           "title": "Skip Ash Output Dir",
           "type": "boolean"
         },
