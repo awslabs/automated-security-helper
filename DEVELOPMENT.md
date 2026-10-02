@@ -220,26 +220,8 @@ Releases are cut by maintainers via **Actions > ASH - Create Release > Run workf
 
 After merging the release PR, a second workflow automatically:
 - Creates the git tag (`v{version}`)
-- Publishes a GitHub Release with auto-generated notes
+- Publishes a GitHub Release whose body is the version's `CHANGELOG.md` entry followed by GitHub's auto-generated notes
 - Updates the floating major tag for the released version -- `v3` for a 3.x release, `v4` for a 4.x one, creating it if it does not exist yet
-
-#### Release line
-
-`main` carries breaking (`feat!`) commits that ship in 3.x by maintainer decision, because 4.0.0 is reserved for the v4 packaging work. The workflow's `release-line` input controls this:
-
-- `3.x` (the default): if commitizen detects a major increment, the workflow runs `cz bump --increment MINOR` instead, logs a warning that names every breaking commit it overrode, and lists them in the run summary and the release PR. A patch or minor increment is left alone. The commits are not rewritten, so their `BREAKING CHANGE` notes still render in `CHANGELOG.md`. The job fails if the current version is not 3.x, or if the bump still produced a version outside 3.x.
-- `auto`: commitizen's own semver, so a breaking change produces a major.
-
-A release whose version understates it can carry hand-written notes in `.github/release-notes/<tag>.md`. The changelog template (`.github/changelog/CHANGELOG.md.j2`) renders that file under the version heading. `v3.8.0.md` lists the behavior changes that 3.8.0 ships in a minor release, with their opt-outs.
-
-To cut 4.0.0 once v4 is on `main`: change the input's default to `auto` in the change that lands v4 (or run the workflow with `release-line: auto` and change the default afterward). Once the version is 4.x, `3.x` refuses to run, so a forgotten default fails loudly rather than capping 4.x.
-
-Preview either line locally:
-
-```bash
-uv run cz bump --dry-run --changelog --increment MINOR   # what release-line 3.x produces when a major is detected
-uv run cz bump --dry-run --changelog                     # what release-line auto produces
-```
 
 ### Manual Version Bumping
 
@@ -252,6 +234,24 @@ uv run cz bump --changelog
 
 # Dry run to preview
 uv run cz bump --changelog --dry-run
+```
+
+### Release line
+
+`main` carries breaking (`feat!`) commits that ship in 3.x by maintainer decision, because 4.0.0 is reserved for the v4 packaging work. The workflow's `release-line` input controls this:
+
+- `3.x` (the default): if commitizen detects a major increment, the workflow runs `cz bump --increment MINOR` instead, logs a warning that names every breaking commit it overrode, and lists them in the run summary. A patch or minor increment is left alone. The commits are not rewritten, so their `BREAKING CHANGE` notes still render in `CHANGELOG.md`. The job fails if the current version is not 3.x, or if the bump still produced a version outside 3.x.
+- `auto`: commitizen's own semver, so a breaking change produces a major.
+
+A release whose version understates it can carry hand-written notes in `.github/release-notes/<tag>.md`. The changelog template (`.github/changelog/CHANGELOG.md.j2`) renders that file under the version heading, and the tag workflow publishes that version's `CHANGELOG.md` entry, curated notes included, at the top of the GitHub Release body, ahead of GitHub's generated notes. `v3.8.0.md` lists the behavior changes that 3.8.0 ships in a minor release, with their opt-outs.
+
+To cut 4.0.0 once v4 is on `main`: change the input's default to `auto` in the change that lands v4 (or run the workflow with `release-line: auto` and change the default afterward). Once the version is 4.x, `3.x` refuses to run, so a forgotten default fails loudly rather than capping 4.x.
+
+Preview either line locally:
+
+```bash
+uv run cz bump --dry-run --changelog --increment MINOR   # what release-line 3.x produces when a major is detected
+uv run cz bump --dry-run --changelog                     # what release-line auto produces
 ```
 
 ## Scanner Plugin Development

@@ -272,13 +272,7 @@ jobs:
           OLD_VERSION: ${{ steps.bump.outputs.old_version }}
           NEW_VERSION: ${{ steps.bump.outputs.new_version }}
           ACTOR: ${{ github.actor }}
-          RELEASE_LINE: ${{ inputs.release-line }}
-          INCREMENT: ${{ steps.line.outputs.increment }}
         run: |
-          BODY="Automated release PR. Merging this will trigger tag creation and GitHub Release publishing."
-          if [[ -n "$INCREMENT" ]]; then
-            BODY+=$'\n\n'"Release line ${RELEASE_LINE}: commitizen detected a major bump from breaking commits, and it was capped to a minor. The workflow run summary lists the commits. Check that CHANGELOG.md calls out each behavior change, because the version number will not."
-          fi
           BRANCH="release/v${NEW_VERSION}"
           git checkout -b "$BRANCH"
           git add -A
@@ -288,6 +282,6 @@ jobs:
 
           gh pr create \
             --title "chore(release): ${OLD_VERSION} -> ${NEW_VERSION}" \
-            --body "$BODY" \
+            --body "Automated release PR. Merging this will trigger tag creation and GitHub Release publishing." \
             --base main \
             --head "$BRANCH"
