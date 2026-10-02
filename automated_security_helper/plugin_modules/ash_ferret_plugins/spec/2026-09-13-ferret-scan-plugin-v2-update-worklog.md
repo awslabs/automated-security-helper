@@ -263,11 +263,12 @@ version-independent defect.
   identical paths under 2.4.5 and 2.5.2, including a directory name with a space.
 - `--exclude` (ferret-scan #682 in 2.5.0, #736 in 2.5.2): no substring branch. Under
   2.4.5, ASH's `.git` ignore skipped `.github/`, and `test-results/**` and
-  `tests/pytest-temp/**` excluded nothing. The 2.5.2 self-scan therefore reports one new
-  API_KEY_OR_SECRET false positive in `.github/actions/run-scan-test/action.yml` (a comment
-  quoting the trigger shape); suppressed by path in `.ash/.ash_community_plugins.yaml`.
-  Self-scan with the community config: PASSED under both, 26 (2.4.5) / 27 (2.5.2)
-  suppressed, 0 actionable.
+  `tests/pytest-temp/**` excluded nothing. The 2.5.2 self-scan therefore reported one new
+  API_KEY_OR_SECRET false positive in `.github/actions/run-scan-test/action.yml`: a comment
+  quoting the generated-schema field shape from the 2.3.3 incident. The comment was
+  reworded to describe the shape instead of quoting it (2.5.2 flags the old text at line
+  236 and nothing in the new text), so no suppression was added. Self-scan with the
+  community config: PASSED under both, 26 suppressed each, 0 actionable.
 - Detection on `tests/test_data/scanners/ferret-scan/sample.txt`: 2.5.2's results are a
   subset of 2.4.5's (117 → 108); the 9 dropped are PHONE hits on card numbers and IBANs.
 - Pre-commit mode: `PRE_COMMIT=1` (and, before 2.5.2, `PRE_COMMIT_HOME`) switched
