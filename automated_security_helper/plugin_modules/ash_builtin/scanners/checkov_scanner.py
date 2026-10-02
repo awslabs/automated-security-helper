@@ -1,6 +1,8 @@
 """Module containing the Checkov security scanner implementation."""
 
 import logging
+import os
+import re
 from pathlib import Path
 from typing import Annotated, ClassVar, List, Literal
 
@@ -62,6 +64,12 @@ CheckFrameworks = Literal[
 ]
 
 
+# Characters a --skip-path value can carry through checkov without changing what
+# it matches or breaking the regex checkov's terraform module finder builds from
+# it. See CheckovScanner._output_dir_skip_pattern.
+_CHECKOV_SAFE_SKIP_PATH = re.compile(r"^[\w./:-]+$")
+
+
 class CheckovScannerConfigOptions(ScannerOptionsBase):
     config_file: Annotated[
         Path | str | None,
@@ -113,6 +121,17 @@ class CheckovScannerConfigOptions(ScannerOptionsBase):
             description="Specific frameworks to exclude with Checkov. Defaults to none."
         ),
     ] = []
+    skip_ash_output_dir: Annotated[
+        bool,
+        Field(
+            description=(
+                "Skip ASH's own output directory when it sits inside the scanned "
+                "directory, so Checkov does not parse ASH's previous reports. "
+                "Defaults to true; set to false to scan it anyway. Has no effect "
+                "on Windows, where Checkov's --skip-path matching is unreliable."
+            ),
+        ),
+    ] = True
     tool_version: Annotated[
         str | None,
         Field(
@@ -334,10 +353,81 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
         results_file = target_results_dir.joinpath("results_sarif.sarif")
         results_file.parent.mkdir(exist_ok=True, parents=True)
 
-        final_args = self._resolve_arguments(
-            target=target,
-            # We want to use the parent here, not the results_file, as Checkov is expecting the output
-            # directory and not the file name.
-            results_file=target_results_dir,
-        )
+        # Added for this resolution only and then removed, as bandit does with its
+        # excluded paths: the pattern depends on the target, and extra_args
+        # persists across scan() calls.
+        original_extra_args = list(self.args.extra_args)
+        output_skip = self._output_dir_skip_pattern(target)
+        if output_skip is not None:
+            self.args.extra_args.append(
+                ToolExtraArg(key="--skip-path", value=output_skip)
+            )
+        try:
+            final_args = self._resolve_arguments(
+                target=target,
+                # We want to use the parent here, not the results_file, as Checkov is expecting the output
+                # directory and not the file name.
+                results_file=target_results_dir,
+            )
+        finally:
+            self.args.extra_args = original_extra_args
         return final_args, results_file, None
+
+    def _output_dir_skip_pattern(self, target: Path) -> str | None:
+        """A ``--skip-path`` value matching ASH's output directory under ``target``.
+
+        Why: Checkov is given the whole directory, and ``--framework all``
+        includes parsers (openapi, generic JSON/YAML) that read report files. A
+        report it cannot read can stall the run until the scan timeout kills it
+        (#628). Checkov already skips hidden directories, so the default
+        ``.ash/ash_output`` was safe, but ``--output-dir`` pointed at a visible
+        directory inside the source -- common in CI -- was scanned.
+
+        Checkov tests each value both as a regex (``re.search``) and as a
+        substring against ``os.path.join(root, name)``, where ``root`` comes from
+        walking the ``--directory`` value as given. So the value is the output
+        directory spelled from that same string, with a trailing ``/`` so ``out``
+        does not also skip ``outer/``.
+
+        Deliberately not ``re.escape``d or anchored with a group. Checkov's
+        terraform module finder builds one regex out of every ``--skip-path``
+        character by character (``'|'.join(f"({excluded_paths})")`` in
+        ``module_finder.py``), so a ``(`` or ``)`` in any value fails the whole
+        terraform scan with "unbalanced parenthesis" -- measured against checkov
+        3.x when an escaped, grouped pattern was tried first. For the same reason a
+        path containing anything beyond word characters, ``.``, ``/``, ``:`` and
+        ``-`` is not emitted at all; the warning names ``skip_path`` instead.
+        Nothing is emitted on Windows, where checkov's walked paths use ``\\``.
+        """
+        options = getattr(self.config, "options", None)
+        if not getattr(options, "skip_ash_output_dir", True):
+            return None
+        scanner_name = getattr(self.config, "name", "checkov")
+        relative = self._output_dir_inside(target)
+        if relative is None:
+            return None
+        if os.sep != "/":
+            # checkov joins walked paths with os.sep, so on Windows the value
+            # would have to carry backslashes, which are regex escapes to the
+            # re.search half of its match and to the module finder's joined
+            # regex. checkov documents --skip-path as unreliable on Windows
+            # (the TODO in filter_ignored_paths); leave the previous behavior.
+            ASH_LOGGER.debug(
+                f"Not excluding ASH's output directory from {scanner_name} on "
+                "Windows; add it to scanners.checkov.options.skip_path if needed."
+            )
+            return None
+        output_path = f"{Path(target).as_posix()}/{relative.as_posix()}/"
+        if not _CHECKOV_SAFE_SKIP_PATH.match(output_path):
+            ASH_LOGGER.warning(
+                f"Not excluding ASH's output directory {output_path} from "
+                f"{scanner_name}: the path has characters checkov cannot take "
+                "in --skip-path. Add it to scanners.checkov.options.skip_path, or "
+                "move --output-dir outside the source directory."
+            )
+            return None
+        ASH_LOGGER.debug(
+            f"Path '{output_path}' excluded from {scanner_name} scan for "
+            "reason: ASH output directory"
+        )
+        return output_path

@@ -297,9 +297,13 @@ scanners:
 ```
 
 A scanner killed by its timeout produces no results file, so the scan fails with an
-error naming the scanner rather than silently reporting zero findings for it.
-`scan_timeout` bounds the scan itself; `install_timeout` separately bounds tool
-installation and defaults to `300`.
+error naming the scanner and the limit (`<scanner> timed out after 1800.0s`) rather
+than silently reporting zero findings for it. Whatever the tool wrote before it was
+killed is kept in `scanners/<name>/<target>/<Scanner>.stderr.log` under the output
+directory. While a scanner runs, ASH logs `<scanner> still running on <target>
+(<N>s elapsed)` at INFO once a minute, so a hung scanner is named in a CI log without
+any extra flag. `scan_timeout` bounds the scan itself; `install_timeout` separately
+bounds tool installation and defaults to `300`.
 
 ### Reporters Configuration
 
@@ -464,6 +468,7 @@ scanners:
       frameworks: ['all']  # Frameworks to scan (plural; 'framework' is not a field)
       skip_frameworks: []  # Frameworks to exclude
       skip_path: []  # Paths to skip, matched as regular expressions
+      skip_ash_output_dir: true  # Skip ASH's output directory when it is inside the source (not on Windows)
       offline: false  # Run in offline mode
       additional_formats: ['cyclonedx_json']  # Additional output formats
       tool_version: null  # Version constraint (e.g., '>=3.2.0,<4.0.0')

@@ -203,6 +203,11 @@ class UVToolMixin:
                 "stderr": result.stderr or "",
                 "returncode": result.returncode,
             }
+            # Carried across like the other fields. scan() and _run_subprocess key
+            # the "timed out after Ns" report on it, so dropping it here made every
+            # uv-run scanner report a timeout as its missing results file.
+            if getattr(result, "timed_out", False) is True:
+                response["timed_out"] = True
 
             self._process_command_response(response)
 

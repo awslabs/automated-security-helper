@@ -48,6 +48,11 @@ from automated_security_helper.workspace.workspace_file import (
 )
 
 
+def _from_environment(ctx: typer.Context, param: str) -> bool:
+    """Whether click took *param*'s value from its ``envvar``."""
+    return getattr(ctx.get_parameter_source(param), "name", None) == "ENVIRONMENT"
+
+
 def _fail_workspace(
     message: str,
     code: WorkspaceExitCode = WorkspaceExitCode.WORKSPACE_ERROR,
@@ -330,10 +335,22 @@ def run_ash_scan_cli_command(
         ),
     ] = None,
     verbose: Annotated[
-        bool, typer.Option("--verbose", "-v", help="Enable verbose logging")
+        bool,
+        typer.Option(
+            "--verbose",
+            "-v",
+            help="Enable verbose logging. Any log flag on the command line overrides ASH_VERBOSE.",
+            envvar="ASH_VERBOSE",
+        ),
     ] = False,
     debug: Annotated[
-        bool, typer.Option("--debug", "-d", help="Enable debug logging")
+        bool,
+        typer.Option(
+            "--debug",
+            "-d",
+            help="Enable debug logging. Any log flag on the command line overrides ASH_DEBUG.",
+            envvar="ASH_DEBUG",
+        ),
     ] = False,
     color: Annotated[bool, typer.Option(help="Enable/disable colorized output")] = True,
     fail_on_findings: Annotated[
@@ -555,6 +572,19 @@ def run_ash_scan_cli_command(
     if version:
         typer.echo(f"awslabs/automated-security-helper v{get_ash_version()}")
         raise typer.Exit
+
+    # envvar= above documents ASH_VERBOSE/ASH_DEBUG in --help, but click would
+    # also let the variable set the flag outright, so ASH_DEBUG=true would beat
+    # an explicit --quiet or --log-level. A value that came from the environment
+    # is dropped here and run_ash_scan reads the variable itself, below every
+    # CLI flag -- one precedence rule for the CLI, MCP and library callers alike.
+    #
+    # Compared by name: typer vendors its own click, so click.core.ParameterSource
+    # is a different enum from the one this context returns.
+    if _from_environment(ctx, "verbose"):
+        verbose = False
+    if _from_environment(ctx, "debug"):
+        debug = False
 
     _validate_shard_options(shard_index, shard_count, workspace)
 
