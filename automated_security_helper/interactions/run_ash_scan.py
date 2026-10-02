@@ -23,7 +23,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from rich import print  # noqa: A004
 
 from automated_security_helper.core.constants import (
-    ASH_CONFIG_FILE_NAMES,
     ASH_EXIT_CODES,
     ASH_WORK_DIR_NAME,
     is_offline_mode,
@@ -1127,6 +1126,43 @@ def _severity_filters_finding(result, min_sev_rank: int) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _discovered_config_path(
+    source_dir: Path, log_selection: bool = False
+) -> Optional[str]:
+    """The config source a scan of *source_dir* uses, by the one discovery rule.
+
+    Every reader in this module goes through here and through
+    ``config_sources.discover_config_source``, so the exit-code fields, the
+    workspace knobs and the orchestrator all read the same file -- including a
+    pyproject.toml [tool.ash] table or an ashrc file. Discovery errors are left
+    to the caller.
+    """
+    from automated_security_helper.config.config_sources import (
+        discover_config_source,
+        log_config_discovery,
+    )
+
+    discovery = discover_config_source(source_dir)
+    if log_selection:
+        log_config_discovery(discovery, announce_selected=False)
+    if discovery.selected is None:
+        return None
+    return discovery.selected.path.as_posix()
+
+
+def _load_with_confinement(ash_config_cls, config_path_str: str, source_dir: Path):
+    """Load a config file with its `extends` bases confined as a scan would."""
+    from automated_security_helper.config.config_sources import (
+        default_confinement_root,
+    )
+
+    config_path = Path(config_path_str)
+    return ash_config_cls.from_file(
+        config_path,
+        confine_to=default_confinement_root(config_path, source_dir),
+    )
+
+
 def _load_config_file(opts: ScanOptions):
     """Load the config file a scan of *opts* would use, or None.
 
@@ -1142,22 +1178,17 @@ def _load_config_file(opts: ScanOptions):
 
     config_path_str = opts.config
     if config_path_str is None:
-        for config_file in ASH_CONFIG_FILE_NAMES:
-            for candidate in (
-                opts.source_dir / config_file,
-                opts.source_dir / ".ash" / config_file,
-            ):
-                if candidate.exists():
-                    config_path_str = candidate.as_posix()
-                    break
-            if config_path_str is not None:
-                break
+        try:
+            config_path_str = _discovered_config_path(opts.source_dir)
+        except Exception:
+            # Surfaces again, with its message, when the orchestrator resolves.
+            return None
 
     if config_path_str is None:
         return None
 
     try:
-        return AshConfig.from_file(Path(config_path_str))
+        return _load_with_confinement(AshConfig, config_path_str, opts.source_dir)
     except Exception:
         return None
 
@@ -1688,20 +1719,9 @@ def _run_local_mode(
 
         config = opts.config
         if config is None:
-            for config_file in ASH_CONFIG_FILE_NAMES:
-                def_paths = [
-                    opts.source_dir / config_file,
-                    opts.source_dir / ".ash" / config_file,
-                ]
-                for def_path in def_paths:
-                    if def_path.exists():
-                        logger.info(
-                            f"Using config file found at: {def_path.as_posix()}"
-                        )
-                        config = def_path.as_posix()
-                        break
-                if config is not None:
-                    break
+            config = _discovered_config_path(opts.source_dir, log_selection=True)
+            if config is not None:
+                logger.info(f"Using config file found at: {config}")
         else:
             logger.info(f"Using config file specified at: {config}")
 
@@ -1877,22 +1897,22 @@ def _resolve_workspace_execution_config(opts: ScanOptions):
 
     config_path_str = opts.config
     if config_path_str is None:
-        for config_file in ASH_CONFIG_FILE_NAMES:
-            for candidate in (
-                opts.source_dir / config_file,
-                opts.source_dir / ".ash" / config_file,
-            ):
-                if candidate.exists():
-                    config_path_str = candidate.as_posix()
-                    break
-            if config_path_str is not None:
-                break
+        try:
+            config_path_str = _discovered_config_path(opts.source_dir)
+        except Exception as exc:  # noqa: BLE001 -- scheduling knobs, not policy
+            logging.getLogger(__name__).warning(
+                f"Could not locate the workspace config ({exc}); using the default "
+                "workspace execution settings."
+            )
+            return WorkspaceExecutionConfig()
 
     if config_path_str is None:
         return WorkspaceExecutionConfig()
 
     try:
-        return AshConfig.from_file(Path(config_path_str)).workspace
+        return _load_with_confinement(
+            AshConfig, config_path_str, opts.source_dir
+        ).workspace
     except Exception as exc:  # noqa: BLE001 -- scheduling knobs, not policy
         logging.getLogger(__name__).warning(
             f"Could not read workspace execution settings from "

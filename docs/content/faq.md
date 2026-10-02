@@ -120,10 +120,22 @@ By default, ASH looks for a configuration file in the following locations (in or
 10. `.ash/ash.yaml`
 11. `ash.json`
 12. `.ash/ash.json`
+13. `.ashrc.toml`
+14. `.ashrc.yaml`
+15. `.ashrc.yml`
+16. `.ashrc.json`
+17. `ashrc.toml`
+18. `ashrc.yaml`
+19. `ashrc.yml`
+20. `ashrc.json`
+21. `pyproject.toml`
 
-The first match wins, and the order is per-filename rather than per-directory:
-for each name ASH checks the source directory first, then its `.ash/`
-subdirectory.
+The first match wins, and the order for items 1-12 is per-filename rather than
+per-directory: for each name ASH checks the source directory first, then its
+`.ash/` subdirectory. Items 13-21 are checked in the source directory only, and
+`pyproject.toml` counts only when it has a `[tool.ash]` table. Sources are never
+merged; ASH logs the one it used and warns about any it ignored. See the
+configuration guide for `[tool.ash]` and for `extends`.
 
 ### How do I create a configuration file?
 ```bash
