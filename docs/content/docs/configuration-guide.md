@@ -6,10 +6,23 @@ ASH v3 uses a YAML configuration file to control its behavior. This guide explai
 
 By default, ASH looks for a configuration file in the following locations (in order):
 
-1. `.ash/.ash.yaml`
+1. `.ash.yml`
 2. `.ash/.ash.yml`
 3. `.ash.yaml`
-4. `.ash.yml`
+4. `.ash/.ash.yaml`
+5. `.ash.json`
+6. `.ash/.ash.json`
+7. `ash.yml`
+8. `.ash/ash.yml`
+9. `ash.yaml`
+10. `.ash/ash.yaml`
+11. `ash.json`
+12. `.ash/ash.json`
+
+The first match wins. The order is per-filename, not per-directory: for each name
+in turn ASH checks the source directory and then its `.ash/` subdirectory, so
+`.ash.yml` in the source directory beats `.ash/.ash.yaml`. The list comes from
+`ASH_CONFIG_FILE_NAMES` in `automated_security_helper/core/constants.py`.
 
 You can also specify a custom configuration file path using the `--config` option:
 
@@ -49,16 +62,20 @@ ash_plugin_modules: []
 
 ### Failing on an incomplete scan
 
-`fail_on_incomplete_scanners` is a top-level key, and it is off by default. Set it
-to `true` and ASH exits 1 when a scanner you selected did not complete — status
-`ERROR` (it ran and failed) or `MISSING` (its dependencies were unavailable, so it
-never ran) — and prints which ones.
+`fail_on_incomplete_scanners` is a top-level key, and it is on by default. ASH exits
+1 when a scanner you selected did not complete — status `ERROR` (it ran and failed)
+or `MISSING` (its dependencies were unavailable, so it never ran) — and prints which
+ones.
 
-It is off rather than on because a repository has to be able to pass it before it
-can be enabled, and turning it on for a tree that cannot teaches everyone to pass
-`--no-fail-on-incomplete-scanners`, which is worse than leaving it opt-in. Enable it
-once your own scans complete cleanly; `ash scan --fail-on-incomplete-scanners` is
-the cheapest way to find out whether they do.
+It is on rather than off because a scanner recorded `ERROR` or `MISSING` produces no
+findings, so with the gate off that scan reports the exit code of a clean one. That is
+the one failure a reader cannot see: the crash is visible in the log, the false
+all-clear is not. A host that genuinely cannot provide a scanner's tool says so once,
+with the key below or `--no-fail-on-incomplete-scanners`, and keeps its old exit codes.
+
+It selects on status, so it covers a failure only once that failure has reached the
+status. A tool that exits non-zero but writes an empty report is graded `PASSED` from
+its zero findings, and this key does not change that in any position.
 
 `SKIPPED` scanners are ones you did not select and never trip it, which is what
 keeps a sharded scan working: each shard excludes the scanners its siblings own,
@@ -82,6 +99,50 @@ false` still reports an incomplete scan, and when both would fail the exit code 
 1 rather than 2, because clearing the findings that were reported would not make
 the scan complete. See
 [An incomplete scan is not a clean scan](cli-reference.md#an-incomplete-scan-is-not-a-clean-scan).
+
+### Failing on a stale content database
+
+`content_db_staleness` is a top-level key, and it defaults to `fail`. After each
+scanner that matches against a content database, ASH reads that database's own
+build time and compares it to the bound declared for it in
+`automated_security_helper/utils/content_databases.py`. Past the bound, the scan
+exits 1 and names the database, when it was built, how old it is, the bound, and
+how to refresh it. This happens in online and offline mode alike.
+
+| Database | Scanner | Bound | Where the bound comes from | Age read from |
+| --- | --- | --- | --- | --- |
+| `grype-db` | grype | 120h (5 days) | grype's own default, `db.max-allowed-built-age` | `built` in `grype db status -o json` |
+| `trivy-db` | trivy-repo | 24h | trivy's own rule: a database is current until its `NextUpdate`, which the published database sets 24h after `UpdatedAt` | `VulnerabilityDB.UpdatedAt` in `trivy version --format json` |
+| `semgrep-offline-rules` | semgrep (offline only) | 720h (30 days) | ASH's own choice; semgrep has no staleness notion for local rules | `.ash-rules-fetched-at` in `$SEMGREP_RULES_CACHE_DIR`, else the oldest rules file's mtime |
+| `opengrep-offline-rules` | opengrep (offline only) | 720h (30 days) | ASH's own choice; opengrep has no staleness notion for local rules | `.ash-rules-fetched-at` in `$OPENGREP_RULES_CACHE_DIR`, else the oldest rules file's mtime |
+
+A database whose build time cannot be read is treated as stale, because an
+unmeasurable database is not evidence of a fresh one.
+
+To let one scan run against a stale database, pass `--allow-stale-content-db`, or
+set:
+
+```yaml
+content_db_staleness: warn
+```
+
+Under `warn` the scan proceeds, and the warning is written to the log and into the
+reports: a `### Stale content databases` section in `ash.summary.md`, a `STALE
+CONTENT DATABASES` section in `ash.summary.txt`, a `toolConfigurationNotifications`
+entry with descriptor id `ASH-CONTENT-DB-STALE` on the scanner's invocation in
+`ash.sarif`, and a `content_databases` list in `ash.flat.json` with `stale: true`
+and `enforced: false`. A reader of any of those can see the scan ran against an
+out-of-date database.
+
+The CLI flag takes precedence over the config value in both directions:
+`--no-allow-stale-content-db` restores `fail` for one scan even when the config
+says `warn`. Like `fail_on_incomplete_scanners`, it cannot be changed by an MCP
+runtime patch.
+
+This gate is independent of `fail_on_incomplete_scanners` and does not need it
+turned on. When the scan also has actionable findings, the exit code is 1 rather
+than 2: clearing the reported findings would not make a scan against a stale
+database trustworthy.
 
 ### Global Settings
 
@@ -279,8 +340,13 @@ The `ash_plugin_modules` section allows you to specify custom Python modules con
 ```yaml
 ash_plugin_modules:
   - my_custom_ash_plugins
-  - another_plugin_module
+  - another_ash_plugins
 ```
+
+The top-level package must be inside ASH's plugin namespace: either under
+`automated_security_helper.`, or a top-level package whose name ends in `ash_plugins`.
+A module outside that namespace is skipped with a warning rather than imported, so a
+name like `another_plugin_module` silently registers nothing.
 
 ## Validating Configuration
 
@@ -319,7 +385,7 @@ ash --config-overrides 'scanners.bandit.enabled=true'
 ash --config-overrides 'global_settings.severity_threshold=LOW'
 
 # Append to a list
-ash --config-overrides 'ash_plugin_modules+=["my_custom_plugin"]'
+ash --config-overrides 'ash_plugin_modules+=["my_ash_plugins"]'
 
 # Add a complex value
 ash --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
@@ -488,9 +554,9 @@ If you encounter UV tool installation issues:
 3. **Use offline mode**: `ASH_OFFLINE=true` to skip installations
 4. **Pre-install tools manually**:
    ```bash
-   uv tool install bandit>=1.7.0
+   uv tool install bandit>=1.7.0,<2.0.0
    uv tool install checkov>=3.2.0,<4.0.0
-   uv tool install semgrep>=1.125.0
+   uv tool install semgrep>=1.125.0,<2.0.0
    ```
 5. **Increase timeout** for slow networks:
    ```yaml
@@ -505,9 +571,9 @@ For more detailed information about UV tool management, see the [UV Tool Managem
 
 ### UV Tool Behavior
 
-- **Bandit**: Automatically installed via `uv tool install bandit>=1.7.0` (default version constraint)
+- **Bandit**: Automatically installed via `uv tool install bandit>=1.7.0,<2.0.0` (default version constraint)
 - **Checkov**: Automatically installed via `uv tool install checkov>=3.2.0,<4.0.0` (default version constraint) with fallback to `uv tool run`
-- **Semgrep**: Automatically installed via `uv tool install semgrep>=1.125.0` (default version constraint) with fallback to `uv tool run`
+- **Semgrep**: Automatically installed via `uv tool install semgrep>=1.125.0,<2.0.0` (default version constraint) with fallback to `uv tool run`
 
 ### Version Constraint Configuration
 
@@ -537,9 +603,9 @@ If you encounter issues with UV tool management:
 3. **Offline Mode**: Use `ASH_OFFLINE=true` to skip tool downloads and rely on pre-installed tools
 4. **Manual Installation**: You can pre-install tools manually if needed:
    ```bash
-   uv tool install bandit>=1.7.0
+   uv tool install bandit>=1.7.0,<2.0.0
    uv tool install checkov>=3.2.0,<4.0.0
-   uv tool install semgrep>=1.125.0
+   uv tool install semgrep>=1.125.0,<2.0.0
    ```
 
 ## Advanced Configuration

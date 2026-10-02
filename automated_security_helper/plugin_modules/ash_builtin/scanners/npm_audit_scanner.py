@@ -1,5 +1,6 @@
 """Module containing the NPM Audit security scanner implementation."""
 
+import copy
 import json
 import logging
 import os
@@ -39,6 +40,13 @@ from automated_security_helper.schemas.sarif_schema_model import (
 from automated_security_helper.utils.get_scan_set import scan_set
 from automated_security_helper.utils.log import ASH_LOGGER
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
+from automated_security_helper.utils.package_identity import (
+    NPM_LOCKFILE_NAMES,
+    PACKAGE_VERSION_KEY,
+    NpmLockIndex,
+    identity_properties,
+    install_path,
+)
 from automated_security_helper.utils.subprocess_utils import find_executable
 
 
@@ -136,18 +144,100 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
     def _process_config_options(self):
         return super()._process_config_options()
 
+    @staticmethod
+    def _lock_context(
+        lock_file: Path | None, target_path: Path | str
+    ) -> tuple[str | None, NpmLockIndex | None]:
+        """The npm lockfile's path relative to the scan root, and an index over it.
+
+        (None, None) when there is no lockfile, it is not an npm lockfile, or it
+        is not under the scan root: node paths then cannot be tied to a place.
+        """
+        if lock_file is None or Path(lock_file).name not in NPM_LOCKFILE_NAMES:
+            return None, None
+        root = Path(target_path)
+        try:
+            rel = Path(lock_file).resolve().relative_to(root.resolve()).as_posix()
+        except ValueError:
+            return None, None
+        return rel, NpmLockIndex(root)
+
+    @staticmethod
+    def _node_identity(
+        pkg_name: str,
+        node_path: str,
+        lock_rel: str | None,
+        lock_index: NpmLockIndex | None,
+    ) -> Dict[str, str]:
+        """Package identity for one node of an npm audit vulnerability.
+
+        ``package_path`` is the node's lockfile key under the lockfile's
+        directory. ``package_version`` is that key's ``version`` in the
+        lockfile, because npm audit's own output carries only the advisory
+        range, not what is installed.
+        """
+        if lock_rel is None or lock_index is None:
+            return identity_properties(pkg_name, None, None)
+        entry = lock_index.entry(lock_rel, str(node_path))
+        return identity_properties(
+            pkg_name,
+            entry.version if entry is not None else None,
+            install_path(lock_rel, str(node_path)),
+        )
+
+    def _convert_per_lockfile(
+        self,
+        per_lock_results: List[tuple[Path, Dict[str, Any]]],
+        merged_results: Dict[str, Any],
+        target_path: Path,
+    ) -> SarifReport:
+        """Convert each lockfile's audit output separately and join the runs.
+
+        Converting the merged dict instead loses findings: it is keyed by
+        package name, so a package vulnerable in two lockfiles kept only the
+        last lockfile's nodes.
+        """
+        report: SarifReport | None = None
+        for lock_file, audit_results in per_lock_results:
+            part = self._convert_npm_audit_to_sarif(
+                audit_results, target_path, lock_file=lock_file
+            )
+            if report is None:
+                report = part
+                continue
+            run, part_run = report.runs[0], part.runs[0]
+            run.results.extend(part_run.results or [])
+            known = {rule.id for rule in run.tool.driver.rules or []}
+            for rule in part_run.tool.driver.rules or []:
+                if rule.id not in known:
+                    run.tool.driver.rules.append(rule)
+                    known.add(rule.id)
+        if report is None:
+            return self._convert_npm_audit_to_sarif(merged_results, target_path)
+        report.runs[0].properties = PropertyBag(
+            metrics=merged_results.get("metadata", {}).get("vulnerabilities", {})
+        )
+        return report
+
     def _convert_npm_audit_to_sarif(
-        self, npm_audit_results: Dict[str, Any], target_path: Path
+        self,
+        npm_audit_results: Dict[str, Any],
+        target_path: Path,
+        lock_file: Path | None = None,
     ) -> SarifReport:
         """Convert npm audit results to SARIF format.
 
         Args:
             npm_audit_results: npm audit results in JSON format
             target_path: Path to the scanned directory
+            lock_file: The lockfile these results were audited from. When it is
+                an npm lockfile under ``target_path``, each result carries
+                ``package_version`` and ``package_path`` from it.
 
         Returns:
             SarifReport: SARIF report containing the scan findings
         """
+        lock_rel, lock_index = self._lock_context(lock_file, target_path)
         # Create the basic SARIF structure
         tool_component = ToolComponent(
             name="npm-audit",
@@ -230,15 +320,15 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         )
                         rules_dict[vuln_id] = rule
 
-                    # Find the package location
-                    package_locations = []
+                    # Create a result for each installed copy (node)
                     for node_path in vuln_info.get("nodes", []):
-                        # Convert node_modules path to a file location
-                        rel_path = str(node_path).replace("node_modules/", "")
-                        package_locations.append(rel_path)
-
-                    # Create a result for this vulnerability
-                    for pkg_location in package_locations:
+                        # The URI keeps its historical shape, which existing
+                        # path-based suppressions match; package_path holds
+                        # the real install path.
+                        pkg_location = str(node_path).replace("node_modules/", "")
+                        identity = self._node_identity(
+                            pkg_name, node_path, lock_rel, lock_index
+                        )
                         result = Result(
                             ruleId=vuln_id,
                             level=level,
@@ -256,8 +346,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                 )
                             ],
                             properties=PropertyBag(
-                                package_name=pkg_name,
-                                installed_version=vuln_info.get("range", "*"),
+                                **identity,
+                                installed_version=identity.get(
+                                    PACKAGE_VERSION_KEY, vuln_info.get("range", "*")
+                                ),
                                 vulnerable_versions=vuln_info.get("range", "*"),
                                 recommendation=f"Update {pkg_name} to a non-vulnerable version",
                                 severity=severity,
@@ -299,12 +391,11 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         )
                         rules_dict[vuln_id] = rule
 
-                    package_locations = []
                     for node_path in vuln_info.get("nodes", []):
-                        rel_path = str(node_path).replace("node_modules/", "")
-                        package_locations.append(rel_path)
-
-                    for pkg_location in package_locations:
+                        pkg_location = str(node_path).replace("node_modules/", "")
+                        identity = self._node_identity(
+                            pkg_name, node_path, lock_rel, lock_index
+                        )
                         result = Result(
                             ruleId=vuln_id,
                             level=level,
@@ -322,8 +413,10 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                                 )
                             ],
                             properties=PropertyBag(
-                                package_name=pkg_name,
-                                installed_version=vuln_info.get("range", "*"),
+                                **identity,
+                                installed_version=identity.get(
+                                    PACKAGE_VERSION_KEY, vuln_info.get("range", "*")
+                                ),
                                 vulnerable_versions=vuln_info.get("range", "*"),
                                 recommendation=f"Update {pkg_name} to a non-vulnerable version",
                                 severity=severity,
@@ -464,7 +557,7 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
             # Find all files to scan from the scan set
             orig_scannable = (
-                [item for item in self.context.work_dir.glob("**/*.*")]
+                list(self.context.work_dir.glob("**/*.*"))
                 if target_type == "converted"
                 else scan_set(
                     source=self.context.source_dir,
@@ -494,8 +587,11 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                 )
                 return sarif_report
 
-            # Run npm audit for each package.json file
+            # Run npm audit for each package.json file. all_results is the
+            # merged raw output written to results.json; per_lock_results keeps
+            # each lockfile's output whole for the SARIF conversion.
             all_results = {}
+            per_lock_results: List[tuple[Path, Dict[str, Any]]] = []
             lock_files = [
                 "yarn.lock",
                 "pnpm-lock.yaml",
@@ -594,6 +690,12 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
                         if result.get("stdout", None):
                             try:
                                 audit_results = json.loads(result.get("stdout", None))
+                                if isinstance(audit_results, dict):
+                                    # A copy: the first document becomes
+                                    # all_results below and is merged into.
+                                    per_lock_results.append(
+                                        (lock_file, copy.deepcopy(audit_results))
+                                    )
                                 # Merge results
                                 if not all_results:
                                     all_results = audit_results
@@ -642,7 +744,9 @@ class NpmAuditScanner(ScannerPluginBase[NpmAuditScannerConfig]):
 
             # Convert npm audit results to SARIF
             if all_results:
-                sarif_report = self._convert_npm_audit_to_sarif(all_results, target)
+                sarif_report = self._convert_per_lockfile(
+                    per_lock_results, all_results, target
+                )
 
                 # Save SARIF report
                 sarif_file = target_results_dir.joinpath("results_sarif.sarif")

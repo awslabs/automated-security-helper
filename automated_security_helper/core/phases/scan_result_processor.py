@@ -23,9 +23,15 @@ class ScanResultProcessor:
     the four _validate_* methods that previously lived on ScanPhase.
     """
 
-    def __init__(self, plugin_context: Any, validation_manager: ScannerValidationManager | None = None) -> None:
+    def __init__(
+        self,
+        plugin_context: Any,
+        validation_manager: ScannerValidationManager | None = None,
+    ) -> None:
         self.plugin_context = plugin_context
-        self.validation_manager = validation_manager or ScannerValidationManager(plugin_context)
+        self.validation_manager = validation_manager or ScannerValidationManager(
+            plugin_context
+        )
 
     # ------------------------------------------------------------------
     # Public interface
@@ -38,20 +44,29 @@ class ScanResultProcessor:
     ) -> AshAggregatedResults:
         """Merge a single ScanResultsContainer into aggregated_results."""
         from automated_security_helper.schemas.sarif_schema_model import SarifReport
-        from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import CycloneDXReport
+        from automated_security_helper.schemas.cyclonedx_bom_1_6_schema import (
+            CycloneDXReport,
+        )
 
         scanner_name = results.scanner_name
         if scanner_name not in aggregated_results.additional_reports:
             aggregated_results.additional_reports[scanner_name] = {}
 
-        if results.target_type not in aggregated_results.additional_reports[scanner_name]:
-            aggregated_results.additional_reports[scanner_name][results.target_type] = {}
+        if (
+            results.target_type
+            not in aggregated_results.additional_reports[scanner_name]
+        ):
+            aggregated_results.additional_reports[scanner_name][
+                results.target_type
+            ] = {}
 
-        aggregated_results.additional_reports[scanner_name][results.target_type] = results.model_dump(
-            exclude_none=True,
-            exclude_unset=True,
-            by_alias=True,
-            mode="json",
+        aggregated_results.additional_reports[scanner_name][results.target_type] = (
+            results.model_dump(
+                exclude_none=True,
+                exclude_unset=True,
+                by_alias=True,
+                mode="json",
+            )
         )
 
         ash_target_result_path = self.plugin_context.output_dir.joinpath(
@@ -71,7 +86,9 @@ class ScanResultProcessor:
                 f"{scanner_name}: Processing as SARIF report with "
                 f"{len(results.raw_results.runs[0].results) if results.raw_results.runs and results.raw_results.runs[0].results else 0} results"
             )
-            sanitized_sarif = sanitize_sarif_paths(results.raw_results, self.plugin_context.source_dir)
+            sanitized_sarif = sanitize_sarif_paths(
+                results.raw_results, self.plugin_context.source_dir
+            )
             sanitized_sarif = normalize_sarif_result_severities(sanitized_sarif)
 
             if not self.plugin_context.ignore_suppressions:
@@ -81,10 +98,16 @@ class ScanResultProcessor:
                     used_suppressions=aggregated_results.used_suppressions,
                 )
             else:
-                ASH_LOGGER.debug("Skipping suppression application due to --ignore-suppressions flag")
+                ASH_LOGGER.debug(
+                    "Skipping suppression application due to --ignore-suppressions flag"
+                )
 
             scanner_version = None
-            if hasattr(results, "metadata") and results.metadata and "scanner_version" in results.metadata:
+            if (
+                hasattr(results, "metadata")
+                and results.metadata
+                and "scanner_version" in results.metadata
+            ):
                 scanner_version = results.metadata["scanner_version"]
             # tool_version is not a field on SarifReport; skip that path
 
@@ -94,9 +117,13 @@ class ScanResultProcessor:
                     if key in results.metadata:
                         invocation_details[key] = results.metadata[key]
                 if "exit_code" in results.metadata or hasattr(results, "exit_code"):
-                    invocation_details["exit_code"] = results.metadata.get("exit_code", results.exit_code)
+                    invocation_details["exit_code"] = results.metadata.get(
+                        "exit_code", results.exit_code
+                    )
                 if "duration" in results.metadata or hasattr(results, "duration"):
-                    invocation_details["duration"] = results.metadata.get("duration", results.duration)
+                    invocation_details["duration"] = results.metadata.get(
+                        "duration", results.duration
+                    )
 
             if hasattr(results, "start_time") and results.start_time:
                 invocation_details["start_time"] = (
@@ -114,18 +141,22 @@ class ScanResultProcessor:
             sanitized_sarif.attach_scanner_details(
                 scanner_name=results.scanner_name,
                 scanner_version=scanner_version or get_ash_version(),
-                invocation_details=invocation_details if invocation_details else {},
+                invocation_details=invocation_details or {},
             )
 
             if aggregated_results.sarif is not None:
                 aggregated_results.sarif.merge_sarif_report(sanitized_sarif)
-            target_report = aggregated_results.additional_reports[scanner_name][results.target_type]
+            target_report = aggregated_results.additional_reports[scanner_name][
+                results.target_type
+            ]
             target_report.pop("raw_results", None)
 
         elif isinstance(results.raw_results, CycloneDXReport):
             ASH_LOGGER.verbose(f"{scanner_name}: Processing as CycloneDX report")
             aggregated_results.cyclonedx = results.raw_results
-            target_report = aggregated_results.additional_reports[scanner_name][results.target_type]
+            target_report = aggregated_results.additional_reports[scanner_name][
+                results.target_type
+            ]
             target_report.pop("severity_counts", None)
             target_report.pop("raw_results", None)
 
@@ -133,14 +164,18 @@ class ScanResultProcessor:
             ASH_LOGGER.verbose(
                 f"{scanner_name}: Processing as additional report (type: {type(results.raw_results)})"
             )
-            aggregated_results.additional_reports[scanner_name][results.target_type]["raw_results"] = (
-                results.raw_results
-            )
-            aggregated_results.additional_reports[scanner_name][results.target_type].pop("severity_counts", None)
+            aggregated_results.additional_reports[scanner_name][results.target_type][
+                "raw_results"
+            ] = results.raw_results
+            aggregated_results.additional_reports[scanner_name][
+                results.target_type
+            ].pop("severity_counts", None)
 
         ash_target_result_path.write_text(
             json.dumps(
-                aggregated_results.additional_reports[scanner_name][results.target_type],
+                aggregated_results.additional_reports[scanner_name][
+                    results.target_type
+                ],
                 default=str,
             )
         )
@@ -165,17 +200,23 @@ class ScanResultProcessor:
             ASH_LOGGER.warning(f"validate_completion encountered an error: {e}")
             ASH_LOGGER.debug(traceback.format_exc())
 
-    def validate_result_completeness(self, aggregated_results: AshAggregatedResults) -> None:
+    def validate_result_completeness(
+        self, aggregated_results: AshAggregatedResults
+    ) -> None:
         """Ensure all originally registered scanners appear in final results."""
         try:
-            checkpoint = self.validation_manager.ensure_complete_results(aggregated_results)
+            checkpoint = self.validation_manager.ensure_complete_results(
+                aggregated_results
+            )
             if checkpoint and checkpoint.has_issues():
                 for scanner_name in checkpoint.get_missing_scanners():
                     ASH_LOGGER.warning(
                         f"Scanner {scanner_name} missing from final results"
                     )
         except Exception as e:
-            ASH_LOGGER.warning(f"validate_result_completeness encountered an error: {e}")
+            ASH_LOGGER.warning(
+                f"validate_result_completeness encountered an error: {e}"
+            )
             ASH_LOGGER.debug(traceback.format_exc())
 
     def validate_metrics(self, aggregated_results: AshAggregatedResults) -> None:

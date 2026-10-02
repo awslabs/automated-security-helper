@@ -24,10 +24,7 @@ from typing import Any, Dict, List
 
 import pytest
 
-from automated_security_helper.core.exceptions import (
-    ASHConfigValidationError,
-    WorkspaceDefinitionError,
-)
+from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.models.workspace import (
     ProjectRunStatus,
     SkippedProjectReason,
@@ -627,6 +624,54 @@ class TestScannerCompleteness:
         assert entry.incomplete_scanners == ["cfn-nag"]
         assert entry.scan_incomplete is True
 
+    @pytest.mark.parametrize(
+        "policy,incomplete,code",
+        [
+            ("fail", True, WorkspaceExitCode.INTERNAL_ERROR),
+            ("warn", False, WorkspaceExitCode.SUCCESS),
+        ],
+    )
+    def test_a_stale_content_database_follows_its_policy_not_the_flag(
+        self, tmp_path, policy, incomplete, code
+    ):
+        """`ash --source-dir P` exits 1 on a stale database; P inside a workspace must too.
+
+        With the completeness gate explicitly off, so only the staleness arm can move it.
+        """
+        from datetime import datetime, timedelta, timezone
+
+        from automated_security_helper.schemas.sarif_schema_model import SarifReport
+        from automated_security_helper.utils import content_db_staleness as staleness
+        from automated_security_helper.utils.content_databases import get
+
+        entry = get("grype-db")
+        now = datetime.now(timezone.utc)
+        record = staleness.ContentDbAgeRecord(
+            name=entry.name,
+            scanner=entry.scanner,
+            built=now - timedelta(days=10),
+            measured_by=entry.age_source,
+            max_age=entry.max_age,
+            measured_at=now,
+            policy=policy,
+            bound_source=entry.bound_source,
+            bound_is_tool_default=entry.bound_is_tool_default,
+            refresh=entry.refresh,
+        )
+        report = SarifReport.model_validate(_sarif(count=0))
+        staleness.attach_records(report, [record])
+
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        FakeOrchestrator.behaviour["api"] = {
+            "sarif": json.loads(
+                report.model_dump_json(by_alias=True, exclude_none=True)
+            ),
+            "scanner_results": {"grype": _scanner("PASSED")},
+        }
+        outcome = _run(tmp_path, plan, fail_on_incomplete_scanners=False)
+        assert outcome.payload.projects[0].scan_incomplete is incomplete
+        assert outcome.exit_code == code
+
     def test_an_error_scanner_stops_a_clean_project_reporting_success(self, tmp_path):
         """ERROR and MISSING are the same news: the scanner did not complete."""
         _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
@@ -725,6 +770,106 @@ class TestScannerCompleteness:
         outcome = _run(tmp_path, plan)
 
         assert outcome.payload.projects[0].incomplete_scanners == []
+        assert outcome.exit_code == WorkspaceExitCode.SUCCESS
+
+    def test_a_project_whose_every_scanner_was_skipped_does_not_report_success(
+        self, tmp_path
+    ):
+        """The set-level half of the same gate, which the per-entry pass cannot see.
+
+        SKIPPED has to be tolerated one entry at a time, because that is how an
+        exclusion and another shard's ownership are recorded. So a project whose
+        *every* entry is SKIPPED cleared the per-entry pass having measured nothing:
+        ``incomplete_scanners == []``, ``scan_incomplete == False``, COMPLETED, zero
+        actionable findings, workspace exit 0. ``ash --source-dir P`` on the same
+        project exits 1 through ``_compute_exit_code``'s own set-level check.
+
+        Reachable without sharding and without operator error beyond one misspelled
+        word: an allowlist that resolves to a scanner this platform declines leaves
+        every entry SKIPPED.
+        """
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        FakeOrchestrator.behaviour["api"] = {
+            "sarif": _sarif(count=0),
+            "scanner_results": {
+                "bandit": _scanner("SKIPPED", excluded=True),
+                "cfn-nag": _scanner("SKIPPED", excluded=True),
+            },
+        }
+        outcome = _run(tmp_path, plan)
+        entry = outcome.payload.projects[0]
+
+        # Control: nothing was found and no single entry is incomplete, so only the
+        # set-level question can move this verdict.
+        assert entry.actionable_finding_count == 0
+        assert entry.exceeds_threshold is False
+        assert entry.incomplete_scanners == []
+
+        assert entry.no_scanner_ran is True
+        assert entry.scan_incomplete is True
+        assert outcome.exit_code == WorkspaceExitCode.INTERNAL_ERROR
+
+    def test_one_scanner_that_ran_is_enough_to_keep_a_narrowed_project_passing(
+        self, tmp_path
+    ):
+        """The control for the case above, at the boundary that decides it.
+
+        ``ash scan --scanners bandit`` inside a workspace leaves every other entry
+        SKIPPED, and that is a scan which did what it was asked. Without this the
+        set-level gate could be stuck at always-fail -- which would fail every
+        narrowed workspace run -- and the test above would still pass.
+        """
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        FakeOrchestrator.behaviour["api"] = {
+            "sarif": _sarif(count=0),
+            "scanner_results": {
+                "bandit": _scanner("PASSED"),
+                "cfn-nag": _scanner("SKIPPED", excluded=True),
+            },
+        }
+        outcome = _run(tmp_path, plan)
+        entry = outcome.payload.projects[0]
+
+        assert entry.no_scanner_ran is False
+        assert entry.scan_incomplete is False
+        assert outcome.exit_code == WorkspaceExitCode.SUCCESS
+
+    def test_turning_the_gate_off_keeps_the_all_skipped_disclosure(self, tmp_path):
+        """Same shape as ``incomplete_scanners``: the fact stays, the verdict moves.
+
+        ``no_scanner_ran`` is recorded unconditionally so an operator who turned the
+        gate off can still see that the project measured nothing; only
+        ``scan_incomplete`` follows the flag.
+        """
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        FakeOrchestrator.behaviour["api"] = {
+            "sarif": _sarif(count=0),
+            "scanner_results": {"bandit": _scanner("SKIPPED", excluded=True)},
+        }
+        outcome = _run(tmp_path, plan, fail_on_incomplete_scanners=False)
+        entry = outcome.payload.projects[0]
+
+        assert entry.no_scanner_ran is True
+        assert entry.scan_incomplete is False
+        assert outcome.exit_code == WorkspaceExitCode.SUCCESS
+
+    def test_a_project_that_recorded_no_scanners_at_all_is_not_flagged(self, tmp_path):
+        """An empty scanner set is a different claim, and ``--phases convert`` makes one.
+
+        ``no_scanner_ran`` answers False for an empty set deliberately, so that a
+        phase-limited run does not become an error. Pinned here because a mirrored
+        implementation that tested emptiness would fail every convert-only project.
+        """
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        FakeOrchestrator.behaviour["api"] = {
+            "sarif": _sarif(count=0),
+            "scanner_results": {},
+        }
+        outcome = _run(tmp_path, plan)
+        entry = outcome.payload.projects[0]
+
+        assert entry.no_scanner_ran is False
+        assert entry.scan_incomplete is False
         assert outcome.exit_code == WorkspaceExitCode.SUCCESS
 
     def test_the_incomplete_project_is_named_in_the_written_file(self, tmp_path):
@@ -1161,7 +1306,7 @@ class TestChangedFilesGate:
             pytest.skip("git is not available on PATH")
         root, plan = _make_workspace(tmp_path, ("unchanged", "MEDIUM"))
         _init_repo(root / "unchanged", commit_extra=False)
-        outcome = _run(tmp_path, plan, precommit=True, base_ref="base-ref")
+        outcome = _run(tmp_path, plan, changed_files_only=True, base_ref="base-ref")
         entry = outcome.payload.projects[0]
         assert entry.status is ProjectRunStatus.SKIPPED
         assert entry.skip_reason is SkippedProjectReason.NO_CHANGES
@@ -1174,7 +1319,7 @@ class TestChangedFilesGate:
             pytest.skip("git is not available on PATH")
         root, plan = _make_workspace(tmp_path, ("unchanged", "MEDIUM"))
         _init_repo(root / "unchanged", commit_extra=False)
-        outcome = _run(tmp_path, plan, precommit=True, base_ref="base-ref")
+        outcome = _run(tmp_path, plan, changed_files_only=True, base_ref="base-ref")
         payload = outcome.payload.skipped_projects
         assert [(e.project, e.reason.value) for e in payload] == [
             ("unchanged", "no-changes")
@@ -1190,28 +1335,28 @@ class TestChangedFilesGate:
         )
         _init_repo(root / "unchanged", commit_extra=False)
         _init_repo(root / "changed", commit_extra=True)
-        outcome = _run(tmp_path, plan, precommit=True, base_ref="base-ref")
+        outcome = _run(tmp_path, plan, changed_files_only=True, base_ref="base-ref")
         assert outcome.exit_code == WorkspaceExitCode.SUCCESS
 
     def test_a_workspace_where_every_project_is_unchanged_exits_zero(
         self, tmp_path, git_available
     ):
-        """The precommit no-op, end to end.
+        """The diff-scoped no-op, end to end.
 
         In a monorepo the common case is an edit outside every project directory
         -- a README at the workspace root -- so every project skips no-changes.
-        This used to exit 4, failing a clean hook run on a workspace where
-        nothing needed scanning. Single-project mode exits 0 for exactly this.
+        This used to exit 4, failing a clean run on a workspace where nothing
+        needed scanning. Single-project mode exits 0 for exactly this.
         """
         if not git_available:
             pytest.skip("git is not available on PATH")
         root, plan = _make_workspace(tmp_path, ("api", "MEDIUM"), ("web", "MEDIUM"))
         for key in ("api", "web"):
             _init_repo(root / key, commit_extra=False)
-        # The edit that triggered the hook lands outside every project.
+        # The edit that prompted the scan lands outside every project.
         (root / "README.md").write_text("docs only\n", encoding="utf-8")
 
-        outcome = _run(tmp_path, plan, precommit=True, base_ref="base-ref")
+        outcome = _run(tmp_path, plan, changed_files_only=True, base_ref="base-ref")
 
         assert outcome.exit_code == WorkspaceExitCode.SUCCESS
         assert all(
@@ -1228,7 +1373,7 @@ class TestChangedFilesGate:
             pytest.skip("git is not available on PATH")
         root, plan = _make_workspace(tmp_path, ("changed", "MEDIUM"))
         _init_repo(root / "changed", commit_extra=True)
-        outcome = _run(tmp_path, plan, precommit=True, base_ref="base-ref")
+        outcome = _run(tmp_path, plan, changed_files_only=True, base_ref="base-ref")
         assert outcome.payload.projects[0].status is ProjectRunStatus.COMPLETED
         assert [o.key for o in FakeOrchestrator.built] == ["changed"]
 
@@ -1243,31 +1388,51 @@ class TestChangedFilesGate:
         )
         _init_repo(root / "changed", commit_extra=True)
         _init_repo(root / "still", commit_extra=False)
-        outcome = _run(tmp_path, plan, precommit=True, base_ref="base-ref")
+        outcome = _run(tmp_path, plan, changed_files_only=True, base_ref="base-ref")
         statuses = {p.project: p.status for p in outcome.payload.projects}
         assert statuses["changed"] is ProjectRunStatus.COMPLETED
         assert statuses["still"] is ProjectRunStatus.SKIPPED
 
-    def test_a_non_repository_under_precommit_is_a_workspace_error(self, tmp_path):
-        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
-        with pytest.raises(WorkspaceDefinitionError) as excinfo:
-            _run(tmp_path, plan, precommit=True)
-        assert "api" in str(excinfo.value)
-
-    def test_allow_missing_projects_downgrades_a_non_repository_to_a_full_scan(
-        self, tmp_path
+    def test_precommit_alone_does_not_scope_the_scan_to_a_diff(
+        self, tmp_path, git_available
     ):
+        """``--mode precommit`` selects fast scanners; it does not select files.
+
+        Single-project mode reads ``--changed-files-only`` alone for the diff
+        gate, so arming it from the mode here meant the same invocation scanned
+        a diff in one mode and the whole tree in the other. It was also diffing
+        the wrong thing: ``<base_ref>...HEAD`` cannot see the staged content a
+        pre-commit hook is called about, so an unchanged-since-base project was
+        skipped however much was staged in it.
+        """
+        if not git_available:
+            pytest.skip("git is not available on PATH")
+        root, plan = _make_workspace(tmp_path, ("unchanged", "MEDIUM"))
+        _init_repo(root / "unchanged", commit_extra=False)
+        outcome = _run(tmp_path, plan, precommit=True, base_ref="base-ref")
+        assert outcome.payload.projects[0].status is ProjectRunStatus.COMPLETED
+        assert [o.key for o in FakeOrchestrator.built] == ["unchanged"]
+
+    def test_a_non_repository_under_precommit_is_not_an_error(self, tmp_path):
+        """Inverted with the gate change above.
+
+        This refusal existed because precommit armed the diff gate and a diff
+        needs a repository. Precommit no longer scopes by diff, so a project that
+        is not a repository is no longer a contradiction -- and refusing here
+        would reject a whole workspace over a mode flag that now only picks
+        scanners.
+        """
         _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
-        outcome = _run(tmp_path, plan, precommit=True, allow_missing_projects=True)
+        outcome = _run(tmp_path, plan, precommit=True)
         assert outcome.payload.projects[0].status is ProjectRunStatus.COMPLETED
 
-    def test_the_gate_is_off_without_precommit_or_changed_files_only(self, tmp_path):
+    def test_the_gate_is_off_without_changed_files_only(self, tmp_path):
         """A plain workspace scan must not care whether a project is a repository."""
         _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
         outcome = _run(tmp_path, plan)
         assert outcome.payload.projects[0].status is ProjectRunStatus.COMPLETED
 
-    def test_changed_files_only_applies_the_same_gate(self, tmp_path, git_available):
+    def test_changed_files_only_applies_the_gate(self, tmp_path, git_available):
         if not git_available:
             pytest.skip("git is not available on PATH")
         root, plan = _make_workspace(tmp_path, ("unchanged", "MEDIUM"))
@@ -1279,6 +1444,22 @@ class TestChangedFilesGate:
         """--changed-files-only already documents a full-scan fallback; keep it."""
         _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
         outcome = _run(tmp_path, plan, changed_files_only=True)
+        assert outcome.payload.projects[0].status is ProjectRunStatus.COMPLETED
+
+    def test_allow_missing_projects_does_not_change_the_non_repository_fallback(
+        self, tmp_path
+    ):
+        """Carried over from when the fallback was conditional on this flag.
+
+        The flag used to be what separated a refused workspace from a full scan,
+        because the refusal only existed for precommit. With the refusal gone the
+        downgrade is unconditional, and this pins that the flag neither restores a
+        refusal nor changes the outcome.
+        """
+        _, plan = _make_workspace(tmp_path, ("api", "MEDIUM"))
+        outcome = _run(
+            tmp_path, plan, changed_files_only=True, allow_missing_projects=True
+        )
         assert outcome.payload.projects[0].status is ProjectRunStatus.COMPLETED
 
 

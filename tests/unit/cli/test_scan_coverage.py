@@ -7,7 +7,11 @@ import pytest
 from typer.testing import CliRunner
 
 from automated_security_helper.cli.scan import run_ash_scan_cli_command
-from automated_security_helper.core.enums import RunMode, ExecutionStrategy, ExecutionPhase
+from automated_security_helper.core.enums import (
+    RunMode,
+    ExecutionStrategy,
+    ExecutionPhase,
+)
 
 
 @pytest.fixture

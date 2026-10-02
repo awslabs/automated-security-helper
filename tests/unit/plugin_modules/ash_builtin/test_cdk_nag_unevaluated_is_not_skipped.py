@@ -186,6 +186,33 @@ def test_only_the_not_a_template_case_still_returns_none():
     cdk-nag and NodeJS installed. Counting them is what catches a future site being added back:
     the assertions below name the two that were converted, but a third one added later would
     slip past a test that only checked those two.
+
+    STILL ONE, AND THE PARSE-FAILURE SKIP DELIBERATELY DID NOT BECOME A SECOND
+    -------------------------------------------------------------------------
+    A file that does not parse as YAML or JSON is also not a CloudFormation template, and an
+    earlier revision of this work added a second ``return None`` here for it. That placement was
+    wrong and was moved rather than kept, which is worth recording because the wrong version
+    looks more natural.
+
+    The classification needs two things the wrapper cannot do: leave ``targets_attempted``
+    un-incremented, and record the parse failure somewhere a consumer can see. Both live on the
+    scanner -- the counters and ``self.errors``, which reaches SARIF ``exitCodeDescription``. A
+    ``return None`` from here reaches the scanner's skip branch, which un-counts the attempt AND
+    says nothing, so the fact vanished entirely;
+    ``tests/integration/scanners/test_cdk_nag_real_pack.py``'s ``TestTargetThatCouldNotBeParsed``
+    caught exactly that, and its own words are why it matters: "'not a finding' on its own would
+    also be satisfied by the failure vanishing entirely".
+
+    So the parse-failure arm now sits in ``CdkNagScanner.scan()``, immediately above the broad
+    ``except Exception`` it carves out of, where it can un-count and notify in one place --
+    ``test_a_file_that_does_not_parse_is_an_uncounted_but_recorded_skip`` below. The wrapper's
+    three-state contract is untouched, and ``get_model_from_template``'s docstring claim that
+    "the two callers already classify that case for themselves" is true again for both callers.
+
+    The invariant this test protects is unchanged: a bare None means "this file was never a
+    CloudFormation template", because that is the one branch the scanner is allowed to un-count
+    without saying anything. A template that WAS evaluated against nothing still has to return
+    a response carrying ``failure``.
     """
     source = inspect.getsource(wrapper_module.run_cdk_nag_against_cfn_template)
     bare_returns = [
@@ -194,8 +221,122 @@ def test_only_the_not_a_template_case_still_returns_none():
     assert len(bare_returns) == 1, (
         f"expected exactly one bare `return None` -- the not-a-CloudFormation-template skip -- "
         f"found {len(bare_returns)}. A `return None` for a template that went unevaluated "
-        f"reaches the scanner's skip branch and un-counts the attempt."
+        f"reaches the scanner's skip branch, which un-counts the attempt and records nothing."
     )
+    scanner_source = inspect.getsource(cdk_nag_scanner.CdkNagScanner.scan)
+    assert "except (YAMLError, UnicodeDecodeError)" in scanner_source, (
+        "the parse-failure skip must stay narrow to parse failures, and must stay in the "
+        "scanner where it can un-count the target and record the reason. Widening it -- to "
+        "OSError, or to a bare `except Exception` -- would swallow an unreadable target and a "
+        "genuine scanner defect into the un-counted skip branch, which is the silent pass this "
+        "module exists to prevent."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Site 1b: the file does not parse at all -- the same skip, reached earlier
+# ---------------------------------------------------------------------------
+
+# Two shapes measured in ASH's own repository, both of which counted as unevaluated
+# targets before the parse-failure arm existed. Reduced to the smallest input that
+# reproduces each, so a reader can see why no parser loads it.
+JSONC_DOCUMENT = """{
+  // source, `npm run build` leaves lib/*.js
+  "compilerOptions": { "strict": true }
+}
+"""
+
+YAML_WITH_APPLICATION_TAGS = """markdown_extensions:
+  - pymdownx.emoji:
+      emoji_index: !!python/name:pymdownx.emoji.twemoji
+"""
+
+
+@pytest.mark.parametrize(
+    "filename,body",
+    [
+        ("tsconfig.json", JSONC_DOCUMENT),
+        ("mkdocs.yml", YAML_WITH_APPLICATION_TAGS),
+    ],
+    ids=["json-with-comments", "yaml-with-application-tags"],
+)
+def test_a_file_that_does_not_parse_is_an_uncounted_but_recorded_skip(
+    scanner, cdk_available, filename, body
+):
+    """A document no parser can load is not a target, and is not silent either.
+
+    BOTH HALVES, BECAUSE THE FIRST ATTEMPT AT THIS SHIPPED ONLY ONE
+    --------------------------------------------------------------
+    Uncounting alone was the first fix and it regressed
+    ``tests/integration/scanners/test_cdk_nag_real_pack.py``'s ``TestTargetThatCouldNotBeParsed``:
+    the parse failure went to a DEBUG log and disappeared from ``exitCodeDescription``, which
+    that class forbids in its own words -- "'not a finding' on its own would also be satisfied
+    by the failure vanishing entirely". A parse failure is not confidently a non-template the
+    way a document that parses with no ``Resources`` key is; a truncated real template looks
+    identical from here, so it has to stay visible.
+
+    Driven through the real ``scan()`` rather than the wrapper, because the behaviour under test
+    IS the scanner's accounting: the counter it must not increment and the channel it must write
+    to. The wrapper is left raising, which is what ``get_model_from_template`` documents.
+
+    Both inputs are reductions of real files in this repository. cdk-nag's scan set is every
+    ``*.json``, ``*.yaml`` and ``*.yml`` file in the tree, so a repository holding either shape
+    -- and most repositories hold one -- reported incomplete coverage for cdk-nag while
+    containing no CloudFormation that went unscanned.
+    """
+    (scanner.context.work_dir / filename).write_text(body, encoding="utf-8")
+
+    report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
+
+    assert (scanner.targets_attempted, scanner.targets_failed) == (0, 0), (
+        f"{filename} does not parse as YAML or JSON, so it was never a candidate "
+        f"CloudFormation template and must not count as a target whose coverage was lost. "
+        f"Got attempted={scanner.targets_attempted} failed={scanner.targets_failed}"
+    )
+    status = _status_for(scanner)
+    assert _gate_accepts(status), (
+        f"a repository whose only JSON/YAML does not parse holds no CloudFormation, so it must "
+        f"still exit 0; got {status}"
+    )
+    # The other half. Uncounting is only safe because the reason survives somewhere a consumer
+    # reads, and exitCodeDescription is where this scanner records per-target reasons.
+    description = report.runs[0].invocations[0].exitCodeDescription or ""
+    assert filename in description, (
+        f"{filename} could not be parsed but is absent from exitCodeDescription, so the fact "
+        f"is recorded nowhere a consumer can see it. An uncounted target must still be an "
+        f"announced one -- a truncated real template produces this same parse failure."
+    )
+    assert "not parseable as YAML or JSON" in description
+
+
+def test_a_resources_carrying_document_that_cannot_be_modeled_is_still_a_failure(
+    tmp_path, no_cdk_kernel
+):
+    """The narrowness control for the test above, and it must stay red-able.
+
+    The parse-failure arm is only defensible because it is narrow: a document that DOES carry a
+    ``Resources`` mapping is CloudFormation, so failing on it is a coverage hole and has to count
+    a failed target. ``Type`` here violates the charset ``CloudFormationResource`` declares, so
+    the model rejects a document it agrees is a template.
+
+    Without this control the test above could be satisfied by widening the arm to a bare
+    ``except Exception``, which would silence exactly the incompleteness #654 exists to surface.
+    """
+    target = tmp_path / "unmodelable.yaml"
+    target.write_text('Resources:\n  Bad:\n    Type: "has a space"\n', encoding="utf-8")
+
+    response = wrapper_module.run_cdk_nag_against_cfn_template(
+        template_path=target,
+        nag_packs=["AwsSolutionsChecks"],
+        outdir=tmp_path / "out",
+    )
+
+    assert response is not None, (
+        "a document carrying a Resources mapping is CloudFormation; failing to model it must "
+        "not reach the un-counted skip branch"
+    )
+    assert response.failure is not None
+    assert "Resources mapping" in response.failure
 
 
 # ---------------------------------------------------------------------------

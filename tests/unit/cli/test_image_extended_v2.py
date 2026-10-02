@@ -2,14 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import os
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from automated_security_helper.cli.image import build_ash_image_cli_command
-from automated_security_helper.core.enums import AshLogLevel, BuildTarget, RunMode
+from automated_security_helper.core.enums import AshLogLevel, BuildTarget
 from automated_security_helper.interactions.run_ash_container import (
     _assemble_run_command,
     _get_oci_wrapper_prefix,
@@ -31,35 +29,35 @@ def _make_ctx(resilient_parsing=False, invoked_subcommand=None):
 
 
 def _base_assemble_kwargs(**overrides):
-    base = dict(
-        oci_command_prefix=[],
-        resolved_oci_runner="/usr/bin/docker",
-        image_name="automated-security-helper:non-root",
-        source_dir=Path("/src/code"),
-        output_dir=Path("/src/code/ash_output"),
-        offline=False,
-        debug=False,
-        color=True,
-        quiet=False,
-        progress=True,
-        verbose=False,
-        simple=False,
-        python_based_plugins_only=False,
-        cleanup=False,
-        inspect=False,
-        fail_on_findings=None,
-        phases=[],
-        scanners=[],
-        exclude_scanners=[],
-        output_formats=[],
-        config=None,
-        config_overrides=[],
-        existing_results=None,
-        ash_plugin_modules=[],
-        strategy=None,
-        ctx=None,
-        container_network="bridge",
-    )
+    base = {
+        "oci_command_prefix": [],
+        "resolved_oci_runner": "/usr/bin/docker",
+        "image_name": "automated-security-helper:non-root",
+        "source_dir": Path("/src/code"),
+        "output_dir": Path("/src/code/ash_output"),
+        "offline": False,
+        "debug": False,
+        "color": True,
+        "quiet": False,
+        "progress": True,
+        "verbose": False,
+        "simple": False,
+        "python_based_plugins_only": False,
+        "cleanup": False,
+        "inspect": False,
+        "fail_on_findings": None,
+        "phases": [],
+        "scanners": [],
+        "exclude_scanners": [],
+        "output_formats": [],
+        "config": None,
+        "config_overrides": [],
+        "existing_results": None,
+        "ash_plugin_modules": [],
+        "strategy": None,
+        "ctx": None,
+        "container_network": "bridge",
+    }
     base.update(overrides)
     return base
 
@@ -71,29 +69,29 @@ def _base_assemble_kwargs(**overrides):
 
 def _invoke_build_image_cli(mock_run_ash_scan, **overrides):
     """Helper to invoke build_ash_image_cli_command with sensible defaults."""
-    defaults = dict(
-        ctx=_make_ctx(),
-        no_build=False,
-        no_run=False,
-        force=False,
-        oci_runner=None,
-        build_target=BuildTarget.NON_ROOT,
-        offline_semgrep_rulesets="p/ci",
-        container_uid=None,
-        container_gid=None,
-        ash_revision_to_install=None,
-        custom_containerfile=None,
-        custom_build_arg=None,
-        config_overrides=None,
-        offline=False,
-        quiet=False,
-        log_level=AshLogLevel.INFO,
-        config=None,
-        verbose=False,
-        debug=False,
-        color=True,
-        container_network="bridge",
-    )
+    defaults = {
+        "ctx": _make_ctx(),
+        "no_build": False,
+        "no_run": False,
+        "force": False,
+        "oci_runner": None,
+        "build_target": BuildTarget.NON_ROOT,
+        "offline_semgrep_rulesets": "p/ci",
+        "container_uid": None,
+        "container_gid": None,
+        "ash_revision_to_install": None,
+        "custom_containerfile": None,
+        "custom_build_arg": None,
+        "config_overrides": None,
+        "offline": False,
+        "quiet": False,
+        "log_level": AshLogLevel.INFO,
+        "config": None,
+        "verbose": False,
+        "debug": False,
+        "color": True,
+        "container_network": "bridge",
+    }
     defaults.update(overrides)
     build_ash_image_cli_command(**defaults)
     return mock_run_ash_scan.call_args[1]
@@ -308,9 +306,12 @@ def test_columns_lines_passthrough_when_tty():
     import shutil as _shutil
 
     fake_size = _shutil.os.terminal_size((160, 50))
-    with patch("sys.stdout") as mock_stdout, patch(
-        "automated_security_helper.interactions.run_ash_container.shutil.get_terminal_size",
-        return_value=fake_size,
+    with (
+        patch("sys.stdout") as mock_stdout,
+        patch(
+            "automated_security_helper.interactions.run_ash_container.shutil.get_terminal_size",
+            return_value=fake_size,
+        ),
     ):
         mock_stdout.isatty.return_value = True
         cmd = _assemble_run_command(**_base_assemble_kwargs(color=True))

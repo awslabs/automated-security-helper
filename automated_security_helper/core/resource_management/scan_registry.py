@@ -23,8 +23,11 @@ from automated_security_helper.core.resource_management.exceptions import (
     MCPResourceError,
 )
 from automated_security_helper.core.resource_management.scan_tracking import (
-    check_scan_completion,
+    assess_coverage,
+    coverage_has_gap,
     create_scan_progress_from_files,
+    load_aggregated_results_model,
+    summarize_scanner_statuses,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -58,13 +61,43 @@ def _canonical_directory(directory_path: str) -> Path:
 
 
 class MCScanStatus(Enum):
-    """Status of a scan."""
+    """Status of a scan.
+
+    ``INCOMPLETE`` is terminal, like ``COMPLETED``: the run finished and its results
+    are readable, but coverage has a gap. One or more selected scanners did not
+    complete (MISSING or ERROR, or lost some of their targets), no scanner reached a
+    verdict, a converter did not run, a rule could not be evaluated, or a content
+    database was past its declared age bound. These are
+    the conditions ``_compute_exit_code`` exits 1 for when results exist. It is kept
+    apart from ``FAILED`` because exit 1 also means a crash, and a client that is
+    shown ``failed`` for both cannot tell "read these partial results" from "there
+    is nothing to read".
+    """
 
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
+    INCOMPLETE = "incomplete"
     FAILED = "failed"
     CANCELLED = "cancelled"
+
+
+#: Terminal statuses whose run finished and left results to read. ``is_complete``
+#: in a progress response is true for these: it answers "is the run over and are
+#: there results", which is what every documented poll loop waits on.
+#: ``coverage_complete`` is the separate answer to "did it cover everything".
+FINISHED_WITH_RESULTS = frozenset({MCScanStatus.COMPLETED, MCScanStatus.INCOMPLETE})
+
+
+def _empty_coverage() -> Dict[str, Any]:
+    """The coverage payload of a scan with no gap to report."""
+    return {
+        "incomplete_scanners": [],
+        "no_scanner_ran": False,
+        "incomplete_converters": [],
+        "unevaluated_rules": [],
+        "stale_content_databases": [],
+    }
 
 
 class ScanRegistryEntry:
@@ -99,6 +132,9 @@ class ScanRegistryEntry:
         self.process_id: Optional[int] = None
         self.error_message: Optional[str] = None
         self.warnings: List[str] = []
+        # What the runner recorded about coverage when it closed the entry: the
+        # ScanIncompleteness.to_payload() shape. None until a runner records one.
+        self.coverage: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -119,6 +155,7 @@ class ScanRegistryEntry:
             "process_id": self.process_id,
             "error_message": self.error_message,
             "warnings": self.warnings,
+            "coverage": self.coverage,
         }
 
     def mark_running(self, process_id: Optional[int] = None) -> None:
@@ -134,6 +171,11 @@ class ScanRegistryEntry:
     def mark_completed(self) -> None:
         """Mark the scan as completed."""
         self.status = MCScanStatus.COMPLETED
+        self.end_time = datetime.now()
+
+    def mark_incomplete(self) -> None:
+        """Mark the scan as finished with partial coverage."""
+        self.status = MCScanStatus.INCOMPLETE
         self.end_time = datetime.now()
 
     def mark_failed(self, error_message: str) -> None:
@@ -372,21 +414,77 @@ class ScanRegistry:
         Returns:
             True if the scan was updated, False if not found
         """
+        if status == MCScanStatus.INCOMPLETE:
+            # finish_scan is the only way in, because it carries the coverage gap.
+            raise ValueError(
+                f"Scan {scan_id} cannot be marked incomplete without its coverage "
+                "gap; close it with finish_scan(..., coverage=...)"
+            )
         with self._registry_lock:
             entry = self._registry.get(scan_id)
             if entry is None:
                 return False
+            self._apply_status(scan_id, entry, status, error_message)
+            return True
 
-            if status == MCScanStatus.RUNNING:
-                entry.mark_running()
-            elif status == MCScanStatus.COMPLETED:
-                entry.mark_completed()
-            elif status == MCScanStatus.FAILED:
-                entry.mark_failed(error_message or "Unknown error")
-            elif status == MCScanStatus.CANCELLED:
-                entry.mark_cancelled()
+    def _apply_status(
+        self,
+        scan_id: str,
+        entry: ScanRegistryEntry,
+        status: MCScanStatus,
+        error_message: Optional[str],
+    ) -> None:
+        """Move ``entry`` to ``status``. The caller holds ``_registry_lock``."""
+        if status == MCScanStatus.RUNNING:
+            entry.mark_running()
+        elif status == MCScanStatus.COMPLETED:
+            entry.mark_completed()
+        elif status == MCScanStatus.INCOMPLETE:
+            entry.mark_incomplete()
+        elif status == MCScanStatus.FAILED:
+            entry.mark_failed(error_message or "Unknown error")
+        elif status == MCScanStatus.CANCELLED:
+            entry.mark_cancelled()
 
-            self._logger.info(f"Updated scan {scan_id} status to {status.value}")
+        self._logger.info(f"Updated scan {scan_id} status to {status.value}")
+
+    def finish_scan(
+        self,
+        scan_id: str,
+        status: MCScanStatus,
+        error_message: Optional[str] = None,
+        coverage: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """Close a scan as its runner, unless something already closed it.
+
+        ``coverage`` is what the runner knows about the scan's coverage, in the
+        ``ScanIncompleteness.to_payload()`` shape. ``INCOMPLETE`` without it is
+        refused with ``ValueError``: the status exists to point a client at the
+        gap, so a status with no gap attached would tell them to look and give
+        them nothing to look at.
+
+        For the code that ran the scan, when the run returns. ``update_scan_status``
+        overwrites whatever is there, so a runner finishing after ``cancel_scan``
+        turned a cancelled scan back into a completed one -- the cancel cannot stop
+        an in-process scan, only record that it was asked to. Checked and applied
+        under the registry lock, so a cancel landing between the two is not lost.
+
+        Returns:
+            True if the entry was closed, False if it was not found or had already
+            left the active states.
+        """
+        if status == MCScanStatus.INCOMPLETE and not coverage:
+            raise ValueError(
+                f"Scan {scan_id} cannot be closed as incomplete without the coverage "
+                "gap that makes it so"
+            )
+        with self._registry_lock:
+            entry = self._registry.get(scan_id)
+            if entry is None or not entry.is_active():
+                return False
+            if coverage is not None:
+                entry.coverage = coverage
+            self._apply_status(scan_id, entry, status, error_message)
             return True
 
     def list_scans(
@@ -614,27 +712,114 @@ class ScanRegistry:
                 raise error
 
             try:
-                # Check if scan has completed based on file existence
-                is_complete = check_scan_completion(output_dir)
-                if is_complete and entry.status != MCScanStatus.COMPLETED:
-                    # Update scan status to completed
-                    entry.mark_completed()
-
-                # Create scan progress object from files
+                # Create scan progress object from files, then reconcile it with
+                # the registry entry, whose status is the response's status.
+                #
+                # Who decides depends on whether anything owns the scan's
+                # lifecycle. A RUNNING entry has a runner that will close it, so the
+                # runner decides and the file is only partial results: the SCAN
+                # phase writes a parseable results file before the REPORT phase has
+                # run, and a previous scan's file can still be on disk. A FAILED or
+                # CANCELLED entry was closed by its runner, and a parseable file
+                # means results exist, not that the scan succeeded. Only a PENDING
+                # entry, which no runner has claimed, takes its status from the
+                # file. Marking the entry completed because the file merely existed
+                # is how a file that did not parse came back as a completed scan
+                # with no scanners.
                 scan_progress = create_scan_progress_from_files(scan_id, output_dir)
+                results_path = output_dir / "ash_aggregated_results.json"
 
-                # If scan is marked as completed in the registry, ensure it's also completed in the progress object
-                if (
-                    entry.status == MCScanStatus.COMPLETED
-                    and scan_progress.status != "completed"
+                if entry.status == MCScanStatus.RUNNING:
+                    scan_progress.mark_in_progress()
+                elif entry.status in (
+                    MCScanStatus.FAILED,
+                    MCScanStatus.CANCELLED,
+                    MCScanStatus.INCOMPLETE,
                 ):
+                    # The runner's terminal status and reason stand. Whatever
+                    # scanners the file holds stay readable as partial results.
+                    pass
+                elif scan_progress.status == "completed":
+                    if entry.status != MCScanStatus.COMPLETED:
+                        # A PENDING entry, which no runner owns, so the file
+                        # decides -- and it decides incomplete versus completed by
+                        # the rule the runner's exit code uses, not by the file
+                        # merely parsing.
+                        model = load_aggregated_results_model(output_dir)
+                        if model is None:
+                            entry.mark_completed()
+                        else:
+                            gate_fires, entry.coverage = assess_coverage(model)
+                            if gate_fires:
+                                entry.mark_incomplete()
+                            else:
+                                entry.mark_completed()
+                elif scan_progress.status == "failed":
+                    # The results file exists and cannot be read as results.
+                    entry.mark_failed(
+                        scan_progress.error_message
+                        or f"Aggregated results file {results_path} could not be read"
+                    )
+                elif scan_progress.results_pending:
+                    # A JSON object with neither scanner_results nor sarif is not a
+                    # results document. Before anything has closed the entry that
+                    # is "not finished"; once it was closed as completed, the final
+                    # document never arrived.
+                    if entry.status == MCScanStatus.COMPLETED:
+                        scan_progress.mark_failed()
+                        scan_progress.error_message = (
+                            f"Aggregated results file {results_path} has neither "
+                            "scanner_results nor sarif, and the scan has ended, so it "
+                            "never wrote its final results"
+                        )
+                        entry.mark_failed(scan_progress.error_message)
+                elif entry.status == MCScanStatus.COMPLETED:
+                    # No results file, and whoever ran the scan closed the entry as
+                    # completed. The entry owns the lifecycle here: a workspace
+                    # closes a project's entry this way when the run returned and
+                    # nothing says the project did not.
                     scan_progress.mark_completed()
 
                 # Convert scan progress to dictionary
                 progress_dict = scan_progress.to_dict()
 
+                # Coverage of a finished scan. The runner records it when it closes
+                # the entry; an entry closed without one (a workspace project the
+                # payload did not mention, a caller using update_scan_status) is
+                # assessed from the results file. None while the scan runs, and for
+                # a failed or cancelled one, because whether that covered everything
+                # is not a question with an answer.
+                coverage = entry.coverage
+                if coverage is None and entry.status in FINISHED_WITH_RESULTS:
+                    model = load_aggregated_results_model(output_dir)
+                    if model is not None:
+                        _, coverage = assess_coverage(model)
+                coverage_complete: Optional[bool] = None
+                if entry.status in FINISHED_WITH_RESULTS and coverage is not None:
+                    coverage_complete = not coverage_has_gap(coverage)
+
+                # Which scanners did not run, and why. The `scanners` map below
+                # now carries a per-scanner status, but only as one of
+                # MCScannerStatus' five values: it cannot separate a tool that is
+                # not installed from one the configuration excluded, and both
+                # arrive there as "skipped". This list carries that reason, which
+                # is the difference between "install it" and "you turned it off".
+                #
+                # Computed here even though cli/mcp_server.py recomputes it from
+                # the same file, because that is not the only consumer:
+                # mcp_tools.mcp_get_scan_progress and
+                # scan_management.check_scan_progress both hand this payload
+                # straight back to their callers.
+                status_summary = summarize_scanner_statuses(output_dir)
+
                 # Combine registry entry information with progress info
                 result = {
+                    # Set explicitly on the path where the call worked. Only
+                    # create_error_response had ever set this key, always to
+                    # False, so a consumer testing `not
+                    # progress_info.get("success")` got the same answer on both
+                    # branches and its guard returned unconditionally.
+                    "success": True,
                     "scan_id": scan_id,
                     "directory_path": entry.directory_path,
                     "output_directory": str(output_dir),
@@ -645,13 +830,21 @@ class ScanRegistry:
                     "config_path": entry.config_path,
                     "warnings": entry.warnings,
                     "error_message": entry.error_message,
-                    "is_complete": entry.status == MCScanStatus.COMPLETED
+                    # "The run is over and its results are readable." True for
+                    # incomplete as well as completed: every documented poll loop
+                    # stops on this, and a loop that kept polling a finished
+                    # incomplete scan would never end. coverage_complete is where
+                    # the gap is reported.
+                    "is_complete": entry.status in FINISHED_WITH_RESULTS
                     or scan_progress.is_complete,
+                    "coverage_complete": coverage_complete,
+                    **(coverage if coverage is not None else _empty_coverage()),
                     "completed_scanners": scan_progress.completed_scanners,
                     "total_scanners": scan_progress.total_scanners,
                     "total_findings": scan_progress.total_findings,
                     "severity_counts": scan_progress.severity_counts,
                     "scanners": progress_dict.get("scanners", {}),
+                    "skipped_scanners": status_summary["skipped_scanners"],
                 }
 
                 return result

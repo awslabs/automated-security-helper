@@ -28,6 +28,7 @@ from automated_security_helper.schemas.sarif_schema_model import (
 )
 from automated_security_helper.utils.cfn_template_model import (
     CloudFormationTemplateModel,
+    CloudFormationTemplateModelError,
     get_model_from_template,
 )
 from automated_security_helper.utils.get_shortest_name import get_shortest_name
@@ -45,13 +46,17 @@ class CdkNagWrapperResponse:
     ``failure`` set means no rule was evaluated -- so the empty ``results`` says nothing about
     the template's compliance.
 
-    Three states reach ``failure``, and they were not always three. The original one is a run
-    that produced no readable validation report. The other two used to return bare None and so
+    Four states reach ``failure``, and they were not always four. The original one is a run
+    that produced no readable validation report. Two more used to return bare None and so
     arrived at the scanner as the legitimate skip: cdk-nag failing to import, and no nag pack
-    being registered. Both mean a real template went unevaluated, which is the opposite of a
-    skip -- the scanner un-counted the attempt for each of them, and a scan where every
-    template hit one of the two ended at zero attempts and reported SKIPPED with exit code 0.
-    Only "this file is not a CloudFormation template" is a skip, so only it returns None.
+    being registered. The fourth is a template that carries a ``Resources`` mapping and that
+    ``get_model_from_template`` could not model, which used to be indistinguishable from a
+    file that is not CloudFormation at all because both answered None. Every one of them
+    means a real template went unevaluated, which is the opposite of a skip -- the scanner
+    un-counted the attempt for each, and a scan where every template hit one of them ended at
+    zero attempts and reported SKIPPED with exit code 0. Only "this file is not a
+    CloudFormation template", which now means "the document carries no ``Resources``
+    mapping", is a skip, so only it returns None.
 
     Before this field existed the caller could only see None-versus-response, and a report-less
     run arrived as an ordinary response holding an empty dict. The scanner counted the target
@@ -748,6 +753,7 @@ def run_cdk_nag_against_cfn_template(
                 )
             from aws_cdk import (
                 App,
+                DefaultStackSynthesizer,
                 Stack,
                 Validations,
             )
@@ -760,7 +766,7 @@ def run_cdk_nag_against_cfn_template(
                 def __init__(
                     self,
                     scope: Construct | None = None,
-                    id: str | None = None,
+                    construct_id: str | None = None,
                     template_path: Path | None = None,
                 ):
                     if template_path is None:
@@ -769,7 +775,47 @@ def run_cdk_nag_against_cfn_template(
                         raise FileNotFoundError(
                             f"Template file does not exist: {template_path}"
                         )
-                    super().__init__(scope, id)
+                    # WHY THE SYNTHESIZER IS OVERRIDDEN: A CDK-SYNTHESIZED TEMPLATE
+                    # COULD NOT BE SCANNED AT ALL
+                    # ------------------------------------------------------------
+                    # ``DefaultStackSynthesizer`` adds a ``BootstrapVersion`` parameter and
+                    # a ``CheckBootstrapVersion`` rule to every stack it synthesizes. A
+                    # template that was ITSELF produced by ``cdk synth`` already carries
+                    # both, so re-including one under ``CfnInclude`` collided:
+                    #
+                    #   RuntimeError: SectionAlreadyContains: section 'Parameters'
+                    #   already contains 'BootstrapVersion'
+                    #
+                    # The raise happened inside ``app.synth()``, which this wrapper catches
+                    # and logs at DEBUG because a raise there is the ORDINARY case -- cdk-nag
+                    # reports violations by raising. So the collision was swallowed, no
+                    # ``validation-report.json`` was ever written, and the template surfaced
+                    # only as "cdk-nag produced no validation report". Measured on ASH's own
+                    # repository: two of eleven targets, both CDK-synthesized fixtures, and
+                    # the pair accounted for half of the reported incompleteness. With the
+                    # override they evaluate and yield 30 violations each across five packs,
+                    # so this closed a real hole rather than quieting a message.
+                    #
+                    # Suppressing the rule is correct here and not merely convenient. The
+                    # bootstrap version check is deploy-time machinery: it makes a
+                    # CloudFormation deployment refuse to proceed against a stale CDK
+                    # bootstrap stack. This wrapper never deploys anything -- it synthesizes
+                    # only so that the policy validation plugins run -- so the parameter and
+                    # rule are inert scaffolding either way. Removing them cannot change
+                    # which rules fire or what they see, because no nag rule reads them.
+                    #
+                    # ``generate_bootstrap_version_rule=False`` rather than
+                    # ``BootstraplessSynthesizer``. The latter also refuses file and Docker
+                    # image assets, and while this wrapper adds none itself, a template
+                    # carrying asset-shaped metadata would then fail for a second reason.
+                    # This flag turns off exactly the one thing that collided.
+                    super().__init__(
+                        scope,
+                        construct_id,
+                        synthesizer=DefaultStackSynthesizer(
+                            generate_bootstrap_version_rule=False
+                        ),
+                    )
                     # Get the relative path to use as the logical ID
                     # CDK will replace path separators with
                     try:
@@ -794,10 +840,33 @@ def run_cdk_nag_against_cfn_template(
                         }
                 return nag_packs
 
-            model = get_model_from_template(template_path)
+            try:
+                model = get_model_from_template(template_path)
+            except CloudFormationTemplateModelError as exc:
+                # The fourth state that reaches ``failure``, and it is here rather than
+                # in the None branch below because the two answers are different facts.
+                # A document carrying a ``Resources`` mapping is CloudFormation, so
+                # cdk-nag was pointed at a real template and evaluated nothing against
+                # it. Returned as a skip, the scanner takes the branch that *decrements*
+                # ``targets_attempted``, and a scan set in which every template tripped
+                # the model ended at zero attempts and reported SKIPPED with exit code
+                # 0 -- the same silent pass the other three states were converted to fix.
+                ASH_LOGGER.error(
+                    f"cdk-nag did not evaluate {template_path}: the template could not "
+                    f"be modeled as CloudFormation ({type(exc.error).__name__})"
+                )
+                return CdkNagWrapperResponse(
+                    results={},
+                    failure=(
+                        "the template carries a Resources mapping but could not be "
+                        "modeled as CloudFormation, so no rule was evaluated: "
+                        f"{type(exc.error).__name__}"
+                    ),
+                )
             if model is None:
                 ASH_LOGGER.debug(
-                    "No model validated from template, skipping CDK Nag. This does not seem to be a valid CloudFormation template"
+                    f"{template_path} carries no Resources mapping, so it is not a "
+                    "CloudFormation template and cdk-nag is skipped for it"
                 )
                 return None
 
@@ -912,8 +981,8 @@ def run_cdk_nag_against_cfn_template(
                     f"cdk-nag validation reported violations during synth for "
                     f"{template_path}: {type(exc).__name__}"
                 )
-            outdir = app.outdir
-            ASH_LOGGER.debug(f"app.outdir: {outdir}")
+            app_outdir = app.outdir
+            ASH_LOGGER.debug(f"app.outdir: {app_outdir}")
 
             # cfn_inc: CfnInclude = item in stack.node.children[0]
             included = [
@@ -929,7 +998,7 @@ def run_cdk_nag_against_cfn_template(
             # yields an empty result set -- a scan that looks clean because it read the wrong
             # place.
             cdk_nag_report_lines, report_failure = _violations_from_validation_report(
-                Path(outdir) / "validation-report.json"
+                Path(app_outdir) / "validation-report.json"
             )
 
             if not cdk_nag_report_lines:

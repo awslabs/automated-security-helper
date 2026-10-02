@@ -37,6 +37,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -186,17 +187,23 @@ def _sarif_with_uris(*uris: str) -> SarifReport:
 
 
 class TestSeverityFiltersFinding:
+    """``properties=None`` is on every stand-in because the real SARIF ``Result``
+    always carries the field, and the severity resolver now reads it -- a stand-in
+    without it was modelling a shape that cannot reach this function."""
+
     def test_a_suppressed_finding_never_qualifies(self):
         """Suppression outranks severity: an error-level suppression is not actionable."""
-        result = SimpleNamespace(suppressions=[{"kind": "external"}], level="error")
+        result = SimpleNamespace(
+            suppressions=[{"kind": "external"}], level="error", properties=None
+        )
         assert _severity_filters_finding(result, 1) is False
 
     def test_an_error_qualifies_at_the_high_threshold(self):
-        result = SimpleNamespace(suppressions=[], level="error")
+        result = SimpleNamespace(suppressions=[], level="error", properties=None)
         assert _severity_filters_finding(result, 3) is True
 
     def test_a_note_does_not_qualify_at_the_high_threshold(self):
-        result = SimpleNamespace(suppressions=[], level="note")
+        result = SimpleNamespace(suppressions=[], level="note", properties=None)
         assert _severity_filters_finding(result, 3) is False
 
 
@@ -273,16 +280,33 @@ class TestResolveLogLevel:
 
 @pytest.fixture
 def container_result(monkeypatch):
-    """Install the CompletedProcess that run_ash_container will appear to return."""
+    """Install the CompletedProcess that run_ash_container will appear to return.
 
-    def install(returncode=0, stdout="", stderr=""):
+    ``results_content`` is written to ``<output_dir>/ash_aggregated_results.json`` while
+    the fake container "runs". It has to be written there rather than by the test before
+    the call, because ``_run_container_mode`` now removes any results file that predates
+    the invocation -- a pre-seeded file is exactly what a previous run leaves behind, and
+    the whole point of the removal is that the two cannot be told apart afterwards.
+    """
+
+    def install(returncode=0, stdout="", stderr="", results_content=None):
         result = create_completed_process(
             args=["docker", "run"],
             returncode=returncode,
             stdout=stdout,
             stderr=stderr,
         )
-        monkeypatch.setattr(ras, "run_ash_container", lambda **kwargs: result)
+
+        def fake_run_ash_container(**kwargs):
+            if results_content is not None:
+                output_dir = Path(kwargs["output_dir"])
+                output_dir.mkdir(parents=True, exist_ok=True)
+                output_dir.joinpath("ash_aggregated_results.json").write_text(
+                    results_content, encoding="utf-8"
+                )
+            return result
+
+        monkeypatch.setattr(ras, "run_ash_container", fake_run_ash_container)
         return result
 
     return install
@@ -293,11 +317,8 @@ class TestRunContainerModeChangedFiles:
         self, container_result, logger, tmp_path, capsys
     ):
         """The container has no git history for the host's base ref."""
-        container_result(returncode=0)
-        results_file = tmp_path / "out" / "ash_aggregated_results.json"
-        results_file.parent.mkdir(parents=True)
-        results_file.write_text(
-            AshAggregatedResults().model_dump_json(), encoding="utf-8"
+        container_result(
+            returncode=0, results_content=AshAggregatedResults().model_dump_json()
         )
         opts = _opts(tmp_path, tmp_path / "out", changed_files_only=True)
 
@@ -341,15 +362,14 @@ class TestRunContainerModeResultsFile:
     def test_a_valid_results_file_is_parsed_and_returned(
         self, container_result, logger, tmp_path
     ):
-        container_result(returncode=0)
-        output_dir = tmp_path / "out"
-        output_dir.mkdir()
-        (output_dir / "ash_aggregated_results.json").write_text(
-            AshAggregatedResults(
+        container_result(
+            returncode=0,
+            results_content=AshAggregatedResults(
                 additional_reports={"marker": "round-tripped"}
             ).model_dump_json(),
-            encoding="utf-8",
         )
+        output_dir = tmp_path / "out"
+        output_dir.mkdir()
         opts = _opts(tmp_path, output_dir)
 
         results = _run_container_mode(opts, logger)
@@ -360,12 +380,9 @@ class TestRunContainerModeResultsFile:
     def test_an_unparseable_results_file_exits_one(
         self, container_result, logger, tmp_path
     ):
-        container_result(returncode=0)
+        container_result(returncode=0, results_content="{ not valid json")
         output_dir = tmp_path / "out"
         output_dir.mkdir()
-        (output_dir / "ash_aggregated_results.json").write_text(
-            "{ not valid json", encoding="utf-8"
-        )
         opts = _opts(tmp_path, output_dir)
 
         with pytest.raises(SystemExit) as excinfo:
@@ -396,12 +413,13 @@ class TestRunContainerModeResultsFile:
     def test_debug_reports_the_container_command_and_stream_sizes(
         self, container_result, logger, tmp_path, capsys
     ):
-        container_result(returncode=0, stdout="abcde")
+        container_result(
+            returncode=0,
+            stdout="abcde",
+            results_content=AshAggregatedResults().model_dump_json(),
+        )
         output_dir = tmp_path / "out"
         output_dir.mkdir()
-        (output_dir / "ash_aggregated_results.json").write_text(
-            AshAggregatedResults().model_dump_json(), encoding="utf-8"
-        )
         opts = _opts(tmp_path, output_dir, debug=True)
 
         _run_container_mode(opts, logger)
@@ -542,7 +560,202 @@ class TestRunLocalModePhases:
         assert recorded["orchestrator"].executed_phases == ["scan", "inspect"]
 
 
+def _git(cwd: Path, *args: str) -> None:
+    subprocess.run(  # nosec B603 B607 -- list args, no shell, fixture repo only
+        ["git", *args],
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+
+
+def _commit_base_then_change(repo: Path, changed: Path) -> None:
+    """A throwaway repository with a ``base-ref`` branch and one change on top."""
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.email", "fixture@example.invalid")
+    _git(repo, "config", "user.name", "Fixture")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "base")
+    _git(repo, "branch", "-f", "base-ref")
+    changed.write_text("print('changed')\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "change")
+
+
+@pytest.fixture
+def git_available() -> bool:
+    probe = subprocess.run(  # nosec B603 B607 -- probing for git on PATH
+        ["git", "--version"], capture_output=True, text=True, check=False, timeout=30
+    )
+    return probe.returncode == 0
+
+
 class TestRunLocalModeChangedFiles:
+    def test_the_diff_is_anchored_on_the_repository_root(
+        self, local_orchestrator, logger, tmp_path, git_available
+    ):
+        """A source dir below the repository root is the geometry that broke.
+
+        ``git diff --name-only`` prints repository-root-relative paths whatever
+        directory it ran in, so a change to ``services/api/app.py`` arrives as
+        that string even when git ran in ``<repo>/services/api``. Joining it onto
+        the source dir yielded ``<repo>/services/api/services/api/app.py``, while
+        ``_filter_results_to_changed_files`` resolves the SARIF side's
+        source-relative ``app.py`` to ``<repo>/services/api/app.py``. The two sets
+        could not intersect, so the filter dropped every finding.
+        """
+        if not git_available:
+            pytest.skip("git is not available on PATH")
+
+        repo = tmp_path / "repo"
+        source_dir = repo / "services" / "api"
+        source_dir.mkdir(parents=True)
+        (source_dir / "app.py").write_text("print('a')\n", encoding="utf-8")
+        (source_dir / "untouched.py").write_text("print('u')\n", encoding="utf-8")
+        _commit_base_then_change(repo, source_dir / "app.py")
+
+        output_dir = tmp_path / "out"
+        (output_dir / "reports").mkdir(parents=True)
+        results = AshAggregatedResults(sarif=_sarif_with_uris("app.py", "untouched.py"))
+        local_orchestrator(results=results)
+        opts = _opts(
+            source_dir, output_dir, changed_files_only=True, base_ref="base-ref"
+        )
+
+        returned, _ = _run_local_mode(opts, logger)
+
+        uris = [
+            result.locations[0].physicalLocation.root.artifactLocation.uri
+            for result in returned.sarif.runs[0].results
+        ]
+        assert uris == ["app.py"]
+
+    def test_a_diff_outside_the_source_dir_reports_nothing(
+        self, local_orchestrator, logger, tmp_path, git_available
+    ):
+        """An empty changed set reports nothing, because that is what was asked.
+
+        A change to ``<repo>/docs/README.md`` is outside a source dir of
+        ``<repo>/services/api``, so the changed set is empty. ``--changed-files-only``
+        is a request to scope to the diff, and nothing in the diff is in scope, so
+        the honest answer is an empty report -- not the whole subtree, which would
+        be ignoring the flag the operator passed. An empty set is therefore a
+        filter that matches nothing, distinct from ``None``, which means git could
+        not answer and the documented fallback is a full scan.
+
+        The on-disk report is rewritten too, for the same reason
+        test_results_and_the_sarif_report_are_both_narrowed exists: leaving the
+        unfiltered SARIF on disk beside an emptied model gives two answers.
+        """
+        if not git_available:
+            pytest.skip("git is not available on PATH")
+
+        repo = tmp_path / "repo"
+        source_dir = repo / "services" / "api"
+        source_dir.mkdir(parents=True)
+        (source_dir / "app.py").write_text("print('a')\n", encoding="utf-8")
+        docs = repo / "docs"
+        docs.mkdir()
+        (docs / "README.md").write_text("base\n", encoding="utf-8")
+        _commit_base_then_change(repo, docs / "README.md")
+
+        output_dir = tmp_path / "out"
+        (output_dir / "reports").mkdir(parents=True)
+        sarif_path = output_dir / "reports" / "ash.sarif"
+        sarif_path.write_text("stale placeholder", encoding="utf-8")
+        local_orchestrator(
+            results=AshAggregatedResults(sarif=_sarif_with_uris("app.py"))
+        )
+        opts = _opts(
+            source_dir, output_dir, changed_files_only=True, base_ref="base-ref"
+        )
+
+        returned, _ = _run_local_mode(opts, logger)
+
+        assert returned.sarif.runs[0].results == []
+        assert "app.py" not in sarif_path.read_text(encoding="utf-8")
+
+    def test_a_finding_outside_the_source_dir_is_not_revived_by_the_diff(
+        self, local_orchestrator, logger, monkeypatch, tmp_path
+    ):
+        """Pins what dropping out-of-tree diff entries buys, now that it is subtle.
+
+        ``--source-dir`` and ``--changed-files-only`` are two scopings and the
+        operator asked for both, so the reported set is their intersection. A
+        scanner that escapes the scan root -- a ``../`` URI that
+        ``sanitize_sarif_paths`` did not make source-relative -- must not be
+        reported just because its file is in the diff.
+
+        Without the source-dir narrowing this is the one input whose outcome
+        differs: the changed set would carry ``<repo>/docs/README.md`` and the
+        escaping URI would resolve onto it and be kept. Every other input reaches
+        the same answer either way, which is why this test exists rather than a
+        more natural one.
+
+        The URI needs both ``..`` segments, and an earlier draft with one was a
+        test that could not fail for its own condition: from
+        ``<repo>/services/api``, ``../docs/README.md`` resolves to
+        ``<repo>/services/docs/README.md``, which is in neither set, so it passed
+        whether or not the narrowing was there. The mutation control is what
+        caught that.
+        """
+        from automated_security_helper.utils import get_scan_set
+
+        repo = tmp_path / "repo"
+        source_dir = repo / "services" / "api"
+        source_dir.mkdir(parents=True)
+        (repo / "docs").mkdir()
+        monkeypatch.setattr(
+            get_scan_set,
+            "get_changed_files",
+            lambda base_ref, cwd: [Path("docs/README.md")],
+        )
+        monkeypatch.setattr(get_scan_set, "git_repository_root", lambda path: repo)
+        output_dir = tmp_path / "out"
+        output_dir.mkdir()
+        local_orchestrator(
+            results=AshAggregatedResults(sarif=_sarif_with_uris("../../docs/README.md"))
+        )
+        opts = _opts(source_dir, output_dir, changed_files_only=True)
+
+        returned, _ = _run_local_mode(opts, logger)
+
+        assert returned.sarif.runs[0].results == []
+
+    def test_an_unknown_repository_root_scans_everything(
+        self, local_orchestrator, logger, monkeypatch, tmp_path
+    ):
+        """The root is the only anchor, so without it the gate must not guess.
+
+        Reachable when ``git rev-parse --show-toplevel`` times out while the diff
+        itself succeeded. Joining onto the source dir instead is the mis-join this
+        class of defect is made of, and it silently reports nothing.
+        """
+        from automated_security_helper.utils import get_scan_set
+
+        monkeypatch.setattr(
+            get_scan_set, "get_changed_files", lambda base_ref, cwd: [Path("app.py")]
+        )
+        monkeypatch.setattr(get_scan_set, "git_repository_root", lambda path: None)
+        output_dir = tmp_path / "out"
+        output_dir.mkdir()
+        local_orchestrator(
+            results=AshAggregatedResults(
+                sarif=_sarif_with_uris("app.py", "untouched.py")
+            )
+        )
+        opts = _opts(tmp_path, output_dir, changed_files_only=True)
+
+        returned, _ = _run_local_mode(opts, logger)
+
+        assert len(returned.sarif.runs[0].results) == 2
+        assert any(
+            "not inside a git repository" in message
+            for message in logger.records["warning"]
+        )
+
     def test_results_and_the_sarif_report_are_both_narrowed(
         self, local_orchestrator, logger, monkeypatch, tmp_path
     ):
@@ -552,6 +765,10 @@ class TestRunLocalModeChangedFiles:
         monkeypatch.setattr(
             get_scan_set, "get_changed_files", lambda base_ref, cwd: ["changed.py"]
         )
+        # The source dir is the repository root in this geometry, which is what
+        # the stub root asserts; test_the_diff_is_anchored_on_the_repository_root
+        # covers the case where the two differ.
+        monkeypatch.setattr(get_scan_set, "git_repository_root", lambda path: tmp_path)
         output_dir = tmp_path / "out"
         (output_dir / "reports").mkdir(parents=True)
         sarif_path = output_dir / "reports" / "ash.sarif"
@@ -584,6 +801,9 @@ class TestRunLocalModeChangedFiles:
         monkeypatch.setattr(
             get_scan_set, "get_changed_files", lambda base_ref, cwd: None
         )
+        # A real root, so this exercises the "diff unavailable" fallback rather
+        # than the "root unavailable" one that would also reach a full scan.
+        monkeypatch.setattr(get_scan_set, "git_repository_root", lambda path: tmp_path)
         output_dir = tmp_path / "out"
         output_dir.mkdir()
         results = AshAggregatedResults(

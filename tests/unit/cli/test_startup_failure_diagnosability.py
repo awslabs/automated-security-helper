@@ -199,9 +199,7 @@ def test_startup_failure_is_reported_when_both_streams_are_none(tmp_path):
 
     assert result.returncode != 0
     combined = result.stdout + result.stderr
-    assert SENTINEL in combined, (
-        f"stdout={result.stdout!r} stderr={result.stderr!r}"
-    )
+    assert SENTINEL in combined, f"stdout={result.stdout!r} stderr={result.stderr!r}"
 
 
 def test_startup_failure_is_reported_when_saved_originals_are_none(tmp_path):
@@ -222,9 +220,7 @@ def test_startup_failure_is_reported_when_saved_originals_are_none(tmp_path):
 
     assert result.returncode != 0
     combined = result.stdout + result.stderr
-    assert SENTINEL in combined, (
-        f"stdout={result.stdout!r} stderr={result.stderr!r}"
-    )
+    assert SENTINEL in combined, f"stdout={result.stdout!r} stderr={result.stderr!r}"
 
 
 def test_version_prints_when_stdout_is_none(tmp_path):
@@ -291,8 +287,7 @@ def test_scan_exit_codes_are_not_rewritten(tmp_path):
     )
 
     assert result.returncode == 3, (
-        f"exit code was rewritten to {result.returncode}. "
-        f"stderr={result.stderr!r}"
+        f"exit code was rewritten to {result.returncode}. stderr={result.stderr!r}"
     )
 
 

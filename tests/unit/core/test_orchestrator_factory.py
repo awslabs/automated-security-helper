@@ -6,24 +6,22 @@ These tests verify:
 - .initialize() is idempotent
 """
 
-from pathlib import Path
-from unittest.mock import patch, MagicMock
-import pytest
+from unittest.mock import patch
 
 from automated_security_helper.core.orchestrator import ASHScanOrchestrator
 from automated_security_helper.config.ash_config import AshConfig
 
 
 def _minimal_kwargs(tmp_path):
-    return dict(
-        source_dir=tmp_path / "src",
-        output_dir=tmp_path / "out",
-        config_path=None,
-        config_overrides=None,
-        no_cleanup=False,
-        metadata=None,
-        ash_plugin_modules=[],
-    )
+    return {
+        "source_dir": tmp_path / "src",
+        "output_dir": tmp_path / "out",
+        "config_path": None,
+        "config_overrides": None,
+        "no_cleanup": False,
+        "metadata": None,
+        "ash_plugin_modules": [],
+    }
 
 
 class TestConstructorNoIO:
@@ -36,7 +34,9 @@ class TestConstructorNoIO:
 
         with patch(
             "automated_security_helper.core.orchestrator.resolve_config",
-            side_effect=RuntimeError("resolve_config must not be called during construction"),
+            side_effect=RuntimeError(
+                "resolve_config must not be called during construction"
+            ),
         ):
             # Should not raise — model_post_init no longer calls resolve_config
             orch = ASHScanOrchestrator(**kwargs)
@@ -52,7 +52,9 @@ class TestConstructorNoIO:
 
         ASHScanOrchestrator(**kwargs)
 
-        assert not out.exists(), ".ash output dir must not be created during construction"
+        assert not out.exists(), (
+            ".ash output dir must not be created during construction"
+        )
 
     def test_constructor_does_not_instantiate_execution_engine(self, tmp_path):
         """After plain construction, execution_engine is None."""
@@ -154,7 +156,7 @@ class TestInitializeIdempotent:
         out = tmp_path / "out"
 
         call_count = {"n": 0}
-        real_resolve = __import__(
+        __import__(
             "automated_security_helper.config.resolve_config",
             fromlist=["resolve_config"],
         ).resolve_config
@@ -182,4 +184,6 @@ class TestInitializeIdempotent:
             second_engine = orch.execution_engine
 
         assert call_count["n"] == 1, "resolve_config should only be called once"
-        assert first_engine is second_engine, "execution_engine must not be replaced on second initialize()"
+        assert first_engine is second_engine, (
+            "execution_engine must not be replaced on second initialize()"
+        )

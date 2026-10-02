@@ -39,6 +39,17 @@ ones passes here. Names are what broke, so names are what this pins; argument
 drift would need the schema compared against the examples, which is a bigger
 job and a separate test.
 
+Nor the wire. `mcp.list_tools()` is the in-process registration table, one Python
+call from the decorator that filled it, so everything between that table and a
+real client is out of scope here: the console-script entry point, the stdio
+transport, the `initialize` exchange, and the serialization of each signature
+into JSON Schema. `.github/actions/validate-mcp/compare_tool_surface.py` covers
+that half -- it drives `ash mcp` through the MCP Inspector as a client would and
+diffs the full `tools/list` reply, schemas included, against a committed golden.
+The two overlap on exactly one property, the set of names, and neither subsumes
+the other: this module can run in a unit test suite with no Node toolchain, and
+that one can see a tool that is registered but unreachable.
+
 `scripts/verify_docs_freshness.py` covers an adjacent but different thing: that
 every registered tool appears in README's table. It derives the registered side
 by regex and only matches `async def`, so a `def` tool is invisible to it. This
@@ -75,18 +86,14 @@ README_TOOL_TABLE_ROW = re.compile(r"^\|\s*`([a-z_][a-z0-9_]*)`\s*\|", re.MULTIL
 # it should cost something to add. An entry is only legitimate when the docs say
 # plainly that the tool is unavailable; naming it as though it works is the
 # defect this module exists to catch, not something to exempt.
-DOCUMENTED_BUT_NOT_REGISTERED_EXEMPTIONS: dict[str, str] = {
-    "select_profile": (
-        "mcp_select_profile is implemented and tested, but binds a config that "
-        "nothing reads: bind_session_config has no readers, and the scan entry "
-        "point takes a config path rather than a resolved AshConfig, so a bound "
-        "config has nowhere to go. Registering it would publish a call that "
-        "returns success and changes nothing. streamable-http.md documents it "
-        "under 'Selecting a profile is not available yet' and says so. Remove "
-        "this entry when the config is threaded through to the scan and the tool "
-        "is registered."
-    ),
-}
+# ``select_profile`` was exempted here, on the grounds that registering a tool
+# which binds a config nothing reads would publish a call returning success and
+# changing nothing. The exemption is gone because the condition it named is gone:
+# ``bind_session_config`` now records a path materialized into the session
+# sandbox, ``resolve_session_config_path`` reads it, and ``run_ash_scan`` plus both
+# workspace tools pass it to the scan. ``ash mcp --profile`` populates the
+# registry, without which nothing could be selected in the first place.
+DOCUMENTED_BUT_NOT_REGISTERED_EXEMPTIONS: dict[str, str] = {}
 
 # Registered tools that need no prose mention.
 #

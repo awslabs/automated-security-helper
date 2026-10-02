@@ -325,6 +325,25 @@ class WorkspaceProjectResult(BaseModel):
             ),
         ),
     ] = 0
+    policy_origin_finding_count: Annotated[
+        int,
+        Field(
+            0,
+            ge=0,
+            description=(
+                "How many of this project's unsuppressed findings came from a "
+                "scanner only `workspace.additional_scanners` asked for, rather "
+                "than one the project enables itself. Those findings carry "
+                "`properties.origin: workspace-policy`, and unless "
+                "`policy_scanners_gate` is set they are excluded from "
+                "actionable_finding_count and cannot fail the project. A count "
+                "of its own because that is what makes them 'reported "
+                "separately': comparing finding_count against "
+                "actionable_finding_count cannot tell a finding the policy "
+                "contributed from one the severity threshold excluded."
+            ),
+        ),
+    ] = 0
     exceeds_threshold: Annotated[
         bool,
         Field(
@@ -385,13 +404,32 @@ class WorkspaceProjectResult(BaseModel):
             ),
         ),
     ]
+    no_scanner_ran: Annotated[
+        bool,
+        Field(
+            False,
+            description=(
+                "Whether this project recorded scanners and not one of them reached "
+                "a verdict -- every entry SKIPPED. A separate fact from "
+                "incomplete_scanners rather than a member of it, because SKIPPED has "
+                "to be tolerated one entry at a time: it is how --exclude-scanners "
+                "and another shard's ownership are recorded. So the per-entry list "
+                "is empty here while the project measured nothing. False for a "
+                "project that recorded no scanners at all, which is what a "
+                "convert-only run legitimately produces. Populated whether or not "
+                "the completeness gate is on, for the same reason "
+                "incomplete_scanners is."
+            ),
+        ),
+    ] = False
     scan_incomplete: Annotated[
         bool,
         Field(
             False,
             description=(
-                "Whether the incomplete scanners above fail this project. Stored "
-                "rather than derived from the list for the same reason "
+                "Whether the two completeness facts above fail this project -- the "
+                "incomplete scanners it names, or having run no scanner at all. "
+                "Stored rather than derived from them for the same reason "
                 "exceeds_threshold is: fail_on_incomplete_scanners can be off, in "
                 "which case a project has scanners that did not run and still "
                 "passes."
@@ -560,7 +598,23 @@ def is_workspace_scan(model: Any) -> bool:
     reporter that tolerates a missing key would instead have added an empty
     project column to real single-directory output and gone unnoticed.
     """
-    return isinstance(getattr(model, "workspace", None), WorkspaceResults)
+    return workspace_of(model) is not None
+
+
+def workspace_of(model: Any) -> Optional[WorkspaceResults]:
+    """*model*'s workspace block, or ``None`` for a single-directory scan.
+
+    The same test as :func:`is_workspace_scan`, returned as the value rather than
+    as a bool, so a caller that goes on to read the block gets a type checker
+    that knows it is not ``None``. ``if is_workspace_scan(model):`` followed by
+    ``model.workspace.<attr>`` is correct at runtime but reads to mypy as a
+    dereference of ``WorkspaceResults | None``, because a ``bool`` return carries
+    no narrowing. Same ``isinstance`` rule, for the same ``MagicMock`` reason.
+    """
+    workspace = getattr(model, "workspace", None)
+    if isinstance(workspace, WorkspaceResults):
+        return workspace
+    return None
 
 
 def workspace_exit_code(

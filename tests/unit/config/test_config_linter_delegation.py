@@ -4,10 +4,8 @@
 """TDD tests for config_linter delegation to config_validator."""
 
 import textwrap
-from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 
 from automated_security_helper.config.config_linter import (
     ConfigLinter,
@@ -27,7 +25,9 @@ class TestLinterUsesValidatorForRequiredFieldCheck:
 
         result = ConfigLinter.lint(cfg)
 
-        error_msgs = [i.message for i in result.issues if i.severity == LintSeverity.ERROR]
+        error_msgs = [
+            i.message for i in result.issues if i.severity == LintSeverity.ERROR
+        ]
         assert any("project_name" in m for m in error_msgs), (
             f"Expected missing-field error for 'project_name', got: {error_msgs}"
         )
@@ -87,7 +87,9 @@ class TestLinterAddsSuppressionChecksOnTop:
         unused_issues = [
             i for i in result.issues if i.category == LintCategory.SUPPRESSION_UNUSED
         ]
-        assert unused_issues, "Linter should report unused suppression that validator ignores"
+        assert unused_issues, (
+            "Linter should report unused suppression that validator ignores"
+        )
 
     def test_expired_suppression_warning_not_in_validator(self, tmp_path):
         """Validator has no concept of expired suppressions; linter adds it."""
@@ -111,7 +113,9 @@ class TestLinterAddsSuppressionChecksOnTop:
         expired_issues = [
             i for i in result.issues if i.category == LintCategory.SUPPRESSION_EXPIRED
         ]
-        assert expired_issues, "Linter should report expired suppression that validator ignores"
+        assert expired_issues, (
+            "Linter should report expired suppression that validator ignores"
+        )
 
 
 class TestLinterDoesNotDuplicateValidatorErrors:
@@ -148,7 +152,8 @@ class TestLinterDoesNotDuplicateValidatorErrors:
         result = ConfigLinter.lint(cfg)
 
         project_name_errors = [
-            i for i in result.issues
+            i
+            for i in result.issues
             if "project_name" in i.message and i.severity == LintSeverity.ERROR
         ]
         assert len(project_name_errors) == 1, (
@@ -169,7 +174,8 @@ class TestLinterDoesNotDuplicateValidatorErrors:
         result = ConfigLinter.lint(cfg)
 
         build_errors = [
-            i for i in result.issues
+            i
+            for i in result.issues
             if "build" in i.message and i.severity == LintSeverity.ERROR
         ]
         assert len(build_errors) == 1, (

@@ -6,9 +6,6 @@
 These tests were written before the fix and must FAIL on the old code, then
 pass after the implementation is applied.
 """
-import tempfile
-from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 from pydantic import ValidationError
@@ -83,7 +80,6 @@ def test_invalid_config_triggers_exit_code_3(tmp_path):
     bad_config.write_text("build: not_an_object\n")
 
     from automated_security_helper.interactions.run_ash_scan import run_ash_scan
-    from automated_security_helper.core.exceptions import ASHConfigValidationError
 
     with pytest.raises(SystemExit) as exc_info:
         run_ash_scan(

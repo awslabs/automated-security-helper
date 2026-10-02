@@ -14,8 +14,12 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from automated_security_helper.base.plugin_config import plugin_config_key
 from automated_security_helper.base.plugin_context import PluginContext
-from automated_security_helper.config.resolve_config import find_config_file, resolve_config
+from automated_security_helper.config.resolve_config import (
+    find_config_file,
+    resolve_config,
+)
 from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES
 from automated_security_helper.plugins.loader import load_plugins
 from automated_security_helper.utils.log import get_logger
@@ -220,7 +224,7 @@ def list_plugins(
                     try:
                         plugin_config = plugin_context.config.get_plugin_config(
                             plugin_type=plugin_type.rstrip("s"),  # Remove 's' from end
-                            plugin_name=plugin_class_name,
+                            plugin_name=plugin_config_key(plugin_class),
                         )
                         if hasattr(plugin_config, "model_dump"):
                             plugin_config = plugin_config.model_dump()

@@ -33,8 +33,39 @@ on:
         required: false
         default: ".ash/ash_output"
         type: string
+      # BEHAVIOR CHANGE -- read this before upgrading if you call this workflow.
+      #
+      # This input has always defaulted to true, and until now it had no effect
+      # in either position: the value was selected with
+      # `inputs.fail-on-findings == 'true'`, and GitHub casts mismatched operands
+      # to a number before comparing, so a Boolean became 1 while the string
+      # 'true' became NaN. The test was false for BOTH input values and the
+      # workflow passed `--no-fail-on-findings` on every run it has ever made.
+      # No value a caller supplied could change that.
+      #
+      # With the comparison fixed, the declared default takes effect for the
+      # first time: a scan with actionable findings now exits non-zero and FAILS
+      # THE JOB. For a repository that has accumulated findings while the gate
+      # was silently off, that is a red build with no change of its own.
+      #
+      # Worse than an unarmed gate, and the reason this is not merely "the
+      # default now applies": `--no-fail-on-findings` is strictly stronger than
+      # omitting the flag. `ash scan` declares `fail_on_findings` as
+      # `bool | None = None` so that an unset value defers to the scanned
+      # repository's own configuration. The explicit negation overrode it, so a
+      # repository setting `fail_on_findings: true` in its own .ash.yaml was
+      # overruled by this workflow.
+      #
+      # Two ways to respond, both supported:
+      #   * Leave it on. That is what the input is for, and the exit code is the
+      #     only part of a scan most callers read.
+      #   * Set `fail-on-findings: false` to keep the previous behavior. Unlike
+      #     before, that value is now honored.
       fail-on-findings:
-        description: "Whether to continue execution even if findings are detected"
+        # The old description -- "Whether to continue execution even if findings
+        # are detected" -- described the inverse of the input's name, which is a
+        # hazard now that the value is load-bearing.
+        description: "Whether to exit non-zero, failing the job, when actionable findings are detected"
         required: false
         default: true
         type: boolean
@@ -137,7 +168,23 @@ on:
         type: string
 
 env:
-  ASH_UVX_SOURCE: git+https://github.com/${{ inputs.ash-repo }}@${{ inputs.ash-version }}
+  # The `[cdk]` extra is what makes the cdk-nag scanner available. Without it the
+  # scanner's availability check -- a metadata read of cdk_nag, aws-cdk-lib and
+  # constructs -- comes up short and cdk-nag reports MISSING, so a consumer with
+  # CloudFormation got no IaC findings from the one scanner that produces them.
+  # Neither `ash dependencies install` step below fixes this: both are scoped to a
+  # single --tool, and cdk-nag is a Python dependency rather than a downloaded
+  # binary.
+  #
+  # Extras on a PEP 508 direct reference, rather than a second install step: the
+  # extra's contents are read from pyproject.toml at the pinned ref, so there is no
+  # second list to drift, and the name is not resolved from an index, so this adds
+  # no index-resolved dependency to a workflow whose subject is supply-chain risk.
+  #
+  # The ` @ ` makes this one requirement string containing spaces, so every use
+  # below quotes it. Unquoted, the shell would split it into three words and pass
+  # `@` to uvx as the command to run.
+  ASH_UVX_SOURCE: automated-security-helper[cdk] @ git+https://github.com/${{ inputs.ash-repo }}@${{ inputs.ash-version }}
   ASH_OUTPUT_DIR: ${{ inputs.output-dir }}
   ASH_CONFIG: ${{ inputs.config }}
 
@@ -153,7 +200,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           enable-cache: true
 
@@ -162,31 +209,53 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
 
+      # THE GRYPE DATABASE CACHE IS TIME-BOUNDED BY THE SAME NUMBER GRYPE ENFORCES
+      #
+      # The key's time bucket is computed by ASH's content-database registry,
+      # automated_security_helper/utils/content_databases.py, from the same entry
+      # ASH passes to grype as GRYPE_DB_MAX_ALLOWED_BUILT_AGE. It is never typed
+      # here, and .github/scripts/assert-content-db-caches.py fails the build if it
+      # is. That module's `bucket_width` carries the argument for why a bucket of
+      # one fifth of the bound, plus a save-side age check, keeps every restored
+      # database inside the bound -- and why a bucket equal to the bound would not.
+      #
+      # There is no restore-keys prefix fallback any more. It restored older
+      # buckets, which is exactly the unbounded case.
+      #
+      # Restored everywhere, saved only from a push to the default branch, so a
+      # pull request never writes an entry another run reads, and the cache holds
+      # one entry per bucket instead of one per pull request.
+      #
+      # If the ASH revision in use predates the registry, the key comes back empty
+      # and the grype cache is simply skipped: grype then downloads its database,
+      # as it does on any miss.
       - name: Compute cache keys
         id: cachekeys
+        env:
+          INSTALL_GRYPE: ${{ inputs.install-grype }}
         run: |
           set -euo pipefail
-          # The grype database key rotates daily. grype refuses a database older
-          # than db.max-allowed-built-age (default 120h), so a key that never
-          # rotated would keep restoring an archive grype then rejects.
-          echo "day=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
           # Tool binaries rotate weekly, so a cache cannot pin a security scanner
           # to one build indefinitely.
           echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+          if [ "${INSTALL_GRYPE}" = "true" ]; then
+            if grype_db="$(uv run --no-project --with "${ASH_UVX_SOURCE}" -- \
+                python -m automated_security_helper.utils.content_databases cache-key grype-db)"; then
+              echo "grype-db=${grype_db}" >> "$GITHUB_OUTPUT"
+              echo "grype database cache bucket: ${grype_db}"
+            else
+              echo "::warning::this ASH revision declares no content-database registry, so the grype database is not cached on this run"
+            fi
+          fi
 
-      - name: Cache the grype vulnerability database
-        if: inputs.install-grype
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Restore the grype vulnerability database
+        id: grype-db-restore
+        if: inputs.install-grype && steps.cachekeys.outputs.grype-db != ''
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           # grype's db.cache-dir default; equivalently GRYPE_DB_CACHE_DIR.
           path: ~/.cache/grype/db
-          key: grype-db-${{ runner.os }}-${{ steps.cachekeys.outputs.day }}
-          # Falling back to an earlier day is safe: grype sets
-          # validate-by-hash-on-start and auto-update by default (throttled to
-          # max-update-check-frequency, 2h), so a slightly older database is
-          # verified and refreshed rather than trusted blindly.
-          restore-keys: |
-            grype-db-${{ runner.os }}-
+          key: grype-db-${{ runner.os }}-${{ steps.cachekeys.outputs.grype-db }}
 
       - name: Cache the OpenGrep binary
         if: inputs.install-opengrep
@@ -225,10 +294,33 @@ jobs:
           ASH_TOOL_BIN: ${{ runner.temp }}/ash-tools
         run: |
           set -euo pipefail
-          uvx --from ${ASH_UVX_SOURCE} ash dependencies install \
+          uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
             --tool grype \
             --bin-path "${ASH_TOOL_BIN}"
           echo "${ASH_TOOL_BIN}" >> "$GITHUB_PATH"
+
+      # A restored database is used only if it is inside the declared bound NOW.
+      # The key already guarantees that for an entry this workflow saved; this is
+      # the check that does not depend on the key being right. A database that
+      # fails it is deleted, so grype downloads a fresh one rather than being
+      # handed a stale one -- and if that download then fails, grype fails the
+      # scan (validate-age is on and ASH passes the bound), which is loud.
+      - name: Refuse a restored grype database older than its declared bound
+        if: inputs.install-grype && steps.grype-db-restore.outputs.cache-hit == 'true'
+        env:
+          ASH_TOOL_BIN: ${{ runner.temp }}/ash-tools
+        run: |
+          set -uo pipefail
+          built="$("${ASH_TOOL_BIN}/grype" db status -o json 2>/dev/null \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin).get("built",""))' 2>/dev/null)"
+          if [ -n "${built}" ] && uv run --no-project --with "${ASH_UVX_SOURCE}" -- \
+              python -m automated_security_helper.utils.content_databases \
+              check-age grype-db --built "${built}" --for use; then
+            echo "restored grype database built ${built} is inside its bound; using it"
+          else
+            echo "::warning::discarding the restored grype database (built '${built:-unknown}'): it is not inside the bound ASH declares for it. grype will download a fresh one."
+            rm -rf ~/.cache/grype/db
+          fi
 
       - name: Install Syft
         if: inputs.install-syft
@@ -236,7 +328,7 @@ jobs:
           ASH_TOOL_BIN: ${{ runner.temp }}/ash-tools
         run: |
           set -euo pipefail
-          uvx --from ${ASH_UVX_SOURCE} ash dependencies install \
+          uvx --from "${ASH_UVX_SOURCE}" ash dependencies install \
             --tool syft \
             --bin-path "${ASH_TOOL_BIN}"
           echo "${ASH_TOOL_BIN}" >> "$GITHUB_PATH"
@@ -290,7 +382,7 @@ jobs:
       # and make are still on the image; libyaml-dev is the one to check first.
       - name: Set up Ruby for cfn-nag
         if: inputs.install-cfn-nag
-        uses: ruby/setup-ruby@984c0c890880bbf811283d6f09c4607c62d210a4 # v1.323.0
+        uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1.327.0
         with:
           ruby-version: "3.3"
 
@@ -425,13 +517,98 @@ jobs:
         env:
           ASH_MODE: ${{ inputs.ash-mode }}
           ASH_ARGS: ${{ inputs.ash-args }}
-          FAIL_ON_FINDINGS_PARAM: ${{ inputs.fail-on-findings == 'true' && '--fail-on-findings' || '--no-fail-on-findings'}}
-          VERBOSE: ${{ inputs.verbose }}
+          # Bare `inputs.fail-on-findings`, not `== 'true'`. GitHub casts
+          # mismatched operands to a number before comparing: a Boolean becomes 1
+          # or 0, and a string is parsed as a JSON number or else becomes NaN. So
+          # `== 'true'` was false for BOTH input values and this rendered
+          # `--no-fail-on-findings` unconditionally. The consequence and the
+          # opt-out are written out at the `fail-on-findings` input above.
+          #
+          # The adjacent `changed-files-only` line already used the bare form,
+          # which is why one of these two inputs worked and the other did not.
+          FAIL_ON_FINDINGS_PARAM: ${{ inputs.fail-on-findings && '--fail-on-findings' || '--no-fail-on-findings' }}
+          # Resolved to the flag here rather than left as a Boolean and tested
+          # with `${VERBOSE:+--verbose}` below, because that test asks whether
+          # the variable is set and NON-EMPTY. A Boolean interpolated into an env
+          # var arrives as the STRING `false`, which is both, so `:+` fired for
+          # either value and `--verbose` was passed unconditionally. The
+          # expression engine still sees a Boolean at this point, so this is the
+          # last place the choice can be made correctly.
+          #
+          # The empty branch omits the flag rather than negating it: `scan.py`
+          # declares `verbose` with an explicit `typer.Option("--verbose", "-v")`,
+          # so no `--no-verbose` exists and absence is how false is expressed.
+          VERBOSE: ${{ inputs.verbose && '--verbose' || '' }}
           CHANGED_FILES_ONLY: ${{ inputs.changed-files-only == true && '--changed-files-only' || '' }}
           BASE_REF: ${{ inputs.base-ref }}
         run: |-
-          uvx --reinstall --from ${ASH_UVX_SOURCE} ash \
-            --source-dir . --output-dir ${ASH_OUTPUT_DIR} ${ASH_ARGS} --no-progress ${FAIL_ON_FINDINGS_PARAM} --build-target ci --mode ${ASH_MODE} ${VERBOSE:+--verbose} ${CHANGED_FILES_ONLY:+${CHANGED_FILES_ONLY} --base-ref "${BASE_REF}"}
+          # ${ASH_ARGS} is last so a flag the caller passes explicitly wins.
+          # `click` resolves a boolean flag pair last-occurrence-wins, and while
+          # ${ASH_ARGS} sat ahead of ${FAIL_ON_FINDINGS_PARAM} a caller who
+          # passed `ash-args: --fail-on-findings` was silently overridden by this
+          # workflow's own derived value -- so there was no way to route around
+          # the comparison bug above from the calling side either.
+          #
+          # The move hands over more than that one flag. Everything between
+          # --output-dir and ${ASH_ARGS} is now the earlier occurrence:
+          # --no-progress, --build-target, --mode, --verbose,
+          # --changed-files-only and --base-ref. Where the option takes a value
+          # or has a negated twin the caller can now change it, so --progress
+          # beats --no-progress and --build-target, --mode and --base-ref are
+          # last-value-wins. --verbose and --changed-files-only are declared
+          # with a single spelling and no negation, so for those a caller can
+          # add the flag but not remove it.
+          #
+          # --source-dir and --output-dir did not change hands. ${ASH_ARGS}
+          # already sat after both, so a caller could override them before this
+          # change and still can.
+          #
+          # --mode deserves the closest look, being the only entry above with an
+          # input of its own. `ash-mode` is what renders ${ASH_MODE} here, so
+          # `ash-args: --mode container` now contradicts the caller's own
+          # `ash-mode: local` and wins. An explicit argument outranking a
+          # derived default is the intended precedence, but it does mean the two
+          # inputs can disagree with no warning.
+          uvx --reinstall --from "${ASH_UVX_SOURCE}" ash \
+            --source-dir . --output-dir ${ASH_OUTPUT_DIR} --no-progress ${FAIL_ON_FINDINGS_PARAM} --build-target ci --mode ${ASH_MODE} ${VERBOSE} ${CHANGED_FILES_ONLY:+${CHANGED_FILES_ONLY} --base-ref "${BASE_REF}"} ${ASH_ARGS}
+
+      # Default branch only, after the scan, so what is saved is the database grype
+      # actually scanned with. The save is refused unless that database is at most
+      # (bound - bucket width) old; content_databases.bucket_width says why that
+      # margin is what keeps a restored entry inside the bound.
+      - name: Check the grype database may be saved (default branch only)
+        id: grype-db-fresh
+        if: >-
+          !cancelled()
+          && inputs.install-grype
+          && steps.cachekeys.outputs.grype-db != ''
+          && steps.grype-db-restore.outputs.cache-hit != 'true'
+          && github.event_name == 'push'
+          && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        env:
+          ASH_TOOL_BIN: ${{ runner.temp }}/ash-tools
+        run: |
+          set -uo pipefail
+          built="$("${ASH_TOOL_BIN}/grype" db status -o json 2>/dev/null \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin).get("built",""))' 2>/dev/null)"
+          if [ -n "${built}" ] && uv run --no-project --with "${ASH_UVX_SOURCE}" -- \
+              python -m automated_security_helper.utils.content_databases \
+              check-age grype-db --built "${built}" --for save; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::not saving the grype database (built '${built:-unknown}'): too close to its bound to be cached."
+          fi
+
+      - name: Save the grype vulnerability database (default branch only)
+        if: >-
+          !cancelled()
+          && steps.grype-db-fresh.outputs.ok == 'true'
+          && github.event_name == 'push'
+          && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/grype/db
+          key: grype-db-${{ runner.os }}-${{ steps.cachekeys.outputs.grype-db }}
 
       - name: Show ASH Summary Report
         if: success() || failure()
@@ -444,7 +621,7 @@ jobs:
           # fetch it does not need - and if the ref has disappeared in the meantime
           # (merge_group queue branches are deleted mid-run) that fetch is what
           # fails, after the scan itself has already succeeded.
-          uvx --from ${ASH_UVX_SOURCE} ash \
+          uvx --from "${ASH_UVX_SOURCE}" ash \
             --output-dir "${ASH_OUTPUT_DIR}" report
 
       - name: Update step summary
@@ -577,7 +754,7 @@ jobs:
           echo "::notice::The JUnit test report was not published as a check: GITHUB_TOKEN is read-only for fork pull requests, so check runs cannot be created. The results are in this job's summary and in the ash_output artifact."
 
       - name: Upload ASH SARIF file
-        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         if: inputs.collect-sarif-report && github.event_name != 'merge_group' && (success() || failure())
         with:
           sarif_file: ${{ inputs.output-dir }}/reports/ash.ghas.sarif

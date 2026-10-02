@@ -92,10 +92,46 @@ crashed scan lands in `error` rather than being mistaken for either real outcome
 Reporting "no findings" for a scan that never ran would be the worst thing this
 gate could do.
 
-For the same reason, when `manage_approval_state` is on, approval is only ever set
-to `APPROVE`, and only on `pass`. An `error` leaves the approval state untouched
-rather than revoking it, so an infrastructure failure cannot be mistaken for a
-security judgment.
+For the same reason, when `manage_approval_state` is on, approval is set to
+`APPROVE` only on `pass`, and to `REVOKE` on `findings` and on `error` alike. This
+paragraph used to say an `error` left the state untouched, on the reasoning that an
+infrastructure failure should not look like a security judgment; the code does not
+do that and should not. A pull request approved on an earlier clean commit, then
+pushed to, would keep the approval the gate itself granted on code it has now
+declined to assess — invisible to a reviewer reading the pull request. An
+over-eager `REVOKE` is visible and self-correcting: the next clean run re-approves.
+
+## The scan does not run with the environment the image gives it
+
+Lambda runs a container image with a read-only root filesystem — only `/tmp` is
+writable — and replaces `PATH` with its own. Every path the ASH image points a
+scanner at is therefore unwritable at scan time: the three data caches the base
+image sets (`GRYPE_DB_CACHE_DIR`, `SEMGREP_RULES_CACHE_DIR` and
+`OPENGREP_RULES_CACHE_DIR`, under `/deps`), `HOME`, and uv's cache and tool
+directory. A scan that inherits them reports most scanners `MISSING` or `ERROR`
+and grype `PASSED` with zero findings.
+
+So the handler builds the scan's environment itself, redirecting all of those into
+`/tmp` and then seeding each redirected path from the location the image recorded
+at build time. The `ash-image-pipeline` module bakes those locations into the
+shared image as `ASH_IMAGE_PATH` and four `ASH_BAKED_*` variables; read off the
+build stage rather than hardcoded, because `ash_image_target` decides which ASH
+stage is wrapped and the stages do not agree on `HOME`. Baked directories are
+symlinked and baked files are copied, so a scanner that rewrites its own rules
+file writes to `/tmp` rather than failing against the read-only layer.
+
+**`ash_offline_mode = true` now fails the gate when the databases are not
+reachable.** Redirecting a cache makes it writable and, on its own, makes it
+empty — and grype with no vulnerability database reports no findings, which on a
+gate is indistinguishable from a clean repository. With `ASH_OFFLINE` set, the
+handler checks each redirected cache after seeding and reports `error` if any is
+still empty, rather than scanning. That is a behavior change for an adopter whose
+base image was built with `ash_offline_mode = true` on the gate but without the
+databases in the image: it used to pass, and it was passing without scanning.
+Rebuild the shared image with `ash_offline_mode = true` so the database and
+rulesets are baked in, or set it to `false` so the scanners may fetch them. An
+online scan with an empty cache logs a warning and proceeds, because it can still
+fetch what it needs.
 
 ## Variables
 

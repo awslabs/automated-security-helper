@@ -34,6 +34,29 @@ describe('Fargate MCP service', () => {
     expect(rendered).toContain(ASH_PARAMETER_NAMES.mcpAllowedHost);
   });
 
+  test('this target does NOT opt into the stateless fallback', () => {
+    /*
+     * The AgentCore stack sets ASH_MCP_STATELESS_FALLBACK=warn so its shipped
+     * defaults start; this one deliberately does not, and the asymmetry is the
+     * point rather than an oversight. Behind a load balancer that may route
+     * consecutive requests to different replicas, a stateful server is wrong for a
+     * reason no measurement here excuses -- AgentCore's evidence is specific to
+     * AgentCore. So this target keeps exiting 65 until its AshVersion can serve
+     * stateless.
+     *
+     * Asserted as an absence because that is what the entrypoint reads: unset means
+     * refuse. A test that only checked AgentCore's side would let this variable be
+     * added here by a well-meaning copy and never say so.
+     */
+    const defs = new Capture();
+    template.hasResourceProperties('AWS::ECS::TaskDefinition', {
+      ContainerDefinitions: defs,
+    });
+    expect(JSON.stringify(defs.asArray())).not.toContain(
+      'ASH_MCP_STATELESS_FALLBACK',
+    );
+  });
+
   test('the health check tolerates the MCP path answering only POST', () => {
     // A GET against the mount path is not a valid MCP request, so a default
     // 200-only check would fail a healthy server. 400-405 proves the process is

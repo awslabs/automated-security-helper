@@ -93,12 +93,9 @@ class TestExternalPluginImplementation:
 
     def test_converter_implementation(self):
         """Test that a converter plugin can implement the IConverter interface."""
-        pass
 
     def test_scanner_implementation(self):
         """Test that a scanner plugin can implement the IScanner interface."""
-        pass
 
     def test_reporter_implementation(self):
         """Test that a reporter plugin can implement the IReporter interface."""
-        pass

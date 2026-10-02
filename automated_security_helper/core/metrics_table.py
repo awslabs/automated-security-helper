@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 from rich.text import Text
 from rich.panel import Panel
@@ -181,10 +182,11 @@ def print_coverage_shortfalls(
     This rendering does not touch the status or the exit code, and neither claim generalizes past
     this function. A sibling change ORs ``any_target_errored`` into the ``error`` flag, so a tree
     that lost ALL its targets does now move the rolled-up status to ERROR -- see the CHANGELOG's
-    breaking-change entry. What is genuinely untouched by the whole change is the DEFAULT exit
-    code: ``_compute_exit_code`` reaches the coverage list only once
-    ``--fail-on-incomplete-scanners`` resolves true. Whether a partial scan should fail is a
-    policy question about pipelines, it is answered by that flag, and it is not one this rendering
+    breaking-change entry. ``_compute_exit_code`` reaches the coverage list once
+    ``--fail-on-incomplete-scanners`` resolves true, which since that flag's default became True
+    is the default path too -- so a partial-coverage scan does now move the default exit code.
+    That is the flag's doing rather than this rendering's: whether a partial scan should fail is a
+    policy question about pipelines, it is answered there, and it is not one this rendering
     decides.
     """
     shortfalls = coverage_shortfalls(asharp_model)
@@ -198,6 +200,28 @@ def print_coverage_shortfalls(
             f"contributed no findings. See the scanner's exitCodeDescription in its SARIF "
             f"report for the reason per target."
         )
+
+
+def print_stale_content_databases(
+    asharp_model: AshAggregatedResults, console: Console
+) -> None:
+    """One line per scanner content database past its declared bound, after the table.
+
+    Printed under both policies. Under `content_db_staleness: fail` the scan is about to exit
+    1 and this says why next to the row that otherwise reads PASSED; under `warn` the scan
+    passes and this is the console's only statement that it ran against a stale database.
+    """
+    from automated_security_helper.utils.content_db_staleness import (
+        stale_content_databases,
+    )
+
+    for record in stale_content_databases(asharp_model):
+        label = (
+            "[bold red]Stale content database:[/bold red]"
+            if record.enforced
+            else "[bold yellow]Stale content database (warning):[/bold yellow]"
+        )
+        console.print(f"{label} {escape(record.message())}")
 
 
 def display_metrics_table(
@@ -296,6 +320,7 @@ def display_metrics_table(
             # guarded block because it writes to the same console: a closed stdout has to be
             # handled identically for both, and a shortfall notice is not worth failing a scan.
             print_coverage_shortfalls(asharp_model, console)
+            print_stale_content_databases(asharp_model, console)
         except (ValueError, OSError, BrokenPipeError) as io_error:
             # stdout/stderr may be closed (e.g., in MCP server context)
             # Log the error but don't fail the scan

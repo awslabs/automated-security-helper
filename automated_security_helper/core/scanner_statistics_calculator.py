@@ -36,8 +36,9 @@ from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     ScannerSeverityCount,
 )
-from automated_security_helper.schemas.sarif_schema_model import PropertyBag
 from automated_security_helper.utils.log import ASH_LOGGER
+from automated_security_helper.utils.scanner_names import SCANNER_TAG_NAMES
+from automated_security_helper.utils.severity_ladder import severity_fails_threshold
 
 
 class ScannerStatisticsCalculator:
@@ -354,7 +355,9 @@ class ScannerStatisticsCalculator:
                 result_scanner = (
                     ScannerStatisticsCalculator._get_scanner_name_from_result(result)
                 )
-                if not (result_scanner and result_scanner.lower() == scanner_name.lower()):
+                if not (
+                    result_scanner and result_scanner.lower() == scanner_name.lower()
+                ):
                     continue
 
                 if result.suppressions and len(result.suppressions) > 0:
@@ -362,7 +365,14 @@ class ScannerStatisticsCalculator:
                 else:
                     counts.increment(_resolve_result_severity(result))
 
-        return counts.suppressed, counts.critical, counts.high, counts.medium, counts.low, counts.info
+        return (
+            counts.suppressed,
+            counts.critical,
+            counts.high,
+            counts.medium,
+            counts.low,
+            counts.info,
+        )
 
     @staticmethod
     def _get_scanner_name_from_result(result: Any) -> Optional[str]:
@@ -396,18 +406,10 @@ class ScannerStatisticsCalculator:
         # Check for tags that might indicate scanner name
         if result.properties and hasattr(result.properties, "tags"):
             for tag in result.properties.tags:
-                # Common scanner names that might appear in tags
-                if tag.lower() in [
-                    "bandit",
-                    "semgrep",
-                    "checkov",
-                    "cfn-nag",
-                    "cdk-nag",
-                    "detect-secrets",
-                    "grype",
-                    "syft",
-                    "npm-audit",
-                ]:
+                # Shared with models/flat_vulnerability.py rather than repeated here.
+                # This list and that one were both written before opengrep shipped and
+                # neither was updated, so the two agreed only by both being wrong.
+                if tag.lower() in SCANNER_TAG_NAMES:
                     return tag
 
         # If we can't determine the scanner from the result, return None
@@ -430,6 +432,28 @@ class ScannerStatisticsCalculator:
         - "HIGH": Findings of high severity or higher are actionable (critical, high)
         - "CRITICAL": Only critical findings are actionable
 
+        Delegated to ``utils.severity_ladder`` rather than encoded here. This used to
+        be a fifth copy of the ladder, and it was the only copy whose unrecognised
+        arm returned 0 instead of counting something -- so an off-table threshold
+        made every scanner report zero actionable findings at every severity, and
+        the summary table, ``summary_stats``, ``ash.flat.json`` and the Actionable
+        column all read clean over real findings. An unrecognised threshold now
+        gates on critical only, which is what ``determine_status`` and the junitxml
+        reporter already do with one; the load-bearing property is that it is not
+        zero, because zero is the one answer that describes a scan that found
+        nothing.
+
+        Case-sensitive on *threshold*, inherited from the ladder and deliberately
+        not papered over here: upper-casing in this consumer alone would make
+        ``"medium"`` gate at MEDIUM here and at CRITICAL everywhere else, which is
+        the divergence the delegation exists to remove. Normalisation belongs at
+        the boundary the value arrives through -- ``core.constants`` for the
+        environment variable.
+
+        A falsy threshold still counts nothing, and that is not the same state as
+        an unrecognised one: ``None`` and ``""`` are how an operator turns the gate
+        off, and the ladder preserves that reading.
+
         Args:
             critical: Number of critical findings
             high: Number of high findings
@@ -441,19 +465,18 @@ class ScannerStatisticsCalculator:
         Returns:
             Number of actionable findings based on the threshold
         """
-        match threshold:
-            case "ALL":
-                return critical + high + medium + low + info
-            case "LOW":
-                return critical + high + medium + low
-            case "MEDIUM":
-                return critical + high + medium
-            case "HIGH":
-                return critical + high
-            case "CRITICAL":
-                return critical
-            case _:
-                return 0
+        counts = {
+            "CRITICAL": critical,
+            "HIGH": high,
+            "MEDIUM": medium,
+            "LOW": low,
+            "INFO": info,
+        }
+        return sum(
+            count
+            for severity, count in counts.items()
+            if severity_fails_threshold(severity, threshold)
+        )
 
     @staticmethod
     def get_scanner_threshold_info(

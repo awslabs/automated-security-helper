@@ -108,10 +108,22 @@ ash report --format html --output-dir ./my-scan-results
 
 ### Where is the ASH configuration file located?
 By default, ASH looks for a configuration file in the following locations (in order):
-1. `.ash/.ash.yaml`
+1. `.ash.yml`
 2. `.ash/.ash.yml`
 3. `.ash.yaml`
-4. `.ash.yml`
+4. `.ash/.ash.yaml`
+5. `.ash.json`
+6. `.ash/.ash.json`
+7. `ash.yml`
+8. `.ash/ash.yml`
+9. `ash.yaml`
+10. `.ash/ash.yaml`
+11. `ash.json`
+12. `.ash/ash.json`
+
+The first match wins, and the order is per-filename rather than per-directory:
+for each name ASH checks the source directory first, then its `.ash/`
+subdirectory.
 
 ### How do I create a configuration file?
 ```bash
@@ -132,8 +144,8 @@ ash --config-overrides 'global_settings.severity_threshold=LOW'
 
 ### What security scanners are included in ASH v3?
 ASH v3 integrates multiple open-source security tools. Tools like Bandit, Checkov, and Semgrep are managed via UV's tool isolation system, which automatically installs and runs them in isolated environments:
-- Bandit (Python SAST) - Managed via UV tool isolation (auto-installed: `bandit>=1.7.0`)
-- Semgrep (Multi-language SAST) - Managed via UV tool isolation (auto-installed: `semgrep>=1.125.0`)
+- Bandit (Python SAST) - Managed via UV tool isolation (auto-installed: `bandit>=1.7.0,<2.0.0`)
+- Semgrep (Multi-language SAST) - Managed via UV tool isolation (auto-installed: `semgrep>=1.125.0,<2.0.0`)
 - detect-secrets (Secret detection) - Included with ASH
 - Checkov (IaC scanning) - Managed via UV tool isolation (auto-installed: `checkov>=3.2.0,<4.0.0`)
 - cfn_nag (CloudFormation scanning) - Requires separate installation
@@ -189,9 +201,7 @@ from automated_security_helper.interactions.run_ash_scan import run_ash_scan
 from automated_security_helper.core.enums import RunMode
 
 results = run_ash_scan(
-    source_dir="/path/to/code",
-    output_dir="/path/to/output",
-    mode=RunMode.local
+    source_dir="/path/to/code", output_dir="/path/to/output", mode=RunMode.local
 )
 ```
 

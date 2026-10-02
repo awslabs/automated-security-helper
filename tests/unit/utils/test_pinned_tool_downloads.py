@@ -257,7 +257,10 @@ class TestIdempotence:
         other_digest = hashlib.sha256(other_payload).hexdigest()
         assert other_digest != real_digest
 
-        with _pin(_grype_asset_filename(), other_digest), _serve(other_payload) as served:
+        with (
+            _pin(_grype_asset_filename(), other_digest),
+            _serve(other_payload) as served,
+        ):
             install_pinned_tool("grype", "linux", "amd64", bin_dir)
         assert served.called
         assert read_receipt(bin_dir, "grype")["sha256"] == other_digest
@@ -409,9 +412,7 @@ class TestIdempotence:
                 "anchor"
             )
 
-    @pytest.mark.skipif(
-        platform.system() == "Windows", reason="POSIX mode bits only"
-    )
+    @pytest.mark.skipif(platform.system() == "Windows", reason="POSIX mode bits only")
     def test_a_group_writable_receipt_is_not_trusted(
         self, tmp_path, monkeypatch, fake_grype_release
     ):
@@ -637,9 +638,7 @@ class TestUnarchivedDownloadPath:
         assert not (bin_dir / "opengrep").is_symlink()
         assert (bin_dir / "opengrep").read_bytes() == PAYLOAD
 
-    @pytest.mark.skipif(
-        platform.system() == "Windows", reason="POSIX mode bits only"
-    )
+    @pytest.mark.skipif(platform.system() == "Windows", reason="POSIX mode bits only")
     def test_make_executable_refuses_to_act_through_a_symlink(self, tmp_path):
         """Path.chmod follows links, so it would have made the target executable."""
         victim = tmp_path / "victim.txt"
@@ -1140,11 +1139,15 @@ class TestAssetResolution:
         binary that fails at exec time, and that shows up in a scan report as an
         execution failure rather than as a tool that was never installable.
         """
-        with pytest.raises(ToolNotProvisionableError, match="publishes no release asset"):
+        with pytest.raises(
+            ToolNotProvisionableError, match="publishes no release asset"
+        ):
             get_tool_asset(tool, "windows", "arm64")
 
     def test_unknown_tool_is_refused(self):
-        with pytest.raises(ToolNotProvisionableError, match="no release-asset download"):
+        with pytest.raises(
+            ToolNotProvisionableError, match="no release-asset download"
+        ):
             get_tool_asset("nonexistent", "linux", "amd64")
 
     def test_windows_assets_install_with_exe_suffix(self):
@@ -1200,13 +1203,17 @@ class TestAssetResolution:
 
         repo_root = Path(__file__).parents[3]
         source = (
-            repo_root / "automated_security_helper" / "utils" / "tool_downloads.py"
-        ).read_text(encoding="utf-8").splitlines()
+            (repo_root / "automated_security_helper" / "utils" / "tool_downloads.py")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        )
         # 1-based, matching how the suppression and every editor count lines.
         opens = next(
             i + 1 for i, line in enumerate(source) if line.startswith("_DIGESTS")
         )
-        closes = next(i + 1 for i, line in enumerate(source[opens:], opens) if line == "}")
+        closes = next(
+            i + 1 for i, line in enumerate(source[opens:], opens) if line == "}"
+        )
 
         config = yaml.safe_load(
             (repo_root / ".ash" / ".ash_community_plugins.yaml").read_text(

@@ -583,6 +583,58 @@ def incomplete_scanners_for_project(results: Any) -> List[str]:
     return [name for name, _status in incomplete_scanners(results)]
 
 
+def no_scanner_ran_for_project(results: Any) -> bool:
+    """Whether this project recorded scanners and none of them reached a verdict.
+
+    The set-level counterpart to ``incomplete_scanners_for_project`` above, and not
+    implied by it. That function asks the question of each entry, and it has to
+    tolerate SKIPPED one entry at a time -- SKIPPED is how ``--exclude-scanners``
+    and another shard's ownership are recorded -- so a project in which *every*
+    entry is SKIPPED clears it having measured nothing. Single-project mode asks
+    both questions, in this order, inside ``_compute_exit_code``; the workspace
+    layer asked only the first, so such a project reported zero findings, COMPLETED
+    and exit 0 while ``ash --source-dir P`` on the same project exited 1.
+
+    Delegates for the same reason its sibling does, and the delegation carries one
+    decision that is easy to get wrong by copying: an *empty* scanner set is not
+    this condition **on its own**. It is what ``--phases convert`` legitimately
+    produces, and a mirrored version that tested emptiness would fail every
+    convert-only project in a workspace.
+
+    Emptiness alone cannot separate that from the silent zero, though, which is why
+    ``no_scanner_ran`` takes a second argument. An empty set covers both "the scan
+    phase was not requested" and "the scan phase ran and had nothing to run", and
+    ``metadata.expected_scanners`` is what tells them apart: ``ScanPhase`` is what
+    records the roster, so a roster means the phase ran. The roster is passed here
+    for the same reason ``_compute_exit_code`` passes it -- reading it from the same
+    field in both places is what keeps this layer's answer and ``ash --source-dir
+    P``'s from diverging, which is the whole point of the sibling above. A project
+    with no roster and no scanners keeps the benign reading.
+
+    Imported inside the function because ``run_ash_scan`` imports this package's
+    ``execution`` module for workspace mode; a module-level import closes that into
+    a cycle.
+
+    Args:
+        results: One project's ``AshAggregatedResults``, or ``None``.
+
+    Returns:
+        True when at least one scanner was recorded and not one of them reached a
+        verdict, and when no scanner was recorded but a roster says the scan phase
+        ran. False for ``None``, which is the crashed-scan case the caller already
+        reports as FAILED.
+    """
+    from automated_security_helper.interactions.run_ash_scan import (
+        no_scanner_ran,
+        scanner_statuses,
+    )
+
+    expected = list(
+        getattr(getattr(results, "metadata", None), "expected_scanners", None) or []
+    )
+    return no_scanner_ran(scanner_statuses(results), expected)
+
+
 def _worse_status(left: Optional[str], right: Optional[str]) -> Optional[str]:
     """Whichever scanner status is worse news, for the workspace-level rollup."""
     if left is None:
@@ -682,9 +734,7 @@ class WorkspaceAggregator:
                 # derivations of one number disagree the moment a workspace
                 # ceiling tightened anything: the project reported 1 actionable
                 # and this split summed to 0, with no rule for which to trust.
-                actionable = count_actionable_results(
-                    results, project.gate_threshold
-                )
+                actionable = count_actionable_results(results, project.gate_threshold)
                 self._scanner_actionable[name] = (
                     self._scanner_actionable.get(name, 0) + actionable
                 )
@@ -842,8 +892,10 @@ class WorkspaceAggregator:
         try:
             with open(target, "w", encoding="utf-8") as handle:
                 handle.write("{\n")
-                for key, value in header.items():
-                    handle.write(f"{json.dumps(key)}: {json.dumps(value)},\n")
+                handle.writelines(
+                    f"{json.dumps(key)}: {json.dumps(value)},\n"
+                    for key, value in header.items()
+                )
                 handle.write('"sarif": {"version": "2.1.0", "runs": [')
                 for position, spool in enumerate(ordered_spools):
                     if position:

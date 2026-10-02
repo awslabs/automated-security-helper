@@ -50,21 +50,46 @@ the ones that pass and reporting success is the failure mode workspace mode exis
 to avoid: a green result covering fewer projects than the operator believes, with
 the passing projects supplying the reassurance.
 
-Two things are deliberately *not* confined: the ``.code-workspace`` file and the
-``--workspace-config`` policy file. ``ASH_MCP_ALLOWED_ROOTS`` answers "which
-directories may the server read source from and write an output tree into", and
-neither of those is that -- each is read once, nothing is written near it, and
-``mcp_scan_directory`` already leaves ``config_path`` outside the policy for the
-same reason. Confining them would break the ordinary deployment where definitions
-and a shared policy live beside checkouts rather than inside one.
+Both tools take a ``session_id``, and it is load-bearing rather than
+informational. Confinement grants a session its own sandbox by passing the id to
+``validate_scan_target``; without it, a ``.code-workspace`` file inside a tree the
+client had just delivered over the protocol had every one of its projects refused
+by the boundary that exists to permit exactly that, because no operator lists a
+directory the server invented per connection.
+
+The config inputs are confined too, and that reverses an earlier decision
+------------------------------------------------------------------------
+The ``.code-workspace`` file and the ``--workspace-config`` policy file used to be
+deliberately unconfined, on the argument that ``ASH_MCP_ALLOWED_ROOTS`` answers
+"which directories may the server read source from and write an output tree into"
+and neither of those is that: each is read once, nothing is written near it, and
+``mcp_scan_directory`` left ``config_path`` outside the policy for the same reason.
+Half of that is still true and the conclusion does not follow. Reading a
+caller-named path is a capability in its own right, and an unconfined one is a
+file-read oracle -- point ``workspace_file`` at any path on the server and the
+parse error or the resolved plan reports something about its content. The read
+happens during resolution, before any project directory exists, so confining the
+projects does not cover it. That made the *more* interesting half of this surface
+the open one. ``config_path`` being unconfined too was a second instance of the
+same defect rather than a precedent for it, and it is now confined as well.
+
+Both now go through ``sandbox.validate_config_input``, which bites on a network
+transport only. On stdio the caller launched this server and can already read any
+file the server can, so the oracle is not a capability it gains there, and
+confining would refuse the ordinary deployment where a definition and a shared
+policy live beside checkouts rather than inside one. On a network transport that
+deployment is served by ``ASH_MCP_ALLOWED_CONFIG_ROOTS`` instead of by confining
+nothing.
 
 Ordering is forced, not chosen
 ------------------------------
-Resolve, then confine, then execute. Confinement needs the resolved project
-directories, which only resolution produces, so a workspace that is both malformed
-and outside the roots reports the malformation -- which is what the operator can
-act on. Every filesystem write, including the ``clean_output`` deletion, happens
-after confinement.
+Confine the config inputs, then resolve, then confine the projects, then execute.
+The config gate has to precede resolution, because resolution is the read it
+guards. Project confinement cannot precede resolution, because it needs the
+resolved project directories -- so a workspace that is both malformed and outside
+the roots reports the malformation, which is what the operator can act on. Every
+filesystem write, including the ``clean_output`` deletion, happens after both
+gates.
 
 Failure modes and known limitations
 -----------------------------------
@@ -87,7 +112,17 @@ import asyncio
 import os
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    FrozenSet,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+)
 
 from automated_security_helper.cli.mcp.progress_monitor import (
     monitor_workspace_progress,
@@ -112,13 +147,18 @@ from automated_security_helper.core.resource_management.scan_registry import (
     MCScanStatus,
     get_scan_registry,
 )
+from automated_security_helper.core.resource_management.scan_tracking import (
+    coverage_has_gap,
+)
 from automated_security_helper.interactions.run_ash_scan import (
     ScanOptions,
     build_project_scan_settings,
+    incomplete_scanner_reason,
 )
 from automated_security_helper.models.workspace import (
     ProjectRunStatus,
     WorkspaceExitCode,
+    WorkspaceProjectResult,
     WorkspaceResults,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -152,6 +192,10 @@ _UNSTATED_SEVERITY_THRESHOLD = "MEDIUM"
 #: inspect a workspace file that is correct, and reporting an invalid project
 #: config as 4 rather than 3 routes it to the wrong person -- 4 means the
 #: operator's workspace definition is wrong, 3 means one project's own config is.
+#: ``ProfileNotRegisteredError`` is listed first and deliberately: it subclasses
+#: ``ValueError``, not ``WorkspaceDefinitionError``, so ordering is not what
+#: separates them -- but keeping it at the top makes the mapping read in the order
+#: a reader will ask about, most-specific first.
 _EXIT_CODE_BY_EXCEPTION: Tuple[Tuple[type, WorkspaceExitCode], ...] = (
     (WorkspaceDefinitionError, WorkspaceExitCode.WORKSPACE_ERROR),
     (ASHConfigValidationError, WorkspaceExitCode.INVALID_PROJECT_CONFIG),
@@ -222,6 +266,7 @@ def _resolve(
     workspace_config: Optional[str],
     allow_missing_projects: bool,
     config_overrides: Optional[Sequence[str]],
+    default_config: Optional[str] = None,
 ) -> WorkspacePlan:
     """Resolve the workspace, or raise.
 
@@ -229,6 +274,13 @@ def _resolve(
     search when it is absent: ``resolve_workspace`` refuses a named policy file
     that does not exist, and falling back to searching would apply different
     policy than the one asked for, silently.
+
+    ``default_config`` is the session's profile, and it has to be passed here as
+    well as to the settings builder. Resolution is what computes each project's
+    reported threshold, so a profile that reached only execution would make
+    ``mcp_resolve_workspace`` report a plan the scan does not run -- and a dry run
+    that describes a different scan is worse than no dry run, because it is the
+    artifact a client checks before committing to N repository scans.
     """
     return resolve_workspace(
         Path(workspace_file),
@@ -237,6 +289,7 @@ def _resolve(
             Path(workspace_config) if workspace_config is not None else None
         ),
         config_overrides=tuple(config_overrides or ()),
+        default_config=Path(default_config) if default_config else None,
     )
 
 
@@ -272,8 +325,48 @@ def _plan_projects(plan: WorkspacePlan) -> List[Dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
+def _refuse_config_inputs_outside_the_permitted_roots(
+    workspace_file: str,
+    workspace_config: Optional[str],
+    session_id: Optional[str],
+) -> Optional[MCPResourceError]:
+    """Validate the two caller-named config paths before either is read.
+
+    Before, not after, because resolution *is* the read this guards: a refusal
+    reported afterwards would have already answered the question the caller was
+    using the tool to ask. That is the one place in this module where a gate
+    precedes resolution, and the reason is that its subject is an argument rather
+    than something resolution produces.
+
+    Only these two. The per-project ``.ash.yaml`` files a workspace pulls in are
+    not caller-named -- each is found inside a project directory that project
+    confinement has already accepted -- so gating them here would re-check a
+    decision already made and would refuse a legitimate in-tree config on a
+    deployment that granted the tree but not its own path as a config root.
+    """
+
+    from automated_security_helper.cli.mcp.sandbox import validate_config_input
+
+    for label, candidate in (
+        ("workspace definition", workspace_file),
+        ("workspace policy", workspace_config),
+    ):
+        if candidate is None:
+            continue
+        refusal = validate_config_input(candidate, session_id=session_id)
+        if refusal is None:
+            continue
+        return MCPResourceError(
+            f"Workspace scan refused: the {label} file is outside the "
+            f"directories this server may read config from. {refusal}",
+            context=dict(refusal.context, config_input=label),
+        )
+    return None
+
+
 def _refuse_projects_outside_the_permitted_roots(
     plan: WorkspacePlan,
+    session_id: Optional[str] = None,
 ) -> Optional[MCPResourceError]:
     """Validate every project that will be scanned; refuse the whole workspace if any fails.
 
@@ -294,7 +387,13 @@ def _refuse_projects_outside_the_permitted_roots(
     """
     offending: List[Tuple[str, MCPResourceError]] = []
     for project in plan.active_projects:
-        refusal = validate_scan_target(project.path)
+        # The session id is passed for the reason run_ash_scan passes it: this
+        # session's own sandbox counts as a permitted root, so a workspace whose
+        # projects live inside a tree the client delivered over the protocol is
+        # scannable. Without it every such project is refused by the boundary
+        # that exists to permit it, because no operator lists a directory the
+        # server invented per connection.
+        refusal = validate_scan_target(project.path, session_id=session_id)
         if refusal is not None:
             offending.append((project.key, refusal))
 
@@ -333,6 +432,58 @@ def _refuse_projects_outside_the_permitted_roots(
 # ---------------------------------------------------------------------------
 
 
+class ProfileNotRegisteredError(ValueError):
+    """A ``profile`` argument naming something the operator never registered.
+
+    Its own class so ``_error_response`` maps it away from
+    ``WorkspaceDefinitionError``: the operator's workspace file is fine, the
+    client asked for a profile that does not exist, and reporting exit 4 would
+    send somebody to inspect a correct definition.
+    """
+
+
+def _resolve_session_config(
+    session_id: Optional[str],
+    profile: Optional[str],
+) -> Optional[str]:
+    """Return the config path a workspace scan should run under, or None.
+
+    Two sources, in order of specificity:
+
+    * ``profile``, naming a registered profile for this one call. Materialized
+      into the session's sandbox the same way ``select_profile`` does, so one code
+      path produces the file and one boundary covers it.
+    * the config this session already bound with ``select_profile``.
+
+    None means neither applies, and then nothing is passed -- each project's own
+    ``.ash.yaml`` discovery runs as it always has. Inventing a path here would
+    scan every project under configuration nobody chose.
+
+    An unknown ``profile`` raises rather than falling back. A workspace scan is N
+    repository scans; running them all under the default config because a profile
+    name was misspelled, and reporting success, is the class of outcome this
+    module's confinement refusal exists to prevent.
+    """
+
+    from automated_security_helper.cli.mcp.profile_registry import (
+        get_profile_registry,
+        materialize_session_config,
+        resolve_session_config_path,
+    )
+
+    if profile is not None:
+        registry = get_profile_registry()
+        entry = registry.get(profile)
+        if entry is None:
+            known = ", ".join(sorted(registry)) or "none registered"
+            raise ProfileNotRegisteredError(
+                f"unknown profile {profile!r}; known: {known}"
+            )
+        return materialize_session_config(session_id, entry.config)
+
+    return resolve_session_config_path(session_id)
+
+
 def _scan_options(
     plan: WorkspacePlan,
     *,
@@ -342,6 +493,7 @@ def _scan_options(
     excluded_scanners: Optional[Sequence[str]],
     offline: bool,
     allow_missing_projects: bool,
+    config_path: Optional[str] = None,
 ) -> ScanOptions:
     """Assemble the ``ScanOptions`` the shared settings builder reads.
 
@@ -365,6 +517,10 @@ def _scan_options(
         output_dir=(
             Path(output_dir) if output_dir else workspace_root / ".ash" / "ash_output"
         ),
+        # The session's bound or per-call profile config, or None. Passed through
+        # the shared builder rather than set on the settings record afterwards, so
+        # the CLI and MCP paths cannot disagree about which field carries it.
+        config=config_path,
         workspace_plan=plan,
         allow_missing_projects=allow_missing_projects,
         config_overrides=list(config_overrides or []),
@@ -449,6 +605,14 @@ def _register_projects(
         for scan_id in registered.values():
             registry.update_scan_status(scan_id, MCScanStatus.CANCELLED)
         raise
+    # Claimed as RUNNING, because this call owns every entry's lifecycle from here
+    # and closes each one in _close_registrations. That matters to
+    # check_scan_progress: an unclaimed PENDING entry takes its status from the
+    # results file, and a project's SCAN phase writes a readable one before its
+    # REPORT phase has run, so a PENDING project would read as completed while its
+    # reports were still being written.
+    for scan_id in registered.values():
+        registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
     return registered
 
 
@@ -472,9 +636,7 @@ def _close_registrations(
     )
     for key, scan_id in registered.items():
         if error is not None:
-            registry.update_scan_status(
-                scan_id, MCScanStatus.FAILED, error_message=error
-            )
+            registry.finish_scan(scan_id, MCScanStatus.FAILED, error_message=error)
             continue
         outcome = outcomes.get(key)
         if outcome is None:
@@ -489,15 +651,68 @@ def _close_registrations(
             # ``.get(None, COMPLETED)``: that reached the same result by looking a
             # None key up in a dict keyed by ProjectRunStatus, which is a type
             # error that happened to behave.
-            registry.update_scan_status(scan_id, MCScanStatus.COMPLETED)
+            registry.finish_scan(scan_id, MCScanStatus.COMPLETED)
             continue
         status = _REGISTRY_STATUS_BY_PROJECT_STATUS.get(
             outcome.status, MCScanStatus.COMPLETED
         )
         if status is MCScanStatus.FAILED:
-            registry.update_scan_status(scan_id, status, error_message=outcome.error)
+            registry.finish_scan(scan_id, status, error_message=outcome.error)
+        elif status is MCScanStatus.COMPLETED:
+            # The single-scan rule, applied per project: a project whose run
+            # finished but whose completeness gate fired is incomplete, not
+            # completed. scan_incomplete is the signal because it is the
+            # project's own verdict, computed with the gate and the
+            # policy-scanner exclusion already applied; re-deriving it from
+            # incomplete_scanners here would ignore both.
+            coverage = _project_coverage(outcome)
+            if outcome.scan_incomplete and coverage_has_gap(coverage):
+                registry.finish_scan(
+                    scan_id, MCScanStatus.INCOMPLETE, coverage=coverage
+                )
+            else:
+                registry.finish_scan(scan_id, status, coverage=coverage)
         else:
-            registry.update_scan_status(scan_id, status)
+            registry.finish_scan(scan_id, status)
+
+
+def _project_coverage(outcome: WorkspaceProjectResult) -> Dict[str, Any]:
+    """One project's coverage, in the shape a single scan's progress reports it.
+
+    Built from the facts the project's outcome already carries, so a client
+    polling a workspace project and one polling a single scan read the same keys.
+    ``incomplete_converters`` and ``unevaluated_rules`` are empty because a
+    project's outcome does not record them, and neither of them feeds
+    ``scan_incomplete``. ``stale_content_databases`` is empty for the first of
+    those reasons only: a stale database does fail the project, and the outcome
+    names its scanner in ``incomplete_scanners`` rather than carrying a record
+    of its own.
+    """
+    statuses = outcome.scanners or {}
+    rows = []
+    for name in outcome.incomplete_scanners:
+        status = str(statuses.get(name, ""))
+        rows.append(
+            {
+                "scanner": name,
+                "status": status,
+                "reason": incomplete_scanner_reason(status),
+                "detail": status,
+            }
+        )
+    return {
+        "incomplete_scanners": rows,
+        "no_scanner_ran": bool(outcome.no_scanner_ran),
+        "incomplete_converters": [],
+        "unevaluated_rules": [],
+        "stale_content_databases": [],
+    }
+
+
+#: Declared ``WorkspaceProjectResult`` fields deliberately withheld from the MCP
+#: response. Empty: every field a project's outcome declares is something a client
+#: reading that outcome needs. An entry added here must say why.
+_WITHHELD_PROJECT_FIELDS: FrozenSet[str] = frozenset()
 
 
 def _project_verdicts(
@@ -507,27 +722,61 @@ def _project_verdicts(
 
     Per project and not merged, because the first question about a workspace scan
     is which project failed and a merged count cannot answer it.
+
+    DERIVED from the model rather than hand-listed, and that is the fix for a
+    defect rather than a tidy-up. This function used to build a closed dict naming
+    each field, and it named 14 of the 19 the model declared at the time: five --
+    ``scanners``, ``incomplete_scanners``, ``scan_incomplete``,
+    ``ceiling_unreachable_findings`` and ``sarif_run_index`` -- were declared on
+    ``WorkspaceProjectResult`` and silently absent from every response. Nothing
+    else under ``cli/mcp/`` mentioned either completeness field, so an MCP client
+    had no way at all to learn that a project's scanners did not run -- it saw
+    ``finding_count: 0`` and a COMPLETED status. Deriving the projection means the
+    next field added to the model cannot fail to propagate, which is what
+    ``tests/unit/cli/mcp/test_workspace_verdict_projection.py`` asserts by comparing
+    the response's key set against ``model_fields``.
+
+    ``include=`` restricts the dump to *declared* fields. The model sets
+    ``extra="allow"``, so an unrestricted dump would also emit whatever a
+    forward-compatible producer attached, making the response shape depend on the
+    input rather than on the contract. ``mode="json"`` is what turns
+    ``ProjectRunStatus`` and ``SkippedProjectReason`` into their string values; it
+    replaces the per-field ``_enum_value`` calls this function used to make, and it
+    covers a future enum-typed field that those calls would have missed.
     """
-    return [
-        {
-            "project": entry.project,
-            "display_label": entry.display_label,
-            "relative_path": entry.relative_path,
-            "status": _enum_value(entry.status),
-            "severity_threshold": entry.severity_threshold,
-            "finding_count": entry.finding_count,
-            "actionable_finding_count": entry.actionable_finding_count,
-            "exceeds_threshold": entry.exceeds_threshold,
-            "duration_seconds": entry.duration_seconds,
-            "output_path": entry.output_path,
-            "scan_id": scan_ids.get(entry.project),
-            "skip_reason": _enum_value(entry.skip_reason),
-            "skip_detail": entry.skip_detail,
-            "error": entry.error,
-            "invalid_config": entry.invalid_config,
-        }
-        for entry in payload.projects
-    ]
+    projected = set(WorkspaceProjectResult.model_fields) - _WITHHELD_PROJECT_FIELDS
+    verdicts: List[Dict[str, Any]] = []
+    for entry in payload.projects:
+        verdict = entry.model_dump(mode="json", include=projected)
+        verdict["scan_id"] = scan_ids.get(entry.project)
+        verdicts.append(verdict)
+    return verdicts
+
+
+def _workspace_scan_incomplete(payload: WorkspaceResults) -> bool:
+    """Whether any project's scan was too incomplete to trust.
+
+    Surfaced at the top level of the response as well as per project, because the
+    common client shape for this tool is a gate that reads the envelope and never
+    walks ``projects``. Such a client saw ``exit_code`` with no statement of why,
+    and an incomplete workspace and a failed one share code 1.
+    """
+    return any(entry.scan_incomplete for entry in payload.projects)
+
+
+def _workspace_ceiling_unreachable(payload: WorkspaceResults) -> Dict[str, int]:
+    """Per scanner, how many findings the severity ceiling could not affect.
+
+    Summed across projects for the same envelope-reading client. Echoed rather
+    than left per-project because it qualifies what the verdict means: a ceiling
+    that did not reach some findings did not tighten the gate for them, so a pass
+    at that ceiling is a weaker statement than it looks.
+    """
+    totals: Dict[str, int] = {}
+    for entry in payload.projects:
+        for scanner, count in (entry.ceiling_unreachable_findings or {}).items():
+            totals[scanner] = totals.get(scanner, 0) + count
+    return totals
 
 
 async def _execute(
@@ -603,6 +852,8 @@ async def mcp_resolve_workspace(
     workspace_config: Optional[str] = None,
     allow_missing_projects: bool = False,
     config_overrides: Optional[List[str]] = None,
+    session_id: Optional[str] = None,
+    profile: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Resolve a workspace and return the plan. Scans nothing.
 
@@ -617,28 +868,60 @@ async def mcp_resolve_workspace(
     for.
 
     Args:
-        workspace_file: Path to the ``.code-workspace`` definition. Not subject to
-            ``ASH_MCP_ALLOWED_ROOTS``; it is a config input, not a scan target.
+        workspace_file: Path to the ``.code-workspace`` definition. A config
+            input, so it is confined by ``ASH_MCP_ALLOWED_CONFIG_ROOTS`` rather
+            than by ``ASH_MCP_ALLOWED_ROOTS``, and on a network transport only.
         workspace_config: Path to a workspace policy file. Must exist when given;
             ASH does not fall back to searching, because that would apply
-            different policy than the one named. Also not confined.
+            different policy than the one named. Confined the same way.
         allow_missing_projects: Mark absent or unreadable project directories
             skipped instead of refusing the workspace. They stay in the plan, so
             the caller can see which were dropped.
         config_overrides: ``--config-overrides`` values, applied to each project's
             config during resolution so the reported threshold is the one a scan
             would enforce.
+        session_id: The session this call acts for. Lets a workspace inside a tree
+            this session delivered over the protocol resolve, and selects which
+            bound profile applies.
+        profile: A registered profile to resolve under for this one call, instead
+            of whatever this session bound. Unknown names are refused.
 
     Returns:
         On success, ``success`` True, ``exit_code`` 0, the rendered plan under
-        ``plan``, and the same decisions structured under ``projects``. On
-        failure, ``create_error_response``'s keys plus ``exit_code``: 4 for a
-        workspace definition or policy problem, 3 for a project whose own config
-        is invalid, 1 for anything else.
+        ``plan``, the same decisions structured under ``projects``, and
+        ``session_config_path`` -- the config a scan of this plan would run under,
+        or None. That last field is why this tool is worth calling before the
+        scan: a dry run that reported the plan a *different* config would produce
+        is worse than none. On failure, ``create_error_response``'s keys plus
+        ``exit_code``: 4 for a workspace definition, policy or confinement
+        problem, 3 for a project whose own config is invalid, 1 for anything else.
     """
+    refusal = _refuse_config_inputs_outside_the_permitted_roots(
+        workspace_file, workspace_config, session_id
+    )
+    if refusal is not None:
+        return _error_response(
+            refusal,
+            "resolve_workspace",
+            exit_code=int(WorkspaceExitCode.WORKSPACE_ERROR),
+        )
+
+    try:
+        session_config = _resolve_session_config(session_id, profile)
+    except (ProfileNotRegisteredError, OSError, RuntimeError) as exc:
+        return _error_response(
+            exc,
+            "resolve_workspace",
+            exit_code=int(WorkspaceExitCode.INVALID_PROJECT_CONFIG),
+        )
+
     try:
         plan = _resolve(
-            workspace_file, workspace_config, allow_missing_projects, config_overrides
+            workspace_file,
+            workspace_config,
+            allow_missing_projects,
+            config_overrides,
+            default_config=session_config,
         )
     except Exception as exc:  # noqa: BLE001 -- mapped to an exit code, never raised
         return _error_response(exc, "resolve_workspace")
@@ -649,6 +932,8 @@ async def mcp_resolve_workspace(
         "exit_code_meaning": ASH_EXIT_CODES[int(WorkspaceExitCode.SUCCESS)],
         "scanned": False,
         "plan": plan.render(),
+        "session_id": session_id,
+        "session_config_path": session_config,
         "workspace_file": plan.workspace_file,
         "workspace_root": plan.workspace_root,
         "workspace_config_source": plan.workspace_config_source,
@@ -675,6 +960,8 @@ async def mcp_scan_workspace(
     offline: bool = False,
     clean_output: bool = True,
     progress_reporter: Optional[ProgressReporter] = None,
+    session_id: Optional[str] = None,
+    profile: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Scan every active project in a workspace and return the per-project verdict.
 
@@ -685,8 +972,9 @@ async def mcp_scan_workspace(
     filesystem write happens after it.
 
     Args:
-        workspace_file: Path to the ``.code-workspace`` definition. Not confined.
-        workspace_config: Path to a workspace policy file. Not confined.
+        workspace_file: Path to the ``.code-workspace`` definition. Confined as a
+            config input -- see the module docstring on why that changed.
+        workspace_config: Path to a workspace policy file. Confined the same way.
         allow_missing_projects: Skip absent or unreadable project directories
             rather than refusing the workspace. Skipped projects get no registry
             entry and no scan id.
@@ -702,6 +990,15 @@ async def mcp_scan_workspace(
         progress_reporter: An awaitable taking ``progress``, ``total`` and
             ``message``. ``Context.report_progress`` satisfies it. Omitted, no
             progress is emitted and the scan is otherwise identical.
+        session_id: The session this call acts for. Lets a workspace inside a tree
+            this session delivered over the protocol scan, and selects which bound
+            profile applies.
+        profile: A registered profile to scan under for this one call, instead of
+            whatever this session bound. Unknown names refuse the whole scan
+            rather than falling back to the default config: a workspace scan is N
+            repository scans, and running them all under configuration nobody
+            chose while reporting success is what this module refuses everywhere
+            else.
 
     Returns:
         On success, ``success`` True, ``exit_code`` from the workspace run (0, or 2
@@ -717,14 +1014,42 @@ async def mcp_scan_workspace(
         enabled reporter that cannot produce a workspace artifact or a project
         that is not a git repository under precommit.
     """
+    # Before resolution, because resolution is the read this gate guards. Every
+    # other gate in this function runs after it, for the reasons the module
+    # docstring gives.
+    config_refusal = _refuse_config_inputs_outside_the_permitted_roots(
+        workspace_file, workspace_config, session_id
+    )
+    if config_refusal is not None:
+        return _error_response(
+            config_refusal,
+            "scan_workspace",
+            exit_code=int(WorkspaceExitCode.WORKSPACE_ERROR),
+        )
+
+    try:
+        session_config = _resolve_session_config(session_id, profile)
+    except (ProfileNotRegisteredError, OSError, RuntimeError) as exc:
+        return _error_response(
+            exc,
+            "scan_workspace",
+            exit_code=int(WorkspaceExitCode.INVALID_PROJECT_CONFIG),
+        )
+
     try:
         plan = _resolve(
-            workspace_file, workspace_config, allow_missing_projects, config_overrides
+            workspace_file,
+            workspace_config,
+            allow_missing_projects,
+            config_overrides,
+            # Same value the settings builder gets below. They must agree; see
+            # ``_resolve`` and ``ProjectScanSettings.default_config_path``.
+            default_config=session_config,
         )
     except Exception as exc:  # noqa: BLE001 -- mapped to an exit code, never raised
         return _error_response(exc, "scan_workspace")
 
-    refusal = _refuse_projects_outside_the_permitted_roots(plan)
+    refusal = _refuse_projects_outside_the_permitted_roots(plan, session_id)
     if refusal is not None:
         return _error_response(
             refusal,
@@ -749,6 +1074,7 @@ async def mcp_scan_workspace(
                 excluded_scanners=excluded_scanners,
                 offline=offline,
                 allow_missing_projects=allow_missing_projects,
+                config_path=session_config,
             )
         )
         project_outputs = _prepare_project_outputs(
@@ -759,6 +1085,17 @@ async def mcp_scan_workspace(
     except Exception as exc:  # noqa: BLE001 -- mapped to an exit code, never raised
         _close_registrations(registered, None, error=str(exc))
         return _error_response(exc, "scan_workspace")
+    except BaseException as exc:
+        # asyncio.CancelledError, KeyboardInterrupt, SystemExit. _register_projects
+        # claimed these entries as RUNNING, and a RUNNING entry's runner decides
+        # its status, so leaving them open would read as running forever. Closed
+        # as failed, then re-raised so cancellation still propagates.
+        _close_registrations(
+            registered,
+            None,
+            error=f"Workspace scan ended without a result: {type(exc).__name__}",
+        )
+        raise
 
     _close_registrations(registered, result.payload)
 
@@ -772,7 +1109,11 @@ async def mcp_scan_workspace(
         "workspace_config_source": plan.workspace_config_source,
         "output_dir": str(settings.output_dir),
         "results_path": str(result.results_path),
+        "session_id": session_id,
+        "session_config_path": session_config,
         "scan_ids": registered,
+        "scan_incomplete": _workspace_scan_incomplete(result.payload),
+        "ceiling_unreachable_findings": _workspace_ceiling_unreachable(result.payload),
         "projects": _project_verdicts(result.payload, registered),
         "skipped_projects": [
             entry.model_dump(mode="json") for entry in plan.skipped_projects

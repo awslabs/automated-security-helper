@@ -438,16 +438,19 @@ Post summaries to Slack channels:
 import requests
 import json
 
+
 def post_to_slack(summary_file, webhook_url):
-    with open(summary_file, 'r') as f:
+    with open(summary_file, "r") as f:
         summary = f.read()
 
     payload = {
         "text": "Security Scan Summary",
-        "attachments": [{
-            "color": "warning",
-            "text": summary[:1000] + "..." if len(summary) > 1000 else summary
-        }]
+        "attachments": [
+            {
+                "color": "warning",
+                "text": summary[:1000] + "..." if len(summary) > 1000 else summary,
+            }
+        ],
     }
 
     requests.post(webhook_url, json=payload)
@@ -462,23 +465,24 @@ import boto3
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-def send_email_summary(summary_file, recipients):
-    ses = boto3.client('ses')
 
-    with open(summary_file, 'r') as f:
+def send_email_summary(summary_file, recipients):
+    ses = boto3.client("ses")
+
+    with open(summary_file, "r") as f:
         summary = f.read()
 
     msg = MIMEMultipart()
-    msg['Subject'] = 'Security Scan Executive Summary'
-    msg['From'] = 'security@company.com'
-    msg['To'] = ', '.join(recipients)
+    msg["Subject"] = "Security Scan Executive Summary"
+    msg["From"] = "security@company.com"
+    msg["To"] = ", ".join(recipients)
 
-    msg.attach(MIMEText(summary, 'plain'))
+    msg.attach(MIMEText(summary, "plain"))
 
     ses.send_raw_email(
-        Source=msg['From'],
+        Source=msg["From"],
         Destinations=recipients,
-        RawMessage={'Data': msg.as_string()}
+        RawMessage={"Data": msg.as_string()},
     )
 ```
 

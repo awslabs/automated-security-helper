@@ -13,7 +13,6 @@ from automated_security_helper.base.converter_plugin import (
     ConverterPluginConfigBase,
 )
 from automated_security_helper.base.options import ConverterOptionsBase
-from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.plugins.decorators import ash_converter_plugin
 from automated_security_helper.utils.log import ASH_LOGGER
 
@@ -38,11 +37,13 @@ class ExampleConverter(ConverterPluginBase[ExampleConverterConfig]):
     """Example converter plugin that demonstrates the decorator pattern."""
 
     def model_post_init(self, context):
+        # Do not assign to self.context here. The context is one object shared by
+        # every plugin in the run, so repointing work_dir would move where the
+        # builtin converters' output is looked for, not just this plugin's.
+        # ConverterPluginBase.model_post_init derives self.results_dir underneath
+        # the shared work_dir, which is the directory a converter should write to.
         if self.config is None:
             self.config = ExampleConverterConfig()
-        self.context.work_dir = self.context.output_dir.joinpath(
-            ASH_WORK_DIR_NAME
-        ).joinpath(self.config.name)
         return super().model_post_init(context)
 
     def validate_plugin_dependencies(self) -> bool:

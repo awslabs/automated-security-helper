@@ -175,13 +175,19 @@ class TestExecuteScannerRawResultShapes:
             for c in mock_logger.warning.call_args_list
         )
 
-    def test_falsy_result_is_recorded_but_missing_status_is_overwritten(self, tmp_path):
-        """A scanner returning False is flagged MISSING, then re-graded to PASSED.
+    def test_falsy_result_is_recorded_and_missing_status_survives_the_regrade(
+        self, tmp_path
+    ):
+        """A scanner returning False is flagged MISSING and stays MISSING.
 
-        This pins current behavior rather than endorsing it. _execute_scanner sets
-        status=MISSING for a falsy return (the documented "plugin is missing
-        dependencies" case), but the threshold re-grade a few lines later only
-        preserves ERROR, so MISSING is discarded and the run reports PASSED.
+        Renamed and inverted from test_falsy_result_is_recorded_but_missing_status_is
+        _overwritten, which pinned the defect: _execute_scanner sets status=MISSING for
+        a falsy return, and the threshold re-grade a few lines later carved out only
+        ERROR, so MISSING was discarded and a scanner that never ran reported PASSED.
+
+        Asserted on the value the container carries once _execute_scanner has returned,
+        which is the whole point. The assignment was never in doubt; what the old
+        assertion could not see is that the same finally block overwrote it further down.
         """
         ctx = _make_context(tmp_path)
         scanner = _make_scanner(ctx, scripted_result=False)
@@ -190,8 +196,8 @@ class TestExecuteScannerRawResultShapes:
         results = executor._execute_scanner("scripted", scanner, _targets(ctx))
 
         assert len(results) == 1
-        assert results[0].status == ScannerStatus.PASSED
-        assert results[0].status != ScannerStatus.MISSING
+        assert results[0].status == ScannerStatus.MISSING
+        assert results[0].status != ScannerStatus.PASSED
 
     def test_nonexistent_target_is_skipped(self, tmp_path):
         ctx = _make_context(tmp_path)
@@ -615,3 +621,222 @@ class TestUpdateProgress:
         )
 
         executor._update_progress(50, "halfway")
+
+
+class _FlagLessScanner:
+    """A scanner-shaped object that declares no ``dependencies_satisfied`` at all.
+
+    Neither a ScannerPluginBase subclass nor a Mock, and it cannot be either.
+    ScannerPluginBase declares the field, so no subclass can be missing it; a Mock
+    auto-creates every attribute asked of it, so it cannot be missing one either.
+    Only a hand-built stand-in reaches the ``getattr`` default that decides what an
+    absent flag means.
+
+    The attributes below are exactly what _execute_scanner reads off a plugin whose
+    scan() returns a plain dict. Anything it does not read is deliberately absent, so
+    a future read of an attribute this stub does not carry fails loudly here rather
+    than being silently satisfied.
+    """
+
+    def __init__(self, config, context, result):
+        self.config = config
+        self.context = context
+        self.results_dir = None
+        self.start_time = None
+        self.end_time = None
+        self.exit_code = 0
+        self._result = result
+
+    def scan(self, **kwargs):
+        return self._result
+
+
+class TestTerminalStatusIsNotRegraded:
+    """The severity re-grade may resolve a default status; it may not erase a verdict.
+
+    determine_status has four return sites -- ERROR, SKIPPED, FAILED, PASSED -- and
+    MISSING is not among them, so re-grading a MISSING container cannot refine the
+    verdict, only destroy it. The carve-out that protects it has to stay narrow at the
+    same time: PASSED is the ScanResultsContainer default, so carving PASSED out would
+    leave every container ungraded and make FAILED unreachable. Both halves are pinned
+    here.
+    """
+
+    def test_falsy_result_records_dependencies_as_unsatisfied(self, tmp_path):
+        """MISSING has to travel on the dependency flag as well as on the status.
+
+        ScannerStatisticsCalculator reads ``dependencies_missing`` off the status
+        string for a scanner-level report and off the container's own field when a
+        scanner-level entry exists, so a container saying MISSING while still claiming
+        satisfied dependencies reports differently depending on which of the two a run
+        produced. Setting both is what keeps them from disagreeing.
+        """
+        ctx = _make_context(tmp_path)
+        scanner = _make_scanner(ctx, scripted_result=False)
+        executor = _make_executor(ctx)
+
+        results = executor._execute_scanner("scripted", scanner, _targets(ctx))
+
+        assert results[0].status == ScannerStatus.MISSING
+        assert results[0].dependencies_satisfied is False
+
+    def test_error_status_still_survives_the_regrade(self, tmp_path):
+        """The one status the old single-value carve-out protected must stay protected."""
+        ctx = _make_context(tmp_path)
+        scanner = _make_scanner(ctx, scripted_result={"status": "failed"})
+        executor = _make_executor(ctx)
+
+        results = executor._execute_scanner("scripted", scanner, _targets(ctx))
+
+        assert results[0].status == ScannerStatus.ERROR
+
+    def test_clean_scan_is_still_graded_passed(self, tmp_path):
+        """A scanner that ran and found nothing keeps reaching PASSED."""
+        ctx = _make_context(tmp_path)
+        scanner = _make_scanner(ctx, scripted_result={"output": "nothing to report"})
+        executor = _make_executor(ctx)
+
+        results = executor._execute_scanner("scripted", scanner, _targets(ctx))
+
+        assert results[0].status == ScannerStatus.PASSED
+
+    def test_findings_above_threshold_are_still_graded_failed(self, tmp_path):
+        """The default status must stay re-gradable, or FAILED becomes unreachable.
+
+        This is the test that fails if the carve-out is ever widened to include
+        ScanResultsContainer's default of PASSED: nothing in _execute_scanner assigns
+        FAILED, so the severity gate is the only route to it.
+        """
+        ctx = _make_context(tmp_path)
+        scanner = _make_scanner(
+            ctx,
+            scripted_result={"severity_counts": {"critical": 1}},
+            threshold="MEDIUM",
+        )
+        executor = _make_executor(ctx)
+
+        results = executor._execute_scanner("scripted", scanner, _targets(ctx))
+
+        assert results[0].status == ScannerStatus.FAILED
+        assert results[0].finding_count == 1
+
+    def test_plugin_dependency_flag_is_carried_onto_every_container(self, tmp_path):
+        """A scan() override can report a missing tool and still return a report.
+
+        The falsy-return branch closes one instance; carrying the plugin's own flag
+        across closes the class. Without this copy such a container reached the
+        statistics calculator claiming its dependencies were satisfied.
+        """
+        ctx = _make_context(tmp_path)
+        scanner = _make_scanner(ctx, scripted_result={"output": "partial"})
+        scanner.dependencies_satisfied = False
+        executor = _make_executor(ctx)
+
+        results = executor._execute_scanner("scripted", scanner, _targets(ctx))
+
+        assert results[0].dependencies_satisfied is False
+
+    def test_satisfied_plugin_flag_is_carried_across_unchanged(self, tmp_path):
+        ctx = _make_context(tmp_path)
+        scanner = _make_scanner(ctx, scripted_result={"output": "clean"})
+        scanner.dependencies_satisfied = True
+        executor = _make_executor(ctx)
+
+        results = executor._execute_scanner("scripted", scanner, _targets(ctx))
+
+        assert results[0].dependencies_satisfied is True
+
+    def test_plugin_flag_cannot_widen_a_missing_container(self, tmp_path):
+        """The copy narrows; it never restores "dependencies were fine".
+
+        A scan() override is free to return False without touching its own flag, and
+        the template's empty-target guard returns before the flag is ever recomputed.
+        A plain assignment here would let either widen a MISSING container back to
+        satisfied, which is the direction that loses information.
+        """
+        ctx = _make_context(tmp_path)
+        scanner = _make_scanner(ctx, scripted_result=False)
+        scanner.dependencies_satisfied = True
+        executor = _make_executor(ctx)
+
+        results = executor._execute_scanner("scripted", scanner, _targets(ctx))
+
+        assert results[0].status == ScannerStatus.MISSING
+        assert results[0].dependencies_satisfied is False
+
+    def test_absent_plugin_flag_reads_as_satisfied(self, tmp_path):
+        """An absent flag is not evidence of a problem, so the default is True.
+
+        Also pins the coercion: the value lands in a field typed bool, and the plugin
+        is an arbitrary object rather than a ScannerPluginBase.
+        """
+        ctx = _make_context(tmp_path)
+        config = _ScannerConfig()
+        scanner = _FlagLessScanner(config, ctx, {"output": "clean"})
+        executor = _make_executor(ctx)
+
+        results = executor._execute_scanner("flagless", scanner, _targets(ctx))
+
+        assert not hasattr(scanner, "dependencies_satisfied")
+        assert results[0].dependencies_satisfied is True
+
+    def test_preserved_statuses_match_the_completeness_gate(self):
+        """The carve-out and the completeness gate must name the same statuses.
+
+        run_ash_scan collects exactly these statuses into the incomplete list and the
+        exit code, so a status preserved here and absent there -- or the reverse -- is
+        the drift that produced the original defect. Held by a test rather than by an
+        import because the gate lives in the CLI layer and a core phase importing it
+        would invert the dependency direction.
+        """
+        from automated_security_helper.core.phases.scanner_executor import (
+            _TERMINAL_SCANNER_STATUSES,
+        )
+        from automated_security_helper.interactions.run_ash_scan import (
+            _INCOMPLETE_SCANNER_STATUSES,
+        )
+
+        assert {status.value for status in _TERMINAL_SCANNER_STATUSES} == set(
+            _INCOMPLETE_SCANNER_STATUSES
+        )
+        assert ScannerStatus.MISSING in _TERMINAL_SCANNER_STATUSES
+        assert ScannerStatus.ERROR in _TERMINAL_SCANNER_STATUSES
+        # PASSED is the ScanResultsContainer default and FAILED is only ever reached
+        # through the severity gate, so neither may be carved out of the re-grade.
+        assert ScannerStatus.PASSED not in _TERMINAL_SCANNER_STATUSES
+        assert ScannerStatus.FAILED not in _TERMINAL_SCANNER_STATUSES
+
+    def test_missing_scanner_reaches_the_completeness_gate(self, tmp_path):
+        """The consequence that matters: a MISSING scanner is reported incomplete.
+
+        Driven through the real ScanResultProcessor and the real gate rather than
+        asserted on the container, because PASSED is what the gate counts as complete:
+        while the re-grade stood, this scanner was absent from the incomplete list,
+        absent from the exit code, and present in the report as clean.
+        """
+        from automated_security_helper.core.phases.scan_result_processor import (
+            ScanResultProcessor,
+        )
+        from automated_security_helper.core.unified_metrics import (
+            get_unified_scanner_metrics,
+        )
+        from automated_security_helper.interactions.run_ash_scan import (
+            incomplete_scanners,
+        )
+
+        ctx = _make_context(tmp_path)
+        scanner = _make_scanner(ctx, scripted_result=False)
+        processor = ScanResultProcessor(plugin_context=ctx)
+        executor = _make_executor(
+            ctx,
+            scanner_tasks=[("scripted", scanner, _targets(ctx))],
+            process_results_fn=processor.process_container,
+        )
+
+        aggregated = executor.run_sequential(AshAggregatedResults())
+
+        assert [
+            (metric.scanner_name, metric.status)
+            for metric in get_unified_scanner_metrics(asharp_model=aggregated)
+        ] == [("scripted", "MISSING")]
+        assert incomplete_scanners(aggregated) == [("scripted", "MISSING")]

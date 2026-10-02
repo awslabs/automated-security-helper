@@ -2,6 +2,16 @@
 
 This page provides detailed information about the ASH command-line interface.
 
+!!! note "Flag tables on this page are hand-maintained"
+
+    [CLI Reference (generated)](cli-reference-generated.md) is introspected from the
+    Typer command definitions and is gated by a freshness test, so it is
+    authoritative for **flag names and aliases, parameter types, defaults, and
+    environment variables**. This page is authoritative for everything that cannot
+    be introspected: worked examples, exit codes, and configuration-override
+    syntax. If the two disagree about a flag, the generated page is right and this
+    one has a bug — please report it.
+
 ## Common Parameters
 
 These parameters are available across multiple ASH commands:
@@ -12,6 +22,7 @@ These parameters are available across multiple ASH commands:
 | `--version`, `-V`      | Print the installed ASH version and exit                   |                   |                      | `scan`                               |
 | `--ash-revision-to-install` | ASH branch or tag to install in the container image for usage during containerized scans | |  | `scan`, `build-image` |
 | `--base-ref` | Git ref to diff against when --changed-files-only is set. | | `ASH_BASE_REF` | `scan` |
+| `--allow-stale-content-db` / `--no-allow-stale-content-db` | Let the scan pass when a scanner's content database is past its declared age bound (for grype, 5 days after it was built), recording a warning in the log and the reports. Without it such a scan exits 1. Takes precedence over the `content_db_staleness` config value; see [Failing on a stale content database](configuration-guide.md#failing-on-a-stale-content-database). | Unset: the `content_db_staleness` config value, then `fail` |  | `scan` |
 | `--changed-files-only` | Limit the scan to files changed between the base branch and HEAD. | | `ASH_CHANGED_FILES_ONLY` | `scan` |
 | `--color` | Enable/disable colorized output | |  | `scan` |
 | `--compact-report` | Produce a shorter markdown report suitable for PR comments. | |  | `scan` |
@@ -19,11 +30,11 @@ These parameters are available across multiple ASH commands:
 | `--container-uid`, `-u` | UID to use for the container user | |  | `scan`, `build-image` |
 | `--custom-build-arg` | Custom build arguments to pass to the container build | |  | `scan` |
 | `--custom-containerfile` | Path to a custom container definition (e.g. | |  | `scan` |
-| `--fail-on-incomplete-scanners` / `--no-fail-on-incomplete-scanners` | Exit 1 when a selected scanner did not complete (`ERROR` or `MISSING`). Off by default; see [An incomplete scan is not a clean scan](#an-incomplete-scan-is-not-a-clean-scan). | | `--fail-on-incomplete-scanners` | `scan` |
+| `--fail-on-incomplete-scanners` / `--no-fail-on-incomplete-scanners` | Exit 1 when a selected scanner did not complete (`ERROR` or `MISSING`). On by default; see [An incomplete scan is not a clean scan](#an-incomplete-scan-is-not-a-clean-scan). | | `--fail-on-incomplete-scanners` | `scan` |
 | `--formats` | The output formats to use (comma-separated). | |  | `scan` |
 | `--min-severity` | Minimum severity to trigger non-zero exit code (critical, high, medium, low, none). | |  | `scan` |
 | `--progress`, `-p` / `--no-progress`, `-P` | Show progress of each job live in the console. Defaults to True. | |  | `scan` |
-| `--python-only` / `--full` | Exclude execution of any plugins or tools that have dependencies external to Python. Also spelled `--python-based-plugins-only` / `--all-enabled-plugins` and `--python-based-scanners-only` / `--all-enabled-scanners`. | |  | `scan` |
+| `--python-based-plugins-only` / `--all-enabled-plugins` | Exclude execution of any plugins or tools that have dependencies external to Python. Also spelled `--python-only` / `--full`, and `--python-based-scanners-only` / `--all-enabled-scanners`; all three name the same option, and the `plugins` spelling is preferred because the option covers converters and reporters too. | |  | `scan` |
 | `--runner` | Use the specified OCI runner instead of docker to run the containerized tools. Also spelled `--oci`. | | `OCI_RUNNER` | `scan` |
 | `--show-summary` | Show metrics table and results summary | |  | `scan` |
 | `--simple` | Simplified output mode with minimal logging | |  | `scan` |
@@ -34,9 +45,9 @@ These parameters are available across multiple ASH commands:
 | `--mode`               | Execution mode: `local`, `container`, or `precommit`       | `local`           | `ASH_MODE`           | `scan`                               |
 | `--debug`, `-d`        | Enable debug logging                                       | `False`           | `ASH_DEBUG`          | All commands                         |
 | `--verbose`, `-v`      | Enable verbose logging                                     | `False`           | `ASH_VERBOSE`        | All commands                         |
-| `--quiet`, `-q`        | Suppress non-essential output                              | `False`           | `ASH_QUIET`          | All commands                         |
-| `--no-color`, `-C`     | Disable colored output                                     | `False`           | `ASH_NO_COLOR`       | All commands                         |
-| `--oci-runner`, `-o`   | OCI runner to use                                          | `docker`          | `ASH_OCI_RUNNER`     | `scan` (container mode)              |
+| `--quiet`, `-q`        | Suppress non-essential output                              | `False`           |                      | All commands                         |
+| `--no-color`, `-C`     | Disable colored output                                     | `False`           |                      | All commands                         |
+| `--oci-runner`, `-o`   | OCI runner to use. Unset by default; ASH uses the first of `finch`, `docker`, `nerdctl`, `podman` found on `PATH` | first found | `OCI_RUNNER` | `scan` (container mode) |
 | `--help`, `-h`         | Show help for the command and exit                         |                   |                      | All commands                         |
 
 ### Compatibility spellings
@@ -82,7 +93,7 @@ ash \
   --config-overrides 'global_settings.severity_threshold=MEDIUM'
 
 # Append to lists
-ash --config-overrides 'ash_plugin_modules+=["my_custom_plugin"]'
+ash --config-overrides 'ash_plugin_modules+=["my_ash_plugins"]'
 
 # Complex values using JSON syntax
 ash --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
@@ -131,7 +142,7 @@ ash [options]
 | `--ash-plugin-modules`        | List of Python modules to import containing ASH plugins |                       | `ASH_PLUGIN_MODULES`    |
 | `--scanners`                  | Specific scanner names to run                           | All enabled scanners  | `ASH_SCANNERS`          |
 | `--exclude-scanners`          | Specific scanner names to exclude                       | None                  | `ASH_EXCLUDED_SCANNERS` |
-| `--output-formats`, `-f`      | Output formats (comma-separated). Available: text, flat-json, yaml, csv, html, dict, junitxml, markdown, sarif, asff, ocsf, cyclonedx, spdx, custom | Default formats       |                         |
+| `--output-formats`, `-f`      | Output formats (comma-separated). Run `ash scan --help` for the list this build accepts; the help text is derived from the code, so it cannot go stale. The reporter names are also tabulated in [Output formats](output-formats.md) | Default formats       |                         |
 | `--strategy`                  | Whether to run scanners in parallel or sequential       | `parallel`            |                         |
 | `--log-level`                 | Set the log level                                       | `INFO`                |                         |
 | `--fail-on-findings`          | Exit with non-zero code if findings are found           | From config           |                         |
@@ -141,7 +152,7 @@ ash [options]
 | `--build/--no-build`, `-b/-B` | Whether to build the ASH container image                | `True`                |                         |
 | `--run/--no-run`, `-r/-R`     | Whether to run the ASH container image                  | `True`                |                         |
 | `--build-target`              | Container build target: `non-root` or `ci`              | `non-root`            |                         |
-| `--oci-runner`, `-o`          | OCI runner to use                                       | `docker`              | `ASH_OCI_RUNNER`        |
+| `--oci-runner`, `-o`          | OCI runner to use. Unset by default; ASH uses the first of `finch`, `docker`, `nerdctl`, `podman` found on `PATH`                                       | first found              | `OCI_RUNNER`            |
 | `--python-only/--full`        | Use only Python-based plugins                           | `False`               |                         |
 | `--cleanup`                   | Clean up temporary files after scan                     | `False`               |                         |
 | `--use-existing`              | Use existing results file                               | `False`               |                         |
@@ -247,6 +258,16 @@ Not every format can be merged across projects, so each reporter declares what i
 | Workspace-scoped | `unused-suppressions` | A workspace-level artefact covering workspace-level state only, not a merge of the projects |
 
 Where the project appears depends on the format: a `workspace_project` column in `csv`, a field of the same name in `flat-json`, a per-project section in `html`, `markdown` and `text`, a `<project>/<scanner>` testsuite name in `junitxml`, and a `workspace_project:<key>` entry in `metadata.labels` for `ocsf`. Single-directory output is unchanged in every case.
+
+A skipped project has no findings, so in the three formats whose output is one record per finding it would have no record at all — indistinguishable from a project that came back clean. Each of those emits one record standing for the project instead, marked in that format's own vocabulary so a finding count can exclude it:
+
+| Format | Where the skipped project appears | How to exclude it from a finding count |
+| --- | --- | --- |
+| `csv` | A row whose `workspace_row_type` is `skipped-project`. That column is workspace-only, like `workspace_project`, and carries `finding` on every ordinary row | Filter `workspace_row_type == 'finding'`. The row's `severity` cell is also blank, so a severity rollup skips it |
+| `junitxml` | A testsuite named after the project, holding one `<skipped type="project-skipped">` test case | Count `<failure>` and `<error>`, which is what CI front ends already do. The suite reports `failures="0" errors="0" skipped="1"` |
+| `ocsf` | A record with `status_id` 99 (OCSF's "not mapped — see `status`"), `status` `Skipped`, severity 1 (Informational), an empty `vulnerabilities` array, and an `ash_row_type:workspace_skipped_project` label | Filter on the label or on `status_id`, or sum `vulnerabilities` lengths, which counts this record as zero |
+
+`html`, `markdown` and `text` show the project in their per-project section with its skip reason, and `flat-json` and `yaml` carry the typed `workspace.skipped_projects` payload. The reason is always stated: a `no-changes` skip is a successful optimisation and an `error` skip is a project that was never looked at, and the two must not read the same.
 
 A reporter is per project when merging would be wrong rather than merely unimplemented. `github-ghas` and `gitlab-sast` produce documents their consumers resolve against a single repository root, so a merged one would mis-locate findings. The three SBOM formats describe one deliverable each, and a workspace of independently versioned projects is N SBOMs. The AWS reporters publish side effects, which a second invocation would duplicate.
 
@@ -355,7 +376,7 @@ ash --output-formats flat-json,sarif,html,markdown
 ash --mode precommit
 
 # Scan with custom plugins
-ash --ash-plugin-modules my_custom_plugin_module
+ash --ash-plugin-modules my_ash_plugins
 
 # Inspect the plan for a workspace, without scanning
 ash --workspace ./dev.code-workspace --dry-run
@@ -387,7 +408,7 @@ ash merge --results <file-or-dir> [--results ...] --output-dir <dir> [options]
 | `--output-formats`     | Comma-separated report formats to generate                                    | The formats the scan's own configuration asks for |                      |
 | `--min-severity`       | Minimum severity that counts as actionable for the exit code                  | `low`                                             |                      |
 | `--fail-on-findings`   | Exit non-zero when the merged report has actionable findings                   | The scan configuration's value, then `True`       |                      |
-| `--fail-on-incomplete-scanners` / `--no-fail-on-incomplete-scanners` | Refuse the merge when a shard completed none of the scanners it owned, and exit 1 when any scanner in the union is `ERROR` or `MISSING` | The scan configuration's value, then `False` | |
+| `--fail-on-incomplete-scanners` / `--no-fail-on-incomplete-scanners` | Refuse the merge when a shard completed none of the scanners it owned, and exit 1 when any scanner in the union is `ERROR` or `MISSING` | The scan configuration's value, then `True` | |
 | `--log-level`          | Set the log level                                                             | `INFO`                                            |                      |
 | `--verbose`, `-v`      | Enable verbose logging                                                        | `False`                                           |                      |
 | `--debug`, `-d`        | Enable debug logging                                                          | `False`                                           |                      |
@@ -410,7 +431,7 @@ Coverage is verified before anything is merged, so a bad set of shards fails wit
 - a scanner appears in some shard's results but no shard was assigned it — the executors resolved different scanner sets, so no shard ran it and the union has a hole
 - the shard that owned a scanner recorded no result for it, leaving another shard's skip marker as the only trace
 
-With `--fail-on-incomplete-scanners`, one more:
+With the completeness gate on, which is the default, one more:
 
 - a shard owned at least one scanner and completed none of them — every scanner it was asked to run came back `ERROR`, came back `MISSING`, or produced no entry at all
 
@@ -488,7 +509,7 @@ ash config [subcommand] [options]
 | `--output-dir`, `-o` | Path to ASH output directory (with `lint`)      | `.ash/ash_output`|                      |
 | `--debug`, `-d`      | Enable debug logging                            | `False`          | `ASH_DEBUG`          |
 | `--verbose`, `-v`    | Enable verbose logging                          | `False`          | `ASH_VERBOSE`        |
-| `--no-color`         | Disable colored output                          | `False`          | `ASH_NO_COLOR`       |
+| `--no-color`         | Disable colored output                          | `False`          |                       |
 
 ### Examples
 
@@ -669,7 +690,7 @@ ash plugin [subcommand] [options]
 | `--config-overrides`      | Override configuration values          |                  |                      |
 | `--debug`, `-d`           | Enable debug logging                   | `False`          | `ASH_DEBUG`          |
 | `--verbose`, `-v`         | Enable verbose logging                 | `False`          | `ASH_VERBOSE`        |
-| `--no-color`              | Disable colored output                 | `False`          | `ASH_NO_COLOR`       |
+| `--no-color`              | Disable colored output                 | `False`          |                       |
 
 ### Examples
 
@@ -681,7 +702,7 @@ ash plugin list
 ash plugin list --include-plugin-config
 
 # List plugins including custom modules
-ash plugin list --ash-plugin-modules my_custom_plugin_module
+ash plugin list --ash-plugin-modules my_ash_plugins
 ```
 
 ## Report Command
@@ -703,7 +724,7 @@ ash report [options]
 | `--log-level`        | Set the log level                 | `INFO`            |                      |
 | `--debug`, `-d`      | Enable debug logging              | `False`           | `ASH_DEBUG`          |
 | `--verbose`, `-v`    | Enable verbose logging            | `False`           | `ASH_VERBOSE`        |
-| `--no-color`         | Disable colored output            | `False`           | `ASH_NO_COLOR`       |
+| `--no-color`         | Disable colored output            | `False`           |                       |
 
 ### Examples
 
@@ -736,7 +757,7 @@ ash dependencies install [options]
 | `--config-overrides`  | Override configuration values            |                              |                      |
 | `--debug`, `-d`       | Enable debug logging                     | `False`                      | `ASH_DEBUG`          |
 | `--verbose`, `-v`     | Enable verbose logging                   | `False`                      | `ASH_VERBOSE`        |
-| `--no-color`          | Disable colored output                   | `False`                      | `ASH_NO_COLOR`       |
+| `--no-color`          | Disable colored output                   | `False`                      |                       |
 
 ### Examples
 
@@ -774,7 +795,7 @@ ash inspect [subcommand] [options]
 | `--config`, `-c`  | Path to configuration file        | `.ash/.ash.yaml`  | `ASH_CONFIG`         |
 | `--debug`, `-d`   | Enable debug logging              | `False`           | `ASH_DEBUG`          |
 | `--verbose`, `-v` | Enable verbose logging            | `False`           | `ASH_VERBOSE`        |
-| `--no-color`      | Disable colored output            | `False`           | `ASH_NO_COLOR`       |
+| `--no-color`      | Disable colored output            | `False`           |                       |
 
 ### Examples
 
@@ -801,10 +822,10 @@ ash build-image [options]
 | `--build-target`             | Container build target: `non-root` or `ci` | `non-root` |                      |
 | `--offline`                  | Build for offline use                      | `False`    |                      |
 | `--offline-semgrep-rulesets` | Semgrep rulesets for offline mode          | `p/ci`     |                      |
-| `--oci-runner`, `-o`         | OCI runner to use                          | `docker`   | `ASH_OCI_RUNNER`     |
+| `--oci-runner`, `-o`         | OCI runner to use. Unset by default; ASH uses the first of `finch`, `docker`, `nerdctl`, `podman` found on `PATH`                          | first found   | `OCI_RUNNER`         |
 | `--debug`, `-d`              | Enable debug logging                       | `False`    | `ASH_DEBUG`          |
 | `--verbose`, `-v`            | Enable verbose logging                     | `False`    | `ASH_VERBOSE`        |
-| `--no-color`                 | Disable colored output                     | `False`    | `ASH_NO_COLOR`       |
+| `--no-color`                 | Disable colored output                     | `False`    |                       |
 
 ### Examples
 
@@ -1047,12 +1068,61 @@ For more information, see:
 
 ASH supports additional environment variables that don't directly map to command-line parameters:
 
-| Variable                   | Description                            | Default                            |
-|----------------------------|----------------------------------------|------------------------------------|
-| `ASH_IMAGE_NAME`           | Name of ASH container image            | `automated-security-helper:latest` |
-| `ASH_CONTAINER_WORK_DIR`   | Working directory inside the container | `/work`                            |
-| `ASH_CONTAINER_SOURCE_DIR` | Source directory inside the container  | `/src`                             |
-| `ASH_CONTAINER_OUTPUT_DIR` | Output directory inside the container  | `/out`                             |
+| Variable              | Description                                                          | Default                                      |
+|-----------------------|----------------------------------------------------------------------|----------------------------------------------|
+| `ASH_IMAGE_NAME`      | Name of the ASH container image                                      | `automated-security-helper:<build-target>`    |
+| `OCI_RUNNER`          | OCI runner to use instead of auto-detection                          | first of `finch`, `docker`, `nerdctl`, `podman` on `PATH` |
+| `OCI_RUNNER_WRAPPER`  | Command prefix to wrap the OCI runner invocation                     |                                              |
+| `ASH_OFFLINE`         | Run in offline mode                                                  |                                              |
+| `ASH_DEBUG`           | Enable debug logging                                                 |                                              |
+| `ASH_VERBOSE`         | Enable verbose logging                                               |                                              |
+| `ASH_BASE_IMAGE_OVERRIDE` | Registry to fetch the Dockerfile's base image from                   | unset (the Dockerfile's own `ARG BASE_IMAGE`) |
+| `ASH_BASE_OCI_LAYOUT` | Verified OCI layout to build the base image from, with no registry call | unset |
+
+### `ASH_BASE_IMAGE_OVERRIDE`
+
+When set, this replaces the Dockerfile's `ARG BASE_IMAGE` default for the duration of the
+build, as `--build-arg BASE_IMAGE=<value>`. Every build entrypoint honours it: the Python CLI
+(`ash build-image` and `ash scan --mode container`) and `Invoke-ASH` in
+`utils/ash_helpers.ps1`.
+
+It exists for one reason. ECR Public meters anonymous pulls by monthly data volume as well as
+by rate, and a CI runner drawing from a shared egress pool can find that volume already spent
+by someone else. ASH's CI pre-pulls the base image and, when ECR Public refuses, sources it
+from Docker Hub instead, then sets this variable to the Docker Hub reference so the build asks
+the registry that actually answered. Tagging the fallback image locally under the ECR name is
+not sufficient: `nerdctl`, `finch`, and `docker buildx` on a `docker-container` driver all
+resolve `FROM` against the registry and never consult the local image store.
+
+Set it yourself if you mirror the base image into a registry of your own. A digest-suffixed
+reference is accepted and recommended:
+
+```bash
+export ASH_BASE_IMAGE_OVERRIDE="my-registry.example.com/python@sha256:<digest>"
+ash build-image
+```
+
+An explicit `--custom-build-arg BASE_IMAGE=...` takes precedence over this variable.
+
+### `ASH_BASE_OCI_LAYOUT`
+
+`<layout dir>@sha256:<manifest digest>`: an OCI image layout holding the Dockerfile's base
+image, and the digest of the manifest for this machine's architecture inside it. ASH's CI sets
+it after restoring the base image from the Actions cache and verifying every blob against the
+Dockerfile's `ARG BASE_IMAGE_DIGEST`, so that a warm CI run makes no registry call for the base
+image at all. You do not normally set it yourself.
+
+What each entrypoint does with it depends on the builder:
+
+| Builder | What ASH passes |
+|---|---|
+| `docker buildx build` (docker-container builder) | `--build-context ash-base-image=oci-layout://<dir>@<digest>` and `--build-arg BASE_IMAGE=ash-base-image` |
+| `nerdctl`, `finch` | `--build-context ash-base-image=oci-layout://<dir>`, `--build-arg BASE_IMAGE=ash-base-image` and `--pull=false` |
+| plain `docker build`, `podman` | nothing: these read the base image from their local image store, where the CI step placed it |
+
+A value that is not `<dir>@sha256:<64 hex>` stops the build with an error rather than being
+ignored. When it applies, it takes the place of `ASH_BASE_IMAGE_OVERRIDE`; an explicit
+`--custom-build-arg BASE_IMAGE=...` still takes precedence over both.
 
 ## Exit Codes
 
@@ -1140,3 +1210,27 @@ can hold both outcomes at once, and leading with the unknown would let A's absen
 tool suppress B's findings. A single-project scan has no second project to
 suppress, which is why it can afford to lead with the unknown. Exit `4` is
 unaffected either way — it means no project was attempted at all.
+
+### A scan against a stale database is not a clean scan
+
+A vulnerability database only describes the advisories published before it was
+built. Measured with grype 0.111.0 under ASH's offline settings, a database built
+10 days earlier scanned with exit 0 and no warning. ASH now reads each content
+database's own build time after its scanner runs and exits 1 when it is past the
+declared bound (grype 120h, trivy 24h, the offline semgrep and opengrep rulesets
+30 days):
+
+```console
+$ ash scan --offline
+ERROR    Content database grype-db (grype) is stale: built 2026-09-21T13:13:21Z,
+         10d 0h old, past its 120h bound (grype's own bound); age read from `built`
+         in `grype db status -o json`. The scan fails: ...
+```
+
+This does not depend on `--fail-on-incomplete-scanners`, and it takes precedence
+over `--fail-on-findings` the same way. `--allow-stale-content-db` (config:
+`content_db_staleness: warn`) lets the scan pass and records the warning in the
+summary reports, the SARIF and `ash.flat.json` instead. Workspace mode applies it
+per project, reporting the project `scan_incomplete: true`. See
+[Failing on a stale content database](configuration-guide.md#failing-on-a-stale-content-database)
+for the bounds, where each comes from, and how to refresh each database.

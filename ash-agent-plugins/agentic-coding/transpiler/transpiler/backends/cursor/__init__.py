@@ -1,4 +1,5 @@
 """Cursor backend."""
+
 from __future__ import annotations
 
 import json
@@ -52,8 +53,14 @@ class CursorBackend(BaseBackend):
         except json.JSONDecodeError as e:
             return {"ok": False, "reason": f".cursor/mcp.json invalid JSON: {e}"}
         if "mcpServers" not in cfg:
-            return {"ok": False, "reason": ".cursor/mcp.json missing `mcpServers` block"}
+            return {
+                "ok": False,
+                "reason": ".cursor/mcp.json missing `mcpServers` block",
+            }
         if not agents.exists():
             return {"ok": False, "reason": "AGENTS.md missing"}
 
-        return {"ok": True, "detail": "mcp.json + AGENTS.md valid (Cursor is GUI-only; no CLI)"}
+        return {
+            "ok": True,
+            "detail": "mcp.json + AGENTS.md valid (Cursor is GUI-only; no CLI)",
+        }

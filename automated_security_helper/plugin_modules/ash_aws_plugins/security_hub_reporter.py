@@ -146,9 +146,7 @@ class SecurityHubReporter(ReporterPluginBase[SecurityHubReporterConfig]):
             "Security Hub import are not yet implemented. The returned JSON is a "
             "placeholder and findings have NOT been sent to Security Hub."
         )
-        findings_count = (
-            len(model.sarif.get_all_results()) if model.sarif else 0
-        )
+        findings_count = len(model.sarif.get_all_results()) if model.sarif else 0
 
         return json.dumps(
             {

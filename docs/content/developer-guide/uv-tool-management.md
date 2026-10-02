@@ -37,13 +37,15 @@ Key methods:
 Tracks the complete installation state of UV tools:
 
 ```python
-from automated_security_helper.models.uv_tool_installation import UVToolInstallationStatus
+from automated_security_helper.models.uv_tool_installation import (
+    UVToolInstallationStatus,
+)
 
 status = UVToolInstallationStatus(
     tool_name="checkov",
     is_installed=True,
     installed_version="3.2.5",
-    preferred_source="uv"
+    preferred_source="uv",
 )
 ```
 
@@ -54,11 +56,7 @@ Configures retry logic for tool operations:
 from automated_security_helper.utils.uv_tool_runner import UVToolRetryConfig
 
 retry_config = UVToolRetryConfig(
-    max_retries=3,
-    base_delay=1.0,
-    max_delay=60.0,
-    exponential_base=2.0,
-    jitter=True
+    max_retries=3, base_delay=1.0, max_delay=60.0, exponential_base=2.0, jitter=True
 )
 ```
 
@@ -70,9 +68,12 @@ Scanners that use UV tool management:
 
 | Scanner | Default Version Constraint | Installation Method |
 |---------|----------------------------|-------------------|
-| Bandit | `>=1.7.0` | `uv tool install bandit>=1.7.0` |
+| Bandit | `>=1.7.0,<2.0.0` | `uv tool install bandit>=1.7.0,<2.0.0` |
 | Checkov | `>=3.2.0,<4.0.0` | `uv tool install checkov>=3.2.0,<4.0.0` |
-| Semgrep | `>=1.125.0` | `uv tool install semgrep>=1.125.0` |
+| Semgrep | `>=1.125.0,<2.0.0` | `uv tool install semgrep>=1.125.0,<2.0.0` |
+
+Each upper bound is enforced by the scanner, not advisory: a constraint without it
+resolves to the next major version, which the scanner deliberately excludes.
 
 ### Scanner Configuration
 
@@ -221,9 +222,9 @@ Pre-install tools to avoid automatic installation:
 
 ```bash
 # Install specific versions
-uv tool install bandit>=1.7.0
+uv tool install bandit>=1.7.0,<2.0.0
 uv tool install checkov>=3.2.0,<4.0.0
-uv tool install semgrep>=1.125.0
+uv tool install semgrep>=1.125.0,<2.0.0
 
 # List installed tools
 uv tool list
@@ -289,7 +290,7 @@ class CustomScanner(ScannerPluginBase[CustomScannerConfig]):
 ### Testing UV Tool Integration
 
 ```python
-@patch('automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner')
+@patch("automated_security_helper.utils.uv_tool_runner.get_uv_tool_runner")
 def test_uv_tool_integration(mock_get_runner):
     mock_runner = Mock()
     mock_get_runner.return_value = mock_runner

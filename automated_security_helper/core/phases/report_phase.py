@@ -4,12 +4,14 @@ from pathlib import Path
 import traceback
 from typing import Dict, Iterable, List, Sequence
 from automated_security_helper.base.engine_phase import EnginePhase
+from automated_security_helper.base.plugin_config import plugin_config_key
 from automated_security_helper.base.reporter_plugin import (
     reporter_format_name,
     reporter_matches_requested_formats,
 )
 from automated_security_helper.core.enums import ExecutionPhase
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+from automated_security_helper.utils.atomic_write import write_text_atomically
 from automated_security_helper.utils.log import ASH_LOGGER
 
 #: The reporter for this format is switched off in configuration. This is the
@@ -251,11 +253,10 @@ class ReportPhase(EnginePhase):
         all_reporter_instances = []
         for plugin_class in reporter_classes:
             try:
-                plugin_name = getattr(plugin_class, "__name__", "Unknown")
                 plugin_config = (
                     self.plugin_context.config.get_plugin_config(
                         plugin_type="reporter",
-                        plugin_name=plugin_name.lower(),
+                        plugin_name=plugin_config_key(plugin_class),
                     )
                     if self.plugin_context.config is not None
                     else None
@@ -418,8 +419,11 @@ class ReportPhase(EnginePhase):
                         ASH_LOGGER.info(
                             f"Writing {display_name} report to {output_file}"
                         )
-                        with open(output_file, mode="w", encoding="utf-8") as f:
-                            f.write(report_result)
+                        # Atomically: open(path, "w") creates the file empty before
+                        # writing it, so a reader waiting for the report to exist
+                        # (an MCP client, or the integration fixture) could read it
+                        # empty or half-written. See utils/atomic_write.py.
+                        write_text_atomically(output_file, report_result)
 
                         results.append(report_result)
 
@@ -449,9 +453,79 @@ class ReportPhase(EnginePhase):
                             ASH_LOGGER.error(
                                 f"Failed to notify reporter complete event: {str(event_error)}"
                             )
+                    elif report_result is None:
+                        # An enabled reporter that returned nothing at all did not
+                        # decide it had nothing to say. `report` is annotated
+                        # `-> str | None`, but no reporter in this repository
+                        # returns None on a path that succeeded: None is what a
+                        # handler produces when it swallows an exception, or what a
+                        # method evaluates to when its only `return` sits inside a
+                        # `try` whose `except` is the last statement in the body.
+                        #
+                        # This arm used to be shared with the empty-string case
+                        # below: logged at DEBUG, which is invisible at default
+                        # verbosity and absent from the console at --quiet, then the
+                        # task was painted a yellow "No report generated" and
+                        # counted among the phase's normal outcomes. So a crashed
+                        # reporter and a reporter with nothing to report were
+                        # indistinguishable to an operator, to the progress display
+                        # and to every event subscriber -- and the crash is the one
+                        # that needs acting on.
+                        #
+                        # This is the class fix for that: it covers every reporter,
+                        # including ones not written yet, rather than each reporter
+                        # separately deciding how loudly to fail.
+                        error_msg = (
+                            f"Reporter {display_name} produced no report. It "
+                            "returned None, which means it could not build its "
+                            "artefact -- no file was written for it."
+                        )
+                        ASH_LOGGER.error(error_msg)
+
+                        # Marked the way the exception handler below marks its own
+                        # failures, deliberately: the two are the same outcome seen
+                        # from either side of a reporter's own try/except, and a
+                        # reader comparing the two arms should find them agreeing.
+                        self.progress_display.update_task(
+                            phase=ExecutionPhase.REPORT,
+                            task_id=reporter_task,
+                            completed=100,
+                            description=f"[red]({display_name}) Failed: no report returned",
+                        )
+
+                        # ERROR rather than REPORT_COMPLETE. REPORT_COMPLETE is how
+                        # a subscriber learns a reporter succeeded, and this one did
+                        # not; emitting it with a null output_file asked every
+                        # subscriber to re-derive that distinction for itself.
+                        try:
+                            from automated_security_helper.plugins.events import (
+                                AshEventType,
+                            )
+
+                            self.notify_event(
+                                AshEventType.ERROR,
+                                message=error_msg,
+                                reporter=display_name,
+                                reporter_class=plugin_instance.__class__.__name__,
+                                phase="report",
+                            )
+                        except Exception as event_error:
+                            ASH_LOGGER.error(
+                                f"Failed to notify reporter error event: {str(event_error)}"
+                            )
                     else:
-                        ASH_LOGGER.debug(
-                            f"Reporter {display_name} returned None or empty report"
+                        # A falsy report that is not None -- in practice an empty
+                        # string. Separated from the arm above because a reporter
+                        # that returned a string did run to completion, so this is
+                        # not a crash. It is still not a normal outcome: no file is
+                        # written, and an enabled reporter asked for by name that
+                        # emits nothing is the silence
+                        # _log_unsatisfied_output_formats exists to break. WARNING
+                        # rather than the previous DEBUG for that reason, and not
+                        # ERROR because nothing here says the run is wrong.
+                        ASH_LOGGER.warning(
+                            f"Reporter {display_name} returned an empty report; "
+                            "no file was written for it."
                         )
 
                         # Update reporter task to 100%

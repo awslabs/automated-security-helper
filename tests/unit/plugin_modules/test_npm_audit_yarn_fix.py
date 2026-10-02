@@ -11,9 +11,8 @@ The fix checks ``find_executable`` before invoking non-npm binaries and
 logs a warning + skips the lock file when the tool is not installed.
 """
 
-import logging
 from pathlib import Path
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock
 
 import pytest
 
@@ -135,6 +134,6 @@ def test_yarn_lock_scanned_when_yarn_available(npm_scanner, tmp_path):
 
     assert result is not False
     # Verify yarn was actually invoked
-    assert any(
-        cmd[0] == "yarn" for cmd in captured_commands
-    ), f"Expected yarn to be invoked, got: {captured_commands}"
+    assert any(cmd[0] == "yarn" for cmd in captured_commands), (
+        f"Expected yarn to be invoked, got: {captured_commands}"
+    )

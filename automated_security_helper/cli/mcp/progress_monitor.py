@@ -133,7 +133,7 @@ async def _handle_scan_completed(
 async def _handle_terminal_status(
     ctx: Context, progress_info: dict, connection_alive: bool
 ) -> bool:
-    """Emit progress + final message for ``failed``/``cancelled`` statuses."""
+    """Emit progress + final message for ``failed``/``incomplete``/``cancelled``."""
     status = progress_info.get("status")
     connection_alive = await _safe_send(
         connection_alive,
@@ -150,6 +150,19 @@ async def _handle_terminal_status(
         connection_alive = await _safe_send(
             connection_alive,
             lambda: ctx.error(f"Scan failed: {error_message}"),
+            "Failed to send completion message",
+        )
+    elif status == "incomplete":
+        names = ", ".join(
+            row.get("scanner", "?")
+            for row in progress_info.get("incomplete_scanners") or []
+        )
+        connection_alive = await _safe_send(
+            connection_alive,
+            lambda: ctx.warning(
+                "Scan finished with incomplete coverage; its results are partial"
+                + (f". Did not complete: {names}" if names else "")
+            ),
             "Failed to send completion message",
         )
     elif status == "cancelled":
@@ -248,14 +261,16 @@ async def _process_scanner_result(
     except asyncio.CancelledError:
         raise
     except Exception as exc:
-        logger.warning(
-            f"Error processing scanner results for {scanner_name}/{target_type}: {str(exc)}"
-        )
+        # Format the message eagerly instead of closing over `exc`. Python deletes
+        # the `except ... as` name when the handler exits, so a lambda that reads
+        # `exc` raises NameError rather than reporting the original error if it is
+        # ever called after the handler unwinds. It happens to work today only
+        # because _safe_send invokes the callable before returning.
+        warning_message = f"Error processing scanner results for {scanner_name}/{target_type}: {str(exc)}"
+        logger.warning(warning_message)
         connection_alive = await _safe_send(
             connection_alive,
-            lambda: ctx.warning(
-                f"Error processing scanner results for {scanner_name}/{target_type}: {str(exc)}"
-            ),
+            lambda: ctx.warning(warning_message),
             "Failed to send warning message",
         )
 
@@ -296,9 +311,7 @@ def _sleep_interval_for(completed_count: int) -> int:
     return 10
 
 
-def _update_scanner_estimate(
-    scanner_results: list, current_estimate: int
-) -> int:
+def _update_scanner_estimate(scanner_results: list, current_estimate: int) -> int:
     """Infer scanner count from result paths; never shrink below current estimate."""
     if not scanner_results:
         return current_estimate
@@ -341,16 +354,23 @@ async def _run_monitor_loop(
             )
             return
 
-        if ash_aggregated_results.exists():
+        # Blocking stat on the event loop, inside the monitor's polling loop. Deferred
+        # rather than fixed: asyncio.to_thread would move it off the loop but adds a
+        # thread hop per poll iteration, and this loop makes several blocking calls, so
+        # converting one of them buys nothing measurable while changing the loop's
+        # timing. Wants doing as one pass over the whole monitor.
+        if ash_aggregated_results.exists():  # noqa: ASYNC240
             await _handle_scan_completed(ctx, output_dir, connection_alive)
             return
 
         progress_info = await mcp_get_scan_progress(scan_id=scan_id)
-        if progress_info.get("status") in ["failed", "cancelled"]:
+        if progress_info.get("status") in ["failed", "incomplete", "cancelled"]:
             await _handle_terminal_status(ctx, progress_info, connection_alive)
             return
 
-        scanner_results = list(output_dir.glob("scanners/**/ASH.ScanResults.json"))
+        # Blocking glob on the event loop. Deferred: see the note on the exists() call
+        # above -- same polling loop, same reason.
+        scanner_results = list(output_dir.glob("scanners/**/ASH.ScanResults.json"))  # noqa: ASYNC240
         total_scanners_estimate = _update_scanner_estimate(
             scanner_results, total_scanners_estimate
         )
@@ -501,9 +521,13 @@ async def monitor_scan_progress(ctx: Context, scan_id: str) -> None:
             "Failed to send cancellation message",
         )
     except Exception as exc:
-        logger.exception(f"Error monitoring scan progress: {str(exc)}")
+        # Eager format, same reason as the handler in _process_scanner_result
+        # above: `exc` is unbound once this handler exits, so a lambda reading it
+        # would raise NameError in place of the real error.
+        error_message = f"Error monitoring scan progress: {str(exc)}"
+        logger.exception(error_message)
         await _safe_send(
             connection_alive,
-            lambda: ctx.error(f"Error monitoring scan progress: {str(exc)}"),
+            lambda: ctx.error(error_message),
             "Failed to send error message to client",
         )

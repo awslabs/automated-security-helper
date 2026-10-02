@@ -32,6 +32,7 @@ if that schema moves. ``severity_counts`` deliberately mirrors
 import json
 import time
 import asyncio
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from unittest import mock
@@ -53,6 +54,8 @@ from automated_security_helper.core.resource_management.scan_management import (
     get_scan_statistics,
 )
 from automated_security_helper.core.resource_management.scan_tracking import (
+    assess_coverage,
+    load_aggregated_results_model,
     get_scan_progress_info,
     get_scan_results,
 )
@@ -73,7 +76,7 @@ LEGACY_RESULT_KEYS = (
 
 def severity_counts(findings):
     """Bucket findings by severity the way extract_findings_summary does."""
-    counts = {bucket: 0 for bucket in SEVERITY_BUCKETS}
+    counts = dict.fromkeys(SEVERITY_BUCKETS, 0)
     for finding in findings:
         bucket = finding.get("severity", "").lower()
         if bucket in counts:
@@ -87,7 +90,7 @@ def write_aggregated_results(output_dir, scanner_results, generated_at=None):
     Only scanners whose status is PASSED or FAILED count as completed, so a
     scanner recorded as ERROR or MISSING here stays out of ``total_scanners``.
     """
-    totals = {bucket: 0 for bucket in SEVERITY_BUCKETS}
+    totals = dict.fromkeys(SEVERITY_BUCKETS, 0)
     actionable = 0
     for info in scanner_results.values():
         actionable += info.get("finding_count", 0)
@@ -142,6 +145,51 @@ def output_directory(tmp_path):
     output_dir = tmp_path / "ash_output"
     output_dir.mkdir()
     return output_dir
+
+
+def _close_like_the_runner(output_dir):
+    """The step _run_scan_async takes when run_ash_scan returns, for ``output_dir``.
+
+    A mock scan writes files; it is not the runner. The real runner closes the entry
+    only after the whole run returns, and until then ``check_scan_progress`` reports
+    the scan as running whatever its results file says -- the SCAN phase writes a
+    readable one before the REPORT phase has run. The mock returns this so a test can
+    close the entry the way the runner does, and assert on the state before it.
+
+    The way the runner does includes which status. A run whose results carry an
+    ERROR scanner exits 1 under the completeness gate, and the runner closes it
+    ``incomplete`` with the gap. Closing every mock scan ``completed`` would have the
+    tests below assert a status no real scan of these results can reach.
+    ``assess_coverage`` is the rule that exit code is decided by.
+    """
+
+    def close():
+        registry = get_scan_registry()
+        [scan] = [
+            scan
+            for scan in registry.list_scans()
+            if Path(scan["output_directory"]) == Path(output_dir)
+        ]
+        model = load_aggregated_results_model(Path(output_dir))
+        assert model is not None, f"the mock wrote no readable results to {output_dir}"
+        gate_fires, coverage = assess_coverage(model)
+        registry.finish_scan(
+            scan["scan_id"],
+            MCScanStatus.INCOMPLETE if gate_fires else MCScanStatus.COMPLETED,
+            coverage=coverage,
+        )
+
+    return close
+
+
+async def _assert_not_completed_until_the_runner_closes(scan_id):
+    """A results file on disk is not a finished scan while its runner is open."""
+    progress = await check_scan_progress(scan_id)
+    assert progress["status"] != "completed", (
+        "The results file exists but the runner has not closed the scan, and "
+        f"it was reported completed with scanners={progress.get('scanners')!r}."
+    )
+    assert progress["is_complete"] is False
 
 
 @pytest.fixture
@@ -199,6 +247,7 @@ def mock_scan_process():
             }
 
         write_aggregated_results(output_dir, scanner_results)
+        return _close_like_the_runner(output_dir)
 
     return create_mock_scan_results
 
@@ -247,15 +296,27 @@ class TestScanWorkflowIntegration:
                 await asyncio.sleep(0.2)
 
             # Wait for the mock scan to complete
-            future.result()
+            close = future.result()
+
+        await _assert_not_completed_until_the_runner_closes(scan_id)
+        close()
 
         # Check scan progress after completion
         progress = await check_scan_progress(scan_id)
         assert progress["scan_id"] == scan_id
         assert progress["status"] == "completed"
         assert progress["is_complete"] is True
-        assert progress["completed_scanners"] == 3
+        # `completed_scanners` counts only scanners that ran AND reported PASSED --
+        # the contract is documented on mcp_server.get_scan_progress. Every scanner
+        # this fixture writes has findings, so each is recorded FAILED and none is
+        # clean. Asserting 3 read the count as "how many ran", which it stopped
+        # meaning when it began excluding scanners that found something.
+        assert progress["completed_scanners"] == 0
         assert progress["total_scanners"] == 3
+        # Zero clean scanners must stay distinguishable from a scan where nothing
+        # ran, which is the reason the two counts are reported separately at all.
+        # Without this line the assertion above passes for both.
+        assert progress["skipped_scanners"] == []
         assert progress["total_findings"] == 6  # 1 + 2 + 3 findings
         assert progress["severity_counts"]["critical"] == 3
 
@@ -467,8 +528,12 @@ class TestScanWorkflowIntegration:
             assert set(scan_ids) <= active_ids
 
             # Wait for all mock scans to complete
-            for future in futures:
-                future.result()
+            closes = [future.result() for future in futures]
+
+        for scan_id in scan_ids:
+            await _assert_not_completed_until_the_runner_closes(scan_id)
+        for close in closes:
+            close()
 
         # Check scan statistics
         stats = await get_scan_statistics()
@@ -476,14 +541,17 @@ class TestScanWorkflowIntegration:
 
         # Check each scan's progress
         for i, scan_id in enumerate(scan_ids):
+            # The third scan carries an errored scanner, so it finished incomplete.
+            expected_status = "incomplete" if i == 2 else "completed"
+
             progress = await check_scan_progress(scan_id)
             assert progress["scan_id"] == scan_id
-            assert progress["status"] == "completed"
+            assert progress["status"] == expected_status
             assert progress["is_complete"] is True
 
             # Get scan results
             results = get_scan_results(output_dirs[i])
-            assert results["status"] == "completed"
+            assert results["status"] == expected_status
             assert results["is_complete"] is True
             # The third scan carries an ERROR scanner, which is reported but is
             # not a completed scanner.
@@ -517,18 +585,29 @@ class TestScanWorkflowIntegration:
         registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
 
         # Create mock scan results with errors
-        mock_scan_process(output_directory, 0.2, 2, True)
+        close = mock_scan_process(output_directory, 0.2, 2, True)
 
-        # Check scan progress
+        await _assert_not_completed_until_the_runner_closes(scan_id)
+        close()
+
+        # Check scan progress. An errored scanner is a coverage gap, not a crash:
+        # the scan finished incomplete, its results are readable, and the gap is
+        # named with its reason.
         progress = await check_scan_progress(scan_id)
         assert progress["scan_id"] == scan_id
-        assert progress["status"] == "completed"
+        assert progress["status"] == "incomplete"
         assert progress["is_complete"] is True
+        assert progress["coverage_complete"] is False
+        assert [
+            (row["scanner"], row["status"], row["reason"])
+            for row in progress["incomplete_scanners"]
+        ] == [("error_scanner", "ERROR", "error")]
 
         # Get scan results
         results = get_scan_results(output_directory)
-        assert results["status"] == "completed"
+        assert results["status"] == "incomplete"
         assert results["is_complete"] is True
+        assert results["coverage_complete"] is False
 
         # The errored scanner is visible, and is excluded from the completed
         # count: two scanners ran to a verdict, three are reported.
@@ -737,7 +816,12 @@ class TestScanWorkflowIntegration:
         # Create scanner with malformed results
         scanner2_source = output_directory / "scanners" / "scanner2" / "source"
         scanner2_source.mkdir(parents=True)
-        with open(scanner2_source / "ASH.ScanResults.json", "w") as handle:
+        # Blocking I/O in an async test body. Deferred, not fixed: this is fixture
+        # setup, so stalling the test's own event loop has no effect on what is being
+        # asserted, and wrapping it in asyncio.to_thread would add concurrency noise to
+        # code whose job is to be obviously correct. Tracked with the source-side
+        # ASYNC230/ASYNC240 sites.
+        with open(scanner2_source / "ASH.ScanResults.json", "w") as handle:  # noqa: ASYNC230
             handle.write("{invalid json")
 
         # Check progress with malformed file

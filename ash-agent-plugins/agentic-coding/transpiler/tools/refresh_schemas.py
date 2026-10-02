@@ -17,6 +17,7 @@ actionable error message.
 After refresh, run `uv run --project agentic-coding/transpiler agentic-plugins check`
 to confirm the new schemas still validate the generated outputs.
 """
+
 from __future__ import annotations
 
 import json
@@ -29,8 +30,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent          # transpiler/tools
-TRANSPILER_DIR = HERE.parent                     # transpiler/
+HERE = Path(__file__).resolve().parent  # transpiler/tools
+TRANSPILER_DIR = HERE.parent  # transpiler/
 SCHEMAS_DIR = TRANSPILER_DIR / "schemas"
 SCHEMAS_INDEX = SCHEMAS_DIR / "schemas.json"
 ZOD_CONVERTER = HERE / "zod_to_json_schema.mjs"

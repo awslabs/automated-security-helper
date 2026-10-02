@@ -16,13 +16,18 @@ command's return value is discarded, so the previous implementation could print
 caller cannot observe is not a verdict.
 """
 
+import io
+import shutil
+import subprocess
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 import typer
+from rich.console import Console
 from typer.testing import CliRunner
 
+from automated_security_helper.cli import dependencies as dependencies_module
 from automated_security_helper.cli.dependencies import (
     EXIT_BAD_SELECTION,
     EXIT_INSTALL_FAILED,
@@ -137,7 +142,9 @@ class TestVerdictIsDerivedFromCounts:
         state already holds is a false alarm, and the docstring of the verdict
         function commits to treating this as a constraint rather than a malfunction.
         """
-        outcomes = [_outcome(name="npm-audit", command="npm", executable="/usr/bin/npm")]
+        outcomes = [
+            _outcome(name="npm-audit", command="npm", executable="/usr/bin/npm")
+        ]
         assert _report_and_exit(outcomes, requested_tools=["npm-audit"]) == EXIT_OK
 
     def test_requesting_an_unprovisionable_tool_that_is_absent_fails(self):
@@ -271,9 +278,9 @@ class TestEmptyArgvIsSkipped:
         monkeypatch.setattr(
             "automated_security_helper.cli.dependencies.ash_plugin_manager",
             SimpleNamespace(
-                plugin_modules=lambda kind: [lambda **_kw: fake]
-                if kind == "scanner"
-                else []
+                plugin_modules=lambda kind: (
+                    [lambda **_kw: fake] if kind == "scanner" else []
+                )
             ),
         )
         ran = []
@@ -334,9 +341,9 @@ class TestToolSelectionScopesFailures:
         monkeypatch.setattr(
             "automated_security_helper.cli.dependencies.ash_plugin_manager",
             SimpleNamespace(
-                plugin_modules=lambda kind: [lambda **_kw: good, Broken]
-                if kind == "scanner"
-                else []
+                plugin_modules=lambda kind: (
+                    [lambda **_kw: good, Broken] if kind == "scanner" else []
+                )
             ),
         )
         monkeypatch.setattr(
@@ -396,21 +403,55 @@ class TestToolSelection:
     in-process -- so without monkeypatch.setenv these tests would leave that
     variable set for every later test sharing the xdist worker, changing where
     find_executable looks.
+
+    WHY THESE ASSERTIONS DO NOT READ ``result.output``
+
+    CliRunner captures by swapping ``sys.stdout``, and pytest's logging plugin
+    suspends and resumes global capture around log records -- on resume
+    ``sys.stdout`` is pytest's capture object rather than the runner's. ASH emits
+    its first log records while loading plugins, which happens once per process,
+    so everything the command prints after that point misses the runner's buffer
+    on the first invocation in a worker and reaches it on every later one.
+
+    Measured rather than reasoned: this test failed run first and passed run
+    second, passes under ``-p no:logging``, passes under ``-s``, and the missing
+    "Nothing installed" panel accounts for the entire 451-byte difference between
+    a first and a second invocation's captured length.
+
+    The product is not affected. A real ``ash dependencies install --tool
+    nonexistent`` prints the panel and exits 2;
+    ``test_unknown_tool_reaches_a_real_stdout`` asserts that out of process, which
+    is the only place it can honestly be asserted.
+
+    So the installer's console is pinned to a buffer these tests own. That also
+    repairs a negative assertion that had been passing vacuously: on a truncated
+    capture, ``"Running command" not in result.output`` holds whether or not the
+    text was printed, because the text it looks for was cut off rather than never
+    written.
     """
 
     @pytest.fixture(autouse=True)
     def _isolate(self, tmp_path, monkeypatch):
         monkeypatch.setenv("ASH_BIN_PATH", str(tmp_path / "bin"))
         self.bin_args = ["--bin-path", str(tmp_path / "bin")]
+        # width, so Rich does not wrap a string an assertion looks for across two
+        # lines; no_color, so it does not interleave ANSI inside one.
+        self.panels = io.StringIO()
+        monkeypatch.setattr(
+            dependencies_module,
+            "console",
+            Console(file=self.panels, width=200, no_color=True),
+        )
 
     def test_unknown_tool_exits_two_and_lists_what_exists(self):
         result = runner.invoke(
             dependencies_app, ["--tool", "nonexistent", *self.bin_args]
         )
         assert result.exit_code == EXIT_BAD_SELECTION
-        assert "Unknown tool" in result.output
+        printed = self.panels.getvalue()
+        assert "Unknown tool" in printed
         # The available list is what makes the error actionable rather than a wall.
-        assert "grype" in result.output
+        assert "grype" in printed
 
     def test_unknown_tool_installs_nothing(self):
         """A bad selection must be refused before any command runs.
@@ -422,5 +463,76 @@ class TestToolSelection:
         result = runner.invoke(
             dependencies_app, ["--tool", "nonexistent", *self.bin_args]
         )
-        assert "Nothing installed" in result.output
-        assert "Running command" not in result.output
+        assert result.exit_code == EXIT_BAD_SELECTION
+        printed = self.panels.getvalue()
+        assert "Nothing installed" in printed
+        assert "Running command" not in printed
+
+    def test_unknown_tool_reaches_a_real_stdout(self):
+        """The rejection has to be visible to a person, not only to a test double.
+
+        Every other assertion in this class reads a console this test pinned, which
+        proves what the code printed but not where it went. Running the installed
+        entry point in its own process is what shows an operator who typed a tool
+        name wrong gets told so, and gets a non-zero status to act on.
+        """
+        ash = shutil.which("ash")
+        if ash is None:
+            pytest.skip("the `ash` console script is not on PATH in this environment")
+        # encoding and errors are load-bearing, and not for tidiness.
+        #
+        # `text=True` on its own decodes the pipe with
+        # locale.getpreferredencoding(False), which is cp1252 on a Windows runner. The
+        # child writes UTF-8: utils/log.py::configure_windows_safe_logging reconfigures
+        # ash's own stdout to UTF-8 whenever a CI indicator is in the environment. Rich
+        # then draws this panel with box-drawing glyphs, and on Windows it draws them
+        # with box.SQUARE rather than box.ROUNDED, because rich.box.Box.substitute
+        # swaps ROUNDED out when options.legacy_windows is set and a piped stdout
+        # reports no VT support. SQUARE's top-right corner is U+2510, which is e2 94 90
+        # in UTF-8, and 0x90 is unassigned in cp1252. Rounded corners would have
+        # decoded into mojibake without complaint, which is why this went unnoticed.
+        #
+        # The decode error does not reach this frame. On Windows, Popen._communicate
+        # reads each pipe on a daemon thread whose body is `buffer.append(fh.read())`,
+        # so a raising read appends nothing, and the function ends with
+        # `stdout = stdout[0] if stdout else None`. An empty buffer is falsy, so
+        # subprocess.run returns a CompletedProcess whose stdout is None having raised
+        # nothing at all -- the returncode assertion above still passes. That is what
+        # failed all five Windows legs: first as `TypeError: argument of type
+        # 'NoneType' is not iterable`, then, after this assertion was rewritten to read
+        # both streams, as `TypeError: unsupported operand type(s) for +: 'NoneType'
+        # and 'str'`. Neither shape was a console-width problem.
+        #
+        # errors="replace" is the part that closes the class rather than this instance:
+        # no byte can make the reader thread raise, so a captured stream cannot come
+        # back None again. tests/unit/utils/test_windows_console_encoding.py pins the
+        # mechanism on every platform.
+        proc = subprocess.run(
+            [ash, "dependencies", "install", "--tool", "nonexistent", *self.bin_args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=900,
+        )
+        assert proc.returncode == EXIT_BAD_SELECTION
+
+        # Rich wraps the panel to its default width for a pipe, which can put a newline
+        # and border padding inside the phrase being searched for, and which stream
+        # carries the panel is not fixed either -- see configure_windows_safe_logging
+        # above. Blanking the whole box-drawing block and collapsing whitespace rejoins
+        # a wrapped phrase; searching both streams removes the second question. An
+        # enumerated glyph list was tried first and was one glyph short, so the range is
+        # deliberate. This still fails if the message is absent or renamed, which is
+        # what the test is for.
+        rendered = " ".join(
+            (proc.stdout + "\n" + proc.stderr)
+            .translate(dict.fromkeys(range(0x2500, 0x2580), " "))
+            .replace("|", " ")
+            .split()
+        )
+        assert "Unknown tool" in rendered, (
+            f"the rejection did not reach the operator. returncode={proc.returncode}. "
+            f"Rendered output: {rendered[:400]}"
+        )
+        assert "Nothing installed" in rendered

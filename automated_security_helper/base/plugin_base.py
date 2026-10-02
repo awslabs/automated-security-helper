@@ -4,7 +4,7 @@ from datetime import datetime
 import logging
 import sys
 from pathlib import Path
-from typing import Annotated, Dict, List, Literal, Optional
+from typing import Annotated, Callable, Dict, List, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -12,7 +12,10 @@ from automated_security_helper.base.plugin_config import PluginConfigBase
 from automated_security_helper.base.plugin_context import PluginContext
 from automated_security_helper.base.uv_tool_mixin import UVToolMixin
 from automated_security_helper.core.enums import PackageManager
-from automated_security_helper.core.exceptions import ScannerError
+from automated_security_helper.core.exceptions import (
+    ScannerError,
+    ToolNotProvisionableError,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -55,6 +58,117 @@ def pep440_requirement(name: str, version: str) -> str:
     if version.startswith(_VERSION_SPECIFIER_START):
         return f"{name}{version}"
     return f"{name}=={version}"
+
+
+def _versioned(dep: "PluginDependency", separator: str) -> str:
+    """Render ``name<separator>version``, or bare ``name`` for ``"latest"``.
+
+    The separator is the package manager's own spelling of a pin: ``=`` for apt
+    and conda, ``@`` for npm and brew, ``-`` for yum. Ranges are not translated
+    between managers -- see ``pep440_requirement`` for why.
+    """
+    if dep.version == "latest":
+        return dep.name
+    return f"{dep.name}{separator}{dep.version}"
+
+
+#: How each package manager's dependencies are rendered into one argv.
+#:
+#: A mapping rather than an ``if``/``elif`` chain so the set of handled members is a
+#: value this module can compare against ``PackageManager`` -- see
+#: ``_UNRENDERED_PACKAGE_MANAGERS``. The chain this replaced covered eight of the ten
+#: members and ended without an ``else``, so a plugin declaring ``package_manager:
+#: conda`` produced an empty command list, the installer reported success, and the
+#: scanner turned up MISSING at scan time with nothing naming the cause.
+_INSTALL_COMMAND_BUILDERS: Dict[
+    PackageManager, Callable[["PluginDependency"], List[str]]
+] = {
+    PackageManager.APT: lambda dep: [
+        "apt-get",
+        "install",
+        "-y",
+        _versioned(dep, "="),
+    ],
+    PackageManager.PIP: lambda dep: [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        pep440_requirement(dep.name, dep.version),
+    ],
+    PackageManager.UV: lambda dep: [
+        "uv",
+        "tool",
+        "install",
+        pep440_requirement(dep.name, dep.version),
+    ],
+    # conda pins with a single `=`, the same spelling apt uses. A real command rather
+    # than a refusal because "conda" is a published, user-facing value: it is in the
+    # generated AshConfig schema, so a custom plugin may already declare it, and such a
+    # plugin means `conda install` -- rejecting the member would break a documented
+    # input while installing it is what the author asked for.
+    PackageManager.CONDA: lambda dep: [
+        "conda",
+        "install",
+        "-y",
+        _versioned(dep, "="),
+    ],
+    PackageManager.NPM: lambda dep: [
+        "npm",
+        "install",
+        "-g",
+        _versioned(dep, "@"),
+    ],
+    PackageManager.BREW: lambda dep: [
+        "brew",
+        "install",
+        _versioned(dep, "@"),
+    ],
+    PackageManager.YUM: lambda dep: [
+        "yum",
+        "install",
+        "-y",
+        _versioned(dep, "-"),
+    ],
+    # choco's version flag lands inside the same argv element as the package name.
+    # Preserved verbatim from the chain this replaced: it is wrong (argv elements do
+    # not word-split), but correcting it is a behaviour change for chocolatey users
+    # and belongs in its own commit, not in a commit about a missing member.
+    PackageManager.CHOCO: lambda dep: [
+        "choco",
+        "install",
+        "-y",
+        f"{dep.name}{f' --version={dep.version}' if dep.version != 'latest' else ''}",
+    ],
+}
+
+#: Members that intentionally render no command, each for a stated reason.
+#:
+#: URL downloads are performed by ``download_utils`` through a plugin's
+#: ``custom_install_commands``, and ``CUSTOM`` says only "not one of the managers
+#: above" -- it carries no package name a command could be built from, so its
+#: commands also live in ``custom_install_commands``. Both are listed here so that
+#: "renders nothing" is a recorded decision rather than a missing branch.
+_NO_INSTALL_COMMAND_PACKAGE_MANAGERS = frozenset(
+    {
+        PackageManager.URL,
+        PackageManager.CUSTOM,
+    }
+)
+
+#: Every PackageManager member that is neither rendered nor deliberately skipped.
+#:
+#: Derived, not listed, so it cannot drift from the enum. It must stay empty: a new
+#: member added without either a builder or an entry above lands here, and
+#: ``tests/unit/base/test_install_command_dispatch_is_exhaustive.py`` fails on it.
+#: That test is the mechanism -- without it a new member would reach
+#: ``get_installation_commands`` and raise there, which is loud but only for whoever
+#: happens to run that plugin.
+_UNRENDERED_PACKAGE_MANAGERS = (
+    frozenset(PackageManager)
+    - frozenset(_INSTALL_COMMAND_BUILDERS)
+    - _NO_INSTALL_COMMAND_PACKAGE_MANAGERS
+)
 
 
 class CustomCommand(BaseModel):
@@ -128,8 +242,7 @@ class PluginBase(UVToolMixin, BaseModel):
         ASH_LOGGER._log(
             level,
             f"([yellow]{self.config.name or self.__class__.__name__}[/yellow]{tt})"
-            + "\t"
-            + "\n".join(msg),
+            "\t" + "\n".join(msg),
             args=(),
         )
         if level == logging.ERROR or append_to_stream == "stderr":
@@ -315,73 +428,33 @@ class PluginBase(UVToolMixin, BaseModel):
         # Process standard dependencies
         if platform in self.dependencies and arch in self.dependencies[platform]:
             for dep in self.dependencies[platform][arch]:
-                if dep.package_manager == PackageManager.APT:
-                    commands.append(
-                        [
-                            "apt-get",
-                            "install",
-                            "-y",
-                            f"{dep.name}{f'={dep.version}' if dep.version != 'latest' else ''}",
-                        ]
+                # Normalised so a plugin that declares the raw string ("conda") and one
+                # that declares the member (PackageManager.CONDA) take the same path. A
+                # value that is not a member at all raises here, naming the value.
+                package_manager = PackageManager(dep.package_manager)
+
+                if package_manager in _NO_INSTALL_COMMAND_PACKAGE_MANAGERS:
+                    # Installed through custom_install_commands, not from here.
+                    continue
+
+                builder = _INSTALL_COMMAND_BUILDERS.get(package_manager)
+                if builder is None:
+                    # Reachable only for a PackageManager member added without a
+                    # builder. Refused rather than skipped: returning no command for a
+                    # declared dependency lets the install report success and defers the
+                    # failure to scan time, where it appears as a scanner reported
+                    # MISSING and names neither the dependency nor the manager.
+                    raise ToolNotProvisionableError(
+                        f"{self.__class__.__name__} declares dependency "
+                        f"'{dep.name}' with package manager "
+                        f"'{package_manager.value}', which ASH has no install "
+                        f"command for. Add a renderer to "
+                        f"_INSTALL_COMMAND_BUILDERS, or list the member in "
+                        f"_NO_INSTALL_COMMAND_PACKAGE_MANAGERS if it is installed "
+                        f"through custom_install_commands."
                     )
-                elif dep.package_manager == PackageManager.PIP:
-                    commands.append(
-                        [
-                            sys.executable,
-                            "-m",
-                            "pip",
-                            "install",
-                            pep440_requirement(dep.name, dep.version),
-                        ]
-                    )
-                elif dep.package_manager == PackageManager.UV:
-                    commands.append(
-                        [
-                            "uv",
-                            "tool",
-                            "install",
-                            pep440_requirement(dep.name, dep.version),
-                        ]
-                    )
-                elif dep.package_manager == PackageManager.NPM:
-                    commands.append(
-                        [
-                            "npm",
-                            "install",
-                            "-g",
-                            f"{dep.name}{f'@{dep.version}' if dep.version != 'latest' else ''}",
-                        ]
-                    )
-                elif dep.package_manager == PackageManager.BREW:
-                    commands.append(
-                        [
-                            "brew",
-                            "install",
-                            f"{dep.name}{f'@{dep.version}' if dep.version != 'latest' else ''}",
-                        ]
-                    )
-                elif dep.package_manager == PackageManager.YUM:
-                    commands.append(
-                        [
-                            "yum",
-                            "install",
-                            "-y",
-                            f"{dep.name}{f'-{dep.version}' if dep.version != 'latest' else ''}",
-                        ]
-                    )
-                elif dep.package_manager == PackageManager.CHOCO:
-                    commands.append(
-                        [
-                            "choco",
-                            "install",
-                            "-y",
-                            f"{dep.name}{f' --version={dep.version}' if dep.version != 'latest' else ''}",
-                        ]
-                    )
-                elif dep.package_manager == PackageManager.URL:
-                    # For URL downloads, we need to use the download_utils module
-                    # This is handled by custom commands, so we don't need to do anything here
-                    pass
+
+                commands.append(builder(dep))
 
         # Add UV tool installation commands if available
         if self.use_uv_tool and self.uv_tool_install_commands:

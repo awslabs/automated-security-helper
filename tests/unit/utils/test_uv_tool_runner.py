@@ -5,7 +5,6 @@ import subprocess  # nosec B404
 import threading
 import time
 from contextlib import contextmanager
-from pathlib import Path
 from unittest.mock import patch, MagicMock
 import pytest
 
@@ -130,17 +129,13 @@ class TestIsToolInstalled:
     def test_returns_true_when_in_list(self, runner):
         runner._uv_available_cache = True
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=0, stdout="bandit 1.7.0\n"
-            )
+            mock_run.return_value = MagicMock(returncode=0, stdout="bandit 1.7.0\n")
             assert runner.is_tool_installed("bandit") is True
 
     def test_returns_false_when_not_in_list(self, runner):
         runner._uv_available_cache = True
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=0, stdout="checkov 3.0.0\n"
-            )
+            mock_run.return_value = MagicMock(returncode=0, stdout="checkov 3.0.0\n")
             assert runner.is_tool_installed("bandit") is False
 
     def test_returns_false_on_error(self, runner):
@@ -158,9 +153,7 @@ class TestGetToolVersion:
     def test_returns_version_string(self, runner):
         runner._uv_available_cache = True
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=0, stdout="bandit 1.7.8\n"
-            )
+            mock_run.return_value = MagicMock(returncode=0, stdout="bandit 1.7.8\n")
             version = runner.get_tool_version("bandit")
             assert version == "bandit 1.7.8"
 
@@ -177,9 +170,7 @@ class TestGetToolVersion:
     def test_uses_package_name_in_from_param(self, runner):
         runner._uv_available_cache = True
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=0, stdout="1.7.8\n"
-            )
+            mock_run.return_value = MagicMock(returncode=0, stdout="1.7.8\n")
             runner.get_tool_version("bandit", package_name="bandit[sarif]")
             cmd = mock_run.call_args[0][0]
             assert "--from" in cmd
@@ -198,9 +189,7 @@ class TestInstallToolWithVersion:
         runner._uv_available_cache = True
         with patch("subprocess.run") as mock_run:
             # list_available_tools response
-            mock_run.return_value = MagicMock(
-                returncode=0, stdout="bandit 1.7.0\n"
-            )
+            mock_run.return_value = MagicMock(returncode=0, stdout="bandit 1.7.0\n")
             result = runner.install_tool_with_version("bandit")
             assert result is True
 
@@ -217,12 +206,15 @@ class TestInstallToolWithVersion:
                 MagicMock(returncode=0, stdout="checkov 3.0.0\n"),
                 MagicMock(returncode=0),  # install succeeds
             ]
-            with patch(
-                "automated_security_helper.utils.subprocess_utils.find_executable",
-                return_value=None,
-            ), patch(
-                "automated_security_helper.core.constants.is_offline_mode",
-                return_value=False,
+            with (
+                patch(
+                    "automated_security_helper.utils.subprocess_utils.find_executable",
+                    return_value=None,
+                ),
+                patch(
+                    "automated_security_helper.core.constants.is_offline_mode",
+                    return_value=False,
+                ),
             ):
                 result = runner.install_tool_with_version("bandit")
                 assert result is True
@@ -234,12 +226,15 @@ class TestInstallToolWithVersion:
                 MagicMock(returncode=0, stdout=""),  # list (tool not present)
                 subprocess.TimeoutExpired("uv", 300),
             ]
-            with patch(
-                "automated_security_helper.utils.subprocess_utils.find_executable",
-                return_value=None,
-            ), patch(
-                "automated_security_helper.core.constants.is_offline_mode",
-                return_value=False,
+            with (
+                patch(
+                    "automated_security_helper.utils.subprocess_utils.find_executable",
+                    return_value=None,
+                ),
+                patch(
+                    "automated_security_helper.core.constants.is_offline_mode",
+                    return_value=False,
+                ),
             ):
                 with pytest.raises(UVToolRunnerError, match="timed out"):
                     runner.install_tool_with_version("bandit", timeout=300)
@@ -248,12 +243,15 @@ class TestInstallToolWithVersion:
         runner._uv_available_cache = True
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="")
-            with patch(
-                "automated_security_helper.utils.subprocess_utils.find_executable",
-                return_value=None,
-            ), patch(
-                "automated_security_helper.core.constants.is_offline_mode",
-                return_value=True,
+            with (
+                patch(
+                    "automated_security_helper.utils.subprocess_utils.find_executable",
+                    return_value=None,
+                ),
+                patch(
+                    "automated_security_helper.core.constants.is_offline_mode",
+                    return_value=True,
+                ),
             ):
                 result = runner.install_tool_with_version("bandit")
                 assert result is False
@@ -265,16 +263,17 @@ class TestInstallToolWithVersion:
                 MagicMock(returncode=0, stdout=""),  # list
                 MagicMock(returncode=0),  # install
             ]
-            with patch(
-                "automated_security_helper.utils.subprocess_utils.find_executable",
-                return_value=None,
-            ), patch(
-                "automated_security_helper.core.constants.is_offline_mode",
-                return_value=False,
+            with (
+                patch(
+                    "automated_security_helper.utils.subprocess_utils.find_executable",
+                    return_value=None,
+                ),
+                patch(
+                    "automated_security_helper.core.constants.is_offline_mode",
+                    return_value=False,
+                ),
             ):
-                runner.install_tool_with_version(
-                    "bandit", version_constraint=">=1.7.0"
-                )
+                runner.install_tool_with_version("bandit", version_constraint=">=1.7.0")
                 install_cmd = mock_run.call_args_list[-1][0][0]
                 assert "bandit>=1.7.0" in install_cmd
 
@@ -285,12 +284,15 @@ class TestInstallToolWithVersion:
                 MagicMock(returncode=0, stdout=""),  # list
                 MagicMock(returncode=0),  # install
             ]
-            with patch(
-                "automated_security_helper.utils.subprocess_utils.find_executable",
-                return_value=None,
-            ), patch(
-                "automated_security_helper.core.constants.is_offline_mode",
-                return_value=False,
+            with (
+                patch(
+                    "automated_security_helper.utils.subprocess_utils.find_executable",
+                    return_value=None,
+                ),
+                patch(
+                    "automated_security_helper.core.constants.is_offline_mode",
+                    return_value=False,
+                ),
             ):
                 runner.install_tool_with_version(
                     "bandit", package_extras=["sarif", "toml"]
@@ -1204,12 +1206,15 @@ class TestGetUvToolCommand:
     """Tests for get_uv_tool_command."""
 
     def test_returns_uv_form_when_probe_succeeds(self, reset_module_caches):
-        with patch(
-            "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
-            return_value="/opt/uv/bin/uv",
-        ), patch(
-            "automated_security_helper.utils.uv_tool_runner.subprocess.run"
-        ) as mock_run:
+        with (
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
+                return_value="/opt/uv/bin/uv",
+            ),
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+            ) as mock_run,
+        ):
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[], returncode=0, stdout="bandit 1.7\n", stderr=""
             )
@@ -1217,17 +1222,19 @@ class TestGetUvToolCommand:
             assert cmd == ["uv", "tool", "run", "bandit"]
             assert mock_run.call_count == 1
 
-    def test_falls_back_to_direct_binary_when_uv_probe_fails(
-        self, reset_module_caches
-    ):
-        with patch(
-            "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
-            return_value="/opt/uv/bin/uv",
-        ), patch(
-            "automated_security_helper.utils.uv_tool_runner.subprocess.run"
-        ) as mock_run, patch(
-            "automated_security_helper.utils.uv_tool_runner.find_executable",
-            return_value="/usr/local/bin/bandit",
+    def test_falls_back_to_direct_binary_when_uv_probe_fails(self, reset_module_caches):
+        with (
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
+                return_value="/opt/uv/bin/uv",
+            ),
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+            ) as mock_run,
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.find_executable",
+                return_value="/usr/local/bin/bandit",
+            ),
         ):
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[], returncode=1, stdout="", stderr="not found"
@@ -1236,47 +1243,60 @@ class TestGetUvToolCommand:
             assert cmd == ["/usr/local/bin/bandit"]
 
     def test_falls_back_to_direct_binary_when_uv_missing(self, reset_module_caches):
-        with patch(
-            "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
-            return_value=None,
-        ), patch(
-            "automated_security_helper.utils.uv_tool_runner.find_executable",
-            return_value="/usr/local/bin/bandit",
+        with (
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
+                return_value=None,
+            ),
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.find_executable",
+                return_value="/usr/local/bin/bandit",
+            ),
         ):
             cmd = get_uv_tool_command("bandit")
             assert cmd == ["/usr/local/bin/bandit"]
 
     def test_returns_none_when_neither_works(self, reset_module_caches):
-        with patch(
-            "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
-            return_value=None,
-        ), patch(
-            "automated_security_helper.utils.uv_tool_runner.find_executable",
-            return_value=None,
+        with (
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
+                return_value=None,
+            ),
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.find_executable",
+                return_value=None,
+            ),
         ):
             assert get_uv_tool_command("bandit") is None
 
     def test_handles_uv_probe_subprocess_error(self, reset_module_caches):
-        with patch(
-            "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
-            return_value="/opt/uv/bin/uv",
-        ), patch(
-            "automated_security_helper.utils.uv_tool_runner.subprocess.run",
-            side_effect=subprocess.TimeoutExpired(cmd="uv", timeout=30),
-        ), patch(
-            "automated_security_helper.utils.uv_tool_runner.find_executable",
-            return_value="/usr/local/bin/bandit",
+        with (
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
+                return_value="/opt/uv/bin/uv",
+            ),
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.subprocess.run",
+                side_effect=subprocess.TimeoutExpired(cmd="uv", timeout=30),
+            ),
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.find_executable",
+                return_value="/usr/local/bin/bandit",
+            ),
         ):
             cmd = get_uv_tool_command("bandit")
             assert cmd == ["/usr/local/bin/bandit"]
 
     def test_uses_fallback_binary_override(self, reset_module_caches):
-        with patch(
-            "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
-            return_value=None,
-        ), patch(
-            "automated_security_helper.utils.uv_tool_runner.find_executable",
-        ) as mock_find:
+        with (
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
+                return_value=None,
+            ),
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.find_executable",
+            ) as mock_find,
+        ):
             mock_find.return_value = "/usr/local/bin/detect-secrets"
             cmd = get_uv_tool_command(
                 "detect-secrets", fallback_binary="detect-secrets"
@@ -1285,12 +1305,15 @@ class TestGetUvToolCommand:
             mock_find.assert_called_once_with("detect-secrets")
 
     def test_memoizes_result_no_re_probe(self, reset_module_caches):
-        with patch(
-            "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
-            return_value="/opt/uv/bin/uv",
-        ), patch(
-            "automated_security_helper.utils.uv_tool_runner.subprocess.run"
-        ) as mock_run:
+        with (
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
+                return_value="/opt/uv/bin/uv",
+            ),
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+            ) as mock_run,
+        ):
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[], returncode=0, stdout="ok\n", stderr=""
             )
@@ -1300,13 +1323,16 @@ class TestGetUvToolCommand:
             assert mock_run.call_count == 1
 
     def test_memoizes_negative_result(self, reset_module_caches):
-        with patch(
-            "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
-            return_value=None,
-        ), patch(
-            "automated_security_helper.utils.uv_tool_runner.find_executable",
-            return_value=None,
-        ) as mock_find:
+        with (
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
+                return_value=None,
+            ),
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.find_executable",
+                return_value=None,
+            ) as mock_find,
+        ):
             assert get_uv_tool_command("bandit") is None
             assert get_uv_tool_command("bandit") is None
             assert mock_find.call_count == 1
@@ -1354,12 +1380,15 @@ class TestGetUvToolCommandThreadSafety:
                 if cmd is None:
                     none_observations.append(cmd)
 
-        with patch(
-            "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
-            return_value="/opt/uv/bin/uv",
-        ), patch(
-            "automated_security_helper.utils.uv_tool_runner.subprocess.run",
-            side_effect=slow_probe,
+        with (
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
+                return_value="/opt/uv/bin/uv",
+            ),
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.subprocess.run",
+                side_effect=slow_probe,
+            ),
         ):
             threads = [threading.Thread(target=worker) for _ in range(20)]
             for t in threads:
@@ -1382,12 +1411,15 @@ class TestGetUvToolCommandThreadSafety:
 
     def test_probe_uses_5s_timeout(self, reset_module_caches):
         """The version probe timeout is 5 s, not 30 s (DA r4 #5)."""
-        with patch(
-            "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
-            return_value="/opt/uv/bin/uv",
-        ), patch(
-            "automated_security_helper.utils.uv_tool_runner.subprocess.run"
-        ) as mock_run:
+        with (
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.find_uv_or_none",
+                return_value="/opt/uv/bin/uv",
+            ),
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+            ) as mock_run,
+        ):
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[], returncode=0, stdout="ok\n", stderr=""
             )
@@ -1470,9 +1502,7 @@ class TestGetToolVersionRunsOneProcessPerTool:
             runner.get_tool_version("checkov")
             assert mock_run.call_count == 2
 
-    def test_invalidation_matches_a_tool_whose_command_is_not_its_package(
-        self, runner
-    ):
+    def test_invalidation_matches_a_tool_whose_command_is_not_its_package(self, runner):
         """The key-shape the previous invalidator missed entirely.
 
         A memo key is "<command>::<from-spec>", but the name reaching
@@ -1492,18 +1522,14 @@ class TestGetToolVersionRunsOneProcessPerTool:
             "automated_security_helper.utils.uv_tool_runner.subprocess.run"
         ) as mock_run:
             mock_run.return_value = MagicMock(returncode=1, stdout="")
-            assert (
-                runner.get_tool_version("jupyter-nbconvert", "nbconvert") is None
-            )
+            assert runner.get_tool_version("jupyter-nbconvert", "nbconvert") is None
             assert mock_run.call_count == 1
 
             # The installer knows this tool as 'nbconvert'.
             invalidate_tool_version_cache("nbconvert")
 
             mock_run.return_value = MagicMock(returncode=0, stdout="7.16.6\n")
-            assert (
-                runner.get_tool_version("jupyter-nbconvert", "nbconvert") == "7.16.6"
-            )
+            assert runner.get_tool_version("jupyter-nbconvert", "nbconvert") == "7.16.6"
             assert mock_run.call_count == 2
 
     def test_invalidation_matches_a_from_spec_carrying_extras(self, runner):
@@ -1522,9 +1548,7 @@ class TestGetToolVersionRunsOneProcessPerTool:
             assert runner.get_tool_version("bandit", spec) == "bandit 1.9.4"
             assert mock_run.call_count == 2
 
-    def test_a_real_install_invalidates_through_install_tool_with_version(
-        self, runner
-    ):
+    def test_a_real_install_invalidates_through_install_tool_with_version(self, runner):
         """End to end through the wiring, not just the invalidator in isolation.
 
         install_tool_with_version is the single function every install path
@@ -1537,19 +1561,22 @@ class TestGetToolVersionRunsOneProcessPerTool:
             "automated_security_helper.utils.uv_tool_runner.subprocess.run"
         ) as mock_run:
             mock_run.return_value = MagicMock(returncode=1, stdout="")
-            assert (
-                runner.get_tool_version("jupyter-nbconvert", "nbconvert") is None
-            )
+            assert runner.get_tool_version("jupyter-nbconvert", "nbconvert") is None
 
-        with patch.object(runner, "is_tool_installed", return_value=False), patch(
-            "automated_security_helper.core.constants.is_offline_mode",
-            return_value=False,
-        ), patch(
-            "automated_security_helper.utils.subprocess_utils.find_executable",
-            return_value=None,
-        ), patch(
-            "automated_security_helper.utils.uv_tool_runner.subprocess.run"
-        ) as mock_run:
+        with (
+            patch.object(runner, "is_tool_installed", return_value=False),
+            patch(
+                "automated_security_helper.core.constants.is_offline_mode",
+                return_value=False,
+            ),
+            patch(
+                "automated_security_helper.utils.subprocess_utils.find_executable",
+                return_value=None,
+            ),
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+            ) as mock_run,
+        ):
             mock_run.return_value = MagicMock(returncode=0, stdout="")
             # The installer's own name for this tool is the package name.
             assert runner.install_tool_with_version("nbconvert") is True
@@ -1680,9 +1707,12 @@ class TestProbeLocksAreNamespaced:
             return real(cache_key)
 
         runner._uv_available_cache = True
-        with patch.object(mod, "_get_or_create_probe_lock", recording), patch(
-            "automated_security_helper.utils.uv_tool_runner.subprocess.run"
-        ) as mock_run:
+        with (
+            patch.object(mod, "_get_or_create_probe_lock", recording),
+            patch(
+                "automated_security_helper.utils.uv_tool_runner.subprocess.run"
+            ) as mock_run,
+        ):
             mock_run.return_value = MagicMock(
                 returncode=0, stdout="bandit 1.9.4\n", stderr=""
             )

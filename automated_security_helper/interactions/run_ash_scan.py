@@ -5,17 +5,26 @@ import json
 import logging
 import os
 import platform
+import shutil
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional, Union, cast
+from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Set, Tuple, cast
 
 import typer
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from rich import print
+
+# `print` shadows the builtin on purpose: this is rich's documented import
+# idiom, so every print() below renders markup and respects the console. The
+# fix A004 wants is an alias, which would mean rewriting every call in this
+# module for no behavior change -- and tests/unit/cli/mcp/test_stdout_jsonrpc_safety.py
+# reasons about this exact import form.
+from rich import print  # noqa: A004
 
 from automated_security_helper.core.constants import (
     ASH_CONFIG_FILE_NAMES,
+    ASH_EXIT_CODES,
     ASH_WORK_DIR_NAME,
     is_offline_mode,
 )
@@ -34,6 +43,9 @@ from automated_security_helper.core.exceptions import (
     WorkspaceDefinitionError,
 )
 from automated_security_helper.core.progress import ExecutionPhaseType
+from automated_security_helper.core.scanner_statistics_calculator import (
+    ScannerStatisticsCalculator,
+)
 from automated_security_helper.core.unified_metrics import (
     format_duration,
     get_unified_scanner_metrics,
@@ -42,7 +54,18 @@ from automated_security_helper.interactions.run_ash_container import run_ash_con
 from automated_security_helper.interactions.run_ash_nix import run_ash_nix
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.workspace import WorkspaceExitCode
-from automated_security_helper.utils.log import NO_MARKUP, escape_markup
+from automated_security_helper.utils.atomic_write import write_text_atomically
+from automated_security_helper.utils.content_db_staleness import (
+    ContentDbAgeRecord,
+    stale_content_databases,
+)
+from automated_security_helper.utils.log import ASH_LOGGER, NO_MARKUP, escape_markup
+from automated_security_helper.utils.sarif_utils import _resolve_result_severity
+from automated_security_helper.utils.severity_ladder import (
+    SEVERITIES,
+    sarif_level_fails_threshold,
+    severity_fails_threshold,
+)
 from automated_security_helper.workspace.plan import WorkspacePlan
 
 if TYPE_CHECKING:
@@ -168,8 +191,18 @@ class ScanOptions(BaseModel):
 # Severity helpers (module-level so _compute_exit_code can be patched cleanly)
 # ---------------------------------------------------------------------------
 
+# The --min-severity scale, which is not the severity ladder's: it has no `info`,
+# and `critical` and `high` share a rank because SARIF's `error` covers both.
+# `workspace.aggregation._MIN_SEVERITY_RANK` mirrors this table for the same gate
+# on the workspace path.
+#
+# There is no `_SARIF_LEVEL_TO_SEVERITY` beside it any more. That table spelled
+# `error -> high` where `utils.sarif_utils` spells `error -> critical`, and
+# `_severity_filters_finding` was the only severity resolver in ASH that read a
+# result's SARIF level while ignoring `properties.issue_severity` -- the field
+# every other resolver treats as authoritative. Both are now routed through
+# `utils.sarif_utils._resolve_result_severity`.
 _SEVERITY_RANK = {"critical": 3, "high": 3, "medium": 2, "low": 1, "none": 0}
-_SARIF_LEVEL_TO_SEVERITY = {"error": "high", "warning": "medium", "note": "low"}
 
 # ---------------------------------------------------------------------------
 # Scanner completeness
@@ -218,9 +251,9 @@ _COMPLETE_SCANNER_STATUSES = frozenset(
 
 #: Every remaining ScannerStatus member: today ERROR (ran and failed) and MISSING
 #: (selected, dependencies unavailable, never ran).
-_INCOMPLETE_SCANNER_STATUSES = frozenset(
-    {member.value for member in ScannerStatus}
-) - _COMPLETE_SCANNER_STATUSES
+_INCOMPLETE_SCANNER_STATUSES = (
+    frozenset({member.value for member in ScannerStatus}) - _COMPLETE_SCANNER_STATUSES
+)
 
 # The statuses that mean "this scanner executed and reached a verdict".
 #
@@ -276,18 +309,38 @@ def scanner_statuses(
     ]
 
 
-def no_scanner_ran(observed: List[tuple[str, str]]) -> bool:
-    """True when *observed* is non-empty and none of its scanners reached a verdict.
+def no_scanner_ran(
+    observed: List[tuple[str, str]],
+    expected: Optional[List[str]] = None,
+) -> bool:
+    """True when this run reached no verdict about the target.
 
-    Non-empty is load-bearing and is not the same assertion. An empty scanner set
-    means the scan phase recorded nothing, which is reachable from a legitimate
-    ``--phases convert`` run and is refused at the CI boundary instead (see
-    ``assert_scanners_completed.py``, which fails a results file reporting no
-    scanners at all). Folding the two together here would turn a phase-limited run
-    into an error.
+    Two conditions, and the second exists because the first could not express it.
+
+    1. *observed* is non-empty and none of its scanners reached a verdict. SKIPPED
+       has to be tolerated one entry at a time -- it is how sharding and
+       ``--exclude-scanners`` record work a run was never meant to do -- so a file
+       in which every entry is SKIPPED clears the per-scanner pass while having
+       measured nothing.
+
+    2. *observed* is empty AND *expected* is not. An empty scanner set used to be
+       exempt unconditionally, on the reasoning that it is reachable from a
+       legitimate ``--phases convert`` run. That reasoning is sound but covers two
+       different states, and a boolean over ``observed`` alone cannot separate
+       them: "the scan phase was not requested", which is benign, and "the scan
+       phase ran and had nothing to run", which is the silent-zero case this gate
+       exists for.
+
+    *expected* is what separates them, and it needs no new state to do it.
+    ``ScanPhase`` is what records ``metadata.expected_scanners``, so a recorded
+    roster means the scan phase ran; no roster and no scanners means it never did.
+
+    Defaults to None so a results file written by a version that recorded no roster
+    -- which ``ash merge`` reads, from whatever ASH produced each shard -- keeps the
+    old benign reading rather than becoming a failure on upgrade.
     """
     if not observed:
-        return False
+        return bool(expected)
     return not any(status in _RAN_SCANNER_STATUSES for _, status in observed)
 
 
@@ -452,6 +505,28 @@ def incomplete_scanners(
     if results is None:
         return []
 
+    # A scanner that ran against a content database past its declared bound, under the
+    # default `content_db_staleness: fail`, is incomplete in the sense this function
+    # means: its findings are real, and its silence about anything published since the
+    # database was built is not. Listed here so the callers that read only this list --
+    # the workspace layer and `ash merge` -- name it. Under `warn` the record is not
+    # enforced and is not listed.
+    #
+    # The exit code does NOT come from this arm. A stale database fails the scan
+    # whether or not `fail_on_incomplete_scanners` is on, so `scan_incompleteness`
+    # carries it in its own field, which `_compute_exit_code` reads, and drops a row
+    # listed here only for its stale database so the one condition is not reported
+    # twice. See `_listed_only_for_a_stale_database`.
+    stale_by_scanner: dict[str, list[str]] = {}
+    for record in stale_content_databases(results, enforced_only=True):
+        stale_by_scanner.setdefault(record.scanner, []).append(record.name)
+
+    def _with_stale(name: str, status: str) -> tuple[str, str]:
+        names = stale_by_scanner.pop(name, None)
+        if names:
+            status = f"{status} (stale content database: {', '.join(names)})"
+        return (name, status)
+
     listed: list[tuple[str, str]] = []
     for metric in get_unified_scanner_metrics(asharp_model=results):
         # Against the allowlist, not against _INCOMPLETE_SCANNER_STATUSES, and the
@@ -470,26 +545,181 @@ def incomplete_scanners(
         # this is the arm an ERROR or MISSING with no denominator falls to.
         if shortfall is None:
             if status_is_incomplete:
-                listed.append((metric.scanner_name, metric.status))
+                listed.append(_with_stale(metric.scanner_name, metric.status))
+            elif metric.scanner_name in stale_by_scanner:
+                listed.append(_with_stale(metric.scanner_name, metric.status))
             continue
 
         attempted, failed = shortfall
         # Total loss, and a status that already says so. The counts would add a
         # parenthetical that repeats the status.
         if status_is_incomplete and failed >= attempted:
-            listed.append((metric.scanner_name, metric.status))
+            listed.append(_with_stale(metric.scanner_name, metric.status))
             continue
 
         # A partial shortfall against a known denominator, whatever the status.
         # Selecting on status ahead of this is what dropped the counts from the
         # measured case.
         listed.append(
-            (
+            _with_stale(
                 metric.scanner_name,
                 f"{metric.status} ({failed} of {attempted} targets unevaluated)",
             )
         )
     return listed
+
+
+def incomplete_converters(
+    results: Optional[AshAggregatedResults],
+) -> List[tuple[str, str]]:
+    """(name, reason) for every converter that was meant to run and did not.
+
+    Conversion produces the second set of targets the scanners are given: notebooks
+    become Python, archives become their contents. A converter that crashed or whose
+    tool was absent therefore costs scan coverage, and it did so with no effect on
+    any verdict -- the scanners that ran reported PASSED on the targets they were
+    handed, and nothing asked whether the targets that should have existed did.
+
+    Two conditions, read off the recorded row rather than re-derived:
+
+    1. ``failure`` is set -- the converter raised, or was dropped by the plugin
+       filter for a reason its own dependency check did not explain. ConvertPhase
+       records both.
+    2. ``dependencies_satisfied`` is False -- its external tool was not available.
+
+    ``excluded`` is checked first and wins over both. It is the converter-side
+    counterpart of a SKIPPED scanner: work the run was never meant to do, which is
+    what a config-disabled converter and one dropped by
+    ``--python-based-plugins-only`` are. A gate that failed on those would fail every
+    run that turns conversion off, which is a supported configuration.
+
+    Read with ``getattr`` because a results file written by an older version carries
+    rows without ``failure``, and ``ash merge`` reads shard results from whatever
+    ASH produced each one.
+
+    Args:
+        results: The aggregated results, or None when the scan produced none.
+
+    Returns:
+        Pairs in the order the rows were recorded, empty when every converter either
+        ran or was excluded. The second element is a display string, not a token;
+        the caller interpolates it into a message and does not parse it.
+    """
+    if results is None:
+        return []
+
+    listed: list[tuple[str, str]] = []
+    for name, row in (getattr(results, "converter_results", None) or {}).items():
+        if getattr(row, "excluded", False):
+            continue
+        failure = getattr(row, "failure", None)
+        if failure:
+            listed.append((name, str(failure)))
+        elif getattr(row, "dependencies_satisfied", True) is False:
+            # An unavailable converter costs coverage only if it had inputs. The count
+            # is established without its tool, which is what makes it answerable for a
+            # converter that never ran -- see
+            # ``ConverterPluginBase.candidate_input_count``.
+            #
+            # ONLY an explicit 0 exempts the row. None means the converter reports no
+            # count, and that is treated exactly as this function treated every row
+            # before the field existed: still incomplete. So a converter that has not
+            # opted in, one whose count raised, and a results file written by a version
+            # predating the field all keep the strict answer, and nothing is exempted by
+            # missing information. ``is 0`` rather than ``== 0`` to keep False out:
+            # ``bool`` is an ``int`` subclass and ``False == 0``, so a row carrying a
+            # boolean would otherwise silence the gate.
+            candidates = getattr(row, "candidate_inputs", None)
+            if candidates is not None and not isinstance(candidates, bool):
+                if candidates == 0:
+                    continue
+            listed.append((name, "dependencies unavailable, so it never ran"))
+    return listed
+
+
+def print_incompleteness_message(
+    incomplete_scanner_rows: List[tuple[str, str]],
+    incomplete_converter_rows: List[tuple[str, str]],
+    stale_database_records: Sequence[ContentDbAgeRecord] = (),
+) -> None:
+    """Explain an exit code of 1 in terms of what actually caused it.
+
+    WHY THIS IS A FUNCTION RATHER THAN THREE BRANCHES INLINE
+    ------------------------------------------------------
+    It was inline, and the converter arm had no branch of its own, so it fell through to
+    "Exiting due to exception during ASH scan" -- which is false. Nothing raises on that
+    path: ``_compute_exit_code`` returns 1 from the converter gate after a
+    ``logger.error``. Both Nix CI legs exited that way, and the wording sent a reader
+    through 1572 log lines hunting a traceback that was never written, with the real
+    cause recorded only in a log line seventy lines earlier.
+
+    Inline it also could not be tested. The enclosing function runs a whole scan, so no
+    unit test could assert on the wording, which is how a message this wrong survived.
+    Extracted, the arm selection is a pure function of two lists and
+    ``tests/unit/interactions/test_fail_on_incomplete_converters.py`` asserts it
+    directly.
+
+    THE SCANNER ARM WINS WHEN BOTH ARE NON-EMPTY, deliberately. A scanner that did not
+    run is the more specific and more serious finding, and conversion shortfalls often
+    follow from the same absent environment. The converter arm is still reachable on its
+    own, which is the case Nix mode produces.
+
+    STALE CONTENT DATABASES ARE PRINTED FIRST AND ALONGSIDE, not as a third arm of
+    the precedence above. Their advice is different (refresh the database, or opt out
+    with ``--allow-stale-content-db``), and that arm is not behind the completeness
+    gate, so a run can trip it together with either of the others. A scanner listed
+    only for its stale database never reaches ``incomplete_scanner_rows``:
+    ``scan_incompleteness`` carries it in the stale records instead, so the
+    install-the-tool advice below is not given for a tool that ran.
+    """
+    if stale_database_records:
+        print(
+            "\n[bold red]ERROR (1) Exiting because "
+            f"{len(stale_database_records)} content database(s) are past their "
+            "declared age bound[/bold red]"
+        )
+        for _record in stale_database_records:
+            print(f"  [red]{escape_markup(_record.message())}[/red]")
+    if incomplete_scanner_rows:
+        # "did not run" would be false for the coverage case: that scanner ran,
+        # reported a status, and could not read some of its targets. Sending an
+        # operator to install a tool that is already installed is the specific
+        # wrong turn this wording avoids.
+        print(
+            "\n[bold red]ERROR (1) Exiting because the scan was incomplete: "
+            f"{len(incomplete_scanner_rows)} selected scanner(s) did not evaluate "
+            "everything they were given[/bold red]"
+        )
+        for _name, _status in incomplete_scanner_rows:
+            print(f"  [red]{_name}: {_status}[/red]")
+        print(
+            "[yellow]ERROR means the scanner ran and failed; MISSING means its "
+            "dependencies were unavailable; a target count means the scanner ran "
+            "but could not read that many of its inputs. Install the missing "
+            "tools, fix or exclude the unreadable targets, exclude the scanners "
+            "with --exclude-scanners, or drop --fail-on-incomplete-scanners to "
+            "accept a partial scan.[/yellow]"
+        )
+    elif incomplete_converter_rows:
+        # Names the converter, because that is the actionable part -- the fix is to
+        # install that converter's tool or accept the partial scan, and neither is
+        # discoverable from "an exception occurred".
+        print(
+            "\n[bold red]ERROR (1) Exiting because conversion was incomplete: "
+            f"{len(incomplete_converter_rows)} converter(s) did not process the "
+            "files they were given[/bold red]"
+        )
+        for _name, _reason in incomplete_converter_rows:
+            print(f"  [red]{_name}: {_reason}[/red]")
+        print(
+            "[yellow]A converter that did not run leaves its inputs unscanned, so "
+            "the scanners saw fewer files than this repository holds. Install the "
+            "converter's tool, disable the converter if its inputs are not wanted, "
+            "or drop --fail-on-incomplete-scanners to accept a partial scan. A "
+            "converter with nothing to convert never reports here.[/yellow]"
+        )
+    elif not stale_database_records:
+        print("[bold red]ERROR (1) Exiting due to exception during ASH scan[/bold red]")
 
 
 def unevaluated_rules(results: Optional[AshAggregatedResults]) -> List[str]:
@@ -633,25 +863,36 @@ def _resolve_fail_on_incomplete_scanners(
     3. *config_value* -- read from the config file before the scan, which is what
        container mode has to fall back on and what ``ash merge`` passes from the
        config carried in the shard results.
-    4. Off, matching ``AshConfig.fail_on_incomplete_scanners``.
+    4. On, matching ``AshConfig.fail_on_incomplete_scanners``.
 
     Step 4 is reached only when no config model was available at all -- a results
     object built by hand, or a scan whose config failed to load. It agrees with the
     model default deliberately: the two are the same question answered twice, and
     when they disagreed the answer you got depended on how far the scan had got
     before it was asked, which is not a property anyone wants an exit code to have.
+    ``cli.merge._resolve_require_scanner_completion`` is a third copy and has to
+    move with these two.
 
-    OFF rather than on, and this was on by default for part of this branch's life.
-    The gate is correct and this repository does not currently pass it: cdk-nag
-    evaluates 6 of its 10 targets here, so `incomplete_scanners` reports
-    ``PASSED (4 of 10 targets unevaluated)`` and every scan leg in CI exits 1 --
-    measured on x86 Linux, arm64 and Windows alike, so it is not a platform
-    artifact. Turning a completeness gate on before the tree it gates is complete
-    makes the gate's first act a false alarm, and the two unscanned CloudFormation
-    templates behind that count are a real coverage gap that wants fixing rather
-    than defaulting past. Enabling it is therefore blocked on that fix, not on
-    anyone's appetite; until then the honest default is the one an operator opts
-    out of nothing to get.
+    ON rather than off, and this was off by default for part of this branch's life.
+    A scanner recorded ERROR or MISSING produces no findings, so deriving the exit
+    code from findings alone gives that scan the code of a clean one -- and step 4 in
+    particular is the least-attributable input there is, a results object whose
+    configuration could not be established. Defaulting the least trustworthy case to
+    the most trusting answer is backwards. The environment that genuinely cannot
+    provide a scanner's tool says so once, with
+    ``--no-fail-on-incomplete-scanners`` or ``fail_on_incomplete_scanners: false``,
+    and keeps its old exit codes; what it no longer gets is that outcome by saying
+    nothing.
+
+    What the default does NOT reach, because this gate selects on status: a tool
+    that failed hard without that failure reaching its status. ``scanner_plugin``'s
+    empty-results branch returns a successful empty report for a tool that exited
+    non-zero and wrote nothing, so ``determine_status`` grades it PASSED from its
+    zero findings and there is no ERROR or MISSING here to find. Pinned by
+    ``TestTheGateCannotSeeAHardFailureGradedPassed`` in
+    ``tests/unit/interactions/test_fail_on_incomplete_scanners.py``, which asserts
+    that this flag returns the same exit code in all three positions for that case.
+    Turning the default on does not fix it and is not a reason to think it fixed.
     """
     if opts.fail_on_incomplete_scanners is not None:
         return opts.fail_on_incomplete_scanners
@@ -663,18 +904,222 @@ def _resolve_fail_on_incomplete_scanners(
 
     if config_value is not None:
         return config_value
-    return False
+    return True
+
+
+#: How an incomplete scanner's recorded status reads as a reason in a structured
+#: payload. ``missing_dependencies`` is the token ``skipped_scanners`` already uses
+#: for the same status, so a client sees one spelling for one cause.
+_INCOMPLETE_SCANNER_REASONS = {
+    ScannerStatus.MISSING.value: "missing_dependencies",
+    ScannerStatus.ERROR.value: "error",
+}
+
+
+def incomplete_scanner_reason(status: str) -> str:
+    """The reason token for a scanner ``incomplete_scanners`` listed, from its status.
+
+    A scanner listed with a status the per-scanner pass accepts (PASSED, FAILED,
+    SKIPPED) is there for the targets it lost, not for its status.
+    """
+    if status in _INCOMPLETE_SCANNER_REASONS:
+        return _INCOMPLETE_SCANNER_REASONS[status]
+    if status in _COMPLETE_SCANNER_STATUSES:
+        return "partial_coverage"
+    return "unrecognized_status"
+
+
+@dataclass(frozen=True)
+class ScanIncompleteness:
+    """Every reason a finished scan exits 1 for coverage rather than for a crash.
+
+    One field per arm of the exit-1 half of ``_compute_exit_code``, which reads its
+    verdict from this object rather than from its own calls to the primitives. That
+    is what makes it safe for anything else to act on: the MCP runner reports a scan
+    ``incomplete`` instead of ``failed`` from this object, and if the two read the
+    question separately, the status a client sees and the exit code the CLI returns
+    could disagree on the same results.
+
+    Truthy when any field is set. Empty for ``results is None``, which also exits
+    1 but means no results exist. That is a crash, and it does not belong in here.
+    """
+
+    #: ``incomplete_scanners`` rows: (name, display status).
+    scanners: Tuple[Tuple[str, str], ...] = ()
+    #: Every scanner's recorded status, the raw token rather than the display
+    #: string, so a payload can say MISSING or ERROR without parsing prose.
+    observed: Tuple[Tuple[str, str], ...] = ()
+    #: The set-level arm: scanners were expected or recorded, and none reached a
+    #: verdict.
+    no_scanner_ran: bool = False
+    #: ``incomplete_converters`` rows: (name, reason).
+    converters: Tuple[Tuple[str, str], ...] = ()
+    #: ``unevaluated_rules``. Not behind the completeness gate.
+    unevaluated_rules: Tuple[str, ...] = ()
+    #: Content databases past their declared bound under ``content_db_staleness:
+    #: fail``. Not behind the completeness gate either; its opt-out is
+    #: ``--allow-stale-content-db`` or ``content_db_staleness: warn``, under which
+    #: nothing is recorded here.
+    stale_content_databases: Tuple[ContentDbAgeRecord, ...] = ()
+
+    def __bool__(self) -> bool:
+        return bool(
+            self.scanners
+            or self.no_scanner_ran
+            or self.converters
+            or self.unevaluated_rules
+            or self.stale_content_databases
+        )
+
+    def to_payload(self) -> Dict[str, object]:
+        """The structured form an MCP client reads. JSON-serializable."""
+        raw_status = dict(self.observed)
+        scanners = []
+        for name, detail in self.scanners:
+            status = raw_status.get(name, "")
+            scanners.append(
+                {
+                    "scanner": name,
+                    "status": status,
+                    "reason": incomplete_scanner_reason(status),
+                    "detail": detail,
+                }
+            )
+        return {
+            "incomplete_scanners": scanners,
+            "no_scanner_ran": self.no_scanner_ran,
+            "incomplete_converters": [
+                {"converter": name, "reason": reason}
+                for name, reason in self.converters
+            ],
+            "unevaluated_rules": list(self.unevaluated_rules),
+            "stale_content_databases": [
+                record.to_dict() for record in self.stale_content_databases
+            ],
+        }
+
+
+def scan_incompleteness(
+    results: Optional[AshAggregatedResults],
+    *,
+    gate: bool,
+    one_shard_of_a_split: bool = False,
+) -> ScanIncompleteness:
+    """Ask the exit-1 coverage questions of *results*, under the gate as resolved.
+
+    ``gate`` is ``_resolve_fail_on_incomplete_scanners``'s answer. When it is off,
+    only the unevaluated-rule arm is asked, because that arm is the only one
+    ``_compute_exit_code`` asks with the gate off. Pass ``gate=True`` to get the
+    facts whatever the gate says, which is what a report that states coverage
+    needs.
+
+    ``one_shard_of_a_split`` exempts the set-level arm for the reason
+    ``_compute_exit_code`` gives at that arm.
+
+    A stale content database is reported in ``stale_content_databases`` whatever the
+    gate says, and ONLY there. ``incomplete_scanners`` also lists its scanner, with
+    the database named in the status, so that the workspace layer and ``ash merge``
+    see it; a row that is there for nothing else is dropped from ``scanners`` here.
+    Otherwise the one condition would be reported twice with the gate on -- once as
+    an incomplete scanner whose reason reads ``partial_coverage`` and whose advice is
+    to install a tool that ran, and once as a stale database -- and once with it off,
+    so the MCP payload and the console message would change shape with a gate the
+    staleness check does not consult. A scanner that is stale AND lost targets or
+    did not run keeps its row: that part is a coverage gap in its own right.
+    """
+    if results is None:
+        return ScanIncompleteness()
+    unevaluated = tuple(unevaluated_rules(results))
+    stale = tuple(stale_content_databases(results, enforced_only=True))
+    if not gate:
+        return ScanIncompleteness(
+            unevaluated_rules=unevaluated, stale_content_databases=stale
+        )
+    observed = scanner_statuses(results)
+    expected_roster = list(
+        getattr(getattr(results, "metadata", None), "expected_scanners", None) or []
+    )
+    stale_scanners = {record.scanner for record in stale}
+    return ScanIncompleteness(
+        scanners=tuple(
+            (name, status)
+            for name, status in incomplete_scanners(results)
+            if not _listed_only_for_a_stale_database(name, status, stale_scanners)
+        ),
+        observed=tuple(observed),
+        no_scanner_ran=(
+            not one_shard_of_a_split and no_scanner_ran(observed, expected_roster)
+        ),
+        converters=tuple(incomplete_converters(results)),
+        unevaluated_rules=unevaluated,
+        stale_content_databases=stale,
+    )
+
+
+def _listed_only_for_a_stale_database(
+    name: str, status: str, stale_scanners: Set[str]
+) -> bool:
+    """Whether an ``incomplete_scanners`` row is there for its stale database alone.
+
+    The status is a complete one followed by exactly the stale-database annotation
+    ``incomplete_scanners`` appends, and nothing else: no target counts, and not an
+    ERROR or MISSING. The test is the one ``run_ash_scan`` applied to its console
+    message when the staleness check landed, moved here so the exit code, the
+    message and the MCP payload share it.
+    """
+    return (
+        name in stale_scanners
+        and status.count(" (") == 1
+        and "(stale content database:" in status
+        and status.split(" (", 1)[0] in _COMPLETE_SCANNER_STATUSES
+    )
+
+
+class ScanIncompleteExit(SystemExit):
+    """``sys.exit(1)`` for a scan that finished with partial coverage.
+
+    A ``SystemExit`` with code 1, so the CLI's exit code and every caller that
+    catches ``SystemExit`` see what they saw before. It adds the structured reason.
+    Exit 1 also means a crash, and an in-process caller that has only the code
+    cannot tell the two apart. Its other choices are parsing the log or re-reading
+    a results file that a crash after the SCAN phase leaves behind looking just
+    like a finished scan's.
+
+    Raised only where ``_compute_exit_code`` returned 1 with results in hand. That
+    function returns 1 with results only from the coverage arms, so the
+    exception's presence is the signal and ``incompleteness`` is what it was.
+    """
+
+    def __init__(
+        self, incompleteness: ScanIncompleteness, results: AshAggregatedResults
+    ):
+        super().__init__(1)
+        self.incompleteness = incompleteness
+        self.results = results
 
 
 def _severity_filters_finding(result, min_sev_rank: int) -> bool:
-    """Return True when *result* meets the minimum severity threshold."""
+    """Return True when *result* meets the minimum severity threshold.
+
+    Severity is resolved by ``utils.sarif_utils._resolve_result_severity``, the
+    resolver the rest of ASH uses, rather than from ``result.level`` alone. Reading
+    the level alone ignored ``properties.issue_severity``, which is the field
+    scanners use to state a severity SARIF cannot express -- grype reports a
+    CRITICAL vulnerability at ``level: warning`` -- so ``--min-severity high``
+    zeroed the whole actionable count and the scan exited 0 over it. The same
+    substitution removes the ``error -> high`` spelling here that disagreed with
+    ``error -> critical`` there.
+
+    ``info`` is deliberately absent from ``_SEVERITY_RANK``, so a result the
+    resolver grades ``info`` falls back to the ``low`` rank. That preserves the
+    outcome for a missing or ``none`` level, which the deleted level table also
+    graded ``low`` through its own default -- adding an ``info`` rank of 0 would
+    change what ``--min-severity low`` accepts and would have to be mirrored in
+    ``workspace.aggregation`` to keep the two paths answering alike.
+    """
     if result.suppressions:
         return False
-    level = getattr(result, "level", "note")
-    if isinstance(level, str):
-        level = level.lower()
-    mapped = _SARIF_LEVEL_TO_SEVERITY.get(level, "low")
-    return _SEVERITY_RANK.get(mapped, 1) >= min_sev_rank
+    return _SEVERITY_RANK.get(_resolve_result_severity(result), 1) >= min_sev_rank
 
 
 # ---------------------------------------------------------------------------
@@ -805,6 +1250,113 @@ def _workspace_relative_file(opts: ScanOptions) -> Optional[str]:
     )
 
 
+# The output-directory entries a local scan clears before it starts, copied from the two
+# places the orchestrator clears them: ``ensure_directories`` rmtrees these four working
+# directories (core/orchestrator.py:418-425) and ``initialize`` unlinks these three files
+# (core/orchestrator.py:280-293). Both are gated there on ``existing_results_path is
+# None``, which is the exemption in ``_discard_prior_run_artifacts`` below.
+#
+# Named here rather than inlined because the point of the list is that it matches that
+# other list; a reader checking the claim needs to see the whole of both.
+_PRIOR_RUN_OUTPUT_DIRECTORIES = ("analysis", "reports", "scanners", "converted")
+_PRIOR_RUN_OUTPUT_FILES = (
+    "ash_aggregated_results.json",
+    "ash-ignore-report.txt",
+    "ash-scan-set-files-list.txt",
+)
+
+
+def _discard_prior_run_artifacts(opts: ScanOptions, logger) -> None:
+    """Clear the output directory the way a local scan does, before an outer mode starts.
+
+    Container mode and Nix mode both re-execute ASH somewhere else and then read
+    ``ash_aggregated_results.json`` back out of the output directory, so the file's mere
+    presence is what stands in for "the scan ran". On its own it does not mean that. Every
+    pre-run refusal in ``run_ash_container`` -- a non-numeric ``--container-uid``, a
+    rejected revision, an OCI runner that cannot be resolved, an image build that failed --
+    reports the same status the in-container CLI uses for an error during execution, and
+    leaves whatever an earlier run wrote: possibly of a different repository, possibly with
+    a different scanner set. Removing it beforehand is what makes ``exists()`` afterwards
+    mean "this invocation produced this".
+
+    The exit code is not the only thing a stale tree corrupts, and it is not the worst.
+    ``reports/`` is what gets published: a caller that runs its publish steps on failure as
+    well as success -- which is the usual shape, so that a failed scan still explains
+    itself -- will post a previous run's ``ash.summary.md`` as its comment, upload a
+    previous ``ash.junit.xml`` as check results and a previous ``ash.ghas.sarif`` to code
+    scanning. An honest exit code beside a stale clean report is the same false negative
+    this function exists to prevent, just moved somewhere a reviewer trusts more.
+
+    So this clears what a local scan clears, in full: the four working directories
+    ``ensure_directories`` rmtrees and the three files ``initialize`` unlinks
+    (``_PRIOR_RUN_OUTPUT_DIRECTORIES`` and ``_PRIOR_RUN_OUTPUT_FILES``). Two entries earn a
+    note:
+
+    - ``reports/ash.sarif`` is not redundant with the results file. ``_compute_exit_code``
+      re-reads that SARIF and lets its count REPLACE the one taken from the model, so a
+      stale report decides the exit code by itself.
+    - ``projects/`` is deliberately NOT in either list. Workspace mode writes a complete
+      single-project tree per project under ``projects/<key>/`` and only the unified
+      top-level files are rewritten by the outer run, so a workspace scan that removed
+      ``projects/`` would delete the per-project reports it is about to summarize.
+    """
+    if opts.existing_results:
+        # The one shape that legitimately consumes a file from before this invocation.
+        # --use-existing resolves to a path in this directory and the inner scan is asked
+        # to read it, so removing it would delete the run's only input. --phases report
+        # and --phases inspect do NOT need this exemption: with existing_results unset the
+        # orchestrator unlinks the results file itself, so the inner run discards it
+        # whether or not the host did.
+        #
+        # Truthiness, not `is not None`, and the empty string is why: run_ash_container
+        # appends --use-existing under `if existing_results:`, so an empty value asks the
+        # inner scan to read nothing. Exempting it here on `is not None` would keep the
+        # stale file AND leave it unread by the container -- the read-back then answers
+        # from it, which is the exact failure this function closes.
+        return
+
+    stale_paths = [
+        opts.output_dir / name
+        for name in (*_PRIOR_RUN_OUTPUT_DIRECTORIES, *_PRIOR_RUN_OUTPUT_FILES)
+    ]
+    for stale in stale_paths:
+        try:
+            if stale.is_dir():
+                shutil.rmtree(stale)
+            else:
+                # Also the branch a non-directory `reports` takes: removing it as a file
+                # is what lets the inner run create the directory it expects.
+                stale.unlink(missing_ok=True)
+        except OSError as e:
+            if not stale.exists():
+                # The call failed but the artifact is gone -- another process removed it,
+                # or a partial rmtree finished the job. Refusing here would fail on the
+                # condition "the call raised" when the property that matters is "the
+                # artifact is still there". On Windows that distinction is the difference
+                # between refusing a scan and running one.
+                logger.debug(
+                    f"{stale.as_posix()} is already gone despite {type(e).__name__}: {e}"
+                )
+                continue
+            # Fail closed. Continuing here would leave the read-back unable to tell a run
+            # that never started from one that finished clean, which is the whole failure
+            # this function exists to prevent -- and a false clean report is worse than a
+            # refusal an operator can see and fix.
+            logger.error(
+                f"Could not remove {stale.as_posix()} from a previous run: {e}. ASH "
+                "cannot tell that output apart from output this scan produced, so it "
+                "will not read it back or publish it. Remove it, or point --output-dir "
+                "somewhere ASH can write."
+            )
+            sys.exit(1)
+
+
+# The statuses the in-container CLI reaches from a results file, and therefore the only
+# ones the host can re-derive its own verdict from. Deliberately narrower than
+# ASH_EXIT_CODES -- see the guard in _run_container_mode for which two are excluded and why.
+_CONTAINER_VERDICT_EXIT_CODES = frozenset({0, 1, 2})
+
+
 def _run_container_mode(
     opts: ScanOptions,
     logger,
@@ -847,6 +1399,12 @@ def _run_container_mode(
         if opts.fail_on_incomplete_scanners is not None
         else resolved_fail_on_incomplete_scanners
     )
+
+    if opts.run:
+        # Only when a scan is actually being asked for. --no-run builds an image and
+        # stops; it never claims to have scanned anything, so it has no business
+        # discarding a report from a run that did.
+        _discard_prior_run_artifacts(opts, logger)
 
     container_result = run_ash_container(
         source_dir=opts.source_dir,
@@ -936,6 +1494,57 @@ def _run_container_mode(
             sys.exit(container_result.returncode)
         sys.exit(0)
 
+    # A status that is not a verdict did not come from a results file, so there is no
+    # verdict for the host to re-derive and nothing below should try.
+    #
+    # NOT "any non-zero status", and the difference matters: the container entrypoint is
+    # this same CLI, so 0, 1 and 2 are verdicts that _compute_exit_code reached from a
+    # results file, and the host deliberately recomputes them, because it applies
+    # --min-severity and --ignore-suppressions, neither of which is forwarded inward.
+    # Exiting on 2 here would report findings the operator asked to filter out.
+    #
+    # NOT ASH_EXIT_CODES either, which is the wider table of every status the CLI can
+    # return and includes two that assert the opposite of a verdict. 3 is an invalid
+    # config, raised by _run_local_mode before it writes the results file, and 4 is a
+    # workspace definition or policy error, which models/workspace.py defines precisely so
+    # that "nothing was scanned" is distinguishable from 2's "a scan completed and found
+    # something". Falling through on either sends the caller to the read-back, which finds
+    # no file and reports 1 with a message about a missing report rather than about the
+    # config -- losing the code that said which of the two it was.
+    #
+    # Everything outside the set is either one of those two or the runner's own
+    # vocabulary: 125 for a `docker run` that failed before the entrypoint, 126 and 127 for
+    # an entrypoint that could not be executed, 137 for a container the kernel killed. Each
+    # of the latter can leave a partially written report behind, which the pre-run cleanup
+    # cannot catch because the file is then genuinely this invocation's -- just not a
+    # complete account of it.
+    #
+    # Default 1, not 0, for a result object without the attribute: this guard exists to
+    # fail closed and "assume success" is the wrong posture inside it.
+    container_returncode = getattr(container_result, "returncode", 1)
+    if container_returncode not in _CONTAINER_VERDICT_EXIT_CODES:
+        verdict_codes = ", ".join(
+            str(code) for code in sorted(_CONTAINER_VERDICT_EXIT_CODES)
+        )
+        ash_meaning = ASH_EXIT_CODES.get(container_returncode)
+        if ash_meaning is not None:
+            # One of ASH's own non-verdict codes. Name what it means, because the status
+            # is the whole diagnostic -- there is no report to point the operator at.
+            logger.error(
+                f"The container exited with {container_returncode} ({ash_meaning}), which "
+                "means nothing was scanned. Only "
+                f"{verdict_codes} are verdicts ASH reaches from a results file, so there "
+                "is nothing in the output directory to read back."
+            )
+        else:
+            logger.error(
+                f"The container exited with {container_returncode}, which is not a status "
+                f"an ASH scan can return ({verdict_codes} are the verdicts it reaches "
+                "from a results file). The scan did not run to completion, so any report "
+                "in the output directory is incomplete and is not being read back."
+            )
+        sys.exit(container_returncode)
+
     output_file = opts.output_dir / "ash_aggregated_results.json"
     if output_file.exists():
         with open(output_file, mode="r", encoding="utf-8") as f:
@@ -963,14 +1572,25 @@ def _run_nix_mode(opts: ScanOptions, logger) -> AshAggregatedResults:
     since a development shell changes PATH but not the filesystem, so there is no mount
     translation and none of that path-mapping logic belongs here.
     """
+    # The shell writes into the output directory this process was given, so a report left
+    # by an earlier run sits exactly where a successful one would. run_ash_nix returns a
+    # bare status and requests no capture -- stdout and stderr are both None -- so a `nix`
+    # that exists on PATH and fails is otherwise indistinguishable from a scan that ran.
+    _discard_prior_run_artifacts(opts, logger)
+
     nix_result = run_ash_nix(debug=opts.debug)
 
     if nix_result.returncode != 0:
-        # Logged rather than fatal. A scan that finds something exits non-zero by design,
+        # Reported rather than fatal. A scan that finds something exits non-zero by design,
         # so treating any non-zero status as a failure here would turn a working scan into
         # an error. Whether findings should fail the run is decided from the loaded
         # results, exactly as in container mode.
-        logger.debug(f"Nix shell exited with code {nix_result.returncode}")
+        #
+        # At warning rather than debug because this is the only diagnostic the path has
+        # for a shell that never opened, and the console handler plus both file handlers
+        # sit at INFO -- a debug record is emitted nowhere, neither to the terminal nor to
+        # ash.log.
+        logger.warning(f"Nix shell exited with code {nix_result.returncode}")
 
     # The inner scan wrote to the same output directory this process was given, so unlike
     # container mode there is no path to translate back.
@@ -1011,13 +1631,53 @@ def _run_local_mode(
 
     _changed_file_set = None
     if opts.changed_files_only:
-        from automated_security_helper.utils.get_scan_set import get_changed_files
+        from automated_security_helper.utils.get_scan_set import (
+            get_changed_files,
+            git_repository_root,
+        )
 
-        changed_paths = get_changed_files(base_ref=opts.base_ref, cwd=opts.source_dir)
-        if changed_paths is not None:
-            _changed_file_set = {
-                opts.source_dir.joinpath(p).resolve() for p in changed_paths
-            }
+        # The diff is anchored on the repository root, never on source_dir.
+        # get_changed_files wraps `git diff --name-only`, which prints
+        # repository-root-relative paths whatever directory it ran in, so joining
+        # them onto source_dir is only correct when the two coincide. Under
+        # `--source-dir services/api` inside a larger repository it produced
+        # <source_dir>/services/api/app.py, while the consumer below resolves the
+        # SARIF side's source-relative URIs (made so by sanitize_sarif_paths) to
+        # <source_dir>/app.py -- two sets that cannot intersect, so the filter
+        # discarded every finding. workspace/execution.py:changed_file_set has
+        # always anchored on the root; this is the same resolution.
+        repository_root = git_repository_root(opts.source_dir)
+        if repository_root is None:
+            # The root is the only anchor, so there is nothing to resolve against.
+            # Fall back to the full scan get_changed_files already documents for
+            # its own unanswerable cases, rather than guessing a root.
+            logger.warning(
+                f"--changed-files-only was requested but "
+                f"{opts.source_dir.as_posix()} is not inside a git repository, or "
+                f"its root could not be read; scanning it in full."
+            )
+        else:
+            changed_paths = get_changed_files(
+                base_ref=opts.base_ref, cwd=opts.source_dir
+            )
+            if changed_paths is not None:
+                # Entries outside source_dir are dropped because --source-dir and
+                # --changed-files-only are two scopings and the operator asked for
+                # both, so what gets reported is their intersection. Only one input
+                # notices: a scanner that escapes the scan root with a `../` URI
+                # sanitize_sarif_paths did not make source-relative is not revived
+                # by its file being in the diff. An empty result here is a filter
+                # that matches nothing, which is the honest answer when nothing in
+                # the diff is in scope -- see the consumer below, which
+                # distinguishes that from None.
+                resolved_source = opts.source_dir.resolve()
+                _changed_file_set = {
+                    candidate
+                    for candidate in (
+                        (repository_root / p).resolve() for p in changed_paths
+                    )
+                    if candidate.is_relative_to(resolved_source)
+                }
 
     try:
         if not opts.quiet and not opts.simple:
@@ -1141,15 +1801,24 @@ def _run_local_mode(
         if opts.simple and not opts.quiet:
             typer.echo("\nASH scan completed.")
 
-        if _changed_file_set and results is not None:
+        # `is not None`, not truthiness: an empty changed set is a filter that
+        # matches nothing, and None is the absence of one. Treating empty as absent
+        # reported the whole tree whenever the diff fell entirely outside
+        # source_dir, which ignores the flag the operator passed -- and it
+        # disagreed with workspace mode, where an empty set from
+        # workspace.execution.changed_file_set is the signal to skip the project.
+        if _changed_file_set is not None and results is not None:
             results = _filter_results_to_changed_files(
                 results, _changed_file_set, opts.source_dir
             )
             sarif_path = opts.output_dir / "reports" / "ash.sarif"
             if sarif_path.exists() and results.sarif:
-                sarif_path.write_text(
+                # Replaced atomically for the same reason as the aggregated file
+                # below: ash.sarif already exists, so a reader waiting on it would
+                # otherwise open it mid-rewrite.
+                write_text_atomically(
+                    sarif_path,
                     results.sarif.model_dump_json(indent=2, by_alias=True),
-                    encoding="utf-8",
                 )
 
         if isinstance(results, BaseModel):
@@ -1157,9 +1826,11 @@ def _run_local_mode(
         else:
             content = json.dumps(results, indent=2, default=str)
 
+        # This rewrite lands after the REPORT phase, while an MCP client that has seen
+        # the reports appear may already be re-reading this file for progress. A
+        # truncating open() hands that reader an empty file, so replace it atomically.
         output_file = opts.output_dir / "ash_aggregated_results.json"
-        with open(output_file, mode="w", encoding="utf-8") as f:
-            f.write(content)
+        write_text_atomically(output_file, content)
 
         return results, _config_fail_on_findings
 
@@ -1340,6 +2011,18 @@ def build_project_scan_settings(opts: ScanOptions) -> "ProjectScanSettings":
         max_parallel_projects=workspace_config.resolved_max_parallel_projects(),
         project_timeout=workspace_config.project_timeout,
         allow_missing_projects=opts.allow_missing_projects,
+        # ``opts.config`` in workspace mode is the fallback for a project that
+        # declares no config of its own, not a config for the workspace: each
+        # project's own ``.ash.yaml`` still wins, which is what makes one
+        # workspace scannable across differently-configured repositories.
+        #
+        # The caller has to pass the same value as ``resolve_workspace``'s
+        # ``default_config``, because the plan's reported threshold comes from
+        # resolution and the scan's config from execution. Dropping it here -- which
+        # this builder did -- made an MCP client's `profile` argument accepted,
+        # threaded through two layers, and silently ignored, which is the same
+        # shape of defect as the ``ASH_OFFLINE`` one recorded in cli/mcp/workspace.
+        default_config_path=opts.config,
     )
 
 
@@ -1449,24 +2132,38 @@ def _print_workspace_summary(
 
 
 # ---------------------------------------------------------------------------
-# _compute_exit_code — pure function from in-memory results; no disk reads
+# _compute_exit_code
 #
-# The prior implementation re-read ash.sarif from disk to work around a
-# concern that Pydantic in-memory suppression state wasn't reliable. That
-# read unconditionally overwrote the in-memory actionable count.
-# Root-cause investigation: get_unified_scanner_metrics() already re-derives
-# all counts from the final SARIF model in memory via ScannerStatisticsCalculator,
-# which reads result.suppressions reliably through the Pydantic field accessor
-# (not a stale __dict__ key). The disk-re-read was masking the issue rather
-# than fixing it. Using in-memory results only is both correct and faster.
+# This comment used to open "pure function from in-memory results; no disk reads"
+# and go on to say the ash.sarif re-read had been deleted as a workaround for a
+# Pydantic suppression-state concern that root-cause investigation had disproved.
+# The re-read was still there, below, overwriting the in-memory actionable count
+# exactly as described -- so the file argued against its own code, and a reader who
+# trusted the comment would conclude the exit code and the summary table could not
+# disagree. They could, and about more than suppressions: the re-read applied
+# global_settings.severity_threshold to every result, while
+# get_unified_scanner_metrics resolves a per-scanner options.severity_threshold and
+# records threshold_source "config". A scanner configured away from the global
+# setting had its findings counted one way in the report and the other way in the
+# exit code, which is the whole contract for a CI gate.
+#
+# The re-read now resolves the threshold per result's owning scanner, through the
+# same ScannerStatisticsCalculator.get_scanner_threshold_info the metrics use, so
+# both counts answer from one threshold model. Deleting the re-read outright was
+# the other option and is what the original comment claimed had happened; it was
+# not taken here because the re-read counts every result in the file whereas the
+# metrics only count results whose scanner name resolves, so deleting it would drop
+# an unattributable finding from the verdict -- a false negative, which is the worse
+# failure for a gate. Whether that superset is real on any shipped scanner is
+# unmeasured; the conservative change does not depend on the answer.
 #
 # Two independent questions, in this order:
 #
 #   1. Did the scanners that were supposed to run actually run? Gated by
-#      fail_on_incomplete_scanners, default OFF, exit 1. Off by default because this
-#      repository cannot pass the gate until cfn-nag, grype and syft are provisioned
-#      on every leg, so CI relies on .github/scripts/assert_scanners_completed.py,
-#      which has no such flag, for the same assertion.
+#      fail_on_incomplete_scanners, default ON, exit 1. CI additionally runs
+#      .github/scripts/assert_scanners_completed.py, which asserts the same thing
+#      with no flag of its own, so a leg whose ASH invocation was edited to pass
+#      --no-fail-on-incomplete-scanners still fails rather than going quiet.
 #   2. Did they find anything actionable? Gated by fail_on_findings, default on,
 #      exit 2.
 #
@@ -1503,9 +2200,25 @@ def _compute_exit_code(
     # scanners contributed nothing. `ash merge` already uses 1 for its coverage
     # refusals on the same reasoning -- the findings are unknown, which is not the
     # same as "no findings".
-    if _resolve_fail_on_incomplete_scanners(
+    #
+    # Every coverage arm below, and the unevaluated-rule arm after the gate, reads
+    # its answer from this one object. The MCP runner acts on the same object (see
+    # ScanIncompleteness), so the status a client is shown and the exit code here
+    # come from the same reads. The arms stay separate for their order and their
+    # messages.
+    gate_on = _resolve_fail_on_incomplete_scanners(
         results, opts, config_fail_on_incomplete_scanners
-    ):
+    )
+    incompleteness = scan_incompleteness(
+        results,
+        gate=gate_on,
+        # The exemption is explained at the set-level arm below.
+        one_shard_of_a_split=(
+            getattr(opts, "shard_index", None) is not None
+            or getattr(opts, "shard_count", None) is not None
+        ),
+    )
+    if gate_on:
         # Two reads of the metrics rather than one, and the second is not a
         # duplicate of the first. `incomplete_scanners` no longer answers from status
         # alone -- it also reports a scanner that ran and lost some of its targets,
@@ -1513,8 +2226,8 @@ def _compute_exit_code(
         # derived from a list of (name, status) pairs. An earlier form of this merge
         # did exactly that, and it dropped the partial-coverage arm out of the exit
         # code entirely while the file looked clean.
-        observed = scanner_statuses(results)
-        incomplete = incomplete_scanners(results)
+        observed = list(incompleteness.observed)
+        incomplete = list(incompleteness.scanners)
         if incomplete:
             logging.getLogger(__name__).error(
                 "Scan incomplete: %s",
@@ -1551,12 +2264,12 @@ def _compute_exit_code(
         # is MISSING, which measured nothing just as thoroughly as an all-SKIPPED
         # one. Making this one check unconditional would answer that same question
         # two different ways depending on which status the non-running scanners
-        # happened to land on. The flag defaults OFF, so the case above exits 0
-        # unless a config or an operator opts in -- which is precisely why
-        # .github/scripts/assert_scanners_completed.py asserts it unconditionally,
-        # and why that script rather than this function is what holds the line in
-        # CI. An operator who leaves the gate off, or turns it off, has said they
-        # accept a scan that did not run.
+        # happened to land on. The flag defaults ON, so the case above now exits 1
+        # unless a config or an operator turns the gate off -- but it can still be
+        # turned off, which is why .github/scripts/assert_scanners_completed.py
+        # asserts it unconditionally and why that script rather than this function
+        # is what holds the line in CI. An operator who turns the gate off has said
+        # they accept a scan that did not run.
         #
         # Skipped for one shard of a split scan, because a shard genuinely can own
         # nothing: core.sharding documents that a shard count above the scanner
@@ -1567,11 +2280,9 @@ def _compute_exit_code(
         # _verify_shard_contributions refuses a shard that owned scanners and
         # completed none of them, and _merged_exit_code runs this same function
         # over the merged model with no shard fields set, so the union is held to
-        # the assertion the individual shards are excused from.
-        one_shard_of_a_split = (
-            opts.shard_index is not None or opts.shard_count is not None
-        )
-        if not one_shard_of_a_split and no_scanner_ran(observed):
+        # the assertion the individual shards are excused from. scan_incompleteness
+        # applies that exemption, from the shard fields passed to it above.
+        if incompleteness.no_scanner_ran:
             logging.getLogger(__name__).error(
                 "Scan ran no scanners: %s. Every scanner was skipped, so this run "
                 "has shown the target to be neither clean nor dirty -- most often a "
@@ -1581,14 +2292,56 @@ def _compute_exit_code(
             )
             return 1
 
+        # The same question asked of the convert phase, which produces the targets
+        # the scanners above were given. A converter that crashed or whose tool was
+        # absent leaves its inputs unscanned, and every scanner that did run still
+        # reports PASSED on the targets it was handed, so no scanner-side signal can
+        # see it.
+        #
+        # Behind fail_on_incomplete_scanners rather than behind a flag of its own,
+        # and that placement is the decision worth recording. It is the same question
+        # the two arms above ask -- did what I asked for actually run -- so it belongs
+        # on the same switch. An operator who has settled how much an incomplete run
+        # matters to them has settled it once, and gets one escape hatch covering
+        # both halves instead of a second flag to discover.
+        #
+        # The consequence they will actually meet is that converters are more likely
+        # than scanners to be legitimately absent on a given host, so this is the arm
+        # that fires on a setup nobody thinks is broken. That is stated as a
+        # consequence rather than as a reason to soften the gate: a converter that did
+        # not run leaves its inputs unscanned whether or not anything is watching, and
+        # the recorded converter_results row is what names which one it was.
+        #
+        # The argument above deliberately does not turn on which way
+        # fail_on_incomplete_scanners defaults. That polarity is a separate decision,
+        # made at the field and the flag rather than here, and a rationale leaning on
+        # it would need rewriting every time it moves.
+        #
+        # 1 rather than 2, matching the two arms above: the reported findings are
+        # real but the set is known to be partial, so clearing them does not clear
+        # the scan.
+        incomplete_conversions = list(incompleteness.converters)
+        if incomplete_conversions:
+            logging.getLogger(__name__).error(
+                "Conversion incomplete, so the scanners were given fewer targets "
+                "than this repository has: %s",
+                ", ".join(
+                    f"{name} ({reason})" for name, reason in incomplete_conversions
+                ),
+            )
+            return 1
+
     # A rule that raised instead of reaching a verdict, which no other gate can see.
     #
     # NOT behind fail_on_incomplete_scanners, and that is the whole point of it being
     # here. This condition has no honest reading under which the scan was clean: the
     # tool was asked to evaluate a rule, it tried, and it failed. That is different
-    # from the case the flag exists to keep quiet, which is an environment
+    # from the case the flag can be told to keep quiet, which is an environment
     # legitimately lacking a scanner's tool -- there the operator's setup explains the
-    # gap, so defaulting to silence is defensible. Nothing explains this one.
+    # gap, so letting them silence it is defensible. Nothing explains this one, so it
+    # is not silenceable at all. The flag now defaults on, which narrows the practical
+    # difference but not the reason: a gate that can be turned off and one that cannot
+    # are different guarantees whatever the default is.
     #
     # It also has to sit ahead of the fail_on_findings early return, for the reason
     # the block above states: an operator who turned findings-gating off said "do not
@@ -1621,7 +2374,7 @@ def _compute_exit_code(
     # gate defaults-on without being unavoidable, and it is already how this
     # repository's own config accepts the fifteen rules that throw on its
     # deliberately parameterized templates.
-    unevaluated = unevaluated_rules(results)
+    unevaluated = list(incompleteness.unevaluated_rules)
     if unevaluated:
         logging.getLogger(__name__).error(
             "Scan incomplete: %d rule(s) could not be evaluated, so this scan "
@@ -1629,6 +2382,37 @@ def _compute_exit_code(
             len(unevaluated),
             ", ".join(unevaluated),
         )
+        return 1
+
+    # A scanner's content database past its declared bound, under the default
+    # `content_db_staleness: fail`. Same placement and the same 1 as the gate above, for
+    # the same reasons: not behind fail_on_incomplete_scanners, because nothing about an
+    # operator's environment makes a stale vulnerability database a clean result, and
+    # ahead of the fail_on_findings early return, because turning findings-gating off is
+    # not asking to be told nothing about the database the findings came from.
+    #
+    # Read from the SARIF notification's level, which the scan set from the policy it ran
+    # under, rather than re-resolving the policy here. That keeps the decision with the
+    # results: container mode's host and `ash merge` both arrive here with a results
+    # model and no reliable view of the config the inner scan used. The opt-out is
+    # `--allow-stale-content-db` or `content_db_staleness: warn`, which writes the same
+    # notification at level warning so it reaches the reports without failing the scan.
+    #
+    # Read from `incompleteness`, like every arm above, so that a stale database is one
+    # condition with one exit code, one message and one MCP status (`incomplete`)
+    # whether the completeness gate is on or off. With the gate on it is not ALSO
+    # reported by the incomplete-scanner arm: `scan_incompleteness` drops a row that is
+    # listed only for its stale database, and leaves it to this arm.
+    stale = list(incompleteness.stale_content_databases)
+    if stale:
+        logger = logging.getLogger(__name__)
+        logger.error(
+            "Scan failed: %d content database(s) are past their declared age bound: %s",
+            len(stale),
+            ", ".join(record.name for record in stale),
+        )
+        for record in stale:
+            logger.error(record.message())
         return 1
 
     final_fail_on_findings: bool
@@ -1645,55 +2429,58 @@ def _compute_exit_code(
     scanner_metrics = get_unified_scanner_metrics(asharp_model=results)
     actionable_findings = sum(item.actionable for item in scanner_metrics)
 
-    # Count actionable findings from the persisted SARIF report file, honouring
-    # global_settings.severity_threshold (#329). The SARIF reporter serializes all
-    # suppressions, including the final pass, while in-memory model access has a
-    # Pydantic mutation bug where result.suppressions is not reliably set.
+    # Count actionable findings from the persisted SARIF report file, honouring the
+    # threshold that governs each result's own scanner (#329). The SARIF reporter
+    # serializes all suppressions, including the final pass, while in-memory model
+    # access has a Pydantic mutation bug where result.suppressions is not reliably
+    # set.
+    #
+    # The threshold is resolved per result rather than once for the whole file. It
+    # used to be read once from global_settings.severity_threshold, which silently
+    # discarded every per-scanner options.severity_threshold -- so a scanner the
+    # operator had tightened or relaxed was judged by the global setting here and by
+    # its own setting in the report and the summary table.
+    #
+    # The comparison is utils.severity_ladder's, replacing the two tables that used
+    # to be inlined here. They agreed with the ladder on all five real thresholds
+    # and diverged off-table, reading an unrecognised threshold as MEDIUM where
+    # every other consumer reads it as CRITICAL. One consequence is worth naming:
+    # the ladder treats a falsy threshold as "no gate at all" rather than as
+    # MEDIUM, which is how the operator turns the gate off and how
+    # calculate_actionable_count already reads it, so the two counts agree on that
+    # input too. No validated config route produces one -- global_settings is a
+    # Literal and ScannerOptionsBase.severity_threshold is Literal | None whose None
+    # means "defer to global" -- so this is parity rather than a new behaviour.
     sarif_file = Path(opts.output_dir).joinpath("reports", "ash.sarif")
     if sarif_file.exists():
         try:
             with open(sarif_file, encoding="utf-8") as f:
                 sarif_json = json.load(f)  # nosec
 
-            _severity_threshold = "MEDIUM"  # default
-            if results is not None and hasattr(results, "ash_config"):
-                _cfg = results.ash_config
-                if (
-                    _cfg
-                    and hasattr(_cfg, "global_settings")
-                    and hasattr(_cfg.global_settings, "severity_threshold")
-                    and _cfg.global_settings.severity_threshold
-                ):
-                    _severity_threshold = (
-                        _cfg.global_settings.severity_threshold.upper()
-                    )
+            # Memoised because get_scanner_threshold_info dumps the whole scanners
+            # config on every call, and a large ash.sarif carries one result per
+            # finding.
+            _threshold_cache: Dict[str, str] = {}
 
-            # SARIF levels: error -> critical/high, warning -> medium, note -> low, none -> info
-            _THRESHOLD_QUALIFYING_LEVELS = {
-                "ALL": {"error", "warning", "note", "none"},
-                "LOW": {"error", "warning", "note"},
-                "MEDIUM": {"error", "warning"},
-                "HIGH": {"error"},
-                "CRITICAL": {"error"},
-            }
-            _qualifying_levels = _THRESHOLD_QUALIFYING_LEVELS.get(
-                _severity_threshold, {"error", "warning"}
-            )
-            _SEVERITY_RANK_FOR_THRESHOLD = {
-                "CRITICAL": 4,
-                "HIGH": 3,
-                "MEDIUM": 2,
-                "LOW": 1,
-                "INFO": 0,
-            }
-            _THRESHOLD_MIN_RANK = {
-                "ALL": 0,
-                "LOW": 1,
-                "MEDIUM": 2,
-                "HIGH": 3,
-                "CRITICAL": 4,
-            }
-            _min_rank = _THRESHOLD_MIN_RANK.get(_severity_threshold, 2)
+            def _threshold_for(scanner_name: object) -> str:
+                """The threshold governing *scanner_name*, global when it has none.
+
+                An empty name is passed through to the same resolver rather than
+                short-circuited: it matches no scanner config key, so the resolver
+                answers with the global threshold. That keeps one threshold
+                resolution site for both cases, and it means a result whose scanner
+                cannot be identified is judged exactly as every result was judged
+                before this change instead of being skipped -- dropping it would
+                remove a finding from the verdict.
+                """
+                key = scanner_name if isinstance(scanner_name, str) else ""
+                if key not in _threshold_cache:
+                    _threshold_cache[key] = (
+                        ScannerStatisticsCalculator.get_scanner_threshold_info(
+                            results, key
+                        )[0]
+                    )
+                return _threshold_cache[key]
 
             sarif_active = 0
             for sarif_run in sarif_json.get("runs", []):
@@ -1701,14 +2488,19 @@ def _compute_exit_code(
                     if r.get("suppressions"):
                         continue
                     props = r.get("properties", {}) or {}
-                    issue_severity = (props.get("issue_severity") or "").upper()
-                    if issue_severity in _SEVERITY_RANK_FOR_THRESHOLD:
-                        if _SEVERITY_RANK_FOR_THRESHOLD[issue_severity] >= _min_rank:
+                    threshold = _threshold_for(
+                        props.get("scanner_name") if isinstance(props, dict) else None
+                    )
+                    issue_severity = (
+                        (props.get("issue_severity") or "").upper()
+                        if isinstance(props, dict)
+                        else ""
+                    )
+                    if issue_severity in SEVERITIES:
+                        if severity_fails_threshold(issue_severity, threshold):
                             sarif_active += 1
-                    else:
-                        level = (r.get("level") or "note").lower()
-                        if level in _qualifying_levels:
-                            sarif_active += 1
+                    elif sarif_level_fails_threshold(r.get("level"), threshold):
+                        sarif_active += 1
             actionable_findings = sarif_active
         except Exception:  # nosec B110
             pass  # Fall through to the unified-metrics count
@@ -1816,6 +2608,7 @@ def _filter_results_to_changed_files(
     """Remove SARIF results whose primary location is not in *changed_files*."""
     if not results or not results.sarif or not results.sarif.runs:
         return results
+    discarded = 0
     for run in results.sarif.runs:
         if not run.results:
             continue
@@ -1839,7 +2632,44 @@ def _filter_results_to_changed_files(
             resolved = Path(source_dir).joinpath(uri).resolve()
             if resolved in changed_files:
                 filtered.append(result)
+        discarded += len(run.results) - len(filtered)
         run.results = filtered
+
+    # An empty *changed_files* is a filter that matches nothing, so it discards
+    # every located result and the run reports zero findings at exit 0 --
+    # indistinguishable from a clean tree. Said at WARNING, with the count, because
+    # a filter that quietly empties a result set is how a filter becomes a false
+    # negative; the same reasoning as the output-path exclusion in
+    # `utils.sarif_utils.apply_suppressions_to_sarif`, which counts for this reason.
+    #
+    # Both routes here are reachable without operator error. `--changed-files-only`
+    # against a base ref that resolves to an empty diff produces an empty set, and
+    # so does a diff falling entirely outside `--source-dir` once the caller
+    # intersects the two scopings. The caller passes the empty set deliberately --
+    # `is not None` there distinguishes a filter matching nothing from no filter --
+    # so this reports the consequence rather than refusing it.
+    #
+    # Conditional on something actually being lost. An empty set over an empty
+    # result set costs nothing, and a count printed on every such run is noise.
+    # Workspace mode never reaches this branch: `workspace.execution` guards its
+    # call with a truthiness check, because there an empty set means skip the
+    # project.
+    #
+    # On ASH_LOGGER rather than `logging.getLogger(__name__)`, which is what the
+    # exit-code gates in this module use. Those emit at ERROR for a caller that
+    # reads the exit code; this one has to reach the operator's console, and
+    # ASH_LOGGER is the logger ASH configures and renders. It is also the logger
+    # every comparable disclosure already uses -- `apply_suppressions_to_sarif`'s
+    # exclusion count, `cli.merge`'s coverage notices.
+    if not changed_files and discarded:
+        ASH_LOGGER.warning(
+            "Discarded %d finding(s): the changed-file set is empty, so it matched "
+            "no location and every located finding was removed. This report is "
+            "therefore not evidence that the tree is clean. Either the diff against "
+            "--base-ref is empty, or none of the paths it names are inside "
+            "--source-dir.",
+            discarded,
+        )
     return results
 
 
@@ -2062,43 +2892,39 @@ def run_ash_scan(
                 f"[bold red]ERROR (2) Exiting due to {actionable_count} actionable findings found in ASH scan[/bold red]"
             )
 
+    _incompleteness = ScanIncompleteness()
     if exit_code == 1:
         # An incomplete scan and a crash share exit 1, so the message has to be
         # chosen from the cause rather than the code. Printing "an exception
         # occurred" for a run whose scanners simply were not installed sends the
         # operator looking for a traceback that does not exist.
-        _incomplete = (
-            incomplete_scanners(results)
-            if _resolve_fail_on_incomplete_scanners(
+        #
+        # The same object _compute_exit_code reached its verdict from, so the
+        # message, the exit code and the exception below agree on the cause. The
+        # scanner and converter rows are empty when the gate is off, because both
+        # arms live behind it; the stale-database records are not, because that arm
+        # is not behind the gate. The message keeps the scanner arm's precedence
+        # over the converter arm when a run trips both, since a scanner that did not
+        # run is the more specific finding.
+        _incompleteness = scan_incompleteness(
+            results,
+            gate=_resolve_fail_on_incomplete_scanners(
                 results, opts, config_fail_on_incomplete_scanners
-            )
-            else []
+            ),
+            one_shard_of_a_split=(
+                opts.shard_index is not None or opts.shard_count is not None
+            ),
         )
-        if _incomplete:
-            # "did not run" would be false for the coverage case: that scanner ran,
-            # reported a status, and could not read some of its targets. Sending an
-            # operator to install a tool that is already installed is the specific
-            # wrong turn this wording avoids.
-            print(
-                "\n[bold red]ERROR (1) Exiting because the scan was incomplete: "
-                f"{len(_incomplete)} selected scanner(s) did not evaluate "
-                "everything they were given[/bold red]"
-            )
-            for _name, _status in _incomplete:
-                print(f"  [red]{_name}: {_status}[/red]")
-            print(
-                "[yellow]ERROR means the scanner ran and failed; MISSING means its "
-                "dependencies were unavailable; a target count means the scanner ran "
-                "but could not read that many of its inputs. Install the missing "
-                "tools, fix or exclude the unreadable targets, exclude the scanners "
-                "with --exclude-scanners, or drop --fail-on-incomplete-scanners to "
-                "accept a partial scan.[/yellow]"
-            )
-        else:
-            print(
-                "[bold red]ERROR (1) Exiting due to exception during ASH scan[/bold red]"
-            )
+        print_incompleteness_message(
+            list(_incompleteness.scanners),
+            list(_incompleteness.converters),
+            list(_incompleteness.stale_content_databases),
+        )
 
+    if exit_code == 1 and results is not None and _incompleteness:
+        # Still exit 1. The exception adds the reason, for an in-process caller
+        # such as the MCP runner that has to tell this from a crash.
+        raise ScanIncompleteExit(_incompleteness, results)
     if exit_code != 0:
         sys.exit(exit_code)
 

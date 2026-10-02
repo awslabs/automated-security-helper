@@ -649,9 +649,9 @@ class TestProjectsAreIsolatedUnderConcurrency:
         _set_rendezvous(len(PROJECT_MARKERS))
         _, result = _execute(tmp_path, ScanningOrchestrator.create)
         statuses = {entry.project: entry.status for entry in result.payload.projects}
-        assert statuses == {
-            key: ProjectRunStatus.COMPLETED for key in PROJECT_KEYS.values()
-        }, [
+        assert statuses == dict.fromkeys(
+            PROJECT_KEYS.values(), ProjectRunStatus.COMPLETED
+        ), [
             (entry.project, entry.status, entry.error)
             for entry in result.payload.projects
         ]

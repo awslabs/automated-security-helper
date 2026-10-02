@@ -2,7 +2,13 @@ import json
 import os
 from pathlib import Path
 import re
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    model_validator,
+)
 from typing import Annotated, Any, List, Dict, Literal, Optional
 
 import yaml
@@ -13,7 +19,6 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
-from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
     ArchiveConverterConfig,
 )
@@ -21,10 +26,10 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_con
     JupyterConverterConfig,
 )
 from automated_security_helper.core.constants import (
-    ASH_CONFIG_FILE_NAMES,
+    ASH_CONFIG_ENV_VAR_ALLOWLIST,
+    ASH_CONFIG_ENV_VAR_PREFIX,
     ASH_DEFAULT_SEVERITY_LEVEL,
 )
-from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.core import IgnorePathWithReason, AshSuppression
 from automated_security_helper.plugin_modules.ash_builtin.reporters.csv_reporter import (
@@ -69,6 +74,9 @@ from automated_security_helper.plugin_modules.ash_builtin.reporters.sarif_report
 from automated_security_helper.plugin_modules.ash_builtin.reporters.github_ghas_reporter import (
     GHASReporterConfig,
 )
+from automated_security_helper.plugin_modules.ash_builtin.reporters.unused_suppressions_reporter import (
+    UnusedSuppressionsReporterConfig,
+)
 from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
     BanditScannerConfig,
 )
@@ -102,6 +110,40 @@ from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner 
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
+def config_env_var_is_interpolatable(var_name: str) -> bool:
+    """Whether a config file's ``!ENV`` reference to ``var_name`` may read it.
+
+    The set and the reasoning behind it live on
+    ``ASH_CONFIG_ENV_VAR_PREFIX`` / ``ASH_CONFIG_ENV_VAR_ALLOWLIST`` in
+    ``core/constants.py``. This function is the single place that consults them,
+    so ``constructor_env_variables`` below cannot drift from the tests.
+
+    The comparison is against the name exactly as the config file wrote it, with
+    no case folding.
+
+    Case folding was tried and withdrawn. The argument for it was Windows, which
+    ASH v3 supports directly in local mode and where ``os.environ`` upper-cases
+    its keys, so ``os.environ.get("aws_secret_access_key")`` returns what
+    ``AWS_SECRET_ACCESS_KEY`` holds. That is true of ``os.environ`` and changes
+    nothing here, because the names this function admits are those beginning with
+    a literal ``ASH_`` plus three exact upper-case entries, and on Windows each of
+    those reads back the variable it names. No spelling passes the check and then
+    reads something outside it, so folding admitted more spellings without
+    excluding any.
+
+    The consequence is worth naming rather than hiding: on Windows a config
+    writing ``${aws_region:None}`` does not resolve, even though Windows itself
+    would find that variable. The reference is left as a literal and a warning
+    names it, the docs and ASH's own config write these names in upper case, and
+    ``tests/unit/config/test_config_env_interpolation.py`` pins both directions so
+    that reintroducing folding is a decision rather than a drift.
+    """
+    return (
+        var_name.startswith(ASH_CONFIG_ENV_VAR_PREFIX)
+        or var_name in ASH_CONFIG_ENV_VAR_ALLOWLIST
+    )
+
+
 # Define BuildConfig class
 class BuildConfig(BaseModel):
     """Configuration model for build-time settings."""
@@ -124,7 +166,83 @@ class BuildConfig(BaseModel):
     ] = []
 
 
-class ConverterConfigSegment(BaseModel):
+def _merge_config_values(base: Any, overlay: Any) -> Any:
+    """Merge two raw config values, ``overlay`` winning key by key.
+
+    Model instances are dumped first so that a value built in Python merges the
+    same way as one read from YAML. Anything that is not a mapping on both sides
+    is replaced by ``overlay`` whole.
+    """
+    if isinstance(base, BaseModel):
+        base = base.model_dump()
+    if isinstance(overlay, BaseModel):
+        overlay = overlay.model_dump()
+    if not (isinstance(base, dict) and isinstance(overlay, dict)):
+        return overlay
+    merged = dict(base)
+    for key, value in overlay.items():
+        merged[key] = (
+            _merge_config_values(merged[key], value) if key in merged else value
+        )
+    return merged
+
+
+def field_name_spellings(segment_cls: type[BaseModel]) -> Dict[str, str]:
+    """Map each declared field name to its alias, where the two differ.
+
+    Read from ``model_fields``, so a plugin field declared with an alias later is
+    covered without being listed anywhere. The config linter reads this too, so
+    its warning about the field-name spelling says what actually happens to it.
+    """
+    return {
+        field_name: info.alias
+        for field_name, info in segment_cls.model_fields.items()
+        if info.alias and info.alias != field_name
+    }
+
+
+class _PluginConfigSegment(BaseModel):
+    """Base for the scanner, reporter and converter config segments.
+
+    A plugin field declared with a hyphenated alias (``gitlab-sast``) differs from
+    its Python field name (``gitlab_sast``), and these segments do not set
+    ``populate_by_name``. Without the validator below, a key written with the
+    field name landed in the ``extra="allow"`` bucket, unvalidated, while the
+    declared field kept its defaults. ``get_plugin_config`` by the alias then
+    returned the defaults, while the runtime lookup by class name could reach the
+    extras copy -- for a scanner it did not, so ``cdk_nag: {enabled: false}``
+    left cdk-nag enabled.
+
+    ``populate_by_name`` is not the fix, because of the case where both keys are
+    present. That happens on every ``--config-overrides`` run that touches an
+    aliased plugin, not only in a hand-written config: ``apply_config_overrides``
+    round-trips through ``model_dump()``, which is keyed by field name, so the
+    file's settings come back under ``gitlab_sast`` while the override adds
+    ``gitlab-sast`` holding only the overridden key. Pydantic would keep one of
+    the two whole, silently reverting either the override or the rest of the
+    file. They are merged key by key instead, the alias -- the documented
+    spelling -- winning where both set the same key. A hand-written config with
+    both is also flagged by ``ash config lint``.
+    """
+
+    @model_validator(mode="before")
+    @classmethod
+    def _read_field_name_spellings_as_aliases(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        for field_name, alias in field_name_spellings(cls).items():
+            if field_name not in data:
+                continue
+            data = dict(data)
+            field_name_value = data.pop(field_name)
+            if alias in data:
+                data[alias] = _merge_config_values(field_name_value, data[alias])
+            else:
+                data[alias] = field_name_value
+        return data
+
+
+class ConverterConfigSegment(_PluginConfigSegment):
     model_config = ConfigDict(
         str_strip_whitespace=True,
         arbitrary_types_allowed=True,
@@ -144,7 +262,7 @@ class ConverterConfigSegment(BaseModel):
     ] = JupyterConverterConfig()
 
 
-class ScannerConfigSegment(BaseModel):
+class ScannerConfigSegment(_PluginConfigSegment):
     model_config = ConfigDict(
         str_strip_whitespace=True,
         arbitrary_types_allowed=True,
@@ -193,7 +311,7 @@ class ScannerConfigSegment(BaseModel):
     ] = SyftScannerConfig()
 
 
-class ReporterConfigSegment(BaseModel):
+class ReporterConfigSegment(_PluginConfigSegment):
     model_config = ConfigDict(
         str_strip_whitespace=True,
         arbitrary_types_allowed=True,
@@ -268,6 +386,13 @@ class ReporterConfigSegment(BaseModel):
         TextReporterConfig,
         Field(description="Configure the options for the Text reporter"),
     ] = TextReporterConfig()
+    unused_suppressions: Annotated[
+        UnusedSuppressionsReporterConfig,
+        Field(
+            description="Configure the options for the Unused Suppressions reporter",
+            alias="unused-suppressions",
+        ),
+    ] = UnusedSuppressionsReporterConfig()
     yaml: Annotated[
         YAMLReporterConfig,
         Field(description="Configure the options for the YAML reporter"),
@@ -469,6 +594,9 @@ class RuntimeOverridesConfig(BaseModel):
         # Same class of field, same reason: a client that could turn the
         # completeness gate off could make a scan where nothing ran report clean.
         "/fail_on_incomplete_scanners",
+        # And the staleness policy: flipping it to warn would let a scan against an
+        # out-of-date vulnerability database pass.
+        "/content_db_staleness",
         # Suppressions and ignore paths can hide findings outright.
         "/global_settings/ignore_paths",
         "/global_settings/suppressions",
@@ -503,8 +631,18 @@ class AshMcpConfig(BaseModel):
 
 
 class AshConfigGlobalSettingsSection(BaseModel):
+    # validate_default is here because `severity_threshold`'s default is derived
+    # from an environment variable, and pydantic does not validate a default no
+    # caller supplied. Without it an off-table `ASH_DEFAULT_SEVERITY_LEVEL` landed
+    # in a Literal-typed field that forbids it, and the ladder in
+    # utils.severity_ladder read the result as CRITICAL -- the strictest gate --
+    # for an operator who had asked for the loosest. core.constants now normalizes
+    # at the boundary, so this guards the other direction: a future default written
+    # in this file that the Literal does not admit fails at construction instead of
+    # travelling into the exit code.
     model_config = ConfigDict(
         extra="forbid",
+        validate_default=True,
     )
 
     severity_threshold: Annotated[
@@ -726,12 +864,35 @@ class AshConfig(BaseModel):
                 "(dependencies unavailable, never ran). SKIPPED scanners are not "
                 "selected and never trip this. Independent of fail_on_findings: "
                 "one answers 'was anything found', this one answers 'did what I "
-                "asked for actually run'. Defaults to False so that environments "
-                "legitimately lacking a scanner's tool keep their current exit "
-                "codes."
+                "asked for actually run'. Selects on the scanner's status, so it "
+                "covers only a failure that reached that status. Defaults to True, "
+                "so a scanner recorded ERROR or MISSING does not report the exit "
+                "code of a clean scan. Set it to False, or pass "
+                "--no-fail-on-incomplete-scanners, to accept a partial scan's exit "
+                "code; excluding the scanner whose tool is unavailable is usually "
+                "better, because an excluded scanner is recorded SKIPPED and the "
+                "report then says what was not measured."
             )
         ),
-    ] = False
+    ] = True
+
+    content_db_staleness: Annotated[
+        Literal["fail", "warn"],
+        Field(
+            description=(
+                "What a scan does when a scanner's content database (grype's or "
+                "trivy's vulnerability database, the offline semgrep/opengrep "
+                "rulesets) was built longer ago than the bound declared for it in "
+                "automated_security_helper/utils/content_databases.py. 'fail' (the "
+                "default) keeps the scanner's findings and exits 1, naming the "
+                "database, its build time, its age and the bound. 'warn' lets the scan "
+                "pass and records the same warning in the log and in the reports "
+                "(summary, SARIF invocation notifications, flat JSON). The CLI flag "
+                "--allow-stale-content-db sets 'warn' for one scan and takes "
+                "precedence over this value; --no-allow-stale-content-db sets 'fail'."
+            )
+        ),
+    ] = "fail"
 
     ash_plugin_modules: Annotated[
         List[str],
@@ -812,6 +973,24 @@ class AshConfig(BaseModel):
                         for g in match:
                             ASH_LOGGER.debug(f"Evaluating env var match: {g}")
                             var_name = g[0] if isinstance(g, tuple) else g
+                            if not config_env_var_is_interpolatable(var_name):
+                                # Left exactly as written rather than replaced
+                                # with its default. A literal that still reads
+                                # as a reference is visible in the artifact and
+                                # refused by any typed field, whereas the
+                                # default is indistinguishable from the variable
+                                # simply not being set. See
+                                # ASH_CONFIG_ENV_VAR_ALLOWLIST in
+                                # core/constants.py for which names resolve.
+                                ASH_LOGGER.warning(
+                                    f"Not reading environment variable {var_name} "
+                                    "into the configuration. A configuration file "
+                                    "may reference names beginning with "
+                                    f"{ASH_CONFIG_ENV_VAR_PREFIX} and these names: "
+                                    f"{', '.join(ASH_CONFIG_ENV_VAR_ALLOWLIST)}. "
+                                    "The reference is left as written."
+                                )
+                                continue
                             default_val = g[1] if isinstance(g, tuple) else None
                             if default_val == "None":
                                 default_val = None
@@ -839,7 +1018,7 @@ class AshConfig(BaseModel):
                     return value
 
                 _AshConfigLoader.add_constructor("!ENV", constructor_env_variables)
-                config_data = yaml.load(f, Loader=_AshConfigLoader)  # nosec B506 - This is using a custom SafeLoader to enable support of !ENV tag evaluation
+                config_data = yaml.load(f, Loader=_AshConfigLoader)  # nosec B506 - This is using a custom SafeLoader to enable support of !ENV tag evaluation, bounded to ASH_CONFIG_ENV_VAR_PREFIX/ASH_CONFIG_ENV_VAR_ALLOWLIST by constructor_env_variables above
         return cls.model_validate(config_data, strict=True)
 
     def save(self, config_path: Path):
@@ -1030,7 +1209,9 @@ def add_suppression_to_config(config_path: Path, suppression: AshSuppression) ->
     # Case D (last resort): a shape we cannot safely edit as text, e.g. an inline
     # `global_settings: {...}` mapping. Fall back to a full rewrite. This loses
     # comments, but only for a structure that essentially never occurs.
-    _rewrite_config_with_entry(config_path, data if isinstance(data, dict) else {}, entry)
+    _rewrite_config_with_entry(
+        config_path, data if isinstance(data, dict) else {}, entry
+    )
 
 
 def _serialize_entry_lines(entry: dict, item_indent: str) -> list[str]:

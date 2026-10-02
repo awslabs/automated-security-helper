@@ -1,0 +1,1040 @@
+name: "Pre-pull the build base image"
+description: >-
+  Pull the Dockerfile's base image once per job, from either of two registries, with the
+  Dockerfile's pinned digest enforced, before anything builds.
+
+# WHY THIS EXISTS
+#
+# Every container cell in this repository builds the ASH image, and the Dockerfile's first
+# instruction is `FROM ${BASE_IMAGE}` with BASE_IMAGE defaulting to a tag on public.ecr.aws.
+# The scan matrix runs roughly twenty-four cells, most of them container cells, and they start
+# together -- so they pull the same base image from the same anonymous client at the same
+# moment and cross ECR Public's data limit for anonymous pulls. Observed on 2026-09-28 across
+# three pull requests, in four different cells, with the runtimes disagreeing only on how they
+# phrase it:
+#
+#   podman:  Error: creating build container: ... toomanyrequests: Data limit exceeded
+#   nerdctl: failed to resolve source metadata ... toomanyrequests: Data limit exceeded
+#
+# podman surfaced it as exit 125 and nerdctl as exit 1, neither of which says "rate limit", and
+# the job then failed on a missing ash_aggregated_results.json -- so the symptom an operator
+# sees is "the scan produced no output", three steps removed from the cause.
+#
+# Pulling once per job, ahead of the build, puts the retry in one place instead of at every
+# `ash build-image` call site, and leaves the build itself untouched: the runtimes use a base
+# image already in the local store rather than going back to the registry.
+#
+# TWO QUOTAS WEAR THE SAME WIRE ERROR, AND ONLY ONE IS WORTH WAITING ON
+#
+# ECR Public meters anonymous clients two separate ways, per
+# https://docs.aws.amazon.com/AmazonECR/latest/public/public-service-quotas.html:
+#
+#   Rate of unauthenticated image pulls   1 per second     not adjustable
+#   Unauthenticated data volume           500 GB / month   not adjustable
+#
+# Both surface as `toomanyrequests`. Waiting out the first is what a retry is for. Waiting out
+# the second inside one job is not possible, and measurement says a retry there is futile:
+# when a runner hit the data cap it hit it on all five attempts across 2m31s.
+#
+# But the cap is NOT a repository-wide monthly wall, and it is worth being precise about that
+# because the obvious reading is wrong. Measured across the open pull requests on 2026-09-28,
+# 148 of 154 container and scan legs SUCCEEDED. Two legs pulling this same base image four
+# minutes apart on the same commit came out opposite ways, and at another commit 49 of 50
+# identically-named legs were green while one was red. Whatever identifies an "unauthenticated
+# customer" is therefore not this repository -- the hosted runners draw from a shared egress
+# pool, and a leg fails when it lands behind an address whose volume is already spent.
+#
+# The distinguishing text is "Data limit exceeded", and the observed message carries BOTH
+# strings at once: `toomanyrequests: Data limit exceeded`. So the data-cap check has to come
+# first; matching on `toomanyrequests` alone sends the case down the retry path, where it
+# spends 2m31s over five attempts to arrive at the failure the first attempt already had.
+#
+# WHY A SECOND REGISTRY, AND WHY IT IS A FALLBACK RATHER THAN A SWAP
+#
+# Re-running the job fixes a data-cap refusal, because the re-run lands behind a different
+# address. That works and costs a human five minutes of noticing. A second registry does the
+# same thing without the human, on the same runner, inside the same job.
+#
+# Docker Hub is emphatically not a better primary. Per
+# https://docs.docker.com/docker-hub/usage/pulls/ its anonymous allowance is counted "per IPv4
+# address or IPv6 /64 subnet", the page warns that a CI platform "may use the same IPv4 address
+# or IPv6 /64 subnet to pull images for multiple users", and "a pull for a multi-arch image will
+# count as one pull for each different architecture". That is the same shared-address failure
+# mode in a smaller bucket. Measured against registry-1.docker.io on 2026-09-29, the live
+# response headers reported `ratelimit-limit: 100;w=3600` for an anonymous client.
+#
+# The value is not that either registry is reliable. It is that the two quotas are metered on
+# different axes -- bytes per month against pulls per window -- and keep separate counters, so
+# an address that has exhausted one has very likely not exhausted the other. Two registries buy
+# two independent chances on one runner. Ordering ECR Public first keeps the shipped Dockerfile
+# authoritative: the reference the build resolves is unchanged, and the common path is byte for
+# byte the path that ran before this fallback existed.
+#
+# HOW THE FALLBACK REACHES THE BUILD, AND WHY A LOCAL TAG IS NOT ENOUGH
+#
+# The first version of the fallback pulled from Docker Hub, tagged the result locally under
+# the ECR reference, and announced that "the build resolves it from the local store without
+# touching public.ecr.aws". That sentence was not something the step could guarantee, and it
+# is the reason a broken path looked healthy: the step exited 0, the log said the base image
+# was in place, and the build died seconds later still asking ECR Public for it:
+#
+#     >>> FROM ${BASE_IMAGE} AS uv-reqs
+#     error: failed to solve: public.ecr.aws/docker/library/python:3.12-slim-bookworm:
+#     failed to resolve source metadata for ...: 429 Too Many Requests
+#     toomanyrequests: Data limit exceeded
+#
+# An earlier version of this comment attributed that log to the finch leg and explained it by
+# finch running BuildKit's OCI worker. The explanation is wrong -- finch does not run that
+# worker, per the table below -- so the attribution is not repeated here. Which leg emitted it
+# is NOT established: the job logs were not re-read while correcting this, and the shape is
+# consistent with either an unconfigured nerdctl leg or a docker cell on a docker-container
+# builder, both of which genuinely cannot read the local tag. Recorded as unresolved rather
+# than reassigned to whichever runtime now fits, because guessing a second time is how the
+# first wrong attribution got written down as fact.
+#
+# WHAT ACTUALLY DECIDES IT, READ FROM BUILDKIT RATHER THAN INFERRED
+#
+# For a BuildKit builder the whole question is one guard in
+# sourceresolver/imageresolver.go's `ResolveImageMetadata` (quoted at v0.31.2, the version
+# nerdctl v2.3.5 pins). The registry is tried first; when that fails:
+#
+#     if rm != resolver.ResolveModeDefault || is.ImageStore == nil {
+#         return nil, err
+#     }
+#     localRslvr := rslvr.WithImageStore(is.ImageStore, resolver.ResolveModePreferLocal)
+#     if _, _, localErr := localRslvr.ResolveLocal(ctx, ref); localErr != nil {
+#         return nil, err
+#     }
+#
+# So the local store IS consulted after a registry refusal -- including a 429 -- but only when
+# BOTH hold: the resolve mode is the default (which it is, since nothing here passes `--pull`),
+# and the worker has an image store at all. `ImageStore` is the only variable, and it is a
+# property of which worker buildkitd is running:
+#
+#   worker/runc/runc.go        `ImageStore: nil, // explicitly`   -- upstream's own comment
+#   worker/containerd/...      bound to one containerd namespace
+#
+# Note which way that cuts: a non-nil store rescues the build on the PRIMARY path too, not just
+# the fallback path. If ECR Public serves this step's pull and then refuses buildkitd's own
+# resolve moments later -- different client, same shared address -- a worker with a store finds
+# the image this step just placed, and a worker without one fails at `FROM`.
+#
+# Per runtime, with how each was established:
+#
+#   plain `docker build`                     reads the local store   measured locally
+#   `docker buildx` on a docker-container    DOES NOT                measured locally
+#   podman / buildah                         reads it                read from source
+#   finch                                    reads it                read from source
+#   nerdctl 2.3.5, unconfigured              DOES NOT                the job log above
+#   nerdctl 2.3.5, as this repository now installs it                reads it
+#
+# finch is in the "reads it" column, which is a correction to what this comment said before.
+# finch ships /etc/finch/buildkit/buildkitd.toml setting `[worker.oci] enabled = false` and
+# `[worker.containerd] enabled = true, namespace = "finch"`, and its own nerdctl.toml sets the
+# same namespace -- so its buildkitd runs the containerd worker, bound to the store its CLI
+# writes to. The earlier claim that finch ignored the local tag attributed a job log to the
+# OCI worker without checking which worker finch runs; it does not run that one.
+#
+# nerdctl was the runtime that genuinely could not see it, and that was fixable rather than
+# inherent: a buildkitd with no config file resolves `--oci-worker` and `--containerd-worker`
+# independently -- both default to "auto", and there is no rule that enabling one disables the
+# other -- then makes the OCI worker default because it registers at priority 0 and
+# `GetDefault` returns index 0 ("currently, only the default worker can be used"). The
+# nerdctl-full bundle unpacks a static runc, so `validOCIBinary()` always succeeds and the OCI
+# worker always wins. scripts/setup-nerdctl-linux.sh now writes the same three settings finch
+# ships, with `namespace = "default"` to match the nerdctl CLI, and asserts the result with
+# `buildctl debug workers` so the config cannot silently fail to apply.
+#
+# `docker buildx` on a docker-container driver stays in the "does not" column and is NOT fixed
+# here. That driver runs buildkitd inside its own container, with its own OCI worker and no
+# access to the host's image store, and nothing this action can write changes that. So on the
+# primary path a docker cell can still be refused at `FROM` after this step succeeded -- the
+# override below only covers the path where the fallback actually fired. On a warm run that gap
+# is now closed differently: the builder is handed the cached OCI layout as a build context,
+# which it reads without a registry. See THE ACTIONS CACHE below. A cold run keeps the gap.
+#
+# Docker's apparent immunity was also never exercised in CI. run-scan-test sets up
+# docker/setup-buildx-action, whose driver defaults to `docker-container`, and exports
+# ACTIONS_RUNTIME_TOKEN -- which is what makes ASH's build switch its argv to
+# `docker buildx build --load`. So every docker cell runs the configuration that ignores the
+# tag; none had happened to hit the quota yet.
+#
+# So the fix changes what `FROM` ASKS FOR rather than trying to satisfy the old ask out of a
+# store the builder may not consult. On the fallback path the step writes
+#
+#     ASH_BASE_IMAGE_OVERRIDE=<fallback repo>@<pin>
+#
+# to GITHUB_ENV, and each of the build entrypoints -- run_ash_container.py's
+# `_build_image` and utils/ash_helpers.ps1 -- passes it through as
+# `--build-arg BASE_IMAGE=...`. That is uniform across every runtime and every builder
+# driver, because no runtime has any say in which reference a build-arg names.
+#
+# The digest interaction is favourable rather than awkward. `FROM ${BASE_IMAGE}` accepts a
+# digest-suffixed value; only `docker tag` refuses one, which is why BASE_IMAGE_DIGEST sits on
+# its own Dockerfile line. So the fallback path is now MORE pinned than the primary: the
+# primary resolves a tag, the fallback resolves content.
+#
+# The local tag is still set, and is deliberately demoted rather than removed. It is what
+# keeps a consumer that does not read ASH_BASE_IMAGE_OVERRIDE working on docker and podman --
+# removing it would regress those from "works" to "broken everywhere" in exchange for
+# tidiness. What changed is that no message claims it is the mechanism.
+#
+# DONE, having previously been rejected on a premise that turned out to be false: switching
+# nerdctl's buildkitd to the containerd worker. The earlier reasoning was that the nerdctl-full
+# bundle ships the OCI worker, so configuring anything else "would test a configuration no user
+# runs". The second half does not hold. Rancher Desktop -- which is what this repository's own
+# support matrix lists for nerdctl, per the note in validate-container -- starts buildkitd with
+#
+#     buildkitd_opts="--addr=unix:///run/buildkit/buildkitd.sock --containerd-worker=true \
+#       --containerd-worker-addr=/run/k3s/containerd/containerd.sock --containerd-worker-gc \
+#       --oci-worker=false"
+#
+# in pkg/rancher-desktop/assets/scripts/buildkit.confd, identical at v1.24.0 and main. So the
+# containerd worker is what the documented nerdctl target runs, and the unconfigured OCI worker
+# was the configuration no user runs. Configuring it moves this leg toward the support matrix.
+#
+# Disclosed rather than buried, because it is a real consequence: this also changes the
+# nerdctl leg's OUTPUT path. nerdctl's `isImageSharable` (pkg/cmd/builder/build.go at v2.3.5)
+# requires five conjuncts -- executor == "containerd", matching containerd UUID, matching
+# namespace, matching snapshotter, and a default build platform. With the OCI worker none of
+# the containerd labels exist, so the `!ok` branch fires, nerdctl asks for
+# `--output type=docker` and imports the tarball itself through `loadImage`. With all five
+# satisfied it asks for `type=image,unpack=true` and buildkitd writes straight into the shared
+# store. Both directions work; what changes is which component creates the image and therefore
+# how a failure presents. The snapshotter conjunct matches by default (both sides use
+# containerd's `overlayfs`), the UUID matches because no separate `address` is configured, and
+# the platform conjunct holds because no entrypoint passes `--platform` -- which is now pinned
+# by tests/unit/test_local_base_image_resolution_is_not_defeated.py, since that one flag would
+# quietly move nerdctl back to the tarball path AND defeat podman's local hit.
+#
+# Still rejected, and for the original reason: pushing the fallback image into a
+# docker-container builder's store. That builder is a separate container with its own OCI
+# worker, so there is nothing to push into and no config here reaches it.
+#
+# Rejected: a BuildKit source policy (`--source-policy-file`, or
+# EXPERIMENTAL_BUILDKIT_SOURCE_POLICY) rewriting the ECR reference to the Docker Hub one. It
+# would work, and only for the BuildKit runtimes -- buildah has no equivalent -- so it is a
+# possible second layer, never the fix.
+#
+# Rejected: a composite-action `outputs:` value instead of GITHUB_ENV. The consumer is not the
+# workflow YAML; it is a build several layers inside two different entrypoints, reached by
+# `ash build-image`, `ash scan --mode container` and a PowerShell function. An output
+# would have to be threaded through every caller's argv, at six `uses:` sites across two
+# actions, each one a place to forget. GITHUB_ENV reaches every later step in the job whatever
+# the entrypoint, and it is already this repository's idiom for the same handoff --
+# run-scan-test exports ACTIONS_RUNTIME_TOKEN the same way, and ASH's build reads it from the
+# environment.
+#
+# WHY THE DIGEST PIN IS THE LOAD-BEARING PART
+#
+# A fallback that quietly accepts a different image is a supply-chain substitution, and strictly
+# worse than the pull failing. The safety argument for sourcing from docker.io is that
+# public.ecr.aws/docker/library/python is a mirror of docker.io/library/python: measured
+# 2026-09-29, both registries answer this tag with index digest
+# sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e and mediaType
+# application/vnd.oci.image.index.v1+json. That argument only holds while the digest is checked,
+# so it is checked in code here rather than assumed, and `ARG BASE_IMAGE_DIGEST` in the
+# Dockerfile is where the expected value lives -- one line from the tag it belongs to.
+#
+# The check is two pulls and a comparison of image ids, and the shape is deliberate:
+#
+#   1. pull `repo:tag`      -- what the Dockerfile's FROM would have resolved
+#   2. pull `repo@<pin>`    -- content-addressed, so the registry cannot answer with anything
+#                              else and the runtime verifies it; no bytes move if step 1
+#                              already fetched them
+#   3. compare the two local image ids; equal means the tag currently resolves to the pinned
+#      content, and the reference the build will use holds exactly that content
+#
+# Rejected: reading the digest back from the runtime with `image inspect` and comparing the
+# string. Measured on docker 25.0.16, `.RepoDigests` does carry the index digest -- but podman
+# records the per-platform manifest digest instead in at least some versions, and nerdctl reads
+# from containerd's own store. One pinned index digest cannot be compared against three
+# different notions of "the digest", and a pin per runtime per platform is not a pin. Comparing
+# image ids sidesteps this entirely: both ids come from the same runtime in the same format, so
+# only their equality is ever relied on.
+#
+# NERDCTL CANNOT INSPECT `repo@<digest>`, SO THE PINNED IMAGE IS LOOKED UP TWO WAYS
+#
+# The first version of this asked for the pinned image as `${repo}@${pin}` and nothing else.
+# That works on docker and it does not work on nerdctl, which is what finch runs. The finch leg
+# failed with this step's own "reported no image id" refusal, correctly, having pulled both
+# references successfully.
+#
+# The cause is in nerdctl's own resolver, `pkg/cmd/image/inspect.go`. `inspectIdentifier`
+# splits the argument into a name, a tag and a digest, and for `repo@sha256:...` the tag is
+# empty -- distribution/reference treats that form as canonical rather than tagged, so
+# nerdctl's `referenceutil.Parse` leaves `Tag` unset. `Inspect` then lists every image whose
+# containerd target digest equals the pin and keeps only candidates matching BOTH the requested
+# name and the requested tag, having first rewritten an empty requested tag to `latest`:
+#
+#     candidateTag := parsedReference.Tag
+#     // If the name had a digest, an empty tag is not normalized to latest, so, account
+#     // for that here
+#     if requestedTag == "" {
+#         requestedTag = "latest"
+#     }
+#     if parsedReference.Name() == requestedName && candidateTag == requestedTag {
+#
+# So `repo@<digest>` only ever resolves when a `repo:latest` record carrying that digest
+# happens to exist. This base image is pulled as `:3.12-slim-bookworm`, so no candidate has
+# tag `latest`, every candidate falls through, and `Inspect` returns `no such image`. Read at
+# v2.2.2 (what finch 1.19.0 ships, per NERDCTL_COMMIT/NERDCTL_RELEASE in finch-core's
+# deps/ubuntu-deps.conf), v2.3.5 (what scripts/setup-nerdctl-linux.sh installs) and v2.4.0:
+# identical in all three, so this is not a version to wait out.
+#
+# Dropping the repository name fixes it. With a bare `sha256:...` argument, nerdctl's
+# `referenceutil.Parse` takes the `digest.Parse` early return, the requested name comes back
+# empty, the name-and-tag branch is skipped entirely and the first candidate at that target
+# digest is returned. So the pinned image is asked for as `${repo}@${pin}` first -- unchanged,
+# and the only form docker accepts, since docker's `image inspect` resolves a bare digest
+# against image IDs (config digests) and never against an index digest -- and as a bare
+# `${pin}` only if that answered nothing.
+#
+# The second form is fail-safe rather than merely convenient, which is what makes it
+# acceptable here at all. It is a LOOKUP KEY, not a value being compared: the pin selects an
+# image record whose containerd target digest is the pin, and what gets compared is still two
+# ids the same runtime printed in the same format. A runtime whose stored target digest is the
+# per-platform manifest digest rather than the index digest therefore finds nothing and lands
+# on the refusal below. This form can turn a refusal into a pass only when the local store
+# really does hold the pinned content; it can never accept different content.
+#
+# Rejected: verifying the digest over the registry API with curl instead, which is genuinely
+# runtime-independent. It answers a different question. `pull ${repo}@${pin}` is
+# content-addressed, so the runtime itself verifies that the bytes in the local store hash to
+# the pin -- no registry round trip can establish that, and no registry round trip is needed
+# for it. What the id comparison adds is only "the tag currently resolves to the pinned
+# content", and moving that to curl would mean trusting a registry's answer to a manifest HEAD
+# about a tag, over a token endpoint and an Accept header for the index media types, instead of
+# trusting the local store the build is about to read. That is a weaker claim about a
+# less relevant object, for more moving parts.
+#
+# Rejected: tagging `${repo}@${pin}` under a throwaway local name and inspecting that. It
+# would work -- `nerdctl tag` resolves references through `pkg/idutil/imagewalker`, whose
+# `name==` filter does match a digest-suffixed record, which is why the fallback path's
+# existing `tag` call is unaffected by any of this. But it writes to the local image store on
+# the verification path, before anything has been verified, and "nothing was tagged" is one of
+# the properties a refusal here is supposed to guarantee.
+#
+# Rejected: `image inspect --mode=native --format '{{.Image.Target.Digest}}'`. nerdctl-only
+# spelling, and it puts a runtime's notion of "the digest" back into the comparison, which is
+# the thing the id comparison exists to avoid.
+#
+# podman needs neither form, and `{{.Id}}` IS THE LOAD-BEARING SPELLING FOR IT
+#
+# Established from source rather than assumed, because podman is the third runtime here and the
+# one this pre-pull reaches without a wrapper. Two things hold on podman 4.9.3, which is what
+# Ubuntu noble ships:
+#
+#   - `repo@<index digest>` resolves for an image pulled by tag. containers/image stores the
+#     top-level manifest under its own digest when it differs from the per-platform one
+#     (`storage/storage_dest.go`), containers/storage folds that into the image's digest index
+#     (`images.go`, recomputeDigests), and a digested reference that matches no name falls back
+#     to `ImagesByDigest` (`storage/storage_reference.go`, resolveImage). So the first form
+#     answers and the bare digest is never reached.
+#   - podman's inspect executes the template against a TYPED struct whose field is `ID`, so
+#     `{{.Id}}` only works because `cmd/podman/inspect/inspect.go` rewrites it, with a regex
+#     that matches the whole action and nothing else:
+#
+#         m := regexp.MustCompile(`{{\s*\.Id\s*}}`)
+#         row = m.ReplaceAllString(row, "{{.ID}}")
+#
+#     Which means `{{.Id}}` is safe and `{{.Id | something}}` or `{{printf "%s" .Id}}` is not:
+#     a pipeline is not rewritten, `.Id` is not a field of the struct, and podman would fail.
+#     If this format string ever needs to do more than name the field, spell it `{{.ID}}` --
+#     that is the real field on podman, the alias docker accepts, and the typed-pass spelling
+#     on nerdctl. It is left as `{{.Id}}` here only because that is what already ran green.
+#
+# All three runtimes' ids are the config blob digest, so they are comparable for the same
+# reason docker's are: podman's `Id` comes from `manifest.ImageID(diffIDs)`, and nerdctl's
+# dockercompat `Id` is `nativeImage.ImageConfigDesc.Digest` with an in-source comment saying it
+# is deliberately docker's notion rather than containerd's. Not that this action relies on
+# that -- it only ever compares two ids from one runtime -- but it is why a mismatch here means
+# what it says.
+#
+# Rejected: pulling only by digest and skipping step 1. It is shorter and it defeats a
+# substituting registry just as well, but it cannot see a tag bump. Move the Dockerfile to
+# python:3.13 and forget the pin, and a digest-only pre-pull fetches the 3.12 image and tags it
+# as 3.13 in the local store -- after which the build gets 3.12 while the Dockerfile says 3.13,
+# silently, precisely because this action makes the local store authoritative. Step 1 is what
+# turns that into a failure.
+#
+# On mismatch this fails and does not try the other registry. The other registry mirrors the
+# same upstream tag, so it would report the same digest; and falling through on a real error
+# turns a clear failure into a slow, confusing one.
+#
+# THE ACTIONS CACHE: ZERO REGISTRY CALLS ON A WARM RUN
+#
+# Pulling once per job still makes at least one registry call per job, and a metadata-only call
+# is not safe: once a shared egress address has spent ECR Public's anonymous 500 GB/month, a
+# manifest lookup is refused as well (`failed to resolve source metadata ... 429 ... Data limit
+# exceeded`, seen in this repository's own logs). So on a warm run this action makes no
+# registry call at all, and neither does the build after it.
+#
+# This used to say the image is never cached, because a cache on a public repository is
+# readable by anyone with a token. The maintainer approved this one case explicitly: the bytes
+# are a third-party public image, byte-identical to docker.io at the pinned digest, and they
+# are hash-verified before use. The approval is for exactly this and nothing wider -- ASH's own
+# built image and layers are not cached, and no other cache is added. The same decision is
+# recorded against these two steps in .github/scripts/assert-publish-surfaces.py.
+#
+# How it is built:
+#
+#   key      tag + pin + RUNNER_ARCH, read from the Dockerfile by oci_layout.py. No network, so
+#            the restore can run first on every run. A new pin is a new key, so a bumped base
+#            image can never be served an old entry.
+#   format   an OCI image layout, not a `docker save` tar. A layout is content-addressed --
+#            each blob is named by its own sha256 -- so it can be checked against the pin. A
+#            `docker save` tar holds uncompressed layers and runtime-made manifests whose
+#            digests no registry served, so there is nothing in it the pin can vouch for.
+#   restore  `actions/cache/restore`, exact key only, on every run.
+#   verify   on a hit, before anything reads it: every blob's filename equals its sha256,
+#            blobs/sha256/<pin> exists and is an image index, the index lists exactly one
+#            linux manifest for this arch, and that manifest's config and layers are present
+#            at the sizes it declares. Anything else in the layout (a stray file, a symlink,
+#            a second hash algorithm) fails it. A failure DISCARDS the entry and falls through
+#            to the pull path below, which is exactly what ran before the cache existed.
+#   use      the build is handed the verified layout, per runtime (table below).
+#   save     only on a push to refs/heads/main, and only after a miss: the pull path runs as
+#            it always did, oci_layout.py then fetches the pinned index, this arch's manifest,
+#            config and layers by digest and verifies them, and `actions/cache/save` stores
+#            the layout. Pull-request runs restore and never save, so a pull request cannot
+#            write an entry any other run will read.
+#
+# How each runtime is handed the layout on a hit, measured or read from source as noted:
+#
+#   docker, `docker build` (docker driver)   ash_helpers.ps1. The layout is loaded
+#       into the engine as a docker-archive tagged under the Dockerfile's FROM reference, and
+#       the engine's builder prefers a local image by default (measured: with the tag present
+#       and its registry host unresolvable, the build succeeds). The oci-layout context is
+#       NOT usable on this driver: measured on docker 25.0.16 / buildx 0.12.1, the docker
+#       driver turned `--build-context x=oci-layout://DIR@sha256:...` into a registry lookup
+#       of docker.io/library/x and failed. So the entrypoints do not pass it here.
+#   docker, `docker buildx build` on a docker-container builder   run_ash_container.py when
+#       ACTIONS_RUNTIME_TOKEN is present. That builder cannot see the engine's store, so it is
+#       given `--build-context ash-base-image=oci-layout://DIR@<arch manifest digest>` and
+#       `--build-arg BASE_IMAGE=ash-base-image`. Measured: the build reports
+#       `[context ash-base-image] OCI load from client` and succeeds, and the name it prints
+#       (docker.io/library/ash-base-image) is not a repository that exists, so a registry
+#       resolve would have failed.
+#   nerdctl and finch   same build context, spelled `oci-layout://DIR` with no digest, plus
+#       `--pull=false` (nerdctl maps it to `image-resolve-mode=local`). nerdctl's parser
+#       (pkg/cmd/builder/build.go, parseBuildContextFromOCILayout, identical at v2.2.2 and
+#       v2.3.5) takes the whole value after the prefix as a path and picks the image from
+#       index.json itself, so a `@digest` suffix would be read as part of the path. finch
+#       1.19.0 on Linux passes `build` flags through to nerdctl unmodified except `--load`
+#       (cmd/finch/nerdctl.go argHandlerMap, cmd/finch/nerdctl_native.go), so both flags
+#       reach it.
+#   podman   cannot take this build context: podman's and buildah's documentation list no
+#       `oci-layout://` form for `--build-context`. The layout is imported with the `oci:`
+#       transport instead and tagged under the FROM reference, and `podman build`'s default
+#       pull policy is `missing`, which returns before any registry I/O on a local hit (see
+#       tests/unit/test_local_base_image_resolution_is_not_defeated.py).
+#
+# The hand-off is ASH_BASE_OCI_LAYOUT=<layout dir>@<arch manifest digest> in GITHUB_ENV, read
+# by the same three entrypoints that read ASH_BASE_IMAGE_OVERRIDE. Only this action sets it.
+#
+# PROOF, NOT A GREEN LEG: on a hit this action also points the registry hosts at 0.0.0.0 in
+# /etc/hosts -- and inside a running buildx builder container, which has its own -- for the
+# rest of the job. A build that still reached a registry for the base image would then fail,
+# so a green warm leg is evidence of zero registry contact rather than of a registry that
+# happened to answer. It is on by default; `block-registries-on-hit: "false"` turns it off.
+#
+# WHAT THIS DELIBERATELY DOES NOT DO
+#
+# It does not upload the image as an artifact, push it to a registry, or cache anything but
+# the verified base-image layout.
+#
+# It also does not authenticate. Authenticating to ECR Public raises the limit and stores
+# nothing, which would satisfy the same requirement more durably, but it needs an IAM role and
+# an OIDC trust on a public repository -- a permissions decision, not a workflow change.
+#
+# It does not pre-flight Docker Hub's remaining allowance. A manifest HEAD returns
+# `ratelimit-remaining` and does not spend a pull, so an attempt certain to fail could be
+# skipped. It is not worth it here: reading that header needs a registry token, which means a
+# token endpoint, an Accept header for the index media types and JSON parsing -- the whole
+# apparatus this design avoided by comparing image ids. The attempt it would save fails in
+# about a second.
+
+inputs:
+  oci-runner:
+    description: "Container runtime: docker, podman, finch or nerdctl. Empty means docker."
+    required: false
+    default: ""
+  runner-wrapper:
+    description: >-
+      Command prefix for the runtime, matching OCI_RUNNER_WRAPPER in the calling workflow.
+      finch needs sudo on the hosted runners; the others do not.
+    required: false
+    default: ""
+  attempts:
+    description: >-
+      How many pulls to try against one registry before moving to the next. Only the
+      per-second rate limit is retried; see the notes above for what is not.
+    required: false
+    default: "5"
+  dockerfile:
+    description: "Where to read the BASE_IMAGE and BASE_IMAGE_DIGEST defaults from."
+    required: false
+    default: "Dockerfile"
+  block-registries-on-hit:
+    description: >-
+      When the build is handed the cached layout, point the base image's registry hosts at
+      0.0.0.0 for the rest of the job, so any registry call for it fails the build instead of
+      passing unnoticed. See the notes above.
+    required: false
+    default: "true"
+
+outputs:
+  cache-used:
+    description: >-
+      'true' when the build was handed a verified base image from the Actions cache and this
+      action made no registry call.
+    value: ${{ steps.hit.outputs.used }}
+
+runs:
+  using: "composite"
+  steps:
+    # Never fails the job. A key that cannot be computed means the Dockerfile's two ARG lines
+    # are malformed, and the pull step below already reports each of those cases precisely; a
+    # second, vaguer error here would only put itself ahead of the useful one.
+    - name: Compute the base-image cache key
+      id: key
+      shell: bash
+      env:
+        DOCKERFILE: ${{ inputs.dockerfile }}
+        HELPER: ${{ github.action_path }}/oci_layout.py
+      run: |
+        set -uo pipefail
+        if key="$(python3 "${HELPER}" key --dockerfile "${DOCKERFILE}" --arch "${RUNNER_ARCH}")"; then
+          echo "key=${key}" >> "${GITHUB_OUTPUT}"
+          echo "base-image cache key: ${key}"
+        else
+          echo "::warning::could not compute the base-image cache key; the cache is skipped \
+        and the pull path below runs, which reports what is wrong with ${DOCKERFILE}."
+        fi
+
+    - name: Restore the base image from the Actions cache
+      id: restore
+      if: steps.key.outputs.key != ''
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/ash-base-image-oci
+        key: ${{ steps.key.outputs.key }}
+
+    - name: Verify the cached base image and hand it to the build
+      id: hit
+      if: steps.restore.outputs.cache-hit == 'true'
+      shell: bash
+      env:
+        RUNTIME: ${{ inputs.oci-runner }}
+        WRAPPER: ${{ inputs.runner-wrapper }}
+        DOCKERFILE: ${{ inputs.dockerfile }}
+        HELPER: ${{ github.action_path }}/oci_layout.py
+        LAYOUT_DIR: ${{ runner.temp }}/ash-base-image-oci
+        BLOCK_REGISTRIES: ${{ inputs.block-registries-on-hit }}
+      run: |
+        set -uo pipefail
+        bash "${GITHUB_ACTION_PATH}/use_cached_layout.sh"
+
+    - name: Pre-pull the build base image
+      id: pull
+      if: steps.hit.outputs.used != 'true'
+      shell: bash
+      env:
+        ATTEMPTS: ${{ inputs.attempts }}
+        RUNTIME: ${{ inputs.oci-runner }}
+        WRAPPER: ${{ inputs.runner-wrapper }}
+        DOCKERFILE: ${{ inputs.dockerfile }}
+      run: |
+        set -uo pipefail
+
+        runtime="${RUNTIME:-docker}"
+
+        # EVERY EXPANSION OF `wrapper` IS GUARDED, BECAUSE IT IS USUALLY EMPTY
+        #
+        # `runner-wrapper` is empty for docker and podman -- only finch and nerdctl need
+        # sudo -- so this array normally has no elements at all. Under `set -u`, bash
+        # before 4.4 treats expanding an element-less array as an unbound variable and
+        # exits. From bash's own CHANGES for 4.4-rc2, under "3. New Features in Bash":
+        #
+        #     Using ${a[@]} or ${a[*]} with an array without any assigned elements when
+        #     the nounset option is enabled no longer throws an unbound variable error.
+        #
+        # macOS ships bash 3.2.57 and is not going to ship anything newer -- Apple stopped
+        # at the last GPLv2 release -- so an unguarded `${wrapper[*]}` is fatal there while
+        # being fine on the ubuntu runners and on any current development machine. Measured
+        # on #672: all ten `PyTest - macos-*` legs, 3.10 through 3.14 on both macos-14 and
+        # macos-latest, died on the first such expansion with
+        #
+        #     step.sh: line 93: wrapper[*]: unbound variable
+        #
+        # having issued no runtime call at all, which then failed every assertion
+        # downstream.
+        #
+        # This action is not itself scheduled on macOS: every macOS x {podman, finch,
+        # nerdctl} cell is excluded in both ash-unified-ci.yml and ash-install-methods.yml,
+        # hosted macOS runners having no nested virtualization, and run-scan-test skips the
+        # pre-pull for python-local. What ran on those legs was
+        # tests/unit/test_prepull_base_image_registry_fallback.py, which extracts this
+        # script and runs it under the host's bash. The guard is still the right fix rather
+        # than a test-only workaround: a step that silently requires bash 4.4+ is one
+        # runner-image change away from being a live failure, and the only thing standing
+        # between the two today is a matrix exclusion written for an unrelated reason.
+        #
+        # `${arr[@]+"${arr[@]}"}` is the portable spelling. `+` tests for set-ness, so it is
+        # exempt from nounset in every version, and it substitutes nothing when the array is
+        # empty. Guarded at every expansion rather than only at the one that failed: an
+        # unguarded site left behind does not remove the bug, it moves it to whichever code
+        # path reaches that line first.
+        #
+        # `[*]` stays `[*]` and `[@]` stays `[@]`. The three `[*]` uses sit inside a larger
+        # double-quoted string that has to stay one word -- an inspect-log line, the status
+        # line below and one annotation -- and `[@]` there would split each into several.
+        # The single `[@]` use is argv, where element boundaries are the whole point.
+        #
+        # Rejected: folding `${runtime}` into the array so it can never be empty and needs
+        # no guard anywhere. Shorter, and immune to this whole class rather than defended
+        # against it -- but the array is displayed as well as executed, and with the wrapper
+        # empty `${wrapper[*]} ${runtime}` renders as ` docker`, so collapsing the two would
+        # reword three log lines. Not worth spending the "nothing observable changed" claim
+        # on in a commit whose entire job is a portability fix.
+        #
+        # Rejected: dropping `set -u`. It is what makes a mistyped variable in a step that
+        # decides which registry a base image comes from fail loudly rather than expand to
+        # nothing.
+        # shellcheck disable=SC2206
+        wrapper=( ${WRAPPER} )
+
+        # A non-positive value would make `seq 1 "${ATTEMPTS}"` produce nothing, the retry
+        # loop body never run, and the pull function return the `for` statement's own status
+        # -- reporting success having pulled nothing at all.
+        if [[ ! "${ATTEMPTS}" =~ ^[1-9][0-9]*$ ]]; then
+          echo "::error::attempts is '${ATTEMPTS}'; it must be a positive integer."
+          exit 1
+        fi
+
+        run_runtime() { "${wrapper[@]+"${wrapper[@]}"}" "${runtime}" "$@"; }
+
+        # Every inspect this step issues is recorded here, each followed by whatever the
+        # runtime wrote to stderr for it. The first version sent that stream to /dev/null, so
+        # when finch refused the pinned reference the log said the id was empty and nothing at
+        # all about why -- the reason was one line on stderr, discarded. A refusal has to carry
+        # it, and it has to carry the argv too, because the step now asks more than one
+        # question and "which one failed" is half the diagnosis.
+        inspect_log="$(mktemp)"
+
+        # Answers with an empty string rather than a non-zero exit on some runtimes, so every
+        # caller has to reject emptiness explicitly. Two empty ids compare equal, and "the
+        # comparison passed because neither side said anything" is the one outcome this action
+        # must never have.
+        #
+        # Takes one or more references to ask about and returns the first id any of them
+        # yields, because no single spelling of "the pinned image" is accepted by every
+        # runtime; see the notes above for which spellings and why the order is what it is.
+        image_id() {
+          local ref out
+          for ref in "$@"; do
+            printf '%s\n' "--- ${wrapper[*]+"${wrapper[*]}"} ${runtime} image inspect --format '{{.Id}}' ${ref}" \
+              >> "${inspect_log}"
+            out="$(run_runtime image inspect --format '{{.Id}}' "${ref}" 2>> "${inspect_log}")" || true
+            # First line only, and not a Go template's way of spelling "that field was absent"
+            # -- `<no value>` is what text/template prints for a missing map key under the
+            # default missingkey mode, and it is not an image id.
+            out="${out%%$'\n'*}"
+            case "${out}" in
+              '' | '<no value>') continue ;;
+            esac
+            printf '%s\n' "${out}"
+            return 0
+          done
+          return 1
+        }
+
+        # Read both pins from the Dockerfile rather than duplicating them here, so bumping
+        # ARG BASE_IMAGE does not silently leave this step pulling the old image while the
+        # build pulls the new one -- which would restore the very rate limit this avoids and
+        # look like the step simply stopped working.
+        #
+        # `p;q` on the first match instead of `| head -n 1`: with pipefail set, head closing
+        # the pipe early makes sed exit 141 and the whole assignment fail on a Dockerfile that
+        # happens to have a second matching line.
+        base="$(sed -n '/^ARG BASE_IMAGE=/{s/^ARG BASE_IMAGE=//;p;q;}' "${DOCKERFILE}")"
+        pin="$(sed -n '/^ARG BASE_IMAGE_DIGEST=/{s/^ARG BASE_IMAGE_DIGEST=//;p;q;}' "${DOCKERFILE}")"
+
+        if [ -z "${base}" ]; then
+          echo "::error::no 'ARG BASE_IMAGE=' line in ${DOCKERFILE}; nothing to pre-pull. \
+        This step reads the tag from the Dockerfile, so a rename there needs one here too."
+          exit 1
+        fi
+        if [ -z "${pin}" ]; then
+          echo "::error::no 'ARG BASE_IMAGE_DIGEST=' line in ${DOCKERFILE}. This step will \
+        not pre-pull a base image it cannot verify, because it may source that image from a \
+        fallback registry and the digest is the only thing establishing the two registries \
+        serve the same bytes. Add the line next to ARG BASE_IMAGE; get the value with: \
+        ${runtime} pull ${base} && ${runtime} image inspect --format '{{index .RepoDigests 0}}' ${base}"
+          exit 1
+        fi
+        if [[ ! "${pin}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+          echo "::error::ARG BASE_IMAGE_DIGEST in ${DOCKERFILE} is '${pin}', which is not a \
+        sha256:<64 hex> digest. It must be the multi-arch index digest of ${base}."
+          exit 1
+        fi
+
+        case "${base}" in
+          *@*)
+            echo "::error::ARG BASE_IMAGE in ${DOCKERFILE} is '${base}', which carries a \
+        digest. The fallback path tags a Docker Hub pull under that exact reference, as the \
+        layer that keeps plain \`docker build\` and podman working, and a digest-suffixed \
+        reference is not a valid \`tag\` target. Keep the digest in ARG BASE_IMAGE_DIGEST \
+        instead; the build-arg this step exports carries it separately, and \`FROM\` accepts \
+        a digest there."
+            exit 1
+            ;;
+        esac
+
+        primary_repo="${base%:*}"
+        tag="${base##*:}"
+        if [ "${primary_repo}" = "${base}" ] || [ -z "${primary_repo}" ] || [ -z "${tag}" ] \
+          || [ "${tag}" != "${tag#*/}" ]; then
+          echo "::error::ARG BASE_IMAGE in ${DOCKERFILE} is '${base}', which does not parse \
+        as repository:tag. This step needs the tag separately to look the same image up in a \
+        fallback registry."
+          exit 1
+        fi
+
+        # The fallback is derived from the primary rather than written out, so that changing
+        # ARG BASE_IMAGE cannot leave the fallback pointing at a different image than the
+        # build. public.ecr.aws/docker/library/* is AWS's mirror of Docker Hub's official
+        # images, so the mapping is exact for that prefix and unknown for anything else --
+        # in which case there is no fallback rather than a guessed one.
+        case "${primary_repo}" in
+          public.ecr.aws/docker/library/*)
+            fallback_repo="docker.io/library/${primary_repo#public.ecr.aws/docker/library/}"
+            ;;
+          *)
+            fallback_repo=""
+            echo "::notice::${primary_repo} is not a public.ecr.aws mirror of a Docker Hub \
+        official image, so no fallback registry is known for it and this step will try the \
+        one registry. If the base image moved deliberately, teach this action the new \
+        mirror pairing."
+            ;;
+        esac
+
+        # For the step that writes the cache layout on main, which fetches by digest from the
+        # same registries in the same order. Unset outside Actions, which a hand-run is.
+        if [ -n "${GITHUB_OUTPUT:-}" ]; then
+          printf '%s\n' "primary-repo=${primary_repo}" "fallback-repo=${fallback_repo}" \
+            >> "${GITHUB_OUTPUT}"
+        fi
+
+        echo "base image:    ${base}"
+        echo "pinned digest: ${pin}"
+        echo "runtime:       ${wrapper[*]+"${wrapper[*]}"} ${runtime}"
+        echo "registries:    ${primary_repo}${fallback_repo:+ then ${fallback_repo}}"
+
+        # Already local AND already matching the pin is success, not a reason to hit a
+        # registry. Present on a warm runner image and after any earlier step in the same job
+        # pulled it. Unlike a bare existence probe this cannot accept an unverified image: if
+        # the local tag is something other than the pinned content, the probe does not match
+        # and the full path below runs.
+        #
+        # The pin is only asked about when the tag is local, which is both one fewer question
+        # on the common cold-runner path and what keeps the runtime measured working from
+        # being asked anything new: the second spelling of the pinned reference below is only
+        # reached when the first answered nothing, and on docker the first always answers.
+        local_tag_id="$(image_id "${base}" || true)"
+        if [ -n "${local_tag_id}" ]; then
+          local_pin_id="$(image_id "${primary_repo}@${pin}" "${pin}" || true)"
+          if [ "${local_tag_id}" = "${local_pin_id}" ]; then
+            echo "already present locally at the pinned digest; not pulling"
+            exit 0
+          fi
+        fi
+
+        # Grows for every pull the step issues, over every registry, so the log ends with one
+        # number an operator can compare against ATTEMPTS.
+        pulls=0
+
+        # 0  the ref is in the local store
+        # 10 this registry refused it for a quota reason; try the next registry
+        # Anything else is not made truer by asking a different registry, so this exits the
+        # step directly rather than returning.
+        pull_ref() {
+          local ref="$1" kind="$2"
+          local log n sleep_for
+          log="$(mktemp)"
+          for n in $(seq 1 "${ATTEMPTS}"); do
+            pulls=$(( pulls + 1 ))
+            echo "=== pull ${ref} (attempt ${n} of ${ATTEMPTS}) ==="
+            if run_runtime pull "${ref}" 2>&1 | tee "${log}"; then
+              [ "${n}" -gt 1 ] && echo "::warning::${ref} pulled on attempt ${n}; the \
+        earlier attempts were rate-limited."
+              return 0
+            fi
+
+            # The monthly data cap first, because the wire error carries both strings and this
+            # one cannot be waited out. Reporting it as a rate limit sends whoever reads the log
+            # looking for a concurrency problem in the matrix, when the matrix is not the cause
+            # and spacing the cells out would not help.
+            if grep -q 'Data limit exceeded' "${log}"; then
+              echo "::warning::${ref} refused: the anonymous 500 GB/month data quota is spent \
+        for the address this runner pulls from. Not retried here -- measurement says every \
+        attempt from the same address fails the same way. Moving to the next registry."
+              return 10
+            fi
+
+            # Deliberately not a bare `429`: three digits match layer sizes and digest
+            # prefixes, and a false quota reading here would send a real error down the
+            # fallback path and report it as a quota problem.
+            if ! grep -qE 'toomanyrequests|[Tt]oo [Mm]any [Rr]equests' "${log}"; then
+              echo "::error::pulling ${ref} failed for a reason other than a registry quota. \
+        Not retried, and no other registry was tried: an unknown manifest, a bad tag, a DNS \
+        failure or an auth error is not fixed by asking somewhere else, and trying anyway \
+        would report a typo in ${DOCKERFILE} as a quota problem. If the reference above ends \
+        in @sha256: and '${runtime}' cannot pull a digest reference, that is a gap in this \
+        action rather than anything wrong with ${DOCKERFILE}. See the output above."
+              exit 1
+            fi
+
+            # Docker Hub's allowance is counted per window per address, not per second, so
+            # there is nothing to wait out inside one job. ECR Public's 1/second limit is
+            # exactly what a short backoff is for.
+            if [ "${kind}" != "ecr" ]; then
+              echo "::warning::${ref} refused: ${kind} rate-limited this address, and its \
+        allowance is per window rather than per second, so retrying inside this job would not \
+        clear it. Moving on."
+              return 10
+            fi
+
+            if [ "${n}" -eq "${ATTEMPTS}" ]; then
+              echo "::warning::ECR Public rate-limited every one of ${ATTEMPTS} pull attempts \
+        for ${ref}. The limit is on anonymous pulls and this matrix starts many cells at once. \
+        Moving to the next registry."
+              return 10
+            fi
+
+            sleep_for=$(( n * 15 ))
+            echo "::warning::ECR Public rate limit on attempt ${n} for ${ref}; retrying in \
+        ${sleep_for}s."
+            sleep "${sleep_for}"
+          done
+        }
+
+        # 0  the pinned image is in the local store under ${base}
+        # 10 this registry refused; try the next one
+        try_registry() {
+          local repo="$1" kind="$2"
+          local rc=0 tag_id pin_id placed_id unanswered override
+
+          pull_ref "${repo}:${tag}" "${kind}" || rc=$?
+          [ "${rc}" -eq 0 ] || return "${rc}"
+
+          # Content-addressed, so this is the fetch whose result cannot be substituted. It
+          # moves no layers when the tag above already resolved to the same digest.
+          pull_ref "${repo}@${pin}" "${kind}" || rc=$?
+          [ "${rc}" -eq 0 ] || return "${rc}"
+
+          tag_id="$(image_id "${repo}:${tag}" || true)"
+          pin_id="$(image_id "${repo}@${pin}" "${pin}" || true)"
+          if [ -z "${tag_id}" ] || [ -z "${pin_id}" ]; then
+            # Naming the side that came back empty rather than both: the original of this
+            # message said "for X or Y", and on the finch failure that left whoever read it
+            # unable to tell that the tag was fine and only the pinned reference was not,
+            # which is the whole shape of the problem.
+            if [ -z "${tag_id}" ] && [ -z "${pin_id}" ]; then
+              unanswered="${repo}:${tag} or ${repo}@${pin}"
+            elif [ -z "${tag_id}" ]; then
+              unanswered="${repo}:${tag}"
+            else
+              unanswered="${repo}@${pin}, in any form this step knows to ask for it"
+            fi
+            echo "::error::${wrapper[*]+"${wrapper[*]}"} ${runtime} reported no image id for \
+        ${unanswered} after pulling both, so the pinned digest cannot be checked. Refusing to \
+        hand the build an unverified base image. This is a gap in this action's support for \
+        '${runtime}', not a registry problem. Every inspect this step issued follows, in \
+        order, each with anything the runtime wrote to stderr for it. The first entry is the \
+        warm-runner probe and is expected to miss on a cold runner."
+            cat "${inspect_log}"
+            exit 1
+          fi
+
+          if [ "${tag_id}" != "${pin_id}" ]; then
+            echo "::error::DIGEST MISMATCH, refusing to pre-pull. ${repo}:${tag} does not \
+        resolve to ${pin}, the digest pinned as ARG BASE_IMAGE_DIGEST in ${DOCKERFILE} \
+        (${repo}:${tag} is image ${tag_id}; ${pin} is image ${pin_id}). Nothing has been \
+        tagged and no other registry was tried. IF YOU JUST BUMPED ARG BASE_IMAGE: this is \
+        the missing second line. Recompute the pin with \`${runtime} pull ${base} && \
+        ${runtime} image inspect --format '{{index .RepoDigests 0}}' ${base}\` and put that \
+        value in ARG BASE_IMAGE_DIGEST in the same commit as the tag. IF YOU DID NOT CHANGE \
+        THE TAG: the tag moved under a pin that was reviewed, so the image on offer is not \
+        the reviewed one -- find out why before updating the pin to make this pass."
+            exit 1
+          fi
+
+          if [ "${repo}" != "${primary_repo}" ]; then
+            # Second layer, not the mechanism -- but a working second layer on every
+            # builder except a docker-container one. Plain `docker build`, podman, finch
+            # and (since scripts/setup-nerdctl-linux.sh configures its buildkitd) nerdctl
+            # all resolve `FROM ${BASE_IMAGE}` out of the local store after a registry
+            # refusal, so a tag under the Dockerfile's own reference keeps them working for
+            # any consumer that never reads ASH_BASE_IMAGE_OVERRIDE. See the notes above
+            # for the one guard in BuildKit that decides this.
+            # Tagging from the digest reference rather than from the fallback's tag keeps this
+            # pinned end to end, and works the same on docker, podman, finch and nerdctl
+            # because `tag` and `pull` are all it needs.
+            if ! run_runtime tag "${repo}@${pin}" "${base}"; then
+              echo "::error::pulled ${repo}@${pin} but could not tag it as ${base}. See the \
+        output above."
+              exit 1
+            fi
+            placed_id="$(image_id "${base}" || true)"
+            if [ "${placed_id}" != "${pin_id}" ]; then
+              echo "::error::tagged ${repo}@${pin} as ${base}, but ${base} now resolves to \
+        image '${placed_id}' rather than '${pin_id}'. Refusing to proceed with a base image \
+        that is not the pinned one."
+              exit 1
+            fi
+
+            # THE MECHANISM: tell the build which registry answered.
+            #
+            # Digest-pinned rather than the fallback's tag, because `FROM ${BASE_IMAGE}`
+            # accepts a digest-suffixed reference -- only `docker tag` above refuses one. So
+            # this path hands the build content rather than a name, which makes it strictly
+            # more pinned than the primary path it is standing in for.
+            override="${repo}@${pin}"
+
+            # GITHUB_ENV's `NAME=value` form is line-oriented, so a value carrying a newline
+            # would let this step inject an arbitrary second variable into the job. Neither
+            # component can carry one today -- `pin` is matched against
+            # ^sha256:[0-9a-f]{64}$ above and `repo` is derived from a single sed-extracted
+            # Dockerfile line with `*@*` already rejected -- so this guard has no reachable
+            # trigger. It is here anyway: the cost is three lines, and the thing on the other
+            # side of it is writing attacker-shaped text into the environment of every later
+            # step in the job.
+            case "${override}" in
+              *[!a-zA-Z0-9._:/@-]*)
+                echo "::error::refusing to export ASH_BASE_IMAGE_OVERRIDE='${override}': it \
+        contains a character that is not valid in an image reference. GITHUB_ENV is \
+        line-oriented, so this step will not write an unexpected value into it."
+                exit 1
+                ;;
+            esac
+
+            if [ -n "${GITHUB_ENV:-}" ]; then
+              printf '%s\n' "ASH_BASE_IMAGE_OVERRIDE=${override}" >> "${GITHUB_ENV}"
+              echo "::notice::sourced ${base} from ${repo} at ${pin}. The build is told to \
+        ask for ${override} directly, through ASH_BASE_IMAGE_OVERRIDE in the job environment, \
+        and that is what keeps it off ${primary_repo}. ${base} is also tagged locally as a \
+        second layer, which every builder here reads except a docker-container one -- that \
+        driver is a separate container with its own image-store-less worker, so the override \
+        rather than the tag is what this relies on."
+            else
+              # Not an error, because a hand-run of this script outside Actions is a
+              # legitimate way to use it. But it is the exact state the retag alone used to
+              # be mistaken for, so it says what breaks rather than that something is unset.
+              echo "::warning::sourced ${base} from ${repo} at ${pin} and tagged it locally, \
+        but GITHUB_ENV is not set, so the build cannot be told which registry answered. The \
+        local tag alone is enough on plain \`docker build\`, podman, finch, and a nerdctl whose \
+        buildkitd runs the containerd worker -- but \`docker buildx\` on a docker-container \
+        driver will go back to ${primary_repo} and be refused again, and so will any buildkitd \
+        left on its default OCI worker. Pass BASE_IMAGE=${override} to the build yourself."
+            fi
+          fi
+
+          return 0
+        }
+
+        tried=""
+        rc=10
+        for entry in "${primary_repo}|ecr" "${fallback_repo}|dockerhub"; do
+          repo="${entry%%|*}"
+          kind="${entry##*|}"
+          [ -n "${repo}" ] || continue
+          tried="${tried:+${tried}, }${repo}"
+          rc=0
+          try_registry "${repo}" "${kind}" || rc=$?
+          if [ "${rc}" -eq 0 ]; then
+            echo "base image ${base} present at ${pin} after ${pulls} pull(s)"
+            exit 0
+          fi
+        done
+
+        # Said accurately for one registry as well as two: a base image with no known Docker
+        # Hub mirror gets here having tried only ECR Public, and telling that operator both
+        # quotas are spent would send them looking for a Docker Hub problem they do not have.
+        if [ -n "${fallback_repo}" ]; then
+          exhausted="ECR Public's 500 GB/month volume quota and Docker Hub's per-window pull \
+        allowance are both spent for this runner's egress address, and those two are metered \
+        on different axes with separate counters, so hitting them at once takes some bad luck"
+        else
+          exhausted="ECR Public's 500 GB/month volume quota is spent for this runner's egress \
+        address, and no fallback registry is known for ${primary_repo}, so there was nowhere \
+        else to try"
+        fi
+
+        echo "::error::RE-RUN THIS JOB. Every registry refused to serve ${base}: ${tried}. \
+        ${exhausted}. The \
+        address is a shared pool rather than this repository, which is why most legs are \
+        unaffected and a re-run usually lands somewhere with quota left. Neither limit is \
+        adjustable: \
+        https://docs.aws.amazon.com/AmazonECR/latest/public/public-service-quotas.html and \
+        https://docs.docker.com/docker-hub/usage/pulls/. If it fails repeatedly across \
+        re-runs, the durable fixes are authenticating the pull, which needs an IAM role and \
+        an OIDC trust on a public repository, or sourcing the base image from a registry \
+        that does not meter anonymous clients at all."
+        exit 1
+
+    # Main only, and only after a miss. The pull above has already verified that the tag
+    # resolves to the pin; this fetches the pinned index, this arch's manifest, its config and
+    # its layers by digest into a fresh layout, verifying every digest as it downloads, and
+    # then verifies the finished layout the same way a restore is verified. It asks the
+    # registries the pull step used, in the same order -- everything is addressed by digest,
+    # so which one answers cannot change the bytes.
+    #
+    # Never fails the job: a layout that cannot be written costs the next run a pull, which is
+    # what every run cost before the cache existed.
+    - name: Write the base image as an OCI layout for the cache (main only)
+      id: write
+      if: >-
+        steps.pull.outcome == 'success'
+        && steps.key.outputs.key != ''
+        && steps.restore.outputs.cache-hit != 'true'
+        && github.event_name == 'push'
+        && github.ref == 'refs/heads/main'
+      shell: bash
+      env:
+        DOCKERFILE: ${{ inputs.dockerfile }}
+        HELPER: ${{ github.action_path }}/oci_layout.py
+        LAYOUT_DIR: ${{ runner.temp }}/ash-base-image-oci
+        PRIMARY_REPO: ${{ steps.pull.outputs.primary-repo }}
+        FALLBACK_REPO: ${{ steps.pull.outputs.fallback-repo }}
+      run: |
+        set -uo pipefail
+        pin="$(sed -n '/^ARG BASE_IMAGE_DIGEST=/{s/^ARG BASE_IMAGE_DIGEST=//;p;q;}' "${DOCKERFILE}")"
+        rm -rf "${LAYOUT_DIR}"
+        repos=(--repo "${PRIMARY_REPO}")
+        [ -n "${FALLBACK_REPO}" ] && repos+=(--repo "${FALLBACK_REPO}")
+        if manifest="$(python3 "${HELPER}" fetch "${repos[@]}" --pin "${pin}" \
+            --arch "${RUNNER_ARCH}" --out "${LAYOUT_DIR}")"; then
+          echo "wrote a verified layout of ${pin} (${RUNNER_ARCH} manifest ${manifest}) to ${LAYOUT_DIR}"
+          echo "ready=true" >> "${GITHUB_OUTPUT}"
+        else
+          rm -rf "${LAYOUT_DIR}"
+          echo "::warning::could not write a verified base-image layout for the cache. This \
+        run is unaffected; the next run on this key pulls from a registry, as every run did \
+        before the cache existed."
+        fi
+
+    # `actions/cache/save` rather than `actions/cache`, so the save is a step with its own
+    # condition instead of a post-job hook that fires wherever the restore ran. The condition
+    # repeats the event and ref test deliberately: this is the one line that decides what may
+    # write to the default branch's cache scope, and it should say so where it stands.
+    - name: Save the base image to the Actions cache (main only)
+      if: >-
+        steps.write.outputs.ready == 'true'
+        && github.event_name == 'push'
+        && github.ref == 'refs/heads/main'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/ash-base-image-oci
+        key: ${{ steps.key.outputs.key }}

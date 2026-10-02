@@ -53,19 +53,31 @@ profiles = await mcp__ash__list_profiles()
 
 Path hashes let clients detect that the operator rotated a profile file underneath them; the paths and the profile contents themselves are never returned. An empty list means the operator registered no profiles, not that the call failed.
 
-### Selecting a profile is not available yet
+### Selecting a profile
 
-`mcp__ash__select_profile` is **not currently a callable tool.** The three selection modes below are implemented and tested at the function level, and the runtime-override allowlist that guards them is enforced, but the tool is not registered and no client can invoke it.
-
-The reason is worth being precise about, because the function working is not the same as the feature working. Selecting a profile resolves a config and binds it to the session, and nothing in ASH reads that binding: the scan entry point takes a config *path*, not a resolved config object, so a bound config has nowhere to go. Registering the tool in that state would give you a call that returns success and changes nothing about the scan that follows. Until the config is threaded through to the scan, the honest surface is one that does not offer it.
-
-Use `--profile NAME=path` at startup and `config_path` per call in the meantime. When it lands, the three modes will be:
+`mcp__ash__select_profile` binds a registered profile to the calling session. Three modes:
 
 1. **Static.** `select_profile(profile_name="default")` — bind the profile as-is.
 2. **Inherit-and-patch.** `select_profile(profile_name="default", patch_ops=[...])` — apply a JSON-Patch document, each op checked against the runtime-override allowlist first; a rejected op fails the whole call without mutating the session config. See [Runtime config overrides](#runtime-config-overrides).
 3. **Full override.** `select_profile(profile_name="default", override_yaml="...")` — replace the resolved config with a client-supplied YAML string, still validated through `AshConfig`.
 
-Note that `patch_ops` and `override_yaml` are mutually exclusive, and that the parameter is `profile_name` — a profile must be named in every mode, including override.
+`patch_ops` and `override_yaml` are mutually exclusive, and the parameter is `profile_name` — a profile must be named in every mode, including override.
+
+Every later call in the session that does not name a config of its own runs under the bound one: `run_ash_scan`, `resolve_ash_workspace` and `run_ash_workspace_scan`. A `config_path` passed on the call still wins, because naming one is the more specific statement. In workspace mode the bound config is the fallback for a project that declares no `.ash.yaml` of its own; a project with one keeps it, which is what lets a single workspace span differently-configured repositories.
+
+```python
+await mcp__ash__select_profile(profile_name="strict")
+# -> {"success": True, "mode": "static", "config_path": ".../config/ash.yaml", ...}
+await mcp__ash__run_ash_scan()  # runs under "strict"
+```
+
+The returned `config_path` names a file the server materialized inside your session's own workspace. That is how the binding reaches the scan: the scan entry point takes a config path rather than a config object, so the resolved config is written out and the path passed down. The file is inside the session sandbox, so this session may read it and another session may not. `clear_source` removes it along with the rest of the session workspace, after which calls fall back to ordinary config discovery.
+
+Sessions do not share a binding, and re-binding replaces the previous one for that session only.
+
+#### Before v3.4
+
+`select_profile` was implemented but not registered, and no client could invoke it. Three things were missing rather than one: there was no `--profile` flag, so the registry was always empty and `list_profiles` always returned `{"profiles": [], "count": 0}`; the tool was never passed to `@mcp.tool()`; and nothing read the binding, because the scan entry point takes a config path and a bound `AshConfig` had nowhere to go. All three are closed. If you worked around this with `config_path` on every call, that keeps working unchanged.
 
 ## Source delivery
 
@@ -123,7 +135,7 @@ sha = hashlib.sha256(zip_bytes).hexdigest()
 
 # Send in 1 MiB chunks
 chunk_size = 1024 * 1024
-chunks = [zip_bytes[i:i+chunk_size] for i in range(0, len(zip_bytes), chunk_size)]
+chunks = [zip_bytes[i : i + chunk_size] for i in range(0, len(zip_bytes), chunk_size)]
 for seq, chunk in enumerate(chunks):
     await mcp__ash__set_source_zip_chunk(
         upload_id=upload_id,

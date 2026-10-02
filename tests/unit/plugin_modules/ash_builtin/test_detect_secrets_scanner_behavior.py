@@ -766,7 +766,18 @@ def test_an_unexpected_failure_is_wrapped_in_scanner_error(scanner, monkeypatch)
     def _boom(*args, **kwargs):
         raise RuntimeError("transient settings failed")
 
-    monkeypatch.setattr(detect_secrets_scanner, "transient_settings", _boom)
+    # Injected through the _detect_secrets_api seam rather than as a module
+    # attribute. The three detect-secrets entry points are imported inside the
+    # methods that use them, because a top-level import that raises removes this
+    # scanner and every plugin module imported after it from the registry.
+    real_collection, _real_settings, real_mapping = (
+        detect_secrets_scanner._detect_secrets_api()
+    )
+    monkeypatch.setattr(
+        detect_secrets_scanner,
+        "_detect_secrets_api",
+        lambda: (real_collection, _boom, real_mapping),
+    )
 
     with pytest.raises(ScannerError) as excinfo:
         scanner.scan(target=scanner.context.work_dir, target_type="converted")

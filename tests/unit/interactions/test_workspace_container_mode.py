@@ -49,6 +49,7 @@ from automated_security_helper.interactions.run_ash_scan import (
     ScanOptions,
     _workspace_relative_file,
 )
+from automated_security_helper.models.workspace import WorkspaceExitCode
 from automated_security_helper.utils.sarif_utils import apply_suppressions_to_sarif
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from automated_security_helper.workspace.plan import ProjectPlan, WorkspacePlan
@@ -145,9 +146,7 @@ class TestRunCommandAssembly:
             tmp_path, tmp_path / "out", workspace_relative_file="dev.code-workspace"
         )
         mounts = [
-            command[index + 1]
-            for index, arg in enumerate(command)
-            if arg == "--mount"
+            command[index + 1] for index, arg in enumerate(command) if arg == "--mount"
         ]
         source_mounts = [m for m in mounts if "destination=/src" in m]
         assert len(source_mounts) == 1
@@ -178,6 +177,174 @@ class TestRunCommandAssembly:
             for index, arg in enumerate(command)
             if arg == "--mount"
         )
+
+
+class TestOutsideRootIsRefusedBeforeAnyContainerStarts:
+    """Containment is decided before mode dispatch, asserted for container mode.
+
+    Why this needs its own tests
+    ----------------------------
+    The containment check lives in the resolver and the resolver runs for every
+    mode, so container mode's rejection is a consequence of a shared code path
+    rather than of anything container-specific. That is a sound argument and it is
+    still only an argument: nothing held the ordering. ``--mode container`` is
+    resolved in ``cli.scan`` *above* the block that applies mode presets, and a
+    later edit that moved workspace resolution below the mode branch -- or that
+    resolved lazily inside the local-mode path only -- would leave container mode
+    mounting an unvalidated root at ``/src`` with every existing test still green.
+
+    The observable these assert on is therefore not "the resolver raised". It is
+    that the process exits 4 and ``run_ash_container`` is never called, which is
+    what "no container is started" actually means.
+
+    The spy is installed at the container boundary, not at ``run_ash_scan``. A spy
+    on ``run_ash_scan`` would be unreached in both the refusal case and the valid
+    case, so both tests would pass against an implementation that never ran a
+    container at all. The positive control below is what rules that out.
+    """
+
+    @pytest.fixture
+    def _clear_ash_env(self, monkeypatch):
+        for name in ("ASH_SOURCE_DIR", "ASH_OUTPUT_DIR", "ASH_CONFIG", "ASH_MODE"):
+            monkeypatch.delenv(name, raising=False)
+
+    @pytest.fixture
+    def container_calls(self, monkeypatch, _clear_ash_env):
+        """Record calls to ``run_ash_container`` instead of starting one."""
+        from types import SimpleNamespace
+
+        calls: list[dict[str, Any]] = []
+
+        def _record(**kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(returncode=0, stdout="", stderr="", args=[])
+
+        monkeypatch.setattr(
+            "automated_security_helper.interactions.run_ash_scan.run_ash_container",
+            _record,
+            raising=True,
+        )
+        return calls
+
+    @staticmethod
+    def _workspace(root: Path, folders: list[str]) -> Path:
+        path = root / "dev.code-workspace"
+        path.write_text(
+            json.dumps({"folders": [{"path": entry} for entry in folders]}),
+            encoding="utf-8",
+        )
+        return path
+
+    @staticmethod
+    def _scan(*args: str):
+        from typer.testing import CliRunner
+
+        from automated_security_helper.cli.main import app
+
+        return CliRunner().invoke(app, ["scan", *args])
+
+    def test_a_contained_workspace_does_reach_the_container(
+        self, tmp_path, container_calls
+    ):
+        """The positive control, without which the two refusals prove nothing.
+
+        Container mode has to actually reach ``run_ash_container`` for "it was not
+        reached" to mean anything. This also pins the mount: the single ``/src``
+        source is the workspace root, so a rejected entry could not have been
+        mounted even indirectly.
+        """
+        root = tmp_path / "ws"
+        (root / "api").mkdir(parents=True)
+        workspace = self._workspace(root, ["api"])
+
+        self._scan("--workspace", str(workspace), "--mode", "container", "--no-run")
+
+        assert len(container_calls) == 1
+        assert Path(container_calls[0]["source_dir"]).resolve() == root.resolve()
+        assert container_calls[0]["workspace_relative_file"] == "dev.code-workspace"
+
+    def test_a_parent_traversal_entry_starts_no_container(
+        self, tmp_path, container_calls
+    ):
+        """``../`` is rejected on the raw text, before anything is mounted."""
+        root = tmp_path / "ws"
+        root.mkdir(parents=True)
+        (tmp_path / "outside").mkdir()
+        workspace = self._workspace(root, ["../outside"])
+
+        result = self._scan(
+            "--workspace", str(workspace), "--mode", "container", "--no-run"
+        )
+
+        assert result.exit_code == WorkspaceExitCode.WORKSPACE_ERROR
+        assert container_calls == []
+
+    def test_an_absolute_path_outside_the_root_starts_no_container(
+        self, tmp_path, container_calls
+    ):
+        """The other shape: no ``..``, but it canonicalises outside the root.
+
+        Separate from the traversal case because the two are rejected by different
+        checks -- the ``..`` scan runs on the raw string and this one on the
+        resolved path -- so one passing does not imply the other.
+        """
+        root = tmp_path / "ws"
+        root.mkdir(parents=True)
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        workspace = self._workspace(root, [outside.as_posix()])
+
+        result = self._scan(
+            "--workspace", str(workspace), "--mode", "container", "--no-run"
+        )
+
+        assert result.exit_code == WorkspaceExitCode.WORKSPACE_ERROR
+        assert container_calls == []
+
+    def test_a_symlink_out_of_the_root_starts_no_container(
+        self, tmp_path, container_calls
+    ):
+        """A link is the case containment alone would accept.
+
+        ``resolve()`` follows it, so the target is outside and the containment
+        check catches this one -- but a link pointing *inside* the root would
+        resolve to a contained path, which is why the resolver rejects the entry
+        for being a symlink as well. Asserted here so container mode is known to
+        inherit both halves.
+        """
+        root = tmp_path / "ws"
+        root.mkdir(parents=True)
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        link = root / "aliased"
+        try:
+            link.symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError):  # pragma: no cover - platform gate
+            pytest.skip("symlink creation is unavailable on this platform")
+        workspace = self._workspace(root, ["aliased"])
+
+        result = self._scan(
+            "--workspace", str(workspace), "--mode", "container", "--no-run"
+        )
+
+        assert result.exit_code == WorkspaceExitCode.WORKSPACE_ERROR
+        assert container_calls == []
+
+    def test_the_refusal_names_the_offending_entry(self, tmp_path, container_calls):
+        """An operator has to be able to fix it, which means knowing which entry."""
+        root = tmp_path / "ws"
+        root.mkdir(parents=True)
+        (tmp_path / "outside").mkdir()
+        workspace = self._workspace(root, ["api", "../outside"])
+        (root / "api").mkdir()
+
+        result = self._scan(
+            "--workspace", str(workspace), "--mode", "container", "--no-run"
+        )
+
+        assert result.exit_code == WorkspaceExitCode.WORKSPACE_ERROR
+        assert "../outside" in result.output
+        assert container_calls == []
 
 
 def _sarif_with_uri(uri: str) -> SarifReport:

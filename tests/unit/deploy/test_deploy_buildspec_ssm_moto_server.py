@@ -68,7 +68,14 @@ HELPER_MARKER = "ash-s3-sync.py"
 
 # A realistic base config: multi-line, no trailing newline, and containing the
 # `$`, `{` and `:` characters that a heredoc or a shell expansion would mangle.
-CONFIG_YAML = "\n".join(
+#
+# Kept as a join rather than the f-string FLY002 asks for. The `${env}` on the
+# first line is the load-bearing character sequence of this fixture -- it is here
+# to prove the buildspec does not mangle a shell expansion. In an f-string those
+# braces have to be written `${{env}}`, so the literal under test would no longer
+# read as the literal it represents, and the one-per-line shape that makes this
+# recognisable as YAML would collapse into a single `\n`-escaped string.
+CONFIG_YAML = "\n".join(  # noqa: FLY002
     [
         "project_name: acme-${env}",
         "global_settings:",

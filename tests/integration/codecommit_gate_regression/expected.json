@@ -9,24 +9,22 @@
     "Do not silently promote a 'specified' value to 'measured'; re-run and record."
   ],
 
-  "verdict_mapping": {
-    "_comment": [
-      "The gate's own exit-code-to-verdict mapping, from _verdict() in",
-      "deploy/cdk/lib/ash-container-scripts.ts. Duplicated here so the harness",
-      "derives verdicts exactly as the gate does rather than inventing its own."
-    ],
-    "0": "passed",
-    "1": "errored",
-    "2": "failed",
-    "3": "errored"
-  },
-
-  "scan_flags": {
-    "_comment": "The gate's exact flag set, from CODECOMMIT_GATE_HANDLER.",
-    "base": ["scan", "--no-progress", "--simple", "--compact-report"],
-    "changed_files_only": ["--changed-files-only", "--base-ref", "<destination-commit>"],
-    "min_severity": ["--min-severity", "medium"]
-  },
+  "_verdict_mapping_and_scan_flags_moved": [
+    "Both used to be transcribed here from deploy/cdk/lib/ash-container-scripts.ts.",
+    "They are now DERIVED into gate-contract.json by gate_contract.py, which calls",
+    "the gate's own _verdict() and reads the argv construction out of its syntax",
+    "tree. assert_case.py and run_regression.sh both load that file.",
+    "",
+    "Why they moved: a transcription of a contract drifts from the contract, and",
+    "this one had. The copy here listed exit codes 0-3 and stopped, so exit code 4",
+    "-- 'workspace definition or policy error' in ASH_EXIT_CODES -- was absent",
+    "entirely and the harness derived nothing for it. The derived mapping covers it",
+    "because _verdict() has no branch for 4 and falls through to 'errored', which",
+    "calling the function reveals and re-typing the branches did not.",
+    "",
+    "Nothing that is MEASURED moves. The observations below are recordings and",
+    "cannot be derived from anything; only the two values the gate owns did."
+  ],
 
   "integrity_invariants": {
     "_comment": [

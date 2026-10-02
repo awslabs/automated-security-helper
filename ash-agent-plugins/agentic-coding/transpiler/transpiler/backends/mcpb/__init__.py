@@ -25,6 +25,7 @@ invariant the .deb and .rpm are held to by counting bundled wheels: cheap to
 check, hard to get wrong by accident, and it turns "did anyone vendor a scanner"
 from a per-file judgment into arithmetic.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -103,7 +104,10 @@ class MCPBBackend(BaseBackend):
             with zipfile.ZipFile(archive) as zf:
                 names = zf.namelist()
                 if "manifest.json" not in names:
-                    return {"ok": False, "reason": "manifest.json missing from archive root"}
+                    return {
+                        "ok": False,
+                        "reason": "manifest.json missing from archive root",
+                    }
                 with zf.open("manifest.json") as f:
                     manifest = json.loads(f.read().decode("utf-8"))
         except zipfile.BadZipFile as e:
@@ -125,6 +129,7 @@ class MCPBBackend(BaseBackend):
         # manifest from the archive and validate it directly — `mcpb
         # validate` does not accept .mcpb archives.
         import tempfile
+
         pins = self._load_cli_pins(ctx.base_dir)
         if "mcpb" in pins:
             ver = self._assert_version_pin("mcpb", ["mcpb", "--version"], pins["mcpb"])

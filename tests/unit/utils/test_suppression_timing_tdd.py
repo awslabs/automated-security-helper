@@ -15,11 +15,10 @@ The bug: somewhere between steps 3 and 6, findings reappear or aren't suppressed
 import sys
 from pathlib import Path
 
-import pytest
 from unittest.mock import MagicMock
 
 from automated_security_helper.models.core import IgnorePathWithReason
-from automated_security_helper.schemas.sarif_schema_model import SarifReport, Run, Result
+from automated_security_helper.schemas.sarif_schema_model import SarifReport, Run
 from automated_security_helper.utils.sarif_utils import (
     apply_suppressions_to_sarif,
     sanitize_sarif_paths,
@@ -33,12 +32,14 @@ def _make_finding(uri: str, rule_id: str = "CKV_AWS_56") -> dict:
         "ruleId": rule_id,
         "message": {"text": f"Finding {rule_id}"},
         "level": "warning",
-        "locations": [{
-            "physicalLocation": {
-                "artifactLocation": {"uri": uri},
-                "region": {"startLine": 3},
+        "locations": [
+            {
+                "physicalLocation": {
+                    "artifactLocation": {"uri": uri},
+                    "region": {"startLine": 3},
+                }
             }
-        }],
+        ],
     }
 
 
@@ -88,12 +89,19 @@ class TestSuppressionTimingBug:
 
         sarif = _make_sarif(_make_finding(finding_uri))
         sanitized = sanitize_sarif_paths(sarif, source_dir)
-        uri = sanitized.runs[0].results[0].locations[0].physicalLocation.root.artifactLocation.uri
+        uri = (
+            sanitized.runs[0]
+            .results[0]
+            .locations[0]
+            .physicalLocation.root.artifactLocation.uri
+        )
         assert uri == "tests/test_data/scanners/cdk/foo.yaml", f"Got: {uri}"
 
     def test_step2_suppress_drops_ignored_finding(self):
         """After sanitization, apply_suppressions drops the finding."""
-        sarif = _make_sarif(_make_finding(_prefix("tests/test_data/scanners/cdk/foo.yaml")))
+        sarif = _make_sarif(
+            _make_finding(_prefix("tests/test_data/scanners/cdk/foo.yaml"))
+        )
         sanitized = sanitize_sarif_paths(sarif, _SOURCE_DIR)
         ctx = _make_context(["tests/test_data/**"])
         result = apply_suppressions_to_sarif(sanitized, ctx)
@@ -106,10 +114,14 @@ class TestSuppressionTimingBug:
             _make_finding("tests/test_data/scanners/cdk/foo.yaml"),
             _make_finding("automated_security_helper/cli/scan.py"),
         )
-        aggregated = SarifReport(runs=[Run(
-            tool=sarif.runs[0].tool,
-            results=[],
-        )])
+        aggregated = SarifReport(
+            runs=[
+                Run(
+                    tool=sarif.runs[0].tool,
+                    results=[],
+                )
+            ]
+        )
         aggregated.merge_sarif_report(sarif)
         assert len(aggregated.runs[0].results) == 2
 
@@ -137,10 +149,14 @@ class TestSuppressionTimingBug:
         )
 
         # Step 3: Merge into aggregated (like scan_phase.py:1512)
-        aggregated = SarifReport(runs=[Run(
-            tool=sarif.runs[0].tool,
-            results=[],
-        )])
+        aggregated = SarifReport(
+            runs=[
+                Run(
+                    tool=sarif.runs[0].tool,
+                    results=[],
+                )
+            ]
+        )
         aggregated.merge_sarif_report(suppressed)
 
         # The test_data finding should NOT reappear
@@ -161,10 +177,14 @@ class TestSuppressionTimingBug:
 
         # Build aggregated model
         model = AshAggregatedResults()
-        model.sarif = SarifReport(runs=[Run(
-            tool=sarif.runs[0].tool,
-            results=[],
-        )])
+        model.sarif = SarifReport(
+            runs=[
+                Run(
+                    tool=sarif.runs[0].tool,
+                    results=[],
+                )
+            ]
+        )
         model.sarif.merge_sarif_report(suppressed)
 
         # Count actionable via unified metrics
@@ -200,13 +220,22 @@ class TestSuppressionTimingBug:
         assert len(suppressed2.runs[0].results) == 1
 
         # Merge
-        aggregated = SarifReport(runs=[Run(
-            tool=sarif.runs[0].tool,
-            results=[],
-        )])
+        aggregated = SarifReport(
+            runs=[
+                Run(
+                    tool=sarif.runs[0].tool,
+                    results=[],
+                )
+            ]
+        )
         aggregated.merge_sarif_report(suppressed2)
         assert len(aggregated.runs[0].results) == 1
 
         # The remaining finding should be scan.py (not test_data)
-        uri = aggregated.runs[0].results[0].locations[0].physicalLocation.root.artifactLocation.uri
+        uri = (
+            aggregated.runs[0]
+            .results[0]
+            .locations[0]
+            .physicalLocation.root.artifactLocation.uri
+        )
         assert "scan.py" in uri, f"Expected scan.py, got: {uri}"

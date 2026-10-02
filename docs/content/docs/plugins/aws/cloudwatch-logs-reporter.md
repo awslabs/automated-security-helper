@@ -309,6 +309,7 @@ CloudWatch Logs pricing includes:
 import boto3
 import json
 
+
 def lambda_handler(event, context):
     # Trigger ASH scan and log results
     # Implementation depends on your Lambda setup

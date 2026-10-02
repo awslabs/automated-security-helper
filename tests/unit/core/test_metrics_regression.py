@@ -7,8 +7,6 @@ PR#274 Bug #21: print() calls in unified_metrics.py (from low)
 
 import inspect
 
-import pytest
-
 
 # ---------------------------------------------------------------------------
 # PR#274 Bug #54 -- Typo "errorn" in metrics_table.py

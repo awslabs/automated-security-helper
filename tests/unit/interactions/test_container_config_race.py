@@ -15,14 +15,11 @@ These tests verify:
    what the host computes.
 3. Local mode is unaffected (still resolves via orchestrator).
 """
+
 from __future__ import annotations
 
-import os
 from pathlib import Path
-from typing import Optional
-from unittest.mock import MagicMock, call, patch
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 
 # ---------------------------------------------------------------------------
@@ -81,12 +78,16 @@ class TestContainerReceivesResolvedFailOnFindings:
         fake_result = MagicMock()
         fake_result.returncode = 0
         results_file = opts.output_dir / "ash_aggregated_results.json"
-        results_file.write_text('{"sarif": null, "scanners": []}', encoding="utf-8")
 
         captured_kwargs: dict = {}
 
         def fake_run_ash_container(**kwargs):
             captured_kwargs.update(kwargs)
+            # Written here rather than before the call, because _run_container_mode now
+            # removes any results file that predates the invocation -- a file seeded by
+            # the test would be indistinguishable from one left by an earlier run. A
+            # real container writes it while running, which is what this models.
+            results_file.write_text('{"sarif": null, "scanners": []}', encoding="utf-8")
             return fake_result
 
         with (
@@ -143,9 +144,7 @@ class TestLocalModeUnaffected:
         not the pre-read file-based value."""
         from automated_security_helper.interactions.run_ash_scan import (
             run_ash_scan,
-            _compute_exit_code,
         )
-        from automated_security_helper.core.enums import RunMode
 
         src = tmp_path / "src"
         src.mkdir(parents=True, exist_ok=True)
@@ -181,5 +180,9 @@ class TestLocalModeUnaffected:
         call_args = mock_exit.call_args
         assert call_args is not None
         # config_fail_on_findings is the third positional or keyword arg
-        config_fof = call_args.args[2] if len(call_args.args) > 2 else call_args.kwargs.get("config_fail_on_findings")
+        config_fof = (
+            call_args.args[2]
+            if len(call_args.args) > 2
+            else call_args.kwargs.get("config_fail_on_findings")
+        )
         assert config_fof is False

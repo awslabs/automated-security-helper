@@ -300,6 +300,49 @@ function Invoke-ASH {
                         "--build-arg", "BUILD_DATE=$(Get-Date -UFormat %s)"
                     )
 
+                    # ASH_BASE_IMAGE_OVERRIDE redirects `FROM ${BASE_IMAGE}` at whichever
+                    # registry actually served the base image.
+                    # .github/actions/prepull-base-image sets it when ECR Public refuses and
+                    # Docker Hub answers, as a digest-pinned reference.
+                    #
+                    # A local tag under the ECR name does not suffice on its own. BuildKit only
+                    # falls back to a local store when its worker has one, and
+                    # worker/runc/runc.go sets `ImageStore: nil` explicitly -- so a buildkitd on
+                    # its default OCI worker, and `docker buildx` on a docker-container driver,
+                    # ignore the tag. Emitted before $buildArgs so a caller's explicit
+                    # BASE_IMAGE build-arg lands later and wins -- a duplicate --build-arg is
+                    # last-wins.
+                    #
+                    # ASH_BASE_OCI_LAYOUT=<layout dir>@<arch manifest digest> is the cache-hit
+                    # hand-off from the same action, a layout it verified against the pinned
+                    # digest. This runs `<runner> build`: on docker that is the docker driver,
+                    # which turns an oci-layout context into a registry lookup, so the action
+                    # loads the layout into the engine instead; podman has no oci-layout
+                    # context and gets the same treatment in its own store. nerdctl and finch
+                    # take the layout as a build context, spelled without the digest (nerdctl
+                    # reads the image from index.json), plus --pull=false, which nerdctl maps
+                    # to image-resolve-mode=local.
+                    $ociRunnerName = [System.IO.Path]::GetFileNameWithoutExtension($RESOLVED_OCI_RUNNER)
+                    if ($env:ASH_BASE_OCI_LAYOUT) {
+                        if ($env:ASH_BASE_OCI_LAYOUT -notmatch '^(?<dir>.+)@(?<digest>sha256:[0-9a-f]{64})$') {
+                            throw "ASH_BASE_OCI_LAYOUT is '$($env:ASH_BASE_OCI_LAYOUT)', which is not <layout dir>@sha256:<64 hex>. Unset it to build from the Dockerfile's own base image reference."
+                        }
+                        $baseLayoutDir = $Matches['dir']
+                        if ($ociRunnerName -in @('nerdctl', 'finch')) {
+                            Write-Host "Base image taken from the verified OCI layout named by ASH_BASE_OCI_LAYOUT, with no registry call."
+                            $buildCmd += "--build-context", "`"ash-base-image=oci-layout://$baseLayoutDir`""
+                            $buildCmd += "--build-arg", "BASE_IMAGE=ash-base-image"
+                            $buildCmd += "--pull=false"
+                        }
+                        else {
+                            Write-Host "Base image expected in $ociRunnerName's local store, placed there from the verified OCI layout named by ASH_BASE_OCI_LAYOUT."
+                        }
+                    }
+                    elseif ($env:ASH_BASE_IMAGE_OVERRIDE) {
+                        Write-Host "Base image redirected to $($env:ASH_BASE_IMAGE_OVERRIDE) by ASH_BASE_IMAGE_OVERRIDE."
+                        $buildCmd += "--build-arg", "BASE_IMAGE=$($env:ASH_BASE_IMAGE_OVERRIDE)"
+                    }
+
                     # Add any extra build args
                     if ($buildArgs.Count -gt 0) {
                         $buildCmd += $buildArgs

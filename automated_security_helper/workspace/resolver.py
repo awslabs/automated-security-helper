@@ -424,12 +424,30 @@ def _apply_existence_checks(
 def _resolve_project_config(
     candidate: _Candidate,
     config_overrides: Tuple[str, ...] = (),
+    default_config: Optional[Path] = None,
 ) -> Tuple[AshConfig, Optional[Path]]:
     """Load one project's config through ASH's ordinary resolution path.
 
     The config file is located once and passed back in, rather than letting
     resolution search again, so the file the plan reports is definitionally the
     file that was loaded and the two cannot disagree.
+
+    ``default_config`` and where it sits in the precedence
+    -----------------------------------------------------
+    Used only when the project declares no config of its own -- when
+    ``find_config_file`` returns None, where ASH's built-in default would
+    otherwise apply. A project with an ``.ash.yaml`` keeps it, because the
+    project's own config is the more specific statement; the same rule makes an
+    explicit ``config_path`` beat a session-bound profile on a single-directory
+    MCP scan.
+
+    The MCP server passes a profile a client bound with ``select_profile`` here.
+    It must reach BOTH this function and ``execution._project_config_with_policy``,
+    which re-resolves at scan time: the plan's reported threshold comes from this
+    call and the scan's actual config comes from that one, so a value threaded
+    into only one of them makes ``--dry-run`` report a plan the scan does not run.
+    ``ProjectScanSettings.default_config_path`` is the same value on the execution
+    side, and the MCP caller sets both from one variable for that reason.
 
     Why the CLI overrides are applied HERE
     -------------------------------------
@@ -456,6 +474,8 @@ def _resolve_project_config(
             of N projects to look at.
     """
     config_path = find_config_file(candidate.resolved)
+    if config_path is None and default_config is not None:
+        config_path = Path(default_config)
     try:
         config = resolve_config(
             config_path=config_path,
@@ -678,6 +698,7 @@ def resolve_workspace(
     allow_missing_projects: bool = False,
     workspace_config: Optional[PathLike] = None,
     config_overrides: Tuple[str, ...] = (),
+    default_config: Optional[PathLike] = None,
 ) -> WorkspacePlan:
     """Resolve and validate a workspace, returning an inspectable plan.
 
@@ -703,6 +724,12 @@ def resolve_workspace(
             having none is not an error. When given it must exist; ASH does not
             fall back to searching, because that would apply different policy
             than the one named. It may not be any project's own config.
+        default_config: Config file to use for a project that declares none of
+            its own, in place of ASH's built-in default. A project with its own
+            ``.ash.yaml`` is unaffected. The MCP server passes a profile a client
+            bound with ``select_profile``; see
+            :func:`_resolve_project_config` on why the same value has to reach
+            ``ProjectScanSettings.default_config_path`` as well.
 
     Returns:
         A :class:`~automated_security_helper.workspace.plan.WorkspacePlan` with
@@ -748,7 +775,11 @@ def resolve_workspace(
             )
             continue
 
-        config, config_path = _resolve_project_config(candidate, config_overrides)
+        config, config_path = _resolve_project_config(
+            candidate,
+            config_overrides,
+            default_config=Path(default_config) if default_config else None,
+        )
         scanners, pins = _scanner_state(config)
         label = _project_label(config, candidate.key)
         projects.append(

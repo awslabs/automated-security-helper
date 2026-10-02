@@ -13,8 +13,6 @@ import yaml
 class ConfigValidationError(Exception):
     """Raised when configuration validation fails."""
 
-    pass
-
 
 class ConfigValidator:
     """Validates ASH configuration files for common issues."""
@@ -53,6 +51,7 @@ class ConfigValidator:
         "project_name",
         "fail_on_findings",
         "fail_on_incomplete_scanners",
+        "content_db_staleness",
         "ash_plugin_modules",
         "external_reports_to_include",
         "global_settings",

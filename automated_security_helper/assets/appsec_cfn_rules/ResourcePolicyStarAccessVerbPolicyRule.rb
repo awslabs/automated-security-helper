@@ -22,7 +22,10 @@ class ResourcePolicyStarAccessVerbPolicyRule < BaseRule
 
       # If the resource has an IAM resource access policy
       unless (resource.accessPolicies.nil?) then
-        parsed_resource_policy = PolicyDocumentParser.new().parse(resource.accessPolicies)
+        # cfn_model is passed because PolicyDocumentParser#parse requires it; see the same
+        # call in StarResourceAccessPolicyRule.rb for why the one-argument form was wrong
+        # and what it cost. Both rules were written against cfn-model 0.4.0's signature.
+        parsed_resource_policy = PolicyDocumentParser.new().parse(cfn_model, resource.accessPolicies)
         parsed_resource_policy.statements.each do |statement|
 
           # If any statement allows access from "*" then the resource is effectively public

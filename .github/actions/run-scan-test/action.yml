@@ -8,9 +8,6 @@ inputs:
   os:
     description: "Runner OS label"
     required: true
-  platform:
-    description: "Platform string (linux/amd64, darwin/amd64, etc.)"
-    required: true
   config-file:
     description: "Config variant: default or community"
     required: false
@@ -31,6 +28,56 @@ inputs:
 runs:
   using: "composite"
   steps:
+    # WHY THE PLATFORM STRING IS DERIVED HERE RATHER THAN PASSED IN
+    #
+    # This used to be a `platform` input, set from a `platform:` key on all 24 rows of
+    # ash-unified-ci.yml's scan-validation matrix. That key was a pure function of `os` -- a
+    # total, single-valued mapping restated 24 times -- and its only consumers are the five log
+    # lines below, so a wrong value produced a log that lied while the leg stayed green. It was
+    # already wrong: `macos-latest` moved to Apple silicon and the rows still said
+    # `darwin/amd64`, disagreeing with the `arch: arm64` the unit-test job records for the same
+    # runner.
+    #
+    # Deriving it in the workflow was not available: GitHub Actions `include:` entries are
+    # literals and no expression context exposes a sibling matrix key, so a matrix cannot compute
+    # one of its own values from another. The runner, on the other hand, knows what it is.
+    #
+    # `runner.os` and `runner.arch` are closed sets. Per the GitHub docs at
+    # https://docs.github.com/en/actions/reference/workflows-and-actions/contexts, `runner.os` is
+    # "Linux, Windows, or macOS" and `runner.arch` is "X86, X64, ARM, or ARM64" -- verbatim. The
+    # case arms cover both sets completely and still fail closed, because a fifth value appearing
+    # upstream must surface as a failed step rather than as an empty string interpolated into a
+    # log line.
+    #
+    # The vocabulary is the OCI one on purpose: `linux/arm64`, not the `linux/aarch64` the matrix
+    # used to carry. aarch64 is a uname string, not an OCI platform, and these strings sit next
+    # to container runtime names in the log.
+    - name: Resolve this runner's platform from the runner itself
+      id: platform
+      shell: bash
+      run: |
+        case "${RUNNER_OS}" in
+          Linux) os_part=linux ;;
+          macOS) os_part=darwin ;;
+          Windows) os_part=windows ;;
+          *)
+            echo "::error::runner.os is '${RUNNER_OS}', which is not one of the documented values (Linux, Windows, macOS). Add an arm rather than letting the platform label go empty."
+            exit 1
+            ;;
+        esac
+        case "${RUNNER_ARCH}" in
+          X64) arch_part=amd64 ;;
+          ARM64) arch_part=arm64 ;;
+          X86) arch_part=386 ;;
+          ARM) arch_part=arm ;;
+          *)
+            echo "::error::runner.arch is '${RUNNER_ARCH}', which is not one of the documented values (X86, X64, ARM, ARM64). Add an arm rather than letting the platform label go empty."
+            exit 1
+            ;;
+        esac
+        echo "platform=${os_part}/${arch_part}" >> "$GITHUB_OUTPUT"
+        echo "runner.os=${RUNNER_OS} runner.arch=${RUNNER_ARCH} -> ${os_part}/${arch_part}"
+
     # Only the docker cells have anything to do with a buildx builder. The two
     # steps below that consume what this bootstraps are both gated
     # `oci-runner == 'docker'`, and ASH's own container build shells out to
@@ -97,6 +144,17 @@ runs:
     - name: Create output directory
       shell: bash
       run: mkdir -p .ash/ash_output
+
+    # Ahead of any build, so the twenty-odd container cells that start together do not all
+    # fetch the base image from ECR Public at once and cross its anonymous-pull data limit.
+    # Skipped for python-local, which builds no image. See the action for what it will and
+    # will not retry, and for the verified base-image cache that makes a warm run pull nothing.
+    - name: Pre-pull the base image for the container legs
+      if: inputs.method != 'python-local'
+      uses: ./.github/actions/prepull-base-image
+      with:
+        oci-runner: ${{ inputs.oci-runner }}
+        runner-wrapper: ${{ (inputs.oci-runner == 'finch' || inputs.oci-runner == 'nerdctl') && 'sudo' || '' }}
 
     # cfn-nag is a Ruby gem, so `ash dependencies install` can only provision it
     # where a usable Ruby exists. This is the python-local legs' problem alone: the
@@ -330,7 +388,7 @@ runs:
       env:
         SNYK_TOKEN: ${{ inputs.snyk-token }}
       run: |
-        echo "Testing ASH using Python (Container) on ${{ inputs.os }} (${{ inputs.platform }}) with config: ${{ inputs.config-file }}"
+        echo "Testing ASH using Python (Container) on ${{ inputs.os }} (${{ steps.platform.outputs.platform }}) with config: ${{ inputs.config-file }}"
         ash --version
         OFFLINE_FLAG=""
         if [ "${{ inputs.offline }}" = "true" ]; then
@@ -367,7 +425,7 @@ runs:
       env:
         SNYK_TOKEN: ${{ inputs.snyk-token }}
       run: |
-        Write-Host "Testing ASH using Python (Local) on ${{ inputs.os }} (${{ inputs.platform }}) with config: ${{ inputs.config-file }}"
+        Write-Host "Testing ASH using Python (Local) on ${{ inputs.os }} (${{ steps.platform.outputs.platform }}) with config: ${{ inputs.config-file }}"
         # Assert that 'ash' is ASH before using it six times. MSYS2 and Git for
         # Windows each ship an Almquist shell of the same name, and when one
         # shadows the scanner every invocation below fails as "Illegal option --"
@@ -464,7 +522,7 @@ runs:
       env:
         SNYK_TOKEN: ${{ inputs.snyk-token }}
       run: |
-        echo "Testing ASH using Python (Local) on ${{ inputs.os }} (${{ inputs.platform }}) with config: ${{ inputs.config-file }}"
+        echo "Testing ASH using Python (Local) on ${{ inputs.os }} (${{ steps.platform.outputs.platform }}) with config: ${{ inputs.config-file }}"
         ash --version
         ash --help
         ash dependencies install
@@ -494,7 +552,7 @@ runs:
       env:
         SNYK_TOKEN: ${{ inputs.snyk-token }}
       run: |
-        Write-Host "Testing ASH using PowerShell on ${{ inputs.os }} (${{ inputs.platform }}) with config: ${{ inputs.config-file }}"
+        Write-Host "Testing ASH using PowerShell on ${{ inputs.os }} (${{ steps.platform.outputs.platform }}) with config: ${{ inputs.config-file }}"
         . ./utils/ash_helpers.ps1
         Get-Help Invoke-ASH -Full
         $runner = if ($env:OCI_RUNNER) { $env:OCI_RUNNER } else { "docker" }

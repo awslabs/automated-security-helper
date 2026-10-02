@@ -6,8 +6,12 @@
 import os
 from pathlib import Path
 from typing import List, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime
 
+from automated_security_helper.utils.content_databases import (
+    get as get_content_database,
+    go_duration,
+)
 from automated_security_helper.utils.log import ASH_LOGGER
 
 
@@ -58,15 +62,27 @@ def validate_grype_offline_mode() -> Tuple[bool, List[str]]:
         is_valid = False
         return is_valid, messages
 
-    # Check database age (warn if older than 7 days)
+    # Warn against the bound grype itself enforces online, declared once in
+    # utils/content_databases.py. This used to be a separate 7-day literal, looser
+    # than grype's own bound, so an offline database could be two days past the
+    # point an online scan would refuse it before anything said so. Still a warning, and
+    # still read from file mtime, which a copy resets (a 10-day-old database copied into
+    # place reads "0 days old" here). The authoritative check is the one after the scan in
+    # utils/content_db_staleness.py, which reads grype's own `built` timestamp and fails
+    # the scan by default.
+    grype_max_age = get_content_database("grype-db").max_age
     newest_db = max(db_files, key=lambda f: f.stat().st_mtime)
     db_age = datetime.now() - datetime.fromtimestamp(newest_db.stat().st_mtime)
 
-    if db_age > timedelta(days=7):
+    if grype_max_age is not None and db_age > grype_max_age:
         ASH_LOGGER.warning(
-            f"Grype offline mode: Database is {db_age.days} days old, consider updating"
+            f"Grype offline mode: Database is {db_age.days} days old, past the "
+            f"{go_duration(grype_max_age)} bound grype enforces online; consider updating"
         )
-        messages.append(f"Database is {db_age.days} days old, consider updating")
+        messages.append(
+            f"Database is {db_age.days} days old, past the "
+            f"{go_duration(grype_max_age)} bound, consider updating"
+        )
     else:
         ASH_LOGGER.info(
             f"Grype offline mode: Found {len(db_files)} database files, newest is {db_age.days} days old"
@@ -123,14 +139,23 @@ def validate_trivy_offline_mode() -> Tuple[bool, List[str]]:
         is_valid = False
         return is_valid, messages
 
+    # The registry's bound rather than the 7-day literal this used to carry, for the reason
+    # given on the grype check above. This is still a file-mtime pre-check and still only a
+    # warning; the authoritative check reads the database's own UpdatedAt after the scan
+    # (utils/content_db_staleness.py) and fails the scan by default.
+    trivy_max_age = get_content_database("trivy-db").max_age
     newest_db = max(db_files, key=lambda f: f.stat().st_mtime)
     db_age = datetime.now() - datetime.fromtimestamp(newest_db.stat().st_mtime)
 
-    if db_age > timedelta(days=7):
+    if db_age > trivy_max_age:
         ASH_LOGGER.warning(
-            f"Trivy offline mode: Database is {db_age.days} days old, consider updating"
+            f"Trivy offline mode: Database is {db_age.days} days old, past the "
+            f"{go_duration(trivy_max_age)} bound trivy applies online; consider updating"
         )
-        messages.append(f"Database is {db_age.days} days old, consider updating")
+        messages.append(
+            f"Database is {db_age.days} days old, past the "
+            f"{go_duration(trivy_max_age)} bound, consider updating"
+        )
     else:
         ASH_LOGGER.info(
             f"Trivy offline mode: Found {len(db_files)} database files, newest is {db_age.days} days old"

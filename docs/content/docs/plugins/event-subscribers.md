@@ -16,10 +16,11 @@ Here's a simple example of creating an event subscriber:
 # my_ash_plugins/__init__.py
 from automated_security_helper.plugins.events import AshEventType
 
+
 def handle_scan_complete(**kwargs):
     """Handle scan complete event"""
-    scanner = kwargs.get('scanner', 'Unknown')
-    remaining_count = kwargs.get('remaining_count', 0)
+    scanner = kwargs.get("scanner", "Unknown")
+    remaining_count = kwargs.get("remaining_count", 0)
 
     print(f"Scanner '{scanner}' completed!")
     if remaining_count > 0:
@@ -28,6 +29,7 @@ def handle_scan_complete(**kwargs):
         print("All scanners completed!")
 
     return True
+
 
 # Event callback registry
 ASH_EVENT_HANDLERS = {
@@ -83,17 +85,19 @@ You can register multiple subscribers for the same event:
 ```python
 def log_scan_completion(**kwargs):
     """Log scan completion to file"""
-    scanner = kwargs.get('scanner')
-    with open('/tmp/scan.log', 'a') as f:
+    scanner = kwargs.get("scanner")
+    with open("/tmp/scan.log", "a") as f:
         f.write(f"Scanner {scanner} completed at {datetime.now()}\n")
     return True
 
+
 def notify_scan_completion(**kwargs):
     """Send notification about scan completion"""
-    scanner = kwargs.get('scanner')
-    remaining = kwargs.get('remaining_count', 0)
+    scanner = kwargs.get("scanner")
+    remaining = kwargs.get("remaining_count", 0)
     # Send notification logic here
     return True
+
 
 ASH_EVENT_HANDLERS = {
     AshEventType.SCAN_COMPLETE: [
@@ -110,15 +114,17 @@ You can subscribe to multiple event types:
 ```python
 def handle_phase_start(**kwargs):
     """Handle any phase start"""
-    phase = kwargs.get('phase', 'Unknown')
+    phase = kwargs.get("phase", "Unknown")
     print(f"Phase '{phase}' started")
     return True
 
+
 def handle_phase_complete(**kwargs):
     """Handle any phase completion"""
-    phase = kwargs.get('phase', 'Unknown')
+    phase = kwargs.get("phase", "Unknown")
     print(f"Phase '{phase}' completed")
     return True
+
 
 ASH_EVENT_HANDLERS = {
     AshEventType.SCAN_START: [handle_phase_start],
@@ -138,7 +144,7 @@ Event subscribers should handle errors gracefully to avoid disrupting the scan p
 def robust_event_handler(**kwargs):
     """Event handler with proper error handling"""
     try:
-        scanner = kwargs.get('scanner', 'Unknown')
+        scanner = kwargs.get("scanner", "Unknown")
         # Your event handling logic here
         print(f"Processing completion of {scanner}")
         return True
@@ -155,9 +161,10 @@ def robust_event_handler(**kwargs):
 ```python
 import requests
 
+
 def notify_slack_on_completion(**kwargs):
     """Send Slack notification when all scanners complete"""
-    remaining_count = kwargs.get('remaining_count', 0)
+    remaining_count = kwargs.get("remaining_count", 0)
 
     if remaining_count == 0:  # All scanners completed
         webhook_url = os.environ.get("SLACK_WEBHOOK", None)
@@ -166,7 +173,7 @@ def notify_slack_on_completion(**kwargs):
             return False
         message = {
             "text": "🎉 ASH security scan completed successfully!",
-            "channel": "#security-alerts"
+            "channel": "#security-alerts",
         }
         try:
             requests.post(webhook_url, json=message)
@@ -174,6 +181,7 @@ def notify_slack_on_completion(**kwargs):
             print(f"Failed to send Slack notification: {e}")
 
     return True
+
 
 ASH_EVENT_HANDLERS = {
     AshEventType.EXECUTION_COMPLETE: [notify_slack_on_completion],
@@ -188,20 +196,22 @@ import time
 # Global state for tracking metrics
 scan_metrics = {}
 
+
 def track_scan_metrics(**kwargs):
     """Track scan performance metrics"""
-    scanner = kwargs.get('scanner')
-    completed_count = kwargs.get('completed_count', 0)
-    total_count = kwargs.get('total_count', 0)
+    scanner = kwargs.get("scanner")
+    completed_count = kwargs.get("completed_count", 0)
+    total_count = kwargs.get("total_count", 0)
 
     # Record completion time
-    scan_metrics[scanner]['completed_at'] = time.time()
+    scan_metrics[scanner]["completed_at"] = time.time()
 
     # Calculate progress
     progress = (completed_count / total_count) * 100 if total_count > 0 else 0
     print(f"Scan progress: {progress:.1f}% ({completed_count}/{total_count})")
 
     return True
+
 
 ASH_EVENT_HANDLERS = {
     AshEventType.SCAN_COMPLETE: [track_scan_metrics],
@@ -215,33 +225,36 @@ import json
 import requests
 from datetime import datetime, timezone
 
+
 def send_to_monitoring_system(**kwargs):
     """Send scan completion data to external monitoring system"""
     try:
-        scanner = kwargs.get('scanner')
-        completed_count = kwargs.get('completed_count', 0)
-        total_count = kwargs.get('total_count', 0)
-        remaining_count = kwargs.get('remaining_count', 0)
+        scanner = kwargs.get("scanner")
+        completed_count = kwargs.get("completed_count", 0)
+        total_count = kwargs.get("total_count", 0)
+        remaining_count = kwargs.get("remaining_count", 0)
 
         # Prepare monitoring data
         monitoring_data = {
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'event_type': 'scanner_completed',
-            'scanner_name': scanner,
-            'progress': {
-                'completed': completed_count,
-                'total': total_count,
-                'remaining': remaining_count,
-                'percentage': (completed_count / total_count * 100) if total_count > 0 else 0
-            }
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "event_type": "scanner_completed",
+            "scanner_name": scanner,
+            "progress": {
+                "completed": completed_count,
+                "total": total_count,
+                "remaining": remaining_count,
+                "percentage": (completed_count / total_count * 100)
+                if total_count > 0
+                else 0,
+            },
         }
 
         # Send to monitoring endpoint
         response = requests.post(
-            'https://monitoring.example.com/api/events',
+            "https://monitoring.example.com/api/events",
             json=monitoring_data,
-            headers={'Content-Type': 'application/json'},
-            timeout=5
+            headers={"Content-Type": "application/json"},
+            timeout=5,
         )
 
         if response.status_code == 200:
@@ -254,6 +267,7 @@ def send_to_monitoring_system(**kwargs):
 
     return True
 
+
 ASH_EVENT_HANDLERS = {
     AshEventType.SCAN_COMPLETE: [send_to_monitoring_system],
 }
@@ -265,20 +279,21 @@ ASH_EVENT_HANDLERS = {
 import sqlite3
 from datetime import datetime
 
+
 def log_to_database(**kwargs):
     """Log scan events to SQLite database"""
     try:
-        scanner = kwargs.get('scanner')
-        completed_count = kwargs.get('completed_count', 0)
-        total_count = kwargs.get('total_count', 0)
-        phase = kwargs.get('phase', 'unknown')
+        scanner = kwargs.get("scanner")
+        completed_count = kwargs.get("completed_count", 0)
+        total_count = kwargs.get("total_count", 0)
+        phase = kwargs.get("phase", "unknown")
 
         # Connect to database
-        conn = sqlite3.connect('/tmp/ash_scan_log.db')
+        conn = sqlite3.connect("/tmp/ash_scan_log.db")
         cursor = conn.cursor()
 
         # Create table if it doesn't exist
-        cursor.execute('''
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS scan_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TEXT,
@@ -288,22 +303,25 @@ def log_to_database(**kwargs):
                 total_count INTEGER,
                 progress_percentage REAL
             )
-        ''')
+        """)
 
         # Insert event data
         progress = (completed_count / total_count * 100) if total_count > 0 else 0
-        cursor.execute('''
+        cursor.execute(
+            """
             INSERT INTO scan_events
             (timestamp, phase, scanner, completed_count, total_count, progress_percentage)
             VALUES (?, ?, ?, ?, ?, ?)
-        ''', (
-            datetime.now(timezone.utc).isoformat(),
-            phase,
-            scanner,
-            completed_count,
-            total_count,
-            progress
-        ))
+        """,
+            (
+                datetime.now(timezone.utc).isoformat(),
+                phase,
+                scanner,
+                completed_count,
+                total_count,
+                progress,
+            ),
+        )
 
         conn.commit()
         conn.close()
@@ -314,6 +332,7 @@ def log_to_database(**kwargs):
         print(f"Error logging to database: {e}")
 
     return True
+
 
 ASH_EVENT_HANDLERS = {
     AshEventType.SCAN_COMPLETE: [log_to_database],
@@ -349,11 +368,11 @@ The event subscribers are called in the order they appear in the callback list f
 ```python
 def conditional_handler(**kwargs):
     """Only handle events under certain conditions"""
-    scanner = kwargs.get('scanner')
-    remaining_count = kwargs.get('remaining_count', 0)
+    scanner = kwargs.get("scanner")
+    remaining_count = kwargs.get("remaining_count", 0)
 
     # Only notify for critical scanners or when all complete
-    critical_scanners = ['bandit', 'semgrep', 'checkov']
+    critical_scanners = ["bandit", "semgrep", "checkov"]
 
     if scanner in critical_scanners or remaining_count == 0:
         print(f"Important: {scanner} completed!")
@@ -367,11 +386,11 @@ def conditional_handler(**kwargs):
 ```python
 def filtered_handler(**kwargs):
     """Filter events based on context"""
-    plugin_context = kwargs.get('plugin_context')
+    plugin_context = kwargs.get("plugin_context")
 
     # Only handle events for certain source directories
-    if plugin_context and 'production' in str(plugin_context.source_dir):
-        scanner = kwargs.get('scanner')
+    if plugin_context and "production" in str(plugin_context.source_dir):
+        scanner = kwargs.get("scanner")
         print(f"Production scan: {scanner} completed")
         # Handle production-specific logic
 
@@ -395,8 +414,8 @@ class ScanProgressTracker:
 
     def handle_scan_complete(self, **kwargs):
         """Track individual scanner completion"""
-        scanner = kwargs.get('scanner')
-        remaining_count = kwargs.get('remaining_count', 0)
+        scanner = kwargs.get("scanner")
+        remaining_count = kwargs.get("remaining_count", 0)
 
         self.completed_scanners.append(scanner)
 
@@ -410,6 +429,7 @@ class ScanProgressTracker:
             print(f"Completion order: {', '.join(self.completed_scanners)}")
 
         return True
+
 
 # Create tracker instance
 tracker = ScanProgressTracker()

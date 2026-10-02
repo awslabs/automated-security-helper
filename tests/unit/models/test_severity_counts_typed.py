@@ -184,15 +184,15 @@ class TestContainerSerialization:
 
 
 def _make_metrics(**overrides) -> ScannerMetrics:
-    defaults = dict(
-        scanner_name="test_scanner",
-        duration=1.5,
-        status="PASSED",
-        threshold="HIGH",
-        threshold_source="config",
-        excluded=False,
-        dependencies_missing=False,
-    )
+    defaults = {
+        "scanner_name": "test_scanner",
+        "duration": 1.5,
+        "status": "PASSED",
+        "threshold": "HIGH",
+        "threshold_source": "config",
+        "excluded": False,
+        "dependencies_missing": False,
+    }
     defaults.update(overrides)
     return ScannerMetrics(**defaults)
 

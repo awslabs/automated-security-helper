@@ -11,6 +11,7 @@ so transitive-only vulnerabilities were silently dropped.
 The fix adds a second pass that creates a Result for any vulnerability
 where has_dict_via is False and via_items is non-empty.
 """
+
 import pytest
 
 from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner import (

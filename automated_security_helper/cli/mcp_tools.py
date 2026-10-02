@@ -14,7 +14,7 @@ import asyncio
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional, Any
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Union
 
 from automated_security_helper.core.resource_management.scan_registry import (
     get_scan_registry,
@@ -37,6 +37,10 @@ from automated_security_helper.core.resource_management.exceptions import (
 )
 from automated_security_helper.utils.get_ash_version import get_ash_version
 from automated_security_helper.utils.log import ASH_LOGGER
+
+if TYPE_CHECKING:
+    # Typing only: the runtime import stays local to the tools that need it.
+    from automated_security_helper.config.ash_config import AshConfig
 
 # Configure module logger (without affecting global logging)
 # The MCP logging patch will ensure this logger is properly isolated
@@ -72,7 +76,8 @@ async def mcp_scan_directory(
     """
     from automated_security_helper.cli.mcp.scan_target import (
         ASH_MCP_ALLOWED_ROOTS_ENV,
-        validate_scan_target,
+        resolve_scan_target,
+        validate_output_tree,
     )
     from automated_security_helper.core.resource_management.error_handling import (
         validate_directory_path,
@@ -84,15 +89,40 @@ async def mcp_scan_directory(
     # ahead of the existence check so that a refused target is reported as
     # refused rather than as a missing directory, and ahead of the output
     # directory creation below so that a refused target is not written into.
-    target_error = validate_scan_target(directory_path, session_id=session_id)
-    if target_error:
+    target = resolve_scan_target(directory_path, session_id=session_id)
+    if target.error is not None:
         return create_error_response(
-            error=target_error,
+            error=target.error,
             operation="scan_directory",
             suggestions=[
-                f"Add the directory to {ASH_MCP_ALLOWED_ROOTS_ENV} if the MCP "
-                "server should be able to scan it",
+                (
+                    f"Add the directory to {ASH_MCP_ALLOWED_ROOTS_ENV} if the MCP "
+                    "server should be able to scan it"
+                ),
                 "Verify that the path is correct",
+            ],
+        )
+    resolved_target = target.require()
+
+    # The policy canonicalized the target and nothing beneath it. The output tree
+    # is created below with parents=True, which follows a symlinked ".ash" out of
+    # the permitted roots, so each component it is about to create is checked
+    # first.
+    output_error = validate_output_tree(resolved_target, ".ash", "ash_output")
+    if output_error is not None:
+        return create_error_response(
+            error=output_error,
+            operation="scan_directory",
+            suggestions=[
+                (
+                    "Remove or replace the symlinked .ash directory in the scan "
+                    "target so the scan output stays inside it"
+                ),
+                (
+                    f"Add the directory the link points at to "
+                    f"{ASH_MCP_ALLOWED_ROOTS_ENV} and scan it directly if that is "
+                    f"what was intended"
+                ),
             ],
         )
 
@@ -139,9 +169,11 @@ async def mcp_scan_directory(
         # Create a unique scan ID
         scan_id = str(uuid.uuid4())
 
-        # Create output directory path
+        # Create output directory path. Built from the resolved target rather
+        # than from the caller's text, so the directory created is the one
+        # validate_output_tree just checked.
         directory_path_obj = Path(directory_path)
-        output_dir = directory_path_obj / ".ash" / "ash_output"
+        output_dir = resolved_target / ".ash" / "ash_output"
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # Register the scan in the registry
@@ -237,13 +269,38 @@ async def _run_scan_async(
             the scan. None means no session — equivalent to legacy behavior.
     """
     from automated_security_helper.core.enums import AshLogLevel, RunMode
-    from automated_security_helper.interactions.run_ash_scan import run_ash_scan
+    from automated_security_helper.core.resource_management.scan_tracking import (
+        assess_coverage,
+        coverage_has_gap,
+    )
+    from automated_security_helper.models.asharp_model import AshAggregatedResults
+    from automated_security_helper.interactions.run_ash_scan import (
+        ScanIncompleteExit,
+        run_ash_scan,
+    )
 
     registry = get_scan_registry()
     entry = registry.get_scan(scan_id)
     if not entry:
         _logger.error(f"Scan {scan_id} not found in registry")
         return
+
+    # Resolve the per-session lock if a session_id was supplied. The lock is
+    # acquired inside the executor wrapper below — we MUST NOT hold it on the
+    # event-loop thread, since the underlying ``run_ash_scan`` blocks for the
+    # full scan duration.
+    #
+    # Resolved before the entry is marked RUNNING, so that nothing which can
+    # raise sits between marking it and the try below that closes it.
+    # check_scan_progress lets a RUNNING entry's runner decide its status, so an
+    # entry left RUNNING would read as running forever.
+    session_lock = None
+    if session_id is not None:
+        from automated_security_helper.cli.mcp.sessions import (
+            get_default_registry as _get_session_registry,
+        )
+
+        session_lock = _get_session_registry().get_or_create(session_id).lock
 
     # Mark the scan as running
     registry.update_scan_status(scan_id, MCScanStatus.RUNNING)
@@ -253,27 +310,16 @@ async def _run_scan_async(
         f"Starting scan process for scan {scan_id} in directory {directory_path}"
     )
 
-    # Resolve the per-session lock if a session_id was supplied. The lock is
-    # acquired inside the executor wrapper below — we MUST NOT hold it on the
-    # event-loop thread, since the underlying ``run_ash_scan`` blocks for the
-    # full scan duration.
-    session_lock = None
-    if session_id is not None:
-        from automated_security_helper.cli.mcp.sessions import (
-            get_default_registry as _get_session_registry,
-        )
-
-        session_lock = _get_session_registry().get_or_create(session_id).lock
-
-    def _scan_under_session_lock() -> None:
+    def _scan_under_session_lock() -> Any:
         """Acquire the session lock (if any) and run the scan synchronously.
 
         Wrapped in a function so the lock is acquired on the executor
-        worker thread, not the asyncio event-loop thread.
+        worker thread, not the asyncio event-loop thread. Returns what
+        ``run_ash_scan`` returned, which on exit 0 is the results model.
         """
         if session_lock is not None:
             with session_lock:
-                run_ash_scan(
+                return run_ash_scan(
                     source_dir=directory_path,
                     output_dir=output_dir,
                     config=config_path,
@@ -283,7 +329,7 @@ async def _run_scan_async(
                     show_summary=False,
                 )
         else:
-            run_ash_scan(
+            return run_ash_scan(
                 source_dir=directory_path,
                 output_dir=output_dir,
                 config=config_path,
@@ -295,16 +341,93 @@ async def _run_scan_async(
 
     try:
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, _scan_under_session_lock)
+        results = await loop.run_in_executor(None, _scan_under_session_lock)
 
-        # Update scan status based on result
-        registry.update_scan_status(scan_id, MCScanStatus.COMPLETED)
+        # Exit 0. The coverage facts are still recorded: with the completeness
+        # gate turned off, a scan whose scanners did not run exits 0, and its
+        # client is still told which ones in incomplete_scanners and
+        # coverage_complete. A return that is not a results model is a test
+        # double or a future return shape, and asserts no coverage.
+        coverage = None
+        if isinstance(results, AshAggregatedResults):
+            try:
+                _, coverage = assess_coverage(results)
+            except Exception as assess_error:  # noqa: BLE001
+                # The scan succeeded. Failing to describe its coverage must not
+                # turn it into a failed one; check_scan_progress assesses the
+                # results file instead when no coverage was recorded.
+                _logger.warning(
+                    f"Scan {scan_id}: could not assess coverage: {assess_error}"
+                )
+        registry.finish_scan(scan_id, MCScanStatus.COMPLETED, coverage=coverage)
         _logger.info(f"Scan {scan_id} completed successfully")
+
+    except ScanIncompleteExit as e:
+        # Exit 1 because coverage has a gap, and NOT because something broke: the
+        # run finished and its results are on disk. Ahead of the SystemExit arm,
+        # which it would otherwise land in as "ASH exited with code 1" -- the
+        # same status a crash gets. The signal is the exception's type, raised
+        # only where _compute_exit_code returned 1 with results in hand. Neither
+        # the exit code nor the results file can carry it: a crash after the SCAN
+        # phase also exits 1 and leaves a parseable file behind.
+        #
+        # The gap reported is the facts whatever the gate says, as for a
+        # completed scan. The exception's own reasons are the fallback: they are
+        # what the exit code was decided on, so they are never empty, and an
+        # exception raised from this handler would escape the task and leave the
+        # entry RUNNING.
+        coverage = e.incompleteness.to_payload()
+        try:
+            _, facts = assess_coverage(e.results)
+            if coverage_has_gap(facts):
+                coverage = facts
+        except Exception as assess_error:  # noqa: BLE001
+            _logger.warning(
+                f"Scan {scan_id}: could not assess coverage, reporting the exit "
+                f"code's reasons instead: {assess_error}"
+            )
+        registry.finish_scan(scan_id, MCScanStatus.INCOMPLETE, coverage=coverage)
+        _logger.warning(f"Scan {scan_id} finished with incomplete coverage: {coverage}")
+
+    except SystemExit as e:
+        # run_ash_scan ends with sys.exit on a non-zero verdict and on every error
+        # path it handles itself. SystemExit is not an Exception, so without this
+        # arm it escaped the task and the entry stayed RUNNING for good: listed as
+        # active, blocking the next scan of the same directory, never carrying the
+        # failure, and -- since a RUNNING entry's runner decides its status --
+        # reading as running forever. fail_on_findings=False does not make the
+        # non-zero branch unreachable: the results-is-None arm of
+        # _compute_exit_code runs before fail_on_findings is resolved,
+        # deliberately, so an incomplete scan still exits non-zero.
+        #
+        # Recorded and not re-raised, unlike the BaseException arm below. This
+        # coroutine is launched with a bare asyncio.create_task, and asyncio
+        # re-raises a BaseException out of Task.__step into the event loop:
+        # letting a SystemExit through stops the MCP server and takes every other
+        # session's in-flight scan with it, while the client sees only a dropped
+        # connection.
+        if e.code in (None, 0):
+            registry.finish_scan(scan_id, MCScanStatus.COMPLETED)
+            _logger.info(f"Scan {scan_id} completed successfully")
+        else:
+            error_message = f"ASH exited with code {e.code}"
+            registry.finish_scan(scan_id, MCScanStatus.FAILED, error_message)
+            _logger.error(f"Scan {scan_id} failed: {error_message}")
 
     except Exception as e:
         error_message = f"Error executing scan: {str(e)}"
-        registry.update_scan_status(scan_id, MCScanStatus.FAILED, error_message)
+        registry.finish_scan(scan_id, MCScanStatus.FAILED, error_message)
         _logger.error(f"Scan {scan_id} failed: {error_message}")
+
+    except BaseException as e:
+        # asyncio.CancelledError (server shutdown, a cancelled task) and
+        # KeyboardInterrupt. The scan did not produce a verdict, so the entry is
+        # closed as failed, and the exception is re-raised so cancellation still
+        # propagates.
+        error_message = f"Scan task ended without a result: {type(e).__name__}"
+        registry.finish_scan(scan_id, MCScanStatus.FAILED, error_message)
+        _logger.error(f"Scan {scan_id} failed: {error_message}")
+        raise
 
 
 async def mcp_get_scan_progress(scan_id: str) -> Dict[str, Any]:
@@ -377,7 +500,9 @@ async def mcp_get_scan_progress(scan_id: str) -> Dict[str, Any]:
         )
 
 
-async def mcp_get_scan_results(output_dir: str) -> Dict[str, Any]:
+async def mcp_get_scan_results(
+    output_dir: str, session_id: Optional[str] = None
+) -> Dict[str, Any]:
     """
     Get final results for a completed scan using file-based tracking.
 
@@ -432,14 +557,21 @@ async def mcp_get_scan_results(output_dir: str) -> Dict[str, Any]:
         # bound what may be scanned bound what may be read back. A legitimate
         # output directory sits at <source_dir>/.ash/ash_output, beneath the scan
         # target, so a root that permits the scan permits its results too.
-        target_error = validate_scan_target(resolved_output_dir)
+        #
+        # The session id matters here for the same reason it does on the scan: a
+        # delivered tree's output lands inside this session's sandbox, which no
+        # operator grant names, so without it a client is refused the results of a
+        # scan it was permitted to run.
+        target_error = validate_scan_target(resolved_output_dir, session_id=session_id)
         if target_error:
             return create_error_response(
                 error=target_error,
                 operation="get_scan_results",
                 suggestions=[
-                    f"Add the directory to {ASH_MCP_ALLOWED_ROOTS_ENV} if the "
-                    "MCP server should be able to read results from it",
+                    (
+                        f"Add the directory to {ASH_MCP_ALLOWED_ROOTS_ENV} if the "
+                        "MCP server should be able to read results from it"
+                    ),
                     "Verify that the path is correct",
                 ],
             )
@@ -712,8 +844,10 @@ def mcp_explain_finding(
                 error=target_error,
                 operation="explain_finding",
                 suggestions=[
-                    f"Add the directory to {ASH_MCP_ALLOWED_ROOTS_ENV} if the "
-                    "MCP server should be able to read results from it",
+                    (
+                        f"Add the directory to {ASH_MCP_ALLOWED_ROOTS_ENV} if the "
+                        "MCP server should be able to read results from it"
+                    ),
                     "Verify that the path is correct",
                 ],
             )
@@ -1154,10 +1288,17 @@ def mcp_select_profile(
           replaced wholesale by the YAML, validated through `AshConfig`.
 
     `patch_ops` and `override_yaml` are mutually exclusive.
+
+    Every mode materializes the resolved config into the session's own sandbox
+    and records the path, which is what makes the binding observable: a later
+    scan that names no config is handed this path. Before that, the resolved
+    config was stored in a field nothing read, so this call returned
+    ``success: True`` and changed nothing a client could detect.
     """
     from automated_security_helper.cli.mcp.profile_registry import (
         bind_session_config,
         get_profile_registry,
+        materialize_session_config,
     )
     from automated_security_helper.config.runtime_patch import (
         RuntimePatchDeniedError,
@@ -1221,17 +1362,24 @@ def mcp_select_profile(
                 "success": False,
                 "error": f"override_yaml validation error: {exc.errors()}",
             }
+        materialized = _materialize_or_error(
+            materialize_session_config, session_id, new_cfg
+        )
+        if isinstance(materialized, dict):
+            return materialized
         bind_session_config(
             session_id,
             config=new_cfg,
             profile_name=profile_name,
             override_yaml=override_yaml,
+            config_path=materialized,
         )
         return {
             "success": True,
             "mode": "override",
             "profile_name": profile_name,
             "session_id": session_id or _default_session_id(),
+            "config_path": materialized,
         }
 
     if patch_ops is not None:
@@ -1245,30 +1393,80 @@ def mcp_select_profile(
             patched = apply_runtime_patch(base_cfg, patch_ops, allowlist=allowlist)
         except RuntimePatchDeniedError as exc:
             return {"success": False, "error": f"patch denied: {exc}"}
+        materialized = _materialize_or_error(
+            materialize_session_config, session_id, patched
+        )
+        if isinstance(materialized, dict):
+            return materialized
         bind_session_config(
             session_id,
             config=patched,
             profile_name=profile_name,
             patch_ops=patch_ops,
+            config_path=materialized,
         )
         return {
             "success": True,
             "mode": "inherit_and_patch",
             "profile_name": profile_name,
             "session_id": session_id or _default_session_id(),
+            "config_path": materialized,
         }
 
+    materialized = _materialize_or_error(
+        materialize_session_config, session_id, base_cfg
+    )
+    if isinstance(materialized, dict):
+        return materialized
     bind_session_config(
         session_id,
         config=base_cfg,
         profile_name=profile_name,
+        config_path=materialized,
     )
     return {
         "success": True,
         "mode": "static",
         "profile_name": profile_name,
         "session_id": session_id or _default_session_id(),
+        "config_path": materialized,
     }
+
+
+def _materialize_or_error(
+    materialize: Callable[[Optional[str], "AshConfig"], str],
+    session_id: Optional[str],
+    config: "AshConfig",
+) -> Union[str, Dict[str, Any]]:
+    """Write the resolved config out, or return this tool's failure shape.
+
+    Returns the path on success and an error dict on failure, which the caller
+    distinguishes with ``isinstance(..., dict)``. The alternative -- letting the
+    exception escape -- would surface as an unhandled error from a tool whose
+    other failure modes all return ``success: False``, so a client would need two
+    ways to detect the same class of problem.
+
+    Binding is NOT attempted when this fails. A bound config whose file does not
+    exist is worse than no binding: every later scan would be handed a path to a
+    missing file and fail with a config error naming a path the client never
+    supplied.
+    """
+    from automated_security_helper.core.resource_management.error_handling import (
+        ErrorCategory,
+    )
+
+    try:
+        return materialize(session_id, config)
+    except (OSError, RuntimeError) as exc:
+        _logger.error(f"Could not materialize the session config: {exc}")
+        return {
+            "success": False,
+            "error": (
+                f"Profile resolved, but its config could not be written to this "
+                f"session's workspace, so a scan could not be given it: {exc}"
+            ),
+            "error_category": ErrorCategory.UNEXPECTED_ERROR.value,
+        }
 
 
 def _default_session_id() -> str:

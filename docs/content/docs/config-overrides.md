@@ -35,7 +35,7 @@ You can append to existing lists by adding a `+` at the end of the key path:
 
 ```bash
 # Add a new plugin module without replacing existing ones
-ash --config-overrides 'ash_plugin_modules+=["my_custom_plugin_module"]'
+ash --config-overrides 'ash_plugin_modules+=["my_ash_plugins"]'
 ```
 
 ### Complex Structures
@@ -181,17 +181,21 @@ ash config validate --config-overrides 'scanners.bandit.options.confidence_level
 
 ### Custom Plugins
 
-You can add custom plugins to ASH by specifying them in the `ash_plugin_modules` list:
+You can add custom plugins to ASH by specifying them in the `ash_plugin_modules` list.
+The top-level package must be inside ASH's plugin namespace: either under
+`automated_security_helper.`, or a top-level package whose name ends in `ash_plugins`
+(`my_ash_plugins`, `acme_ash_plugins`). A module outside that namespace is skipped with
+a warning rather than imported, so a name like `my_plugins` silently registers nothing.
 
 ```yaml
 ash_plugin_modules:
-  - my_custom_plugin_module
+  - my_ash_plugins
 ```
 
 Or using the override:
 
 ```bash
-ash --config-overrides 'ash_plugin_modules+=["my_custom_plugin_module"]'
+ash --config-overrides 'ash_plugin_modules+=["my_ash_plugins"]'
 ```
 
 ## Notes
@@ -205,4 +209,18 @@ ash --config-overrides 'ash_plugin_modules+=["my_custom_plugin_module"]'
   rather than rejected, for compatibility with configuration files written
   against other ASH versions.
 - For complex values, use valid JSON syntax
-- Environment variables can be referenced in YAML configuration files using `!ENV ${VAR_NAME:default_value}` syntax
+- Environment variables can be referenced in YAML configuration files using
+  `!ENV ${VAR_NAME:default_value}` syntax. `VAR_NAME` must begin with `ASH_`, or
+  be one of `AWS_REGION`, `AWS_DEFAULT_REGION` or `AWS_PROFILE`. A reference to
+  any other name is left in the configuration exactly as written and a warning
+  names it; ASH does not read the variable. The names are matched exactly, so
+  write them in upper case.
+
+  ASH reads the configuration file it finds in the directory it is scanning, so
+  which variables that file may name is ASH's decision rather than the file's.
+  To reference a variable of your own, give it an `ASH_` prefix — `ASH_MY_BUCKET`
+  rather than `MY_BUCKET` — and set it under that name wherever you run ASH.
+
+  A reference with no default, `${VAR_NAME}`, has never resolved and still does
+  not; write `${VAR_NAME:default_value}`. A reference must also be the whole
+  value, not part of a longer string.

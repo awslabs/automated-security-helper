@@ -85,6 +85,22 @@ databases are fetched. Only the resulting scan is offline. An offline image's
 databases are frozen at build time, which makes the rebuild cadence above load-bearing
 rather than optional.
 
+**An offline image stops passing once its databases are past their bound.** ASH reads
+each database's own build time after the scan and exits 1 when it is too old: grype's
+database 5 days (120h) after it was built, which is grype's own default, and the
+offline semgrep and opengrep rulesets 30 days after they were downloaded (the build
+records that time in `.ash-rules-fetched-at`). This applies in offline mode exactly
+as online; before it, an offline scan with a weeks-old database exited 0 with no
+warning.
+
+To keep an air-gapped image passing, rebuild it at least every 5 days with
+`ash build-image --offline`, which downloads a current grype database and current
+rulesets, and move the new image across the air gap. To scan with an older image
+anyway, pass `--allow-stale-content-db` or set `content_db_staleness: warn` in the ASH
+config: the scan passes, and the summary reports, `ash.sarif` and `ash.flat.json` all
+say which database was stale and how old it was. See
+[Failing on a stale content database](configuration-guide.md#failing-on-a-stale-content-database).
+
 ## If you would rather not run a container
 
 `--mode local` runs ASH as a Python process with no image involved:

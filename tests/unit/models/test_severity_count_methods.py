@@ -24,9 +24,7 @@ class TestScannerSeverityCountTotal:
         assert sc.total == 0
 
     def test_total_sums_all_severity_fields(self):
-        sc = ScannerSeverityCount(
-            critical=1, high=2, medium=3, low=4, info=5
-        )
+        sc = ScannerSeverityCount(critical=1, high=2, medium=3, low=4, info=5)
         assert sc.total == 15
 
     def test_total_excludes_suppressed(self):
@@ -49,33 +47,23 @@ class TestScannerSeverityCountActionableCount:
     """ScannerSeverityCount.actionable_count(threshold)."""
 
     def test_critical_threshold_only_critical(self):
-        sc = ScannerSeverityCount(
-            critical=2, high=3, medium=4, low=5, info=6
-        )
+        sc = ScannerSeverityCount(critical=2, high=3, medium=4, low=5, info=6)
         assert sc.actionable_count("critical") == 2
 
     def test_high_threshold_includes_critical_and_high(self):
-        sc = ScannerSeverityCount(
-            critical=2, high=3, medium=4, low=5, info=6
-        )
+        sc = ScannerSeverityCount(critical=2, high=3, medium=4, low=5, info=6)
         assert sc.actionable_count("high") == 5
 
     def test_medium_threshold(self):
-        sc = ScannerSeverityCount(
-            critical=2, high=3, medium=4, low=5, info=6
-        )
+        sc = ScannerSeverityCount(critical=2, high=3, medium=4, low=5, info=6)
         assert sc.actionable_count("medium") == 9
 
     def test_low_threshold(self):
-        sc = ScannerSeverityCount(
-            critical=2, high=3, medium=4, low=5, info=6
-        )
+        sc = ScannerSeverityCount(critical=2, high=3, medium=4, low=5, info=6)
         assert sc.actionable_count("low") == 14
 
     def test_info_threshold_same_as_total(self):
-        sc = ScannerSeverityCount(
-            critical=2, high=3, medium=4, low=5, info=6
-        )
+        sc = ScannerSeverityCount(critical=2, high=3, medium=4, low=5, info=6)
         assert sc.actionable_count("info") == 20
         assert sc.actionable_count("info") == sc.total
 

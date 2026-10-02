@@ -53,9 +53,16 @@ To update suppression expiration dates, modify your ASH configuration file
 The offline mode validation system has been enhanced with emoji-prefixed logging:
 
 - `Semgrep offline mode: Found 150 rule files in cache`
-- `Semgrep offline mode: SEMGREP_RULES_CACHE_DIR not set, falling back to p/ci`
+- `Semgrep is running in offline mode but no rule cache was found. Set $SEMGREP_RULES_CACHE_DIR to a directory containing .yaml/.yml rule files.`
 - `Grype offline mode: Cache directory validated with 5 files`
-- `Grype offline mode: Database is 45 days old, consider updating`
+- `Grype offline mode: Database is 45 days old, past the 120h bound grype enforces online; consider updating`
+
+There is no fallback to the online `p/ci` ruleset when the cache is missing. An
+offline run that silently fetched the registry ruleset would be a different scan
+than the one that was requested, reported as the one that was requested. The
+scanner declines instead: it records the reason above, `ash` reports it as
+`MISSING`, and the run fails the completeness gate when
+`--fail-on-incomplete-scanners` is in effect.
 
 ## Custom Event Handlers
 
@@ -65,10 +72,12 @@ You can create custom event handlers:
 from automated_security_helper.plugins.events import AshEventType
 from automated_security_helper.plugins import ash_plugin_manager
 
+
 def my_custom_callback(**kwargs):
     scanner = kwargs.get("scanner", "unknown")
     print(f"Scanner {scanner} completed!")
     return True
+
 
 ash_plugin_manager.subscribe(AshEventType.SCAN_COMPLETE, my_custom_callback)
 ```

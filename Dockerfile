@@ -2,6 +2,51 @@
 #checkov:skip=CKV_DOCKER_3:ASH container runs as root — scanners require root for package installs and system tool access
 #checkov:skip=CKV_DOCKER_8:Same as CKV_DOCKER_3 — root is intentional for scanner tool execution
 ARG BASE_IMAGE=public.ecr.aws/docker/library/python:3.12-slim-bookworm
+# Change this in the same commit as the tag above. Why, and how to get the value: below.
+ARG BASE_IMAGE_DIGEST=sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e
+
+# BASE_IMAGE_DIGEST
+#
+# The digest the tag above resolved to when it was last reviewed. Nothing in this file reads
+# it; .github/actions/prepull-base-image does, and refuses to hand the build a base image
+# whose digest is anything else. That pre-pull can source the image from either
+# public.ecr.aws or docker.io, whichever will serve it -- so something has to establish that
+# the two are serving the same bytes. This is that something, and it is the whole safety
+# argument for having a second registry at all.
+#
+# It sits on the line after the tag, ahead of this note rather than after it, so that the
+# three lines of context in a one-line tag bump's diff include it. A reviewer looking at
+# `ARG BASE_IMAGE` changing sees this line unchanged directly underneath. Dependabot raises
+# base-image pull requests here daily and moves the tag without knowing about this line, so
+# that reviewer is a real person on a real recurring pull request, not a hypothetical.
+#
+# To recompute it after a tag bump:
+#
+#   docker pull public.ecr.aws/docker/library/python:<new tag>
+#   docker image inspect --format '{{index .RepoDigests 0}}' public.ecr.aws/docker/library/python:<new tag>
+#
+# This is the multi-arch INDEX digest, not a per-platform manifest digest, which is why one
+# value covers amd64 and arm64. Measured 2026-09-29: public.ecr.aws and docker.io both report
+# this digest for this tag, with mediaType application/vnd.oci.image.index.v1+json.
+#
+# It is deliberately NOT folded into BASE_IMAGE as `repo:tag@sha256:...`. That form would let
+# Dependabot keep both in step, which is the one thing it has going for it, but `docker tag`
+# refuses a digest-suffixed target, and the pre-pull's fallback path tags a Docker Hub pull
+# under the exact reference `FROM ${BASE_IMAGE}` resolves -- which is what keeps plain
+# `docker build` and podman working. The reference has to stay taggable, so the digest has to
+# live somewhere else.
+#
+# BASE_IMAGE IS ALSO AN OVERRIDE POINT, NOT ONLY A DEFAULT
+#
+# When the pre-pull's fallback fires it passes
+# `--build-arg BASE_IMAGE=docker.io/library/<name>@<this digest>`, so
+# `FROM ${BASE_IMAGE}` below asks Docker Hub for content rather than asking
+# ECR Public for a tag. `FROM` accepts a digest-suffixed value even though `docker tag` does
+# not, so the fallback is more tightly pinned than the default above rather than less. That
+# redirect exists because the BuildKit runtimes -- nerdctl, finch, and `docker buildx` on a
+# docker-container driver -- resolve `FROM` against the registry and never consult the local
+# store, so the local tag alone did not reach them. See the pre-pull action for the
+# measurement.
 
 # First stage: Build UV requirements
 FROM ${BASE_IMAGE} AS uv-reqs
@@ -284,6 +329,13 @@ RUN grype --version
 # semgrep or opengrep rules cache. CI never caught it because the only offline leg
 # in the matrix is `oci-runner: docker`, where SHELL is honoured and bash runs it.
 # The exposure was users building offline images with a non-docker runtime.
+#
+# .ash-rules-fetched-at records when the rulesets were downloaded. A rules file has no
+# build time of its own, and ASH fails a scan whose offline rules are past the bound in
+# automated_security_helper/utils/content_databases.py (RULESET_FETCHED_AT_FILE there),
+# so the download time is written down rather than inferred from mtime, which a copy
+# resets. The grype database needs no such file: `grype db status` reports its own
+# build time.
 RUN set -uex; if [ "${OFFLINE}" = "YES" ]; then \
     with-retry 'grype db update' && \
     mkdir -p ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR} && \
@@ -292,6 +344,9 @@ RUN set -uex; if [ "${OFFLINE}" = "YES" ]; then \
         with-retry "curl -sSf https://semgrep.dev/c/${i} -o ${outfile}"; \
         cp "${outfile}" "${OPENGREP_RULES_CACHE_DIR}/$(basename "${i}").yml"; \
     done && \
+    fetched_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" && \
+    printf '%s\n' "${fetched_at}" > "${SEMGREP_RULES_CACHE_DIR}/.ash-rules-fetched-at" && \
+    printf '%s\n' "${fetched_at}" > "${OPENGREP_RULES_CACHE_DIR}/.ash-rules-fetched-at" && \
     chmod -R 777 ${GRYPE_DB_CACHE_DIR} ${SEMGREP_RULES_CACHE_DIR} ${OPENGREP_RULES_CACHE_DIR}; \
     fi
 

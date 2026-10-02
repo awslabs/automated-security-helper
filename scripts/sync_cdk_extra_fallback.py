@@ -10,8 +10,12 @@ which happens in editable and source layouts, so it cannot simply be deleted.
 Being a copy, it drifts. 200a6565 (#547) bumped ``aws-cdk-lib`` in pyproject.toml
 and touched nothing else, and every dependabot bump since has done the same:
 `dependabot/uv/scanner-minor` broke ``test_fallback_matches_installed_metadata``
-on all 18 unit-test legs, and `dependabot/uv/engine-minor` broke it twice before
-that. The test is correct and worth keeping -- it fails on a bumped floor, a
+on every unit-test leg -- 18 of them at the time, 25 since ash-unified-ci.yml
+gained Python 3.14 and dropped its macos-14 exclusions -- and
+`dependabot/uv/engine-minor` broke it twice before that. The figure is given as
+"every leg" first because the bare 18 that used to stand here kept reading as a
+current fact after the matrix grew, and the sentence is about blast radius rather
+than arithmetic. The test is correct and worth keeping -- it fails on a bumped floor, a
 dropped ceiling, a removed requirement, an added requirement and a renamed
 package -- but it only ever reports the drift. Nothing repaired it, so a human
 edited the constant by hand on every bump.

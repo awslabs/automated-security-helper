@@ -13,6 +13,10 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterWorkspaceBehaviour,
 )
 from automated_security_helper.models.workspace import is_workspace_scan
+from automated_security_helper.utils.content_db_staleness import (
+    content_db_records,
+    stale_content_databases,
+)
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.plugin_modules.ash_builtin.reporters.report_content_emitter import (
     ReportContentEmitter,
@@ -96,6 +100,25 @@ class FlatJSONReporter(ReporterPluginBase[FlatJSONReporterConfig]):
         # Add scanner metrics if enabled
         if self.config.options.include_scanner_metrics:
             report_data["scanner_metrics"] = emitter.get_scanner_results()
+
+        # Every content database the scan measured, fresh or stale, with its build time, age,
+        # bound and whether it failed the scan. Always present (an empty list when no scanner
+        # read one), so a consumer can tell "nothing was measured" from an older ASH that did
+        # not report it. A stale entry under `content_db_staleness: warn` has stale=true and
+        # enforced=false: the scan passed, and this is where a reader of the file learns it
+        # passed against an out-of-date database.
+        # The notification level is what decided the exit code, so it is what `enforced`
+        # reports; the property record carries the policy too, and the two agree for
+        # anything ASH wrote.
+        stale = {record.name: record for record in stale_content_databases(model)}
+        databases = []
+        for record in content_db_records(model):
+            entry = record.to_dict()
+            if record.name in stale:
+                entry["policy"] = stale[record.name].policy
+                entry["enforced"] = stale[record.name].enforced
+            databases.append(entry)
+        report_data["content_databases"] = databases
 
         # Add top hotspots
         report_data["top_hotspots"] = emitter.get_top_hotspots(10)

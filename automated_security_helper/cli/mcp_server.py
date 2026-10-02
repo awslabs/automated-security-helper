@@ -35,6 +35,7 @@ from automated_security_helper.cli.mcp_tools import (
     mcp_set_source_zip_finalize,
     mcp_clear_source,
     mcp_list_profiles,
+    mcp_select_profile,
 )
 from automated_security_helper.core.constants import ASH_EXIT_CODES
 from automated_security_helper.models.workspace import WorkspaceExitCode
@@ -52,8 +53,16 @@ from automated_security_helper.core.resource_management.result_filters import (
     apply_content_filters,
     add_findings_list,
 )
+from automated_security_helper.cli.mcp.profile_registry import (
+    resolve_session_config_path,
+)
 from automated_security_helper.cli.mcp.progress_monitor import monitor_scan_progress
-from automated_security_helper.cli.mcp.scan_target import validate_scan_target
+from automated_security_helper.cli.mcp.sandbox import validate_config_input
+from automated_security_helper.cli.mcp.scan_target import (
+    resolve_scan_target,
+    validate_output_tree,
+    validate_scan_target,
+)
 from automated_security_helper.cli.mcp.session_identity import resolve_session_id
 from automated_security_helper.cli.mcp.source_delivery import (
     delivered_session_count,
@@ -117,6 +126,12 @@ def _resolve_omitted_source_dir(session_id: str) -> _OmittedSourceResolution:
     exactly that rather than papered over -- the count of other delivering
     sessions is the tell, and it names the likely cause in the error.
 
+    The registry record is checked against the filesystem rather than trusted.
+    The two can disagree -- a delivery interrupted mid-swap, or anything outside
+    the server removing the directory -- and a record pointing at a directory
+    that is gone, or at one that is empty, is the same false-negative shape as
+    the fallback above: the scan runs and reports clean.
+
     Args:
         session_id: The session this call resolved to.
 
@@ -130,8 +145,31 @@ def _resolve_omitted_source_dir(session_id: str) -> _OmittedSourceResolution:
     )
 
     delivered = get_session_source_dir(session_id)
-    if delivered is not None:
+    if delivered is not None and delivered.is_dir():
         return _OmittedSourceResolution(source_dir=str(delivered))
+
+    if delivered is not None:
+        # Registered, but the directory is gone. Returning the path anyway would
+        # report "directory not found" for a tree the server said it had, and an
+        # empty-but-present tree would be worse still -- it scans and reports
+        # clean. Naming the state is what makes it actionable, since re-delivering
+        # is the fix and the caller cannot guess that from a missing-path error.
+        return _OmittedSourceResolution(
+            error={
+                "success": False,
+                "error": (
+                    f"The source tree delivered under this session id is no "
+                    f"longer on disk at {delivered}. Deliver it again with "
+                    f"set_source_git or "
+                    f"set_source_zip_chunk/set_source_zip_finalize. Refusing to "
+                    f"scan: the recorded directory cannot be read, and scanning "
+                    f"the server's working directory instead would report on a "
+                    f"tree that is not yours."
+                ),
+                "error_type": "delivered_source_missing",
+                "session_id": session_id,
+            }
+        )
 
     if session_id == DEFAULT_SESSION_ID:
         # No session header at all: a single local client, where the working
@@ -205,6 +243,11 @@ async def run_ash_scan(
     - Check progress['is_complete'] or progress['status'] for completion
     - DO NOT sleep for long periods without polling
 
+    A finished scan ends in status 'completed' or 'incomplete'; both set
+    is_complete. 'incomplete' means the run finished and its results are
+    readable, but one or more selected scanners did not complete: treat it as
+    terminal with partial coverage and read incomplete_scanners for which and why.
+
     Example usage:
         result = run_ash_scan(source_dir="/path/to/project")
         scan_id = result['scan_id']
@@ -255,6 +298,34 @@ async def run_ash_scan(
         if not Path(source_dir).is_absolute():
             source_dir = str(Path.cwd() / source_dir)
 
+        # A profile this session bound with select_profile supplies the config
+        # when the caller names none. The caller's own config_path wins, because
+        # naming one on the call is the more specific statement and silently
+        # replacing it would make the explicit argument a lie.
+        #
+        # Nothing is invented for an unbound session: config_path stays None and
+        # ASH's own discovery finds an in-tree .ash.yaml as it always has.
+        if config_path is None:
+            config_path = resolve_session_config_path(session_id)
+            if config_path is not None:
+                await ctx.info(
+                    f"Using the config bound to this session by select_profile: "
+                    f"{config_path}"
+                )
+        else:
+            # Caller-named, so it is caller-supplied input and gets the same
+            # boundary the workspace tools' config inputs get. Without this the
+            # scan tool would be the one unconfined config read left.
+            config_error = validate_config_input(config_path, session_id=session_id)
+            if config_error:
+                await ctx.error(str(config_error))
+                return {
+                    "success": False,
+                    "error": str(config_error),
+                    "error_type": "config_input_not_permitted",
+                    "error_category": config_error.context["error_category"],
+                }
+
         # Check the root policy before acting on the target in any way. The
         # clean_output branch below deletes a file inside the caller-named
         # directory, so it must not run for a target the policy refuses.
@@ -265,23 +336,38 @@ async def run_ash_scan(
         # a permitted root. Without it a delivered tree is refused by the very
         # allowlist the operator set to bound the scan surface, since no operator
         # lists a directory the server invented per connection.
-        target_error = validate_scan_target(source_dir, session_id=session_id)
-        if target_error:
-            await ctx.error(str(target_error))
+        target = resolve_scan_target(source_dir, session_id=session_id)
+        if target.error is not None:
+            await ctx.error(str(target.error))
             return {
                 "success": False,
-                "error": str(target_error),
+                "error": str(target.error),
                 "error_type": "scan_target_not_permitted",
                 # Mirrors the category create_error_response sets on the
                 # mcp_tools side, so one key identifies a refusal from any entry
                 # point rather than two depending on which tool was called.
-                "error_category": target_error.context["error_category"],
+                "error_category": target.error.context["error_category"],
+            }
+        resolved_target = target.require()
+
+        # The policy canonicalized the target and nothing beneath it. The
+        # clean_output branch below deletes a file inside <target>/.ash, which
+        # follows a symlinked .ash out of the permitted roots, so the tree is
+        # checked before anything reads or writes through it.
+        output_error = validate_output_tree(resolved_target, ".ash", "ash_output")
+        if output_error is not None:
+            await ctx.error(str(output_error))
+            return {
+                "success": False,
+                "error": str(output_error),
+                "error_type": "output_dir_not_permitted",
+                "error_category": output_error.context["error_category"],
             }
 
         await ctx.info(f"Starting scan for directory: {source_dir}")
 
         directory_path_obj = Path(source_dir)
-        output_dir = directory_path_obj.joinpath(".ash", "ash_output")
+        output_dir = resolved_target.joinpath(".ash", "ash_output")
         aggregated_results_path = output_dir.joinpath("ash_aggregated_results.json")
 
         if clean_output and aggregated_results_path.exists():
@@ -374,6 +460,7 @@ async def resolve_ash_workspace(
     workspace_config: Optional[str] = None,
     allow_missing_projects: bool = False,
     config_overrides: Optional[list] = None,
+    profile: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Resolve a VS Code workspace file into a scan plan without scanning anything.
 
@@ -395,13 +482,23 @@ async def resolve_ash_workspace(
             unreadable as skipped instead of refusing the workspace.
         config_overrides: Optional list of `key=value` config overrides, applied to
             each project's config so the reported threshold is the enforced one.
+        profile: Name of a registered config profile to resolve under for this one
+            call, instead of whatever select_profile bound to this session. Call
+            list_profiles to see what the operator registered.
 
     Returns:
         Dict with `plan` (the rendered plan, for a human to read), `projects` (the
-        same decisions structured), and `exit_code` -- 0 on success, 4 for a
-        workspace definition or policy problem, 3 for a project whose own config is
-        invalid.
+        same decisions structured), `session_config_path` (the config a scan of
+        this plan would run under, or null), and `exit_code` -- 0 on success, 4 for
+        a workspace definition, policy or confinement problem, 3 for a project
+        whose own config is invalid or an unknown profile.
     """
+    try:
+        session_id = resolve_session_id(ctx.headers)
+    except ValueError as e:
+        await ctx.error(str(e))
+        return _session_error(e)
+
     try:
         await ctx.info(f"Resolving ASH workspace: {workspace_file}")
         response = await mcp_resolve_workspace(
@@ -409,6 +506,8 @@ async def resolve_ash_workspace(
             workspace_config=workspace_config,
             allow_missing_projects=allow_missing_projects,
             config_overrides=list(config_overrides) if config_overrides else None,
+            session_id=session_id,
+            profile=profile,
         )
         if not response.get("success", False):
             await ctx.error(str(response.get("error", "Unknown error")))
@@ -436,6 +535,7 @@ async def run_ash_workspace_scan(
     excluded_scanners: Optional[list] = None,
     offline: bool = False,
     clean_output: bool = True,
+    profile: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Scan every project in a VS Code workspace and return the per-project verdict.
 
@@ -453,11 +553,13 @@ async def run_ash_workspace_scan(
     the response can be used with get_scan_progress and get_scan_results per
     project. A project skipped at resolution gets no entry and no id.
 
-    Confinement: `ASH_MCP_ALLOWED_ROOTS` governs the project directories, and one
-    project outside the permitted roots refuses the whole workspace rather than
-    scanning the rest -- a green result covering fewer projects than you asked for
-    is the outcome that refusal exists to prevent. The .code-workspace file itself
-    and the workspace policy file are config inputs and are not confined.
+    Confinement: `ASH_MCP_ALLOWED_ROOTS` governs the project directories, plus this
+    session's own workspace so a tree delivered with set_source_git or
+    set_source_zip_finalize is scannable. One project outside the permitted roots
+    refuses the whole workspace rather than scanning the rest -- a green result
+    covering fewer projects than you asked for is the outcome that refusal exists to
+    prevent. The .code-workspace file and the workspace policy file are config
+    inputs, governed by `ASH_MCP_ALLOWED_CONFIG_ROOTS` on a network transport.
 
     Not available in container mode; workspace mode runs locally.
 
@@ -474,15 +576,28 @@ async def run_ash_workspace_scan(
             precedence over `scanners`.
         offline: Run without network access.
         clean_output: Remove each project's previous aggregated-results file first.
+        profile: Name of a registered config profile to scan under for this one
+            call, instead of whatever select_profile bound to this session. An
+            unknown name refuses the whole scan; running N repository scans under
+            the default config because a profile name was misspelled, and
+            reporting success, is exactly what the confinement refusal above
+            exists to prevent.
 
     Returns:
         Dict with `scan_ids` (project key to registry scan id), `projects` (each
-        project's status, finding counts and threshold verdict), `results_path`, and
+        project's status, finding counts and threshold verdict), `results_path`,
+        `session_config_path` (the config the scan ran under, or null), and
         `exit_code` -- 0 clean, 2 actionable findings above a threshold, 3 an
-        invalid project config, 4 a workspace definition, policy or confinement
-        refusal, 1 an internal error. `success` reports whether the scan ran; the
-        verdict is `exit_code`.
+        invalid project config or an unknown profile, 4 a workspace definition,
+        policy or confinement refusal, 1 an internal error. `success` reports
+        whether the scan ran; the verdict is `exit_code`.
     """
+    try:
+        session_id = resolve_session_id(ctx.headers)
+    except ValueError as e:
+        await ctx.error(str(e))
+        return _session_error(e)
+
     try:
         await ctx.info(f"Starting ASH workspace scan: {workspace_file}")
         # No filesystem work happens here. The confinement check needs the
@@ -501,6 +616,8 @@ async def run_ash_workspace_scan(
             offline=offline,
             clean_output=clean_output,
             progress_reporter=ctx.report_progress,
+            session_id=session_id,
+            profile=profile,
         )
         if not response.get("success", False):
             await ctx.error(str(response.get("error", "Unknown error")))
@@ -535,7 +652,7 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
     Usage pattern:
         while True:
             progress = get_scan_progress(scan_id=scan_id)
-            if progress.get('is_complete') or progress.get('status') in ['completed', 'failed', 'cancelled']:
+            if progress.get('is_complete') or progress.get('status') in ['completed', 'incomplete', 'failed', 'cancelled']:
                 break
             time.sleep(5)  # Wait 5 seconds before next check
 
@@ -544,10 +661,40 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
 
     Returns:
         Dict with progress info including:
-        - is_complete: Boolean indicating if scan is done
-        - status: Current status (running, completed, failed, cancelled)
-        - progress_percentage: Estimated completion percentage
-        - message: Human-readable status message
+        - success: False when the poll itself failed, in which case `error`
+          describes why and no other key below is populated.
+        - is_complete: True once the run is over and its results are readable:
+          for `completed` and `incomplete` alike. It is not a statement that
+          every scanner ran; `coverage_complete` is.
+        - status: Current status (pending, running, completed, incomplete,
+          failed, cancelled). `incomplete` is terminal: the run finished and
+          produced results, but coverage has a gap -- a selected scanner was
+          MISSING or ERROR or lost targets, no scanner reached a verdict, a
+          converter did not run, a rule could not be evaluated, or a content
+          database was past its declared age bound. Its
+          findings are real and partial. `failed` means the run crashed or
+          produced no readable results.
+        - coverage_complete: True when nothing below names a gap, False when
+          something does, None while running and for failed or cancelled scans.
+          Reported whatever the completeness gate says, so a scan run with
+          `fail_on_incomplete_scanners: false` is `completed` with
+          `coverage_complete: false` when scanners did not run.
+        - incomplete_scanners: Each selected scanner that did not complete, as
+          `scanner`, `status` (MISSING, ERROR, or a status kept despite lost
+          targets), `reason` (`missing_dependencies`, `error`,
+          `partial_coverage`, `unrecognized_status`) and `detail`.
+        - no_scanner_ran: Scanners were expected and none reached a verdict.
+        - incomplete_converters: Converters that should have run and did not,
+          each with `converter` and `reason`.
+        - unevaluated_rules: Rules that raised instead of reaching a verdict.
+        - stale_content_databases: Content databases past their declared age
+          bound under `content_db_staleness: fail`, one record each with `name`,
+          `scanner`, `built`, `age`, `max_age` and `refresh`. Reported with the
+          completeness gate on or off; a scanner listed here only for its
+          database is not also in incomplete_scanners.
+        - completed_scanners / total_scanners: Counts, where "completed" means
+          the scanner ran and reported PASSED. A scanner that failed, errored or
+          never ran is excluded from the first number but not the second.
         - scanner_statuses: Per-scanner status for every scanner ASH considered,
           including ones that never ran. Empty until the scan finishes.
         - skipped_scanners: The subset that did not run, each with a `reason` of
@@ -560,7 +707,14 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
 
         progress_info = await mcp_get_scan_progress(scan_id=scan_id)
 
-        if not progress_info.get("success", False):
+        # Discriminates rather than tests presence. `not
+        # progress_info.get("success")` was true on both branches, because the
+        # producer set the key only on failure: this was an unconditional return
+        # and everything below it -- the scanners walk, the severity totals and
+        # summarize_scanner_statuses -- was dead on a real poll. Both arms are
+        # needed: a producer can report a problem by setting success False, or by
+        # including error without setting success at all.
+        if "error" in progress_info or progress_info.get("success") is False:
             return progress_info
 
         registry = get_scan_registry()
@@ -606,7 +760,12 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
                         try:
                             # encoding explicit: see cli/report.py. ASH writes this
                             # file as UTF-8; the locale default is cp1252 on Windows.
-                            with open(result_file, "r", encoding="utf-8") as f:
+                            # Blocking open + json.load on the event loop, which stalls this MCP server for
+                            # every other in-flight request while a scan result is read. A correct fix moves
+                            # both calls into asyncio.to_thread together (reading in a thread and parsing on
+                            # the loop just relocates the stall), so it is a real change to this function
+                            # rather than a lint edit. Deferred deliberately.
+                            with open(result_file, "r", encoding="utf-8") as f:  # noqa: ASYNC230
                                 result_data = json.load(f)
 
                             scanner_results[scanner_name][target_type] = result_data
@@ -658,6 +817,13 @@ async def get_scan_results(
     """
     Get final results for a completed scan with optional filtering.
 
+    Works the same for an `incomplete` scan, whose partial findings are returned
+    in full. The response's `status` is `completed` or `incomplete`, decided by
+    the rule the scan's exit code uses, with `coverage_complete`,
+    `incomplete_scanners`, `no_scanner_ran`, `incomplete_converters`,
+    `unevaluated_rules` and `stale_content_databases` naming any gap, as in
+    get_scan_progress.
+
     Args:
         output_dir: Path to the scan output directory (absolute path recommended)
         filter_level: Filter level for response data. Options:
@@ -672,6 +838,12 @@ async def get_scan_results(
         actionable_only: If True, exclude suppressed findings from results. This filters out findings
                         that have been marked as false positives or accepted risks. Default is False.
     """
+    try:
+        session_id = resolve_session_id(ctx.headers)
+    except ValueError as e:
+        await ctx.error(str(e))
+        return _session_error(e)
+
     try:
         if not Path(output_dir).is_absolute():
             output_dir = str(Path.cwd() / output_dir)
@@ -688,9 +860,22 @@ async def get_scan_results(
             f"Getting results from ASH scan in directory: {output_dir} ({filter_info})"
         )
 
-        results = await mcp_get_scan_results(output_dir=output_dir)
+        # The session is passed so a results directory inside this session's own
+        # sandbox is readable. A delivered tree's output lands at
+        # <sandbox>/source/.ash/ash_output, which no operator grant names, so
+        # without the id a client could scan a tree it delivered and then be
+        # refused its own results. It also keeps a sibling session from reading
+        # them, which the shared-workspace deny rule enforces either way.
+        results = await mcp_get_scan_results(
+            output_dir=output_dir, session_id=session_id
+        )
 
-        if "error" in results or not results.get("success"):
+        # `not results.get("success")` was true on both branches, because the
+        # producer set the key only on failure. Every filter below sat behind
+        # that early return, so filter_level, scanners, severities and
+        # actionable_only were all inert on a real scan while the unit tests --
+        # which stub the producer with a dict that does carry the key -- passed.
+        if "error" in results or results.get("success") is False:
             return results
 
         if actionable_only:
@@ -755,7 +940,17 @@ async def get_scan_summary(
     # via get_scan_summary from one obtained by calling get_scan_results directly.
     # Preserved from the pre-refactor implementation; asserted by
     # tests/unit/cli/test_mcp_server.py::TestGetScanSummary.
-    if isinstance(summary, dict) and summary.get("success"):
+    #
+    # Conditioned on the absence of a failure signal rather than on the presence
+    # of `success`, matching the guards in the two tools above. Requiring the key
+    # to be present and truthy meant the tag was never attached on a real scan:
+    # get_scan_results returned early before filter_summary -- the only thing on
+    # this path that sets the key -- ever ran.
+    if (
+        isinstance(summary, dict)
+        and "error" not in summary
+        and summary.get("success") is not False
+    ):
         summary["_source_function"] = "get_scan_summary"
     return summary
 
@@ -810,7 +1005,8 @@ async def get_scan_result_paths(
 
         await ctx.info(f"Getting scan result paths from: {output_dir}")
 
-        if not output_path.exists():
+        # Blocking stat on the event loop. Deferred with the other MCP-server sites.
+        if not output_path.exists():  # noqa: ASYNC240
             return {
                 "success": False,
                 "error": f"Output directory does not exist: {output_dir}",
@@ -1404,6 +1600,76 @@ async def list_profiles() -> Dict[str, Any]:
             "error": f"Error listing profiles: {str(e)}",
             "error_type": type(e).__name__,
         }
+
+
+@mcp.tool()
+async def select_profile(
+    ctx: Context,
+    profile_name: str,
+    patch_ops: Optional[list] = None,
+    override_yaml: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Bind one of the operator's registered config profiles to this session.
+
+    Every later call in this session that does not name a config of its own runs
+    under the bound one: run_ash_scan, resolve_ash_workspace and
+    run_ash_workspace_scan all pick it up. Call list_profiles first to see what
+    the operator registered with `ash mcp --profile NAME=path`.
+
+    Three modes, distinguished by which optional argument you pass:
+
+    * Neither: bind the profile as the operator wrote it.
+    * patch_ops: apply a JSON-Patch document to it first. Each op is checked
+      against the server's runtime-override allowlist, and one rejected op fails
+      the whole call without changing the session's config.
+    * override_yaml: replace it wholesale with your own YAML, still validated.
+
+    patch_ops and override_yaml are mutually exclusive.
+
+    Binding replaces any previous binding for this session. Sessions do not share
+    a binding, and a config bound by one session is not readable by another.
+
+    Args:
+        profile_name: Name the operator registered the profile under.
+        patch_ops: JSON-Patch operations to apply to the profile's config.
+        override_yaml: Complete ASH config YAML replacing the profile's.
+
+    Returns:
+        Dict with success, mode ('static', 'inherit_and_patch' or 'override'),
+        profile_name, session_id, and config_path -- the file inside this
+        session's workspace that later scans will be handed. On failure,
+        success=False and error, for an unknown profile, a denied patch op, or
+        YAML that does not validate.
+    """
+    try:
+        session_id = resolve_session_id(ctx.headers)
+    except ValueError as e:
+        await ctx.error(str(e))
+        return _session_error(e)
+
+    try:
+        result = mcp_select_profile(
+            profile_name,
+            patch_ops=patch_ops,
+            override_yaml=override_yaml,
+            session_id=session_id,
+        )
+    except Exception as e:
+        logger.exception(f"Error in select_profile: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Error selecting profile: {str(e)}",
+            "error_type": type(e).__name__,
+        }
+
+    if result.get("success"):
+        await ctx.info(
+            f"Profile {profile_name!r} bound to session {session_id} "
+            f"({result.get('mode')})"
+        )
+    else:
+        await ctx.error(str(result.get("error", "select_profile failed")))
+    return _with_session(result, session_id)
 
 
 def _build_ash_exit_codes() -> str:

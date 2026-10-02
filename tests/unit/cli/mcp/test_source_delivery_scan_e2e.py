@@ -26,9 +26,11 @@ Shaped like the Bedrock AgentCore Runtime target on purpose:
 The assertions name findings -- rule id, file, and line -- rather than counting
 them. A count assertion would still pass if the scanner ran against the server's
 own working directory instead of the delivered tree, which is the failure this
-test exists to catch. ``completed_scanners``/``total_scanners`` are asserted
+test exists to catch. ``total_scanners`` and ``skipped_scanners`` are asserted
 alongside, because a scan where nothing ran reports zero findings the same way a
-clean scan does.
+clean scan does. Not ``completed_scanners``: that counts only the scanners that
+ran and reported PASSED, so it falls as findings are reported, and this test
+plants findings on purpose.
 """
 
 from __future__ import annotations
@@ -273,7 +275,12 @@ def test_uploaded_source_is_scanned_and_reports_its_own_findings(
                         delivered = Path(collected["finalize"]["source_dir"])
                         collected["extracted"] = sorted(
                             p.relative_to(delivered).as_posix()
-                            for p in delivered.rglob("*")
+                            # Blocking I/O in an async test body. Deferred, not fixed: this is fixture
+                            # setup, so stalling the test's own event loop has no effect on what is being
+                            # asserted, and wrapping it in asyncio.to_thread would add concurrency noise to
+                            # code whose job is to be obviously correct. Tracked with the source-side
+                            # ASYNC230/ASYNC240 sites.
+                            for p in delivered.rglob("*")  # noqa: ASYNC240
                             if p.is_file()
                         )
 
@@ -295,6 +302,7 @@ def test_uploaded_source_is_scanned_and_reports_its_own_findings(
                         )
                         if progress.get("is_complete") or progress.get("status") in (
                             "completed",
+                            "incomplete",
                             "failed",
                             "cancelled",
                         ):
@@ -350,14 +358,62 @@ def test_uploaded_source_is_scanned_and_reports_its_own_findings(
 
     # --- the scan really ran ------------------------------------------------
     progress = collected["progress"]
-    assert progress.get("status") == "completed", f"scan did not complete: {progress}"
+    # `completed` when every selected scanner ran, `incomplete` when one did not --
+    # and which one is computed from the scan's own record below, not accepted
+    # either way. With fail_on_incomplete_scanners on by default, a scanner that is
+    # not installed makes the scan exit 1; CI's integration job lacks seven. This
+    # asserted `completed` and failed there with "ASH exited with code 1", because
+    # the runner read every exit 1 as a crash. `failed` is never acceptable: the
+    # findings asserted at the end of this test come from this scan.
+    assert progress.get("status") in ("completed", "incomplete"), (
+        f"scan did not finish: {progress}"
+    )
+    assert progress.get("is_complete") is True, progress
+    # Read off the scan's own scanner_results, which get_scan_progress echoes.
+    recorded = {
+        name: str(info.get("status", "")).upper()
+        for name, info in progress.get("scanner_statuses", {}).items()
+    }
+    assert recorded, f"progress carried no scanner_statuses: {progress}"
+    did_not_run = {
+        name
+        for name, status in recorded.items()
+        if str(status).upper() in ("MISSING", "ERROR")
+    }
+    named = {
+        row["scanner"]
+        for row in progress.get("incomplete_scanners", [])
+        if row["reason"] in ("missing_dependencies", "error")
+    }
+    assert named == did_not_run, (
+        f"incomplete_scanners named {sorted(named)}; the scan recorded "
+        f"{sorted(did_not_run)} MISSING or ERROR"
+    )
+    if did_not_run:
+        assert progress["status"] == "incomplete", (
+            f"{sorted(did_not_run)} did not run, yet the scan reported "
+            f"{progress['status']!r}"
+        )
+    assert progress.get("coverage_complete") is (progress["status"] == "completed")
     total_scanners = progress.get("total_scanners")
-    completed_scanners = progress.get("completed_scanners")
     assert total_scanners, (
         f"no scanners were registered, so zero findings would prove nothing: {progress}"
     )
-    assert completed_scanners == total_scanners, (
-        f"only {completed_scanners}/{total_scanners} scanners completed: {progress}"
+    # Not `completed_scanners == total_scanners`. That count excludes any scanner that
+    # reported findings (see mcp_server.get_scan_progress), and this test plants
+    # findings deliberately -- so the equality asserted that nothing was found, which
+    # is the opposite of what the planted-finding assertions below require. It held
+    # only while the count meant "ran". Measured on this very test: it reported
+    # "only 7/10 scanners completed" in a run whose own log line read "Result
+    # completeness validation passed - completeness rate: 100.0%". Every scanner ran;
+    # three of them found something.
+    #
+    # `skipped_scanners` is the key the contract points at for telling "scanned, found
+    # nothing" from "never ran", so it is the one that carries the original intent.
+    skipped = [entry.get("scanner") for entry in progress.get("skipped_scanners", [])]
+    assert len(skipped) < total_scanners, (
+        f"every one of the {total_scanners} scanners was skipped, so the findings "
+        f"asserted below would prove nothing: skipped={skipped} progress={progress}"
     )
 
     # --- the findings are from the delivered files --------------------------

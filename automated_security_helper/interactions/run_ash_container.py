@@ -463,6 +463,69 @@ def _gha_layer_cache_args(
     ]
 
 
+# The build-context name the cached base-image layout is attached under, and therefore the value
+# `FROM ${BASE_IMAGE}` is pointed at. Not a registry reference: nothing named this exists on any
+# registry, so a builder that ignored the context and went to the network would fail rather
+# than quietly resolve something.
+BASE_OCI_LAYOUT_CONTEXT = "ash-base-image"
+_BASE_OCI_LAYOUT_VALUE = re.compile(r"^(?P<dir>.+)@(?P<digest>sha256:[0-9a-f]{64})$")
+
+
+def _base_oci_layout_args(resolved_oci_runner: str, buildx: bool) -> List[str]:
+    """Build arguments that hand the build the base image from a verified OCI layout.
+
+    ``ASH_BASE_OCI_LAYOUT=<layout dir>@<arch manifest digest>`` is set by
+    ``.github/actions/prepull-base-image`` on a cache hit, after it has verified every blob in
+    the layout against the Dockerfile's pinned digest. What each runtime needs differs, and the
+    action's header carries the measurements behind each row:
+
+    - ``docker buildx build`` (a docker-container builder, which cannot see the engine's image
+      store): ``--build-context ash-base-image=oci-layout://DIR@DIGEST`` plus
+      ``--build-arg BASE_IMAGE=ash-base-image``.
+    - plain ``docker build`` (the docker driver): nothing. That driver turns an oci-layout
+      context into a registry lookup, so the action loads the layout into the engine instead
+      and the driver's default prefers the local image.
+    - nerdctl and finch: the same context spelled ``oci-layout://DIR`` -- nerdctl treats
+      everything after the prefix as the path and reads the image from index.json -- plus
+      ``--pull=false``, which nerdctl maps to ``image-resolve-mode=local``.
+    - podman: nothing. It has no oci-layout build context; the action imports the layout into
+      podman's store and ``podman build``'s default ``--pull=missing`` uses it.
+
+    Empty when the variable is unset or empty. A malformed value raises rather than being
+    ignored, because ignoring it would send the build to the registry the variable exists to
+    avoid, with nothing in the log saying why.
+    """
+    value = os.environ.get("ASH_BASE_OCI_LAYOUT", "").strip()
+    if not value:
+        return []
+    match = _BASE_OCI_LAYOUT_VALUE.match(value)
+    if match is None:
+        raise ValueError(
+            f"ASH_BASE_OCI_LAYOUT is '{value}', which is not <layout dir>@sha256:<64 hex>. "
+            "It is set by .github/actions/prepull-base-image; unset it to build from the "
+            "Dockerfile's own base image reference."
+        )
+    layout_dir, digest = match.group("dir"), match.group("digest")
+    runner = Path(resolved_oci_runner).stem
+    if runner == "docker":
+        if not buildx:
+            return []
+        context = f"oci-layout://{layout_dir}@{digest}"
+        extra: List[str] = []
+    elif runner in ("nerdctl", "finch"):
+        context = f"oci-layout://{layout_dir}"
+        extra = ["--pull=false"]
+    else:
+        return []
+    return [
+        "--build-context",
+        f"{BASE_OCI_LAYOUT_CONTEXT}={context}",
+        "--build-arg",
+        f"BASE_IMAGE={BASE_OCI_LAYOUT_CONTEXT}",
+        *extra,
+    ]
+
+
 def _build_image(
     oci_command_prefix: List[str],
     resolved_oci_runner: str,
@@ -526,6 +589,54 @@ def _build_image(
             f"BUILD_DATE_EPOCH={int(datetime.now().timestamp())}",
         ]
     )
+
+    # ASH_BASE_IMAGE_OVERRIDE redirects `FROM ${BASE_IMAGE}` at the registry that actually
+    # answered, and is set by .github/actions/prepull-base-image when ECR Public refuses the
+    # base image and Docker Hub serves it instead. It is a digest-pinned reference, so this
+    # path is more tightly pinned than the Dockerfile's own tag default, not less.
+    #
+    # It has to be a build-arg rather than only a local tag under the ECR name. BuildKit does
+    # consult a local store after a registry refusal, but only when the worker HAS one:
+    # `sourceresolver/imageresolver.go` gates that recovery behind
+    # `rm != ResolveModeDefault || is.ImageStore == nil`, and `worker/runc/runc.go` sets
+    # `ImageStore: nil, // explicitly`. A `docker buildx build` on a docker-container driver
+    # runs buildkitd in its own container with exactly that worker, so it never sees the host's
+    # image store -- measured: a build with the tag present still died at `FROM` asking the
+    # refusing registry. That driver cannot be configured out of it from here, so changing what
+    # FROM asks for is the one mechanism every runtime and every driver honours. See
+    # .github/actions/prepull-base-image for the full per-runtime table.
+    #
+    # Emitted BEFORE custom_build_arg, because a duplicate --build-arg is last-wins (measured
+    # on docker 25.0.16), so an explicit `--custom-build-arg BASE_IMAGE=...` from the caller
+    # still overrides this CI fallback rather than being silently discarded.
+    #
+    # ASH_BASE_OCI_LAYOUT, when this runtime can take it, replaces the override: it is only set
+    # on a cache hit, where the pre-pull made no registry call and exported no override, so the
+    # two do not meet in CI. If both were set by hand, the verified layout wins, since it names
+    # content the override would have to fetch.
+    base_layout_args = _base_oci_layout_args(
+        resolved_oci_runner, buildx=bool(cache_args)
+    )
+    base_image_override = os.environ.get("ASH_BASE_IMAGE_OVERRIDE", "").strip()
+    if base_layout_args:
+        typer.echo(
+            "Base image taken from the verified OCI layout named by ASH_BASE_OCI_LAYOUT, "
+            "with no registry call."
+        )
+        build_cmd.extend(base_layout_args)
+    elif base_image_override:
+        typer.echo(
+            f"Base image redirected to {base_image_override} "
+            "by ASH_BASE_IMAGE_OVERRIDE in the environment."
+        )
+        build_cmd.extend(["--build-arg", f"BASE_IMAGE={base_image_override}"])
+
+    # `--custom-build-arg FOO=bar` was threaded from the CLI through run_ash_scan into this
+    # function's signature and then never appended to the command, so every value a caller
+    # passed was silently dropped. Appended here rather than alongside the fixed build-args
+    # above so that it lands last and therefore wins any collision with them.
+    for build_arg in custom_build_arg:
+        build_cmd.extend(["--build-arg", build_arg])
 
     extra_args: List[str] = []
     if force:
@@ -662,9 +773,12 @@ def _assemble_run_command(
     # Environment variables
     cmd.extend(
         [
-            "-e", f"ASH_ACTUAL_SOURCE_DIR={source_dir}",
-            "-e", f"ASH_ACTUAL_OUTPUT_DIR={output_dir}",
-            "-e", f"ASH_DEBUG={'YES' if debug else 'NO'}",
+            "-e",
+            f"ASH_ACTUAL_SOURCE_DIR={source_dir}",
+            "-e",
+            f"ASH_ACTUAL_OUTPUT_DIR={output_dir}",
+            "-e",
+            f"ASH_DEBUG={'YES' if debug else 'NO'}",
         ]
     )
 
@@ -751,7 +865,9 @@ def _assemble_run_command(
         ash_args.append("--no-fail-on-incomplete-scanners")
 
     for phase in phases:
-        ash_args.extend(["--phases", phase.value if hasattr(phase, "value") else str(phase)])
+        ash_args.extend(
+            ["--phases", phase.value if hasattr(phase, "value") else str(phase)]
+        )
 
     for scanner in scanners:
         ash_args.extend(["--scanners", scanner])
@@ -760,7 +876,9 @@ def _assemble_run_command(
         ash_args.extend(["--exclude-scanners", scanner])
 
     for fmt in output_formats:
-        ash_args.extend(["--output-formats", fmt.value if hasattr(fmt, "value") else str(fmt)])
+        ash_args.extend(
+            ["--output-formats", fmt.value if hasattr(fmt, "value") else str(fmt)]
+        )
 
     if config:
         ash_args.extend(["--config", config])
@@ -769,14 +887,43 @@ def _assemble_run_command(
         ash_args.extend(["--config-overrides", override])
 
     if existing_results:
-        ash_args.extend(["--existing-results", existing_results])
+        # Truthiness here and truthiness in _discard_prior_run_artifacts, which grants the
+        # matching exemption from the pre-run cleanup. The two have to agree on the empty
+        # string or it falls between them: the host would keep a previous run's results
+        # file for an inner scan that was never asked to read it, and then read that file
+        # back as this invocation's own.
+        #
+        # `--use-existing`, not `--existing-results`. The latter is not declared anywhere
+        # on the CLI -- it exists only as a local variable in cli/scan.py, where
+        # --use-existing is resolved into the path this parameter carries -- and the
+        # container entrypoint is that same CLI, so the flag is a usage error inside.
+        # Worse, a usage error exits 2, which is also ASH's code for actionable findings,
+        # so the host's read-back could not tell the rejected invocation from a dirty scan.
+        #
+        # The value would be wrong in the container regardless: it is a host path, and the
+        # output directory is bind-mounted at /out. --use-existing resolves
+        # ash_aggregated_results.json from the inner --output-dir, which is the same file
+        # through that mount, so this reproduces the host's own resolution rather than
+        # re-sending a path the container cannot reach.
+        expected = Path(output_dir).joinpath("ash_aggregated_results.json")
+        if Path(existing_results).resolve() != expected.resolve():
+            ASH_LOGGER.warning(
+                f"--existing-results was given {existing_results}, which is not "
+                f"{expected.as_posix()}. The container mounts only the output directory, "
+                "and the in-container scan reads that directory's own "
+                "ash_aggregated_results.json, so the named file will not be the one used."
+            )
+        ash_args.append("--use-existing")
 
     for module in ash_plugin_modules:
         ash_args.extend(["--ash-plugin-modules", module])
 
     if strategy:
         ash_args.extend(
-            ["--strategy", strategy.value if hasattr(strategy, "value") else str(strategy)]
+            [
+                "--strategy",
+                strategy.value if hasattr(strategy, "value") else str(strategy),
+            ]
         )
 
     # Both or neither, and not via the ASH_SHARD_* environment variables: this
@@ -811,7 +958,9 @@ def _execute_container(cmd: List[str], debug: bool):
     try:
         result = run_cmd_direct(cmd, debug=debug)
         if debug:
-            print(f"Container execution completed with return code: {result.returncode}")
+            print(
+                f"Container execution completed with return code: {result.returncode}"
+            )
         return result
     except CalledProcessError as e:
         if debug:
@@ -936,7 +1085,10 @@ def run_ash_container(
         if not container_uid.isdigit():
             typer.secho("Container UID must be a numeric value", fg=typer.colors.RED)
             return create_completed_process(
-                args=[], returncode=1, stdout="", stderr="Container UID must be a numeric value",
+                args=[],
+                returncode=1,
+                stdout="",
+                stderr="Container UID must be a numeric value",
             )
     else:
         container_uid = str(host_uid)
@@ -945,7 +1097,10 @@ def run_ash_container(
         if not container_gid.isdigit():
             typer.secho("Container GID must be a numeric value", fg=typer.colors.RED)
             return create_completed_process(
-                args=[], returncode=1, stdout="", stderr="Container GID must be a numeric value",
+                args=[],
+                returncode=1,
+                stdout="",
+                stderr="Container GID must be a numeric value",
             )
     else:
         container_gid = str(host_gid)
@@ -955,15 +1110,15 @@ def run_ash_container(
         resolved_oci_runner = _resolve_oci_runner(oci_runner)
     except RuntimeError as e:
         typer.secho(str(e), fg=typer.colors.RED)
-        return create_completed_process(
-            args=[], returncode=1, stdout="", stderr=str(e)
-        )
+        return create_completed_process(args=[], returncode=1, stdout="", stderr=str(e))
 
     oci_command_prefix = _get_oci_wrapper_prefix()
 
     # Resolve ASH revision
     rev = get_ash_revision()
-    resolved_revision = ash_revision_to_install if ash_revision_to_install is not None else rev
+    resolved_revision = (
+        ash_revision_to_install if ash_revision_to_install is not None else rev
+    )
 
     if resolved_revision is not None and resolved_revision != "LOCAL":
         if not _validate_ash_revision(resolved_revision):
@@ -974,7 +1129,10 @@ def run_ash_container(
                 fg=typer.colors.RED,
             )
             return create_completed_process(
-                args=[], returncode=1, stdout="", stderr=f"Invalid ASH revision value: {resolved_revision!r}",
+                args=[],
+                returncode=1,
+                stdout="",
+                stderr=f"Invalid ASH revision value: {resolved_revision!r}",
             )
 
     # Resolve Dockerfile path
@@ -982,9 +1140,7 @@ def run_ash_container(
         dockerfile_path = _find_dockerfile(resolved_revision)
     except FileNotFoundError as e:
         typer.secho(str(e), fg=typer.colors.RED)
-        return create_completed_process(
-            args=[], returncode=1, stdout="", stderr=str(e)
-        )
+        return create_completed_process(args=[], returncode=1, stdout="", stderr=str(e))
 
     # Resolve build target
     resolved_build_target = (
@@ -1076,7 +1232,9 @@ def run_ash_container(
                 output_dir.mkdir(parents=True, exist_ok=True)
                 output_dir = output_dir.resolve()
             except Exception as e:
-                typer.secho(f"Error creating output directory: {e}", fg=typer.colors.RED)
+                typer.secho(
+                    f"Error creating output directory: {e}", fg=typer.colors.RED
+                )
                 return create_completed_process(
                     args=[], returncode=1, stdout="", stderr=str(e)
                 )

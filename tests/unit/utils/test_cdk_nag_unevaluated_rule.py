@@ -331,6 +331,26 @@ class TestTheMarkerStillMatchesTheInstalledCdkNag:
     This test is the only thing standing between that and a silent regression. It reads the
     cdk-nag distribution ASH actually installs rather than a fixture, so it fails on the version
     bump that introduces the drift instead of on the scan that is misreported because of it.
+
+    DO NOT CONVERT THE MISSING-EXTRA CASE TO A SKIP
+    -----------------------------------------------
+    It fails without the ``[cdk]`` extra, which reads like a local-environment wart and has
+    been proposed as one. Run ``uv sync --extra cdk`` -- that is what CI does, and
+    ``.github/actions/run-unit-tests/action.yml`` calls the flag "required, not cosmetic"
+    because a plain ``uv sync`` left cdk-nag absent from every test run and a breaking major
+    bump of it landed green.
+
+    The obvious repair is the guarded-skip pattern from
+    ``tests/integration/scanners/test_cdk_nag_real_pack.py``: skip when the extra is missing,
+    but hard-fail under ``ASH_REQUIRE_CDK_EXTRA``. That is correct THERE and wrong HERE, for a
+    reason that is invisible from inside this file. ``ASH_REQUIRE_CDK_EXTRA: "1"`` is set on
+    one step of that action -- "Run cdk-nag integration tests" -- and NOT on the "Run PyTest"
+    step that collects this module. So the escape hatch that makes the skip safe over there
+    does not exist over here: the skip would be unconditional in CI, and the guard this
+    docstring spends thirty lines justifying would become a test that cannot fail.
+
+    A skip here is only defensible once that variable is also set on the step that runs the
+    unit suite. Until then the hard failure IS the mechanism, and its cost is one command.
     """
 
     def test_the_prefix_appears_verbatim_in_the_installed_distribution(self):
@@ -352,7 +372,10 @@ class TestTheMarkerStillMatchesTheInstalledCdkNag:
         # never touches jsii.
         spec = importlib.util.find_spec("cdk_nag")
         assert spec is not None and spec.origin, (
-            "cdk_nag is not installed, so the marker cannot be confirmed"
+            "cdk_nag is not installed, so the marker cannot be confirmed. Run "
+            "`uv sync --extra cdk`; CI does, and this assertion is a hard failure rather "
+            "than a skip on purpose -- see the class docstring for why a skip here would be "
+            "unconditional in CI."
         )
         root = Path(spec.origin).parent
         tarballs = sorted(root.rglob("*.tgz"))

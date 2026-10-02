@@ -29,6 +29,7 @@ from automated_security_helper.utils.suppression_matcher import (
     should_suppress_finding,
 )
 from automated_security_helper.models.flat_vulnerability import FlatVulnerability
+from automated_security_helper.utils.package_identity import extract_package_identity
 from automated_security_helper.models.asharp_model import ScannerSeverityCount
 from automated_security_helper.utils.secret_masking import mask_secret_in_text
 from automated_security_helper.utils.suppression_matcher import file_path_matches
@@ -393,7 +394,14 @@ def _resolve_result_severity(result) -> str:
             return issue_sev.lower()
 
     if result.level:
-        match str(result.level).lower():
+        # Read `.value` before str(): Level is a (str, Enum) mixin, so
+        # str(Level.error) is "Level.error" and matches no arm below. The field
+        # holds a member whenever it was not validated -- an omitted key taking
+        # the default, or a post-construction assignment. Falling through here
+        # returns "info", which puts a real finding under every threshold above
+        # INFO, so the gate passes a report the SARIF on disk says is error.
+        level = getattr(result.level, "value", result.level)
+        match str(level).lower():
             case "error":
                 return "critical"
             case "warning":
@@ -656,6 +664,40 @@ def apply_suppressions_to_sarif(
 
     _inline_suppression_cache: dict[str, list] = {}
 
+    # Whether the output directory contains the source directory, in which case the
+    # output-path exclusion below is not applied at all.
+    #
+    # Every finding in the scanned tree resolves inside such an output directory, so
+    # the exclusion would drop the entire result set -- and a run with no findings
+    # exits 0, so emptying it is indistinguishable from a clean scan. That is the
+    # worst outcome this function can produce, and it is reachable: `ash merge`
+    # builds its context with source_dir=Path.cwd() and the operator's --output-dir
+    # verbatim, so `ash merge --output-dir .` lands here. `ash scan` relocates the
+    # equal-paths case before reaching this point; this covers containment, which it
+    # does not, and covers every other caller that builds a context directly.
+    #
+    # Declining the exclusion rather than refusing the scan: the exclusion exists to
+    # keep ASH's own reports out of its findings, which is a tidiness property, and
+    # trading a whole result set for it is the wrong way round. Said at WARNING
+    # because a guard that quietly stops applying is how a guard becomes decoration.
+    # is_relative_to is true for equal paths, so this covers output_dir == source_dir
+    # as well as containment.
+    _output_dir_contains_source = _resolved_source.is_relative_to(_output_dir_resolved)
+    if _output_dir_contains_source:
+        ASH_LOGGER.warning(
+            f"Not excluding findings under the output directory "
+            f"'{_output_dir_resolved.as_posix()}': it is the source directory "
+            f"'{_resolved_source.as_posix()}' or an ancestor of it, so every finding "
+            f"in the scanned tree resolves inside it and the exclusion would discard "
+            f"the whole result set. Point --output-dir at a directory outside the "
+            f"scanned tree to restore it."
+        )
+
+    # Findings removed by the output-path exclusion, reported below. Counted because
+    # this pass can remove an arbitrary number of results, and before it was counted
+    # the only trace was one per-finding line at VERBOSE.
+    excluded_by_output_path = 0
+
     for run in sarif_report.runs:
         if not run.results:
             continue
@@ -685,15 +727,37 @@ def apply_suppressions_to_sarif(
                         _source_dir_basename,
                     )
                     if uri not in _uri_resolve_cache:
-                        _uri_resolve_cache[uri] = Path(uri).resolve()
+                        # Anchored on the source directory, NOT on the process's
+                        # working directory. _normalize_sarif_uri has just stripped
+                        # the source-directory prefix, so `uri` is relative to
+                        # source_dir; Path(uri).resolve() anchored it on cwd instead,
+                        # which agrees only when cwd happens to equal source_dir.
+                        # Anywhere else -- a CI job that checks out to one directory
+                        # and passes --source-dir for another, `ash merge`, any MCP
+                        # session -- the resolution landed outside the output
+                        # directory and the exclusion silently stopped firing, so
+                        # ASH's own reports came back as findings about the scanned
+                        # tree.
+                        #
+                        # An absolute `uri` is left alone rather than relocated:
+                        # pathlib discards the left operand of `/` when the right is
+                        # absolute. That is what this needs. A URI the prefix strip
+                        # did not match is absolute and outside the source tree -- a
+                        # system config, a cached dependency -- and joining it onto
+                        # source_dir would fabricate a path inside a tree it is not
+                        # in.
+                        _uri_resolve_cache[uri] = (_resolved_source / uri).resolve()
                     resolved_uri = _uri_resolve_cache[uri]
-                    if resolved_uri.is_relative_to(
-                        _output_dir_resolved
-                    ) and not resolved_uri.is_relative_to(_work_dir_resolved):
+                    if (
+                        not _output_dir_contains_source
+                        and resolved_uri.is_relative_to(_output_dir_resolved)
+                        and not resolved_uri.is_relative_to(_work_dir_resolved)
+                    ):
                         ASH_LOGGER.verbose(
                             f"Excluding result -- location is in output path and NOT in the work directory and should not have been included: '{uri}'",
                             extra=NO_MARKUP,
                         )
+                        excluded_by_output_path += 1
                         is_in_ignorable_path = True
                         continue
                     ignore_reason = _check_ignore_paths(uri, ignore_paths)
@@ -743,7 +807,30 @@ def apply_suppressions_to_sarif(
                             line_start = location.physicalLocation.root.region.startLine
                             line_end = location.physicalLocation.root.region.endLine
 
+                        package_name, package_version, package_path = (
+                            extract_package_identity(result.properties)
+                        )
+                        # package_path is compared in the form a suppression
+                        # writes it: relative to the scan root. Converters emit
+                        # it that way, but SARIF from an older ASH or another
+                        # tool may carry the absolute source-dir prefix (on
+                        # Windows, drive included), which is stripped here the
+                        # same way the location URI is. The basename argument
+                        # is None: that case exists for one scanner's location
+                        # URIs and would strip a real leading directory here.
+                        if package_path:
+                            package_path = _normalize_sarif_uri(
+                                package_path,
+                                _source_dir_prefix,
+                                _source_dir_prefix_with_slash,
+                                _source_dir_prefix_no_drive,
+                                None,
+                            )
+
                         flat_finding = FlatVulnerability(
+                            package_name=package_name,
+                            package_version=package_version,
+                            package_path=package_path,
                             id=get_finding_id(result.ruleId, uri, line_start, line_end),
                             title=(
                                 result.message.root.text
@@ -818,4 +905,19 @@ def apply_suppressions_to_sarif(
             updated_results.append(result)
 
         run.results = updated_results
+
+    # Reported after every run, and only when something was removed.
+    #
+    # WARNING rather than the per-finding VERBOSE line above, because the aggregate
+    # is what tells an operator their result set shrank -- silently emptying a run is
+    # the failure this exclusion is closest to causing, and the individual lines are
+    # invisible at the default level. Conditional because a count printed on every
+    # scan is noise, and noise gets filtered.
+    if excluded_by_output_path:
+        ASH_LOGGER.warning(
+            f"Excluded {excluded_by_output_path} finding(s) whose location is inside "
+            f"the output directory '{_output_dir_resolved.as_posix()}' and outside "
+            f"its work directory. These are reports ASH wrote, not findings about "
+            f"the scanned tree. Run with --verbose to see each one."
+        )
     return sarif_report

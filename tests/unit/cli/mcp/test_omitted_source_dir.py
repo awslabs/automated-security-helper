@@ -24,6 +24,7 @@ a wrong green.
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -195,3 +196,71 @@ class TestNoDeliveryAnywhereIsRefusedOnASession:
         error = _resolve_omitted_source_dir("a-real-session").error
 
         assert error["session_id"] == "a-real-session"
+
+
+class TestAStaleRegistryRecordIsRefused:
+    """Registered, but the directory is no longer there.
+
+    The registry is a process-local dict and the tree it points at is ordinary
+    filesystem state, so the two can disagree: a delivery interrupted between
+    clearing the old tree and putting the new one in place, or anything outside
+    the server removing the directory. Handing the path back anyway produced
+    "directory does not exist" from a later check, which does not tell the caller
+    that re-delivering is the fix -- and if the directory survived but was empty,
+    the scan completed and reported clean, which is the outcome this module
+    exists to prevent.
+    """
+
+    def test_a_recorded_directory_that_is_gone_is_refused(self, tmp_path):
+        delivered = tmp_path / "session-a" / "source"
+        delivered.mkdir(parents=True)
+        sd._set_session_source_dir("session-a", delivered)
+        shutil.rmtree(delivered)
+
+        resolution = _resolve_omitted_source_dir("session-a")
+
+        assert resolution.source_dir is None
+        assert resolution.error is not None
+        assert resolution.error["error_type"] == "delivered_source_missing"
+
+    def test_the_message_names_the_path_and_the_fix(self, tmp_path):
+        delivered = tmp_path / "session-a" / "source"
+        delivered.mkdir(parents=True)
+        sd._set_session_source_dir("session-a", delivered)
+        shutil.rmtree(delivered)
+
+        message = _resolve_omitted_source_dir("session-a").error["error"]
+
+        assert str(delivered) in message
+        assert "set_source_git" in message
+        assert "Refusing to scan" in message
+
+    def test_a_file_where_the_tree_should_be_is_refused_too(self, tmp_path):
+        """``is_dir()`` rather than ``exists()``: a file is not a scannable tree."""
+        session = tmp_path / "session-a"
+        session.mkdir()
+        delivered = session / "source"
+        delivered.write_text("not a directory")
+        sd._set_session_source_dir("session-a", delivered)
+
+        resolution = _resolve_omitted_source_dir("session-a")
+
+        assert resolution.error is not None
+        assert resolution.error["error_type"] == "delivered_source_missing"
+
+    def test_the_default_session_does_not_fall_back_to_cwd_either(self, tmp_path):
+        """A stale record is a stale record; cwd is not a substitute for it.
+
+        Distinct from ``test_default_session_with_no_delivery_uses_cwd``: nothing
+        was ever delivered there, whereas here something was and then vanished.
+        Scanning cwd at that point would report on a tree the caller never sent.
+        """
+        delivered = tmp_path / "default" / "source"
+        delivered.mkdir(parents=True)
+        sd._set_session_source_dir(DEFAULT_SESSION_ID, delivered)
+        shutil.rmtree(delivered)
+
+        resolution = _resolve_omitted_source_dir(DEFAULT_SESSION_ID)
+
+        assert resolution.source_dir is None
+        assert resolution.error["error_type"] == "delivered_source_missing"

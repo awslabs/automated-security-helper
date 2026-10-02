@@ -200,7 +200,7 @@ class ConfigLinter:
         for issue in issues:
             if not issue.fixable:
                 continue
-            if issue.category in (LintCategory.SUPPRESSION_EXPIRED,):
+            if issue.category == LintCategory.SUPPRESSION_EXPIRED:
                 removal_issues.append(issue)
             else:
                 modification_issues.append(issue)
@@ -904,19 +904,9 @@ class ConfigLinter:
     @classmethod
     def _make_suppression_id(cls, suppression: Dict[str, Any]) -> str:
         """Create a unique identifier for a suppression (matches reporter logic)."""
-        line_start = suppression.get("line_start")
-        line_end = suppression.get("line_end")
+        from automated_security_helper.models.core import suppression_id
 
-        # If line_start is specified but line_end is not, use line_start for both
-        line_end_val = line_end if line_end is not None else line_start
-
-        parts = [
-            suppression.get("path", ""),
-            suppression.get("rule_id") or "*",
-            str(line_start) if line_start is not None else "*",
-            str(line_end_val) if line_end_val is not None else "*",
-        ]
-        return "|".join(parts)
+        return suppression_id(suppression)
 
     @classmethod
     def _check_legacy_name_variants(
@@ -926,9 +916,10 @@ class ConfigLinter:
 
         Operators sometimes type the snake_case Python field name when the
         canonical input form for a built-in plugin is the kebab-case alias
-        (e.g. ``cdk_nag:`` instead of ``cdk-nag:``). The snake form silently
-        lands in ``__pydantic_extra__`` and the real built-in keeps its
-        default config — silent mis-configuration.
+        (e.g. ``cdk_nag:`` instead of ``cdk-nag:``). The segments' shared
+        before-validator reads that spelling as the alias, so it configures
+        the built-in, but only the alias is documented. It used to land in
+        ``__pydantic_extra__`` while the built-in kept its default config.
 
         Walks the ``scanners``, ``reporters``, and ``converters`` segments,
         compares each key against the segment's declared canonical input
@@ -946,6 +937,7 @@ class ConfigLinter:
             ConverterConfigSegment,
             ReporterConfigSegment,
             ScannerConfigSegment,
+            field_name_spellings,
         )
 
         segment_specs = (
@@ -964,7 +956,7 @@ class ConfigLinter:
             canonical_input_forms: set[str] = set()
             for fname, finfo in segment_cls.model_fields.items():
                 alias = getattr(finfo, "alias", None)
-                canonical_input_forms.add(alias if alias else fname)
+                canonical_input_forms.add(alias or fname)
 
             for key in list(segment_data):
                 if key in canonical_input_forms:
@@ -1002,6 +994,20 @@ class ConfigLinter:
                     continue
 
                 # Plain legacy variant — auto-fixable.
+                if field_name_spellings(segment_cls).get(key) == swapped:
+                    # The field-name spelling of an aliased field: the
+                    # segment's before-validator reads it as the alias.
+                    consequence = (
+                        f"ASH reads it as {swapped!r}, but only the "
+                        f"canonical form is documented."
+                    )
+                else:
+                    # The kebab spelling of a field declared without an
+                    # alias: nothing maps it, so it is a separate extra key.
+                    consequence = (
+                        "The legacy form lands in __pydantic_extra__ and "
+                        "the real built-in keeps its default config."
+                    )
                 result.issues.append(
                     LintIssue(
                         severity=LintSeverity.WARNING,
@@ -1010,9 +1016,7 @@ class ConfigLinter:
                         message=(
                             f"{segment_name}.{key!r} uses the legacy "
                             f"snake/kebab variant; canonical form is "
-                            f"{swapped!r}. The legacy form lands in "
-                            f"__pydantic_extra__ and the real built-in "
-                            f"keeps its default config."
+                            f"{swapped!r}. {consequence}"
                         ),
                         fixable=True,
                     )

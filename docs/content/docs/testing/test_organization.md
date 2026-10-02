@@ -50,6 +50,7 @@ Example:
 # tests/unit/scanners/test_bandit_scanner.py
 import pytest
 
+
 @pytest.mark.unit
 @pytest.mark.scanner
 def test_bandit_scanner_initialization():
@@ -69,6 +70,7 @@ Example:
 ```python
 # tests/integration/scanners/test_scanner_reporter_integration.py
 import pytest
+
 
 @pytest.mark.integration
 @pytest.mark.scanner
@@ -138,11 +140,13 @@ Example:
 ```python
 import pytest
 
+
 @pytest.mark.unit
 @pytest.mark.scanner
 def test_bandit_scanner_initialization():
     # Test code here
     pass
+
 
 @pytest.mark.integration
 @pytest.mark.slow
@@ -192,6 +196,7 @@ def temp_config():
     yield config_file
     config_file.unlink()
 
+
 def test_with_config(temp_config):
     # Test code here
     pass
@@ -235,10 +240,12 @@ import pytest
 from pathlib import Path
 from automated_security_helper.scanners.bandit_scanner import BanditScanner
 
+
 @pytest.fixture
 def temp_python_file(temp_project_dir):
     file_path = temp_project_dir / "test.py"
     return file_path
+
 
 @pytest.mark.unit
 @pytest.mark.scanner
@@ -260,12 +267,17 @@ class TestBanditScanner:
         assert len(result.findings) == 1
         assert "pickle.loads" in result.findings[0].message
 
-    @pytest.mark.parametrize("code,expected_findings", [
-        ("import pickle\npickle.loads(b'')", 1),  # Unsafe pickle usage
-        ("import hashlib\nhashlib.md5(b'')", 1),  # Weak hash algorithm
-        ("print('Hello, world!')", 0),  # No security issues
-    ])
-    def test_findings_with_different_code(self, temp_python_file, code, expected_findings):
+    @pytest.mark.parametrize(
+        "code,expected_findings",
+        [
+            ("import pickle\npickle.loads(b'')", 1),  # Unsafe pickle usage
+            ("import hashlib\nhashlib.md5(b'')", 1),  # Weak hash algorithm
+            ("print('Hello, world!')", 0),  # No security issues
+        ],
+    )
+    def test_findings_with_different_code(
+        self, temp_python_file, code, expected_findings
+    ):
         # Arrange
         temp_python_file.write_text(code)
         scanner = BanditScanner()

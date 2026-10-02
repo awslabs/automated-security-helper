@@ -6,10 +6,9 @@ import shutil
 from pathlib import Path
 from typing import Annotated, Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from automated_security_helper.base.plugin_context import PluginContext
-from automated_security_helper.config.default_config import get_default_config
 
 from automated_security_helper.config.resolve_config import resolve_config
 from automated_security_helper.core.enums import ExecutionStrategy
@@ -17,7 +16,6 @@ from automated_security_helper.core.progress import (
     ExecutionPhaseType,
 )
 from automated_security_helper.core.constants import (
-    ASH_CONFIG_FILE_NAMES,
     ASH_WORK_DIR_NAME,
 )
 from automated_security_helper.core.execution_engine import (
@@ -27,7 +25,6 @@ from automated_security_helper.core.execution_engine import (
 from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.core.exceptions import (
     ASHValidationError,
-    ASHConfigValidationError,
 )
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.core.enums import ExportFormat
