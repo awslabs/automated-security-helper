@@ -5,14 +5,17 @@
 
 Why this file exists
 --------------------
-GitHub deliberately does not start workflow runs for events authenticated with
-``GITHUB_TOKEN``. The release workflow pushed the release branch and opened the
-PR with that token, so the PR arrived with none of its required checks -- and the
-required checks are what the branch ruleset waits for, so the PR could not merge
-on its own.
+A pull request opened with ``GITHUB_TOKEN`` does not start its workflows on its
+own. GitHub used to create no runs for it at all: v3.5.0 through v3.5.3 arrived
+with none of their required checks, and the branch ruleset waits for exactly
+those, so the PR could not merge until a human pushed to it. Since June 2026
+GitHub creates the runs in an approval-required state instead, and they start
+only after a maintainer selects "Approve workflows to run". Every release PR
+from v3.5.4 on was approved that way (each run shows ``run_attempt`` 2,
+triggered by a maintainer, minutes after the PR opened). See
+https://docs.github.com/en/actions/concepts/security/github_token.
 
-This is not theoretical: it is why v3.6.0's release PR needed a manual push
-before it would go green.
+An App-opened PR starts its checks with neither step.
 
 Only the PR creation needs the App
 ----------------------------------
@@ -40,9 +43,11 @@ Why a fallback
 --------------
 The App credentials are repository secrets that have to be created by hand. Until
 they exist, ``steps.app-token.outputs.token`` is empty, and a workflow that
-insisted on it would fail to release at all. A release that needs one manual
-nudge is worse than the status quo; a release that cannot run is much worse. The
-fallback keeps the workflow working before and after the App is set up.
+insisted on it would fail to release at all. Without the App the cost is one
+click by the maintainer who has to review and merge the PR anyway; failing
+closed would turn that into no release until an App is approved and installed.
+The fallback is kept, but it has to say so on the PR itself, because a warning
+in the run log was not where the person who has to click was looking.
 """
 
 from pathlib import Path
@@ -157,8 +162,8 @@ def test_both_app_secrets_are_required_before_minting(workflow):
     env = detect.get("env") or {}
     referenced = " ".join(str(v) for v in env.values())
 
-    assert "RELEASE_APP_ID" in referenced, (
-        "The detect step does not read RELEASE_APP_ID."
+    assert "RELEASE_APP_CLIENT_ID" in referenced, (
+        "The detect step does not read RELEASE_APP_CLIENT_ID."
     )
     assert "RELEASE_APP_PRIVATE_KEY" in referenced, (
         "The detect step never looks at RELEASE_APP_PRIVATE_KEY, so an id set "
@@ -183,3 +188,65 @@ def test_there_is_a_fallback_to_github_token(workflow_text):
         "created, the release workflow would fail outright instead of falling "
         "back to today's behaviour."
     )
+
+
+def _mint_step(workflow):
+    steps = _steps(workflow)
+    return next(s for s in steps if TOKEN_ACTION in str(s.get("uses", "")))
+
+
+def test_the_mint_uses_client_id_not_the_deprecated_app_id(workflow):
+    """v3 of the action deprecates `app-id` in favor of `client-id`."""
+    inputs = _mint_step(workflow).get("with") or {}
+    assert "app-id" not in inputs, (
+        "create-github-app-token is given the deprecated `app-id` input."
+    )
+    assert "RELEASE_APP_CLIENT_ID" in str(inputs.get("client-id", "")), (
+        "create-github-app-token is not given the client id secret."
+    )
+
+
+def test_the_app_token_is_scoped_to_what_pr_creation_needs(workflow):
+    """Without `permission-*` inputs the token gets every installation permission.
+
+    Contents must stay read-only: the push is GITHUB_TOKEN's job, and Apps with
+    write access to code are not granted on these organizations.
+    """
+    inputs = _mint_step(workflow).get("with") or {}
+    granted = {k: v for k, v in inputs.items() if k.startswith("permission-")}
+    assert granted == {
+        "permission-contents": "read",
+        "permission-pull-requests": "write",
+    }, f"The App token permissions are not the minimal set: {granted!r}"
+
+
+def test_the_fallback_says_so_on_the_pr(workflow):
+    """A GITHUB_TOKEN release PR has to tell the maintainer to approve its runs.
+
+    Until June 2026 the only signal was a warning in the run log, and that
+    warning also described the old behavior (no runs, push to start them).
+    """
+    steps = _steps(workflow)
+    pr_step = next(s for s in steps if "gh pr create" in str(s.get("run", "")))
+    env = pr_step.get("env") or {}
+    run = str(pr_step.get("run", ""))
+
+    assert "steps.appcreds.outputs.present" in str(env.get("APP_TOKEN_USED", "")), (
+        "The PR step cannot tell whether it is running on the App token."
+    )
+    assert "Approve workflows to run" in run, (
+        "The fallback PR does not tell the maintainer to approve its workflow runs."
+    )
+    assert '--body "$BODY"' in run, (
+        "The PR body is not the one that carries the approval note."
+    )
+    assert "GITHUB_STEP_SUMMARY" in run, (
+        "The fallback is not reported in the run summary."
+    )
+
+
+def test_no_message_still_claims_a_push_is_needed(workflow_text):
+    """The old warning said checks never start and a push was needed. Both are
+    stale: GitHub now creates the runs, pending approval."""
+    assert "will not trigger its required checks" not in workflow_text
+    assert "push to the branch to start them" not in workflow_text

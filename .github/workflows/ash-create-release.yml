@@ -17,12 +17,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      # GitHub does not start workflow runs for events authenticated with
-      # GITHUB_TOKEN. The release PR was opened with it, so it arrived with none of
-      # its required checks, and the ruleset waits for exactly those checks. The PR
-      # could not merge on its own; v3.6.0's needed a manual push to go green.
+      # A pull request opened with GITHUB_TOKEN does not start its workflows on
+      # its own. GitHub used to create no runs at all for it (v3.5.0 through
+      # v3.5.3 arrived with none of their required checks, and the ruleset waits
+      # for exactly those). Since June 2026 it creates them in an
+      # approval-required state instead: the merge box shows a banner, and the
+      # checks only start once someone with write access selects "Approve
+      # workflows to run". Every release PR from v3.5.4 on was approved that way.
+      # https://docs.github.com/en/actions/concepts/security/github_token
       #
-      # An App is a separate identity, so a PR it opens does trigger the checks.
+      # An App is a separate identity, so a PR it opens starts the checks with no
+      # approval step.
       #
       # Only the PR creation needs the App. Both required checks trigger on
       # `pull_request`:
@@ -39,16 +44,14 @@ jobs:
       # Nothing is lost by leaving the push as it was: the workflow already sets
       # its git identity to github-actions[bot], so the commit attribution is
       # unchanged either way.
-      # Both secrets are required, not just the id. create-github-app-token fails
-      # the step if the key is missing or malformed, and the step has no
-      # continue-on-error, so a half-configured secret set would kill the whole
-      # release job -- strictly worse than the degraded-but-working state this
-      # replaces. The `||` fallback further down cannot rescue that: it only covers
-      # an absent output, never a failed step.
+      #
+      # Setup steps for the App and its secrets are in DEVELOPMENT.md, under
+      # "Release App setup".
+      #
       - name: Detect release App credentials
         id: appcreds
         env:
-          APP_ID: ${{ secrets.RELEASE_APP_ID }}
+          APP_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
           APP_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
         run: |
           if [ -n "$APP_ID" ] && [ -n "$APP_KEY" ]; then
@@ -56,9 +59,9 @@ jobs:
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
             if [ -n "$APP_ID" ] || [ -n "$APP_KEY" ]; then
-              echo "::warning::Only one of RELEASE_APP_ID / RELEASE_APP_PRIVATE_KEY is set. Both are required, so the App is being skipped and the release PR will be created with GITHUB_TOKEN. See issue #341."
+              echo "::warning::Only one of RELEASE_APP_CLIENT_ID / RELEASE_APP_PRIVATE_KEY is set. Both are required, so the App is being skipped and the release PR will be created with GITHUB_TOKEN. Its required checks will wait for a maintainer to approve them. See DEVELOPMENT.md, Release App setup."
             else
-              echo "::warning::RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY are not set, so the release PR will be created with GITHUB_TOKEN and will not trigger its required checks. A maintainer will need to push to the branch to start them. See issue #341."
+              echo "::warning::RELEASE_APP_CLIENT_ID and RELEASE_APP_PRIVATE_KEY are not set, so the release PR will be created with GITHUB_TOKEN. Its required checks will wait for a maintainer to select Approve workflows to run on the PR. See DEVELOPMENT.md, Release App setup."
             fi
           fi
 
@@ -67,8 +70,16 @@ jobs:
         if: steps.appcreds.outputs.present == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          app-id: ${{ secrets.RELEASE_APP_ID }}
+          # `app-id` is deprecated in v3 in favor of `client-id`.
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          # Without these the token carries every permission the installation
+          # has. `gh pr create` needs pull-requests: write. contents: read is
+          # requested so the repository lookups gh makes first cannot 403; on a
+          # public repository it exposes nothing new. If the App was not granted
+          # both, this step fails here, before anything is bumped or pushed.
+          permission-contents: read
+          permission-pull-requests: write
 
       # Deliberately left on the default GITHUB_TOKEN. Handing the App token to
       # checkout would make `git push` authenticate as the App, which then needs
@@ -157,6 +168,7 @@ jobs:
           OLD_VERSION: ${{ steps.bump.outputs.old_version }}
           NEW_VERSION: ${{ steps.bump.outputs.new_version }}
           ACTOR: ${{ github.actor }}
+          APP_TOKEN_USED: ${{ steps.appcreds.outputs.present }}
         run: |
           BRANCH="release/v${NEW_VERSION}"
           git checkout -b "$BRANCH"
@@ -165,8 +177,25 @@ jobs:
                      -m "Triggered-by: @${ACTOR} via workflow_dispatch"
           git push -u origin "$BRANCH"
 
-          gh pr create \
+          BODY="Automated release PR. Merging this will trigger tag creation and GitHub Release publishing."
+          if [[ "$APP_TOKEN_USED" != "true" ]]; then
+            # Said on the PR itself, because that is where the maintainer who has
+            # to act will be looking. The run log warning alone was easy to miss.
+            NOTE="**Required checks are waiting for approval.** This PR was opened with \`GITHUB_TOKEN\` because the release App secrets are not configured, so GitHub created its workflow runs in an approval-required state. A maintainer with write access needs to select **Approve workflows to run** in the merge box below before the checks start. To remove this step, set up the release App as described in DEVELOPMENT.md under \"Release App setup\"."
+            BODY="${BODY}"$'\n\n'"${NOTE}"
+          fi
+
+          PR_URL=$(gh pr create \
             --title "chore(release): ${OLD_VERSION} -> ${NEW_VERSION}" \
-            --body "Automated release PR. Merging this will trigger tag creation and GitHub Release publishing." \
+            --body "$BODY" \
             --base main \
-            --head "$BRANCH"
+            --head "$BRANCH")
+          echo "$PR_URL"
+          if [[ "$APP_TOKEN_USED" != "true" ]]; then
+            echo "::warning::Release PR ${PR_URL} needs a maintainer to approve its workflow runs before the required checks start."
+            {
+              echo "### Release PR checks need approval"
+              echo
+              echo "${PR_URL} was opened with GITHUB_TOKEN. Open it and select **Approve workflows to run** to start its required checks."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi

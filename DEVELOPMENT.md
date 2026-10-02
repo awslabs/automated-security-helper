@@ -223,6 +223,24 @@ After merging the release PR, a second workflow automatically:
 - Publishes a GitHub Release with auto-generated notes
 - Updates the floating major tag for the released version -- `v3` for a 3.x release, `v4` for a 4.x one, creating it if it does not exist yet
 
+#### Release App setup
+
+The release PR's required checks (`ash / SAST, SCA, and IaC Scan`, `Validate PR title`, `required-checks`) run on `pull_request`. When the PR is opened with the workflow's `GITHUB_TOKEN`, GitHub creates those runs in an approval-required state, and nothing starts until a maintainer with write access selects **Approve workflows to run** in the PR's merge box. The release PR says so in its description when that happens. To have the checks start on their own, the workflow opens the PR with a GitHub App token instead, which needs this one-time setup by a repository admin:
+
+1. Create a GitHub App owned by the organization. It needs no webhook and no callback URL.
+2. Repository permissions: **Pull requests: Read and write** and **Contents: Read-only**. Metadata: Read-only is added automatically. Grant nothing else. The App must not have Contents write: the branch push stays on `GITHUB_TOKEN`, and the workflow requests exactly these two permissions when it mints the token, so the mint step fails if either is missing.
+3. Install the App on this repository only.
+4. Generate a private key for the App, and copy the App's **Client ID** from its settings page (the Client ID, not the numeric App ID).
+5. Add two repository secrets under **Settings > Secrets and variables > Actions**:
+   - `RELEASE_APP_CLIENT_ID`: the Client ID
+   - `RELEASE_APP_PRIVATE_KEY`: the full contents of the `.pem` file
+
+No repository variables are needed.
+
+The workflow only uses the App when both secrets are set. With neither or only one, it falls back to `GITHUB_TOKEN`, logs a warning, and the PR waits for approval as described above. Once both are set, a misconfigured App (not installed, wrong permissions, bad key) fails the release job at the token step, before any version bump or push, rather than silently falling back.
+
+To confirm the setup, run the release workflow and check that the **Mint a GitHub App token** step ran, that the PR author is the App rather than `github-actions`, and that the PR's checks start without an approval banner.
+
 ### Manual Version Bumping
 
 ```bash
