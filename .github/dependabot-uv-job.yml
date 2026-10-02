@@ -1,0 +1,91 @@
+# Dependabot job definition for the root uv project, run by
+# .github/workflows/ash-uv-dependency-updates.yml through the dependabot CLI.
+#
+# This exists because of one field. GitHub-hosted Dependabot reads `versioning-strategy` from
+# .github/dependabot.yml and then drops it when it builds a uv job: the job definition it hands
+# the updater carries `"requirements-update-strategy": null` (dependabot-core#16112). With no
+# strategy, the updater guesses one, and for this project it guesses `bump_versions`, which
+# raises a floor in pyproject.toml on every release even when the old floor already allowed it.
+# The CLI passes this file to the same updater image unchanged, so the strategy below arrives.
+#
+# `bump_versions_if_necessary` leaves a requirement alone when the new release already
+# satisfies it, so the only change is uv.lock. A release outside the declared range still
+# produces a pull request, which widens the upper bound and keeps the floor:
+# `>=0.53.0,<0.54` becomes `>=0.53.0,<0.55`. That is what keeps advisory floors such as
+# `pyjwt>=2.14` and `GitPython>=3.1.62` in place, and they have to stay in
+# [project.dependencies] because `pip install git+https://...` reads nothing else.
+#
+# Everything else here mirrors the root uv entry in .github/dependabot.yml: the groups (in the
+# same order, since a dependency lands in the first group it matches), the three existing CDK
+# ignores, the cooldown and the commit prefix. tests/unit/test_dependabot_uv_job.py fails if
+# the two drift apart. That entry has `open-pull-requests-limit: 0`, so it no longer opens
+# version updates of its own and keeps opening security updates.
+#
+# Security updates are not handled here. They need the repository's Dependabot alerts, which
+# the workflow token cannot read, and GitHub-hosted Dependabot still opens them.
+job:
+  package-manager: uv
+  source:
+    provider: github
+    repo: awslabs/automated-security-helper
+    directory: /
+  requirements-update-strategy: bump_versions_if_necessary
+  allowed-updates:
+    - dependency-type: direct
+      update-type: all
+  cooldown:
+    default-days: 7
+    semver-major-days: 7
+  commit-message-options:
+    prefix: build
+  ignore-conditions:
+    - dependency-name: "aws-cdk-lib*"
+      source: .github/dependabot.yml
+      update-types:
+        - "version-update:semver-minor"
+        - "version-update:semver-patch"
+    - dependency-name: "cdk-nag*"
+      source: .github/dependabot.yml
+      update-types:
+        - "version-update:semver-minor"
+        - "version-update:semver-patch"
+    - dependency-name: "constructs*"
+      source: .github/dependabot.yml
+      update-types:
+        - "version-update:semver-minor"
+        - "version-update:semver-patch"
+  dependency-groups:
+    - name: scanner-major-upgrade
+      rules:
+        patterns:
+          - "cdk-nag*"
+          - "aws-cdk-lib*"
+          - "constructs*"
+          - "detect-secrets*"
+          - "cfn-flip*"
+        update-types:
+          - "major"
+    - name: scanner-minor
+      rules:
+        patterns:
+          - "cdk-nag*"
+          - "aws-cdk-lib*"
+          - "constructs*"
+          - "detect-secrets*"
+          - "cfn-flip*"
+        update-types:
+          - "minor"
+          - "patch"
+    - name: engine-major-upgrade
+      rules:
+        patterns:
+          - "*"
+        update-types:
+          - "major"
+    - name: engine-minor
+      rules:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"

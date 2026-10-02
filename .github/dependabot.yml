@@ -138,13 +138,28 @@ updates:
     # pyproject.toml alone -- so a strategy that only moves the locked version would have
     # had nothing to move, and updates would have stopped instead of flowing.
     versioning-strategy: increase-if-necessary
-    # 5 is the default open-pull-requests-limit, it counts version updates only, and on
-    # reaching it Dependabot stops raising them -- silently, since nothing reports a
-    # suppressed update. Four were open at once on 2026-09-28, so the cap was one PR away
-    # from holding back every subsequent bump in this ecosystem. Set explicitly so the
-    # number is a decision rather than a default nobody chose. Security updates are exempt
-    # from the limit and do not count toward it, so this does not gate advisories.
-    open-pull-requests-limit: 10
+    # 0 turns off VERSION updates for this entry and nothing else. Security updates are not
+    # subject to this limit, so advisories for the root project keep arriving from here.
+    #
+    # Version updates for the root project come from .github/workflows/ash-uv-dependency-updates.yml
+    # instead. GitHub drops `versioning-strategy` before it builds a uv job -- the job
+    # definition carries `"requirements-update-strategy": null`, dependabot-core#16112 -- so
+    # the updater falls back to `bump_versions` for this project and raises a floor on every
+    # release, in range or not. That workflow runs the same updater with a job definition
+    # that does set `bump_versions_if_necessary`, from .github/dependabot-uv-job.yml, which
+    # mirrors the groups, ignores and cooldown below and is held to them by
+    # tests/unit/test_dependabot_uv_job.py.
+    #
+    # Both cannot run. With version updates on here as well, every release would arrive
+    # twice, once raising the floor and once not.
+    #
+    # Security updates from this entry still use `bump_versions`, so the vulnerable package's
+    # floor is raised to the fixed release. That is how the advisory floors in pyproject.toml
+    # are set by hand anyway (the GitPython and pyjwt entries).
+    #
+    # Undo this, and delete that workflow, once #16112 is fixed and a uv job here carries
+    # the strategy. The previous value was 10.
+    open-pull-requests-limit: 0
     # aws-cdk-lib publishes a minor most days -- 2.269.0 to 2.270.0 was one of them, and it
     # arrived as a pull request of its own because it was the only member of scanner-minor
     # that run. CDK v2 minors are additive, so the ones worth a human are the majors, which

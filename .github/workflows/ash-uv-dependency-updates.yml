@@ -1,0 +1,179 @@
+name: ASH - uv Dependency Updates
+# Opens the root uv project's version-update pull requests, in place of GitHub-hosted
+# Dependabot, which has `open-pull-requests-limit: 0` for that entry.
+#
+# WHY THIS WORKFLOW EXISTS
+#
+# GitHub drops `versioning-strategy` when it builds a uv job (dependabot-core#16112): the job
+# definition says `"requirements-update-strategy": null`, the updater guesses `bump_versions`
+# for this project, and every release raises a floor in pyproject.toml whether or not the old
+# floor already allowed it (PR #702 did it to five packages at once). This runs the same
+# updater image through the dependabot CLI with .github/dependabot-uv-job.yml, which sets
+# `bump_versions_if_necessary`. Measured on this repository with the pinned image and this
+# job file: six in-range updates (uv, boto3, uvicorn, ruff, types-boto3, hatchling in both
+# [dependency-groups] and [build-system]) changed uv.lock and nothing else; with uvicorn
+# narrowed to `>=0.53.0,<0.54`, the 0.54.0 release widened it to `>=0.53.0,<0.55` and kept the
+# floor. Without the cooldown, an out-of-range pytest-mock in the dev group widened the same way.
+#
+# Delete this workflow, and restore the limit in .github/dependabot.yml, once a uv job there
+# carries the strategy.
+#
+# WHY TWO JOBS
+#
+# `update` runs the updater, which runs `uv lock` and so can execute a dependency's build
+# backend. It gets a read-only token and nothing else. `publish` holds the credential that
+# can push and open pull requests, and runs no code but the stdlib script in this repository.
+# The proposals cross between them as an artifact.
+#
+# WHY A GITHUB APP TOKEN AND NOT GITHUB_TOKEN
+#
+# A pull request opened, or a branch pushed, with GITHUB_TOKEN starts no workflow run. The
+# ruleset on main requires "ash / SAST, SCA, and IaC Scan", "Validate PR title" and
+# "required-checks", and "Validate PR title" runs on `pull_request` only, so a
+# workflow_dispatch afterwards cannot stand in for it. An App installation token is a
+# different actor, so its pull requests trigger CI like anyone else's.
+#
+# The App needs Contents: read and write and Pull requests: read and write on this repository,
+# and nothing else. Its client ID goes in the DEPENDABOT_UV_APP_CLIENT_ID variable and its
+# private key in the DEPENDABOT_UV_APP_PRIVATE_KEY secret. Until both exist, `publish` fails
+# with an error naming them, so a missing credential is a red run, not a quiet one.
+#
+# WHAT IS PINNED, AND THE COST
+#
+# The CLI tarball by sha256, and the updater and proxy images by digest, for the same reason
+# every action here is pinned to a sha: these run with this repository's token. Nothing bumps
+# them automatically, so updater fixes arrive only when someone moves the three values below
+# together. The updater image is dependabot-core 0.398.0.
+
+on:
+  schedule:
+    # Daily, matching the `interval: daily` of the entry this replaces.
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  # Two runs at once would each open the same pull requests.
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+env:
+  DEPENDABOT_CLI_VERSION: v1.93.0
+  # The release's published checksum is md5 only, so this sha256 was computed from the v1.93.0
+  # linux-amd64 tarball, whose md5 matched the release's .md5 file.
+  DEPENDABOT_CLI_SHA256: 3c89e7a3d04066115a8d17574267ae288cb67f9dcb7096f9c7ce96ee180849ba # pragma: allowlist secret
+  UPDATER_IMAGE: ghcr.io/dependabot/dependabot-updater-uv@sha256:e27055d031d00af40f45b943e92ebab741576bf7f2b6a159804a2b23cdaf7253
+  PROXY_IMAGE: ghcr.io/dependabot/proxy@sha256:4e2e238158e37c7698ffe4371f46ed9592c8c1a9384382114d55da49142bd8d8
+
+jobs:
+  update:
+    name: Compute uv updates
+    # A fork has neither the App nor any reason to propose updates to this repository. And
+    # only main: a dispatch from another branch would propose updates against that branch's
+    # job file but open them against main.
+    if: github.repository == 'awslabs/automated-security-helper' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+
+      - name: Install the dependabot CLI
+        run: |
+          set -euo pipefail
+          tarball="dependabot-${DEPENDABOT_CLI_VERSION}-linux-amd64.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/$tarball" \
+            "https://github.com/dependabot/cli/releases/download/${DEPENDABOT_CLI_VERSION}/${tarball}"
+          echo "${DEPENDABOT_CLI_SHA256}  $RUNNER_TEMP/$tarball" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$tarball" -C "$RUNNER_TEMP" dependabot
+          "$RUNNER_TEMP/dependabot" --version
+
+      - name: Pin the job to the commit this run checked out
+        # The CLI ignores --commit when given -f, so the commit goes into the file. extract and
+        # publish then refuse any proposal computed against a different one.
+        run: |
+          set -euo pipefail
+          uv run --no-project --with pyyaml==6.0.3 python .github/scripts/dependabot_uv_prs.py \
+            job .github/dependabot-uv-job.yml "$RUNNER_TEMP/dependabot-job.yml" --commit "$GITHUB_SHA"
+
+      - name: Run the updater
+        env:
+          # Read-only. The CLI hands it to the proxy, not to the updater container, and uses it
+          # to fetch the repository and release notes without the anonymous API rate limit.
+          LOCAL_GITHUB_ACCESS_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/dependabot" update \
+            -f "$RUNNER_TEMP/dependabot-job.yml" \
+            --updater-image "$UPDATER_IMAGE" \
+            --proxy-image "$PROXY_IMAGE" \
+            --timeout 45m \
+            -o "$RUNNER_TEMP/dependabot-output.yml"
+
+      - name: Validate the output and extract the proposed pull requests
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/proposals"
+          uv run --no-project --with pyyaml==6.0.3 python .github/scripts/dependabot_uv_prs.py \
+            extract "$RUNNER_TEMP/dependabot-output.yml" "$RUNNER_TEMP/proposals/proposals.json" \
+            --expect-base "$GITHUB_SHA" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dependabot-uv-proposals
+          path: ${{ runner.temp }}/proposals/proposals.json
+          retention-days: 1
+          if-no-files-found: error
+
+  publish:
+    name: Open uv update pull requests
+    needs: update
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      # The default branch, never a pull request's head: the only input from the update job
+      # is the artifact, and the script refuses any file but pyproject.toml and uv.lock.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts/dependabot_uv_prs.py
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dependabot-uv-proposals
+          path: ${{ runner.temp }}/proposals
+
+      - name: Mint a GitHub App installation token
+        id: app-token
+        if: vars.DEPENDABOT_UV_APP_CLIENT_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.DEPENDABOT_UV_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DEPENDABOT_UV_APP_PRIVATE_KEY }}
+          # This repository only, named outright rather than read from the event payload.
+          repositories: automated-security-helper
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Open, keep or close pull requests
+        env:
+          # Empty when the App is not configured; the script then fails with an error that
+          # names the variable and secret to set.
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/dependabot_uv_prs.py publish \
+            "$RUNNER_TEMP/proposals/proposals.json" --base main --expect-base "$GITHUB_SHA" \
+            | tee -a "$GITHUB_STEP_SUMMARY"

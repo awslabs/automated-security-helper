@@ -236,6 +236,20 @@ ALLOWLIST: tuple[Entry, ...] = (
         ),
     ),
     Entry(
+        file=".github/workflows/ash-uv-dependency-updates.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes="name=dependabot-uv-proposals path=${{ runner.temp }}/proposals/proposals.json",
+        reason=(
+            "The pull requests the dependabot updater proposes for the root uv project: "
+            "titles, bodies, and new copies of pyproject.toml and uv.lock. All of it is "
+            "this public repository's own manifests plus public PyPI metadata, and the "
+            "same bytes appear in the pull requests it becomes. It is an artifact only to "
+            "carry them from the job that runs the updater to the job that holds the "
+            "write credential, so the two never share a runner. Kept for one day."
+        ),
+    ),
+    Entry(
         file=".github/actions/run-scan-test/action.yml",
         kind=KIND_UPLOAD,
         action=_UPLOAD,
