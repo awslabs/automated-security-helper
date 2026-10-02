@@ -205,6 +205,7 @@ class UVToolMixin:
             }
 
             self._process_command_response(response)
+            self._explain_offline_resolve_failure(response, results_dir)
 
             self._plugin_log(
                 f"UV tool execution completed for {self.command} with exit code {response['returncode']}",
@@ -232,6 +233,41 @@ class UVToolMixin:
             )
             ASH_LOGGER.debug(f"UV tool execution error details: {e}", exc_info=True)
             return None
+
+    def _explain_offline_resolve_failure(
+        self, response: Dict[str, Any], results_dir: Optional[Path]
+    ) -> None:
+        """Put the cause first when ``uv tool run --offline`` could not resolve.
+
+        uv exits 1 for a resolve failure, which bandit also uses for "found
+        issues", so the scan carries on, finds no results file, and used to
+        report ``[Errno 2] No such file or directory`` followed by uv's resolver
+        text (#520). This prepends a message naming the requirement and what to
+        do. It changes no control flow; ``_select_tool_execution`` is where a
+        usable binary on PATH is chosen instead.
+        """
+        if not self._is_offline_mode() or response.get("returncode", 0) == 0:
+            return
+        stderr = response.get("stderr") or ""
+        if not stderr and results_dir is not None:
+            log_path = Path(results_dir) / f"{self.__class__.__name__}.stderr.log"
+            try:
+                stderr = log_path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                return
+        if "No solution found when resolving" not in stderr:
+            return
+        requirement = self._uv_from_spec() or self.command
+        message = (
+            f"Offline mode: uv could not resolve {requirement!r} from its local "
+            f"cache, so {self.command} never ran. uv only finds tools installed "
+            f"under its current tool directory (`uv tool dir`); a different $HOME "
+            f"or UV_TOOL_DIR than at install time hides them. Install "
+            f"{requirement!r} where uv can see it, or put a {self.command} that "
+            f"satisfies it on PATH. uv said: {stderr.strip()[:800]}"
+        )
+        self.errors.insert(0, message)
+        self._plugin_log(message, level=logging.ERROR)
 
     # ------------------------------------------------------------------
     # Availability / validation
@@ -364,6 +400,118 @@ class UVToolMixin:
             )
 
         return validation_result
+
+    def _select_tool_execution(self, installation_info: Dict[str, Any]) -> bool:
+        """Decide how an available tool runs, and whether it can run at all.
+
+        Called by the uv-backed scanners once ``_get_tool_installation_info``
+        reports the tool available. Returns the dependency verdict and sets
+        ``use_uv_tool`` and ``dependencies_satisfied`` to match.
+
+        Before this existed, the "pre_installed" branch logged "Using
+        pre-installed <tool> at <path>" and left ``use_uv_tool`` True, so the
+        scan still went through ``uv tool run --from <requirement>``. Offline,
+        that resolve has only uv's cache to work from, and a cache that does not
+        hold the tool fails the scan with uv's resolver output as the error
+        (#520), while the binary on PATH goes unused.
+
+        Rules, in order:
+
+        * Online with the tool visible to ``uv tool list``: unchanged, run via uv.
+        * Otherwise, if an executable on PATH is verified to satisfy the scan's
+          requirement (extras and version constraint included, see
+          ``utils/pre_installed_tool.py``), run it directly. Offline this
+          applies to a uv-installed tool too: ``uv tool run --offline`` can only
+          reuse an environment that is already there, and a configured
+          ``tool_version`` the installed tool does not match fails the same way.
+        * A tool uv cannot see, verified NOT to satisfy it: offline, the
+          dependency is unsatisfied and ``dependency_unavailable_reason`` says
+          what is missing. Online, keep uv, which can resolve the missing pieces.
+        * Anything else (not verifiable, or a uv-visible tool whose PATH
+          executable does not verify): keep uv, the previous behavior, rather
+          than guess. If that resolve then fails offline,
+          ``_explain_offline_resolve_failure`` names the cause.
+        """
+        from automated_security_helper.utils.pre_installed_tool import (
+            build_requirement,
+            verify_pre_installed_tool,
+        )
+        from automated_security_helper.utils.uv_tool_runner import (
+            find_executable,
+            find_uv_or_none,
+        )
+
+        source = installation_info.get("preferred_source")
+        offline = self._is_offline_mode()
+
+        if source == "uv" and not offline:
+            self._plugin_log(
+                f"{self.command} already installed via UV tool", level=logging.INFO
+            )
+            self.dependencies_satisfied = True
+            return True
+
+        executable = installation_info.get("pre_installed_path") or find_executable(
+            self.command
+        )
+        if executable is None:
+            # Only reachable for source == "uv" offline with nothing on PATH.
+            self._plugin_log(
+                f"{self.command} already installed via UV tool", level=logging.INFO
+            )
+            self.dependencies_satisfied = True
+            return True
+
+        extras = self._get_tool_package_extras()
+        constraint = self._get_tool_version_constraint()
+        requirement = build_requirement(self.command, extras, constraint)
+        verdict = verify_pre_installed_tool(
+            executable,
+            self.command,
+            extras,
+            constraint,
+            uv_executable=find_uv_or_none(),
+        )
+
+        if verdict.status == "satisfied":
+            self._plugin_log(
+                f"Using pre-installed {self.command} at {executable} directly; "
+                f"it satisfies {requirement!r}",
+                level=logging.INFO,
+            )
+            self.use_uv_tool = False
+            self.dependencies_satisfied = True
+            return True
+
+        # Only for a tool uv cannot see. When uv can, the executable on PATH may
+        # be a different install than uv's, so failing it says nothing about
+        # whether `uv tool run --offline` will work.
+        if verdict.status == "unsatisfied" and offline and source == "pre_installed":
+            reason = (
+                f"Offline mode: {self.command} at {executable} cannot be used: "
+                f"{verdict.detail}. uv cannot fetch what is missing while offline. "
+                f"Install it before going offline, e.g. `uv tool install "
+                f"'{requirement}'`, or rebuild the image with `ash build-image --offline`."
+            )
+            self.dependency_unavailable_reason = reason
+            self._plugin_log(reason, level=logging.ERROR)
+            self.dependencies_satisfied = False
+            return False
+
+        if source == "uv":
+            self._plugin_log(
+                f"{self.command} already installed via UV tool", level=logging.INFO
+            )
+        else:
+            self._plugin_log(
+                f"Using pre-installed {self.command} at {executable} through uv, "
+                f"not directly: {verdict.detail}",
+                level=logging.WARNING
+                if verdict.status == "unsatisfied"
+                else logging.INFO,
+            )
+        self.dependencies_satisfied = True
+        return True
 
     # ------------------------------------------------------------------
     # Installation setup

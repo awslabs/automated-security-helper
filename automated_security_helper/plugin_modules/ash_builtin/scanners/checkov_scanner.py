@@ -203,16 +203,9 @@ class CheckovScanner(ScannerPluginBase[CheckovScannerConfig]):
             installation_info = self._get_tool_installation_info()
 
             if installation_info.get("available"):
-                # Tool is available either via UV or pre-installed
-                source = installation_info.get("preferred_source", "unknown")
-                if source == "uv":
-                    self._plugin_log("Checkov already installed via UV tool")
-                elif source == "pre_installed":
-                    self._plugin_log(
-                        f"Using pre-installed checkov at {installation_info.get('pre_installed_path')}"
-                    )
-                self.dependencies_satisfied = True
-                return True
+                # Runs a verified binary on PATH directly instead of re-resolving
+                # through uv, and fails offline with the missing extras named (#520).
+                return self._select_tool_execution(installation_info)
 
             # Tool not available, attempt installation
             self._plugin_log(
