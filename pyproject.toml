@@ -7,7 +7,7 @@ readme = "README.md"
 license = "Apache-2.0"
 classifiers = [ "Development Status :: 5 - Production/Stable", "Intended Audience :: Developers", "License :: OSI Approved :: Apache Software License", "Programming Language :: Python :: 3", "Programming Language :: Python :: 3.10", "Programming Language :: Python :: 3.11", "Programming Language :: Python :: 3.12", "Programming Language :: Python :: 3.13", "Programming Language :: Python :: 3.14",]
 dependencies = [
- "uv>=0.12.18,<0.13",
+ "uv>=0.12.19,<0.13",
  "requests>=2.34,<3.0.0",
  "attrs>=26.1,<27.0.0",
  "jsonschema>=4.26,<5.0.0",
@@ -33,7 +33,7 @@ dependencies = [
  "junitparser>=5.0,<6",
  "textual>=8.2,<9",
  "detect-secrets>=1.5,<2",
- "boto3>=1.43.100,<1.44",
+ "boto3>=1.43.102,<1.44",
  "cfn-flip>=1.3,<2",
  "mcp>=2.2.0,<3",
  "toml>=0.10,<1.0.0",
@@ -85,7 +85,7 @@ email = "ntheule@amazon.com"
 
 [dependency-groups]
 dev = [
- "ruff>=0.16.8,<1.0.0",
+ "ruff>=0.16.9,<1.0.0",
  "pytest>=9.1,<10.0.0",
  "pytest-cov>=7.1,<8.0.0",
  "pytest-mock>=3.15,<4.0.0",
@@ -122,7 +122,7 @@ dev = [
  # satellite to move a minor ahead of the parent. For type stubs that is a staleness question
  # rather than a runtime one, and it avoids having to widen twelve lines in lockstep every time
  # the ecosystem's minor rolls over.
- "types-boto3>=1.43.100,<2.0.0",
+ "types-boto3>=1.43.102,<2.0.0",
  "types-boto3-cloudformation>=1.43.62,<2.0.0",
  "types-boto3-dynamodb>=1.43.64,<2.0.0",
  "types-boto3-ec2>=1.43.100,<2.0.0",
@@ -138,7 +138,7 @@ dev = [
  "mkdocs-mermaid2-plugin>=1.2,<2.0.0",
  "pytest-xdist>=3.8,<4.0.0",
  "toml>=0.10",
- "hatchling>=1.32",
+ "hatchling>=1.32.4",
  "mcp>=2.2.0",
  "commitizen>=4.19.0",
  # A prerequisite, not a convenience. pre-commit builds every `language: python` hook
@@ -173,7 +173,7 @@ dev = [
 # and the result, hatchling followed by a bare `*`, is not valid PEP 508, so uv rejects it.
 # Identical specifiers are rewritten together and the fallback has nothing to clobber.
 # Do not quote the package name in this comment: the updater's search does not skip comments.
-requires = [ "hatchling>=1.32",]
+requires = [ "hatchling>=1.32.4",]
 build-backend = "hatchling.build"
 
 [project.urls]
