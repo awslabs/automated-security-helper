@@ -68,7 +68,7 @@ Every later call in the session that does not name a config of its own runs unde
 ```python
 await mcp__ash__select_profile(profile_name="strict")
 # -> {"success": True, "mode": "static", "config_path": ".../config/ash.yaml", ...}
-await mcp__ash__run_ash_scan()   # runs under "strict"
+await mcp__ash__run_ash_scan()  # runs under "strict"
 ```
 
 The returned `config_path` names a file the server materialized inside your session's own workspace. That is how the binding reaches the scan: the scan entry point takes a config path rather than a config object, so the resolved config is written out and the path passed down. The file is inside the session sandbox, so this session may read it and another session may not. `clear_source` removes it along with the rest of the session workspace, after which calls fall back to ordinary config discovery.
@@ -135,7 +135,7 @@ sha = hashlib.sha256(zip_bytes).hexdigest()
 
 # Send in 1 MiB chunks
 chunk_size = 1024 * 1024
-chunks = [zip_bytes[i:i+chunk_size] for i in range(0, len(zip_bytes), chunk_size)]
+chunks = [zip_bytes[i : i + chunk_size] for i in range(0, len(zip_bytes), chunk_size)]
 for seq, chunk in enumerate(chunks):
     await mcp__ash__set_source_zip_chunk(
         upload_id=upload_id,

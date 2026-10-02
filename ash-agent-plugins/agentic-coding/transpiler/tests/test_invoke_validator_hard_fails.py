@@ -11,6 +11,7 @@ This test confirms that _invoke_validator hard-fails when a real CLI
 returns a real failure, while still soft-skipping when the binary is
 absent entirely (env-quirk vs artifact bug — opposite policy).
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -26,7 +27,9 @@ def test_validator_hard_fails_on_real_failure(tmp_path, monkeypatch):
 
     # Stub `which` to make it look like the CLI is installed.
     fake_bin = tmp_path / "fake-validator"
-    fake_bin.write_text("#!/bin/sh\necho 'Error: no such file or directory: /missing/plugin.json' >&2\nexit 1\n")
+    fake_bin.write_text(
+        "#!/bin/sh\necho 'Error: no such file or directory: /missing/plugin.json' >&2\nexit 1\n"
+    )
     fake_bin.chmod(0o755)
     monkeypatch.setenv("PATH", str(tmp_path) + ":" + str(Path.cwd()))
 
@@ -47,7 +50,9 @@ def test_validator_soft_skips_when_cli_absent(monkeypatch, tmp_path):
 
     # Empty PATH → which returns None for every binary.
     monkeypatch.setenv("PATH", str(tmp_path))
-    result = BaseBackend._invoke_validator(["definitely-not-a-real-cli-12345", "validate", "/x"])
+    result = BaseBackend._invoke_validator(
+        ["definitely-not-a-real-cli-12345", "validate", "/x"]
+    )
     assert result["ok"] is True, f"missing CLI should soft-skip (got: {result})"
     assert result.get("skipped") is True, (
         f"missing CLI must set skipped=True for the smoke-test summary "

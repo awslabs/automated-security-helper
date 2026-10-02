@@ -1009,9 +1009,7 @@ class TestScanCommand:
         """
         command = gate.build_scan_command(tmp_path / "w.code-workspace", tmp_path / "o")
         selected = [
-            command[i + 1]
-            for i, arg in enumerate(command[:-1])
-            if arg == "--scanners"
+            command[i + 1] for i, arg in enumerate(command[:-1]) if arg == "--scanners"
         ]
         assert set(selected) == {"bandit", "checkov"}
         assert selected == list(gate.GATE_SCANNERS)
@@ -1103,9 +1101,7 @@ class TestOneDeadScannerIsReportedAsOneProblem:
         # partition of the full list -- nothing invented, nothing dropped.
         assert set(outcome.root_violations) <= set(outcome.violations)
         assert len(outcome.consequential_violations) == len(outcome.violations) - 1
-        assert (
-            outcome.root_violations[0] not in outcome.consequential_violations
-        )
+        assert outcome.root_violations[0] not in outcome.consequential_violations
 
     def test_the_downstream_marker_failures_are_not_root_causes(
         self, healthy, output_dir
@@ -1238,8 +1234,6 @@ class TestScannerErrorEvidenceIsSurfaced:
     def test_a_log_within_budget_is_untouched(self):
         body = self.TRACEBACK
         assert (
-            gate._clamp_keeping_both_ends(
-                body, gate.SCANNER_LOG_PRINT_BUDGET_BYTES
-            )
+            gate._clamp_keeping_both_ends(body, gate.SCANNER_LOG_PRINT_BUDGET_BYTES)
             == body
         )

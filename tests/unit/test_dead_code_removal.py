@@ -6,7 +6,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_uv_tool_installation_module_removed():
-    dead_file = REPO_ROOT / "automated_security_helper" / "models" / "uv_tool_installation.py"
+    dead_file = (
+        REPO_ROOT / "automated_security_helper" / "models" / "uv_tool_installation.py"
+    )
     assert not dead_file.exists(), f"{dead_file} should have been removed"
 
 

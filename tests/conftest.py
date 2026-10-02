@@ -691,10 +691,25 @@ def no_cdk_kernel(monkeypatch):
     class _Construct:
         pass
 
+    class _DefaultStackSynthesizer:
+        """``WrapperStack`` passes one to ``Stack.__init__``.
+
+        Present because the wrapper imports the name at the top of its import block,
+        alongside App, Stack and Validations, so its absence is an ImportError before
+        any of these doubles gets a chance to matter. It records nothing: the
+        ``generate_bootstrap_version_rule=False`` argument is about what the REAL
+        synthesizer emits into a synthesized template, which only the behaviour
+        doubles in test_cdk_nag_wrapper_behavior.py reach.
+        """
+
+        def __init__(self, *args, **kwargs):
+            pass
+
     aws_cdk = types.ModuleType("aws_cdk")
     aws_cdk.App = _App
     aws_cdk.Stack = _Stack
     aws_cdk.Validations = _Validations
+    aws_cdk.DefaultStackSynthesizer = _DefaultStackSynthesizer
 
     cfn_include = types.ModuleType("aws_cdk.cloudformation_include")
     cfn_include.CfnInclude = _CfnInclude

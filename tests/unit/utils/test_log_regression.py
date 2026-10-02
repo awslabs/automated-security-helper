@@ -22,9 +22,7 @@ class TestBug165AddLoggingLevelReimport:
         try:
             addLoggingLevel("VERBOSE", 15)
         except AttributeError:
-            pytest.fail(
-                "addLoggingLevel raised AttributeError on duplicate level name"
-            )
+            pytest.fail("addLoggingLevel raised AttributeError on duplicate level name")
 
     def test_add_logging_level_new_level_works(self):
         from automated_security_helper.utils.log import addLoggingLevel

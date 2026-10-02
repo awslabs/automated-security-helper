@@ -51,7 +51,7 @@ UNKNOWN_SEVERITY = "unknown"
 
 def empty_severity_counts() -> Dict[str, int]:
     """A zeroed severity breakdown, including the catch-all bucket."""
-    counts = {bucket: 0 for bucket in SEVERITY_BUCKETS}
+    counts = dict.fromkeys(SEVERITY_BUCKETS, 0)
     counts[UNKNOWN_SEVERITY] = 0
     return counts
 
@@ -64,6 +64,46 @@ class MCScannerStatus(Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     SKIPPED = "skipped"
+
+
+#: ``core.enums.ScannerStatus`` value -> the ``MCScannerStatus`` it means here.
+#: Keyed on the string rather than on the enum member, matching
+#: :func:`summarize_scanner_statuses`, which reads the same field out of the same
+#: document and also compares strings -- the value arrives from JSON, so it is a
+#: string by the time either function sees it.
+_SCANNER_STATUS_MAP = {
+    "PASSED": MCScannerStatus.COMPLETED,
+    "FAILED": MCScannerStatus.FAILED,
+    "ERROR": MCScannerStatus.FAILED,
+    "MISSING": MCScannerStatus.SKIPPED,
+    "SKIPPED": MCScannerStatus.SKIPPED,
+}
+
+
+def scanner_status_from_results(status: Any) -> MCScannerStatus:
+    """Map a ``scanner_results`` status onto the progress view's status.
+
+    ``create_scan_progress_from_files`` used to pass the literal
+    ``MCScannerStatus.COMPLETED`` for every entry in ``scanner_results`` and
+    never read the status the document recorded, so an aggregated file reporting
+    bandit PASSED, semgrep MISSING and grype ERROR came back as
+    ``completed_scanners`` 3 of 3 with all three statuses ``'completed'``. A
+    scanner that never ran read as one that ran and found nothing, which for a
+    security tool inverts the answer. That document is the fixture in
+    ``tests/unit/core/resource_management/test_mcp_success_contract.py``'s
+    ``test_completed_scanners_counts_only_the_ones_that_ran_clean``, which now
+    asserts 1 of 3.
+
+    An unrecognized value maps to FAILED rather than to COMPLETED or SKIPPED.
+    ``ScannerStatus`` is a closed set of five members, all of them mapped above,
+    so anything else means the document disagrees with the code that wrote it.
+    FAILED is the loudest of the available outcomes and the only one that both
+    keeps the scanner out of ``completed_scanners`` and surfaces as a problem
+    rather than as a routine skip.
+    """
+    if isinstance(status, str):
+        return _SCANNER_STATUS_MAP.get(status.upper(), MCScannerStatus.FAILED)
+    return MCScannerStatus.FAILED
 
 
 class ScannerProgress:
@@ -202,8 +242,9 @@ class ScanProgress:
         self.duration: Optional[float] = None
         self.total_findings: int = 0
         self.severity_counts: Dict[str, int] = empty_severity_counts()
-        # Why the scan is "failed" when the aggregated results file could not be
-        # read as results. None otherwise.
+        # Why the failure happened, for the caller that has to act on it. A
+        # failed status with no reason is what let a truncated results file be
+        # reported to an operator as a finished scan with nothing to report.
         self.error_message: Optional[str] = None
         # The aggregated file exists but is not the final document yet; see
         # create_scan_progress_from_files. The caller decides what that means,
@@ -258,10 +299,19 @@ class ScanProgress:
         # Ensure duration is at least a small positive value for cross-platform compatibility
         self.duration = max(duration, 0.001)
 
-    def mark_failed(self) -> None:
-        """Mark the scan as failed and calculate duration."""
+    def mark_failed(self, error_message: Optional[str] = None) -> None:
+        """Mark the scan as failed and calculate duration.
+
+        Args:
+            error_message: Why the scan failed. Optional so existing callers
+                that have nothing to add keep working, but supply it wherever
+                one is available: this is the only channel by which a parse
+                failure reaches the operator polling for progress.
+        """
         self.status = "failed"
         self.end_time = datetime.now()
+        if error_message is not None:
+            self.error_message = error_message
         duration = (self.end_time - self.start_time).total_seconds()
         # Ensure duration is at least a small positive value for cross-platform compatibility
         self.duration = max(duration, 0.001)
@@ -664,6 +714,78 @@ def parse_aggregated_results(
     return data
 
 
+def coverage_has_gap(coverage: Optional[Dict[str, Any]]) -> bool:
+    """Whether a coverage payload (``ScanIncompleteness.to_payload()``) names a gap."""
+    if not coverage:
+        return False
+    return bool(
+        coverage.get("incomplete_scanners")
+        or coverage.get("no_scanner_ran")
+        or coverage.get("incomplete_converters")
+        or coverage.get("unevaluated_rules")
+        or coverage.get("stale_content_databases")
+    )
+
+
+def assess_coverage(results: AshAggregatedResults) -> Tuple[bool, Dict[str, Any]]:
+    """``(gate_fires, coverage)`` for a scan whose results are in hand.
+
+    ``gate_fires`` is whether ``_compute_exit_code`` would exit 1 on these results
+    for coverage, and it is what separates ``incomplete`` from ``completed``. It
+    resolves the gate the way an MCP scan does: no command-line flag, because the
+    MCP runner passes none, so the config the scan ran under (``results.ash_config``)
+    decides, and the gate is on when that is absent.
+
+    ``coverage`` is the facts whatever the gate says, which matches what the
+    workspace layer's ``incomplete_scanners`` does. An operator who turned the
+    gate off has accepted the gap. They have not asked to be told there was none,
+    so a ``completed`` scan still names the scanners that did not run and reports
+    ``coverage_complete: false``.
+
+    Both come from ``scan_incompleteness``, the object ``_compute_exit_code``
+    reaches its verdict from. Nothing here re-derives a coverage rule.
+    """
+    from types import SimpleNamespace
+
+    from automated_security_helper.interactions.run_ash_scan import (
+        _resolve_fail_on_incomplete_scanners,
+        scan_incompleteness,
+    )
+
+    gate = _resolve_fail_on_incomplete_scanners(
+        results, SimpleNamespace(fail_on_incomplete_scanners=None), None
+    )
+    gated = scan_incompleteness(results, gate=gate)
+    facts = scan_incompleteness(results, gate=True)
+    return bool(gated), facts.to_payload()
+
+
+def load_aggregated_results_model(
+    output_dir: Path,
+) -> Optional[AshAggregatedResults]:
+    """The aggregated results file as a model, or None if it cannot be one.
+
+    None covers a missing file, a file that does not parse, and a document that
+    fails ``validate_result_structure``. A caller that needs to tell those apart
+    goes through ``get_scan_results``. This one answers only "are there results
+    to assess".
+    """
+    try:
+        raw = parse_aggregated_results(output_dir)
+    except MCPResourceError:
+        return None
+    if not isinstance(raw, dict):
+        return None
+    is_valid, _ = validate_result_structure(raw)
+    if not is_valid:
+        return None
+    try:
+        return AshAggregatedResults(**raw)
+    except Exception as e:  # noqa: BLE001 -- "not assessable" is the answer
+        _logger.debug(f"Aggregated results in {output_dir} did not load: {e}")
+        return None
+
+
 class _UnusableResultsError(ValueError):
     """The aggregated results document is the wrong shape somewhere specific."""
 
@@ -722,11 +844,13 @@ def _add_aggregated_scanner_progress(
         # Filter findings for this scanner
         scanner_findings = [f for f in findings if f.get("scanner") == scanner_name]
 
-        # Create scanner progress for source target
+        # Create scanner progress for source target, carrying the status the
+        # document recorded rather than assuming success.
+        mapped_status = scanner_status_from_results(scanner_info.get("status"))
         source_progress = ScannerProgress(
             scanner_name=scanner_name,
             target_type="source",
-            status=MCScannerStatus.COMPLETED,
+            status=mapped_status,
             finding_count=scanner_info.get("finding_count", 0),
         )
 
@@ -736,7 +860,17 @@ def _add_aggregated_scanner_progress(
         else:
             source_progress.update_findings(scanner_findings)
 
-        source_progress.mark_completed()
+        # mark_* and not a bare status assignment: each one also sets end_time,
+        # and a skipped scanner correctly gets none. This used to be an
+        # unconditional mark_completed(), which re-asserted COMPLETED over
+        # whatever the constructor was given and so would have defeated the
+        # mapping above.
+        if mapped_status is MCScannerStatus.COMPLETED:
+            source_progress.mark_completed()
+        elif mapped_status is MCScannerStatus.FAILED:
+            source_progress.mark_failed()
+        else:
+            source_progress.mark_skipped()
 
         # Add to scan progress
         scan_progress.add_scanner_progress(source_progress)
@@ -807,9 +941,10 @@ def create_scan_progress_from_files(
         except MCPResourceError as e:
             # safe_read_json_file's message already names the file and the parse
             # error, e.g. "Invalid JSON format in file <path>: Expecting value: ...".
+            # It is carried on the object because without it the caller cannot
+            # tell a corrupt file from a scan that genuinely produced no scanners.
             _logger.error(f"Error parsing aggregated results: {str(e)}")
-            scan_progress.mark_failed()
-            scan_progress.error_message = str(e)
+            scan_progress.mark_failed(str(e))
             return scan_progress
 
         if not isinstance(results, dict):
@@ -1138,10 +1273,27 @@ def get_scan_results(
         # directory, which carries no record of the id it was registered under.
         result_scan_id = f"scan-{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
+        # "completed" or "incomplete", from the model just built, by the rule the
+        # exit code uses. This used to be the literal "completed", so a scan whose
+        # scanners were MISSING read here as a clean finished one. The findings
+        # below are returned either way: partial results are the point of an
+        # incomplete scan.
+        gate_fires, coverage = assess_coverage(results)
+
         return {
+            # Set explicitly, because "the call worked" is not inferable from the
+            # rest of this payload. Only create_error_response had ever set this
+            # key, always to False, so consumers testing `not
+            # results.get("success")` saw the same answer on both branches: the
+            # guard in cli/mcp_server.py::get_scan_results was an unconditional
+            # return and filter_level, scanners, severities and actionable_only
+            # were all inert on a real scan.
+            "success": True,
             "scan_id": result_scan_id,
-            "status": "completed",
+            "status": "incomplete" if gate_fires else "completed",
             "is_complete": True,
+            "coverage_complete": not coverage_has_gap(coverage),
+            **coverage,
             "actionable_findings": metadata.get("summary_stats", {}).get("actionable"),
             "summary_stats": metadata.get("summary_stats", {}),
             "scanner_reports": results_dict.get("additional_reports", {}),

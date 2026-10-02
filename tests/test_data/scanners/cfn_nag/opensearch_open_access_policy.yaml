@@ -1,0 +1,26 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Fixture for the two shipped resource-policy rules under
+  automated_security_helper/assets/appsec_cfn_rules. Both of them only execute on a
+  resource whose AccessPolicies property is set, and no fixture in this repository had
+  one, so the single path on which either rule can report a finding was never run --
+  which is how a call that raises ArgumentError on every invocation stayed undetected.
+
+  The access policy below is deliberately world-open in two separate ways, one per rule:
+  the principal is {AWS: "*"}, which StarResourceAccessPolicyRule reports, and the action
+  ends in ":*", which ResourcePolicyStarAccessVerbPolicyRule reports. Making it compliant
+  would leave both rules returning an empty id list and the fixture would prove nothing.
+
+Resources:
+  OpenSearchDomain:
+    Type: AWS::OpenSearchService::Domain
+    Properties:
+      DomainName: ash-fixture-open-domain
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "*"
+            Action: "es:*"
+            Resource: "*"

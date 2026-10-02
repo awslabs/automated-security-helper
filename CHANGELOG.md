@@ -48,6 +48,56 @@
 
 ### Behavior changes
 
+- **`fail_on_incomplete_scanners` now defaults to `true`.** A scan in which a
+  selected scanner did not complete — status `ERROR` (it ran and failed) or `MISSING`
+  (its dependencies were unavailable, so it never ran) — exits 1 without anyone
+  having to ask for it. It defaulted to `false`, on the argument that a host
+  legitimately lacking a scanner's tool should keep its exit code.
+
+  **A scan on a host missing some scanners' tools was exiting 0 and now exits 1.**
+  Nothing about your code changed. A scanner recorded `MISSING` reports no findings,
+  so with the gate off such a scan returned the exit code of a clean one — and unlike
+  a crash, that outcome is invisible to whoever reads the result. The environments
+  affected are the ones where it mattered most: a container or air-gapped host that
+  can run one scanner out of ten was reporting success for scanning almost nothing.
+
+  **What this does not reach.** The gate selects on scanner status, so it covers a
+  failure only once that failure has reached the status. A tool that exits non-zero
+  and writes an empty report is still graded `PASSED` from its zero findings, and
+  this default is the same exit code on, off or unset for that case — the empty
+  results branch in `base/scanner_plugin.py` returns a successful empty report
+  without consulting the exit code. That is a separate defect, not fixed here, and
+  turning this default on should not be read as having fixed it.
+
+  To keep the previous exit codes, set `fail_on_incomplete_scanners: false` or pass
+  `--no-fail-on-incomplete-scanners`. Prefer `--exclude-scanners` for a tool you do
+  not have: an excluded scanner is recorded `SKIPPED` rather than `MISSING`, does not
+  trip the gate, and the report then says which scanners were not part of the run,
+  where `false` returns to a 0 that carries no such information.
+
+  `SKIPPED` never trips the gate, which is what keeps sharding working — each shard
+  excludes the scanners its siblings own — and means narrowing a run with
+  `--scanners` or `--exclude-scanners` does not fail it.
+
+  **This default switches on several independent rules, not one.** Everything below
+  was already written and already gated behind this field; all of it was previously
+  unreachable without opting in, and all of it is now on the default path:
+
+  - a selected scanner at `ERROR` or `MISSING` fails the scan (`incomplete_scanners`);
+  - a scanner that ran but could not evaluate part of its input fails it, reported as
+    `PASSED (n of m targets unevaluated)` — the partial-coverage arm of the same
+    function, and the arm most likely to be new to an existing scan;
+  - a run in which *every* scanner was `SKIPPED` fails, rather than reporting a tree
+    it never examined as clean (`no_scanner_ran`, skipped for a single shard of a
+    split scan, which legitimately can own nothing);
+  - `ash merge` refuses a union in which some shard completed none of the scanners it
+    owned, and applies both rules above to the merged model;
+  - in workspace mode, a project whose scanners did not complete sets
+    `scan_incomplete`, which fails the whole workspace run.
+
+  `--no-fail-on-incomplete-scanners`, or `fail_on_incomplete_scanners: false`, turns
+  off all of them together.
+
 - **`--fail-on-incomplete-scanners` now also fails a scan that lost only part of
   its input.** The flag selected on scanner status, and a scanner that failed on
   some of its targets keeps whatever status the severity gate gives it — `PASSED`
@@ -58,17 +108,21 @@
   silent on partial loss, which is the more common case and the one operators turn
   it on to catch.
 
-  **If you already pass `--fail-on-incomplete-scanners`, a build that was green
-  will now exit 1 with no diff of your own.** Nothing about your code changed and
-  nothing newly broke: the flag was blind to partial loss, and the coverage it was
-  silently accepting is now reported. Expect to hit this in CI without warning the
-  first time you upgrade. It affects only runs that pass the flag (or set
-  `fail_on_incomplete_scanners: true`); the default path is unchanged.
+  **A build that was green will now exit 1 with no diff of your own.** Nothing about
+  your code changed and nothing newly broke: the flag was blind to partial loss, and
+  the coverage it was silently accepting is now reported. Expect to hit this in CI
+  without warning the first time you upgrade. On its own this change affected only
+  runs that had the gate on, which was then opt-in; read it together with the default
+  flip above, which is what puts every run on that path.
 
   Measured on this repository's own tree, so the scale is concrete rather than
-  hypothetical: cdk-nag **attempts 10 targets and cannot evaluate 4** of them, a
-  40% loss that nothing in the rendered output mentioned. ASH's own scan therefore
-  now exits 1 under the flag.
+  hypothetical: cdk-nag **attempted 11 targets and could not evaluate 4** of them, a
+  36% loss that nothing in the rendered output mentioned. That measurement is what
+  the gate surfaced on first contact, and both causes behind it are fixed in the two
+  cdk-nag entries under Fixes below — the same tree now reports 9 of 9 evaluated.
+  The number is kept here because it is the reason the gate earns its keep: it found
+  a real hole on the first repository it was pointed at, which happened to be ASH's
+  own.
 
   Note that cdk-nag's status here is `FAILED`, on 16 actionable findings at the
   `MEDIUM` threshold, both before and after this change. The point is not that a
@@ -77,14 +131,15 @@
   carried. A scanner reports a **complete** scan of its input whether it passed or
   failed on the part it read.
 
-  That 40% is not entirely spurious, and it is worth knowing the split before
-  dismissing it. Two of the four are real CloudFormation templates that genuinely
-  went unscanned (`test-yaml.template.json` and
-  `cfn-and-python-test-yaml.template.json`). The other two — a `tsconfig.json` and
-  a `mkdocs.yml` — were never templates at all and reach cdk-nag through a
-  separate target-selection bug, not fixed here. So half the number is real lost
-  coverage and half is noise, which is precisely why the counts are reported
-  rather than folded into a single percentage.
+  That 36% was not entirely spurious, and the split is worth knowing because the two
+  halves needed different fixes. Two of the four were real CloudFormation templates
+  that genuinely went unscanned (`test-yaml.template.json` and
+  `cfn-and-python-test-yaml.template.json`); both are CDK-synthesized and collided
+  with the wrapper's own bootstrap-version parameter. The other two — a
+  `tsconfig.json` and a `mkdocs.yml` — were never templates at all and were
+  misclassified as failed targets rather than skipped. So half the number was real
+  lost coverage and half was noise, which is precisely why the counts are reported
+  rather than folded into a single percentage. Both are fixed under Fixes below.
 
   A scanner that reports no target counts at all is unaffected — absent counters
   mean the scanner does not track targets, not that it lost them, so the nine
@@ -95,11 +150,10 @@
   breaking change below does change statuses, with no flag to opt into. Read the
   two together.
 
-  To restore the previous behavior, drop the flag (or set
-  `fail_on_incomplete_scanners: false`) to accept a partial scan. To keep the
-  flag and clear the failure, fix or exclude the targets the scanner could not
-  read; the failure message names each scanner with the counts, whatever its
-  status.
+  To restore the previous behavior, set `fail_on_incomplete_scanners: false` or pass
+  `--no-fail-on-incomplete-scanners` to accept a partial scan. To keep the gate and
+  clear the failure, fix or exclude the targets the scanner could not read; the
+  failure message names each scanner with the counts, whatever its status.
 
 - **A rule that could not be evaluated now fails the scan, under default config.**
   This one changes the default exit code, so read it even if you pass no flags.
@@ -158,7 +212,95 @@
   — that reports an error-level runtime condition trips it. cdk-nag is the only
   builtin that writes one today.
 
+- **The reusable scan workflow now installs the `cdk` extra, so cdk-nag runs for
+  the repositories that call it. If you call this workflow, this change alone can
+  turn a build that was green red.**
+
+  This is a published surface, not an internal CI detail.
+  `.github/workflows/run-ash-security-scan.yml` is `on: workflow_call`; it is the
+  workflow other repositories invoke with `uses:`, and
+  `.github/scripts/assert-publish-surfaces.py` tracks it as published.
+
+  It installed ASH from a bare `git+https://` reference carrying no extra, and both
+  of its `ash dependencies install` steps are scoped to a single `--tool` (`grype`
+  and `syft`), so no step in the job ever installed cdk-nag. cdk-nag's availability
+  check is a metadata read of `cdk_nag`, `aws-cdk-lib` and `constructs`, so it came
+  up short on every run: the scanner reported `MISSING`, callers scanning
+  CloudFormation got nothing from the only builtin scanner that reads it, and ASH's
+  own `SAST, SCA, and IaC Scan` check failed for the same reason. The install is now
+  `automated-security-helper[cdk] @ git+https://...`, a PEP 508 direct reference, so
+  the extra's contents are read from `pyproject.toml` at the pinned `ash-version`
+  ref — no second dependency list to drift — and the name still resolves from the
+  git ref rather than from an index.
+
+  Three things change for a caller, and the second one fails builds:
+
+  - **You get cdk-nag findings on any CloudFormation in your tree**, where the
+    scanner previously reported `MISSING` and contributed no findings at all.
+  - **A build that was green can now exit 1 on this change alone.** Combined with
+    the `fail_on_incomplete_scanners` default flip above, cdk-nag findings at or
+    above your severity threshold now fail the scan. Nothing in your code changed
+    and nothing newly broke; a scanner that was silently absent is now running and
+    reporting. Expect to hit this on the first run after upgrading.
+  - **The install grows by nine packages**, so the job spends longer installing:
+    `aws-cdk-lib`, `cdk-nag`, `constructs`, `jsii`, `publication`, `typeguard`,
+    `aws-cdk-asset-awscli-v1`, `aws-cdk-asset-node-proxy-agent-v6` and
+    `aws-cdk-cloud-assembly-schema`.
+
+  This ships in the same release as the `fail_on_incomplete_scanners` default flip
+  deliberately. Landing it separately would break callers twice — once when the gate
+  turns on, again when cdk-nag starts producing findings — so both arrive together
+  in one breaking release.
+
+  To keep the previous outcome, pass `ash-args: --exclude-scanners cdk-nag`. An
+  excluded scanner is recorded `SKIPPED` rather than `MISSING`, which does not trip
+  the completeness gate, and the report then says cdk-nag was not part of the run.
+
 ### Breaking changes
+
+- **MCP scans can now end in a new terminal status, `incomplete`.** Clients
+  should treat it as terminal with partial coverage: the run finished and its
+  results are readable, but at least one selected scanner did not complete
+  (`MISSING`, `ERROR`, or lost some of its targets), no scanner reached a verdict,
+  a converter did not run, a rule could not be evaluated, or a content database
+  was past its declared age bound. Before this, the MCP
+  runner reported every exit 1 as `failed` with "ASH exited with code 1", so once
+  `fail_on_incomplete_scanners` defaulted on, a scan with one uninstalled scanner
+  could not be told apart from a crash.
+
+  What a client sees:
+
+  - `get_scan_progress` returns `status: "incomplete"` with `is_complete: true`.
+    `is_complete` means "the run is over and results are readable", so poll loops
+    that wait on it still terminate. The gap is reported in new keys:
+    `coverage_complete` (`false`; `true` for a clean `completed` scan; `null`
+    while running and for `failed` or `cancelled`), `incomplete_scanners` (each
+    with `scanner`, `status`, `reason` and `detail`, where `reason` is
+    `missing_dependencies`, `error`, `partial_coverage` or `unrecognized_status`),
+    `no_scanner_ran`, `incomplete_converters`, `unevaluated_rules` and
+    `stale_content_databases` (one record per database, the same fields as
+    `ash.flat.json`'s `content_databases` list).
+  - `get_scan_results` returns the findings in full, with `status` set to
+    `completed` or `incomplete` by the same rule and the same keys. It used to
+    report the literal `completed` for any results file that parsed.
+  - A workspace project whose completeness gate fired closes its scan entry as
+    `incomplete` instead of `completed`.
+  - `failed` now means only that the run crashed or left no readable results.
+
+  A loop that stops only on `status in ("completed", "failed", "cancelled")` and
+  ignores `is_complete` will not stop on `incomplete`. Add it to the set.
+
+  The status is decided from a structured signal and never from log text or
+  the bare exit code. `run_ash_scan` raises `ScanIncompleteExit`, a `SystemExit`
+  with code 1, only where `_compute_exit_code` returned 1 with results in hand,
+  and it carries the coverage reasons that verdict was reached from. The CLI's
+  exit codes do not change. Reading the results file to make the call was
+  rejected: a run that crashes after the SCAN phase also exits 1, and the file it
+  leaves behind can name the same MISSING scanners as a finished scan.
+
+  With the gate off (`fail_on_incomplete_scanners: false`), a scan whose scanners
+  did not run is still `completed`, as its exit code of 0 says, but it now reports
+  `coverage_complete: false` and names those scanners.
 
 - **A scan against a content database past its declared age bound now exits 1 by
   default, online and offline. An air-gapped image stops passing once its database
@@ -183,7 +325,10 @@
   Past the bound the scanner's findings are kept and the scan exits 1, with a message
   naming the database, its build time, its age, the bound, and how to refresh it. It
   does not depend on `fail_on_incomplete_scanners`, and it outranks findings (1, not 2).
-  Workspace mode reports such a project `scan_incomplete: true`. A database whose build
+  Workspace mode reports such a project `scan_incomplete: true`, and an MCP
+  scan ends `incomplete` with the database in `stale_content_databases`, with the
+  completeness gate on or off. A scanner flagged only for its database is reported
+  there and not also as an incomplete scanner. A database whose build
   time cannot be read counts as stale.
 
   **Who it affects.** Anyone running offline images, or the trivy plugin, with
@@ -261,17 +406,19 @@
 
   **What is not affected**, because the distinction is the useful part:
 
-  - **The default exit code, by either of the two changes described here.**
-    `_compute_exit_code` consults `incomplete_scanners` only once
-    `--fail-on-incomplete-scanners` resolves true, so neither lost-target change
-    moves a default run's exit code. A scanner rolling up to `ERROR` does affect
-    the exit code under that flag — but it did already, since `ERROR` was always a
-    status the flag selected on.
+  - **The exit code of a run with the completeness gate off, by either of the two
+    changes described here.** `_compute_exit_code` consults `incomplete_scanners`
+    only once `--fail-on-incomplete-scanners` resolves true, so neither lost-target
+    change moves the exit code of a run that set `fail_on_incomplete_scanners: false`.
+    A scanner rolling up to `ERROR` does affect the exit code under the gate — but it
+    did already, since `ERROR` was always a status the gate selected on.
 
-    Read that scope literally rather than as a statement about the release. A
-    separate entry below — "a rule that could not be evaluated now fails the scan"
-    — *does* change the default exit code, through a different signal and for a
-    different reason. Nothing about lost targets is what moves it.
+    Read that scope literally rather than as a statement about the release. This said
+    "the default exit code" while the gate was opt-in; the default flip above is what
+    puts a default run on the gated path, so lost targets now do reach a default run's
+    exit code — through that change rather than through these two. A separate entry
+    below — "a rule that could not be evaluated now fails the scan" — reaches it a
+    third way, through a different signal again.
   - **`ash merge`'s shard verification.** `_completed` reads the raw
     `ScannerTargetStatusInfo.status` off `scanner_results`, not the derived rollup,
     so a partial-coverage scanner still counts as having run and no healthy shard
@@ -287,6 +434,118 @@
   exclude the targets the scanner could not read on the affected tree, or exclude
   the scanner. Reverting to the previous behavior means accepting a report that
   states coverage it does not have.
+
+### Fixes
+
+- **cdk-nag now evaluates CDK-synthesized CloudFormation templates.** A template
+  produced by `cdk synth` carries a `BootstrapVersion` parameter and a
+  `CheckBootstrapVersion` rule of its own. ASH re-includes a template under
+  `CfnInclude` into a fresh stack, and `DefaultStackSynthesizer` adds the same
+  parameter and rule to that stack, so the two collided with
+  `SectionAlreadyContains: section 'Parameters' already contains 'BootstrapVersion'`.
+
+  The collision was invisible. It raised inside `app.synth()`, which the wrapper
+  catches and logs at DEBUG — correctly, because cdk-nag reports violations *by*
+  raising there — so no `validation-report.json` was ever written and the only trace
+  left was `cdk-nag produced no validation report`. No rule ran against the template
+  and nothing above DEBUG said which rule, or that there had been a collision at all.
+
+  `WrapperStack` now synthesizes with `generate_bootstrap_version_rule=False`. The
+  bootstrap check is deploy-time machinery that refuses a deployment against a stale
+  CDK bootstrap stack; this wrapper synthesizes only so that the policy validation
+  plugins run and never deploys anything, so the parameter and rule were inert
+  scaffolding either way and no nag rule reads them.
+
+  Measured on this repository: the two affected templates went from unevaluated to 30
+  violations each across five packs. Measured as a control on a template that already
+  worked, the validation report is identical with the flag and without it — same
+  packs, same rules, same construct paths — so the change adds coverage without
+  moving any existing verdict. `BootstraplessSynthesizer` was the alternative and was
+  rejected: it also refuses file and Docker image assets, which would make an
+  asset-bearing template fail for a second, unrelated reason.
+
+- **A file cdk-nag cannot parse is an announced skip, not an unevaluated target.**
+  cdk-nag's scan set is every `*.json`, `*.yaml` and `*.yml` file in the tree, most of
+  which were never CloudFormation. A file that no YAML or JSON parser can load cannot
+  carry a `Resources` mapping, so it is not a candidate template — but the parse error
+  fell through to `CdkNagScanner.scan()`'s broad `except Exception`, which counts a
+  **failed target**.
+
+  It is uncounted **and still reported**, which is two changes rather than one. A
+  parse failure is not confidently a non-template the way a document that parses with
+  no `Resources` key is — a truncated or malformed real template produces the same
+  symptom, and ASH cannot tell which from here. So the notice goes through
+  `_plugin_log(append_to_stream="stderr")`, which appends to the scanner's error list
+  and therefore reaches SARIF `exitCodeDescription`: the same channel the "target
+  directory is empty" notice uses, at INFO rather than ERROR because it is a fact
+  rather than a failure. Dropping it to a DEBUG log was tried first and rejected —
+  `tests/integration/scanners/test_cdk_nag_real_pack.py` pins that an unparseable
+  target must appear in that channel, on the grounds that "not a finding" would
+  otherwise also be satisfied by the failure vanishing entirely.
+
+  With `fail_on_incomplete_scanners` on by default, that made any repository holding
+  a JSON-with-comments file or a YAML with application-specific tags report
+  incomplete coverage for cdk-nag while containing nothing unscanned. In ASH's own
+  tree it was `deploy/cdk/tsconfig.json` (a `//` comment) and `mkdocs.yml`
+  (`!!python/name:` tags).
+
+  The sibling `cfn_nag_scanner` already classified this case as a skip over the same
+  scan set, calling the same `get_model_from_template`, and that function's docstring
+  already recorded the contract — "Exceptions from `load_yaml` propagate unchanged
+  ... and the two callers already classify that case for themselves." cdk-nag was the
+  caller that did not. This is convergence on a decision the codebase had already
+  made, not a new leniency.
+
+  **Narrow on purpose.** Only `YAMLError` and `UnicodeDecodeError` are reclassified,
+  in the scanner's per-target loop immediately above the broad handler it carves out
+  of. `OSError` is not: an unreadable file is a target ASH was asked to scan and could
+  not, which is an incompleteness the gate should see. A document that *does* carry a
+  `Resources` mapping and cannot be modeled is not either — that stays a failed
+  target, with a test pinning it so the arm cannot be widened into a bare
+  `except Exception`.
+
+- **An unavailable converter with nothing to convert no longer fails the scan.** The
+  converter arm of `fail_on_incomplete_scanners` fired whenever a converter's tool was
+  absent, regardless of whether that converter had any inputs. In `--mode nix` the dev
+  shell supplies scanner binaries and exports `ASH_OFFLINE=YES`, which correctly refuses
+  `uv tool install nbconvert`, so the jupyter converter is unavailable on every Nix-mode
+  run — and both Nix CI legs exited 1 on a fixture holding one CloudFormation template,
+  one Python file and one `package.json`, and **no notebooks at all**. Nothing had gone
+  unscanned.
+
+  `ConverterPluginBase.candidate_input_count()` answers how many files a converter *would*
+  have converted, established **without** its external tool — which is what makes it
+  available for a converter already dropped for a missing tool. `ConverterStatusInfo`
+  carries it as `candidate_inputs`, and the gate exempts a row only on an explicit `0`.
+
+  **This is not a carve-out, and the carve-out was the rejected alternative.** Exempting
+  converters from the gate would let ASH report success on a tree whose notebooks were
+  never scanned, which is the defect the gate exists to catch — reintroduced one file type
+  at a time. So the exemption is "nothing to convert", never "converters", and it turns on
+  a positive claim rather than on missing information: `None` means the converter reports
+  no count and is treated exactly as strictly as every row was before the field existed,
+  which covers a converter that has not opted in, one whose count raised, and a results
+  file written by a version predating the field.
+
+- **An incomplete-conversion exit says so, instead of claiming an exception.** The message
+  selector behind exit 1 handled the scanner arm and fell through to `ERROR (1) Exiting
+  due to exception during ASH scan` for everything else. Nothing raises on the converter
+  path — `_compute_exit_code` returns 1 after a `logger.error` — so both Nix legs exited
+  claiming an exception that did not exist, and the only record of the real cause was a log
+  line seventy lines earlier. The converter arm now names the converter and what to do
+  about it. The arm selection moved into `print_incompleteness_message`, because inline in
+  a function that runs a whole scan it could not be unit tested, which is how wording that
+  wrong survived.
+
+- **The Nix install-method CI job installs the `cdk` extra.** cdk-nag is the one
+  scanner Nix cannot supply — it runs in-process through jsii rather than as an
+  external binary, which is why `flake.nix` omits it — but "Nix does not supply it"
+  is not "it need not be installed". The job's `pip install .` left cdk-nag's three
+  distributions absent, so the scan selected it and recorded `MISSING`. Tolerable
+  while the completeness gate was opt-in; with the new default the scan exits 1 for a
+  reason that has nothing to do with Nix. `node` comes from `pkgs.nodejs` in the
+  flake's dev shell, already there for `npm audit`, and ASH re-execs itself inside
+  `nix develop`, so the in-process scanner finds it.
 
 ### Reporting changes
 
@@ -307,8 +566,10 @@
     no claim" from "attempted none".
   - The console table and the markdown report gained an "Incomplete coverage"
     section, emitted only when there is something to report. Measured on this
-    repository, `ash.summary.md` gained `### Incomplete coverage` naming cdk-nag's
-    6 of 10.
+    repository it named cdk-nag's 7 of 11 when the section was added; with both
+    cdk-nag fixes under Fixes below in place the tree has nothing to report and the
+    section is absent again. It is the *conditional* emission that is the change
+    here, not a number.
   - cdk-nag's SARIF gained `runs[].invocations[].toolExecutionNotifications`, one
     per rule that raised instead of returning a verdict, at `level: error`.
     Measured on this repository: 11 notifications where there were previously

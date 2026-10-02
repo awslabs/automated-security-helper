@@ -251,6 +251,41 @@ ${ASH_S3_SYNC_SCRIPT}PY`;
  *   success for a flag that does not exist — the one error direction that must
  *   not happen.
  *
+ * `ASH_MCP_STATELESS_FALLBACK`, AND WHY THE SHIPPED DEFAULTS NEEDED IT
+ * -------------------------------------------------------------------
+ * The refusal above is correct and it made the one-click templates undeployable
+ * with their own defaults. `AshVersion` defaults to `v3.7.0`, whose `ash mcp` has
+ * no `--stateless-http`, and `McpStatelessHttp` defaults to `true`, so the
+ * entrypoint took the refusal branch and exited 65 before the server ever bound.
+ * An adopter who changed nothing got a container that never started and a
+ * CloudFormation health-check timeout naming no cause.
+ *
+ * Both defaults are individually right. `v3.7.0` is the newest release, and
+ * pinning adopters to a feature branch is worse; `true` is what AWS documents as
+ * the AgentCore default and what is correct behind any multi-replica load
+ * balancer. The defect is the COMBINATION, so the fix is a third value that lets a
+ * deployment say which way to resolve it.
+ *
+ * `refuse` is the default when the variable is unset, so nothing an existing
+ * deployment does changes. `warn` starts stateful and says so loudly. Only the
+ * AgentCore stack sets `warn`, and only because that is where stateful was
+ * MEASURED to work — a live runtime completed initialize, tools/list and
+ * tools/call, with controls proving sessions were genuinely enforced. The residual
+ * hazard there is narrower than the old refusal message claimed: not "rejects
+ * every session id the platform injects", which was measured false, but a client
+ * that follows AgentCore's own guidance to adopt the rotating id it returns, which
+ * is refused on its third call. That message has been corrected to say so.
+ *
+ * This is maintainer decision D6's second option. The first — moving
+ * `DEFAULT_ASH_VERSION` to a ref whose `ash mcp` accepts the flag — is the right
+ * end state and needs a release cut from `main`, which no change here can make.
+ * When that release exists, delete this fallback rather than keeping both.
+ *
+ * The Fargate stack deliberately does NOT set it. Its hazard is a load balancer
+ * routing consecutive requests to different replicas, which no measurement here
+ * excuses, so that target keeps exiting 65 until its `AshVersion` can serve
+ * stateless.
+ *
  * KNOWN LIMITATION: ASH takes the shared-secret value as `--auth-header-value`,
  * a command-line argument, and exposes no environment-variable equivalent for
  * it. The resolved secret is therefore visible in the container's own process
@@ -355,8 +390,10 @@ set -- ash mcp --transport streamable-http \\
 if [ "\${ASH_MCP_STATELESS:-true}" = "true" ]; then
   if ash_mcp_supports '--stateless-http'; then
     set -- "$@" --stateless-http
+  elif [ "\${ASH_MCP_STATELESS_FALLBACK:-refuse}" = "warn" ]; then
+    echo "ash-mcp-entrypoint: WARNING: stateless was asked for, but the ASH in this image has no --stateless-http option, so this server runs STATEFUL. It honors only the session id it issued at initialize, so a client that adopts the id returned on each response is refused on its third call. Deploy an AshVersion whose 'ash mcp' accepts --stateless-http to remove this." >&2
   else
-    echo "ash-mcp-entrypoint: this deployment asks for a stateless MCP server, but the ASH in this image has no --stateless-http option, so the server would run stateful and reject every session id the platform injects. Deploy an AshVersion whose 'ash mcp' accepts --stateless-http, or set McpStatelessHttp=false to run stateful deliberately." >&2
+    echo "ash-mcp-entrypoint: this deployment asks for a stateless MCP server, but the ASH in this image has no --stateless-http option, so the server would run stateful and honor only the session id it issued at initialize. Deploy an AshVersion whose 'ash mcp' accepts --stateless-http, set McpStatelessHttp=false to run stateful deliberately, or set ASH_MCP_STATELESS_FALLBACK=warn to start stateful with a warning." >&2
     exit 65
   fi
 elif ash_mcp_supports '--no-stateless-http'; then
@@ -474,6 +511,38 @@ exec "$@"
  * fix did precisely that and three scanners still ERRORed. Do not remove the
  * `isdir` check.
  *
+ * THE SAME PROBLEM FOR THE SCANNERS' OWN DATA, AND WHY IT IS FATAL OFFLINE
+ * -----------------------------------------------------------------------
+ * Redirecting the three data caches (`/deps/.grype`, `/deps/.semgrep`,
+ * `/deps/.opengrep`) into /tmp makes them writable and, on its own, makes them
+ * EMPTY. An image built with `AshOfflineMode=YES` has a vulnerability database
+ * and semgrep/opengrep rulesets baked into those directories — the Dockerfile
+ * asserts they are non-empty at build time, at Dockerfile:312 — and the redirect
+ * put them out of reach at scan time. grype with no database reports PASSED with
+ * zero findings, so the build-time assertion was defeated by the runtime and the
+ * gate reported a clean scan of an unexamined tree.
+ *
+ * So each redirected cache is seeded from the location the image recorded, and an
+ * OFFLINE scan whose redirected caches are still empty afterwards REFUSES rather
+ * than scanning. The refusal is checked on the outcome — is the writable path
+ * empty — rather than on whether the variables are set, because an assertion that
+ * re-tested the inputs would be silenced by whatever silenced the seeding. That is
+ * the same reasoning as the Dockerfile's own assertion, which deliberately checks
+ * the artifacts rather than re-testing OFFLINE.
+ *
+ * DIRECTORIES ARE LINKED, FILES ARE COPIED
+ * ----------------------------------------
+ * A baked directory holds content a scanner only reads — grype's database lands in
+ * a versioned subdirectory — so a link costs none of the ephemeral storage the
+ * clone and ASH's output already draw on. A baked FILE is what a scanner is most
+ * likely to rewrite in place, and a link to one aims that write at the read-only
+ * layer: it would look seeded and fail at scan time. So files are copied, which is
+ * what makes the semgrep and opengrep rulesets usable.
+ *
+ * The uv tool dir keeps its directories-only rule and does NOT copy files, for the
+ * reason in the section above: uv must create its own lock inside UV_TOOL_DIR, and
+ * a copy of the baked one is a stale lock rather than an absent one.
+ *
  * OTHER FAILURE MODES
  * -------------------
  * If ASH_IMAGE_PATH is absent the current PATH is kept, so a locally-run handler
@@ -482,12 +551,27 @@ exec "$@"
  * visibly, in the report. Seeding is idempotent, so a warm invocation re-uses
  * what the cold one linked. HOME is set last-ish on purpose: several tools
  * derive their own paths from it, and /root is not writable.
+ *
+ * An ONLINE scan whose caches are empty is logged and allowed: grype can still
+ * fetch a database, so the scan is slow rather than blind.
+ *
+ * WHERE THE REFUSAL GOES, AND WHY IT IS NOT JUST A RAISE
+ * -----------------------------------------------------
+ * `_scan_env` is called BEFORE the clone, and a `RuntimeError` from it is caught,
+ * commented onto the pull request, and routed through `_set_approval` with an
+ * errored verdict before being re-raised. A bare raise would fail the invocation
+ * with nothing on the pull request and — worse — would leave an APPROVE standing
+ * from an earlier, cleaner commit on code this gate has just declined to examine.
+ * That is the same stale-approval shape the Terraform flavor of this gate was
+ * fixed for, so `_set_approval` exists to be shared by both paths rather than
+ * having the approval logic inline on only one of them.
  */
 export const CODECOMMIT_GATE_HANDLER = `# ASH one-shot CodeCommit pull-request gate.
 # Generated by the ASH CDK deployment targets; see
 # deploy/cdk/lib/ash-container-scripts.ts.
 import os
 import pathlib
+import shutil
 import subprocess
 import tempfile
 import uuid
@@ -507,9 +591,35 @@ EXIT_INVALID_CONFIG = 3
 # constraint on "content", so this is a safety margin rather than the API limit.
 MAX_COMMENT_CHARS = 10000
 
+# Baked scanner data, paired with the writable path it is redirected to. Read off
+# the environment, not hardcoded; see ash-container-scripts.ts.
+BAKED_SCANNER_DATA = (
+    ("ASH_BAKED_GRYPE_DB_DIR", "GRYPE_DB_CACHE_DIR"),
+    ("ASH_BAKED_SEMGREP_RULES_DIR", "SEMGREP_RULES_CACHE_DIR"),
+    ("ASH_BAKED_OPENGREP_RULES_DIR", "OPENGREP_RULES_CACHE_DIR"),
+)
+
+# What is_offline_mode() in core/constants.py reads as offline.
+OFFLINE_VALUES = ("YES", "TRUE", "1")
+
 
 def _run(argv, **kwargs):
     return subprocess.run(argv, capture_output=True, text=True, **kwargs)
+
+
+def _seed_from_baked(baked, writable, directories_only):
+    """Link baked directories, copy baked files. See ash-container-scripts.ts."""
+    if not baked or not os.path.isdir(baked):
+        return
+    for name in sorted(os.listdir(baked)):
+        target = os.path.join(baked, name)
+        link = os.path.join(writable, name)
+        if os.path.lexists(link):
+            continue
+        if os.path.isdir(target):
+            os.symlink(target, link)
+        elif not directories_only and os.path.isfile(target):
+            shutil.copy2(target, link)
 
 
 def _scan_env(workdir):
@@ -534,17 +644,29 @@ def _scan_env(workdir):
     for path in (cache, tool_dir, env["XDG_DATA_HOME"]):
         os.makedirs(path, exist_ok=True)
 
-    baked = os.environ.get("ASH_BAKED_UV_TOOL_DIR")
-    if baked and os.path.isdir(baked):
-        for name in os.listdir(baked):
-            target = os.path.join(baked, name)
-            # Directories only -- linking uv's .lock would aim it at the read-only
-            # filesystem while looking seeded. Do not drop this check.
-            if not os.path.isdir(target):
-                continue
-            link = os.path.join(tool_dir, name)
-            if not os.path.lexists(link):
-                os.symlink(target, link)
+    # Directories only. Do not change this to False; see ash-container-scripts.ts.
+    _seed_from_baked(os.environ.get("ASH_BAKED_UV_TOOL_DIR"), tool_dir, True)
+
+    empty = []
+    for baked_var, cache_var in BAKED_SCANNER_DATA:
+        writable = env[cache_var]
+        os.makedirs(writable, exist_ok=True)
+        _seed_from_baked(os.environ.get(baked_var), writable, False)
+        if not os.listdir(writable):
+            empty.append("%s (from %s)" % (cache_var, baked_var))
+
+    if empty:
+        offline = os.environ.get("ASH_OFFLINE", "NO").strip().upper() in OFFLINE_VALUES
+        if offline:
+            raise RuntimeError(
+                "ASH_OFFLINE is set, so this scan cannot fetch what it is missing, "
+                "and these redirected scanner caches are empty after seeding: %s. "
+                "Refusing to scan rather than reporting no findings from an empty "
+                "vulnerability database and no rulesets. Rebuild the image with "
+                "AshOfflineMode=YES so they are baked in, or set it to NO so the "
+                "scanners may fetch them." % "; ".join(empty)
+            )
+        print("ash-gate: empty after seeding, will be fetched: %s" % "; ".join(empty))
 
     return env
 
@@ -591,6 +713,16 @@ def handler(event, context):
     source_dir = os.path.join(workdir, "src")
     output_dir = os.path.join(workdir, "out")
 
+    # Before the clone so a refusal reaches the pull request and withdraws a
+    # standing approval rather than failing the invocation silently.
+    try:
+        scan_env = _scan_env(workdir)
+    except RuntimeError as exc:
+        _post(codecommit, pull_request_id, repository_name, destination_commit,
+              source_commit, "## ASH scan errored\\n\\n%s\\n" % exc)
+        _set_approval(codecommit, pull_request_id, revision_id, "errored")
+        raise
+
     clone = _run(["git", "clone", "--no-single-branch", "--quiet",
                   "codecommit::%s://%s" % (region, repository_name), source_dir])
     if clone.returncode != 0:
@@ -615,7 +747,7 @@ def handler(event, context):
         argv += ["--min-severity", min_severity]
 
     # env= is load-bearing; see _scan_env.
-    scan = _run(argv, cwd=source_dir, env=_scan_env(workdir))
+    scan = _run(argv, cwd=source_dir, env=scan_env)
     verdict, explanation = _verdict(scan.returncode)
 
     summary = _scan_summary(output_dir)
@@ -630,16 +762,22 @@ def handler(event, context):
 
     _post(codecommit, pull_request_id, repository_name, destination_commit, source_commit, body)
 
-    if os.environ.get("ASH_APPROVAL_GATE", "false") == "true" and revision_id:
-        state = "APPROVE" if verdict == "passed" else "REVOKE"
-        try:
-            codecommit.update_pull_request_approval_state(
-                pullRequestId=pull_request_id, revisionId=revision_id, approvalState=state)
-        except codecommit.exceptions.PullRequestCannotBeApprovedByAuthorException:
-            # The comment is already posted; only the vote is unavailable.
-            pass
+    _set_approval(codecommit, pull_request_id, revision_id, verdict)
 
     return {"verdict": verdict, "exitCode": scan.returncode, "pullRequestId": pull_request_id}
+
+
+def _set_approval(codecommit, pull_request_id, revision_id, verdict):
+    """APPROVE only a passing scan. Shared with the refusal path; see the .ts note."""
+    if os.environ.get("ASH_APPROVAL_GATE", "false") != "true" or not revision_id:
+        return
+    state = "APPROVE" if verdict == "passed" else "REVOKE"
+    try:
+        codecommit.update_pull_request_approval_state(
+            pullRequestId=pull_request_id, revisionId=revision_id, approvalState=state)
+    except codecommit.exceptions.PullRequestCannotBeApprovedByAuthorException:
+        # The comment is already posted; only the vote is unavailable.
+        pass
 
 
 def _post(codecommit, pull_request_id, repository_name, before_commit_id, after_commit_id, content):

@@ -7,7 +7,6 @@ from pydantic import (
     ConfigDict,
     Field,
     PrivateAttr,
-    ValidationError,
     model_validator,
 )
 from typing import Annotated, Any, List, Dict, Literal, Optional
@@ -20,7 +19,6 @@ from automated_security_helper.base.scanner_plugin import (
     ScannerPluginBase,
     ScannerPluginConfigBase,
 )
-from automated_security_helper.config.default_config import get_default_config
 from automated_security_helper.plugin_modules.ash_builtin.converters.archive_converter import (
     ArchiveConverterConfig,
 )
@@ -30,10 +28,8 @@ from automated_security_helper.plugin_modules.ash_builtin.converters.jupyter_con
 from automated_security_helper.core.constants import (
     ASH_CONFIG_ENV_VAR_ALLOWLIST,
     ASH_CONFIG_ENV_VAR_PREFIX,
-    ASH_CONFIG_FILE_NAMES,
     ASH_DEFAULT_SEVERITY_LEVEL,
 )
-from automated_security_helper.core.exceptions import ASHConfigValidationError
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.models.core import IgnorePathWithReason, AshSuppression
 from automated_security_helper.plugin_modules.ash_builtin.reporters.csv_reporter import (
@@ -635,8 +631,18 @@ class AshMcpConfig(BaseModel):
 
 
 class AshConfigGlobalSettingsSection(BaseModel):
+    # validate_default is here because `severity_threshold`'s default is derived
+    # from an environment variable, and pydantic does not validate a default no
+    # caller supplied. Without it an off-table `ASH_DEFAULT_SEVERITY_LEVEL` landed
+    # in a Literal-typed field that forbids it, and the ladder in
+    # utils.severity_ladder read the result as CRITICAL -- the strictest gate --
+    # for an operator who had asked for the loosest. core.constants now normalizes
+    # at the boundary, so this guards the other direction: a future default written
+    # in this file that the Literal does not admit fails at construction instead of
+    # travelling into the exit code.
     model_config = ConfigDict(
         extra="forbid",
+        validate_default=True,
     )
 
     severity_threshold: Annotated[
@@ -858,12 +864,17 @@ class AshConfig(BaseModel):
                 "(dependencies unavailable, never ran). SKIPPED scanners are not "
                 "selected and never trip this. Independent of fail_on_findings: "
                 "one answers 'was anything found', this one answers 'did what I "
-                "asked for actually run'. Defaults to False so that environments "
-                "legitimately lacking a scanner's tool keep their current exit "
-                "codes."
+                "asked for actually run'. Selects on the scanner's status, so it "
+                "covers only a failure that reached that status. Defaults to True, "
+                "so a scanner recorded ERROR or MISSING does not report the exit "
+                "code of a clean scan. Set it to False, or pass "
+                "--no-fail-on-incomplete-scanners, to accept a partial scan's exit "
+                "code; excluding the scanner whose tool is unavailable is usually "
+                "better, because an excluded scanner is recorded SKIPPED and the "
+                "report then says what was not measured."
             )
         ),
-    ] = False
+    ] = True
 
     content_db_staleness: Annotated[
         Literal["fail", "warn"],
@@ -1198,7 +1209,9 @@ def add_suppression_to_config(config_path: Path, suppression: AshSuppression) ->
     # Case D (last resort): a shape we cannot safely edit as text, e.g. an inline
     # `global_settings: {...}` mapping. Fall back to a full rewrite. This loses
     # comments, but only for a structure that essentially never occurs.
-    _rewrite_config_with_entry(config_path, data if isinstance(data, dict) else {}, entry)
+    _rewrite_config_with_entry(
+        config_path, data if isinstance(data, dict) else {}, entry
+    )
 
 
 def _serialize_entry_lines(entry: dict, item_indent: str) -> list[str]:

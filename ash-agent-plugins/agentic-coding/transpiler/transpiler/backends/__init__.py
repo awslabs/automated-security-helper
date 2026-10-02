@@ -6,6 +6,7 @@ The order of imports below determines the order backends appear in
 `BackendRegistry.all()` — kept in the same order as the original
 configs.yaml so generated output ordering is stable across the refactor.
 """
+
 from . import claude  # noqa: F401
 from . import codex  # noqa: F401
 from . import kiro  # noqa: F401

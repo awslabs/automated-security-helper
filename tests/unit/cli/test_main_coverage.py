@@ -68,9 +68,7 @@ class TestGetGenaiGuide:
         )
 
         output_path = tmp_path / "guide.md"
-        result = runner.invoke(
-            app, ["get-genai-guide", "--output", str(output_path)]
-        )
+        result = runner.invoke(app, ["get-genai-guide", "--output", str(output_path)])
         # Command may fail on some platforms (network timeout, missing file)
         # Only assert success if the guide file exists locally AND command succeeded
         if guide_path.exists() and result.exit_code == 0:
@@ -97,9 +95,7 @@ class TestGetGenaiGuide:
 
         output_path = tmp_path / "guide.md"
 
-        with patch(
-            "requests.get", side_effect=requests.RequestException("timeout")
-        ):
+        with patch("requests.get", side_effect=requests.RequestException("timeout")):
             # Mock local file not existing
             with patch("pathlib.Path.exists", return_value=False):
                 result = runner.invoke(

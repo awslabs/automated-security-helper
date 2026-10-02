@@ -20,6 +20,18 @@ implied by the first. Because SKIPPED has to be tolerated one entry at a time, a
 file in which every entry is SKIPPED passes the per-scanner check while having
 measured nothing at all.
 
+And it exits 1 when a scanner ASH says it expected has no row at all, or when ASH
+recorded a plugin module that failed to import. Both are assertions the per-scanner
+loop structurally cannot make, because that loop builds its universe from the
+``scanner_results`` dict it is handed. A scanner that never registered is absent
+from the numerator and the denominator at once: eight rows of ten printed "All 8
+scanners accounted for; none incomplete" and returned 0, and no arithmetic over
+that dict could have noticed. ``metadata.expected_scanners`` is written by ASH from
+the configuration's declared scanner roster rather than from the plugins that
+resolved, so comparing against it is a genuinely different question from comparing
+the rows to each other. Absent from a results file written by a version that did
+not record it, in which case that comparison is skipped rather than failed.
+
 Why this exists in this shape
 -----------------------------
 It replaces five separate in-line guards, four of which grepped the *prose* text
@@ -56,23 +68,22 @@ existed the two did disagree -- on a Windows run of this repository's own config
 exited 1 on the same file.
 
 One difference remains, and it is why this script carries the gate rather than sharing
-it: ASH puts both checks behind ``fail_on_incomplete_scanners``, which defaults to
-False, while this script has no equivalent and always fails. Both arms in
-``run_ash_scan._compute_exit_code`` sit inside that flag's ``if``, so with it off
-neither the per-scanner check nor the no-scanner-ran check runs at all. On a default
-run the two therefore disagree in the direction that matters: ``ash scan`` exits 0 on
-a results file carrying MISSING scanners, and this script exits 1 on that same file.
+it: ASH puts both checks behind ``fail_on_incomplete_scanners``, while this script has
+no equivalent and always fails. Both arms in ``run_ash_scan._compute_exit_code`` sit
+inside that flag's ``if``, so anything that turns the flag off -- a
+``--no-fail-on-incomplete-scanners`` added to a workflow, a scanned tree's own
+``.ash.yaml`` -- takes both of ASH's checks with it and leaves nothing behind. This
+script cannot be switched off that way, so it is what makes the assertion
+unconditional in CI.
 
-So in CI this script is the only thing gating on incompleteness. ASH's own exit code
-does not, by default. That is worth saying outright, because the paragraph above --
-that the guard and the exit code "answer from the same field, so they cannot
-disagree" -- is a claim about the field they read, not about the verdict they return.
+That is worth saying outright, because the paragraph above -- that the guard and the
+exit code "answer from the same field, so they cannot disagree" -- is a claim about
+the field they read, not about the verdict they return. The flag's default is now
+True, so on an unconfigured run the two verdicts do agree; the point of keeping this
+script is that they agree by policy rather than by construction.
 
-The default is False deliberately, and is not an oversight to correct here. This
-repository cannot pass its own completeness gate yet: cfn-nag, grype and syft are not
-provisioned on every leg, so flipping the default would fail every job rather than the
-ones with a real gap. An operator who opts in with ``--fail-on-incomplete-scanners``
-gets 1 from both, which is the flag converging the two rather than drifting them.
+Their overlap is deliberate and they fail for different reasons: ASH's exit code is
+ASH judging its own run, and this is CI judging whether that judgement still happens.
 """
 
 from __future__ import annotations
@@ -194,6 +205,61 @@ def main() -> int:
             "records it as SKIPPED and says so in the report. Any other status is "
             "one this gate does not recognise -- most likely a results file from a "
             f"different ASH version; the ones it accepts are {', '.join(COMPLETE_STATUSES)}."
+        )
+        failed = True
+
+    # Every scanner ASH expected has to be present, and the roster it is compared
+    # against does not come from these rows.
+    #
+    # This is the assertion the loop above cannot make. It builds its universe from
+    # the scanner_results dict, so a scanner that never registered is missing from
+    # what is checked and from what it is checked against simultaneously -- and every
+    # per-row verdict, every counter and the final summary line all read clean.
+    #
+    # Compared on a normalized key rather than literally. The roster is taken from
+    # config field aliases and the rows from config.name on the instantiated plugin;
+    # those agree today, and a literal comparison would turn any future divergence in
+    # separator or case into ten false failures instead of the one real finding this
+    # exists to report.
+    #
+    # Only the roster-minus-rows direction is a finding. A row not on the roster is a
+    # plugin module an operator loaded without a matching config entry, which is a
+    # supported arrangement.
+    metadata = results.get("metadata")
+    metadata = metadata if isinstance(metadata, dict) else {}
+
+    expected = metadata.get("expected_scanners")
+    if isinstance(expected, list) and expected:
+        present = {str(name).replace("-", "_").lower() for name in scanner_results}
+        unaccounted = sorted(
+            str(name)
+            for name in expected
+            if str(name).replace("-", "_").lower() not in present
+        )
+        if unaccounted:
+            for name in unaccounted:
+                print(f"::error::Scanner {name} was expected but has no result at all")
+            print(
+                f"::error::{len(unaccounted)} of {len(expected)} expected scanners "
+                f"produced no result: {', '.join(unaccounted)}. A scanner with no row "
+                "did not register, so it is absent from every status counter and from "
+                "this gate's per-scanner check -- the run reported itself complete "
+                "over the scanners that remained. Most likely a plugin module that "
+                "failed to import, or a scanner whose constructor raised; check the "
+                "run log for 'failed to import' and 'could not be constructed'."
+            )
+            failed = True
+
+    load_errors = metadata.get("plugin_load_errors")
+    if isinstance(load_errors, dict) and load_errors:
+        for module_path, error in sorted(load_errors.items()):
+            print(f"::error::Plugin module {module_path} failed to import: {error}")
+        print(
+            f"::error::{len(load_errors)} plugin module(s) failed to import, so this "
+            "run is missing plugins ASH ships with. Each group is imported in "
+            "isolation so one missing optional dependency costs one group rather than "
+            "the rest of the set -- which makes the run degrade instead of crash, and "
+            "is why it has to fail here instead."
         )
         failed = True
 

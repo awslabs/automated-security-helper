@@ -168,6 +168,7 @@ async def _drive_one_scan(source: Path) -> Dict[str, Any]:
             polls += 1
             if progress.get("is_complete") or progress.get("status") in (
                 "completed",
+                "incomplete",
                 "failed",
                 "cancelled",
             ):
@@ -268,6 +269,16 @@ def completed_scan(tmp_path_factory: pytest.TempPathFactory) -> Dict[str, Any]:
             os.environ["ASH_MCP_ALLOWED_ROOTS"] = previous
 
 
+def _recorded_statuses(completed_scan: Dict[str, Any]) -> Dict[str, str]:
+    """Each scanner's status as the scan recorded it in its own results."""
+    return {
+        name: str(info.get("status", "")).upper()
+        for name, info in completed_scan["results"]["raw_results"][
+            "scanner_results"
+        ].items()
+    }
+
+
 def test_the_scan_reaches_completion_and_reports_where_it_wrote(
     completed_scan: Dict[str, Any],
 ) -> None:
@@ -275,20 +286,59 @@ def test_the_scan_reaches_completion_and_reports_where_it_wrote(
 
     ``run_ash_scan`` returns before the scan finishes and tells clients to poll
     ``get_scan_progress`` until ``is_complete``; a client has no other way to learn
-    the scan is done. So the contract under test is that polling terminates with
-    ``completed`` and hands back an ``output_directory`` that exists -- everything
+    the scan is done. So the contract under test is that polling terminates in a
+    finished state and hands back an ``output_directory`` that exists -- everything
     else in this module reads that directory.
 
-    ``status`` is asserted to be ``completed`` rather than merely terminal. A scan
-    that reached ``failed`` would also end the loop, and treating that as done is how
-    a broken scan gets read as a clean one.
+    WHICH FINISHED STATE
+    --------------------
+    ``completed`` when every selected scanner ran, ``incomplete`` when one did not,
+    and this test computes which one to expect from the scan's own record rather
+    than accepting either. With ``fail_on_incomplete_scanners`` on by default, a
+    scan with a MISSING scanner exits 1. That is what CI's integration job sees:
+    seven scanners are not installed there. This test used to require
+    ``completed`` and failed on that job with "Scan finished in state 'failed':
+    ASH exited with code 1", because the runner read every exit 1 as a crash.
+
+    So: a scanner recorded MISSING or ERROR means ``incomplete``, naming exactly
+    those scanners with their reasons. ``failed`` is never acceptable, because the
+    scan below produced the results the rest of this module reads, and treating a
+    failed scan as done is how a broken scan gets read as a clean one.
     """
     progress = completed_scan["progress"]
+    recorded = _recorded_statuses(completed_scan)
+    missing = {name for name, status in recorded.items() if status == "MISSING"}
+    errored = {name for name, status in recorded.items() if status == "ERROR"}
 
-    assert progress["status"] == "completed", (
+    assert progress["status"] in ("completed", "incomplete"), (
         f"Scan finished in state {progress['status']!r}: "
         f"{progress.get('error_message')}"
     )
+    if missing or errored:
+        assert progress["status"] == "incomplete", (
+            f"{sorted(missing)} MISSING and {sorted(errored)} ERROR, yet the scan "
+            f"reported {progress['status']!r}"
+        )
+    rows = progress["incomplete_scanners"]
+    by_reason: Dict[str, set] = {}
+    for row in rows:
+        by_reason.setdefault(row["reason"], set()).add(row["scanner"])
+        assert row["status"] == recorded.get(row["scanner"], ""), row
+    assert by_reason.get("missing_dependencies", set()) == missing, (
+        f"incomplete_scanners named {sorted(by_reason.get('missing_dependencies', []))} "
+        f"as missing; the results record {sorted(missing)} MISSING"
+    )
+    assert by_reason.get("error", set()) == errored, (
+        f"incomplete_scanners named {sorted(by_reason.get('error', []))} as errored; "
+        f"the results record {sorted(errored)} ERROR"
+    )
+    # Anything else listed is there for lost targets, which no status shows.
+    assert set(by_reason) <= {"missing_dependencies", "error", "partial_coverage"}
+    # detect-secrets ran, so the set-level arm cannot be what this is about.
+    assert progress["no_scanner_ran"] is False
+    # The two statements of the same fact have to agree.
+    assert progress["coverage_complete"] is (progress["status"] == "completed")
+    assert progress["error_message"] is None
     assert progress["is_complete"] is True
     assert progress["scan_id"] == completed_scan["scan_id"]
     assert completed_scan["output_dir"].is_dir(), (
@@ -315,15 +365,38 @@ def test_the_scan_examined_something_rather_than_skipping_every_scanner(
 
     WHERE THE OUTCOME LIVES, AND WHERE IT DOES NOT
     ----------------------------------------------
-    Read from ``raw_results.scanner_results``, not from the ``scanners`` section of
-    ``get_scan_progress``, and the difference is the trap. Progress tracks whether a
-    scanner's result *file* has appeared, so once a scan finishes it reports
-    ``status: "completed"`` for every scanner -- measured: all ten, including the ones
-    the results call SKIPPED and MISSING. A control written against progress would
-    therefore pass on a scan where nothing was installed, which is the exact failure
-    it exists to catch. The second assertion below pins that the two vocabularies are
-    disjoint, so a client cannot read one as the other by accident and a future change
-    that merged them would have to say so here.
+    Read from ``raw_results.scanner_results``, which is where the scan phase records
+    what each scanner actually did. That is still the authoritative source, but the
+    reason has changed, and so has the second half of this test.
+
+    It used to be that ``get_scan_progress`` could not answer the question at all.
+    ``mcp_server.get_scan_progress`` opened with ``if not
+    progress_info.get("success")``, which no producer ever satisfied, so it returned
+    before reaching either the per-scanner file walk or
+    ``summarize_scanner_statuses``. What a client got was the registry's own map, and
+    that map hardcoded ``MCScannerStatus.COMPLETED`` for every entry in
+    ``scanner_results`` -- so a scan where nothing was installed reported every
+    scanner ``"completed"`` and read exactly like a clean repository. A control
+    written against progress would have passed on it, which is the failure this test
+    exists to catch, and the assertion here pinned the two vocabularies as disjoint
+    to keep a client from reading one as the other.
+
+    Both halves of that are now fixed: the guard discriminates on an explicit
+    ``success: False`` rather than on the key's absence, and the registry maps the
+    recorded status instead of asserting COMPLETED. So progress does carry real
+    outcomes, and the assertions below pin that rather than its absence -- per the
+    instruction the old assertion's own message gave.
+
+    One caveat kept from the old note, because it is why this test still reads the
+    results. The ``scanners`` section is built by globbing
+    ``scanners/*/*/ASH.ScanResults.json``, and each leaf is that file verbatim. Those
+    files are a scanner's own report of its run, and they can disagree with the
+    aggregated view that applied the severity threshold: on the scan this module
+    drives, detect-secrets finds the planted key and the aggregated results call it
+    FAILED while its own result file still says PASSED. ``scanner_statuses`` is read
+    from ``scanner_results`` and does not have that problem, which is why it, and not
+    the globbed map, is what the tool documents for telling "never ran" from "ran
+    clean".
     """
     scanner_results = completed_scan["results"]["raw_results"]["scanner_results"]
     assert scanner_results, "The scan reported no scanner results at all"
@@ -346,17 +419,42 @@ def test_the_scan_examined_something_rather_than_skipping_every_scanner(
         f"scan: {statuses}"
     )
 
+    progress = completed_scan["progress"]
     progress_statuses = {
         str(leaf.get("status", "")).upper()
-        for targets in completed_scan["progress"]["scanners"].values()
+        for targets in progress["scanners"].values()
         for leaf in targets.values()
     }
     assert progress_statuses, "get_scan_progress reported no per-scanner entries"
-    assert not progress_statuses & {"PASSED", "FAILED", "SKIPPED", "MISSING"}, (
-        "get_scan_progress now reports scanner outcomes in the same vocabulary as the "
-        f"results ({sorted(progress_statuses)}). It used to report file-arrival state "
-        "only, and this control reads the results for that reason. If progress now "
-        "carries real outcomes, say so here and consider reading it instead."
+    assert progress_statuses & {"PASSED", "FAILED", "SKIPPED", "MISSING"}, (
+        "get_scan_progress reported no scanner outcome in the results vocabulary "
+        f"({sorted(progress_statuses)}). The whole map coming back as 'completed' is "
+        "the signature of the guard short-circuiting before the file walk, which is "
+        "what made a scan with nothing installed read as a clean one."
+    )
+
+    # The counts have to disagree whenever a scanner did not pass, or the progress
+    # view is back to grading every scanner COMPLETED. Asserted as a relationship and
+    # not as numbers: which scanners are installed varies by environment, and this
+    # test must not start depending on that.
+    did_not_pass = {name for name, status in statuses.items() if status != "PASSED"}
+    if did_not_pass:
+        assert progress["completed_scanners"] < progress["total_scanners"], (
+            f"{sorted(did_not_pass)} did not pass, yet progress reports "
+            f"{progress['completed_scanners']} of {progress['total_scanners']} "
+            "scanners completed"
+        )
+
+    # The list a client needs to tell "never ran" from "ran and found nothing". It
+    # reached no client at all while the guard short-circuited, and it is derived
+    # from scanner_results, so the set equality is exact rather than approximate.
+    expected_skipped = {
+        name for name, status in statuses.items() if status in ("SKIPPED", "MISSING")
+    }
+    reported_skipped = {entry["scanner"] for entry in progress["skipped_scanners"]}
+    assert reported_skipped == expected_skipped, (
+        f"skipped_scanners reported {sorted(reported_skipped)} but the results call "
+        f"{sorted(expected_skipped)} SKIPPED or MISSING"
     )
 
 
@@ -398,7 +496,20 @@ def test_the_report_inventory_names_files_that_exist_and_parse(
     The SARIF is parsed and its results counted rather than merely deserialized. A
     syntactically valid SARIF document with an empty ``runs`` list is what a broken
     reporter emits, and it reads as a clean scan.
+
+    The results tool reports the same finished state and the same gap as progress,
+    because an ``incomplete`` scan's partial results are the reason it has that
+    status rather than ``failed``: they must be readable, and must say they are
+    partial.
     """
+    results = completed_scan["results"]
+    progress = completed_scan["progress"]
+    assert results["status"] == progress["status"]
+    assert results["coverage_complete"] is progress["coverage_complete"]
+    assert sorted(row["scanner"] for row in results["incomplete_scanners"]) == sorted(
+        row["scanner"] for row in progress["incomplete_scanners"]
+    )
+
     files = completed_scan["paths"]["files"]
     assert completed_scan["paths"]["success"] is True
 
@@ -457,7 +568,9 @@ def test_the_scan_is_listed_and_a_finished_scan_cannot_be_cancelled(
         "Cancelling a completed scan reported success. A client would believe it had "
         "stopped work that had already finished."
     )
-    assert cancel["status"] == "completed"
+    # The finished state the scan reached, named back, whichever of the two it was.
+    assert cancel["status"] == completed_scan["progress"]["status"]
+    assert cancel["status"] in ("completed", "incomplete")
 
 
 def test_the_server_sends_a_progress_notification_while_starting_the_scan(
@@ -575,51 +688,40 @@ async def test_completion_is_reported_from_the_aggregated_file_alone(
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "filter_level is inert on a real scan. mcp_get_scan_results returns no "
-        "'success' key on the success path, so get_scan_results takes its "
-        "`not results.get('success')` early return and never filters. Unit tests miss "
-        "it because they stub mcp_get_scan_results with a dict that does carry "
-        "success: True. Remove this xfail when the payload carries it."
-    ),
-)
 def test_filter_level_summary_returns_a_summary(completed_scan: Dict[str, Any]) -> None:
-    """``get_scan_results(filter_level="summary")`` should return the summary shape.
+    """``get_scan_results(filter_level="summary")`` returns the summary shape.
 
-    WHY THIS IS AN XFAIL RATHER THAN AN ASSERTION OR A DELETION
-    -----------------------------------------------------------
+    WHY THIS WAS AN XFAIL, AND WHY THE MARKER IS GONE
+    ------------------------------------------------
     The behavior is documented in the tool's own schema -- "summary: Return only
     summary data (metadata, findings counts, scanner summaries)" -- and
     ``filter_summary`` exists, is imported, and produces exactly that shape when handed
-    a real payload. What is missing is the key that gates it. On the success path
+    a real payload. What was missing was the key that gates it. On the success path
     ``mcp_get_scan_results`` returns whatever
-    ``get_scan_results_with_error_handling`` produced, and that dict has no ``success``
+    ``get_scan_results_with_error_handling`` produced, and that dict had no ``success``
     member, so::
 
         if "error" in results or not results.get("success"):
             return results
 
-    fires on every successful scan and the unfiltered payload is returned whatever
-    ``filter_level`` said. ``scanners``, ``severities`` and ``actionable_only`` sit
-    downstream of the same early return and are equally inert. ``get_scan_summary``
-    calls this tool, so its ``_source_function`` tag never gets attached either.
+    fired on every successful scan and the unfiltered payload came back whatever
+    ``filter_level`` said. ``scanners``, ``severities`` and ``actionable_only`` sat
+    downstream of the same early return and were equally inert, and
+    ``get_scan_summary``'s ``_source_function`` tag never got attached either.
 
-    Measured rather than inferred: on a completed scan the payload's keys are
+    Measured rather than inferred: on a completed scan the payload's keys were
     ``actionable_findings, completion_time, is_complete, operation, raw_results,
     scan_id, scanner_reports, status, summary_stats, timestamp, total_scanners`` -- no
     ``success``, no ``_filter``, and ``raw_results`` present at a filter level whose
     documented job is to omit it. Handing that same payload to ``filter_summary``
-    directly produces the documented shape, which locates the defect at the gate rather
-    than in the filter.
+    directly produced the documented shape, which located the defect at the gate
+    rather than in the filter.
 
-    Encoded as ``xfail(strict=True)`` because both alternatives are worse. A plain
-    assertion makes the suite red for a defect this change is not authorized to fix.
-    Asserting the current behavior instead -- that ``raw_results`` comes back at summary
-    level -- would pin a bug as the contract, and the next person to fix the gate would
-    have to delete a passing test to do it. Strict xfail fails the moment the defect is
-    fixed, which is the only outcome that forces this test to be turned into a real one.
+    The producer now sets ``success`` and the gate discriminates on a ``False`` value
+    rather than on the key's absence, so this is an ordinary assertion. The
+    ``xfail(strict=True)`` marker was chosen precisely so that it would fail the
+    moment the defect was fixed, forcing this conversion instead of allowing a
+    silently-passing xpass.
     """
     filtered = completed_scan["summary_filtered"]
 

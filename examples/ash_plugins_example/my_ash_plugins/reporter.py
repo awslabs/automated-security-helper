@@ -13,7 +13,6 @@ from automated_security_helper.base.reporter_plugin import (
     ReporterPluginBase,
     ReporterPluginConfigBase,
 )
-from automated_security_helper.core.constants import ASH_WORK_DIR_NAME
 from automated_security_helper.plugins.decorators import ash_reporter_plugin
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.utils.log import ASH_LOGGER
@@ -39,11 +38,13 @@ class ExampleReporter(ReporterPluginBase[ExampleReporterConfig]):
     """Example reporter plugin that demonstrates the decorator pattern."""
 
     def model_post_init(self, context):
+        # Do not assign to self.context here. The context is one object shared by
+        # every plugin in the run, so repointing work_dir would move where the
+        # converted files the scanners were given are looked for. A reporter writes
+        # under self.context.output_dir, as report() below does, and never needs
+        # work_dir at all.
         if self.config is None:
             self.config = ExampleReporterConfig()
-        self.context.work_dir = self.context.output_dir.joinpath(
-            ASH_WORK_DIR_NAME
-        ).joinpath(self.config.name)
         return super().model_post_init(context)
 
     def report(self, model: AshAggregatedResults) -> str:

@@ -111,7 +111,7 @@ async def cancel_scan(scan_id: str) -> Dict[str, Any]:
             "message": f"Scan is already in {entry.status.value} state and cannot be cancelled",
             "status": entry.status.value,
             "suggestions": [
-                "No action needed as the scan is already completed/failed/cancelled",
+                "No action needed as the scan is already completed/incomplete/failed/cancelled",
                 "Use get_scan_results to retrieve results if the scan is completed",
                 "Start a new scan if needed",
             ],
@@ -249,7 +249,14 @@ async def cleanup_scan_resources(
         if remove_output and entry.output_directory:
             try:
                 output_dir = Path(entry.output_directory)
-                if output_dir.exists() and output_dir.is_dir():
+                # Deferred, and this site is the clearest case for deferring. Fixing the exists()
+                # and is_dir() calls flagged here would leave the shutil.rmtree() on the next
+                # line -- which blocks for as long as it takes to delete an entire scan output
+                # tree, far longer than two stats, and which ASYNC240 does not flag because it is
+                # not a pathlib method. Silencing the cheap half would make the rule green while
+                # the actual event-loop stall stayed exactly where it is. The whole block needs
+                # to move off the loop together.
+                if output_dir.exists() and output_dir.is_dir():  # noqa: ASYNC240
                     shutil.rmtree(output_dir)
                     removed_output = True
             except PermissionError as e:
@@ -334,7 +341,7 @@ async def cleanup_old_scans(
     scans_to_cleanup = []
 
     for scan in all_scans:
-        if scan["status"] in ["completed", "failed", "cancelled"]:
+        if scan["status"] in ["completed", "incomplete", "failed", "cancelled"]:
             end_time_str = scan.get("end_time") or scan.get("start_time")
             if end_time_str:
                 try:

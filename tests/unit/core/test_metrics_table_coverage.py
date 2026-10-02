@@ -1,8 +1,5 @@
 """Tests for core/metrics_table.py — covers metrics table generation functions."""
 
-from unittest.mock import MagicMock, patch
-import pytest
-
 
 class TestMetricsTableModule:
     """Tests for metrics_table module."""

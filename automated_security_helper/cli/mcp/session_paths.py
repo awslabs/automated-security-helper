@@ -50,10 +50,27 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-#: A validated id may hold ASCII letters, digits, dot, underscore and hyphen, and
-#: nothing else. Anchored with ``fullmatch`` at the call site rather than with
+#: The characters a validated id may hold: ASCII letters, digits, and
+#: ``. _ ~ + = -``. Anchored with ``fullmatch`` at the call site rather than with
 #: ``^``/``$`` here, so the pattern cannot be reused unanchored by accident.
-_ALLOWED_COMPONENT = re.compile(r"[A-Za-z0-9._-]+")
+#:
+#: This is the ONE rule for every caller-supplied id that becomes a path
+#: component: the ``Mcp-Session-Id`` header (``session_identity``), the
+#: ``sessions`` registry, and ``source_delivery``'s session and upload ids. Two
+#: rules used to exist and disagreed; this is the wider character set of the two
+#: (URL-unreserved plus ``+`` and ``=``, so UUIDs, hex tokens, JWTs and padded or
+#: unpadded base64url all pass) with the 128-character cap of the other.
+#:
+#: KNOWN RISK, ACCEPTED BY THE OPERATOR, UNTESTED: with ``~`` allowed, an id
+#: shaped like a Windows 8.3 short name (``SESSIO~1``) might alias a sibling
+#: session's directory on a volume where 8.3 name generation is enabled. ``~`` is
+#: kept for client compatibility. Do not add a partial guard for it here without
+#: revisiting that decision.
+_ALLOWED_COMPONENT = re.compile(r"[A-Za-z0-9._~+=-]+")
+
+#: Individual filenames cap at 255 bytes on ext4/APFS/NTFS; 128 leaves room for
+#: the ``.zip.part`` suffixes ``source_delivery`` appends to an upload id.
+MAX_COMPONENT_LEN = 128
 
 #: Rejected although the character class admits them: both name a directory
 #: relative to another one rather than a directory of their own.
@@ -72,21 +89,32 @@ def validated_path_component(value: str, what: str = "session_id") -> str:
         ``value`` unchanged.
 
     Raises:
-        ValueError: if ``value`` is empty, holds a character outside the
-            allowlist, or is ``.`` or ``..``.
+        ValueError: if ``value`` is empty, longer than ``MAX_COMPONENT_LEN``,
+            holds a character outside the allowlist, or is ``.`` or ``..``.
 
     Refused rather than sanitized. Sanitizing maps two distinct ids onto one
     component, which silently merges two callers' directories -- a quieter and
     worse outcome than rejecting the second caller's id.
     """
 
+    # The specific rules run before the character class so the common mistakes
+    # keep their own messages; the class is the closing net.
     if not value:
         raise ValueError(f"{what} must be a non-empty string")
+    if len(value) > MAX_COMPONENT_LEN:
+        raise ValueError(
+            f"{what} is {len(value)} characters; the maximum is {MAX_COMPONENT_LEN}"
+        )
+    if "/" in value or "\\" in value:
+        raise ValueError(f"{what} must not contain path separators: {value!r}")
     if value in _RELATIVE_COMPONENTS:
         raise ValueError(f"{what} must not be a relative-path component: {value!r}")
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in value):
+        raise ValueError(f"{what} must not contain control characters: {value!r}")
     if not _ALLOWED_COMPONENT.fullmatch(value):
         raise ValueError(
-            f"{what} may contain only letters, digits, '.', '_' and '-': {value!r}"
+            f"{what} may contain only letters, digits and the characters "
+            f"'.', '_', '-', '~', '+', '=': {value!r}"
         )
     return value
 
@@ -142,6 +170,7 @@ def session_directory(parent: Path, session_id: str, what: str = "session_id") -
 
 
 __all__ = [
+    "MAX_COMPONENT_LEN",
     "joined_inside",
     "session_directory",
     "validated_path_component",

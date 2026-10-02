@@ -17,8 +17,7 @@ Before testing, ensure:
 #### Test 1.1: Minimal Filter
 ```python
 result = await mcp_ash_get_scan_results(
-    output_dir="/path/to/.ash/ash_output",
-    filter_level="minimal"
+    output_dir="/path/to/.ash/ash_output", filter_level="minimal"
 )
 
 # Verify response structure
@@ -35,6 +34,7 @@ assert "scanner_reports" not in result
 
 # Verify response size
 import json
+
 size_kb = len(json.dumps(result)) / 1024
 assert size_kb < 5, f"Response too large: {size_kb}KB"
 print(f"✓ Minimal filter: {size_kb:.2f}KB")
@@ -43,8 +43,7 @@ print(f"✓ Minimal filter: {size_kb:.2f}KB")
 #### Test 1.2: Summary Filter
 ```python
 result = await mcp_ash_get_scan_results(
-    output_dir="/path/to/.ash/ash_output",
-    filter_level="summary"
+    output_dir="/path/to/.ash/ash_output", filter_level="summary"
 )
 
 # Verify response structure
@@ -67,8 +66,7 @@ print(f"✓ Summary filter: {size_kb:.2f}KB")
 #### Test 1.3: Full Filter (Default)
 ```python
 result = await mcp_ash_get_scan_results(
-    output_dir="/path/to/.ash/ash_output",
-    filter_level="full"
+    output_dir="/path/to/.ash/ash_output", filter_level="full"
 )
 
 # Verify response structure
@@ -82,9 +80,7 @@ print(f"✓ Full filter: {size_kb:.2f}KB")
 
 #### Test 1.4: No Filter (Backward Compatibility)
 ```python
-result = await mcp_ash_get_scan_results(
-    output_dir="/path/to/.ash/ash_output"
-)
+result = await mcp_ash_get_scan_results(output_dir="/path/to/.ash/ash_output")
 
 # Should return full results
 assert "raw_results" in result
@@ -96,8 +92,7 @@ print("✓ No filter (backward compatible): Full results returned")
 #### Test 2.1: Single Scanner
 ```python
 result = await mcp_ash_get_scan_results(
-    output_dir="/path/to/.ash/ash_output",
-    scanners="bandit"
+    output_dir="/path/to/.ash/ash_output", scanners="bandit"
 )
 
 # Verify only bandit results are included
@@ -107,7 +102,7 @@ if "scanner_reports" in result:
 
 if "raw_results" in result and "scanner_results" in result["raw_results"]:
     assert "bandit" in result["raw_results"]["scanner_results"]
-    
+
 # Verify filter metadata
 assert "_content_filters" in result
 assert "bandit" in result["_content_filters"]["scanners"]
@@ -117,8 +112,7 @@ print("✓ Single scanner filter: bandit only")
 #### Test 2.2: Multiple Scanners
 ```python
 result = await mcp_ash_get_scan_results(
-    output_dir="/path/to/.ash/ash_output",
-    scanners="bandit,semgrep,checkov"
+    output_dir="/path/to/.ash/ash_output", scanners="bandit,semgrep,checkov"
 )
 
 # Verify only specified scanners are included
@@ -135,8 +129,7 @@ print("✓ Multiple scanner filter: bandit, semgrep, checkov")
 #### Test 2.3: Case Insensitivity
 ```python
 result = await mcp_ash_get_scan_results(
-    output_dir="/path/to/.ash/ash_output",
-    scanners="BANDIT,Semgrep"
+    output_dir="/path/to/.ash/ash_output", scanners="BANDIT,Semgrep"
 )
 
 # Should work with any case
@@ -149,8 +142,7 @@ print("✓ Scanner filter is case-insensitive")
 #### Test 3.1: Single Severity
 ```python
 result = await mcp_ash_get_scan_results(
-    output_dir="/path/to/.ash/ash_output",
-    severities="critical"
+    output_dir="/path/to/.ash/ash_output", severities="critical"
 )
 
 # Verify only critical severity is included
@@ -167,8 +159,7 @@ print("✓ Single severity filter: critical only")
 #### Test 3.2: Multiple Severities
 ```python
 result = await mcp_ash_get_scan_results(
-    output_dir="/path/to/.ash/ash_output",
-    severities="critical,high,medium"
+    output_dir="/path/to/.ash/ash_output", severities="critical,high,medium"
 )
 
 # Verify filter metadata
@@ -180,8 +171,7 @@ print("✓ Multiple severity filter: critical, high, medium")
 #### Test 3.3: Exclude Suppressed
 ```python
 result = await mcp_ash_get_scan_results(
-    output_dir="/path/to/.ash/ash_output",
-    severities="critical,high,medium,low,info"
+    output_dir="/path/to/.ash/ash_output", severities="critical,high,medium,low,info"
 )
 
 # Verify suppressed is excluded
@@ -195,9 +185,7 @@ print("✓ Severity filter excludes suppressed findings")
 #### Test 4.1: Response Size + Scanner
 ```python
 result = await mcp_ash_get_scan_results(
-    output_dir="/path/to/.ash/ash_output",
-    filter_level="summary",
-    scanners="bandit"
+    output_dir="/path/to/.ash/ash_output", filter_level="summary", scanners="bandit"
 )
 
 # Verify both filters applied
@@ -215,9 +203,7 @@ print(f"✓ Summary + scanner filter: {size_kb:.2f}KB")
 #### Test 4.2: Response Size + Severity
 ```python
 result = await mcp_ash_get_scan_results(
-    output_dir="/path/to/.ash/ash_output",
-    filter_level="minimal",
-    severities="critical"
+    output_dir="/path/to/.ash/ash_output", filter_level="minimal", severities="critical"
 )
 
 # Verify both filters applied
@@ -237,7 +223,7 @@ print(f"✓ Minimal + severity filter: {size_kb:.2f}KB")
 result = await mcp_ash_get_scan_results(
     output_dir="/path/to/.ash/ash_output",
     scanners="bandit,semgrep",
-    severities="critical,high"
+    severities="critical,high",
 )
 
 # Verify both filters applied
@@ -253,7 +239,7 @@ result = await mcp_ash_get_scan_results(
     output_dir="/path/to/.ash/ash_output",
     filter_level="summary",
     scanners="bandit",
-    severities="critical,high"
+    severities="critical,high",
 )
 
 # Verify all filters applied
@@ -274,8 +260,7 @@ print(f"✓ All filters combined: {size_kb:.2f}KB")
 #### Test 5.1: Invalid Scanner Name
 ```python
 result = await mcp_ash_get_scan_results(
-    output_dir="/path/to/.ash/ash_output",
-    scanners="nonexistent_scanner"
+    output_dir="/path/to/.ash/ash_output", scanners="nonexistent_scanner"
 )
 
 # Should return empty results or handle gracefully
@@ -286,8 +271,7 @@ print("✓ Invalid scanner name handled gracefully")
 #### Test 5.2: Invalid Severity Level
 ```python
 result = await mcp_ash_get_scan_results(
-    output_dir="/path/to/.ash/ash_output",
-    severities="invalid_severity"
+    output_dir="/path/to/.ash/ash_output", severities="invalid_severity"
 )
 
 # Should return empty results or handle gracefully
@@ -298,9 +282,7 @@ print("✓ Invalid severity level handled gracefully")
 #### Test 5.3: Empty Filter Values
 ```python
 result = await mcp_ash_get_scan_results(
-    output_dir="/path/to/.ash/ash_output",
-    scanners="",
-    severities=""
+    output_dir="/path/to/.ash/ash_output", scanners="", severities=""
 )
 
 # Should return all results (empty filters ignored)
@@ -317,8 +299,7 @@ import time
 # Measure full results
 start = time.time()
 full = await mcp_ash_get_scan_results(
-    output_dir="/path/to/.ash/ash_output",
-    filter_level="full"
+    output_dir="/path/to/.ash/ash_output", filter_level="full"
 )
 full_time = time.time() - start
 full_size = len(json.dumps(full)) / 1024
@@ -326,8 +307,7 @@ full_size = len(json.dumps(full)) / 1024
 # Measure summary results
 start = time.time()
 summary = await mcp_ash_get_scan_results(
-    output_dir="/path/to/.ash/ash_output",
-    filter_level="summary"
+    output_dir="/path/to/.ash/ash_output", filter_level="summary"
 )
 summary_time = time.time() - start
 summary_size = len(json.dumps(summary)) / 1024
@@ -335,15 +315,18 @@ summary_size = len(json.dumps(summary)) / 1024
 # Measure minimal results
 start = time.time()
 minimal = await mcp_ash_get_scan_results(
-    output_dir="/path/to/.ash/ash_output",
-    filter_level="minimal"
+    output_dir="/path/to/.ash/ash_output", filter_level="minimal"
 )
 minimal_time = time.time() - start
 minimal_size = len(json.dumps(minimal)) / 1024
 
 print(f"Full: {full_size:.2f}KB in {full_time:.3f}s")
-print(f"Summary: {summary_size:.2f}KB in {summary_time:.3f}s ({100*summary_size/full_size:.1f}% of full)")
-print(f"Minimal: {minimal_size:.2f}KB in {minimal_time:.3f}s ({100*minimal_size/full_size:.1f}% of full)")
+print(
+    f"Summary: {summary_size:.2f}KB in {summary_time:.3f}s ({100 * summary_size / full_size:.1f}% of full)"
+)
+print(
+    f"Minimal: {minimal_size:.2f}KB in {minimal_time:.3f}s ({100 * minimal_size / full_size:.1f}% of full)"
+)
 ```
 
 #### Test 6.2: Content Filter Impact
@@ -351,8 +334,7 @@ print(f"Minimal: {minimal_size:.2f}KB in {minimal_time:.3f}s ({100*minimal_size/
 # Measure unfiltered results
 start = time.time()
 unfiltered = await mcp_ash_get_scan_results(
-    output_dir="/path/to/.ash/ash_output",
-    filter_level="summary"
+    output_dir="/path/to/.ash/ash_output", filter_level="summary"
 )
 unfiltered_time = time.time() - start
 unfiltered_size = len(json.dumps(unfiltered)) / 1024
@@ -363,13 +345,15 @@ filtered = await mcp_ash_get_scan_results(
     output_dir="/path/to/.ash/ash_output",
     filter_level="summary",
     scanners="bandit",
-    severities="critical,high"
+    severities="critical,high",
 )
 filtered_time = time.time() - start
 filtered_size = len(json.dumps(filtered)) / 1024
 
 print(f"Unfiltered: {unfiltered_size:.2f}KB in {unfiltered_time:.3f}s")
-print(f"Filtered: {filtered_size:.2f}KB in {filtered_time:.3f}s ({100*filtered_size/unfiltered_size:.1f}% of unfiltered)")
+print(
+    f"Filtered: {filtered_size:.2f}KB in {filtered_time:.3f}s ({100 * filtered_size / unfiltered_size:.1f}% of unfiltered)"
+)
 ```
 
 ## Test Checklist

@@ -17,6 +17,7 @@ def test_bandit_scanner_initialization():
     assert scanner.name == "bandit"
     assert scanner.is_enabled()
 
+
 def test_bandit_scanner_scan_python_file(temp_python_file):
     temp_python_file.write_text("import pickle\npickle.loads(b'')")
     scanner = BanditScanner()
@@ -50,6 +51,7 @@ def test_bandit_scanner_finds_unsafe_pickle_usage():
     # Test code here
     pass
 
+
 def test_bandit_scanner_ignores_safe_code():
     # Test code here
     pass
@@ -60,6 +62,7 @@ def test_bandit_scanner_ignores_safe_code():
 def test_scanner_1():
     # Test code here
     pass
+
 
 def test_scanner_2():
     # Test code here
@@ -105,6 +108,7 @@ def temp_config():
     yield config_file
     config_file.unlink()
 
+
 def test_with_config(temp_config):
     scanner = BanditScanner(config_file=temp_config)
     assert scanner.is_enabled()
@@ -123,7 +127,7 @@ def test_scanner_with_mock_subprocess(mocker):
         args=["bandit", "-r", "test.py"],
         returncode=0,
         stdout="No issues found.",
-        stderr=""
+        stderr="",
     )
 
     scanner = BanditScanner()
@@ -139,11 +143,14 @@ Test boundary conditions and error cases to ensure the code handles them correct
 
 **Good Example:**
 ```python
-@pytest.mark.parametrize("input_value,expected_error", [
-    (None, TypeError),
-    ("", ValueError),
-    ("/nonexistent/file.py", FileNotFoundError),
-])
+@pytest.mark.parametrize(
+    "input_value,expected_error",
+    [
+        (None, TypeError),
+        ("", ValueError),
+        ("/nonexistent/file.py", FileNotFoundError),
+    ],
+)
 def test_scanner_with_invalid_input(input_value, expected_error):
     scanner = BanditScanner()
     with pytest.raises(expected_error):
@@ -160,6 +167,7 @@ def test_scanner_1(temp_project_dir):
     # Test code here using temp_project_dir
     pass
 
+
 def test_scanner_2(temp_project_dir):
     # Test code here using a fresh temp_project_dir
     pass
@@ -171,11 +179,13 @@ def test_scanner_2(temp_project_dir):
 TEMP_DIR = Path("/tmp/test")
 TEMP_DIR.mkdir(exist_ok=True)
 
+
 def test_scanner_1():
     # Creates files that test_scanner_2 depends on
     (TEMP_DIR / "test.py").write_text("import pickle\npickle.loads(b'')")
     # Test code here
     pass
+
 
 def test_scanner_2():
     # Depends on files created by test_scanner_1
@@ -191,11 +201,14 @@ Use `@pytest.mark.parametrize` to test multiple inputs with the same test functi
 
 **Good Example:**
 ```python
-@pytest.mark.parametrize("code,expected_findings", [
-    ("import pickle\npickle.loads(b'')", 1),  # Unsafe pickle usage
-    ("import hashlib\nhashlib.md5(b'')", 1),  # Weak hash algorithm
-    ("print('Hello, world!')", 0),  # No security issues
-])
+@pytest.mark.parametrize(
+    "code,expected_findings",
+    [
+        ("import pickle\npickle.loads(b'')", 1),  # Unsafe pickle usage
+        ("import hashlib\nhashlib.md5(b'')", 1),  # Weak hash algorithm
+        ("print('Hello, world!')", 0),  # No security issues
+    ],
+)
 def test_bandit_scanner_findings(temp_python_file, code, expected_findings):
     # Arrange
     temp_python_file.write_text(code)
@@ -218,6 +231,7 @@ Unit tests should focus on testing a single unit of code in isolation. They shou
 import pytest
 from automated_security_helper.scanners.bandit_scanner import BanditScanner
 
+
 @pytest.mark.unit
 @pytest.mark.scanner
 class TestBanditScanner:
@@ -232,20 +246,22 @@ class TestBanditScanner:
         mock_run.return_value = subprocess.CompletedProcess(
             args=["bandit", "-r", "test.py"],
             returncode=0,
-            stdout=json.dumps({
-                "results": [
-                    {
-                        "filename": "test.py",
-                        "line": 1,
-                        "issue_text": "Unsafe pickle usage",
-                        "issue_severity": "HIGH",
-                        "issue_confidence": "HIGH",
-                        "issue_cwe": "CWE-502",
-                        "test_id": "B301"
-                    }
-                ]
-            }),
-            stderr=""
+            stdout=json.dumps(
+                {
+                    "results": [
+                        {
+                            "filename": "test.py",
+                            "line": 1,
+                            "issue_text": "Unsafe pickle usage",
+                            "issue_severity": "HIGH",
+                            "issue_confidence": "HIGH",
+                            "issue_cwe": "CWE-502",
+                            "test_id": "B301",
+                        }
+                    ]
+                }
+            ),
+            stderr="",
         )
 
         # Arrange
@@ -273,6 +289,7 @@ import pytest
 from automated_security_helper.scanners.bandit_scanner import BanditScanner
 from automated_security_helper.reporters.sarif_reporter import SarifReporter
 
+
 @pytest.mark.integration
 @pytest.mark.scanner
 @pytest.mark.reporter
@@ -290,7 +307,12 @@ def test_scanner_reporter_integration(temp_project_dir):
 
     # Assert
     assert len(report["runs"][0]["results"]) == 1
-    assert report["runs"][0]["results"][0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] == "test.py"
+    assert (
+        report["runs"][0]["results"][0]["locations"][0]["physicalLocation"][
+            "artifactLocation"
+        ]["uri"]
+        == "test.py"
+    )
     assert "Unsafe pickle usage" in report["runs"][0]["results"][0]["message"]["text"]
 ```
 
@@ -301,6 +323,7 @@ End-to-end tests should focus on testing complete workflows from start to finish
 ```python
 import pytest
 from tests.utils.integration_test_utils import integration_test_environment
+
 
 @pytest.mark.integration
 @pytest.mark.slow

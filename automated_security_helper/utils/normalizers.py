@@ -28,5 +28,3 @@ def get_normalized_filename(str_to_normalize: str | Path) -> str:
         flags=re.IGNORECASE,
     ).lstrip("-")
     return normalized
-
-

@@ -67,7 +67,9 @@ def test_process_config_options_skip_path_values_are_verbatim(
         config=CheckovScannerConfig(
             options=CheckovScannerConfigOptions(
                 skip_path=[
-                    IgnorePathWithReason(path=user_path, reason="value-preservation test"),
+                    IgnorePathWithReason(
+                        path=user_path, reason="value-preservation test"
+                    ),
                 ]
             )
         ),

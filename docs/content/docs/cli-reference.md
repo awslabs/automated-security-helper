@@ -30,7 +30,7 @@ These parameters are available across multiple ASH commands:
 | `--container-uid` | UID to use for the container user | |  | `scan` |
 | `--custom-build-arg` | Custom build arguments to pass to the container build | |  | `scan` |
 | `--custom-containerfile` | Path to a custom container definition (e.g. | |  | `scan` |
-| `--fail-on-incomplete-scanners` / `--no-fail-on-incomplete-scanners` | Exit 1 when a selected scanner did not complete (`ERROR` or `MISSING`). Off by default; see [An incomplete scan is not a clean scan](#an-incomplete-scan-is-not-a-clean-scan). | | `--fail-on-incomplete-scanners` | `scan` |
+| `--fail-on-incomplete-scanners` / `--no-fail-on-incomplete-scanners` | Exit 1 when a selected scanner did not complete (`ERROR` or `MISSING`). On by default; see [An incomplete scan is not a clean scan](#an-incomplete-scan-is-not-a-clean-scan). | | `--fail-on-incomplete-scanners` | `scan` |
 | `--formats` | The output formats to use (comma-separated). | |  | `scan` |
 | `--min-severity` | Minimum severity to trigger non-zero exit code (critical, high, medium, low, none). | |  | `scan` |
 | `--progress` | Show progress of each job live in the console. Defaults to True. | |  | `scan` |
@@ -63,7 +63,7 @@ ash \
   --config-overrides 'global_settings.severity_threshold=MEDIUM'
 
 # Append to lists
-ash --config-overrides 'ash_plugin_modules+=["my_custom_plugin"]'
+ash --config-overrides 'ash_plugin_modules+=["my_ash_plugins"]'
 
 # Complex values using JSON syntax
 ash --config-overrides 'global_settings.ignore_paths+=[{"path": "build/", "reason": "Generated files"}]'
@@ -346,7 +346,7 @@ ash --output-formats flat-json,sarif,html,markdown
 ash --mode precommit
 
 # Scan with custom plugins
-ash --ash-plugin-modules my_custom_plugin_module
+ash --ash-plugin-modules my_ash_plugins
 
 # Inspect the plan for a workspace, without scanning
 ash --workspace ./dev.code-workspace --dry-run
@@ -378,7 +378,7 @@ ash merge --results <file-or-dir> [--results ...] --output-dir <dir> [options]
 | `--output-formats`     | Comma-separated report formats to generate                                    | The formats the scan's own configuration asks for |                      |
 | `--min-severity`       | Minimum severity that counts as actionable for the exit code                  | `low`                                             |                      |
 | `--fail-on-findings`   | Exit non-zero when the merged report has actionable findings                   | The scan configuration's value, then `True`       |                      |
-| `--fail-on-incomplete-scanners` / `--no-fail-on-incomplete-scanners` | Refuse the merge when a shard completed none of the scanners it owned, and exit 1 when any scanner in the union is `ERROR` or `MISSING` | The scan configuration's value, then `False` | |
+| `--fail-on-incomplete-scanners` / `--no-fail-on-incomplete-scanners` | Refuse the merge when a shard completed none of the scanners it owned, and exit 1 when any scanner in the union is `ERROR` or `MISSING` | The scan configuration's value, then `True` | |
 | `--log-level`          | Set the log level                                                             | `INFO`                                            |                      |
 | `--verbose`, `-v`      | Enable verbose logging                                                        | `False`                                           |                      |
 | `--debug`, `-d`        | Enable debug logging                                                          | `False`                                           |                      |
@@ -401,7 +401,7 @@ Coverage is verified before anything is merged, so a bad set of shards fails wit
 - a scanner appears in some shard's results but no shard was assigned it — the executors resolved different scanner sets, so no shard ran it and the union has a hole
 - the shard that owned a scanner recorded no result for it, leaving another shard's skip marker as the only trace
 
-With `--fail-on-incomplete-scanners`, one more:
+With the completeness gate on, which is the default, one more:
 
 - a shard owned at least one scanner and completed none of them — every scanner it was asked to run came back `ERROR`, came back `MISSING`, or produced no entry at all
 
@@ -672,7 +672,7 @@ ash plugin list
 ash plugin list --include-plugin-config
 
 # List plugins including custom modules
-ash plugin list --ash-plugin-modules my_custom_plugin_module
+ash plugin list --ash-plugin-modules my_ash_plugins
 ```
 
 ## Report Command

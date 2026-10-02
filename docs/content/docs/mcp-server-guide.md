@@ -79,9 +79,7 @@ A dictionary with scan ID and status information.
 **Example:**
 ```python
 result = await mcp_scan_directory(
-    directory_path="/path/to/your/code",
-    severity_threshold="MEDIUM",
-    config_path=None
+    directory_path="/path/to/your/code", severity_threshold="MEDIUM", config_path=None
 )
 ```
 
@@ -112,9 +110,7 @@ A dictionary with scan progress information.
 
 **Example:**
 ```python
-progress = await mcp_get_scan_progress(
-    scan_id="550e8400-e29b-41d4-a716-446655440000"
-)
+progress = await mcp_get_scan_progress(scan_id="550e8400-e29b-41d4-a716-446655440000")
 ```
 
 **Example Response:**
@@ -175,9 +171,7 @@ A dictionary with scan results information.
 
 **Example:**
 ```python
-results = await mcp_get_scan_results(
-    scan_id="550e8400-e29b-41d4-a716-446655440000"
-)
+results = await mcp_get_scan_results(scan_id="550e8400-e29b-41d4-a716-446655440000")
 ```
 
 **Example Response:**
@@ -280,9 +274,7 @@ A dictionary with cancellation result information.
 
 **Example:**
 ```python
-result = await mcp_cancel_scan(
-    scan_id="550e8400-e29b-41d4-a716-446655440000"
-)
+result = await mcp_cancel_scan(scan_id="550e8400-e29b-41d4-a716-446655440000")
 ```
 
 **Example Response:**
@@ -509,8 +501,7 @@ When using the ASH MCP server, follow these best practices:
 ```python
 # Start a scan
 result = await mcp_scan_directory(
-    directory_path="/path/to/your/code",
-    severity_threshold="MEDIUM"
+    directory_path="/path/to/your/code", severity_threshold="MEDIUM"
 )
 
 # Get the scan ID
@@ -542,8 +533,7 @@ else:
 scan_ids = []
 for directory in directories:
     result = await mcp_scan_directory(
-        directory_path=directory,
-        severity_threshold="MEDIUM"
+        directory_path=directory, severity_threshold="MEDIUM"
     )
     scan_ids.append(result["scan_id"])
 
@@ -580,8 +570,7 @@ for scan_id in scan_ids:
 # Start a scan with error handling
 try:
     result = await mcp_scan_directory(
-        directory_path="/path/to/your/code",
-        severity_threshold="MEDIUM"
+        directory_path="/path/to/your/code", severity_threshold="MEDIUM"
     )
 
     if not result["success"]:

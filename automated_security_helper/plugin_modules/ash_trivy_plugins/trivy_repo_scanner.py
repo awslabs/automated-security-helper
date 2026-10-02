@@ -270,11 +270,13 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
                         else None
                     )
                     resolved.append(
-                        install_path(lock_rel, entry.key) if entry is not None else None
+                        install_path(lock_rel, entry.key)
+                        if lock_rel and entry is not None
+                        else None
                     )
 
                 if resolved and all(resolved):
-                    for location, path in zip(result.locations, resolved):
+                    for location, path in zip(result.locations or [], resolved):
                         copy = result.model_copy(deep=True)
                         copy.locations = [location.model_copy(deep=True)]
                         self._set_identity(copy, name, version, path)
@@ -290,7 +292,7 @@ class TrivyRepoScanner(ScannerPluginBase[TrivyRepoScannerConfig]):
     def _set_identity(result, name, version, path) -> None:
         identity = identity_properties(name, version, path)
         if result.properties is None:
-            result.properties = PropertyBag(**identity)
+            result.properties = PropertyBag.model_validate(identity)
         else:
             for key, value in identity.items():
                 setattr(result.properties, key, value)

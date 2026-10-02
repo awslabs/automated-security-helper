@@ -53,6 +53,13 @@ proxy's. What this module does guarantee is that an id names one directory and
 not a path: an id that could traverse, or that carries a separator or a control
 character, is refused rather than sanitized. Sanitizing would map two distinct
 ids onto one workspace and silently merge two callers' source trees.
+
+That guarantee lives in ``session_paths.validated_path_component``, the one
+implementation shared by the transport, the ``sessions`` registry and
+``source_delivery``; :func:`validate_path_component` here only delegates to it.
+``source_delivery`` once carried its own weaker copy of three of these
+predicates, and ``session_paths`` and this module later carried two rules that
+disagreed. One rule, several labels (the header, ``session_id``, ``upload_id``).
 """
 
 from __future__ import annotations
@@ -63,10 +70,31 @@ from typing import Mapping, Optional
 # against a lowercased key.
 MCP_SESSION_ID_HEADER = "mcp-session-id"
 
-# A session id becomes a single path component. Individual filenames cap at 255
-# bytes on ext4/APFS/NTFS; 128 leaves room for the ``.zip.part`` suffixes that
-# source_delivery appends inside the session directory without going near it.
-_MAX_SESSION_ID_LEN = 128
+
+def validate_path_component(value: str, label: str) -> str:
+    """Refuse a caller-supplied value that could name anything but one directory.
+
+    A delegate, not a rule. The rule lives in
+    :func:`automated_security_helper.cli.mcp.session_paths.validated_path_component`
+    and is the only one: this module and ``session_paths`` each used to carry a
+    copy, the copies disagreed about ``~``, ``+``, ``=`` and length, and an id one
+    accepted and the other refused was admitted at the transport and then failed
+    inside the session registry. Kept under this name so the transport and its
+    tests keep their import; ``label`` names the refused input in the message.
+
+    Returns:
+        ``value`` unchanged when it names exactly one path component.
+
+    Raises:
+        ValueError: under exactly the conditions ``validated_path_component``
+            raises.
+    """
+
+    from automated_security_helper.cli.mcp.session_paths import (
+        validated_path_component,
+    )
+
+    return validated_path_component(value, label)
 
 
 def _header_value(headers: Mapping[str, str], name: str) -> Optional[str]:
@@ -97,10 +125,11 @@ def resolve_session_id(headers: Optional[Mapping[str, str]]) -> str:
 
     Raises:
         ValueError: if the header is present but could not name a single
-            directory -- it contains a path separator, is a relative-path
-            component, carries a control character, or exceeds
-            ``_MAX_SESSION_ID_LEN``. Refused rather than sanitized: see the
-            module docstring.
+            directory, per :func:`validate_path_component` -- it contains a path
+            separator, is a relative-path component, carries a control character
+            or a character with path meaning such as a drive-specifying ``:``,
+            or exceeds ``session_paths.MAX_COMPONENT_LEN``. Refused rather than sanitized:
+            see the module docstring.
 
     A header that is absent, empty, or whitespace-only is treated as "no session
     supplied" and resolves to the default, matching the ``session_id or
@@ -127,34 +156,11 @@ def resolve_session_id(headers: Optional[Mapping[str, str]]) -> str:
     if not candidate:
         return DEFAULT_SESSION_ID
 
-    if len(candidate) > _MAX_SESSION_ID_LEN:
-        raise ValueError(
-            f"{MCP_SESSION_ID_HEADER} is {len(candidate)} characters; "
-            f"the maximum is {_MAX_SESSION_ID_LEN}"
-        )
-
-    if "/" in candidate or "\\" in candidate:
-        raise ValueError(
-            f"{MCP_SESSION_ID_HEADER} must not contain a path separator: {candidate!r}"
-        )
-
-    if candidate in (".", ".."):
-        raise ValueError(
-            f"{MCP_SESSION_ID_HEADER} must not be a relative-path component: "
-            f"{candidate!r}"
-        )
-
-    # A NUL truncates the path at the C boundary, so an id carrying one would
-    # name a different directory than it appears to. The other control
-    # characters are refused with it because none of them belongs in a session
-    # id and each is a poor thing to have in a directory name.
-    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in candidate):
-        raise ValueError(
-            f"{MCP_SESSION_ID_HEADER} must not contain control characters: "
-            f"{candidate!r}"
-        )
-
-    return candidate
+    return validate_path_component(candidate, MCP_SESSION_ID_HEADER)
 
 
-__all__ = ["MCP_SESSION_ID_HEADER", "resolve_session_id"]
+__all__ = [
+    "MCP_SESSION_ID_HEADER",
+    "resolve_session_id",
+    "validate_path_component",
+]

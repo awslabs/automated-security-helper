@@ -21,7 +21,7 @@ class Metadata(BaseModel):
 
 class ClientCertificate(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     cert: str
     key: str
@@ -30,7 +30,7 @@ class ClientCertificate(BaseModel):
 
 class RequestOptions(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     timeout: float | None = None
     verifySsl: bool | None = None
@@ -43,19 +43,19 @@ class RequestOptions(BaseModel):
 
 
 class Role(StrEnum):
-    chat = 'chat'
-    autocomplete = 'autocomplete'
-    embed = 'embed'
-    rerank = 'rerank'
-    edit = 'edit'
-    apply = 'apply'
-    summarize = 'summarize'
-    subagent = 'subagent'
+    chat = "chat"
+    autocomplete = "autocomplete"
+    embed = "embed"
+    rerank = "rerank"
+    edit = "edit"
+    apply = "apply"
+    summarize = "summarize"
+    subagent = "subagent"
 
 
 class DefaultCompletionOptions(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     contextLength: float | None = None
     maxTokens: float | None = None
@@ -76,7 +76,7 @@ class DefaultCompletionOptions(BaseModel):
 
 class CacheBehavior(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     cacheSystemMessage: bool | None = None
     cacheConversation: bool | None = None
@@ -84,7 +84,7 @@ class CacheBehavior(BaseModel):
 
 class RequestOptions1(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     timeout: float | None = None
     verifySsl: bool | None = None
@@ -98,7 +98,7 @@ class RequestOptions1(BaseModel):
 
 class EmbedOptions(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     maxChunkSize: float | None = None
     maxBatchSize: float | None = None
@@ -107,7 +107,7 @@ class EmbedOptions(BaseModel):
 
 class SystemMessageDescription(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     prefix: str | None = None
     exampleArgs: list[list[str | str | float]] | None = None
@@ -115,7 +115,7 @@ class SystemMessageDescription(BaseModel):
 
 class ToolOverrides(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     description: str | None = None
     displayTitle: str | None = None
@@ -128,7 +128,7 @@ class ToolOverrides(BaseModel):
 
 class ChatOptions(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     baseSystemMessage: str | None = None
     baseAgentSystemMessage: str | None = None
@@ -137,29 +137,29 @@ class ChatOptions(BaseModel):
 
 
 class Chat(StrEnum):
-    llama2 = 'llama2'
-    alpaca = 'alpaca'
-    zephyr = 'zephyr'
-    phi2 = 'phi2'
-    phind = 'phind'
-    anthropic = 'anthropic'
-    chatml = 'chatml'
-    none = 'none'
-    openchat = 'openchat'
-    deepseek = 'deepseek'
-    xwin_coder = 'xwin-coder'
-    neural_chat = 'neural-chat'
-    codellama_70b = 'codellama-70b'
-    llava = 'llava'
-    gemma = 'gemma'
-    granite = 'granite'
-    llama3 = 'llama3'
-    codestral = 'codestral'
+    llama2 = "llama2"
+    alpaca = "alpaca"
+    zephyr = "zephyr"
+    phi2 = "phi2"
+    phind = "phind"
+    anthropic = "anthropic"
+    chatml = "chatml"
+    none = "none"
+    openchat = "openchat"
+    deepseek = "deepseek"
+    xwin_coder = "xwin-coder"
+    neural_chat = "neural-chat"
+    codellama_70b = "codellama-70b"
+    llava = "llava"
+    gemma = "gemma"
+    granite = "granite"
+    llama3 = "llama3"
+    codestral = "codestral"
 
 
 class PromptTemplates(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     apply: str | None = None
     chat: Chat | None = None
@@ -169,7 +169,7 @@ class PromptTemplates(BaseModel):
 
 class AutocompleteOptions(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     disable: bool | None = None
     maxPromptTokens: float | None = None
@@ -193,7 +193,7 @@ class AutocompleteOptions(BaseModel):
 
 class Models(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     name: str
     model: str
@@ -203,7 +203,7 @@ class Models(BaseModel):
     maxStopWords: float | None = None
     roles: list[Role] | None = None
     capabilities: (
-        list[Literal['tool_use'] | Literal['image_input'] | Literal['next_edit'] | str]
+        list[Literal["tool_use"] | Literal["image_input"] | Literal["next_edit"] | str]
         | None
     ) = None
     defaultCompletionOptions: DefaultCompletionOptions | None = None
@@ -216,7 +216,7 @@ class Models(BaseModel):
     useResponsesApi: bool | None = None
     env: dict[str, str | bool | float] | None = None
     autocompleteOptions: AutocompleteOptions | None = None
-    provider: Literal['continue-proxy']
+    provider: Literal["continue-proxy"]
     apiKeyLocation: str | None = None
     envSecretLocations: dict[str, str] | None = None
     orgScopeId: str | None
@@ -225,7 +225,7 @@ class Models(BaseModel):
 
 class RequestOptions2(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     timeout: float | None = None
     verifySsl: bool | None = None
@@ -239,7 +239,7 @@ class RequestOptions2(BaseModel):
 
 class ToolOverrides1(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     description: str | None = None
     displayTitle: str | None = None
@@ -252,7 +252,7 @@ class ToolOverrides1(BaseModel):
 
 class ChatOptions1(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     baseSystemMessage: str | None = None
     baseAgentSystemMessage: str | None = None
@@ -262,7 +262,7 @@ class ChatOptions1(BaseModel):
 
 class PromptTemplates1(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     apply: str | None = None
     chat: Chat | None = None
@@ -272,7 +272,7 @@ class PromptTemplates1(BaseModel):
 
 class Models1(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     name: str
     model: str
@@ -282,7 +282,7 @@ class Models1(BaseModel):
     maxStopWords: float | None = None
     roles: list[Role] | None = None
     capabilities: (
-        list[Literal['tool_use'] | Literal['image_input'] | Literal['next_edit'] | str]
+        list[Literal["tool_use"] | Literal["image_input"] | Literal["next_edit"] | str]
         | None
     ) = None
     defaultCompletionOptions: DefaultCompletionOptions | None = None
@@ -300,46 +300,46 @@ class Models1(BaseModel):
 
 
 class Uses(StrEnum):
-    anthropic_claude_sonnet_4_6 = 'anthropic/claude-sonnet-4-6'
-    anthropic_claude_opus_4_6 = 'anthropic/claude-opus-4-6'
-    anthropic_claude_sonnet_4 = 'anthropic/claude-sonnet-4'
+    anthropic_claude_sonnet_4_6 = "anthropic/claude-sonnet-4-6"
+    anthropic_claude_opus_4_6 = "anthropic/claude-opus-4-6"
+    anthropic_claude_sonnet_4 = "anthropic/claude-sonnet-4"
     togetherai_llama_4_maverick_instruct_17bx128e = (
-        'togetherai/llama-4-maverick-instruct-17bx128e'
+        "togetherai/llama-4-maverick-instruct-17bx128e"
     )
-    google_gemini_2_5_pro = 'google/gemini-2.5-pro'
-    mistral_codestral = 'mistral/codestral'
-    voyageai_voyage_code_3 = 'voyageai/voyage-code-3'
-    anthropic_claude_sonnet_4_5 = 'anthropic/claude-sonnet-4-5'
-    relace_instant_apply = 'relace/instant-apply'
-    xai_grok_2 = 'xai/grok-2'
-    openai_gpt_4o = 'openai/gpt-4o'
+    google_gemini_2_5_pro = "google/gemini-2.5-pro"
+    mistral_codestral = "mistral/codestral"
+    voyageai_voyage_code_3 = "voyageai/voyage-code-3"
+    anthropic_claude_sonnet_4_5 = "anthropic/claude-sonnet-4-5"
+    relace_instant_apply = "relace/instant-apply"
+    xai_grok_2 = "xai/grok-2"
+    openai_gpt_4o = "openai/gpt-4o"
     togetherai_llama_4_scout_instruct_17bx16e = (
-        'togetherai/llama-4-scout-instruct-17bx16e'
+        "togetherai/llama-4-scout-instruct-17bx16e"
     )
-    anthropic_claude_haiku_4_5 = 'anthropic/claude-haiku-4-5'
-    google_gemini_2_5_flash = 'google/gemini-2.5-flash'
-    voyageai_rerank_2 = 'voyageai/rerank-2'
-    anthropic_claude_opus_4_1 = 'anthropic/claude-opus-4-1'
-    ollama_deepseek_r1 = 'ollama/deepseek-r1'
-    morphllm_morph_v0 = 'morphllm/morph-v0'
-    lmstudio_deepseek_r1 = 'lmstudio/deepseek-r1'
-    openai_o3_mini = 'openai/o3-mini'
-    voyageai_voyage_code_2 = 'voyageai/voyage-code-2'
-    ollama_qwen2_5_coder_1_5b = 'ollama/qwen2.5-coder-1.5b'
-    openai_gpt_4o_mini = 'openai/gpt-4o-mini'
-    openai_o1 = 'openai/o1'
-    mistral_mistral_embed = 'mistral/mistral-embed'
-    ollama_nomic_embed_text_latest = 'ollama/nomic-embed-text-latest'
-    lmstudio_deepseek_r1_8b = 'lmstudio/deepseek-r1-8b'
-    mistral_mistral_large = 'mistral/mistral-large'
-    lmstudio_qwen2_5_coder_1_5b = 'lmstudio/qwen2.5-coder-1.5b'
-    ollama_deepseek_r1_8b = 'ollama/deepseek-r1-8b'
-    openai_text_embedding_3_large = 'openai/text-embedding-3-large'
+    anthropic_claude_haiku_4_5 = "anthropic/claude-haiku-4-5"
+    google_gemini_2_5_flash = "google/gemini-2.5-flash"
+    voyageai_rerank_2 = "voyageai/rerank-2"
+    anthropic_claude_opus_4_1 = "anthropic/claude-opus-4-1"
+    ollama_deepseek_r1 = "ollama/deepseek-r1"
+    morphllm_morph_v0 = "morphllm/morph-v0"
+    lmstudio_deepseek_r1 = "lmstudio/deepseek-r1"
+    openai_o3_mini = "openai/o3-mini"
+    voyageai_voyage_code_2 = "voyageai/voyage-code-2"
+    ollama_qwen2_5_coder_1_5b = "ollama/qwen2.5-coder-1.5b"
+    openai_gpt_4o_mini = "openai/gpt-4o-mini"
+    openai_o1 = "openai/o1"
+    mistral_mistral_embed = "mistral/mistral-embed"
+    ollama_nomic_embed_text_latest = "ollama/nomic-embed-text-latest"
+    lmstudio_deepseek_r1_8b = "lmstudio/deepseek-r1-8b"
+    mistral_mistral_large = "mistral/mistral-large"
+    lmstudio_qwen2_5_coder_1_5b = "lmstudio/qwen2.5-coder-1.5b"
+    ollama_deepseek_r1_8b = "ollama/deepseek-r1-8b"
+    openai_text_embedding_3_large = "openai/text-embedding-3-large"
 
 
 class RequestOptions3(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     timeout: float | None = None
     verifySsl: bool | None = None
@@ -353,7 +353,7 @@ class RequestOptions3(BaseModel):
 
 class ToolOverrides2(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     description: str | None = None
     displayTitle: str | None = None
@@ -366,7 +366,7 @@ class ToolOverrides2(BaseModel):
 
 class ChatOptions2(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     baseSystemMessage: str | None = None
     baseAgentSystemMessage: str | None = None
@@ -376,7 +376,7 @@ class ChatOptions2(BaseModel):
 
 class PromptTemplates2(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     apply: str | None = None
     chat: Chat | None = None
@@ -386,7 +386,7 @@ class PromptTemplates2(BaseModel):
 
 class Override(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     name: str | None = None
     model: str | None = None
@@ -396,7 +396,7 @@ class Override(BaseModel):
     maxStopWords: float | None = None
     roles: list[Role] | None = None
     capabilities: (
-        list[Literal['tool_use'] | Literal['image_input'] | Literal['next_edit'] | str]
+        list[Literal["tool_use"] | Literal["image_input"] | Literal["next_edit"] | str]
         | None
     ) = None
     defaultCompletionOptions: DefaultCompletionOptions | None = None
@@ -409,14 +409,14 @@ class Override(BaseModel):
     useResponsesApi: bool | None = None
     env: dict[str, str | bool | float] | None = None
     autocompleteOptions: AutocompleteOptions | None = None
-    provider: Literal['continue-proxy'] = 'continue-proxy'
+    provider: Literal["continue-proxy"] = "continue-proxy"
     apiKeyLocation: str | None = None
     envSecretLocations: dict[str, str] | None = None
 
 
 class RequestOptions4(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     timeout: float | None = None
     verifySsl: bool | None = None
@@ -430,7 +430,7 @@ class RequestOptions4(BaseModel):
 
 class ToolOverrides3(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     description: str | None = None
     displayTitle: str | None = None
@@ -443,7 +443,7 @@ class ToolOverrides3(BaseModel):
 
 class ChatOptions3(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     baseSystemMessage: str | None = None
     baseAgentSystemMessage: str | None = None
@@ -453,7 +453,7 @@ class ChatOptions3(BaseModel):
 
 class PromptTemplates3(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     apply: str | None = None
     chat: Chat | None = None
@@ -463,7 +463,7 @@ class PromptTemplates3(BaseModel):
 
 class Override1(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     name: str | None = None
     model: str | None = None
@@ -473,7 +473,7 @@ class Override1(BaseModel):
     maxStopWords: float | None = None
     roles: list[Role] | None = None
     capabilities: (
-        list[Literal['tool_use'] | Literal['image_input'] | Literal['next_edit'] | str]
+        list[Literal["tool_use"] | Literal["image_input"] | Literal["next_edit"] | str]
         | None
     ) = None
     defaultCompletionOptions: DefaultCompletionOptions | None = None
@@ -491,16 +491,16 @@ class Override1(BaseModel):
 
 class Models2(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     uses: str | Uses
-    with_: dict[str, str] | None = Field(default=None, alias='with')
+    with_: dict[str, str] | None = Field(default=None, alias="with")
     override: Override | Override1 | None = None
 
 
 class Context(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     name: str | None = None
     provider: str
@@ -509,7 +509,7 @@ class Context(BaseModel):
 
 class Override2(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     name: str | None = None
     provider: str | None = None
@@ -518,21 +518,21 @@ class Override2(BaseModel):
 
 class Context1(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     uses: str
-    with_: dict[str, str] | None = Field(default=None, alias='with')
+    with_: dict[str, str] | None = Field(default=None, alias="with")
     override: Override2 | None = None
 
 
 class Level(StrEnum):
-    all = 'all'
-    noCode = 'noCode'
+    all = "all"
+    noCode = "noCode"
 
 
 class RequestOptions5(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     timeout: float | None = None
     verifySsl: bool | None = None
@@ -546,13 +546,13 @@ class RequestOptions5(BaseModel):
 
 class Data(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     name: str
     destination: str
     schema_: constr(
-        pattern=r'^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$'
-    ) = Field(..., alias='schema')
+        pattern=r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$"
+    ) = Field(..., alias="schema")
     level: Level | None = None
     events: list[str] | None = None
     requestOptions: RequestOptions5 | None = None
@@ -561,7 +561,7 @@ class Data(BaseModel):
 
 class RequestOptions6(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     timeout: float | None = None
     verifySsl: bool | None = None
@@ -575,16 +575,16 @@ class RequestOptions6(BaseModel):
 
 class Override3(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     name: str | None = None
     destination: str | None = None
     schema_: (
         constr(
-            pattern=r'^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$'
+            pattern=r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$"
         )
         | None
-    ) = Field(default=None, alias='schema')
+    ) = Field(default=None, alias="schema")
     level: Level | None = None
     events: list[str] | None = None
     requestOptions: RequestOptions6 | None = None
@@ -593,16 +593,16 @@ class Override3(BaseModel):
 
 class Data1(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     uses: str
-    with_: dict[str, str] | None = Field(default=None, alias='with')
+    with_: dict[str, str] | None = Field(default=None, alias="with")
     override: Override3 | None = None
 
 
 class McpServers(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     name: str
     serverName: str | None = None
@@ -611,20 +611,20 @@ class McpServers(BaseModel):
     sourceSlug: str | None = None
     connectionTimeout: PositiveFloat | None = None
     command: str
-    type: Literal['stdio'] = 'stdio'
+    type: Literal["stdio"] = "stdio"
     args: list[str] | None = None
     env: dict[str, str] | None = None
     cwd: str | None = None
 
 
 class Type(StrEnum):
-    sse = 'sse'
-    streamable_http = 'streamable-http'
+    sse = "sse"
+    streamable_http = "streamable-http"
 
 
 class RequestOptions7(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     timeout: float | None = None
     verifySsl: bool | None = None
@@ -638,7 +638,7 @@ class RequestOptions7(BaseModel):
 
 class McpServers1(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     name: str
     serverName: str | None = None
@@ -654,7 +654,7 @@ class McpServers1(BaseModel):
 
 class Override4(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     name: str | None = None
     serverName: str | None = None
@@ -663,7 +663,7 @@ class Override4(BaseModel):
     sourceSlug: str | None = None
     connectionTimeout: PositiveFloat | None = None
     command: str | None = None
-    type: Literal['stdio'] = 'stdio'
+    type: Literal["stdio"] = "stdio"
     args: list[str] | None = None
     env: dict[str, str] | None = None
     cwd: str | None = None
@@ -671,7 +671,7 @@ class Override4(BaseModel):
 
 class RequestOptions8(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     timeout: float | None = None
     verifySsl: bool | None = None
@@ -685,7 +685,7 @@ class RequestOptions8(BaseModel):
 
 class Override5(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     name: str | None = None
     serverName: str | None = None
@@ -701,16 +701,16 @@ class Override5(BaseModel):
 
 class McpServers2(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     uses: str
-    with_: dict[str, str] | None = Field(default=None, alias='with')
+    with_: dict[str, str] | None = Field(default=None, alias="with")
     override: Override4 | Override5 | None = None
 
 
 class Rules(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     name: str
     rule: str
@@ -724,15 +724,15 @@ class Rules(BaseModel):
 
 class Rules1(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     uses: str
-    with_: dict[str, str] | None = Field(default=None, alias='with')
+    with_: dict[str, str] | None = Field(default=None, alias="with")
 
 
 class Prompts(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     name: str
     description: str | None = None
@@ -742,7 +742,7 @@ class Prompts(BaseModel):
 
 class Override6(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     name: str | None = None
     description: str | None = None
@@ -752,16 +752,16 @@ class Override6(BaseModel):
 
 class Prompts1(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     uses: str
-    with_: dict[str, str] | None = Field(default=None, alias='with')
+    with_: dict[str, str] | None = Field(default=None, alias="with")
     override: Override6 | None = None
 
 
 class Docs(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     name: str
     startUrl: str
@@ -773,7 +773,7 @@ class Docs(BaseModel):
 
 class Override7(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     name: str | None = None
     startUrl: str | None = None
@@ -785,20 +785,20 @@ class Override7(BaseModel):
 
 class Docs1(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     uses: str
-    with_: dict[str, str] | None = Field(default=None, alias='with')
+    with_: dict[str, str] | None = Field(default=None, alias="with")
     override: Override7 | None = None
 
 
 class ContinueConfig(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     name: str
     version: str
-    schema_: str | None = Field(default=None, alias='schema')
+    schema_: str | None = Field(default=None, alias="schema")
     metadata: Metadata | None = None
     env: dict[str, str | float | bool] | None = None
     requestOptions: RequestOptions | None = None

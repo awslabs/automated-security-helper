@@ -1182,3 +1182,47 @@ class TestASkippedProjectSurvivesAFindingLessWorkspace:
         empty = AshAggregatedResults()
         empty.sarif = SarifReport.model_validate({"version": "2.1.0", "runs": []})
         assert _report(OcsfReporter, empty, context) == "[]"
+
+
+class TestSkippedProjectsHelperWithNoWorkspace:
+    """``skipped_projects`` for a model whose ``workspace`` is not a workspace block.
+
+    ``AshAggregatedResults.workspace`` is ``None`` for every single-directory
+    scan, so the helper that csv, junitxml and ocsf all call is handed a
+    ``None`` workspace on the common path. The contract is ``[]``: no synthetic
+    rows, no exception. A ``MagicMock`` model is the other shape reporters are
+    tested with, and its truthy ``workspace`` attribute must read as "no
+    workspace" too, or every mocked single-directory scan would try to iterate
+    a Mock.
+    """
+
+    def test_none_workspace_yields_no_skipped_projects(self, single_model):
+        from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_skipped_rows import (
+            skipped_projects,
+        )
+
+        assert single_model.workspace is None
+        assert skipped_projects(single_model) == []
+
+    def test_mock_model_yields_no_skipped_projects(self):
+        from unittest.mock import MagicMock
+
+        from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_skipped_rows import (
+            skipped_projects,
+        )
+
+        # A populated attribute, because a bare MagicMock iterates as empty and
+        # would return [] even if the Mock were mistaken for a workspace block.
+        model = MagicMock()
+        model.workspace.skipped_projects = ["not-a-real-skip"]
+        assert skipped_projects(model) == []
+
+    def test_workspace_block_yields_its_skipped_set(self, skipped_workspace_model):
+        """The positive control, so the two ``[]`` answers above are not vacuous."""
+        from automated_security_helper.plugin_modules.ash_builtin.reporters.workspace_skipped_rows import (
+            skipped_projects,
+        )
+
+        entries = skipped_projects(skipped_workspace_model)
+        assert [entry.project for entry in entries] == [SKIPPED_PROJECT]
+        assert entries[0].reason == SkippedProjectReason.NO_CHANGES

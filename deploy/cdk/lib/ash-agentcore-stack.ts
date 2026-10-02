@@ -330,7 +330,38 @@ export class AshAgentCoreStack extends Stack {
       // `ProtocolConfiguration: MCP | HTTP | A2A | AGUI`.
       protocolConfiguration: 'MCP',
       roleArn: role.roleArn,
-      environmentVariables: config.mcpEnvironment(),
+      environmentVariables: {
+        ...config.mcpEnvironment(),
+        /*
+         * Resolves the contradiction between this stack's own two defaults.
+         *
+         * `AshVersion` defaults to v3.7.0, whose `ash mcp` has no
+         * `--stateless-http`; `McpStatelessHttp` defaults to `true`. The
+         * entrypoint refuses that pair and exits 65, so the shipped one-click
+         * template could not deploy without an adopter changing a parameter, and
+         * the symptom was a health-check timeout that named no cause.
+         *
+         * `warn` starts the server stateful and says so on stderr. It is set HERE
+         * and not in the entrypoint's default, and not in ash-runtime-config.ts
+         * where the other MCP variables live, because AgentCore is the only target
+         * where stateful was measured to work: a live runtime completed
+         * initialize, tools/list and tools/call, with controls proving sessions
+         * were genuinely enforced. See "WHY `McpStatelessHttp` DEFAULTS TO `true`"
+         * at the top of this file for that measurement and for the residual
+         * hazard, which is a client adopting the rotating session id AgentCore
+         * returns and being refused on its third call.
+         *
+         * Everything else keeps the refusal, Fargate included: behind a load
+         * balancer that may route consecutive requests to different replicas,
+         * nothing here excuses running stateful.
+         *
+         * This is maintainer decision D6's second option, taken because the first
+         * -- pointing `DEFAULT_ASH_VERSION` at a ref whose `ash mcp` accepts the
+         * flag -- needs a release that does not exist yet. Delete this line when
+         * it does, rather than carrying both.
+         */
+        ASH_MCP_STATELESS_FALLBACK: 'warn',
+      },
       description: 'ASH security scanner exposed over MCP.',
     });
 

@@ -32,13 +32,18 @@ All plugins follow a similar lifecycle:
 All plugins follow a similar structure:
 
 ```python
-from automated_security_helper.base.scanner_plugin import ScannerPluginBase, ScannerPluginConfigBase
+from automated_security_helper.base.scanner_plugin import (
+    ScannerPluginBase,
+    ScannerPluginConfigBase,
+)
+
 
 class MyCustomScannerConfig(ScannerPluginConfigBase):
     """Configuration for MyCustomScanner."""
 
     # Define configuration options
     custom_option: str = "default_value"
+
 
 class MyCustomScanner(ScannerPluginBase):
     """Custom scanner implementation."""
@@ -50,10 +55,7 @@ class MyCustomScanner(ScannerPluginBase):
     def scan(self, target_path: str) -> dict:
         """Perform the scan operation."""
         # Implement scanning logic
-        return {
-            "findings": [],
-            "status": "success"
-        }
+        return {"findings": [], "status": "success"}
 
     def cleanup(self):
         """Clean up resources."""
@@ -71,7 +73,7 @@ from automated_security_helper.plugins import ash_plugin_manager
 ash_plugin_manager.register_scanner(
     name="my-custom-scanner",
     scanner_class=MyCustomScanner,
-    config_class=MyCustomScannerConfig
+    config_class=MyCustomScannerConfig,
 )
 ```
 
@@ -116,8 +118,12 @@ abstract `cleanup()`; release resources in `_post_scan()` if you need to.
 ### Scanner Plugin Example
 
 ```python
-from automated_security_helper.base.scanner_plugin import ScannerPluginBase, ScannerPluginConfigBase
+from automated_security_helper.base.scanner_plugin import (
+    ScannerPluginBase,
+    ScannerPluginConfigBase,
+)
 from automated_security_helper.core.enums import ScannerStatus
+
 
 class CustomRegexScannerConfig(ScannerPluginConfigBase):
     """Configuration for CustomRegexScanner."""
@@ -125,6 +131,7 @@ class CustomRegexScannerConfig(ScannerPluginConfigBase):
     name: str = "custom-regex"
     enabled: bool = True
     patterns: List[str] = ["password\\s*=\\s*['\"]([^'\"]+)['\"]"]
+
 
 class CustomRegexScanner(ScannerPluginBase):
     """Scanner that uses regex patterns to find security issues."""
@@ -138,23 +145,25 @@ class CustomRegexScanner(ScannerPluginBase):
         findings = []
 
         for file_path in self._get_files(target_path):
-            with open(file_path, 'r') as f:
+            with open(file_path, "r") as f:
                 content = f.read()
 
             for i, line in enumerate(content.splitlines()):
                 for pattern in self.patterns:
                     if match := pattern.search(line):
-                        findings.append({
-                            "file": file_path,
-                            "line": i + 1,
-                            "pattern": pattern.pattern,
-                            "match": match.group(0),
-                            "severity": "HIGH"
-                        })
+                        findings.append(
+                            {
+                                "file": file_path,
+                                "line": i + 1,
+                                "pattern": pattern.pattern,
+                                "match": match.group(0),
+                                "severity": "HIGH",
+                            }
+                        )
 
         return {
             "findings": findings,
-            "status": ScannerStatus.FAILED if findings else ScannerStatus.PASSED
+            "status": ScannerStatus.FAILED if findings else ScannerStatus.PASSED,
         }
 
     def cleanup(self):
@@ -193,8 +202,12 @@ class ReporterPluginBase(ABC):
 ### Reporter Plugin Example
 
 ```python
-from automated_security_helper.base.reporter_plugin import ReporterPluginBase, ReporterPluginConfigBase
+from automated_security_helper.base.reporter_plugin import (
+    ReporterPluginBase,
+    ReporterPluginConfigBase,
+)
 from automated_security_helper.models.asharp_model import AshAggregatedResults
+
 
 class CustomJSONReporterConfig(ReporterPluginConfigBase):
     """Configuration for CustomJSONReporter."""
@@ -202,6 +215,7 @@ class CustomJSONReporterConfig(ReporterPluginConfigBase):
     name: str = "custom-json"
     enabled: bool = True
     pretty_print: bool = True
+
 
 class CustomJSONReporter(ReporterPluginBase):
     """Reporter that generates a custom JSON report."""
@@ -223,7 +237,7 @@ class CustomJSONReporter(ReporterPluginBase):
                 "low": results.metadata.summary_stats.low,
                 "info": results.metadata.summary_stats.info,
             },
-            "findings": []
+            "findings": [],
         }
 
         # Extract findings from SARIF
@@ -234,7 +248,9 @@ class CustomJSONReporter(ReporterPluginBase):
                         finding = {
                             "rule_id": result.ruleId,
                             "level": result.level,
-                            "message": result.message.text if result.message else "No message",
+                            "message": result.message.text
+                            if result.message
+                            else "No message",
                         }
                         report_data["findings"].append(finding)
 
@@ -262,7 +278,11 @@ class ConverterPluginBase(ABC):
 ### Converter Plugin Example
 
 ```python
-from automated_security_helper.base.converter_plugin import ConverterPluginBase, ConverterPluginConfigBase
+from automated_security_helper.base.converter_plugin import (
+    ConverterPluginBase,
+    ConverterPluginConfigBase,
+)
+
 
 class CustomYAMLConverterConfig(ConverterPluginConfigBase):
     """Configuration for CustomYAMLConverter."""
@@ -270,6 +290,7 @@ class CustomYAMLConverterConfig(ConverterPluginConfigBase):
     name: str = "custom-yaml"
     enabled: bool = True
     file_extensions: List[str] = [".yaml", ".yml"]
+
 
 class CustomYAMLConverter(ConverterPluginBase):
     """Converter that processes YAML files."""
@@ -293,11 +314,11 @@ class CustomYAMLConverter(ConverterPluginBase):
                     os.makedirs(os.path.dirname(target_file), exist_ok=True)
 
                     # Process the YAML file
-                    with open(source_file, 'r') as f:
+                    with open(source_file, "r") as f:
                         yaml_content = yaml.safe_load(f)
 
                     # Write processed content to target file
-                    with open(target_file, 'w') as f:
+                    with open(target_file, "w") as f:
                         yaml.dump(yaml_content, f)
 
                     converted_files.append(target_file)
@@ -321,6 +342,7 @@ class AshEventType(Enum):
     REPORT_START = "report_start"
     REPORT_COMPLETE = "report_complete"
 
+
 # Event subscriber function type
 EventSubscriberFunc = Callable[..., bool]
 ```
@@ -331,15 +353,17 @@ EventSubscriberFunc = Callable[..., bool]
 from automated_security_helper.plugins.events import AshEventType
 from automated_security_helper.plugins import ash_plugin_manager
 
+
 def scan_complete_handler(**kwargs):
     """Handle scan completion events."""
-    scanner = kwargs.get('scanner', 'unknown')
-    remaining = kwargs.get('remaining_count', 0)
+    scanner = kwargs.get("scanner", "unknown")
+    remaining = kwargs.get("remaining_count", 0)
 
     print(f"Scanner {scanner} completed. {remaining} scanners remaining.")
 
     # Return True to indicate successful handling
     return True
+
 
 # Register the event subscriber
 ash_plugin_manager.subscribe(AshEventType.SCAN_COMPLETE, scan_complete_handler)
@@ -398,19 +422,21 @@ from automated_security_helper.plugins import ash_plugin_manager
 from .scanners import CustomRegexScanner, CustomRegexScannerConfig
 from .reporters import CustomJSONReporter, CustomJSONReporterConfig
 
+
 # Register plugins
 def register_plugins():
     ash_plugin_manager.register_scanner(
         name="custom-regex",
         scanner_class=CustomRegexScanner,
-        config_class=CustomRegexScannerConfig
+        config_class=CustomRegexScannerConfig,
     )
 
     ash_plugin_manager.register_reporter(
         name="custom-json",
         reporter_class=CustomJSONReporter,
-        config_class=CustomJSONReporterConfig
+        config_class=CustomJSONReporterConfig,
     )
+
 
 # Auto-register when imported
 register_plugins()

@@ -13,8 +13,6 @@ import yaml
 class ConfigValidationError(Exception):
     """Raised when configuration validation fails."""
 
-    pass
-
 
 class ConfigValidator:
     """Validates ASH configuration files for common issues."""

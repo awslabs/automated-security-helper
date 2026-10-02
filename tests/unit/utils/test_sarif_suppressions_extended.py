@@ -523,7 +523,10 @@ class TestSarifSuppressions:
         assert len(suppressed_result.suppressions) == 1
         assert suppressed_result.suppressions[0].kind == "inSource"
         assert "(ASH inline)" in suppressed_result.suppressions[0].justification
-        assert "env var is safe in Lambda" in suppressed_result.suppressions[0].justification
+        assert (
+            "env var is safe in Lambda"
+            in suppressed_result.suppressions[0].justification
+        )
 
         # Line 1 has no inline comment -- should NOT be suppressed
         unsuppressed_result = result.runs[0].results[1]

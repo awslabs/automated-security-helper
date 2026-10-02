@@ -57,7 +57,7 @@ def build_ash_image_cli_command(
         typer.Option(
             "--container-network",
             help="Docker network mode for the container run (e.g. 'bridge', 'none', 'host'). "
-                 "Pass 'none' to force offline/airgapped network isolation independently of --offline.",
+            "Pass 'none' to force offline/airgapped network isolation independently of --offline.",
         ),
     ] = "bridge",
     build_target: Annotated[

@@ -1,9 +1,7 @@
 """Tests for C2 bug fix: --output-formats CLI flag threading through to ReportPhase."""
 
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from automated_security_helper.core.enums import ExportFormat
 
@@ -49,9 +47,7 @@ class TestOutputFormatsThreading:
 
         assert engine._output_formats == []
 
-    @patch(
-        "automated_security_helper.core.execution_engine.ReportPhase"
-    )
+    @patch("automated_security_helper.core.execution_engine.ReportPhase")
     def test_execute_phases_passes_output_formats_to_report(
         self, mock_report_cls, tmp_path
     ):
