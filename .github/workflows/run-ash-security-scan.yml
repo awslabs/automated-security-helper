@@ -335,7 +335,7 @@ jobs:
       # and make are still on the image; libyaml-dev is the one to check first.
       - name: Set up Ruby for cfn-nag
         if: inputs.install-cfn-nag
-        uses: ruby/setup-ruby@762794c140bbeda0f1224786aa33b4b46783a6c1 # v1.326.0
+        uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1.327.0
         with:
           ruby-version: "3.3"
 
@@ -660,7 +660,7 @@ jobs:
           echo "::notice::The JUnit test report was not published as a check: GITHUB_TOKEN is read-only for fork pull requests, so check runs cannot be created. The results are in this job's summary and in the ash_output artifact."
 
       - name: Upload ASH SARIF file
-        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         if: inputs.collect-sarif-report && github.event_name != 'merge_group' && (success() || failure())
         with:
           sarif_file: ${{ inputs.output-dir }}/reports/ash.ghas.sarif
