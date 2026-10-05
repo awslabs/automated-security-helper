@@ -400,7 +400,9 @@ ENV NODE_OPTIONS=--max_old_space_size=512
 # COPY ASH source to /ash instead of / to isolate
 #
 COPY --from=uv-reqs /src/dist/*.whl .
-RUN uv pip install --system "$(ls *.whl)[cdk]" && rm -rf *.whl
+# [symbols] is tree-sitter and its grammars, for suppressions scoped by `symbol`.
+# Without it every such suppression matches nothing, so the image ships it.
+RUN uv pip install --system "$(ls *.whl)[cdk,symbols]" && rm -rf *.whl
 
 #
 # Make sure the ash script is executable

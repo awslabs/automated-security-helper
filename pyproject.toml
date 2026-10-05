@@ -54,6 +54,24 @@ cdk = [
     "cdk-nag>=3.0,<4.0.0",
     "constructs>=10.8,<11.0.0",
 ]
+# Symbol-scoped suppressions (`symbol:` on a suppression entry) resolve the named
+# function or class to a line span by parsing the source file with tree-sitter.
+# An extra rather than a core requirement: these are native wheels, and tree-sitter
+# publishes no musllinux aarch64 wheel (tree-sitter-typescript and tree-sitter-java
+# publish no musllinux aarch64 wheel either), so as a core requirement they would
+# make a plain install need a C compiler on Alpine arm64. Without the extra a symbol
+# suppression matches nothing and the scan says which extra is missing.
+#
+# One wheel per grammar rather than tree-sitter-language-pack: language-pack 1.x
+# ships no grammars in its wheel and downloads parser shared libraries from a remote
+# manifest at runtime, which uv.lock cannot pin or hash and an offline scan cannot do.
+symbols = [
+    "tree-sitter>=0.26,<0.27",
+    "tree-sitter-java>=0.23.5,<0.24",
+    "tree-sitter-javascript>=0.25,<0.26",
+    "tree-sitter-python>=0.25,<0.26",
+    "tree-sitter-typescript>=0.23.2,<0.24",
+]
 
 [[project.authors]]
 name = "Daniel Begimher"

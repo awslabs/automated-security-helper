@@ -35,6 +35,7 @@ from automated_security_helper.utils.package_identity import (
 )
 from automated_security_helper.models.asharp_model import ScannerSeverityCount
 from automated_security_helper.utils.secret_masking import mask_secret_in_text
+from automated_security_helper.utils.symbol_spans import SymbolResolver
 from automated_security_helper.utils.suppression_matcher import file_path_matches
 
 
@@ -523,13 +524,14 @@ def _apply_config_suppression(
     suppressions: list,
     flat_finding: "FlatVulnerability",
     used_suppressions: set | None,
+    symbol_resolver: SymbolResolver | None = None,
 ) -> bool:
     """Apply a config-based suppression to *result* if one matches *flat_finding*.
 
     Mutates result.suppressions on match. Returns True when a suppression was applied.
     """
     should_suppress, matching_suppression = should_suppress_finding(
-        flat_finding, suppressions
+        flat_finding, suppressions, symbol_resolver
     )
     if not should_suppress:
         return False
@@ -751,6 +753,15 @@ def apply_suppressions_to_sarif(
 
     _inline_suppression_cache: dict[str, list] = {}
 
+    # Built only when an entry sets `symbol`, so a config without one never
+    # touches tree-sitter. The resolver parses a file only when every other
+    # field of a symbol-scoped entry already matches a finding in it.
+    _symbol_resolver: SymbolResolver | None = (
+        SymbolResolver(plugin_context.source_dir)
+        if any(getattr(s, "symbol", None) for s in suppressions)
+        else None
+    )
+
     # Whether the output directory contains the source directory, in which case the
     # output-path exclusion below is not applied at all.
     #
@@ -944,7 +955,11 @@ def apply_suppressions_to_sarif(
 
                 if flat_finding:
                     config_suppressed = _apply_config_suppression(
-                        result, suppressions, flat_finding, used_suppressions
+                        result,
+                        suppressions,
+                        flat_finding,
+                        used_suppressions,
+                        _symbol_resolver,
                     )
                     if config_suppressed and len(result.suppressions or []) >= 1:
                         updated_results.append(result)
