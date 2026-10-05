@@ -77,27 +77,17 @@
        {
         "Fn::And": [
          {
-          "Fn::Equals": [
+          "Fn::EachMemberEquals": [
            {
-            "Fn::Select": [
-             0,
-             {
-              "Ref": "VpcSubnetIds"
-             }
-            ]
+            "Ref": "VpcSubnetIds"
            },
            ""
           ]
          },
          {
-          "Fn::Equals": [
+          "Fn::EachMemberEquals": [
            {
-            "Fn::Select": [
-             0,
-             {
-              "Ref": "VpcSecurityGroupIds"
-             }
-            ]
+            "Ref": "VpcSecurityGroupIds"
            },
            ""
           ]
@@ -109,14 +99,9 @@
          {
           "Fn::Not": [
            {
-            "Fn::Equals": [
+            "Fn::EachMemberEquals": [
              {
-              "Fn::Select": [
-               0,
-               {
-                "Ref": "VpcSubnetIds"
-               }
-              ]
+              "Ref": "VpcSubnetIds"
              },
              ""
             ]
@@ -126,14 +111,9 @@
          {
           "Fn::Not": [
            {
-            "Fn::Equals": [
+            "Fn::EachMemberEquals": [
              {
-              "Fn::Select": [
-               0,
-               {
-                "Ref": "VpcSecurityGroupIds"
-               }
-              ]
+              "Ref": "VpcSecurityGroupIds"
              },
              ""
             ]

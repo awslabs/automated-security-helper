@@ -1435,8 +1435,13 @@ export class AshEksOperatorStack extends Stack {
      * groups are silently ignored, and an adopter who meant to attach the function to
      * a private endpoint gets an unattached one that fails on connect.
      */
-    const noSubnets = Fn.conditionEquals(Fn.select(0, subnetIds.valueAsList), '');
-    const noSecurityGroups = Fn.conditionEquals(Fn.select(0, securityGroupIds.valueAsList), '');
+    //
+    // Fn::EachMemberEquals rather than the Fn::Select(0) shape HasVpcConfig uses:
+    // Rules accept only the rule-specific functions listed in the CloudFormation
+    // "Rules syntax" page, and Fn::Select is not one of them. An empty
+    // CommaDelimitedList is [""], so "every member equals ''" is "nothing supplied".
+    const noSubnets = Fn.conditionEachMemberEquals(subnetIds.valueAsList, '');
+    const noSecurityGroups = Fn.conditionEachMemberEquals(securityGroupIds.valueAsList, '');
     new CfnRule(this, 'VpcSubnetsAndSecurityGroupsTogether', {
       assertions: [
         {

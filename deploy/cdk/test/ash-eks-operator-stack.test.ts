@@ -1041,17 +1041,53 @@ describe('the VPC opt-in', () => {
     expect(vpcConfig['Fn::If'][2]).toEqual({ Ref: 'AWS::NoValue' });
   });
 
+  test('the Rule uses only functions CloudFormation allows in Rules', () => {
+    /*
+     * The CloudFormation "Rules syntax" page lists the only functions a rule may use.
+     * Anything else fails template validation at launch, and nothing offline reports
+     * it: cfn-lint, cdk-nag and synth all passed a Rule built on Fn::Select. A test
+     * that evaluates the Rule with its own interpreter would accept Fn::Select too,
+     * so the allowlist is checked separately.
+     */
+    const RULE_FUNCTIONS = new Set([
+      'Fn::And',
+      'Fn::Contains',
+      'Fn::EachMemberEquals',
+      'Fn::EachMemberIn',
+      'Fn::Equals',
+      'Fn::If',
+      'Fn::Not',
+      'Fn::Or',
+      'Fn::RefAll',
+      'Fn::ValueOf',
+      'Fn::ValueOfAll',
+      'Ref',
+    ]);
+    const used = new Set<string>();
+    const walk = (node: any): void => {
+      if (Array.isArray(node)) node.forEach(walk);
+      else if (node && typeof node === 'object') {
+        for (const [key, value] of Object.entries(node)) {
+          if (key.startsWith('Fn::') || key === 'Ref') used.add(key);
+          walk(value);
+        }
+      }
+    };
+    walk(JSON_TEMPLATE.Rules);
+    expect(used.size).toBeGreaterThan(0);
+    expect([...used].filter((fn) => !RULE_FUNCTIONS.has(fn))).toEqual([]);
+  });
+
   test('a Rule refuses subnets without security groups, and the reverse', () => {
     /*
      * Evaluated here the way CloudFormation evaluates it, with the parameter values
-     * substituted, so the test exercises the assertion's logic and not only its
-     * presence. Each CommaDelimitedList is represented by its first element, which is
-     * all the assertion reads.
+     * substituted as lists, so the test exercises the assertion's logic and not only
+     * its presence. An empty CommaDelimitedList parameter resolves to [""].
      */
     const rule = JSON_TEMPLATE.Rules?.VpcSubnetsAndSecurityGroupsTogether;
     expect(rule).toBeDefined();
     const [assertion] = rule.Assertions;
-    const evaluate = (node: any, params: Record<string, string>): any => {
+    const evaluate = (node: any, params: Record<string, string[]>): any => {
       if (typeof node !== 'object' || node === null) return node;
       const [fn] = Object.keys(node);
       const args = node[fn];
@@ -1062,11 +1098,10 @@ describe('the VPC opt-in', () => {
           return args.every((a: any) => evaluate(a, params));
         case 'Fn::Not':
           return !evaluate(args[0], params);
-        case 'Fn::Equals':
-          return evaluate(args[0], params) === evaluate(args[1], params);
-        case 'Fn::Select':
-          expect(args[0]).toBe(0);
-          return evaluate(args[1], params);
+        case 'Fn::EachMemberEquals': {
+          const list: string[] = evaluate(args[0], params);
+          return list.every((member) => member === args[1]);
+        }
         case 'Ref':
           expect(params).toHaveProperty(args);
           return params[args];
@@ -1074,18 +1109,18 @@ describe('the VPC opt-in', () => {
           throw new Error('unexpected function in rule: ' + fn);
       }
     };
-    const cases: [string, string, boolean][] = [
-      ['', '', true],
-      ['subnet-a', 'sg-a', true],
-      ['subnet-a', '', false],
-      ['', 'sg-a', false],
+    const cases: [string[], string[], boolean][] = [
+      [[''], [''], true],
+      [['subnet-a', 'subnet-b'], ['sg-a'], true],
+      [['subnet-a'], [''], false],
+      [[''], ['sg-a'], false],
     ];
-    for (const [subnet, group, ok] of cases) {
+    for (const [subnets, groups, ok] of cases) {
       expect({
-        subnet,
-        group,
-        ok: evaluate(assertion.Assert, { VpcSubnetIds: subnet, VpcSecurityGroupIds: group }),
-      }).toEqual({ subnet, group, ok });
+        subnets,
+        groups,
+        ok: evaluate(assertion.Assert, { VpcSubnetIds: subnets, VpcSecurityGroupIds: groups }),
+      }).toEqual({ subnets, groups, ok });
     }
   });
 
