@@ -313,112 +313,22 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # Native packages. These are the first jobs in the repository to use a `container:`
-  # key -- before this, no workflow had one, none had `services:`, and none ran a bare
-  # `docker run`, so building a .deb inside Debian and an .rpm inside Amazon Linux is a
-  # new capability rather than a reuse of an existing pattern.
+  # Native packages: deb and rpm. Their jobs live in ash-native-packages.yml, which
+  # builds its own wheel the same way (`uv build`), gates it with the same
+  # artifact-contents check, and then builds, payload-gates, installs and scans each
+  # package inside its target distribution, with upgrade legs and negative controls.
+  # They moved because that workflow needs a `push` trigger, which this one
+  # deliberately does not have (see the header above). Comments on the jobs below that
+  # compare against "the deb and rpm jobs" mean the legs in that workflow.
   #
-  # Testing inside a distro image PUBLISHES NOTHING. It pulls a public base image, builds
-  # a package in it and throws the container away, so it does not touch the project's
-  # position that ASH publishes no binary artifacts to public registries.
+  # Testing inside a distro image PUBLISHES NOTHING. It pulls a public base image,
+  # builds a package in it and throws the container away.
   #
-  # Why a container rather than the ubuntu-latest host, which has dpkg-deb: building the
-  # package in the same image that tests it lets a missing dependency pass because the
-  # build host happened to provide it. The container starts with neither the interpreter
-  # nor pip, so the package's own Depends/Requires have to be right.
-  #
-  # Both jobs run the same script a developer runs locally, rather than reimplementing
-  # the steps in YAML. A verification that exists twice drifts, and the copy in CI is the
-  # one nobody runs by hand.
-  deb:
-    name: "native: deb (debian:bookworm)"
-    needs: build
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    container: debian:bookworm
-    steps:
-      # Before checkout, because actions/checkout needs git in the image and
-      # debian:bookworm ships none. Without this it silently falls back to a REST API
-      # tarball, which works but leaves no git metadata -- and the failure mode when it
-      # does not work is an empty workspace rather than an error naming git.
-      #
-      # `shell: bash` is not decoration. Inside a `container:`, Actions runs a bare
-      # `run:` with `sh -e {0}`, and debian:bookworm's /bin/sh is dash, which has no
-      # `pipefail`. So this step died on its FIRST line with
-      #
-      #     /__w/_temp/....sh: 1: set: Illegal option -o pipefail
-      #     ##[error]Process completed with exit code 2.
-      #
-      # before apt-get ran at all, which failed the whole deb job. Measured in run
-      # 35257690850. It is invisible when the same script is run by hand, because an
-      # interactive shell is bash, and invisible in the rpm job next door, because
-      # amazonlinux:2023's /bin/sh IS bash -- that job got as far as its own unrelated
-      # failure. The asymmetry is the reason this survived: two jobs with the same
-      # three lines, and only one of them broken by them.
-      - name: Install git for actions/checkout
-        shell: bash
-        run: |
-          set -euo pipefail
-          export DEBIAN_FRONTEND=noninteractive
-          apt-get -qq update >/dev/null
-          apt-get -qq install -y --no-install-recommends git ca-certificates >/dev/null
-          git --version
+  # Every verification runs the same script a developer runs locally, rather than
+  # reimplementing the steps in YAML. A verification that exists twice drifts, and the
+  # copy in CI is the one nobody runs by hand.
 
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      # download-artifact has no v7. Its major versions are offset from
-      # upload-artifact's, so v8 is the current release and is the correct pair for the
-      # upload pinned at v7.0.1 above -- both are the v4-generation artifact backend.
-      # This looks like a mismatch and is not one.
-      - name: Download the wheel built and gated by the build job
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: ash-package-${{ github.sha }}-attempt-${{ github.run_attempt }}
-          path: dist
-
-      - name: Build the .deb, install it, and run a real scan
-        run: bash packaging/deb/verify-in-container.sh
-        env:
-          REPO: ${{ github.workspace }}
-
-  rpm:
-    name: "native: rpm (amazonlinux:2023)"
-    needs: build
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    container: public.ecr.aws/amazonlinux/amazonlinux:2023
-    steps:
-      # `shell: bash` for the same reason as the deb job above, though this image is
-      # the one where it currently makes no difference: amazonlinux:2023's /bin/sh IS
-      # bash, so `set -euo pipefail` works here as written. It is made explicit
-      # anyway, because "works" is resting on a property of the base image that
-      # nothing states and nothing checks, and the deb job is the demonstration of
-      # what happens when that property differs.
-      - name: Install git for actions/checkout
-        shell: bash
-        run: |
-          set -euo pipefail
-          dnf -q -y install git ca-certificates tar gzip >/dev/null
-          git --version
-
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Download the wheel built and gated by the build job
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: ash-package-${{ github.sha }}-attempt-${{ github.run_attempt }}
-          path: dist
-
-      # This job is the reason the rpm's dependency list is correct. On the first run it
-      # failed with "python3 >= 3.10 is needed by ash", because Amazon Linux 2023's
-      # python3 is 3.9 -- a defect invisible to any amount of spec review and to a build
-      # on ubuntu-latest, where python3 is new enough.
-      - name: Build the .rpm, install it, and run a real scan
-        run: bash packaging/rpm/verify-in-container.sh
-        env:
-          REPO: ${{ github.workspace }}
-
-  # WHY THIS JOB HAS NO `container:` KEY WHEN THE TWO ABOVE DO
+  # WHY THIS JOB HAS NO `container:` KEY WHEN THE DEB AND RPM JOBS DO
   #
   # flatpak-builder drives bwrap, and bwrap has to create a user namespace. Measured on
   # a Docker 25.0 host before this job was written:
@@ -554,7 +464,7 @@ jobs:
           path: dist
 
       # One script, the same one a developer runs. The alternative was reimplementing the
-      # steps in YAML, and the comment above the deb job says why that is wrong: a
+      # steps in YAML, and the native-packages comment above says why that is wrong: a
       # verification that exists twice drifts, and the copy in CI is the one nobody runs by
       # hand.
       #
@@ -776,7 +686,7 @@ jobs:
   #
   # macOS is the platform essentially every Homebrew user installs ASH on, which makes
   # it the real target environment rather than the convenient one -- the same standard
-  # the deb and rpm jobs above are held to, where the package is built inside the
+  # the deb and rpm jobs in ash-native-packages.yml are held to, where the package is built inside the
   # distro that will install it. Per actions/runner-images, `macos-latest` is macOS 26
   # Arm64 and that image ships Homebrew 6.0.22, Ruby 3.4.10 and Rust 1.98.1. This is a
   # public repository, so GitHub-hosted macOS minutes are free and cost is not the

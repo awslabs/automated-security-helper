@@ -94,7 +94,7 @@ jobs:
     permissions:
       contents: read
 
-    # A container, for the same reason the deb and rpm jobs in ash-package.yml use one, and
+    # A container, for the same reason the deb and rpm jobs in ash-native-packages.yml use one, and
     # NOT for its Gradle. The image is used for its toolset: a JDK 21, git, python3 and unzip,
     # measured present in gradle:jdk21 (Ubuntu 26.04, Gradle 9.7.1). The build itself always
     # goes through ./gradlew, which pins the Gradle version -- so the image's Gradle drifting
@@ -118,7 +118,7 @@ jobs:
       # `sh -e {0}`, and gradle:jdk21's /bin/sh is dash. This one happens to work
       # without it -- that image's dash is new enough to accept `-o pipefail`, which
       # dash gained in 0.5.12 -- but debian:bookworm's is not, and the same three
-      # lines in ash-package.yml's deb job died on their first line with
+      # lines in the deb job (then in ash-package.yml) died on their first line with
       # "Illegal option -o pipefail" and failed the whole job. Depending on which
       # dash a base image happens to ship is not worth the one line it takes to
       # remove the dependency. Measured: /bin/sh is dash in this image, bash is

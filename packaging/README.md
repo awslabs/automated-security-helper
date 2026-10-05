@@ -66,8 +66,8 @@ lists of real builds.
 
 | Directory | Format | Verified by |
 |---|---|---|
-| `deb/` | Debian, Ubuntu | build + install + real scan in `debian:bookworm` |
-| `rpm/` | Amazon Linux, RHEL | build + install + real scan in `amazonlinux:2023` |
+| `deb/` | Debian, Ubuntu | build + payload gate + install + real scan + upgrade from N-1 + purge in `debian:bookworm` and `ubuntu:24.04` (`ash-native-packages.yml`) |
+| `rpm/` | Amazon Linux, RHEL | build + payload gate + install + real scan + upgrade from N-1 + erase in `amazonlinux:2023` and `ubi9` (`ash-native-packages.yml`) |
 | `flatpak/` | any Linux with flatpak | build + install + real scan against `org.freedesktop.Sdk//24.08` |
 | `msix/` | Windows 10, Windows 11 | build + sign + install + real scan on `windows-latest` |
 | `chocolatey/` | Windows, via Chocolatey | nuspec vs NuGet's XSD anywhere; build + install + real scan on `windows-latest` |
@@ -89,18 +89,40 @@ is a URL and a sha256, so no dependency source enters the tree. Read
 
 ## Install shape, common to the deb and the rpm
 
-Both packages install the same way, so a bug in one is a bug in the other:
+Both packages install the same way, so a bug in one is a bug in the other. Below,
+`<pkgname>` is `ASH_PKG_NAME` and `<cli>` is `ASH_CLI_NAME`, both set in
+`packaging/cli-name.sh` and both `ash` today. The READMEs the packages ship are
+written with `@ASH_PKG@` and `@ASH_CLI@` and substituted at build time.
 
-- `/usr/lib/ash/wheels/` — ASH's wheel, the only payload.
-- `/usr/lib/ash/venv/` — created by the post-install step, never shipped inside the
-  package. A venv built on the build host would carry absolute paths and the build
-  host's interpreter ABI, so it cannot be relocated to the target.
-- `/usr/bin/ash` — a wrapper execing the venv's entry point. A symlink into the venv
-  would work for `ash` but breaks `sys.executable` discovery for the container runner,
+- `/usr/lib/<pkgname>/wheels/` — ASH's wheel, the only payload.
+- `/usr/lib/<pkgname>/venv` — a symlink to `/usr/lib/<pkgname>/venv-<id>/`, which the
+  post-install step creates; never shipped inside the package. A venv built on the
+  build host would carry absolute paths and the build host's interpreter ABI, so it
+  cannot be relocated to the target, and for the same reason an upgrade builds the
+  new venv in its own directory and swaps the symlink by rename rather than moving a
+  venv.
+- `/usr/bin/<cli>` — a wrapper execing the venv's entry point. A symlink into the venv
+  would work for the command itself but breaks `sys.executable` discovery for the container runner,
   which shells out to itself.
 
 Removal drops the venv, because `pip` created it after install and no package manager
-tracks files a `postinst` wrote.
+tracks files a `postinst` wrote. An upgrade does not: the deb's `prerm` removes it only on
+`remove`, the rpm's `%postun` only when `$1` is 0, and a failed rebuild never touches the
+symlink, so the previous version keeps working.
+
+Package versions are mapped from the wheel's PEP 440 version by `packaging/version-map.sh`
+so dpkg and rpm sort them correctly (`3.8.0rc1` becomes `3.8.0~rc1`, below `3.8.0`).
+
+Both packages compress their payload with gzip and add a license file, and
+`packaging/assert-package-payload.py` pins each payload member by member, rejects any
+member that is not a regular file or directory (a symlink or device node at a pinned
+path, or a hard link) and any setuid, setgid, group-writable or world-writable
+mode, applies the artifact-contents gate's own content
+rules to every member, and hands the wheel it extracts from the built package back to
+that gate. The shared install-and-scan logic,
+including the negative controls that show each check failing, is
+`packaging/verify-lib.sh`; the command name both packages install is set once, in
+`packaging/cli-name.sh`.
 
 ## Where the Flatpak differs, and why
 
