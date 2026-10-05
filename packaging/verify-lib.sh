@@ -267,6 +267,56 @@ vl_lower_version() {
     out = $1; for (i = 2; i <= NF; i++) out = out "." $i; print out }'
 }
 
+# The venv layout: /usr/lib/ash/venv is a symlink to exactly one venv-<id>
+# directory, and nothing an interrupted install would leave is present.
+vl_assert_venv_layout() {
+  [ -L "$ASH_VENV" ] || vl_fail "$ASH_VENV is not a symlink"
+  local dirs=() d
+  for d in /usr/lib/ash/venv-*; do
+    if [ -d "$d" ]; then
+      dirs+=("$d")
+    fi
+  done
+  [ "${#dirs[@]}" -eq 1 ] || vl_fail "expected exactly one /usr/lib/ash/venv-* directory, found ${#dirs[@]}: ${dirs[*]}"
+  [ "$(readlink -f "$ASH_VENV")" = "${dirs[0]}" ] || vl_fail "$ASH_VENV does not point at ${dirs[0]}"
+  for d in /usr/lib/ash/venv.previous /usr/lib/ash/venv.swap-*; do
+    if [ -e "$d" ] || [ -L "$d" ]; then
+      vl_fail "left behind by the install: $d"
+    fi
+  done
+  vl_say "   venv layout: $ASH_VENV -> $(readlink "$ASH_VENV"), no other venv present"
+}
+
+# Samples, every 50 ms for as long as an install runs, whether the command and the
+# interpreter behind /usr/lib/ash/venv exist. Any miss is a moment in which the
+# installed CLI could not have started.
+vl_probe_start() {
+  rm -f /tmp/venv-probe.log /tmp/venv-probe.stop
+  (
+    while [ ! -e /tmp/venv-probe.stop ]; do
+      if [ -x "$ASH_VENV/bin/$ASH_CLI_NAME" ] && [ -x "$ASH_VENV/bin/python3" ]; then
+        echo ok
+      else
+        echo miss
+      fi
+      sleep 0.05
+    done
+  ) >/tmp/venv-probe.log 2>&1 &
+  VL_PROBE_PID=$!
+}
+
+vl_probe_stop_and_assert() {
+  touch /tmp/venv-probe.stop
+  wait "$VL_PROBE_PID"
+  local samples misses
+  samples="$(awk 'END { print NR }' /tmp/venv-probe.log)"
+  misses="$(awk '$0 == "miss" { n++ } END { print n + 0 }' /tmp/venv-probe.log)"
+  vl_say "   availability probe: $samples samples, $misses with no usable $ASH_VENV"
+  # A floor on the sample count, so a probe that never ran cannot pass.
+  [ "$samples" -ge 20 ] || vl_fail "the availability probe took only $samples samples"
+  [ "$misses" -eq 0 ] || vl_fail "$ASH_VENV was unusable in $misses of $samples samples during the install"
+}
+
 # --------------------------------------------------------------------------
 # Removal.
 # --------------------------------------------------------------------------

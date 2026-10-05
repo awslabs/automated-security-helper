@@ -16,6 +16,8 @@
 #   negative-scan-rc   a scan exiting 0 with findings must FAIL the exit-code gate
 #   negative-install   a package whose postinst fails must FAIL the install step
 #   negative-payload   a package with an empty payload must FAIL the payload gate
+#   version-map        PEP 440 pre/post/dev versions must sort correctly under the
+#                      distribution's own version comparator
 #
 # Every check here exists because a weaker version of it passed something broken. The
 # negative modes are how each one is shown to be capable of failing; a check that has
@@ -104,6 +106,11 @@ WHEEL="$(one_wheel "$DIST")"
 VERSION="$(wheel_version "$WHEEL")"
 [ -n "$VERSION" ] || vl_fail "cannot read a version from $(basename "$WHEEL")"
 
+if [ "$MODE" = version-map ]; then
+  echo "== package versions must sort the way PEP 440 does"
+  exec bash "$REPO/packaging/test-version-map.sh" deb "$WHEEL"
+fi
+
 case "$MODE" in
   negative-payload)
     echo "== NEGATIVE CONTROL: an empty-payload .deb must FAIL the payload gate"
@@ -152,7 +159,9 @@ if [ "$MODE" = upgrade ]; then
   PREV_WHEEL="$(one_wheel "$PREV_DIST")"
   PREV_VERSION="$(wheel_version "$PREV_WHEEL")"
   [ -n "$PREV_VERSION" ] || vl_fail "cannot read a version from $(basename "$PREV_WHEEL")"
-  dpkg --compare-versions "$PREV_VERSION" lt "$VERSION" \
+  # shellcheck source=packaging/version-map.sh
+  . "$REPO/packaging/version-map.sh"
+  dpkg --compare-versions "$(pkg_version "$PREV_VERSION" deb)" lt "$(pkg_version "$VERSION" deb)" \
     || vl_fail "the N-1 wheel ($PREV_VERSION) does not sort below N ($VERSION)"
   PREV_DEB="$(build_deb "$PREV_WHEEL" "$OUT/prev")"
   echo "   built N-1: $PREV_DEB"
@@ -161,14 +170,19 @@ if [ "$MODE" = upgrade ]; then
   echo "== 3. install N-1 ($PREV_VERSION)"
   deb_install "$PREV_DEB"
   vl_assert_installed_version "$PREV_VERSION"
-  OLD_VENV_ID="$(stat -c '%i' "$ASH_VENV")"
+  # The layout is asserted after the upgrade below, not here, so the availability
+  # probe is the first check that sees an install which breaks the venv mid-upgrade.
+  OLD_VENV="$(readlink -f "$ASH_VENV")"
 
-  echo "== 4. upgrade to N ($VERSION): the venv must be REPLACED, not kept"
+  echo "== 4. upgrade to N ($VERSION): the venv must be REPLACED, and never absent"
+  vl_probe_start
   deb_install "$DEB"
+  vl_probe_stop_and_assert
   vl_assert_installed_version "$VERSION"
-  [ "$(stat -c '%i' "$ASH_VENV")" != "$OLD_VENV_ID" ] || vl_fail "the venv directory is the one N-1 created"
-  [ ! -e /usr/lib/ash/venv.previous ] || vl_fail "the parked N-1 venv survived a successful upgrade"
-  echo "   OK: the venv was rebuilt and nothing was left parked"
+  vl_assert_venv_layout
+  [ "$(readlink -f "$ASH_VENV")" != "$OLD_VENV" ] || vl_fail "the venv is the one N-1 created"
+  [ ! -e "$OLD_VENV" ] || vl_fail "the N-1 venv $OLD_VENV survived a successful upgrade"
+  echo "   OK: the venv was rebuilt and the N-1 venv is gone"
 
   echo "== 5. scan with the upgraded install"
   vl_scan_and_assert
@@ -181,16 +195,20 @@ if [ "$MODE" = upgrade ]; then
   done
 
   echo "== 7. an upgrade whose dependency resolve fails must leave the working install"
+  LIVE_VENV="$(readlink -f "$ASH_VENV")"
   vl_blackhole_index
   rc=0
+  vl_probe_start
   PIP_RETRIES=0 PIP_TIMEOUT=5 apt-get install -y -q --reinstall "$DEB" >/tmp/apt-fail.log 2>&1 || rc=$?
+  vl_probe_stop_and_assert
   vl_restore_index
   sed -n "s/^$ASH_CLI_NAME: /   $ASH_CLI_NAME: /p" /tmp/apt-fail.log
   [ "$rc" -ne 0 ] || vl_fail "the reinstall with no reachable index exited 0, so it did not exercise a failed upgrade"
   echo "   the reinstall failed as intended (exit $rc)"
   vl_assert_installed_version "$VERSION"
-  [ ! -e /usr/lib/ash/venv.previous ] || vl_fail "the parked venv was left behind instead of restored"
-  echo "   OK: the previous venv was restored and still runs"
+  vl_assert_venv_layout
+  [ "$(readlink -f "$ASH_VENV")" = "$LIVE_VENV" ] || vl_fail "the failed upgrade repointed $ASH_VENV"
+  echo "   OK: the failed upgrade left the working venv in place and nothing behind"
 
   echo "== 8. the documented recovery works once the index is back"
   dpkg --configure -a >/tmp/dpkg-configure.log 2>&1 || { tail -n 20 /tmp/dpkg-configure.log >&2; vl_fail "dpkg --configure -a failed"; }

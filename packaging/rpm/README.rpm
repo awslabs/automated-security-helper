@@ -28,6 +28,19 @@ unrelated third party, not to this project.
   # then, on the target, before installing the package:
   printf '[global]\nno-index = true\nfind-links = /srv/ash-wheels\n' > /etc/pip.conf
 
+Where the post-install step fetches from
+----------------------------------------
+
+The package does not name an index. It runs pip with the host's own pip
+configuration, so whatever that configuration says is where ASH's dependencies come
+from: /etc/pip.conf, root's pip.conf (/root/.config/pip/pip.conf or
+/root/.pip/pip.conf), and PIP_* variables such as PIP_INDEX_URL in the environment
+the package manager runs in, since rpm scriptlets inherit it. With no
+configuration that is PyPI. This is deliberate: it is what lets the offline and
+mirror setups above work. It also means anyone who can edit that configuration
+decides what code the install step fetches and runs as root, so treat it with the
+same care as a yum repository.
+
 Scanners are not installed by this package
 ------------------------------------------
 
@@ -40,7 +53,8 @@ Files
 -----
 
   /usr/lib/ash/wheels/   ASH's wheel, the package's only payload
-  /usr/lib/ash/venv/     created by %post, removed by %postun on erase only
+  /usr/lib/ash/venv      symlink to the live /usr/lib/ash/venv-<id>/, which %post
+                         creates; %postun removes both on erase only
   /usr/bin/ash           wrapper that execs the venv entry point
   /usr/share/doc/ash/    this file (installed as README), which %post's failure
                          message points at
@@ -50,6 +64,7 @@ The venv is built on the target rather than shipped, because a virtualenv record
 absolute paths and the interpreter ABI of the machine that created it. %postun checks
 $1 = 0 so an upgrade does not delete the venv the new version's %post just built.
 %post installs the wheel this package shipped by its exact name: during an upgrade
-the old package's wheel is still on disk when %post runs. If the rebuild fails, %post
-moves the previous venv back, so the previous version keeps working; once the index is
-reachable, run: dnf reinstall ash
+the old package's wheel is still on disk when %post runs. The new venv is built in its
+own venv-<id> directory and only then does a renamed symlink make it live, so the
+command works throughout an upgrade and a failed rebuild leaves the previous version
+working; once the index is reachable, run: dnf reinstall ash

@@ -160,9 +160,10 @@ chmod 0755 %{buildroot}%{_bindir}/%{ash_cli}
 %post
 set -u
 
-VENV=/usr/lib/ash/venv
-# Where a working venv is parked while its replacement is built. See UPGRADE SAFETY.
-VENV_PREV=/usr/lib/ash/venv.previous
+BASE=/usr/lib/ash
+# A SYMLINK to the live venv, never a directory, except on a host upgrading from a
+# release that predates this layout. See LAYOUT.
+VENV="$BASE/venv"
 DOC=%{_docdir}/%{name}/README
 CLI=%{ash_cli}
 
@@ -180,32 +181,26 @@ if [ ! -f "$WHEEL" ]; then
   exit 1
 fi
 
-# UPGRADE SAFETY
+# LAYOUT, AND WHY THE VENV IS SWAPPED BY RENAMING A SYMLINK
 #
-# An earlier version removed the venv unconditionally before rebuilding it, so an
-# upgrade whose dependency resolve then failed left /usr/bin/$CLI installed and pointing
-# at nothing. The old venv is now moved aside first and moved back on any failure.
+# The same scheme as packaging/deb/debian/postinst; change both together. Each install
+# builds a fresh venv in $BASE/venv-<id>, and only once it runs is $BASE/venv repointed
+# at it by renaming a new symlink over the old one. rename(2) replaces the link
+# atomically, so /usr/lib/ash/venv always resolves to a complete venv, and an upgrade
+# whose build fails never touches the link at all. That matters more here than for the
+# .deb: rpm treats a failed %%post as a warning and registers the new version anyway.
 #
-# It is rebuilt at its FINAL path, not built elsewhere and renamed into place: a venv
-# records its absolute path in every console script's shebang, so it cannot be moved.
-# A rebuild rather than `pip install --upgrade` into the old venv, because an in-place
-# upgrade leaves the old distribution's entry points behind when a release renames one.
+# The venv directory is never renamed: a venv records its absolute path in every
+# console script's shebang, so it cannot be moved after it is built.
 #
-# rpm reports a failed %%post as a warning and still registers the new version, so this
-# is the only thing standing between a failed upgrade and a broken install.
-rm -rf "$VENV_PREV"
-had_previous=0
-if [ -d "$VENV" ]; then
-  mv "$VENV" "$VENV_PREV"
-  had_previous=1
-fi
-
-restore_and_fail() {
-  rm -rf "$VENV"
-  if [ "$had_previous" = 1 ] && [ -d "$VENV_PREV" ]; then
-    mv "$VENV_PREV" "$VENV"
-    echo "$CLI: restored the previous working environment at $VENV." >&2
-  fi
+# Known limit: the previous venv is deleted right after the swap, so a process ALREADY
+# running from it can fail on a later import. Invocations started after the swap use the
+# new venv.
+NEW_NAME="venv-$(date +%%s)-$$"
+NEW="$BASE/$NEW_NAME"
+SWAP="$BASE/venv.swap-$$"
+fail() {
+  rm -rf "$NEW" "$SWAP"
   exit 1
 }
 
@@ -228,35 +223,58 @@ if [ -z "$PY" ]; then
   echo "$CLI: found no Python that can create a virtualenv." >&2
   echo "$CLI: this package requires one of python3.11, python3.12 or python3.13." >&2
   echo "$CLI: install one, then run: dnf reinstall ash" >&2
-  restore_and_fail
+  fail
 fi
 
-if ! "$PY" -m venv "$VENV"; then
-  echo "$CLI: failed to create a virtualenv at $VENV with $PY." >&2
-  echo "$CLI: check that $VENV is writable and not on a noexec mount." >&2
-  restore_and_fail
+if ! "$PY" -m venv "$NEW"; then
+  echo "$CLI: failed to create a virtualenv at $NEW with $PY." >&2
+  echo "$CLI: check that $BASE is writable and not on a noexec mount." >&2
+  fail
 fi
 
-# The wheel is installed from the local path; its DEPENDENCIES come from the index. That
-# split is the whole reason this package is not self-contained, and it is documented in
-# $DOC.
-if ! "$VENV/bin/pip" install --quiet --disable-pip-version-check "$WHEEL"; then
-  echo "$CLI: failed to install $WHEEL into $VENV." >&2
+# The wheel is installed from the local path; its DEPENDENCIES come from whatever Python
+# index the host's pip configuration names. See $DOC.
+if ! "$NEW/bin/pip" install --quiet --disable-pip-version-check "$WHEEL"; then
+  echo "$CLI: failed to install $WHEEL into $NEW." >&2
   echo "$CLI: this step needs a reachable Python package index to resolve ASH's runtime" >&2
   echo "$CLI: dependencies. See $DOC." >&2
-  restore_and_fail
+  echo "$CLI: the previously installed version, if any, is untouched." >&2
+  fail
 fi
 
 # Run the entry point rather than trusting pip's exit code. A wheel can install cleanly
 # and still not produce a working console script if its metadata is wrong, and the
 # wrapper in /usr/bin would then fail for every user.
-if ! "$VENV/bin/$CLI" --version >/dev/null 2>&1; then
-  echo "$CLI: $WHEEL installed but $VENV/bin/$CLI does not run." >&2
-  restore_and_fail
+if ! "$NEW/bin/$CLI" --version >/dev/null 2>&1; then
+  echo "$CLI: $WHEEL installed but $NEW/bin/$CLI does not run." >&2
+  fail
 fi
 
-# Only now is the parked venv expendable.
-rm -rf "$VENV_PREV"
+# A host upgrading from the directory layout has a real directory here, and a symlink
+# cannot be renamed over a non-empty directory. Moved aside once; this is the one upgrade
+# with a short window, and it is restored if the swap fails.
+MIGRATED=
+if [ -d "$VENV" ] && [ ! -L "$VENV" ]; then
+  MIGRATED="$BASE/venv.previous"
+  rm -rf "$MIGRATED"
+  mv "$VENV" "$MIGRATED"
+fi
+
+if ! ln -s "$NEW_NAME" "$SWAP" || ! mv -T "$SWAP" "$VENV"; then
+  echo "$CLI: could not point $VENV at $NEW." >&2
+  if [ -n "$MIGRATED" ] && [ ! -e "$VENV" ]; then
+    mv "$MIGRATED" "$VENV"
+  fi
+  fail
+fi
+
+# Every other venv is now unreachable: the one just replaced, a directory-layout venv
+# moved aside above, and anything a killed run left behind.
+for stale in "$BASE"/venv-* "$BASE"/venv.previous "$BASE"/venv.swap-*; do
+  [ -e "$stale" ] || [ -L "$stale" ] || continue
+  [ "$stale" = "$NEW" ] && continue
+  rm -rf "$stale"
+done
 
 exit 0
 
@@ -273,7 +291,9 @@ set -u
 # new version had just built and break every upgrade. The upgrade leg of
 # packaging/rpm/verify-in-container.sh exercises this ordering.
 if [ "$1" -eq 0 ]; then
-  rm -rf /usr/lib/ash/venv /usr/lib/ash/venv.previous
+  # The link, every venv it could point at, and anything an interrupted %%post left
+  # behind. See LAYOUT in %%post.
+  rm -rf /usr/lib/ash/venv /usr/lib/ash/venv-* /usr/lib/ash/venv.previous /usr/lib/ash/venv.swap-*
   # rpm removed its own files before this ran, but could not rmdir /usr/lib/ash while the
   # unowned venv was still inside it. Now that the venv is gone, take the parent if it is
   # empty; anything else left there is not this package's to delete.

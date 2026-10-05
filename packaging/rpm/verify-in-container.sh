@@ -17,6 +17,8 @@
 #   negative-scan-rc   a scan exiting 0 with findings must FAIL the exit-code gate
 #   negative-install   a package whose %post fails must FAIL the install step
 #   negative-payload   a package with an empty payload must FAIL the payload gate
+#   version-map        PEP 440 pre/post/dev versions must sort correctly under the
+#                      distribution's own version comparator
 #
 # The system python3 on both targets is 3.9, below ASH's floor. The package declares
 # (python3.11 or python3.12 or python3.13) and dnf must satisfy that itself, so nothing
@@ -138,6 +140,11 @@ PY
   "$tree/packaging/rpm/build.sh" "$wheel" "$out"
 }
 
+if [ "$MODE" = version-map ]; then
+  echo "== package versions must sort the way PEP 440 does"
+  exec bash "$REPO/packaging/test-version-map.sh" rpm "$WHEEL"
+fi
+
 case "$MODE" in
   negative-payload)
     echo "== NEGATIVE CONTROL: an empty-payload .rpm must FAIL the payload gate"
@@ -180,30 +187,42 @@ if [ "$MODE" = upgrade ]; then
   echo "== 3. install N-1 ($PREV_VERSION)"
   rpm_install install "$PREV_RPM"
   vl_assert_installed_version "$PREV_VERSION"
-  OLD_VENV_ID="$(stat -c '%i' "$ASH_VENV")"
+  # The layout is asserted after the upgrade below, not here, so the availability
+  # probe is the first check that sees an install which breaks the venv mid-upgrade.
+  OLD_VENV="$(readlink -f "$ASH_VENV")"
 
-  echo "== 4. upgrade to N ($VERSION): the venv must be REPLACED, not kept"
+  echo "== 4. upgrade to N ($VERSION): the venv must be REPLACED, and never absent"
+  vl_probe_start
   rpm_install upgrade "$RPM"
-  [ "$(rpm -q --qf '%{VERSION}' ash)" = "$VERSION" ] || vl_fail "rpm reports $(rpm -q ash) after the upgrade"
+  vl_probe_stop_and_assert
+  # shellcheck source=packaging/version-map.sh
+  . "$REPO/packaging/version-map.sh"
+  [ "$(rpm -q --qf '%{VERSION}' ash)" = "$(pkg_version "$VERSION" rpm)" ] \
+    || vl_fail "rpm reports $(rpm -q ash) after the upgrade"
   vl_assert_installed_version "$VERSION"
-  [ "$(stat -c '%i' "$ASH_VENV")" != "$OLD_VENV_ID" ] || vl_fail "the venv directory is the one N-1 created"
-  [ ! -e /usr/lib/ash/venv.previous ] || vl_fail "the parked N-1 venv survived a successful upgrade"
-  echo "   OK: the venv was rebuilt from the N wheel and nothing was left parked"
+  vl_assert_venv_layout
+  [ "$(readlink -f "$ASH_VENV")" != "$OLD_VENV" ] || vl_fail "the venv is the one N-1 created"
+  [ ! -e "$OLD_VENV" ] || vl_fail "the N-1 venv $OLD_VENV survived a successful upgrade"
+  echo "   OK: the venv was rebuilt from the N wheel and the N-1 venv is gone"
 
   echo "== 5. scan with the upgraded install"
   vl_scan_and_assert
 
   echo "== 6. an upgrade whose dependency resolve fails must leave the working install"
+  LIVE_VENV="$(readlink -f "$ASH_VENV")"
   vl_blackhole_index
   rc=0
+  vl_probe_start
   PIP_RETRIES=0 PIP_TIMEOUT=5 rpm_install reinstall "$RPM" >/tmp/dnf-fail.out 2>&1 || rc=$?
+  vl_probe_stop_and_assert
   vl_restore_index
   sed -n "s/^$ASH_CLI_NAME: /   $ASH_CLI_NAME: /p" /tmp/dnf-install.log
   [ "$rc" -ne 0 ] || vl_fail "the reinstall with no reachable index was reported as a success, so it did not exercise a failed upgrade"
   echo "   the reinstall's %post failed as intended"
   vl_assert_installed_version "$VERSION"
-  [ ! -e /usr/lib/ash/venv.previous ] || vl_fail "the parked venv was left behind instead of restored"
-  echo "   OK: the previous venv was restored and still runs"
+  vl_assert_venv_layout
+  [ "$(readlink -f "$ASH_VENV")" = "$LIVE_VENV" ] || vl_fail "the failed upgrade repointed $ASH_VENV"
+  echo "   OK: the failed upgrade left the working venv in place and nothing behind"
 
   echo "== 7. the documented recovery works once the index is back"
   rpm_install reinstall "$RPM"

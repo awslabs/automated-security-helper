@@ -72,17 +72,23 @@ is a URL and a sha256, so no dependency source enters the tree. Read
 Both packages install the same way, so a bug in one is a bug in the other:
 
 - `/usr/lib/ash/wheels/` — ASH's wheel, the only payload.
-- `/usr/lib/ash/venv/` — created by the post-install step, never shipped inside the
-  package. A venv built on the build host would carry absolute paths and the build
-  host's interpreter ABI, so it cannot be relocated to the target.
+- `/usr/lib/ash/venv` — a symlink to `/usr/lib/ash/venv-<id>/`, which the
+  post-install step creates; never shipped inside the package. A venv built on the
+  build host would carry absolute paths and the build host's interpreter ABI, so it
+  cannot be relocated to the target, and for the same reason an upgrade builds the
+  new venv in its own directory and swaps the symlink by rename rather than moving a
+  venv.
 - `/usr/bin/ash` — a wrapper execing the venv's entry point. A symlink into the venv
   would work for `ash` but breaks `sys.executable` discovery for the container runner,
   which shells out to itself.
 
 Removal drops the venv, because `pip` created it after install and no package manager
 tracks files a `postinst` wrote. An upgrade does not: the deb's `prerm` removes it only on
-`remove`, the rpm's `%postun` only when `$1` is 0, and both post-install steps park the
-existing venv and restore it if the rebuild fails.
+`remove`, the rpm's `%postun` only when `$1` is 0, and a failed rebuild never touches the
+symlink, so the previous version keeps working.
+
+Package versions are mapped from the wheel's PEP 440 version by `packaging/version-map.sh`
+so dpkg and rpm sort them correctly (`3.8.0rc1` becomes `3.8.0~rc1`, below `3.8.0`).
 
 Both packages compress their payload with gzip and add a license file, and
 `packaging/assert-package-payload.py` pins each payload member by member, applies the

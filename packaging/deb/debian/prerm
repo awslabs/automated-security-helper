@@ -14,7 +14,9 @@ set -u
 
 case "$1" in
   remove)
-    rm -rf /usr/lib/ash/venv /usr/lib/ash/venv.previous
+    # The link, every venv it could point at, and anything an interrupted postinst
+    # left behind. See LAYOUT in postinst.
+    rm -rf /usr/lib/ash/venv /usr/lib/ash/venv-* /usr/lib/ash/venv.previous /usr/lib/ash/venv.swap-*
     ;;
   upgrade|failed-upgrade|deconfigure)
     ;;
