@@ -332,6 +332,42 @@ function prepareReportFile(host: ScanHost, file: string): ReportFile {
   return { file, mtimeBefore, removed };
 }
 
+/**
+ * The first symbolic link among the paths the extension deletes under `outputDir`,
+ * or undefined when there is none.
+ *
+ * resolveOutputDirectory resolves links in the output directory itself, but not
+ * below it: a committed `.ash/ash_output/reports -> elsewhere` passes that check,
+ * and unlinking reports/ash.sarif would then delete `elsewhere/ash.sarif`. Every
+ * component under `outputDir` is checked with lstat, so a link at any depth is
+ * seen. A link at the last component is refused too: unlinking it is harmless,
+ * but ASH would then write its report through it.
+ */
+function symlinkBelow(outputDir: string, relatives: readonly string[]): string | undefined {
+  const seen = new Set<string>();
+  for (const relative of relatives) {
+    let current = outputDir;
+    for (const part of relative.split('/')) {
+      current = path.join(current, part);
+      if (seen.has(current)) {
+        continue;
+      }
+      seen.add(current);
+      let isLink: boolean;
+      try {
+        isLink = fs.lstatSync(current).isSymbolicLink();
+      } catch {
+        // Missing (nothing to follow), or unreadable (the delete fails the same way).
+        break;
+      }
+      if (isLink) {
+        return current;
+      }
+    }
+  }
+  return undefined;
+}
+
 /** 'absent', 'stale' (from a previous run), or 'fresh' (written by this run). */
 function reportFreshness(host: ScanHost, report: ReportFile): 'absent' | 'stale' | 'fresh' {
   const after = host.mtimeMs(report.file);
@@ -437,6 +473,20 @@ async function scanAndPublish(
       host.showInfo(FALLBACK_NOTICE);
       fallbackNotice = 'shown';
     }
+  }
+
+  // Checked here, immediately before the deletes, rather than with the settings:
+  // the probe has run since then, and the window between this check and the
+  // unlink should be as short as it can be.
+  const link = symlinkBelow(outputDir, [SARIF_RELATIVE_PATH, AGGREGATED_RESULTS_FILE]);
+  if (link !== undefined) {
+    const detail =
+      `${link} is a symbolic link. The extension deletes the previous report under ` +
+      `${outputDir} before scanning, and a link there would point that delete somewhere ` +
+      'else. Remove the link, or set ash.outputDirectory to a folder without one.';
+    host.log(detail);
+    host.showError(`ASH: ${detail}`);
+    return { status: 'bad-setting', detail, executable, fallbackNotice };
   }
 
   const sarif = prepareReportFile(host, path.join(outputDir, ...SARIF_RELATIVE_PATH.split('/')));

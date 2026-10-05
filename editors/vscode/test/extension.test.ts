@@ -544,6 +544,43 @@ describe('ash.outputDirectory is confined to the workspace folder', () => {
       });
     });
 
+    it.each([
+      // [where the link is, what it points at, the file the delete would reach]
+      ['reports', 'the outside folder', 'ash.sarif'],
+      ['reports/ash.sarif', 'an outside file', 'ash.sarif'],
+      ['ash_aggregated_results.json', 'an outside file', 'ash_aggregated_results.json'],
+    ])(
+      'refuses a committed symlink at %s (to %s) below the output directory and deletes nothing',
+      async (linkRelative, target, victimName) => {
+        const outputDir = path.join(workspace, '.ash', 'ash_output');
+        mkdirSync(path.join(outputDir, 'reports'), { recursive: true });
+        const victim = path.join(outside, victimName);
+        writeFileSync(victim, 'not ASH output');
+        const linkPath = path.join(outputDir, ...linkRelative.split('/'));
+        rmSync(linkPath, { recursive: true, force: true });
+        symlinkSync(target === 'the outside folder' ? outside : victim, linkPath);
+        const { host, invocations, collection } = harness({ sarifFixture: 'planted-secret.sarif' });
+        seedPreviousFinding(collection);
+        const realHost = createScanHost(
+          collection as unknown as vscode.DiagnosticCollection,
+          new OutputChannel('ASH') as unknown as vscode.OutputChannel,
+          new Memento() as unknown as vscode.Memento,
+        );
+
+        const report = await runScanCommand(
+          { ...host, removeFile: realHost.removeFile, mtimeMs: realHost.mtimeMs },
+          workspace,
+          SETTINGS,
+        );
+
+        expect(readFileSync(victim, 'utf8')).toBe('not ASH output');
+        expect(report.status).toBe('bad-setting');
+        expect(report.detail).toContain(linkPath);
+        expect(invocations.map((call) => call.args[0])).toEqual(['--version']);
+        expect(collection.totalDiagnostics()).toBe(0);
+      },
+    );
+
     it('compares real paths when the workspace itself is reached through a symlink', () => {
       symlinkSync(workspace, path.join(root, 'alias'), 'dir');
 
