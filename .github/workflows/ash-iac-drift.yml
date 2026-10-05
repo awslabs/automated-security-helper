@@ -70,9 +70,15 @@ on:
   # filter narrow. All seven jobs are single-runner and offline -- cdk synth, terraform
   # validate, cdk-nag and the link renderer read local files only. The argument is that a
   # second verdict on a tree pull_request already covered is not a second check.
+  #
+  # v4-capabilities and v4/** are added so the v4 line gets a verdict on every pushed
+  # commit whether or not a pull request is open for it. This workflow is where the
+  # quick-create e2e leg runs (scripts/e2e/quick_create.sh).
   push:
     branches:
       - main
+      - v4-capabilities
+      - "v4/**"
   pull_request:
     # "**" not "*": GitHub branch filters treat "*" as matching any character
     # except "/", so a PR whose BASE is a nested branch (a stacked PR targeting
@@ -1607,6 +1613,23 @@ jobs:
           git diff -- "$GEN"
           echo "::endgroup::"
           exit 1
+
+      # The e2e leg. The committed document carries no URLs (no bucket is configured,
+      # by design), so the steps above never see a rendered link. This renders the
+      # head's templates against a scratch dotted bucket and a scratch undotted one,
+      # asserts path-style and virtual-hosted addressing respectively with a judge that
+      # shares no code with the renderer, cfn-lints every template a link names in the
+      # regions it launches in, and shows five negative controls failing. Nothing is
+      # written into the checkout; the script checks that last.
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+
+      - name: Render a dotted and an undotted bucket and judge both
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/e2e/quick_create.sh "$RUNNER_TEMP/quick-create-e2e"
 
   # ---------------------------------------------------------------------------
   # One stable name for branch protection to require.

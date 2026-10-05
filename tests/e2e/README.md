@@ -102,3 +102,14 @@ run is that measurement. With the override, the trigger rests on an environment 
 that ASH reads the same way everywhere and on a config value the case sets explicitly.
 The simulation covers the platform default that is known to differ. It does not cover
 anything else Windows might do differently.
+
+## Channels that run no scan
+
+The quick-create links (`deploy/quick-create-links.md`) are a document, not an install,
+so that leg uses none of the cases above. `scripts/e2e/quick_create.sh` renders the
+head's templates against a scratch dotted bucket and a scratch undotted one, judges each
+render with `scripts/e2e/assert_quick_create.py` (path-style and virtual-hosted
+addressing, one link per template and launch region, every `param_` against its
+template), runs cfn-lint at error level on each template a link names, and shows five
+negative controls failing. It runs in the `quick-create-link-drift` job of
+`.github/workflows/ash-iac-drift.yml`. The committed hosting file stays empty.
