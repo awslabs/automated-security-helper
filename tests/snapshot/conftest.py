@@ -19,6 +19,7 @@ apply the one shared :class:`SnapshotNormalizer`; never normalize inside a test.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import sys
@@ -153,7 +154,14 @@ def _is_builtin_plugin_module(module_path: str) -> bool:
 
 
 @pytest.fixture(autouse=True)
-def _builtin_plugins_only(monkeypatch: pytest.MonkeyPatch) -> None:
+def _builtin_plugins_only(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Give every snapshot the plugin registry of a fresh process; see below."""
+    with builtin_plugin_registry(monkeypatch):
+        yield
+
+
+@contextlib.contextmanager
+def builtin_plugin_registry(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Give every snapshot the plugin registry of a freshly started ``ash`` process.
 
     Plugins register into one module-level ``ash_plugin_manager`` when their module is
@@ -171,19 +179,31 @@ def _builtin_plugins_only(monkeypatch: pytest.MonkeyPatch) -> None:
     cache starts empty; all three are put back afterwards for the rest of the
     suite. A built-in that an earlier test unregistered is not quietly re-added:
     the fixture fails, because a fresh process would have it.
+
+    Used as the autouse fixture ``_builtin_plugins_only``; a context manager so
+    tests/snapshot/test_snapshot_plugin_registry.py can drive it directly.
+
+    A plugin module imported for the first time during the test registered into the
+    test's copy, and Python will not run that module's registration again: it stays
+    in ``sys.modules``. Its registrations are therefore merged back into the real
+    registry on teardown (keys the real registry already has are left alone), so the
+    rest of the suite sees the same registry it would have seen without this fixture.
     """
     from automated_security_helper.plugin_modules import ash_builtin
     from automated_security_helper.plugins import ash_plugin_manager
 
     library = ash_plugin_manager.plugin_library
+    imported_before = set(sys.modules)
+    real: dict[str, dict[str, Any]] = {}
     for kind, declared in (
         ("converters", ash_builtin.ASH_CONVERTERS),
         ("scanners", ash_builtin.ASH_SCANNERS),
         ("reporters", ash_builtin.ASH_REPORTERS),
     ):
+        real[kind] = getattr(library, kind)
         builtin = {
             name: registration
-            for name, registration in getattr(library, kind).items()
+            for name, registration in real[kind].items()
             if _is_builtin_plugin_module(registration.plugin_module_path)
         }
         missing = sorted(
@@ -195,6 +215,7 @@ def _builtin_plugins_only(monkeypatch: pytest.MonkeyPatch) -> None:
                 f"snapshot test (an earlier test removed them): {missing}"
             )
         monkeypatch.setattr(library, kind, builtin)
+    real_handlers = library.event_handlers
     monkeypatch.setattr(
         library,
         "event_handlers",
@@ -204,10 +225,42 @@ def _builtin_plugins_only(monkeypatch: pytest.MonkeyPatch) -> None:
                 for callback in callbacks
                 if _is_builtin_plugin_module(getattr(callback, "__module__", "") or "")
             ]
-            for event, callbacks in library.event_handlers.items()
+            for event, callbacks in real_handlers.items()
         },
     )
     monkeypatch.setattr(ash_plugin_manager, "_resolved_plugins", {})
+    try:
+        yield
+    finally:
+        # Runs before monkeypatch puts the real dicts back, so the copies are still
+        # installed and readable here.
+        _merge_new_registrations(library, real, real_handlers, imported_before)
+
+
+def _merge_new_registrations(
+    library: Any,
+    real: dict[str, dict[str, Any]],
+    real_handlers: dict[Any, list[Callable[..., Any]]],
+    imported_before: set[str],
+) -> None:
+    """Copy into the real registry what modules first imported during the test added."""
+
+    def first_imported_now(module_path: str) -> bool:
+        return module_path in sys.modules and module_path not in imported_before
+
+    for kind, registry in real.items():
+        for name, registration in getattr(library, kind).items():
+            if name not in registry and first_imported_now(
+                registration.plugin_module_path
+            ):
+                registry[name] = registration
+    for event, callbacks in library.event_handlers.items():
+        for callback in callbacks:
+            module_path = getattr(callback, "__module__", "") or ""
+            if first_imported_now(module_path) and callback not in real_handlers.get(
+                event, []
+            ):
+                real_handlers.setdefault(event, []).append(callback)
 
 
 @pytest.fixture(autouse=True)
