@@ -24,17 +24,21 @@ Reassembling from the committed template tests what would actually deploy.
 
 WHAT IS NOT TESTED HERE
 -----------------------
-`handler()` is never invoked: it needs AWS credentials, a cluster and a CloudFormation
-response URL. Everything below the network boundary is exercised -- the manifest builders
-and the delete rule -- and everything above it remains unverified until someone deploys
-the stack. That boundary is deliberate and is the honest limit of this file.
+`handler()` runs only with its network edges faked: EKS, the Kubernetes requests made
+through `call()`, and the CloudFormation response. That exercises its delete and apply
+loops, including the scope guard. The real requests, the token, TLS against the cluster
+CA and the response PUT remain unverified until someone deploys the stack. That boundary
+is deliberate and is the honest limit of this file.
 """
 
 from __future__ import annotations
 
+import base64
 import json
 import pathlib
 import re
+import tempfile
+import types
 
 import pytest
 
@@ -171,26 +175,118 @@ def test_every_manifest_is_json_serializable(docs: list) -> None:
         json.dumps(manifest)
 
 
+class _FakeEks:
+    """The two EKS reads handler() makes, answered locally."""
+
+    def describe_cluster(self, name):  # noqa: ARG002
+        return {
+            "cluster": {
+                "endpoint": "https://cluster.example.invalid",
+                "certificateAuthority": {
+                    "data": base64.b64encode(b"not a real certificate").decode()
+                },
+            }
+        }
+
+    def describe_addon(self, **_):
+        return {"addon": {"status": "ACTIVE"}}
+
+
+class _FakeSession:
+    def client(self, service):
+        assert service == "eks", f"unexpected client {service}"
+        return _FakeEks()
+
+
+class _FakeContext:
+    @staticmethod
+    def get_remaining_time_in_millis() -> int:
+        return 600_000
+
+
+def _run_handler(
+    applier: dict, monkeypatch, tmp_path, request_type: str
+) -> tuple[list, dict]:
+    """Invoke handler() with every network edge replaced, and record what it asked for.
+
+    `call` and `respond` are module globals of the exec'd applier, so replacing them in
+    its namespace is what handler() resolves at call time. The real loop, the real
+    `documents()` and the real scope guard all run.
+    """
+    calls: list = []
+    responses: list = []
+
+    def fake_call(endpoint, ca_file, token_for, path, method, body, **kwargs):  # noqa: ARG001
+        calls.append((method, path, kwargs))
+        return 200, b"{}"
+
+    def fake_respond(event, status, reason, physical_id, data=None):  # noqa: ARG001
+        responses.append({"status": status, "reason": reason, "id": physical_id})
+
+    def temp_file_here(**kwargs):
+        return tempfile.NamedTemporaryFile(**{**kwargs, "dir": str(tmp_path)})
+
+    monkeypatch.setitem(applier, "call", fake_call)
+    monkeypatch.setitem(applier, "respond", fake_respond)
+    monkeypatch.setitem(
+        applier,
+        "boto3",
+        types.SimpleNamespace(
+            session=types.SimpleNamespace(Session=lambda: _FakeSession())
+        ),
+    )
+    monkeypatch.setitem(
+        applier, "tempfile", types.SimpleNamespace(NamedTemporaryFile=temp_file_here)
+    )
+    event = {
+        "RequestType": request_type,
+        "PhysicalResourceId": "demo/ash-system",
+        "ResourceProperties": {
+            "ClusterName": "demo",
+            "Namespace": "ash-system",
+            "OperatorImage": "example.dkr.ecr.us-east-1.amazonaws.com/op:v1",
+        },
+    }
+    applier["handler"](event, _FakeContext())
+    assert len(responses) == 1, f"handler responded {len(responses)} times"
+    assert responses[0]["status"] == "SUCCESS", responses[0]["reason"]
+    return calls, responses[0]
+
+
 class TestDeleteRule:
     """NOTHING CLUSTER-SCOPED IS EVER DELETED.
 
-    Simulated rather than read. Reading the guard is not running it, and this is the most
-    destructive-if-wrong path in the stack: deleting the namespace cascade-deletes
-    everything in it, and deleting a CRD cascade-deletes every AshScan in every namespace
-    of the cluster -- including an installation this stack knows nothing about.
+    Driven through handler() with a fake `call`, so the guard under test is the one in
+    the handler's delete loop. An earlier version re-implemented the scope filter here,
+    and removing the guard from the handler left it green. Deleting the namespace
+    cascade-deletes everything in it, and deleting a CRD cascade-deletes every AshScan
+    in every namespace of the cluster, including an installation this stack knows
+    nothing about.
     """
 
-    @staticmethod
-    def _split(applier: dict, docs: list) -> tuple[list[str], list[str]]:
-        cluster = applier["CLUSTER"]
-        deleted = [path for path, _, scope in reversed(docs) if scope != cluster]
-        kept = [path for path, _, scope in reversed(docs) if scope == cluster]
-        return deleted, kept
+    @pytest.fixture
+    def run(self, applier: dict, monkeypatch, tmp_path) -> tuple[list, dict]:
+        return _run_handler(applier, monkeypatch, tmp_path, "Delete")
 
-    def test_scopes_partition_the_documents(self, applier: dict, docs: list) -> None:
-        deleted, kept = self._split(applier, docs)
-        assert len(deleted) == 5
-        assert len(kept) == 5
+    @pytest.fixture
+    def deleted(self, run: tuple[list, dict]) -> list[str]:
+        return [path for _, path, _ in run[0]]
+
+    def test_only_deletes_and_reports_what_it_kept(
+        self, run: tuple[list, dict]
+    ) -> None:
+        calls, response = run
+        assert {method for method, _, _ in calls} == {"DELETE"}
+        assert "kept 5 cluster-scoped" in response["reason"], response["reason"]
+
+    def test_deletes_exactly_the_namespaced_documents(
+        self, applier: dict, docs: list, deleted: list[str]
+    ) -> None:
+        namespaced = [
+            path for path, _, scope in reversed(docs) if scope == applier["NAMESPACED"]
+        ]
+        assert len(namespaced) == 5
+        assert deleted == namespaced
 
     @pytest.mark.parametrize(
         "fragment,what",
@@ -200,25 +296,33 @@ class TestDeleteRule:
             ("/clusterrolebindings/", "the ClusterRoleBinding"),
         ],
     )
-    def test_never_deletes(
-        self, applier: dict, docs: list, fragment: str, what: str
-    ) -> None:
-        deleted, _ = self._split(applier, docs)
+    def test_never_deletes(self, deleted: list[str], fragment: str, what: str) -> None:
         offenders = [path for path in deleted if fragment in path]
         assert offenders == [], f"would delete {what}: {offenders}"
 
-    def test_never_deletes_the_namespace(self, applier: dict, docs: list) -> None:
-        deleted, _ = self._split(applier, docs)
+    def test_never_deletes_the_namespace(self, deleted: list[str]) -> None:
         assert [p for p in deleted if p.endswith("/namespaces/ash-system")] == []
 
     def test_does_delete_the_deployment_so_the_operator_stops(
-        self, applier: dict, docs: list
+        self, deleted: list[str]
     ) -> None:
         """The converse control: a rule that deleted nothing would pass every test above."""
-        deleted, _ = self._split(applier, docs)
         assert any("/deployments/" in path for path in deleted)
         assert sum("/serviceaccounts/" in path for path in deleted) == 2
         assert all("/namespaces/ash-system" in path for path in deleted)
+
+
+class TestApplyForce:
+    """CRDs are applied without force; everything the stack owns outright, with it."""
+
+    def test_only_crds_skip_force(self, applier: dict, monkeypatch, tmp_path) -> None:
+        calls, _ = _run_handler(applier, monkeypatch, tmp_path, "Create")
+        assert len(calls) == 10
+        assert {method for method, _, _ in calls} == {"PATCH"}
+        for _, path, kwargs in calls:
+            is_crd = "/customresourcedefinitions/" in path
+            assert kwargs["force"] is (not is_crd), path
+            assert kwargs["tolerate_409"] is is_crd, path
 
 
 class TestCrds:
