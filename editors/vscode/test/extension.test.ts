@@ -42,6 +42,7 @@ import {
   currentSourceDir,
   deactivate,
   readSettings,
+  resolveOutputDirectory,
   runScanCommand,
 } from '../src/extension';
 import {
@@ -52,7 +53,15 @@ import {
   resetState,
   state,
 } from './vscode-stub';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'fs';
 import { tmpdir } from 'os';
 
 const FIXTURES = path.join(__dirname, 'fixtures');
@@ -456,16 +465,98 @@ describe('findings with no file location', () => {
   });
 });
 
-describe('an absolute ash.outputDirectory', () => {
-  it('is used as given rather than joined onto the workspace', async () => {
+/** A diagnostic left by an earlier scan, so a test can see whether a refusal clears it. */
+function seedPreviousFinding(collection: DiagnosticCollection): void {
+  collection.set(vscode.Uri.file(path.join(SOURCE_DIR, 'old.py')), [
+    new vscode.Diagnostic(new vscode.Range(0, 0, 0, 1), 'old finding'),
+  ]);
+}
+
+describe('ash.outputDirectory is confined to the workspace folder', () => {
+  // ASH's orchestrator removes analysis/, reports/, scanners/ and converted/ under
+  // the output directory before a scan, and this extension deletes the previous
+  // report there. The setting is workspace-scoped, so a cloned repository's
+  // .vscode/settings.json chooses it: an escape would delete those directories
+  // wherever the repository pointed.
+  it.each([
+    ['an absolute path', '/tmp/elsewhere'],
+    ['a parent-directory escape', '../../..'],
+    ['an escape after a descent', '.ash/../../home'],
+    ['the workspace folder itself', '.'],
+  ])('refuses %s, runs nothing and clears earlier findings', async (_label, outputDirectory) => {
+    const { host, invocations, collection } = harness({ sarifFixture: 'planted-secret.sarif' });
+    seedPreviousFinding(collection);
+
+    const report = await runScanCommand(host, SOURCE_DIR, { ...SETTINGS, outputDirectory });
+
+    expect(report.status).toBe('bad-setting');
+    expect(report.detail).toContain('ash.outputDirectory');
+    expect(invocations).toEqual([]);
+    expect(collection.totalDiagnostics()).toBe(0);
+    expect(state.errors.join('\n')).toContain('ash.outputDirectory');
+  });
+
+  it('accepts a relative path that stays inside, including one with a harmless ..', async () => {
     const { host, invocations } = harness({ sarifFixture: 'planted-secret.sarif' });
 
-    await runScanCommand(host, SOURCE_DIR, { ...SETTINGS, outputDirectory: '/tmp/elsewhere' });
+    const report = await runScanCommand(host, SOURCE_DIR, {
+      ...SETTINGS,
+      outputDirectory: 'build/../.ash/ash_output',
+    });
 
-    expect(invocations[1].args).toContain('/tmp/elsewhere');
-    // No SARIF exists at that path in this harness, so the scan is reported as
-    // having written none -- which is the point: the path was not rewritten.
-    expect(state.errors.join('\n')).toContain('/tmp/elsewhere');
+    expect(report.status).toBe('ok');
+    expect(invocations[1].args).toContain(OUTPUT_DIR);
+  });
+
+  describe('with a real directory tree', () => {
+    let root: string;
+    let workspace: string;
+    let outside: string;
+    beforeEach(() => {
+      root = realpathSync(mkdtempSync(path.join(tmpdir(), 'ash-vscode-confine-')));
+      workspace = path.join(root, 'workspace');
+      outside = path.join(root, 'outside');
+      mkdirSync(workspace);
+      mkdirSync(outside);
+    });
+    afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+    it('refuses a committed symlink that points out of the workspace', async () => {
+      symlinkSync(outside, path.join(workspace, 'out'), 'dir');
+      const { host, invocations, collection } = harness({ sarifFixture: 'planted-secret.sarif' });
+      seedPreviousFinding(collection);
+
+      const report = await runScanCommand(host, workspace, { ...SETTINGS, outputDirectory: 'out/ash' });
+
+      expect(report.status).toBe('bad-setting');
+      expect(report.detail).toContain(outside);
+      expect(invocations).toEqual([]);
+      expect(collection.totalDiagnostics()).toBe(0);
+    });
+
+    it('resolves through a symlink that stays inside the workspace', () => {
+      mkdirSync(path.join(workspace, 'real'));
+      symlinkSync(path.join(workspace, 'real'), path.join(workspace, 'link'), 'dir');
+
+      expect(resolveOutputDirectory(workspace, 'link/out')).toEqual({
+        ok: true,
+        dir: path.join(workspace, 'real', 'out'),
+      });
+    });
+
+    it('compares real paths when the workspace itself is reached through a symlink', () => {
+      symlinkSync(workspace, path.join(root, 'alias'), 'dir');
+
+      expect(resolveOutputDirectory(path.join(root, 'alias'), '.ash/ash_output')).toEqual({
+        ok: true,
+        dir: path.join(workspace, '.ash', 'ash_output'),
+      });
+    });
+  });
+
+  it('uses the default for an empty or blank setting', () => {
+    expect(resolveOutputDirectory(SOURCE_DIR, '  ')).toEqual({ ok: true, dir: OUTPUT_DIR });
+    expect(resolveOutputDirectory(SOURCE_DIR, undefined)).toEqual({ ok: true, dir: OUTPUT_DIR });
   });
 });
 

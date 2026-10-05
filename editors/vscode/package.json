@@ -52,7 +52,7 @@
         "ash.outputDirectory": {
           "type": "string",
           "default": ".ash/ash_output",
-          "description": "Directory the scan writes to, relative to the workspace folder. ASH writes its SARIF report to reports/ash.sarif underneath it."
+          "markdownDescription": "Directory the scan writes to, relative to the workspace folder. ASH writes its SARIF report to `reports/ash.sarif` underneath it.\n\nIt must resolve, symlinks included, to a folder inside the workspace folder. ASH clears directories under it before each scan, so an absolute path, a `..` escape or a link out of the workspace is refused and nothing runs."
         },
         "ash.extraArguments": {
           "type": "array",

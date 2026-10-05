@@ -69,6 +69,7 @@ export type ScanStatus =
   | 'ok'
   | 'incomplete'
   | 'no-workspace'
+  | 'bad-setting'
   | 'wrong-executable'
   | 'scan-failed'
   | 'no-report'
@@ -132,6 +133,9 @@ export interface ScanHost {
   readonly recordFallbackNoticeShown: () => void;
 }
 
+/** The `ash.outputDirectory` default, relative to the workspace folder. */
+export const DEFAULT_OUTPUT_DIRECTORY = '.ash/ash_output';
+
 export interface ScanSettings {
   /** Empty means "resolve ashx, then ash, from PATH". */
   readonly executablePath: string;
@@ -148,7 +152,7 @@ export function readSettings(): ScanSettings {
   // to null.
   return {
     executablePath: (config.get<string>('executablePath', '') ?? '').trim(),
-    outputDirectory: config.get<string>('outputDirectory', '.ash/ash_output') || '.ash/ash_output',
+    outputDirectory: config.get<string>('outputDirectory', DEFAULT_OUTPUT_DIRECTORY) || DEFAULT_OUTPUT_DIRECTORY,
     extraArguments: config.get<string[]>('extraArguments', []) ?? [],
     scanTimeoutSeconds: timeoutSetting(config.get<number>('scanTimeoutSeconds', DEFAULT_SCAN_TIMEOUT_SECONDS)),
   };
@@ -157,6 +161,90 @@ export function readSettings(): ScanSettings {
 /** A usable timeout from the raw setting: a negative or non-number falls back to the default. */
 function timeoutSetting(raw: unknown): number {
   return typeof raw === 'number' && Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_SCAN_TIMEOUT_SECONDS;
+}
+
+/**
+ * The real path of `target`, resolving links in the part of it that exists.
+ *
+ * The output directory usually does not exist before the first scan, and
+ * `realpathSync` throws on a missing path, so this walks up to the nearest
+ * ancestor that exists, resolves that, and re-appends the rest. Without it a
+ * not-yet-created directory beneath a symlink would be compared lexically, and
+ * the link is exactly what the comparison has to see through.
+ */
+function realPathOfNearestAncestor(target: string): string {
+  let current = path.resolve(target);
+  const unresolved: string[] = [];
+  for (;;) {
+    try {
+      return path.join(fs.realpathSync(current), ...unresolved.reverse());
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) {
+        // Nothing on the way up exists, so there is no link to resolve.
+        return path.resolve(target);
+      }
+      unresolved.push(path.basename(current));
+      current = parent;
+    }
+  }
+}
+
+/**
+ * Where the scan writes, or why the setting is refused.
+ *
+ * WHY THIS IS A CONFINEMENT CHECK AND NOT A JOIN
+ *
+ * `ash.outputDirectory` is workspace-scoped, so a cloned repository's
+ * `.vscode/settings.json` chooses it, and the directory it names is one this
+ * extension and ASH both delete from: the extension removes the previous
+ * reports/ash.sarif and ash_aggregated_results.json there, and ASH's orchestrator
+ * removes analysis/, reports/, scanners/ and converted/ under it before scanning.
+ * An absolute value, a `..` escape or a committed symlink such as `out -> ~` would
+ * point those deletions at the user's home directory. So an absolute value is
+ * refused, and a relative one is accepted only when its real path, links
+ * resolved, lies strictly inside the workspace folder's real path. The folder
+ * itself is refused too: ASH would clear those four directories out of the
+ * user's own tree.
+ */
+export function resolveOutputDirectory(
+  sourceDir: string,
+  configured: string | undefined,
+): { readonly ok: true; readonly dir: string } | { readonly ok: false; readonly message: string } {
+  const trimmed = (configured ?? '').trim();
+  const relative = trimmed === '' ? DEFAULT_OUTPUT_DIRECTORY : trimmed;
+
+  if (path.isAbsolute(relative)) {
+    return {
+      ok: false,
+      message:
+        `ash.outputDirectory is "${relative}", an absolute path. It must be relative to ` +
+        'the workspace folder and stay inside it. Change it, or clear it to use the ' +
+        `default (${DEFAULT_OUTPUT_DIRECTORY}).`,
+    };
+  }
+
+  const resolved = realPathOfNearestAncestor(path.resolve(sourceDir, relative));
+  const fromRoot = path.relative(realPathOfNearestAncestor(sourceDir), resolved);
+  // `..` in front means it escaped. An absolute result means the two share no
+  // root at all, which is what a drive-relative value such as `D:out` produces
+  // on Windows. An empty one is the workspace folder itself.
+  if (
+    fromRoot === '' ||
+    fromRoot === '..' ||
+    fromRoot.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(fromRoot)
+  ) {
+    return {
+      ok: false,
+      message:
+        `ash.outputDirectory (${relative}) resolves to ${resolved}, which is not inside ` +
+        'the workspace folder. ASH clears directories under its output directory before ' +
+        `scanning, so it must be a folder inside the workspace. Clear it to use the ` +
+        `default (${DEFAULT_OUTPUT_DIRECTORY}).`,
+    };
+  }
+  return { ok: true, dir: resolved };
 }
 
 /** The message the one-time fallback notice shows. Exported so tests pin it. */
@@ -261,6 +349,16 @@ async function scanAndPublish(
     return { status: 'no-workspace', detail };
   }
 
+  // Settings are checked before anything runs: a refused output directory must
+  // not be reached even by the probe's side effects.
+  const output = resolveOutputDirectory(sourceDir, settings.outputDirectory);
+  if (!output.ok) {
+    host.log(output.message);
+    host.showError(`ASH: ${output.message}`);
+    return { status: 'bad-setting', detail: output.message };
+  }
+  const outputDir = output.dir;
+
   // No working directory on the probe or the scan: see CommandOptions in ash-cli.ts.
   const resolved = await resolveExecutable(settings.executablePath, host.run);
   if (!resolved.ok) {
@@ -282,9 +380,6 @@ async function scanAndPublish(
     }
   }
 
-  const outputDir = path.isAbsolute(settings.outputDirectory)
-    ? settings.outputDirectory
-    : path.join(sourceDir, settings.outputDirectory);
   const sarif = prepareReportFile(host, path.join(outputDir, ...SARIF_RELATIVE_PATH.split('/')));
   const aggregated = prepareReportFile(host, path.join(outputDir, AGGREGATED_RESULTS_FILE));
 
