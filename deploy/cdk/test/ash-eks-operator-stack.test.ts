@@ -478,6 +478,15 @@ describe('REGRESSION: stack deletion must not delete anything cluster-scoped', (
     expect(readme).toMatch(/AshScan` in every namespace/i);
   });
 
+  test('the README warns that VPC network interfaces can outlive a stack delete', () => {
+    // CloudFormation deletes the execution role right after the function. The Lambda
+    // guide says Lambda needs that role to delete the Hyperplane ENI, so an adopter who
+    // set VpcSubnetIds can be left with an ENI to remove by hand.
+    const readme = readFileSync(join(__dirname, '..', '..', 'README.md'), 'utf8');
+    expect(readme).toMatch(/Hyperplane network interface/);
+    expect(readme).toContain('https://docs.aws.amazon.com/lambda/latest/dg/configuration-vpc.html');
+  });
+
   test('the parameter description no longer promises an occupancy check', () => {
     // The original description claimed the namespace was "left in place ... only if
     // something else still occupies it". No such check existed, and none can exist:

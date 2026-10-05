@@ -113,6 +113,14 @@ everything in it, and deleting `ashscans.ash.awslabs.github.io` would destroy ev
 this stack knows nothing about. Remove them yourself if you are certain nothing else
 uses them.
 
+If you set `VpcSubnetIds`, the delete can also leave a Hyperplane network interface in
+those subnets. CloudFormation deletes the installer's execution role right after the
+function, and the Lambda guide says "If you delete the execution role before Lambda
+deletes the Hyperplane ENI, Lambda won't be able to delete the Hyperplane ENI. You can
+manually perform the deletion."
+([Understanding Hyperplane ENIs](https://docs.aws.amazon.com/lambda/latest/dg/configuration-vpc.html#configuration-vpc-enis)).
+Check the subnets for a leftover interface after the stack is gone.
+
 ## What deploying actually costs you
 
 Building the image per deployment is the price of there being no public one, and it
