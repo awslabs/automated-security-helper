@@ -24,6 +24,17 @@ scanner's output is stored here in the form the scanner plugin hands to the scan
 (SARIF, or CycloneDX for syft), with locations pointing into `repo/`. What is under
 test is everything ASH does from that point on.
 
+### Why `repo/` has no `requirements.txt`
+
+The grype and syft outputs place requests 2.19.1 at `requirements.txt`, and no such
+file is committed. A `requirements.txt` pinning `requests==2.19.1` is a dependency
+manifest to GitHub, so the dependency-review check on every pull request reported it
+as a newly added high-severity dependency (GHSA-x84v-xcm2-53pg) and failed. Nothing
+under test reads the file: the findings come from the canned outputs, and the whole
+snapshot suite passes with or without it. Exempting the advisory in the
+dependency-review configuration was the alternative, and it was rejected because that
+exemption would cover the whole repository, not this directory.
+
 ## The single-directory scan (`repo/`, `scanner_outputs/scanners.yaml`)
 
 | Scanner | Outcome | Findings |
