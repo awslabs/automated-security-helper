@@ -311,9 +311,14 @@ def build_scan_crd() -> tuple[dict[str, Any], dict[str, Any]]:
                     "an API credential, and nothing in the scan path calls the API."
                 ),
             },
-            "resources": _resources_schema("Resources for each shard pod."),
+            "resources": _resources_schema(
+                "Resources for each shard pod. Replaces, not merges with, the default "
+                "of requests cpu 500m / memory 1Gi and limits cpu 2 / memory 4Gi."
+            ),
             "collectResources": _resources_schema(
-                "Resources for the collector pod. Defaults to spec.resources."
+                "Resources for the collector pod. Defaults to spec.resources, and "
+                "when neither is set to requests cpu 250m / memory 512Mi and limits "
+                "cpu 1 / memory 2Gi."
             ),
             "config": config_schema,
         },

@@ -223,7 +223,8 @@ spec:
                   credential, and nothing in the scan path calls the API.'
               resources:
                 type: object
-                description: Resources for each shard pod.
+                description: Resources for each shard pod. Replaces, not merges with, the default of requests
+                  cpu 500m / memory 1Gi and limits cpu 2 / memory 4Gi.
                 properties:
                   limits:
                     type: object
@@ -235,7 +236,8 @@ spec:
                     additionalProperties: *id001
               collectResources:
                 type: object
-                description: Resources for the collector pod. Defaults to spec.resources.
+                description: Resources for the collector pod. Defaults to spec.resources, and when neither
+                  is set to requests cpu 250m / memory 512Mi and limits cpu 1 / memory 2Gi.
                 properties:
                   limits:
                     type: object

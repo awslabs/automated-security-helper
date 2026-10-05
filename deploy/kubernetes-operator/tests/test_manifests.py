@@ -525,3 +525,54 @@ class TestPodServiceAccount:
             if s.get("kind") == "ServiceAccount"
         }
         assert manifests.SCAN_SERVICE_ACCOUNT not in bound
+
+
+class TestDefaultResources:
+    """A CR that sets no resources must not schedule unbounded pods.
+
+    Without a default, a shard or collector pod gets no requests (so the scheduler
+    packs it anywhere) and no limits (so one runaway scanner can take the node's
+    memory). An adopter's namespace quota that requires limits also refuses such a
+    pod outright.
+    """
+
+    @staticmethod
+    def resources(job):
+        return job["spec"]["template"]["spec"]["containers"][0]["resources"]
+
+    @pytest.mark.parametrize("build", [shard_job, collect_job], ids=["shard", "collect"])
+    def test_requests_and_limits_are_set_when_the_cr_sets_none(self, build):
+        res = self.resources(build())
+        for section in ("requests", "limits"):
+            assert set(res.get(section, {})) == {"cpu", "memory"}, res
+
+    def test_the_defaults_are_not_shared_mutable_state(self):
+        first = self.resources(shard_job())
+        first["limits"]["memory"] = "1Ki"
+        assert self.resources(shard_job())["limits"]["memory"] != "1Ki"
+
+    def test_cr_resources_replace_the_default(self):
+        mine = {"requests": {"cpu": "1", "memory": "2Gi"}}
+        assert self.resources(shard_job({"resources": mine})) == mine
+        assert self.resources(collect_job({"resources": mine})) == mine
+
+    def test_collect_resources_win_over_resources_for_the_collector(self):
+        mine = {"limits": {"memory": "3Gi"}}
+        job = collect_job({"resources": {"limits": {"memory": "9Gi"}}, "collectResources": mine})
+        assert self.resources(job) == mine
+
+    def test_the_crd_descriptions_quote_the_real_defaults(self):
+        from ash_operator.constants import DEFAULT_COLLECT_RESOURCES, DEFAULT_SHARD_RESOURCES
+        from ash_operator.generate_manifests import render_all
+
+        crd = yaml.safe_load(render_all()["crd-ashscans.yaml"])
+        props = crd["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]["spec"][
+            "properties"
+        ]
+        for key, default in (
+            ("resources", DEFAULT_SHARD_RESOURCES),
+            ("collectResources", DEFAULT_COLLECT_RESOURCES),
+        ):
+            for section in default.values():
+                for quantity in section.values():
+                    assert quantity in props[key]["description"], (key, quantity)

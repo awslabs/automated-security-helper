@@ -28,6 +28,25 @@ ASH_CLI = "ash"
 # something.
 SCAN_SERVICE_ACCOUNT = "ash-scan"
 
+# ── Pod resources when the CR sets none ──────────────────────────────────────
+# Without these a shard or collector pod has no requests, so the scheduler packs it
+# anywhere, and no limits, so one runaway scanner can take a node's memory. A CR's
+# own `resources` / `collectResources` replaces the default whole; nothing is merged
+# key by key. The shard limit is the 2 vCPU / 4 GiB the Fargate task in deploy/cdk
+# gives a full, unsharded scan, which that stack records as the smallest pairing
+# where scanners stop being OOM-killed; a shard runs a subset of the same roster.
+# These are starting points, not measurements of any particular tree. A scanner
+# killed for memory comes back as a scanner failure, and a pod killed for memory
+# fails its Job, so either way the run does not read as a clean scan.
+DEFAULT_SHARD_RESOURCES = {
+    "requests": {"cpu": "500m", "memory": "1Gi"},
+    "limits": {"cpu": "2", "memory": "4Gi"},
+}
+DEFAULT_COLLECT_RESOURCES = {
+    "requests": {"cpu": "250m", "memory": "512Mi"},
+    "limits": {"cpu": "1", "memory": "2Gi"},
+}
+
 # ── API surface ──────────────────────────────────────────────────────────────
 # Reverse of the Maven/Java coordinate the project already chose for its CDK
 # constructs (``io.github.awslabs.ash``), so the API group is not a new

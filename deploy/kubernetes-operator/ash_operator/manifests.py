@@ -28,6 +28,7 @@ the pod, and the results path, which is scoped to one run's UID.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from pathlib import Path
@@ -39,6 +40,8 @@ from ash_operator.constants import (
     CONFIG_FILENAME,
     CONFIG_MOUNT,
     CONFIG_PATH,
+    DEFAULT_COLLECT_RESOURCES,
+    DEFAULT_SHARD_RESOURCES,
     GROUP,
     LABEL_CONFIG_DIGEST,
     LABEL_MCP_NAME,
@@ -346,7 +349,9 @@ def build_shard_job(
                             "args": scan_argv,
                             "env": env,
                             "volumeMounts": _mounts(),
-                            "resources": spec.get("resources") or {},
+                            "resources": copy.deepcopy(
+                                spec.get("resources") or DEFAULT_SHARD_RESOURCES
+                            ),
                             "securityContext": _hardened_security_context(),
                         }
                     ],
@@ -459,9 +464,11 @@ def build_collect_job(
                             "args": args,
                             "env": env,
                             "volumeMounts": _mounts(),
-                            "resources": spec.get("collectResources")
-                            or spec.get("resources")
-                            or {},
+                            "resources": copy.deepcopy(
+                                spec.get("collectResources")
+                                or spec.get("resources")
+                                or DEFAULT_COLLECT_RESOURCES
+                            ),
                             "securityContext": _hardened_security_context(),
                             # How the controller learns the outcome without a
                             # token on this pod or the results volume mounted into
