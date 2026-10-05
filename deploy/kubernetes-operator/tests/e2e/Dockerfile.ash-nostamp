@@ -19,8 +19,15 @@
 # normally, the operator would report Succeeded, and the test asserting Refused would
 # fail for a reason nobody could find. Verifying the edit is what makes the negative
 # control trustworthy.
-ARG BASE=ash-e2e:local
-FROM ${BASE}
+#
+# Only the tag is a build argument. The repository is always the e2e image that
+# conftest.py builds first, and naming it here keeps the base reference tagged
+# rather than an opaque argument that could resolve to an untagged :latest.
+ARG BASE_TAG=local
+FROM ash-e2e:${BASE_TAG}
+
+# Inherits NONE from the e2e image; restated so this file says it on its own.
+HEALTHCHECK NONE
 
 USER 0
 RUN set -eu; \

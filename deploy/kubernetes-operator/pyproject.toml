@@ -72,7 +72,7 @@ ignore = [
   "S607", # ditto, partial executable paths resolved from PATH
   # The "secrets" in tests/test_auth.py are the literal string "tok" standing in for
   # a projected ServiceAccount token, and the "credentials" in the e2e fixtures are
-  # AWS's own documentation-only AKIAIOSFODNN7EXAMPLE pair -- planted so a scanner
+  # the documentation-only example key pair AWS publishes -- planted so a scanner
   # has something to find.
   "S105",
   "S106",

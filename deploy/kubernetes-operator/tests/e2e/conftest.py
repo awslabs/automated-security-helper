@@ -22,6 +22,7 @@ from tests.e2e.helpers import (
     ASH_IMAGE,
     ASH_IMAGE_NOSTAMP,
     CLUSTER_NAME,
+    IMAGE_TAG,
     NAMESPACE,
     OPERATOR_DIR,
     OPERATOR_IMAGE,
@@ -87,6 +88,9 @@ def ash_image(require_tooling) -> str:
 @pytest.fixture(scope="session")
 def ash_image_nostamp(ash_image) -> str:
     """Build the provenance negative-control image, FROM the normal one."""
+    # Dockerfile.ash-nostamp names the ash-e2e repository itself and takes only the
+    # tag, so a renamed ASH_IMAGE must fail here rather than build FROM a stale image.
+    assert ash_image == f"ash-e2e:{IMAGE_TAG}", ash_image
     run(
         [
             "docker",
@@ -94,7 +98,7 @@ def ash_image_nostamp(ash_image) -> str:
             "-t",
             ASH_IMAGE_NOSTAMP,
             "--build-arg",
-            f"BASE={ash_image}",
+            f"BASE_TAG={IMAGE_TAG}",
             "-f",
             str(E2E_DIR / "Dockerfile.ash-nostamp"),
             str(E2E_DIR),

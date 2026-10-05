@@ -38,6 +38,11 @@ missing = [k for k in ('shard-entrypoint.sh', 'collect-entrypoint.sh', 'collect.
 assert not missing, f'the installed package is missing {missing}'; \
 print('entrypoints present:', sorted(cm['data']))"
 
+# Kubernetes never reads a Docker HEALTHCHECK; the kubelet's probes are the only
+# health signal a pod has. NONE says so explicitly and also clears any check a future
+# base image might declare, which the kubelet would ignore while `docker ps` showed it.
+HEALTHCHECK NONE
+
 USER 1000
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 ENTRYPOINT ["kopf", "run", "--standalone", "-m", "ash_operator.main"]

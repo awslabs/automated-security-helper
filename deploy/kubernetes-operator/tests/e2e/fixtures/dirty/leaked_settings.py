@@ -1,9 +1,8 @@
 """Deliberately planted credentials, for detect-secrets.
 
-Not real. The access key id is ``AKIAIOSFODNN7EXAMPLE`` and the secret is
-``wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY`` -- the documentation-only pair AWS
-publishes in its own examples, which is why it is safe to commit and why
-detect-secrets still flags it.
+Not real. Both values below are the documentation-only example pair AWS
+publishes in its own examples, which is why they are safe to commit and why
+detect-secrets still flags them.
 
 This file is in the fixture so that two *different* shards each contribute a
 finding. At shardCount 3, bandit sorts to position 0 and detect-secrets to position

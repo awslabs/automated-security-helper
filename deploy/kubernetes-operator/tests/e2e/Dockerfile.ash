@@ -22,6 +22,11 @@ ENV HOME=/home/ash \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
+# Kubernetes never reads a Docker HEALTHCHECK, and this image runs `ash scan` to
+# completion in a Job rather than serving anything, so there is nothing to probe.
+# NONE says so explicitly instead of leaving it to be inferred.
+HEALTHCHECK NONE
+
 WORKDIR /src
 COPY ash-source /src
 
