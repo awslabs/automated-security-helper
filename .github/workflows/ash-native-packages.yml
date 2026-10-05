@@ -73,13 +73,15 @@ on:
       - "pyproject.toml"
       - "hatch_build.py"
       # Wheel inputs outside the package tree: the hook copies Dockerfile into the
-      # wheel, README.md is its METADATA, and LICENSE and NOTICE are its license
-      # files. packaging/assert-paths-filter.py measures this list against a built
-      # wheel.
+      # wheel, README.md is its METADATA, LICENSE and NOTICE are its license files,
+      # and hatchling leaves out every file .gitignore ignores.
+      # packaging/assert-paths-filter.py measures this list against a wheel it
+      # builds under an audit hook.
       - "Dockerfile"
       - "README.md"
       - "LICENSE"
       - "NOTICE"
+      - ".gitignore"
   # `["**"]` so a PR stacked on a nested branch name still runs, as in ash-package.yml.
   # The paths filter matches push's, so a PR that touches none of these files does not
   # start seventeen container legs. That cannot leave a required check pending: the
@@ -98,13 +100,15 @@ on:
       - "pyproject.toml"
       - "hatch_build.py"
       # Wheel inputs outside the package tree: the hook copies Dockerfile into the
-      # wheel, README.md is its METADATA, and LICENSE and NOTICE are its license
-      # files. packaging/assert-paths-filter.py measures this list against a built
-      # wheel.
+      # wheel, README.md is its METADATA, LICENSE and NOTICE are its license files,
+      # and hatchling leaves out every file .gitignore ignores.
+      # packaging/assert-paths-filter.py measures this list against a wheel it
+      # builds under an audit hook.
       - "Dockerfile"
       - "README.md"
       - "LICENSE"
       - "NOTICE"
+      - ".gitignore"
   # merge_group takes no paths filter, so a queued entry always gets a verdict.
   merge_group:
     types: [checks_requested]
@@ -155,15 +159,17 @@ jobs:
           --artifact-gate .github/scripts/assert-artifact-contents.py
 
       # A wheel input missing from the paths filters is a change that reaches the
-      # packages with every leg below skipped. The inputs are read off a built wheel.
+      # packages with every leg below skipped. The checker builds the wheel itself,
+      # in-process under an audit hook, and records every repository file the build
+      # opens. `--with hatchling` resolves the newest release, as `uv build` does for
+      # [build-system] requires, and the checker refuses to measure if the installed
+      # hatchling does not satisfy that requirement.
       - name: The paths filters cover every input to the wheel
         shell: bash
         run: |
           set -euo pipefail
-          uv run --no-project python packaging/assert-paths-filter.py --self-test
-          uv build --wheel -o "$RUNNER_TEMP/paths-wheel" >/dev/null
-          uv run --no-project python packaging/assert-paths-filter.py \
-            --wheel "$(ls "$RUNNER_TEMP"/paths-wheel/*.whl)"
+          uv run --no-project --with hatchling python packaging/assert-paths-filter.py --self-test
+          uv run --no-project --with hatchling python packaging/assert-paths-filter.py
 
       # Toolchain-free: the name check runs before either build looks for its tool.
       - name: The deb and rpm builds refuse the same names, and the docs follow them
