@@ -179,15 +179,29 @@
  * bytes per 3 and reaches the adopter as an opaque blob. `.ash/.ash.yaml` records the
  * empty population from the other side.
  *
- * WHAT THE FIVE TEMPLATES MEASURE NOW, against a 51,200-byte cap, with `main` beside
- * each for the diff a reviewer reads:
+ * THERE WAS A SIX-ROW BYTE TABLE HERE AND IT WENT STALE, five of six rows wrong against
+ * the committed files — AshAgentCore read 48,809 when it was 49,392, AshImagePipeline
+ * 61,183 when it was 65,143, and so on. Nothing asserted any of the numbers, so nothing
+ * reported the drift, and the table was the evidence for this comment's central risk
+ * argument. The corrected reading was WORSE than the stated one, which is the direction
+ * that matters: it understated the risk it existed to flag.
  *
- *                            bytes    margin        on main    margin on main
- *   AshAgentCore            48,809    under 2,391    50,934     under     266
- *   AshCodeCommitGate       46,272    under 4,928    50,714     under     486
- *   AshDistributedPipeline 154,630    over  103,430 148,394     over  97,194
- *   AshFargate              68,502    over   17,302  76,674     over  25,474
- *   AshImagePipeline        61,183    over    9,983  68,435     over  17,235
+ * So the table is gone rather than refreshed. Repeating byte counts in prose is the same
+ * hazard `README.md` already names when it says counts "change with every template change
+ * and nothing would catch it if this table went stale" and points at `wc -c` instead. The
+ * same argument applies here, and refreshing the numbers would only reset the clock.
+ *
+ * For current figures:
+ *
+ *   wc -c templates/*.template.json
+ *
+ * What is worth stating, because it is a threshold rather than a measurement: every inline
+ * template is held under the budget by the assertions below, which name the one that
+ * erodes. Which template has the tightest margin is not recorded here. This note once
+ * named AshAgentCore, and AshEksOperator then landed with less headroom and made it
+ * wrong, which is the stale-prose hazard described above. Every
+ * number in the paragraphs that follow is provenance for a change already landed and is
+ * left as written; treat them as history, not as current state.
  *
  * PER-POLICY REASONS ARE CHEAPER THAN THE ROLE-SCOPED UNION THEY REPLACED, WHICH IS THE
  * OPPOSITE OF WHAT AN EARLIER NOTE HERE PREDICTED. A union reason has to describe every
@@ -198,13 +212,19 @@
  * AshImagePipeline -1,778. Sixteen distinct IAM5 reasons now ship where five did, over the
  * same 77 entries on the same 77 policies.
  *
- * READ THE AGENTCORE MARGIN AS STILL WORTH WATCHING: 2,391 bytes, 4.7% of the cap, on a
- * stack whose suppression metadata grows with every resource added. An indented entry costs
- * 71 bytes of structure plus its reason -- about 390 at the 321-character mean across the
- * five templates, 357 for AshAgentCore's eight -- and a new suppressed resource brings its
- * own body on top of that. So the headroom is a handful of resources, not dozens. It is 9x
- * `main`'s 266 bytes, which was less than one entry, and the earlier description of the 266
- * as comfortable was wrong.
+ * READ THE AGENTCORE MARGIN AS STILL WORTH WATCHING, and note the figure quoted here was
+ * itself wrong: it said 2,391 bytes and 4.7% of the cap, where the committed file was
+ * 1,296 under the budget. An indented suppression entry costs 71 bytes of structure plus
+ * its reason -- about 390 at the 321-character mean -- so the real headroom is about three
+ * entries, not six. The headroom is a handful of resources, not dozens, and the stack's
+ * suppression metadata grows with every resource added.
+ *
+ * AshEksOperator landed inline and immediately demonstrated the failure this guard exists
+ * for: it crossed 51,200 outright, at 57,692 bytes, because prose in the Lambda's inline
+ * `ZipFile` SHIPS INSIDE THE TEMPLATE while TypeScript comments do not. Most of it was
+ * reasoning already present in the stack header, so the fix was deduplication rather than
+ * loss -- but the lesson generalizes: for any stack with an inline-code Lambda, a docstring
+ * is a template-size decision.
  *
  * AshDistributedPipeline is the one stack that GREW against `main`, by 6,236 bytes.
  * The per-service policy split trades one `DefaultPolicy` per role for one policy per
@@ -263,6 +283,22 @@ const INLINE_TEMPLATE_BODY_MAX_BYTES = 51_200;
  * still be landed and then narrowed, rather than having to be reverted. Left at 512 because
  * re-deriving it from the current mean reason length would tie a size guard to prose that
  * is expected to move.
+ *
+ * WHAT THIS RESERVE DOES NOT COVER, because the one breach that actually happened was 12x
+ * its size. AshEksOperator went 6,492 bytes over the HARD CAP in a single change, from
+ * prose inside an inline-code Lambda's `ZipFile` -- which ships in the template, unlike a
+ * TypeScript comment. A 512-byte reserve buys no land-then-narrow room against an
+ * increment like that, and no reserve size sensibly would: a docstring paragraph has no
+ * upper bound, so sizing the reserve to absorb one would mean sizing it to absorb
+ * anything.
+ *
+ * So the number is left alone and the limit is written down instead. The reserve is
+ * calibrated for the increment it was measured against -- one suppression entry -- and the
+ * budget assertion below is what catches everything else, including the ZipFile breach,
+ * which it did. Two guards with different jobs: the reserve buys a landing strip for small
+ * growth, the assertion is the wall. If a future stack adds an inline-code Lambda, treat
+ * its docstrings as a template-size decision rather than expecting this reserve to absorb
+ * them.
  */
 const INLINE_RESERVE_BYTES = 512;
 const INLINE_TEMPLATE_BUDGET_BYTES = INLINE_TEMPLATE_BODY_MAX_BYTES - INLINE_RESERVE_BYTES;
@@ -270,11 +306,18 @@ const INLINE_TEMPLATE_BUDGET_BYTES = INLINE_TEMPLATE_BODY_MAX_BYTES - INLINE_RES
 /**
  * The same page puts a template passed by S3 URL at 1 MB, which is why the
  * oversized templates have a launch path at all rather than a defect.
+ *
+ * THE TWO CEILINGS DO NOT SHARE HEADROOM, which is the part the constant names hide.
+ * 1,048,576 / 51,200 = 20.5, so the S3 path has 20.5x the room — and the budget above
+ * protects only the other one. Busting 51,200 costs scripted `--template-body` and a
+ * console paste while a quick-create link and the console's own upload flow keep
+ * working: one launch capability, not both. The page's tuning strategy names nested
+ * stacks or minification as the way back under.
  */
 const S3_TEMPLATE_BODY_MAX_BYTES = 1_048_576;
 
 /** Launchable with `--template-body`. Keep in step with README.md. */
-const INLINE_LAUNCHABLE = ['AshAgentCore', 'AshCodeCommitGate'];
+const INLINE_LAUNCHABLE = ['AshAgentCore', 'AshCodeCommitGate', 'AshEksOperator'];
 
 /** Must be uploaded and launched with `--template-url`. Keep in step with README.md. */
 const S3_URL_ONLY = ['AshDistributedPipeline', 'AshFargate', 'AshImagePipeline'];
@@ -317,10 +360,16 @@ const SUPPRESSION_ENTRIES: Record<string, number> = {
   AshDistributedPipeline: 55,
   AshFargate: 9,
   AshImagePipeline: 8,
+  // One AwsSolutions-IAM5 entry, on the installer role's DefaultPolicy, and it IS
+  // consulted -- that policy holds two real wildcards, so this is not an inert
+  // entry of the kind KNOWN_INERT_SUPPRESSIONS lists. The stack deliberately ships
+  // no CdkNagValidationFailure entry: measured against the synthesized report, no
+  // rule throws on it, so one would protect nothing.
+  AshEksOperator: 1,
 };
 
-/** 89, spelled out so the total is asserted and not merely derived from the map. */
-const SUPPRESSION_ENTRIES_TOTAL = 89;
+/** 90, spelled out so the total is asserted and not merely derived from the map. */
+const SUPPRESSION_ENTRIES_TOTAL = 90;
 
 /**
  * The entries no cdk-nag rule consults, named so the next reader can tell a known
@@ -504,7 +553,7 @@ describe('the shipped cdk-nag suppression population', () => {
     },
   );
 
-  test('the five templates ship 89 suppression entries between them', () => {
+  test('the six templates ship 90 suppression entries between them', () => {
     const total = ALL_STACKS.reduce((n, stack) => n + suppressionEntries(stack).length, 0);
     expect(total).toBe(SUPPRESSION_ENTRIES_TOTAL);
     // Non-vacuity for the map above: a typo that made every count 0 would satisfy

@@ -2861,6 +2861,155 @@ global_settings:
     - path: "ash-agent-plugins/**/.github/**/*.yml"
       rule_id: "yaml.github-actions.security.*"
       reason: "Same rationale as the root .github rule: interpolations are author-defined inputs.*/matrix.*, not attacker-controlled github.event.* context. The repo pins actions by major tag by convention (see .github/workflows)."
+    # === AshEksOperator ===
+    #
+    # Every entry below is scoped to the one template, and each finding was read in
+    # ASH's own SARIF for it before being listed. Findings with a code fix were fixed
+    # instead: reserved concurrency (CKV_AWS_115, LambdaConcurrency, CFN_NAG_W92) and
+    # an integer ServiceTimeout (W9003).
+    - rule_id: CKV_AWS_116
+      path: deploy/cdk/templates/AshEksOperator.template.json
+      reason: >-
+        The installer is a CloudFormation custom-resource responder, like the bootstrap
+        starters described in the CKV_AWS_116 entries above. Its handler catches every
+        exception and answers the response URL with FAILED, and the custom resource's
+        ServiceTimeout bounds the case where it cannot answer. An
+        asynchronous-invocation DLQ would capture an event only after the stack had
+        already failed.
+    - rule_id: CKV_AWS_111
+      path: deploy/cdk/templates/AshEksOperator.template.json
+      reason: >-
+        The write actions on "*" are ec2:CreateNetworkInterface,
+        ec2:DeleteNetworkInterface, ec2:AssignPrivateIpAddresses and
+        ec2:UnassignPrivateIpAddresses on InstallerRoleDefaultPolicy. The Lambda
+        developer guide (configuration-vpc.html, Required IAM permissions) lists them as
+        required for a VPC-attached function and says to allow them on all resources;
+        the interfaces do not exist when the policy is evaluated. The constraint is
+        InstallerEc2CodeDeny, the guide's recommended Deny keyed on
+        lambda:SourceFunctionArn, so the function's own code cannot make these calls and
+        only the Lambda service can.
+    - rule_id: CFN_NAG_W12
+      path: deploy/cdk/templates/AshEksOperator.template.json
+      reason: >-
+        One policy, InstallerRoleDefaultPolicy, whose only "*" resource is the statement
+        holding the six EC2 actions the Lambda developer guide requires on all resources
+        for VPC attachment. Same reasoning as the CKV_AWS_111 entry for this file
+        immediately above, including the code-side Deny.
+    - rule_id: CFN_NAG_W58
+      path: deploy/cdk/templates/AshEksOperator.template.json
+      reason: >-
+        The installer function writes to InstallerLogs, a log group the stack creates
+        and passes to the function; its role is granted logs:CreateLogStream and
+        logs:PutLogEvents on that group alone. cfn_nag looks for a broader grant than
+        the function needs. Same construction as the AshCodeCommitGate scan function.
+    - rule_id: F3031
+      path: deploy/cdk/templates/AshEksOperator.template.json
+      reason: >-
+        Three records, all an empty-string parameter default evaluated inside the true
+        branch of an Fn::If whose condition is false for that value. One is
+        InstallerLogs' KmsKeyId under HasKmsKey, as in the other templates. The other
+        two are on the installer function at VpcConfig.SubnetIds and
+        VpcConfig.SecurityGroupIds under HasVpcConfig; the validator reuses the KmsKeyId
+        wording for them, but the property paths in its report are the VpcConfig lists.
+        When HasVpcConfig is true the template Rule guarantees both lists are non-empty.
+    - rule_id: E1150
+      path: deploy/cdk/templates/AshEksOperator.template.json
+      reason: >-
+        VpcConfig.SecurityGroupIds evaluated with its empty default inside the true
+        branch of Fn::If HasVpcConfig. That branch is taken only when VpcSubnetIds is
+        non-empty, and the template Rule VpcSubnetsAndSecurityGroupsTogether then
+        refuses an empty VpcSecurityGroupIds before any resource is created, so the
+        empty value cannot reach Lambda.
+    - rule_id: HIPAA.Security-IAMNoInlinePolicy
+      path: deploy/cdk/templates/AshEksOperator.template.json
+      reason: >-
+        Two CDK-generated AWS::IAM::Policy resources and no role Policies array:
+        InstallerRoleDefaultPolicy, the installer's grant set, and InstallerEc2CodeDeny,
+        which grants nothing and only denies the function's own code the EC2 actions.
+        Same construction as the other five templates; see the IAMNoInlinePolicy block
+        comment above. A suppression is keyed by rule id, so each pack prefix needs its
+        own entry.
+    - rule_id: NIST.800.53.R4-IAMNoInlinePolicy
+      path: deploy/cdk/templates/AshEksOperator.template.json
+      reason: >-
+        Two CDK-generated AWS::IAM::Policy resources and no role Policies array:
+        InstallerRoleDefaultPolicy, the installer's grant set, and InstallerEc2CodeDeny,
+        which grants nothing and only denies the function's own code the EC2 actions.
+        Same construction as the other five templates; see the IAMNoInlinePolicy block
+        comment above. A suppression is keyed by rule id, so each pack prefix needs its
+        own entry.
+    - rule_id: NIST.800.53.R5-IAMNoInlinePolicy
+      path: deploy/cdk/templates/AshEksOperator.template.json
+      reason: >-
+        Two CDK-generated AWS::IAM::Policy resources and no role Policies array:
+        InstallerRoleDefaultPolicy, the installer's grant set, and InstallerEc2CodeDeny,
+        which grants nothing and only denies the function's own code the EC2 actions.
+        Same construction as the other five templates; see the IAMNoInlinePolicy block
+        comment above. A suppression is keyed by rule id, so each pack prefix needs its
+        own entry.
+    - rule_id: PCI.DSS.321-IAMNoInlinePolicy
+      path: deploy/cdk/templates/AshEksOperator.template.json
+      reason: >-
+        Two CDK-generated AWS::IAM::Policy resources and no role Policies array:
+        InstallerRoleDefaultPolicy, the installer's grant set, and InstallerEc2CodeDeny,
+        which grants nothing and only denies the function's own code the EC2 actions.
+        Same construction as the other five templates; see the IAMNoInlinePolicy block
+        comment above. A suppression is keyed by rule id, so each pack prefix needs its
+        own entry.
+    - rule_id: HIPAA.Security-LambdaDLQ
+      path: deploy/cdk/templates/AshEksOperator.template.json
+      reason: >-
+        The installer is a CloudFormation custom-resource responder, like the bootstrap
+        starters described in the CKV_AWS_116 entries above. Its handler catches every
+        exception and answers the response URL with FAILED, and the custom resource's
+        ServiceTimeout bounds the case where it cannot answer. An
+        asynchronous-invocation DLQ would capture an event only after the stack had
+        already failed.
+    - rule_id: NIST.800.53.R5-LambdaDLQ
+      path: deploy/cdk/templates/AshEksOperator.template.json
+      reason: >-
+        The installer is a CloudFormation custom-resource responder, like the bootstrap
+        starters described in the CKV_AWS_116 entries above. Its handler catches every
+        exception and answers the response URL with FAILED, and the custom resource's
+        ServiceTimeout bounds the case where it cannot answer. An
+        asynchronous-invocation DLQ would capture an event only after the stack had
+        already failed.
+    - rule_id: HIPAA.Security-LambdaInsideVPC
+      path: deploy/cdk/templates/AshEksOperator.template.json
+      reason: >-
+        The installer is VPC-attached when the adopter supplies VpcSubnetIds and
+        VpcSecurityGroupIds, which a private-only cluster endpoint needs, and not
+        otherwise. A public or mixed endpoint is reached directly, and forcing a VPC
+        would require EKS, STS and S3 endpoints or a NAT gateway for a function that
+        runs once per stack operation. The template Rule refuses a half-supplied VPC
+        config.
+    - rule_id: NIST.800.53.R4-LambdaInsideVPC
+      path: deploy/cdk/templates/AshEksOperator.template.json
+      reason: >-
+        The installer is VPC-attached when the adopter supplies VpcSubnetIds and
+        VpcSecurityGroupIds, which a private-only cluster endpoint needs, and not
+        otherwise. A public or mixed endpoint is reached directly, and forcing a VPC
+        would require EKS, STS and S3 endpoints or a NAT gateway for a function that
+        runs once per stack operation. The template Rule refuses a half-supplied VPC
+        config.
+    - rule_id: NIST.800.53.R5-LambdaInsideVPC
+      path: deploy/cdk/templates/AshEksOperator.template.json
+      reason: >-
+        The installer is VPC-attached when the adopter supplies VpcSubnetIds and
+        VpcSecurityGroupIds, which a private-only cluster endpoint needs, and not
+        otherwise. A public or mixed endpoint is reached directly, and forcing a VPC
+        would require EKS, STS and S3 endpoints or a NAT gateway for a function that
+        runs once per stack operation. The template Rule refuses a half-supplied VPC
+        config.
+    - rule_id: PCI.DSS.321-LambdaInsideVPC
+      path: deploy/cdk/templates/AshEksOperator.template.json
+      reason: >-
+        The installer is VPC-attached when the adopter supplies VpcSubnetIds and
+        VpcSecurityGroupIds, which a private-only cluster endpoint needs, and not
+        otherwise. A public or mixed endpoint is reached directly, and forcing a VPC
+        would require EKS, STS and S3 endpoints or a NAT gateway for a function that
+        runs once per stack operation. The template Rule refuses a half-supplied VPC
+        config.
   ignore_paths:
     - path: "**/.venv/**"
       reason: Virtual environment, not committed, only 3p content

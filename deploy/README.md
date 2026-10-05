@@ -30,10 +30,96 @@ than one stack with switches.
 | ECS Fargate | Scheduled and on-demand scans of one or more repositories | ECS task on Fargate | Task invocation | — |
 | Lambda CodeCommit gate | A scan on every push, with the result reported back to the repository | Lambda function | CodeCommit trigger | `CodeCommitRepositoryArn` |
 | CodePipeline distributed executor | One logical scan split across parallel shards, results merged | CodeBuild projects in a pipeline | Pipeline execution | `ShardCount` |
+| EKS operator | The ASH operator installed into an EKS cluster you already run | Pods in your cluster | An `AshScan` or `AshMcpServer` custom resource | `EksClusterName`, `OperatorImageUri`, `OperatorNamespace`, `VpcSubnetIds`, `VpcSecurityGroupIds` |
 
-Every target builds the ASH container image into your own ECR repository as part of
-deployment. None of them pull a prebuilt image, because there is no public one to
+None of these targets pulls a prebuilt ASH image, because there is no public one to
 pull. See [Trust and the container image](#trust-and-the-container-image).
+
+The first four go further and build the image into your own ECR repository as part of
+deployment. **The EKS operator target does not, and this is the one place in `deploy/`
+where the image is your job rather than the template's.** It installs an operator
+whose image it takes as a required parameter with no default, pointing at your own
+registry, and it creates no ECR repository. Build and push the operator image before
+launching that stack; a blank `OperatorImageUri` is rejected at launch rather than
+discovered later as an `ImagePullBackOff`.
+
+That target also differs in what it needs from you up front. It installs into a
+cluster it did not create, so these have to already be true and it cannot check any
+of them for you:
+
+- The cluster's **authentication mode must include the EKS API** (`API` or
+  `API_AND_CONFIG_MAP`, not `CONFIG_MAP` alone). Without it the access entry the
+  stack creates cannot be created at all.
+- The cluster's **platform version must support access entries**.
+- A **private-only API endpoint** means supplying `VpcSubnetIds` and
+  `VpcSecurityGroupIds` so the installer can reach it. Supply both or neither; the
+  template refuses one without the other before it creates anything.
+- If you do attach it to a VPC, it needs egress to **three** services, not two: EKS,
+  STS, and **S3**. S3 is the one that gets missed and it fails worst — CloudFormation's
+  response URL is a presigned S3 URL, so an installer that can reach EKS and STS but
+  not S3 applies every manifest successfully and then cannot report that it did. The
+  stack sits in `CREATE_IN_PROGRESS` until it times out with the operator already
+  installed and no error raised anywhere. Either a NAT gateway, or interface endpoints
+  for EKS and STS plus a `com.amazonaws.<region>.s3` endpoint.
+- The **EKS Pod Identity agent** must be installed for the operator's AWS identity to
+  resolve. The stack does not install it, but it does report what it found in the
+  `PodIdentityAgentStatus` output — `ABSENT` there means the operator will get no AWS
+  credentials no matter what you attach to `OperatorRoleArn`.
+- **A private registry needs a pull path, and nothing here creates one.** This is the
+  likely case, because `OperatorImageUri` points at your own registry and that is
+  usually private ECR — so the intended configuration is the one that needs this. The
+  **kubelet** pulls the image, using the node role or an `imagePullSecret`, *before any
+  pod identity exists*; the Pod Identity association this stack creates governs the
+  container's own AWS calls and does nothing for image pull. Give the node role ECR
+  pull permission, or attach an `imagePullSecret` to the ServiceAccounts. The operator
+  sets `imagePullSecrets` nowhere, and neither does this stack.
+
+  This bites twice. The operator's scan Jobs run under the ServiceAccount named by the
+  custom resource's `scanServiceAccountName` field, which **defaults to `default`** if
+  you omit it — and `default` has neither the RBAC nor any pull secret. So set that
+  field to `ash-scan` (the account this stack creates) rather than leaving it unset.
+
+`OperatorRoleArn` has **no policies attached, and the default configuration needs
+none.** Nothing ASH runs by default calls an AWS API: every boto3 user is confined to
+one plugin directory that nothing else references, and the package declares no
+`entry_points`, so there is no auto-discovery path either.
+
+Two things to know before you opt in to the AWS reporters, because the opt-in is
+coarser and quieter than it looks:
+
+- **Opting in activates four reporters, not one.** Adding `ash_aws_plugins` to a scan's
+  `spec.config.ash_plugin_modules` turns on S3, Bedrock summary, CloudWatch Logs **and**
+  Security Hub — all four default to enabled. Either attach permissions covering all
+  four, or set `enabled: false` on the three you did not want.
+- **A missing permission does not fail the scan.** ASH deliberately does not fail a whole
+  scan because one output format could not be written; it logs an error and carries on.
+  So an opt-in without the matching IAM produces error lines in the pod log, a pod that
+  exits 0, and a scan this operator marks `Complete` — with the S3 copy never made.
+  Check the operator's logs, not the scan phase, if a report does not arrive.
+
+  This affects only delivery to AWS services. The operator's own result collection reads
+  the shared volume and does not go through S3, so scan results themselves are unaffected.
+
+The stack header in `cdk/lib/ash-eks-operator-stack.ts` says what each unmet
+precondition looks like when it fails.
+
+**Deleting the stack does not remove everything it created, on purpose.** It removes
+the Deployment — so the operator stops — along with the ServiceAccounts, Role and
+RoleBinding. It deliberately leaves the namespace, both CustomResourceDefinitions, the
+ClusterRole and the ClusterRoleBinding in place, because all of those are cluster-scoped
+and this stack may not be their only owner: deleting a namespace cascade-deletes
+everything in it, and deleting `ashscans.ash.awslabs.github.io` would destroy every
+`AshScan` in every namespace of the cluster, including any belonging to an installation
+this stack knows nothing about. Remove them yourself if you are certain nothing else
+uses them.
+
+If you set `VpcSubnetIds`, the delete can also leave a Hyperplane network interface in
+those subnets. CloudFormation deletes the installer's execution role right after the
+function, and the Lambda guide says "If you delete the execution role before Lambda
+deletes the Hyperplane ENI, Lambda won't be able to delete the Hyperplane ENI. You can
+manually perform the deletion."
+([Understanding Hyperplane ENIs](https://docs.aws.amazon.com/lambda/latest/dg/configuration-vpc.html#configuration-vpc-enis)).
+Check the subnets for a leftover interface after the stack is gone.
 
 ## What deploying actually costs you
 
@@ -58,10 +144,16 @@ has consequences worth knowing before the first `create-stack` rather than after
 `cdk/` holds the CDK apps and the synthesized templates in `cdk/templates/`. You can
 launch any of them straight from the CloudFormation console without running `cdk` at
 all — the console uploads the template for you, so template size never comes up.
-`terraform/` mirrors the same targets with the same parameter names.
+`terraform/` mirrors the same targets with the same parameter names — with one
+exception: there is no Terraform module for the EKS operator target yet. `deploy/cdk`
+is the only implementation of it today, so nothing under `terraform/` reads
+`EksClusterName` or `OperatorImageUri`. `VpcSecurityGroupIds`, added with that target,
+joins the shared parameter surface in `cdk/lib/ash-config.ts` and still needs a
+Terraform counterpart when that module lands.
 
 Scripting the launch is where size does come up. CloudFormation caps an inline
-`--template-body` at 51,200 bytes. `AshAgentCore` and `AshCodeCommitGate` fit;
+`--template-body` at 51,200 bytes. `AshAgentCore`, `AshCodeCommitGate` and
+`AshEksOperator` fit;
 `AshImagePipeline`, `AshFargate` and `AshDistributedPipeline` do not, and have to be
 uploaded to S3 and launched with `--template-url` instead, where the cap is 1 MB.
 `cdk/README.md` has the sizes and both commands. `AshDistributedPipeline` is roughly

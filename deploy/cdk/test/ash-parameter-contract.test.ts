@@ -13,6 +13,7 @@ import { AshAgentCoreStack } from '../lib/ash-agentcore-stack';
 import { AshCodeCommitGateStack } from '../lib/ash-codecommit-gate-stack';
 import { ASH_PARAMETER_NAMES, toAgentCoreName } from '../lib/ash-config';
 import { AshDistributedPipelineStack } from '../lib/ash-distributed-pipeline-stack';
+import { AshEksOperatorStack } from '../lib/ash-eks-operator-stack';
 import { AshFargateStack } from '../lib/ash-fargate-stack';
 import { AshImagePipelineStack } from '../lib/ash-image-pipeline-stack';
 
@@ -24,6 +25,7 @@ const STACKS: Record<string, StackFactory> = {
   AshFargate: (app, id) => new AshFargateStack(app, id),
   AshCodeCommitGate: (app, id) => new AshCodeCommitGateStack(app, id),
   AshDistributedPipeline: (app, id) => new AshDistributedPipelineStack(app, id),
+  AshEksOperator: (app, id) => new AshEksOperatorStack(app, id),
 };
 
 function templates(): Record<string, Template> {
@@ -83,9 +85,26 @@ describe('parameter names are the contract', () => {
         'RebuildSchedule',
         'ShardCount',
         'VpcSubnetIds',
+        // Added with AshEksOperator, which is the first target to attach a Lambda
+        // to a VPC and therefore the first to need a security group alongside the
+        // subnets. Like every name in this list it is part of the surface a
+        // Terraform mirror of that target would have to match, so it still needs
+        // adding under deploy/terraform/ when that mirror lands.
+        'VpcSecurityGroupIds',
       ].sort(),
     );
   });
+
+  /**
+   * The one stack that has taken `VpcSubnetIds` off the reserved list.
+   *
+   * `AshEksOperator` attaches its installer function to a VPC so it can reach a
+   * cluster whose API endpoint is private-only, which is exactly the "until the
+   * resources that consume them land" condition the note below describes. The name
+   * going live for one stack does not un-reserve it for the others, so this is a
+   * single-stack exception rather than a relaxation of the assertion.
+   */
+  const VPC_SUBNETS_LIVE_IN = new Set(['AshEksOperator']);
 
   test('the reserved names are reserved, not quietly declared', () => {
     // The other half of the note above, as an assertion rather than a promise. If
@@ -112,7 +131,7 @@ describe('parameter names are the contract', () => {
         kmsKeyArn: declared.includes(ASH_PARAMETER_NAMES.kmsKeyArn),
       }).toEqual({
         stack: id,
-        vpcSubnetIds: false,
+        vpcSubnetIds: VPC_SUBNETS_LIVE_IN.has(id),
         certificateArn: false,
         kmsKeyArn: true,
       });
@@ -174,16 +193,44 @@ describe('parameter names are the contract', () => {
     expect(statements).toBeGreaterThan(0);
   });
 
+  test('the live-reserved-name exception names a stack that exists', () => {
+    // Without this the exception set could outlive the stack that earned it: if
+    // AshEksOperator were removed from STACKS the loop above would stop consulting
+    // the set entirely and the stale entry would never be reported.
+    for (const id of VPC_SUBNETS_LIVE_IN) {
+      expect(Object.keys(ALL)).toContain(id);
+    }
+  });
+
   test('every declared parameter is one of the canonical names or a documented extra', () => {
-    // The gate stack adds three of its own. Anything beyond this list is either a
-    // typo or an undocumented addition the Terraform mirror will not have.
-    const allowedExtras = new Set(['ApprovalGate', 'ChangedFilesOnly', 'MinSeverity']);
+    /*
+     * Two stacks add names of their own, and each extra is recorded WITH ITS OWNER
+     * rather than in a flat allowlist. A flat set would let any stack declare any
+     * extra -- the previous form asserted `id === 'AshCodeCommitGate'` for every
+     * non-canonical name, which was the same property while only one stack had
+     * extras and would have silently become wrong the moment a second did.
+     *
+     * Anything absent from this map is either a typo or an undocumented addition.
+     */
+    const extraOwners: Record<string, string> = {
+      ApprovalGate: 'AshCodeCommitGate',
+      ChangedFilesOnly: 'AshCodeCommitGate',
+      MinSeverity: 'AshCodeCommitGate',
+      // AshEksOperator's three. None is a shared-shape name: the cluster and the
+      // image identify a target that exists only for this stack, and the namespace
+      // is a Kubernetes concept the other five have no use for. VpcSubnetIds and
+      // VpcSecurityGroupIds are NOT here -- both are canonical.
+      EksClusterName: 'AshEksOperator',
+      OperatorImageUri: 'AshEksOperator',
+      OperatorNamespace: 'AshEksOperator',
+    };
     const canonical = new Set<string>(Object.values(ASH_PARAMETER_NAMES));
     for (const [id, template] of Object.entries(ALL)) {
       for (const name of Object.keys(template.toJSON().Parameters ?? {})) {
-        expect(canonical.has(name) || allowedExtras.has(name)).toBe(true);
+        expect(canonical.has(name) || name in extraOwners).toBe(true);
         if (!canonical.has(name)) {
-          expect(id).toBe('AshCodeCommitGate');
+          // Carries both names so a failure says which stack declared what.
+          expect({ name, declaredBy: id }).toEqual({ name, declaredBy: extraOwners[name] });
         }
       }
     }
@@ -264,13 +311,50 @@ describe('every template stays portable and asset-free', () => {
     expect(json.Resources?.CDKMetadata).toBeUndefined();
   });
 
-  test.each(Object.keys(STACKS))('%s builds ASH rather than pulling a prebuilt image', (id) => {
-    // ASH publishes no public image. A reference to one would mean this template
-    // could never work.
+  /*
+   * The image invariant has two halves, and until AshEksOperator landed one test
+   * could carry both because every stack satisfied them the same way.
+   *
+   * THE HALF THAT IS UNIVERSAL: no template may reference a prebuilt public ASH
+   * image. That follows from the trust position in
+   * docs/content/docs/building-your-own-image.md and holds for every stack.
+   *
+   * THE HALF THAT IS NOT: "therefore the stack builds ASH itself, into an ECR
+   * repository it creates". That is the mechanism the five workload stacks use
+   * because each one RUNS ASH and needs an image to exist before its workload
+   * starts. AshEksOperator runs nothing -- it installs an operator into a cluster
+   * and the operator's image is the ADOPTER'S, built by them, in their registry.
+   * There is no image for it to build and no repository for it to create.
+   *
+   * Exempting it from the second half without replacing it would leave the stack
+   * with the weaker guarantee of the two, so it gets its own assertion instead: the
+   * image must arrive as a parameter with NO Default. That is what makes a silent
+   * substitution impossible -- a defaulted parameter is precisely how a public
+   * image could creep back in, and CloudFormation refuses to create the stack at
+   * all when a defaultless parameter is left blank.
+   */
+  const BUILDS_ASH_IMAGE = Object.keys(STACKS).filter((id) => id !== 'AshEksOperator');
+
+  test.each(Object.keys(STACKS))('%s references no prebuilt public ASH image', (id) => {
+    expect(JSON.stringify(ALL[id].toJSON())).not.toContain('public.ecr.aws/aws-labs');
+  });
+
+  test.each(BUILDS_ASH_IMAGE)('%s builds ASH into a repository it creates', (id) => {
     const rendered = JSON.stringify(ALL[id].toJSON());
-    expect(rendered).not.toContain('public.ecr.aws/aws-labs');
     expect(rendered).toContain('automated-security-helper.git');
     expect(Object.keys(ALL[id].findResources('AWS::ECR::Repository')).length).toBeGreaterThan(0);
+  });
+
+  test('the exempt stack is exempt because it takes the image, not because it defaults one', () => {
+    // Non-vacuity for the filter above: if AshEksOperator ever stopped declaring
+    // the parameter, the exemption would silently become a hole rather than a
+    // documented exception.
+    const image = ALL.AshEksOperator.toJSON().Parameters?.OperatorImageUri;
+    expect(image).toBeDefined();
+    expect(image).not.toHaveProperty('Default');
+    expect(image.MinLength).toBe(1);
+    expect(BUILDS_ASH_IMAGE).not.toContain('AshEksOperator');
+    expect(BUILDS_ASH_IMAGE).toHaveLength(Object.keys(STACKS).length - 1);
   });
 });
 
