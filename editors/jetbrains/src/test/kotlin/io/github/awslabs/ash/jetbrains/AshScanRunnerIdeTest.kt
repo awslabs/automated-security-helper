@@ -474,7 +474,7 @@ class AshScanRunnerIdeTest : BasePlatformTestCase() {
 
     fun testAScanThatOutlivesItsDeadlineIsAFailure() {
         val (source, output) = dirs()
-        val script = rawStub("exec sleep 20")
+        val script = rawStub("sleep 20; exit 0")
         var outcome: AshScanRunner.Outcome? = null
         val worker = thread { outcome = AshScanRunner.run(script.toString(), source, output, timeoutMillis = 3_000) }
         val stubs = StubProcesses.awaitDescendants("sleep")
@@ -613,7 +613,7 @@ class AshScanRunnerIdeTest : BasePlatformTestCase() {
         // POSIX and 1 on Windows. None of those is ASH's verdict, so none may be reported as one.
         val source = Files.createDirectories(workdir.resolve("project"))
         val started = workdir.resolve("started")
-        val script = rawStub("touch '$started'; exec sleep 300")
+        val script = rawStub("touch '$started'; sleep 300; exit 0")
         val indicator = EmptyProgressIndicator()
         var messages: List<AshScanController.Message>? = null
 
@@ -638,7 +638,7 @@ class AshScanRunnerIdeTest : BasePlatformTestCase() {
         // Cancel for all of it and then report the executable as not ASH, which it is.
         val (source, output) = dirs()
         val started = workdir.resolve("started")
-        val script = rawStub("exit 0", versionBody = "touch '$started'; exec sleep 300")
+        val script = rawStub("exit 0", versionBody = "touch '$started'; sleep 300")
         val indicator = EmptyProgressIndicator()
         var outcome: AshScanRunner.Outcome? = null
 
