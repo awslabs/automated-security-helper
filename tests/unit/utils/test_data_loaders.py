@@ -442,7 +442,7 @@ class TypedDataLoader(Generic[T]):
             ValueError: If the file format is not supported
         """
         file_path = Path(file_path)
-        if file_path.suffix.lower() in (".json",):
+        if file_path.suffix.lower() == ".json":
             data = TestDataLoader.load_json(file_path)
         elif file_path.suffix.lower() in (".yaml", ".yml"):
             data = TestDataLoader.load_yaml(file_path)
@@ -476,7 +476,7 @@ class TypedDataLoader(Generic[T]):
             ValueError: If the file format is not supported or the file does not contain a list
         """
         file_path = Path(file_path)
-        if file_path.suffix.lower() in (".json",):
+        if file_path.suffix.lower() == ".json":
             data = TestDataLoader.load_json(file_path)
         elif file_path.suffix.lower() in (".yaml", ".yml"):
             data = TestDataLoader.load_yaml(file_path)

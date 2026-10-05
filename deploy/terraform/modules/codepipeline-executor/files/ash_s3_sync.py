@@ -58,7 +58,9 @@ def download(bucket: str, prefix: str, local_dir: str) -> int:
     paginator = client.get_paginator("list_objects_v2")
     count = 0
 
-    for page in paginator.paginate(Bucket=bucket, Prefix=f"{prefix}/" if prefix else ""):
+    for page in paginator.paginate(
+        Bucket=bucket, Prefix=f"{prefix}/" if prefix else ""
+    ):
         for obj in page.get("Contents", []):
             key = obj["Key"]
             if key.endswith("/"):

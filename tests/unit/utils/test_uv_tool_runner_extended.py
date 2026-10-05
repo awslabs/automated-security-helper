@@ -59,9 +59,7 @@ class TestRunTool:
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[], returncode=0, stdout="", stderr=""
             )
-            runner.run_tool(
-                "bandit", args=[], package_extras=["sarif", "toml"]
-            )
+            runner.run_tool("bandit", args=[], package_extras=["sarif", "toml"])
             cmd = mock_run.call_args[0][0]
             assert "--from" in cmd
             # Should contain bandit[sarif,toml]
@@ -73,9 +71,7 @@ class TestRunTool:
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[], returncode=0, stdout="", stderr=""
             )
-            runner.run_tool(
-                "bandit", args=[], version_constraint=">=1.7.0"
-            )
+            runner.run_tool("bandit", args=[], version_constraint=">=1.7.0")
             cmd = mock_run.call_args[0][0]
             assert "--from" in cmd
             from_idx = cmd.index("--from")
@@ -108,9 +104,12 @@ class TestRunTool:
                 runner.run_tool("bandit", check=True)
 
     def test_offline_mode_adds_flag(self, runner):
-        with patch("subprocess.run") as mock_run, patch(
-            "automated_security_helper.core.constants.is_offline_mode",
-            return_value=True,
+        with (
+            patch("subprocess.run") as mock_run,
+            patch(
+                "automated_security_helper.core.constants.is_offline_mode",
+                return_value=True,
+            ),
         ):
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[], returncode=0, stdout="", stderr=""
@@ -241,9 +240,7 @@ class TestGetCacheInfo:
 
     def test_cache_not_available(self, runner):
         with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=1, stdout="", stderr="error"
-            )
+            mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="error")
             info = runner.get_cache_info()
             assert info["cache_available"] is False
 
@@ -295,5 +292,11 @@ class TestResetUvToolRunner:
         runner1 = get_uv_tool_runner()
         reset_uv_tool_runner()
         runner2 = get_uv_tool_runner()
-        # After reset, should still be a valid UVToolRunner but potentially different instance
+        # Identity, not just type. reset_uv_tool_runner() rebinds the module
+        # global to `UVToolRunner()` unconditionally, so a new instance is the
+        # contract rather than a possibility -- the earlier "potentially
+        # different instance" wording undersold it. Asserting only isinstance
+        # here passed even if reset_uv_tool_runner() did nothing at all, which
+        # is the one thing this test exists to rule out.
+        assert runner2 is not runner1
         assert isinstance(runner2, UVToolRunner)

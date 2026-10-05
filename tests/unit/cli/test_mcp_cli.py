@@ -30,19 +30,27 @@ from automated_security_helper.cli.mcp import (
 
 class TestValidateLogOptions:
     def test_debug_flag_overrides_everything(self):
-        result = validate_log_options(verbose=True, debug=True, log_level=AshLogLevel.ERROR)
+        result = validate_log_options(
+            verbose=True, debug=True, log_level=AshLogLevel.ERROR
+        )
         assert result == AshLogLevel.DEBUG
 
     def test_verbose_flag_when_debug_false(self):
-        result = validate_log_options(verbose=True, debug=False, log_level=AshLogLevel.ERROR)
+        result = validate_log_options(
+            verbose=True, debug=False, log_level=AshLogLevel.ERROR
+        )
         assert result == AshLogLevel.VERBOSE
 
     def test_returns_explicit_log_level_when_no_flags(self):
-        result = validate_log_options(verbose=False, debug=False, log_level=AshLogLevel.TRACE)
+        result = validate_log_options(
+            verbose=False, debug=False, log_level=AshLogLevel.TRACE
+        )
         assert result == AshLogLevel.TRACE
 
     def test_default_info_level(self):
-        result = validate_log_options(verbose=False, debug=False, log_level=AshLogLevel.INFO)
+        result = validate_log_options(
+            verbose=False, debug=False, log_level=AshLogLevel.INFO
+        )
         assert result == AshLogLevel.INFO
 
 
@@ -122,26 +130,35 @@ class TestMcpCommand:
         result = mcp_command(typer_ctx)
         assert result is None
 
-    @patch("automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=False)
+    @patch(
+        "automated_security_helper.cli.mcp.validate_mcp_dependencies",
+        return_value=False,
+    )
     def test_missing_deps_exits_with_code_1(self, _mock_deps, typer_ctx):
         with pytest.raises(typer.Exit) as exc_info:
             mcp_command(typer_ctx)
         assert exc_info.value.exit_code == 1
 
-    @patch("automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True)
+    @patch(
+        "automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True
+    )
     @patch("automated_security_helper.cli.mcp_server.run_mcp_server")
     def test_successful_server_start(self, mock_run, _mock_deps, typer_ctx):
         mcp_command(typer_ctx, quiet=True)
         mock_run.assert_called_once()
 
-    @patch("automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True)
+    @patch(
+        "automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True
+    )
     @patch("automated_security_helper.cli.mcp_server.run_mcp_server")
     def test_not_quiet_prints_startup_message(self, mock_run, _mock_deps, typer_ctx):
         # Should not raise; exercises the print branch when quiet=False
         mcp_command(typer_ctx, quiet=False)
         mock_run.assert_called_once()
 
-    @patch("automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True)
+    @patch(
+        "automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True
+    )
     @patch(
         "automated_security_helper.cli.mcp_server.run_mcp_server",
         side_effect=KeyboardInterrupt,
@@ -151,7 +168,9 @@ class TestMcpCommand:
             mcp_command(typer_ctx, quiet=True)
         assert exc_info.value.exit_code == 0
 
-    @patch("automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True)
+    @patch(
+        "automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True
+    )
     @patch(
         "automated_security_helper.cli.mcp_server.run_mcp_server",
         side_effect=KeyboardInterrupt,
@@ -161,7 +180,9 @@ class TestMcpCommand:
             mcp_command(typer_ctx, quiet=False)
         assert exc_info.value.exit_code == 0
 
-    @patch("automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True)
+    @patch(
+        "automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True
+    )
     @patch(
         "automated_security_helper.cli.mcp_server.run_mcp_server",
         side_effect=ScannerError("scanner broke"),
@@ -171,7 +192,9 @@ class TestMcpCommand:
             mcp_command(typer_ctx, quiet=True)
         assert exc_info.value.exit_code == 2
 
-    @patch("automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True)
+    @patch(
+        "automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True
+    )
     @patch(
         "automated_security_helper.cli.mcp_server.run_mcp_server",
         side_effect=ScannerError("scanner broke"),
@@ -181,7 +204,9 @@ class TestMcpCommand:
             mcp_command(typer_ctx, quiet=False)
         assert exc_info.value.exit_code == 2
 
-    @patch("automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True)
+    @patch(
+        "automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True
+    )
     @patch(
         "automated_security_helper.cli.mcp_server.run_mcp_server",
         side_effect=ASHValidationError("bad config"),
@@ -191,7 +216,9 @@ class TestMcpCommand:
             mcp_command(typer_ctx, quiet=True)
         assert exc_info.value.exit_code == 3
 
-    @patch("automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True)
+    @patch(
+        "automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True
+    )
     @patch(
         "automated_security_helper.cli.mcp_server.run_mcp_server",
         side_effect=ASHValidationError("bad config"),
@@ -201,7 +228,9 @@ class TestMcpCommand:
             mcp_command(typer_ctx, quiet=False)
         assert exc_info.value.exit_code == 3
 
-    @patch("automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True)
+    @patch(
+        "automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True
+    )
     @patch(
         "automated_security_helper.cli.mcp_server.run_mcp_server",
         side_effect=RuntimeError("unexpected"),
@@ -211,7 +240,9 @@ class TestMcpCommand:
             mcp_command(typer_ctx, quiet=True)
         assert exc_info.value.exit_code == 1
 
-    @patch("automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True)
+    @patch(
+        "automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True
+    )
     @patch(
         "automated_security_helper.cli.mcp_server.run_mcp_server",
         side_effect=RuntimeError("unexpected"),
@@ -221,7 +252,9 @@ class TestMcpCommand:
             mcp_command(typer_ctx, quiet=False)
         assert exc_info.value.exit_code == 1
 
-    @patch("automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True)
+    @patch(
+        "automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True
+    )
     @patch("automated_security_helper.cli.mcp_server.run_mcp_server")
     def test_quiet_with_verbose_raises_exit_3(self, _mock_run, _mock_deps, typer_ctx):
         """Options validation failure (quiet + verbose) raises Exit(3)."""
@@ -229,14 +262,18 @@ class TestMcpCommand:
             mcp_command(typer_ctx, verbose=True, quiet=True)
         assert exc_info.value.exit_code == 3
 
-    @patch("automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True)
+    @patch(
+        "automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True
+    )
     @patch("automated_security_helper.cli.mcp_server.run_mcp_server")
     def test_debug_sets_log_level(self, mock_run, _mock_deps, typer_ctx):
         """Debug flag is passed through log level resolution."""
         mcp_command(typer_ctx, debug=True, quiet=False)
         mock_run.assert_called_once()
 
-    @patch("automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True)
+    @patch(
+        "automated_security_helper.cli.mcp.validate_mcp_dependencies", return_value=True
+    )
     @patch("automated_security_helper.cli.mcp_server.run_mcp_server")
     def test_verbose_sets_log_level(self, mock_run, _mock_deps, typer_ctx):
         """Verbose flag is passed through log level resolution."""

@@ -66,6 +66,31 @@ class ConverterPluginBase(PluginBase, Generic[T]):
         Defaults to returning True as most converter plugins are entirely Python based."""
         return True
 
+    def candidate_input_count(self) -> int | None:
+        """How many files this converter WOULD convert, or None if it cannot say.
+
+        Answered WITHOUT the converter's tool, which is the whole point. A converter
+        whose tool is unavailable is dropped by ``filter_enabled_plugins`` before it can
+        run, so by the time anything asks "did conversion lose coverage?" the converter
+        has never looked at the tree. That question has two very different answers --
+        "there were notebooks and none were converted" is lost coverage, "there were no
+        notebooks at all" is nothing -- and without this they were indistinguishable.
+
+        WHY THE DEFAULT IS None AND NOT 0
+        ---------------------------------
+        ``None`` means "this converter does not report a count", and the completeness
+        gate treats that as strictly as it did before: an unavailable converter with no
+        count still reports incomplete conversion. Defaulting to 0 would silently exempt
+        every converter that has not implemented this, turning a gate into a no-op for
+        all of them at once -- the opposite of the intended direction. Each converter
+        opts in by overriding, and until it does nothing about its behaviour changes.
+
+        Counting rather than returning a bool, so a caller can report the number. The
+        count is of CANDIDATES, not of conversions: it says what the converter was asked
+        to do, which is what makes it the right denominator for a coverage claim.
+        """
+        return None
+
     @abstractmethod
     def convert(self, target: Path | str) -> List[Path]:
         """Execute the converter on the target prior to scans.
@@ -73,4 +98,3 @@ class ConverterPluginBase(PluginBase, Generic[T]):
         Returns the list of Path objects emitted by the `convert()` operation that
         correspond to scannable files emitted to the work_dir.
         """
-        pass

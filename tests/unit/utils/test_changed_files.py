@@ -3,14 +3,18 @@
 
 """Tests for get_changed_files() and _filter_results_to_changed_files()."""
 
+import logging
 import subprocess  # nosec B404
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
 
+
 from automated_security_helper.utils.get_scan_set import get_changed_files
-from automated_security_helper.interactions.run_ash_scan import _filter_results_to_changed_files
+from automated_security_helper.interactions.run_ash_scan import (
+    _filter_results_to_changed_files,
+)
 from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.schemas.sarif_schema_model import (
     ArtifactLocation,
@@ -33,7 +37,10 @@ class TestGetChangedFiles:
     def test_returns_paths_on_success(self):
         fake_output = "src/app.py\nREADME.md\nlib/utils.js\n"
         mock_result = MagicMock(returncode=0, stdout=fake_output)
-        with patch("automated_security_helper.utils.get_scan_set.subprocess.run", return_value=mock_result) as mock_run:
+        with patch(
+            "automated_security_helper.utils.get_scan_set.subprocess.run",
+            return_value=mock_result,
+        ) as mock_run:
             result = get_changed_files("origin/main")
 
         mock_run.assert_called_once_with(
@@ -47,7 +54,10 @@ class TestGetChangedFiles:
 
     def test_returns_empty_list_when_no_changes(self):
         mock_result = MagicMock(returncode=0, stdout="\n")
-        with patch("automated_security_helper.utils.get_scan_set.subprocess.run", return_value=mock_result):
+        with patch(
+            "automated_security_helper.utils.get_scan_set.subprocess.run",
+            return_value=mock_result,
+        ):
             result = get_changed_files()
 
         assert result == []
@@ -72,14 +82,20 @@ class TestGetChangedFiles:
 
     def test_returns_none_on_nonzero_exit(self):
         mock_result = MagicMock(returncode=128, stdout="", stderr="fatal: bad ref")
-        with patch("automated_security_helper.utils.get_scan_set.subprocess.run", return_value=mock_result):
+        with patch(
+            "automated_security_helper.utils.get_scan_set.subprocess.run",
+            return_value=mock_result,
+        ):
             result = get_changed_files("nonexistent-branch")
 
         assert result is None
 
     def test_custom_base_ref(self):
         mock_result = MagicMock(returncode=0, stdout="file.txt\n")
-        with patch("automated_security_helper.utils.get_scan_set.subprocess.run", return_value=mock_result) as mock_run:
+        with patch(
+            "automated_security_helper.utils.get_scan_set.subprocess.run",
+            return_value=mock_result,
+        ) as mock_run:
             result = get_changed_files("origin/develop")
 
         mock_run.assert_called_once_with(
@@ -94,7 +110,10 @@ class TestGetChangedFiles:
     def test_strips_blank_lines(self):
         fake_output = "\n  a.py  \n\nb.py\n\n"
         mock_result = MagicMock(returncode=0, stdout=fake_output)
-        with patch("automated_security_helper.utils.get_scan_set.subprocess.run", return_value=mock_result):
+        with patch(
+            "automated_security_helper.utils.get_scan_set.subprocess.run",
+            return_value=mock_result,
+        ):
             result = get_changed_files()
 
         assert result == [Path("a.py"), Path("b.py")]
@@ -133,6 +152,54 @@ def _make_results_with_sarif(result_list: list[Result]) -> AshAggregatedResults:
     return results
 
 
+@pytest.fixture
+def ash_warnings(caplog):
+    """Read back ASH's own WARNING records, which plain ``caplog`` cannot see.
+
+    Two independent reasons, both documented in ``tests/conftest.py``:
+
+    * ``utils.log`` sets ``ASH_LOGGER.propagate = False``, so a record on it never
+      reaches the root handler ``caplog`` installs. Its handlers have to be swapped
+      for the duration.
+    * Any ``logging.config.dictConfig`` whose payload leaves
+      ``disable_existing_loggers`` at its default -- some libraries do this at
+      import time -- sets ``disabled`` on every logger not named in the payload.
+      The autouse fixture in ``tests/conftest.py`` snapshots and restores that for
+      the ``ash`` logger, so re-enabling here is belt and braces rather than the
+      load-bearing part; a disabled logger drops records inside ``Logger.handle``
+      and the assertion then reads as the code under test never having logged.
+
+    Returns a callable rather than the records, so the list is read after the call
+    under test instead of being captured before it.
+    """
+    from automated_security_helper.utils.log import ASH_LOGGER
+
+    saved_handlers = ASH_LOGGER.handlers
+    saved_propagate = ASH_LOGGER.propagate
+    saved_disabled = ASH_LOGGER.disabled
+    handlers = [
+        handler
+        for handler in saved_handlers
+        if isinstance(handler, type(caplog.handler))
+    ]
+    if caplog.handler not in handlers:
+        handlers.append(caplog.handler)
+    ASH_LOGGER.handlers = handlers
+    ASH_LOGGER.propagate = False
+    ASH_LOGGER.disabled = False
+    caplog.set_level(logging.WARNING, logger=ASH_LOGGER.name)
+    try:
+        yield lambda: [
+            record.getMessage()
+            for record in caplog.records
+            if record.levelno >= logging.WARNING
+        ]
+    finally:
+        ASH_LOGGER.handlers = saved_handlers
+        ASH_LOGGER.propagate = saved_propagate
+        ASH_LOGGER.disabled = saved_disabled
+
+
 class TestFilterResultsToChangedFiles:
     """Unit tests for _filter_results_to_changed_files."""
 
@@ -141,10 +208,12 @@ class TestFilterResultsToChangedFiles:
         source_dir.mkdir()
         changed = {(source_dir / "src" / "app.py").resolve()}
 
-        results = _make_results_with_sarif([
-            _make_result("src/app.py"),
-            _make_result("src/other.py"),
-        ])
+        results = _make_results_with_sarif(
+            [
+                _make_result("src/app.py"),
+                _make_result("src/other.py"),
+            ]
+        )
 
         filtered = _filter_results_to_changed_files(results, changed, source_dir)
         run_results = filtered.sarif.runs[0].results
@@ -158,9 +227,11 @@ class TestFilterResultsToChangedFiles:
         changed = {(source_dir / "lib" / "helper.js").resolve()}
 
         # Scanners sometimes emit file://relative/path (non-standard but real)
-        results = _make_results_with_sarif([
-            _make_result("file://lib/helper.js"),
-        ])
+        results = _make_results_with_sarif(
+            [
+                _make_result("file://lib/helper.js"),
+            ]
+        )
 
         filtered = _filter_results_to_changed_files(results, changed, source_dir)
         assert len(filtered.sarif.runs[0].results) == 1
@@ -184,13 +255,68 @@ class TestFilterResultsToChangedFiles:
         source_dir = tmp_path / "repo"
         source_dir.mkdir()
 
-        results = _make_results_with_sarif([
-            _make_result("src/app.py"),
-            _make_result("src/other.py"),
-        ])
+        results = _make_results_with_sarif(
+            [
+                _make_result("src/app.py"),
+                _make_result("src/other.py"),
+            ]
+        )
 
         filtered = _filter_results_to_changed_files(results, set(), source_dir)
         assert filtered.sarif.runs[0].results == []
+
+    def test_empty_changed_set_says_so_and_counts_what_it_discarded(
+        self, tmp_path, ash_warnings
+    ):
+        """Emptying a result set silently is indistinguishable from a clean scan.
+
+        An empty changed-file set matches nothing, so every result goes and the run
+        reports zero findings at exit 0. It is reachable without operator error:
+        ``--changed-files-only`` against a base ref that resolves to an empty diff,
+        or a diff falling entirely outside ``--source-dir`` once the caller
+        intersects the two scopings. The count is part of the assertion because a
+        warning that does not say how much was lost does not tell an operator
+        whether to believe the report.
+        """
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+
+        results = _make_results_with_sarif(
+            [
+                _make_result("src/app.py"),
+                _make_result("src/other.py"),
+            ]
+        )
+
+        _filter_results_to_changed_files(results, set(), source_dir)
+
+        warnings = ash_warnings()
+        assert warnings, "an empty changed-file set discarded every result in silence"
+        assert any("2 finding(s)" in message for message in warnings), (
+            f"no warning named the number discarded: {warnings}"
+        )
+
+    def test_a_matching_changed_set_warns_about_nothing(self, tmp_path, ash_warnings):
+        """The warning is for the empty-set case, not for the flag working.
+
+        A non-empty set that discards results is the operator's filter doing what
+        they asked. Warning there would make the line noise, and noise gets
+        filtered -- which would cost the empty-set case its only signal.
+        """
+        source_dir = tmp_path / "repo"
+        source_dir.mkdir()
+        changed = {(source_dir / "src" / "app.py").resolve()}
+
+        results = _make_results_with_sarif(
+            [
+                _make_result("src/app.py"),
+                _make_result("src/other.py"),
+            ]
+        )
+
+        _filter_results_to_changed_files(results, changed, source_dir)
+
+        assert ash_warnings() == []
 
     def test_result_without_locations_is_kept(self, tmp_path):
         source_dir = tmp_path / "repo"

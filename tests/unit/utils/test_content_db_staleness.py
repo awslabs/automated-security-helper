@@ -763,3 +763,104 @@ class TestNoScannerReadsAnUndeclaredDatabase:
         declared = {e.scanner for e in cdb.CONTENT_DATABASES}
         explained = set(cdb.SCANNERS_WITHOUT_CONTENT_DATABASE)
         assert sorted(scanners - declared - explained) == ["a-new-db-scanner"]
+
+
+# --------------------------------------------------------------------------- one verdict
+
+
+class TestAStaleDatabaseIsOneConditionWithTheGateOnOrOff:
+    """With the completeness gate on, the stale database is not reported twice.
+
+    ``incomplete_scanners`` lists the stale scanner (above), and the gate's scanner arm
+    reads that list. Before ``scan_incompleteness`` carried stale databases in a field of
+    their own, the gate-on run exited from the scanner arm with ``partial_coverage`` as
+    the MCP reason and install-the-tool advice on the console, while the gate-off run
+    exited from the stale arm with no ``ScanIncompleteExit``, so MCP reported ``failed``.
+    """
+
+    @staticmethod
+    def _stale_model(tmp_path, policy=cdb.STALENESS_FAIL):
+        sarif = _sarif("grype")
+        staleness.assess_scanner(
+            _grype_case(tmp_path, timedelta(days=10)), sarif, policy
+        )
+        return _model(sarif)
+
+    @pytest.mark.parametrize("gate", [True, False])
+    def test_it_is_carried_once_in_its_own_field(self, tmp_path, gate):
+        from automated_security_helper.core.unified_metrics import ScannerMetrics
+        from automated_security_helper.interactions.run_ash_scan import (
+            scan_incompleteness,
+        )
+
+        model = self._stale_model(tmp_path)
+        metric = ScannerMetrics(scanner_name="grype", status="PASSED")
+        with patch(f"{_MODULE}.get_unified_scanner_metrics", return_value=[metric]):
+            got = scan_incompleteness(model, gate=gate)
+        assert [r.name for r in got.stale_content_databases] == ["grype-db"]
+        assert got.scanners == ()
+        assert bool(got)
+        payload = got.to_payload()
+        assert payload["incomplete_scanners"] == []
+        assert [d["name"] for d in payload["stale_content_databases"]] == ["grype-db"]
+        json.dumps(payload)
+
+    def test_a_stale_scanner_that_also_lost_targets_keeps_its_row(self, tmp_path):
+        from automated_security_helper.core.unified_metrics import ScannerMetrics
+        from automated_security_helper.interactions.run_ash_scan import (
+            scan_incompleteness,
+        )
+
+        model = self._stale_model(tmp_path)
+        metric = ScannerMetrics(
+            scanner_name="grype",
+            status="PASSED",
+            targets_attempted=10,
+            targets_failed=4,
+        )
+        with patch(f"{_MODULE}.get_unified_scanner_metrics", return_value=[metric]):
+            got = scan_incompleteness(model, gate=True)
+        assert [name for name, _ in got.scanners] == ["grype"]
+        assert "4 of 10 targets unevaluated" in got.scanners[0][1]
+        assert [r.name for r in got.stale_content_databases] == ["grype-db"]
+
+    @pytest.mark.parametrize("gate", [True, False])
+    def test_it_exits_1_with_the_gate_on_or_off(self, tmp_path, gate):
+        model = self._stale_model(tmp_path)
+        assert _exit_code(tmp_path, model, fail_on_incomplete_scanners=gate) == 1
+
+    @pytest.mark.parametrize("gate", [True, False])
+    def test_the_opt_out_still_passes_with_the_gate_on_or_off(self, tmp_path, gate):
+        from automated_security_helper.interactions.run_ash_scan import (
+            scan_incompleteness,
+        )
+
+        model = self._stale_model(tmp_path, cdb.STALENESS_WARN)
+        assert _exit_code(tmp_path, model, fail_on_incomplete_scanners=gate) == 0
+        with patch(f"{_MODULE}.get_unified_scanner_metrics", return_value=[]):
+            assert not scan_incompleteness(model, gate=gate)
+
+    def test_the_message_gives_the_refresh_advice_and_not_the_install_advice(
+        self, tmp_path, capsys
+    ):
+        from automated_security_helper.interactions.run_ash_scan import (
+            print_incompleteness_message,
+        )
+
+        model = self._stale_model(tmp_path)
+        records = staleness.stale_content_databases(model, enforced_only=True)
+        print_incompleteness_message([], [], records)
+        # rich colours and wraps the line, so compare the plain text.
+        out = " ".join(re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out).split())
+        assert "content database(s) are past their declared age bound" in out
+        assert "grype-db" in out
+        assert "Install the missing" not in out
+        assert "exception" not in out
+
+    def test_the_mcp_coverage_check_sees_it(self):
+        from automated_security_helper.core.resource_management.scan_tracking import (
+            coverage_has_gap,
+        )
+
+        assert coverage_has_gap({"stale_content_databases": [{"name": "grype-db"}]})
+        assert not coverage_has_gap({"stale_content_databases": []})

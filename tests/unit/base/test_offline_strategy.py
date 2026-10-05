@@ -1,21 +1,46 @@
 """Tests for OfflineStrategy enum and per-scanner declarations."""
 
-import pytest
 from automated_security_helper.core.enums import OfflineStrategy
 from automated_security_helper.base.scanner_plugin import ScannerPluginBase
-from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import BanditScanner
-from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import CdkNagScanner
-from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scanner import CfnNagScanner
-from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import DetectSecretsScanner
-from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import FerretScanScanner
-from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import CheckovScanner
-from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import GrypeScanner
-from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner import NpmAuditScanner
-from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import OpengrepScanner
-from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import SemgrepScanner
-from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner import SyftScanner
-from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import TrivyRepoScanner
-from automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner import SnykCodeScanner
+from automated_security_helper.plugin_modules.ash_builtin.scanners.bandit_scanner import (
+    BanditScanner,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.cdk_nag_scanner import (
+    CdkNagScanner,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.cfn_nag_scanner import (
+    CfnNagScanner,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.detect_secrets_scanner import (
+    DetectSecretsScanner,
+)
+from automated_security_helper.plugin_modules.ash_ferret_plugins.ferret_scanner import (
+    FerretScanScanner,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.checkov_scanner import (
+    CheckovScanner,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.grype_scanner import (
+    GrypeScanner,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.npm_audit_scanner import (
+    NpmAuditScanner,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.opengrep_scanner import (
+    OpengrepScanner,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.semgrep_scanner import (
+    SemgrepScanner,
+)
+from automated_security_helper.plugin_modules.ash_builtin.scanners.syft_scanner import (
+    SyftScanner,
+)
+from automated_security_helper.plugin_modules.ash_trivy_plugins.trivy_repo_scanner import (
+    TrivyRepoScanner,
+)
+from automated_security_helper.plugin_modules.ash_snyk_plugins.snyk_code_scanner import (
+    SnykCodeScanner,
+)
 
 
 def test_enum_values():

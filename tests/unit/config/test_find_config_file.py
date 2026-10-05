@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from pathlib import Path
-import pytest
 
 from automated_security_helper.config.resolve_config import find_config_file
 from automated_security_helper.core.constants import ASH_CONFIG_FILE_NAMES

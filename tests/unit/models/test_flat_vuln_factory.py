@@ -206,9 +206,7 @@ class TestFromSarifResultScannerName:
 
     def test_prefers_properties_scanner_name_over_tool_name(self):
         result = _make_result(scanner_name="bandit-real")
-        vuln = FlatVulnerability.from_sarif_result(
-            result, "Unknown Tool", "SAST"
-        )
+        vuln = FlatVulnerability.from_sarif_result(result, "Unknown Tool", "SAST")
         assert vuln.scanner == "bandit-real"
 
     def test_falls_back_to_tool_name_when_no_scanner_property(self):
@@ -307,16 +305,12 @@ class TestExtractScannerNameHelper:
 
     def test_prefers_properties_scanner_name(self):
         result = _make_result(scanner_name="semgrep")
-        name = _extract_scanner_name_from_result(
-            result, "fallback-tool", tags=None
-        )
+        name = _extract_scanner_name_from_result(result, "fallback-tool", tags=None)
         assert name == "semgrep"
 
     def test_falls_back_to_run_tool_name(self):
         result = _make_result()
-        name = _extract_scanner_name_from_result(
-            result, "fallback-tool", tags=None
-        )
+        name = _extract_scanner_name_from_result(result, "fallback-tool", tags=None)
         assert name == "fallback-tool"
 
     def test_handles_none_tags(self):
@@ -368,6 +362,28 @@ class TestResolveSeverityHelper:
     def test_note_level_maps_to_low(self):
         result = _make_result(level="note")
         assert _resolve_severity(result) == "LOW"
+
+    def test_absent_level_key_maps_to_high_not_medium(self):
+        """A scanner that omits ``level`` gets the field default, which is error.
+
+        Every flattened reporter -- CSV, HTML, text, JUnit -- and
+        ``FlatVulnerability.is_actionable`` read this value, so resolving to the
+        unknown-level MEDIUM fallback moves the finding two bands down.
+        ``model_validate`` is the path third-party SARIF takes and the only one
+        that exercises the default.
+        """
+        result = Result.model_validate(
+            {"ruleId": "B105", "message": {"text": "hardcoded password string"}}
+        )
+
+        assert _resolve_severity(result) == "HIGH"
+
+    def test_level_held_as_an_enum_member_maps_to_high(self):
+        """Assignment is unvalidated too, so the reader must not trust the type."""
+        result = _make_result(level="warning")
+        result.level = Level.error
+
+        assert _resolve_severity(result) == "HIGH"
 
 
 class TestLocationDisplayProperty:

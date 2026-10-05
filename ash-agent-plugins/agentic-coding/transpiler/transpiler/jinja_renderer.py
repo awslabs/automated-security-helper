@@ -18,12 +18,19 @@ templates/kiro/POWER_frontmatter.j2.
 StrictUndefined is enabled so a missing variable surfaces as an error
 rather than silently producing empty output.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
 
-from jinja2 import ChoiceLoader, Environment, FileSystemLoader, StrictUndefined, select_autoescape
+from jinja2 import (
+    ChoiceLoader,
+    Environment,
+    FileSystemLoader,
+    StrictUndefined,
+    select_autoescape,
+)
 
 # Shared templates directory (sibling to the transpiler package)
 _SHARED_TEMPLATES = Path(__file__).resolve().parent.parent / "templates"

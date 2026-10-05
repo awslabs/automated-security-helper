@@ -290,7 +290,7 @@ results = run_ash_scan(
     output_dir="/path/to/output",
     mode=RunMode.local,
     strategy=Strategy.parallel,
-    scanners=["bandit", "semgrep"]
+    scanners=["bandit", "semgrep"],
 )
 ```
 

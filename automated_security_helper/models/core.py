@@ -6,13 +6,12 @@
 from __future__ import annotations
 
 import fnmatch
-from typing import List, Annotated, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, Annotated, Optional, TYPE_CHECKING
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 from datetime import datetime, date
 
 from automated_security_helper.utils.path_matching import (
     _path_pattern_matches,
-    _recursive_glob_match,
 )
 
 if TYPE_CHECKING:
@@ -58,7 +57,7 @@ class ToolArgs(BaseModel):
 PACKAGE_SUPPRESSION_FIELDS = ("package_name", "package_version", "package_path")
 
 
-def suppression_id(suppression: dict) -> str:
+def suppression_id(suppression: Dict[str, Any]) -> str:
     """Identifier for a suppression given as a dict of its fields.
 
     Shared by ``AshSuppression.id`` and the config linter, which reads raw YAML
@@ -165,9 +164,7 @@ class AshSuppression(IgnorePathWithReason):
             try:
                 datetime.strptime(v, "%Y-%m-%d")
             except ValueError:
-                raise ValueError(
-                    f"Invalid expiration date format. Use YYYY-MM-DD: {v}"
-                )
+                raise ValueError(f"Invalid expiration date format. Use YYYY-MM-DD: {v}")
         return v
 
     @property
@@ -229,9 +226,7 @@ class AshSuppression(IgnorePathWithReason):
             if finding.rule_id is None:
                 return False
             # Case-insensitive glob match for OS portability
-            if not fnmatch.fnmatch(
-                finding.rule_id.lower(), self.rule_id.lower()
-            ):
+            if not fnmatch.fnmatch(finding.rule_id.lower(), self.rule_id.lower()):
                 return False
 
         if not _path_pattern_matches(finding.file_path, self.path):

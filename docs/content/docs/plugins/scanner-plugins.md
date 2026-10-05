@@ -20,8 +20,12 @@ fits this shape does not implement `scan()` at all:
 from pathlib import Path
 from typing import List, Literal, Optional, Tuple
 
-from automated_security_helper.base.scanner_plugin import ScannerPluginBase, ScannerPluginConfigBase
+from automated_security_helper.base.scanner_plugin import (
+    ScannerPluginBase,
+    ScannerPluginConfigBase,
+)
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
+
 
 @ash_scanner_plugin
 class MyScanner(ScannerPluginBase[MyScannerConfig]):
@@ -36,7 +40,13 @@ class MyScanner(ScannerPluginBase[MyScannerConfig]):
         """Return the argv to run, where it writes SARIF, and any extra env."""
         results_file = self.results_dir.joinpath(target_type, "results_sarif.sarif")
         results_file.parent.mkdir(parents=True, exist_ok=True)
-        argv = ["my-scanner-tool", "--sarif", "--output", str(results_file), str(target)]
+        argv = [
+            "my-scanner-tool",
+            "--sarif",
+            "--output",
+            str(results_file),
+            str(target),
+        ]
         return argv, results_file, None
 ```
 
@@ -59,8 +69,7 @@ class ApiScanner(ScannerPluginBase[ApiScannerConfig]):
             f"{self.__class__.__name__} overrides scan() directly."
         )
 
-    def scan(self, target, target_type, global_ignore_paths=None, config=None):
-        ...
+    def scan(self, target, target_type, global_ignore_paths=None, config=None): ...
 ```
 
 Omitting the stub makes the class abstract, and it fails at instantiation rather
@@ -74,12 +83,15 @@ Define a configuration class for your scanner:
 ```python
 from pydantic import Field
 
+
 class MyScannerConfig(ScannerPluginConfigBase):
     name: str = "my-scanner"
     enabled: bool = True
 
     class Options:
-        severity_threshold: str = Field(default="MEDIUM", description="Minimum severity level")
+        severity_threshold: str = Field(
+            default="MEDIUM", description="Minimum severity level"
+        )
         include_tests: bool = Field(default=False, description="Include test files")
 ```
 
@@ -95,18 +107,28 @@ from typing import List, Literal
 
 from pydantic import Field
 
-from automated_security_helper.base.scanner_plugin import ScannerPluginBase, ScannerPluginConfigBase
+from automated_security_helper.base.scanner_plugin import (
+    ScannerPluginBase,
+    ScannerPluginConfigBase,
+)
 from automated_security_helper.plugins.decorators import ash_scanner_plugin
 from automated_security_helper.models.scan_results_container import ScanResultsContainer
 
+
 class CustomScannerConfig(ScannerPluginConfigBase):
     """Configuration for CustomScanner"""
+
     name: str = "custom-scanner"
     enabled: bool = True
 
     class Options:
-        tool_path: str = Field(default="custom-tool", description="Path to the scanning tool")
-        severity_threshold: str = Field(default="MEDIUM", description="Minimum severity level")
+        tool_path: str = Field(
+            default="custom-tool", description="Path to the scanning tool"
+        )
+        severity_threshold: str = Field(
+            default="MEDIUM", description="Minimum severity level"
+        )
+
 
 @ash_scanner_plugin
 class CustomScanner(ScannerPluginBase):
@@ -124,8 +146,13 @@ class CustomScanner(ScannerPluginBase):
 
         super().model_post_init(context)
 
-    def scan(self, target: Path, target_type: Literal["source", "converted"],
-             global_ignore_paths: List = None, config=None):
+    def scan(
+        self,
+        target: Path,
+        target_type: Literal["source", "converted"],
+        global_ignore_paths: List = None,
+        config=None,
+    ):
         """Scan the target using a custom tool"""
         if config is None:
             config = self.config
@@ -135,13 +162,16 @@ class CustomScanner(ScannerPluginBase):
 
         try:
             # Run the external tool
-            cmd = [config.options.tool_path, "--scan", str(target),
-                   "--severity", config.options.severity_threshold]
+            cmd = [
+                config.options.tool_path,
+                "--scan",
+                str(target),
+                "--severity",
+                config.options.severity_threshold,
+            ]
 
             result = self._run_subprocess(
-                cmd,
-                stdout_preference="return",
-                stderr_preference="write"
+                cmd, stdout_preference="return", stderr_preference="write"
             )
 
             # Parse the output
@@ -155,37 +185,30 @@ class CustomScanner(ScannerPluginBase):
                     "runs": [
                         {
                             "tool": {
-                                "driver": {
-                                    "name": config.name,
-                                    "version": "1.0.0"
-                                }
+                                "driver": {"name": config.name, "version": "1.0.0"}
                             },
-                            "results": []
+                            "results": [],
                         }
-                    ]
+                    ],
                 }
 
                 # Convert findings to SARIF format
                 for finding in findings:
-                    sarif_report["runs"][0]["results"].append({
-                        "ruleId": finding["id"],
-                        "level": finding["severity"].lower(),
-                        "message": {
-                            "text": finding["message"]
-                        },
-                        "locations": [
-                            {
-                                "physicalLocation": {
-                                    "artifactLocation": {
-                                        "uri": finding["file"]
-                                    },
-                                    "region": {
-                                        "startLine": finding["line"]
+                    sarif_report["runs"][0]["results"].append(
+                        {
+                            "ruleId": finding["id"],
+                            "level": finding["severity"].lower(),
+                            "message": {"text": finding["message"]},
+                            "locations": [
+                                {
+                                    "physicalLocation": {
+                                        "artifactLocation": {"uri": finding["file"]},
+                                        "region": {"startLine": finding["line"]},
                                     }
                                 }
-                            }
-                        ]
-                    })
+                            ],
+                        }
+                    )
 
                 # Write SARIF report
                 sarif_path = self.results_dir / f"{config.name}.sarif"
@@ -285,11 +308,11 @@ from pathlib import Path
 from automated_security_helper.base.plugin_context import PluginContext
 from my_ash_plugins.scanners import CustomScanner
 
+
 def test_custom_scanner():
     # Create a plugin context
     context = PluginContext(
-        source_dir=Path("test_data"),
-        output_dir=Path("test_output")
+        source_dir=Path("test_data"), output_dir=Path("test_output")
     )
 
     # Create scanner instance

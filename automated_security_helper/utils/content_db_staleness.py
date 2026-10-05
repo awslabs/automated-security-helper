@@ -68,7 +68,7 @@ import subprocess  # nosec B404 - fixed tool binaries, list arguments, no shell
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional
 
 from automated_security_helper.utils.content_databases import (
     CONTENT_DATABASES,
@@ -83,6 +83,9 @@ from automated_security_helper.utils.content_databases import (
     parse_timestamp,
 )
 from automated_security_helper.utils.log import ASH_LOGGER
+
+if TYPE_CHECKING:
+    from automated_security_helper.schemas.sarif_schema_model import Notification
 
 STALE_NOTIFICATION_ID = "ASH-CONTENT-DB-STALE"
 INVOCATION_PROPERTY = "ash_content_databases"
@@ -384,7 +387,7 @@ def measure(
 # --------------------------------------------------------------------------- the SARIF record
 
 
-def _notification(record: ContentDbAgeRecord):
+def _notification(record: ContentDbAgeRecord) -> "Notification":
     from automated_security_helper.schemas.sarif_schema_model import (
         Level,
         Message,
@@ -402,7 +405,9 @@ def _notification(record: ContentDbAgeRecord):
             root=ReportingDescriptorReference3(id=STALE_NOTIFICATION_ID)
         ),
         timeUtc=record.measured_at,
-        properties=PropertyBag(content_database=record.to_dict()),
+        # model_validate rather than a keyword: PropertyBag declares only `tags` and
+        # takes everything else through extra=allow, which a type checker cannot see.
+        properties=PropertyBag.model_validate({"content_database": record.to_dict()}),
     )
 
 
@@ -491,7 +496,10 @@ def assess_scanner(
             ASH_LOGGER.info(
                 f"Content database {record.name} ({record.scanner}): "
                 f"{record.timestamp_label} "
-                f"{_iso(record.built)}, {format_age(record.age)} old, inside its "
+                # Not stale implies a build time was read: an unread one counts as
+                # stale. The guard says so to the type checker, not to a reader.
+                f"{_iso(record.built) if record.built else 'unknown'}, "
+                f"{format_age(record.age)} old, inside its "
                 f"{go_duration(record.max_age)} bound."
             )
     try:

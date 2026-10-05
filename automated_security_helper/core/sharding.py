@@ -134,6 +134,22 @@ class ShardAssignment(BaseModel):
     agrees on the count, has complete indices, no duplicates and no overlap. Every
     check in :func:`verify_shard_coverage` passed and ``d`` was never scanned,
     because nothing recorded what the partition was taken *from*.
+
+    ``selected_scanners`` closes the remaining gap, and it is a third field rather
+    than a narrowing of ``assigned_scanners`` for a reason that is easy to get
+    backwards. The partition is taken over every registered scanner, before the
+    selection filters, so ``assigned_scanners`` names scanners the shard never
+    intended to run -- ``--scanners bandit`` leaves grype assigned and SKIPPED. That
+    breadth reads like the defect, and narrowing it looks like the fix, but two
+    readers depend on it. ``verify_shard_coverage``'s ``uncovered`` check compares
+    the union of the assignments against the candidate set, so a narrowed assignment
+    would leave every config-disabled and platform-declined scanner uncovered and
+    refuse merges with nothing wrong with them. ``cli.merge._verify_shard_contributions``
+    reads it as ownership, and would stop holding a shard to the scanners it was
+    given. Recording intent alongside the assignment keeps both readers correct and
+    makes the over-claim recoverable: a scanner assigned, not selected here, and not
+    selected on any other shard ran nowhere, and before this field there was nothing
+    in the provenance that said so.
     """
 
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
@@ -154,6 +170,19 @@ class ShardAssignment(BaseModel):
             "Every scanner this executor resolved before partitioning -- the set "
             "assigned_scanners was taken from. None on results written before "
             "this field existed, in which case the union check is skipped."
+        ),
+    )
+    selected_scanners: list[str] | None = Field(
+        default=None,
+        description=(
+            "The subset of assigned_scanners this shard actually intended to run, "
+            "after the --scanners allowlist, --exclude-scanners and each scanner's "
+            "own enabled flag. A third field rather than a narrowing of "
+            "assigned_scanners, because that field's breadth is load-bearing for "
+            "two existing readers -- see the class docstring. Intent and not "
+            "outcome: a scanner whose tool is absent stays here, because 'nobody "
+            "asked for it' and 'nobody could run it' route to different people. "
+            "None on results written before this field existed."
         ),
     )
 
@@ -304,7 +333,8 @@ def verify_shard_coverage(assignments: Sequence[ShardAssignment]) -> None:
         ShardCoverageError: If no shards were supplied, if the shards disagree
             about the total count, if any index is missing or repeated, if two
             shards claim the same scanner, if the shards disagree about the
-            candidate set, or if the assignments do not union to it.
+            candidate set, if the assignments do not union to it, or if a shard
+            selected a scanner assigned to another shard.
     """
     if not assignments:
         raise ShardCoverageError(
@@ -368,6 +398,66 @@ def verify_shard_coverage(assignments: Sequence[ShardAssignment]) -> None:
         )
 
     _verify_candidate_agreement(assignments, claimed)
+    _verify_selection_within_assignment(assignments)
+
+
+def _verify_selection_within_assignment(
+    assignments: Sequence[ShardAssignment],
+) -> None:
+    """Check no shard intended to run a scanner another shard owns.
+
+    The only condition ``selected_scanners`` supports refusing on, and it is worth
+    being precise about why the others are not here. A scanner assigned to some
+    shard and selected by none ran nowhere, which sounds like the refusal to make;
+    but that is also exactly what a config-disabled or platform-declined scanner
+    looks like, and the provenance cannot tell those apart. Refusing would break
+    merges that have nothing wrong with them, which is the same trap narrowing
+    ``assigned_scanners`` would have walked into.
+
+    This one has no such reading. A shard reporting that it selected a scanner it
+    does not own means the shard exclusion did not take effect on that executor, so
+    two shards ran it and every finding it reported is counted twice. The overlap
+    check above cannot see it: the overlap is between one shard's selection and
+    another's assignment, and the assignments themselves are still disjoint.
+
+    A shard carrying no selection record is skipped rather than refused, unlike the
+    candidate set. The distinction is which absence can hide something: a shard with
+    no candidate set could be concealing the union hole, while a shard with no
+    selection record only says less. Refusing the latter would stop a fan-out whose
+    runners are mid-upgrade from merging at all.
+
+    Args:
+        assignments: One entry per shard result being merged.
+
+    Raises:
+        ShardCoverageError: If any shard selected a scanner assigned to another.
+    """
+    owner: dict[str, int] = {}
+    for assignment in assignments:
+        for scanner in _normalized(assignment.assigned_scanners):
+            owner[scanner] = assignment.shard_index
+
+    trespasses: list[str] = []
+    for assignment in assignments:
+        if assignment.selected_scanners is None:
+            continue
+        for scanner in _normalized(assignment.selected_scanners):
+            holder = owner.get(scanner)
+            if holder is not None and holder != assignment.shard_index:
+                trespasses.append(
+                    f"{scanner} (selected by shard {assignment.shard_index}, "
+                    f"assigned to shard {holder})"
+                )
+
+    if trespasses:
+        raise ShardCoverageError(
+            "These shards intended to run a scanner assigned to another shard: "
+            f"{'; '.join(sorted(trespasses))}. A shard only runs what it was "
+            "assigned, so the exclusion that implements the split did not take "
+            "effect on that executor -- the scanner ran on both shards and its "
+            "findings would be counted once per shard. The assignments themselves "
+            "are disjoint, so no other check here can see this."
+        )
 
 
 def _verify_candidate_agreement(

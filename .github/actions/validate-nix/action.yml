@@ -26,7 +26,23 @@ runs:
 
     - name: "nix: install ASH"
       shell: bash
-      run: pip install .
+      # The `cdk` extra, not a bare `pip install .`, and this is a correctness fix
+      # rather than a convenience. cdk-nag is the one scanner Nix cannot supply -- it
+      # runs in-process through jsii rather than as an external binary, which is why
+      # flake.nix omits it and why the assertion below excludes it. But "Nix does not
+      # supply it" is not the same claim as "it need not be installed": the scan step
+      # selects every enabled scanner, and with cdk-nag's three distributions absent it
+      # reported MISSING. That was tolerated only while the completeness gate was
+      # opt-in; with fail_on_incomplete_scanners on by default the scan exits 1, so a
+      # bare install now fails this job for a reason that has nothing to do with Nix.
+      #
+      # Installing it is the honest close rather than excluding cdk-nag from the scan.
+      # `node` comes from `pkgs.nodejs` in the flake's dev shell -- already there for
+      # `npm audit` -- and ASH re-execs itself inside `nix develop`, so the in-process
+      # scanner finds the pinned interpreter on PATH. Measured against this action's own
+      # fixture: cdk-nag evaluates template.yaml across all five packs and classifies
+      # package.json as not-CloudFormation, so it attempts one target and fails none.
+      run: pip install '.[cdk]'
 
     - name: "nix: create test fixture"
       shell: bash
@@ -119,6 +135,13 @@ runs:
         # deliberately: its scanner sets self.command = "python" and runs from ASH's own
         # environment, so Nix never supplies it and its status says nothing about whether
         # the flake worked. Gating on it would make this job fail for an unrelated reason.
+        #
+        # It stays off this list even though the install step above now installs it. The
+        # list's question is "did the flake hand ASH a working binary", and for cdk-nag
+        # there is no binary either way. What keeps cdk-nag honest here is the scan step's
+        # own exit code: fail_on_incomplete_scanners is on by default, so a cdk-nag that
+        # goes MISSING or leaves a target unevaluated fails the step before this
+        # assertion runs.
         flake_supplied = [
             "bandit",
             "cfn-nag",

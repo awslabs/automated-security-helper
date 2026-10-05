@@ -318,17 +318,18 @@ Correlate ASH findings with AWS Config compliance:
 ```python
 import boto3
 
+
 def correlate_findings():
-    securityhub = boto3.client('securityhub')
-    config = boto3.client('config')
+    securityhub = boto3.client("securityhub")
+    config = boto3.client("config")
 
     # Get ASH findings
     findings = securityhub.get_findings(
-        Filters={'ProductName': [{'Value': 'ASH', 'Comparison': 'EQUALS'}]}
+        Filters={"ProductName": [{"Value": "ASH", "Comparison": "EQUALS"}]}
     )
 
     # Correlate with Config rules
-    for finding in findings['Findings']:
+    for finding in findings["Findings"]:
         # Implementation depends on your specific use case
         pass
 ```

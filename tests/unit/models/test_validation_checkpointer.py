@@ -1,6 +1,6 @@
 """Tests for ValidationCheckpointer — checkpoint creation and validation logic."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -10,7 +10,6 @@ from automated_security_helper.models.scanner_validation import (
     ValidationCheckpoint,
     ValidationCheckpointer,
 )
-from automated_security_helper.core.enums import ScannerStatus
 
 
 @pytest.fixture

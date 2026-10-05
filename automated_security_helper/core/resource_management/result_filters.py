@@ -120,7 +120,9 @@ def filter_actionable_only(results: Dict[str, Any]) -> Dict[str, Any]:
                     run["results"] = [
                         r
                         for r in run["results"]
-                        if not (r.get("suppressions") and len(r.get("suppressions", [])) > 0)
+                        if not (
+                            r.get("suppressions") and len(r.get("suppressions", [])) > 0
+                        )
                     ]
 
     if "summary_stats" in filtered_results:
@@ -218,14 +220,20 @@ def apply_content_filters(
     ):
         filtered_results["raw_results"]["additional_reports"] = {
             name: data
-            for name, data in filtered_results["raw_results"]["additional_reports"].items()
+            for name, data in filtered_results["raw_results"][
+                "additional_reports"
+            ].items()
             if name.lower() in scanner_list
         }
 
     _severity_keys = {"critical", "high", "medium", "low", "info", "suppressed"}
     if severity_list and "summary_stats" in filtered_results:
         filtered_results["summary_stats"] = {
-            key: (value if key not in _severity_keys or key.lower() in severity_list else 0)
+            key: (
+                value
+                if key not in _severity_keys or key.lower() in severity_list
+                else 0
+            )
             for key, value in filtered_results["summary_stats"].items()
         }
 

@@ -16,7 +16,15 @@ Two delivery channels are supported:
    per-session ``incoming/`` directory, verify a sha256 checksum at finalize
    time, and extract under the session workspace after rejecting any
    path-traversal entries (absolute paths, ``..`` components, symlinks
-   pointing outside the workspace).
+   pointing outside the workspace). Extraction builds a staging sibling and
+   renames it over ``source/`` only once it has succeeded, so a re-delivery that
+   is refused leaves the previously delivered tree in place.
+
+Both the ``session_id`` and the ``upload_id`` arriving over the protocol have to
+name exactly one path component, and that is enforced by the one validator in
+``session_paths`` rather than re-derived per call site. Every path built from
+an ``upload_id`` goes through :func:`_upload_path`; every path built from a
+``session_id`` goes through :func:`_session_workspace`.
 
 Hard limits guard against pathological inputs:
 
@@ -54,6 +62,9 @@ from automated_security_helper.cli.mcp.session_paths import (
     session_directory,
     validated_path_component,
 )
+from automated_security_helper.utils.path_containment import (
+    validate_contained_path,
+)
 
 # ---------------------------------------------------------------------------
 # Hard limits — enforced at finalize time.
@@ -63,6 +74,12 @@ _MAX_ZIP_BYTES: int = 100 * 1024 * 1024  # 100 MiB on-disk zip
 _MAX_EXTRACTED_BYTES: int = 500 * 1024 * 1024  # 500 MiB uncompressed
 _MAX_FILES: int = 50_000  # entry count
 _MAX_CHUNK_BYTES: int = 1 * 1024 * 1024  # 1 MiB per chunked b64 upload (decoded)
+
+# Extraction builds here and is renamed onto "source" only once it has
+# succeeded, so a refused re-delivery cannot destroy the tree it failed to
+# replace. A sibling of "source" rather than a subdirectory of it, so the rename
+# is within one directory and therefore atomic.
+_STAGING_DIR_NAME = ".source.incoming"
 
 # ZipInfo external_attr bits for a symlink (S_IFLNK == 0xA000) shifted into
 # the high half of external_attr.
@@ -372,29 +389,62 @@ def _incoming_dir(session_dir: Path) -> Path:
     return _ensure_dir(session_dir / "incoming")
 
 
+def _upload_path(session_dir: Path, upload_id: str, suffix: str) -> Path:
+    """Build the one path in this session's ``incoming/`` naming this upload.
+
+    Every upload path is built here so that the validation cannot be attached to
+    one builder and missed by the others. That is exactly what had happened:
+    ``_part_path`` carried the only check and has a single caller, on the chunk
+    path, while ``set_source_zip_finalize`` built through ``_final_zip_path`` and
+    reached ``stat()``, ``read()`` and ``unlink()`` on an unvalidated path. An
+    absolute ``upload_id`` left no trace of the workspace root in the result --
+    ``Path('<incoming>') / '/etc/cron.d/x.zip'`` is ``/etc/cron.d/x.zip`` -- and
+    the function's only precondition is that the file exists, which an attacker
+    satisfies by naming a file that already does.
+
+    Two separate guards, because neither implies the other:
+
+    * ``upload_id`` must name one path component, which is what stops the
+      traversal and the absolute path from being built at all.
+    * the built path must be contained in ``incoming/`` and must not itself be a
+      symlink. Containment is the assertion that holds even if the component rule
+      is later loosened, and the symlink half is not a containment question: a
+      link inside ``incoming/`` is contained, and following it would hash and
+      then unlink whatever it points at. This is the same call the zip member
+      handling makes for symlink entries.
+
+    The unresolved join is returned rather than the canonical path the check
+    produced, so the file this names is byte-identical to what the previous
+    implementation named; the check is a gate, not a rewrite.
+
+    Raises:
+        ValueError: if ``upload_id`` does not name a single path component, or if
+            the built path is not a non-symlink inside ``incoming/``.
+    """
+
+    validated_path_component(upload_id, "upload_id")
+
+    name = f"{upload_id}{suffix}"
+    incoming = _incoming_dir(session_dir)
+    result = validate_contained_path(name, incoming.resolve())
+    if result.error is not None:
+        raise ValueError(
+            f"upload_id {upload_id!r} does not name a file inside the session's "
+            f"incoming directory: {result.error.message}"
+        )
+    return incoming / name
+
+
 def _part_path(session_dir: Path, upload_id: str) -> Path:
-    return (
-        _incoming_dir(session_dir)
-        / f"{validated_path_component(upload_id, 'upload_id')}.zip.part"
-    )
+    return _upload_path(session_dir, upload_id, ".zip.part")
 
 
 def _meta_path(session_dir: Path, upload_id: str) -> Path:
-    # Validated here too, not only in _part_path. The three build a filename from
-    # the same caller-supplied id and are called independently -- _read_next_sequence
-    # reaches _meta_path without _part_path running first -- so a check in one of
-    # them is not a check on the id.
-    return (
-        _incoming_dir(session_dir)
-        / f"{validated_path_component(upload_id, 'upload_id')}.next"
-    )
+    return _upload_path(session_dir, upload_id, ".next")
 
 
 def _final_zip_path(session_dir: Path, upload_id: str) -> Path:
-    return (
-        _incoming_dir(session_dir)
-        / f"{validated_path_component(upload_id, 'upload_id')}.zip"
-    )
+    return _upload_path(session_dir, upload_id, ".zip")
 
 
 def _read_next_sequence(session_dir: Path, upload_id: str) -> int:
@@ -542,12 +592,19 @@ def set_source_zip_finalize(
 
     Returns:
         Absolute path of the extracted source tree (the session's
-        ``source_dir``).
+        ``source_dir``). Unchanged on every failure path: extraction goes to a
+        staging sibling and is renamed into place only after it succeeds, so a
+        refused re-delivery leaves the previously delivered tree intact rather
+        than leaving the session registered against an empty directory.
 
     Raises:
         FileNotFoundError: if the upload never received its final chunk.
-        ValueError: on sha256 mismatch, oversize zip, oversize extraction,
-            too-many-files, or path-traversal/symlink-out-of-tree entries.
+        ValueError: if ``upload_id`` does not name a single path component, or on
+            sha256 mismatch, oversize zip, oversize extraction, too-many-files,
+            or path-traversal/symlink-out-of-tree entries.
+        zipfile.BadZipFile: if the assembled bytes are not a zip archive. The
+            checksum matching means the client sent what it meant to send, so
+            this is a client-side packaging error rather than corruption.
     """
 
     root = workspace_root if workspace_root is not None else resolve_workspace_root()
@@ -577,49 +634,77 @@ def set_source_zip_finalize(
             f"sha256 mismatch: expected {expected_sha256}, got {actual_sha}"
         )
 
-    # Pre-extraction validation pass: walk the namelist and the zipinfo list,
-    # rejecting absolute paths, traversal components, oversize totals, and
-    # symlinks that would resolve outside the session sandbox.
+    # Extract into a staging sibling and swap, rather than clearing the
+    # delivered tree first. The checksum and size guards above do precede any
+    # write, but the four guards a hostile or malformed archive trips -- entry
+    # count, member traversal, uncompressed total, symlink member -- all run
+    # after the archive is open, and so did ``zipfile.ZipFile`` itself raising
+    # BadZipFile. Removing the tree before that point left the session
+    # registered and pointing at an empty directory, which a scan then reports
+    # as clean: the false-negative shape, and the worst outcome available to a
+    # security scanner. Costs one delivery's worth of extra peak disk, since the
+    # old and new trees coexist until the rename.
     target = session_dir / "source"
-    if target.exists():
-        shutil.rmtree(target, ignore_errors=True)
-    _ensure_dir(target)
+    staging = session_dir / _STAGING_DIR_NAME
+    if staging.exists():
+        # Left behind by a delivery that died between extraction and the swap.
+        # It is scratch space and never the delivered tree, so removing it
+        # cannot lose anything a caller can still reach.
+        shutil.rmtree(staging, ignore_errors=True)
+    _ensure_dir(staging)
 
-    with zipfile.ZipFile(final) as zf:
-        infos = zf.infolist()
-        if len(infos) > _MAX_FILES:
-            raise ValueError(f"too many files in zip: {len(infos)} > {_MAX_FILES}")
+    swapped = False
+    try:
+        # Pre-extraction validation pass: walk the namelist and the zipinfo
+        # list, rejecting absolute paths, traversal components, oversize totals,
+        # and symlinks that would resolve outside the session sandbox.
+        with zipfile.ZipFile(final) as zf:
+            infos = zf.infolist()
+            if len(infos) > _MAX_FILES:
+                raise ValueError(f"too many files in zip: {len(infos)} > {_MAX_FILES}")
 
-        total_uncompressed = 0
-        for info in infos:
-            _validate_zip_member(info.filename)
-            total_uncompressed += info.file_size
-            if total_uncompressed > _MAX_EXTRACTED_BYTES:
-                raise ValueError(
-                    f"extracted size exceeds {_MAX_EXTRACTED_BYTES} bytes "
-                    f"(at entry {info.filename!r})"
-                )
-            if _is_symlink_zipinfo(info):
-                # Reject ALL symlink entries — not just those whose target
-                # resolves outside the sandbox. Pre-extraction resolve()
-                # of a link under (target/info.filename).parent races
-                # extraction: an earlier zip entry that materializes a
-                # directory which is itself a symlink (or a leftover-from-
-                # prior-upload directory that resolves elsewhere) would
-                # let a later symlink entry pass validation but still
-                # escape once extractall() runs.
-                #
-                # Source tree shipping over MCP does not need symlinks.
-                # Refusing them outright eliminates the pre/post-write
-                # divergence. See DA r6 #5.
-                link_target = zf.read(info).decode("utf-8", errors="replace")
-                raise ValueError(
-                    f"symlink {info.filename!r} -> {link_target!r}: "
-                    f"symlinks are not allowed in MCP source delivery zips"
-                )
+            total_uncompressed = 0
+            for info in infos:
+                _validate_zip_member(info.filename)
+                total_uncompressed += info.file_size
+                if total_uncompressed > _MAX_EXTRACTED_BYTES:
+                    raise ValueError(
+                        f"extracted size exceeds {_MAX_EXTRACTED_BYTES} bytes "
+                        f"(at entry {info.filename!r})"
+                    )
+                if _is_symlink_zipinfo(info):
+                    # Reject ALL symlink entries — not just those whose target
+                    # resolves outside the sandbox. Pre-extraction resolve()
+                    # of a link under (target/info.filename).parent races
+                    # extraction: an earlier zip entry that materializes a
+                    # directory which is itself a symlink (or a leftover-from-
+                    # prior-upload directory that resolves elsewhere) would
+                    # let a later symlink entry pass validation but still
+                    # escape once extractall() runs.
+                    #
+                    # Source tree shipping over MCP does not need symlinks.
+                    # Refusing them outright eliminates the pre/post-write
+                    # divergence. See DA r6 #5.
+                    link_target = zf.read(info).decode("utf-8", errors="replace")
+                    raise ValueError(
+                        f"symlink {info.filename!r} -> {link_target!r}: "
+                        f"symlinks are not allowed in MCP source delivery zips"
+                    )
 
-        # Validation passed; extract.
-        zf.extractall(target)
+            # Validation passed; extract into staging.
+            zf.extractall(staging)
+
+        # Swap. The old tree only goes away once the new one is complete on
+        # disk, and the rename is within one directory so the window in which
+        # neither is in place is two syscalls wide rather than the whole
+        # validate-and-extract pass.
+        if target.exists():
+            shutil.rmtree(target, ignore_errors=True)
+        staging.rename(target)
+        swapped = True
+    finally:
+        if not swapped:
+            shutil.rmtree(staging, ignore_errors=True)
 
     _set_session_source_dir(session_id, target)
     # The on-disk zip is no longer needed.

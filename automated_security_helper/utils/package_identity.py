@@ -203,7 +203,9 @@ class NpmLockIndex:
     def entries(self, lockfile_rel: str) -> Optional[List[NpmLockEntry]]:
         rel = lockfile_rel.lstrip("/")
         if rel not in self._cache:
-            self._cache[rel] = load_npm_lock_entries(self.root / rel)
+            # Path() because the root may be a PurePath kept for its flavor, and
+            # only a concrete path can be read.
+            self._cache[rel] = load_npm_lock_entries(Path(self.root / rel))
         return self._cache[rel]
 
     def entry(self, lockfile_rel: str, key: str) -> Optional[NpmLockEntry]:

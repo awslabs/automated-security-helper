@@ -5,6 +5,7 @@ transpiler.backends triggers every backend module, populating the registry.
 `BackendRegistry.names()` is the authoritative list; nothing should restate its
 length, since a stated count goes stale the next time a backend is added.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -33,6 +34,7 @@ class BackendRegistry:
         # destructive rather than merely wrong. Imported locally to keep
         # registry.py free of a module-level dependency on core.
         from .core import validated_output_dir
+
         validated_output_dir(backend_cls.NAME, backend_cls.OUTPUT_DIR)
         cls._backends[backend_cls.NAME] = backend_cls
         return backend_cls

@@ -1,4 +1,5 @@
 """Windsurf backend."""
+
 from __future__ import annotations
 
 from ...core import (
@@ -57,4 +58,7 @@ class WindsurfBackend(BaseBackend):
         if not install.exists():
             return {"ok": False, "reason": "install.sh missing"}
 
-        return {"ok": True, "detail": "rules + AGENTS.md + install.sh valid (Windsurf is GUI-only)"}
+        return {
+            "ok": True,
+            "detail": "rules + AGENTS.md + install.sh valid (Windsurf is GUI-only)",
+        }

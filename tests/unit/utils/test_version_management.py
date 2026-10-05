@@ -1,8 +1,7 @@
 """Tests for utils/version_management.py — covers version detection and update logic."""
 
 from pathlib import Path
-from unittest.mock import patch, MagicMock
-import pytest
+from unittest.mock import patch
 
 from automated_security_helper.utils.version_management import (
     get_project_root,
@@ -60,6 +59,7 @@ class TestGetVersion:
 
     def test_fallback_to_pyproject(self):
         import importlib.metadata
+
         with patch(
             "automated_security_helper.utils.version_management.importlib.metadata.version",
             side_effect=importlib.metadata.PackageNotFoundError("not found"),
@@ -70,12 +70,16 @@ class TestGetVersion:
 
     def test_fallback_to_unknown(self):
         import importlib.metadata
-        with patch(
-            "automated_security_helper.utils.version_management.importlib.metadata.version",
-            side_effect=importlib.metadata.PackageNotFoundError("not found"),
-        ), patch(
-            "automated_security_helper.utils.version_management.get_version_from_pyproject",
-            return_value=None,
+
+        with (
+            patch(
+                "automated_security_helper.utils.version_management.importlib.metadata.version",
+                side_effect=importlib.metadata.PackageNotFoundError("not found"),
+            ),
+            patch(
+                "automated_security_helper.utils.version_management.get_version_from_pyproject",
+                return_value=None,
+            ),
         ):
             version = get_version()
             assert version == "unknown"
@@ -95,7 +99,7 @@ class TestUpdateVersionInPyproject:
             result = update_version_in_pyproject("2.0.0")
             assert result is True
             content = pyproject.read_text()
-            assert '2.0.0' in content
+            assert "2.0.0" in content
 
     def test_returns_false_on_missing_version(self, tmp_path):
         pyproject = tmp_path / "pyproject.toml"

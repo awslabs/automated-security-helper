@@ -1,12 +1,7 @@
 """Extended tests for models/asharp_model.py — covers model methods and serialization."""
 
-from datetime import datetime
-from pathlib import Path
-from unittest.mock import MagicMock, patch
 import json
-import pytest
 
-from automated_security_helper.config.ash_config import AshConfig
 from automated_security_helper.models.asharp_model import (
     AshAggregatedResults,
     ScannerStatusInfo,

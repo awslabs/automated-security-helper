@@ -16,10 +16,7 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -29,13 +26,12 @@ import pytest
 
 def _make_opts(tmp_path, fail_on_findings=None, mode=None):
     from automated_security_helper.interactions.run_ash_scan import ScanOptions
-    from automated_security_helper.core.enums import RunMode
 
-    kwargs = dict(
-        source_dir=tmp_path / "src",
-        output_dir=tmp_path / "out",
-        fail_on_findings=fail_on_findings,
-    )
+    kwargs = {
+        "source_dir": tmp_path / "src",
+        "output_dir": tmp_path / "out",
+        "fail_on_findings": fail_on_findings,
+    }
     if mode is not None:
         kwargs["mode"] = mode
     return ScanOptions(**kwargs)
@@ -70,7 +66,6 @@ class TestContainerModeConfigFailOnFindings:
         """Container scan with config.fail_on_findings=False and CLI unset → exit 0."""
         from automated_security_helper.interactions.run_ash_scan import (
             _compute_exit_code,
-            ScanOptions,
         )
 
         opts = _make_opts(tmp_path, fail_on_findings=None)
@@ -92,7 +87,6 @@ class TestContainerModeConfigFailOnFindings:
         """Container scan with config.fail_on_findings=True and CLI unset → exit 2."""
         from automated_security_helper.interactions.run_ash_scan import (
             _compute_exit_code,
-            ScanOptions,
         )
 
         opts = _make_opts(tmp_path, fail_on_findings=None)

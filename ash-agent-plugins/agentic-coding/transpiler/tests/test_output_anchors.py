@@ -14,6 +14,7 @@ they get tests rather than a comment.
    check is comparing against -- and would then report no drift, having caused
    it. That failure is silent: a green gate that destroyed data.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -36,15 +37,15 @@ from transpiler.registry import BackendRegistry
 @pytest.mark.parametrize(
     "bad",
     [
-        "",            # resolves to the anchor root itself
-        "   ",         # ditto, once stripped
-        ".",           # ditto; PurePath(".").parts is empty
-        "..",          # one level above the anchor
+        "",  # resolves to the anchor root itself
+        "   ",  # ditto, once stripped
+        ".",  # ditto; PurePath(".").parts is empty
+        "..",  # one level above the anchor
         "../evil",
         "skills/../..",
-        "/etc",        # absolute on POSIX
+        "/etc",  # absolute on POSIX
         "C:/Windows",  # absolute on Windows; PurePosixPath would not notice
-        "..\\evil",    # backslash is a separator on Windows only
+        "..\\evil",  # backslash is a separator on Windows only
         "\\\\server\\share",  # UNC root
     ],
 )
@@ -104,7 +105,10 @@ def test_resolve_output_dir_honors_the_declared_anchor(tmp_path):
         OUTPUT_DIR = "somewhere"
         OUTPUT_ANCHOR = "repository"
 
-    assert resolve_output_dir(PluginsAnchored, anchors) == tmp_path / "plugins" / "somewhere"
+    assert (
+        resolve_output_dir(PluginsAnchored, anchors)
+        == tmp_path / "plugins" / "somewhere"
+    )
     assert resolve_output_dir(RepoAnchored, anchors) == tmp_path / "repo" / "somewhere"
 
 
@@ -139,9 +143,13 @@ def test_sandbox_replaces_both_anchors_with_distinct_subdirs(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_check_drift_hands_every_build_a_fully_sandboxed_anchor_pair(tmp_path, monkeypatch):
+def test_check_drift_hands_every_build_a_fully_sandboxed_anchor_pair(
+    tmp_path, monkeypatch
+):
     """Both fields must point inside a throwaway directory -- not just `plugins`."""
-    real_anchors = OutputAnchors(plugins=tmp_path / "plugins", repository=tmp_path / "repo")
+    real_anchors = OutputAnchors(
+        plugins=tmp_path / "plugins", repository=tmp_path / "repo"
+    )
     real_anchors.plugins.mkdir(parents=True)
     real_anchors.repository.mkdir(parents=True)
 

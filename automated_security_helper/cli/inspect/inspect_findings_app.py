@@ -361,7 +361,7 @@ class FindingsExplorerApp(App):
 
     def _get_unique_scanners(self) -> list:
         """Get a list of unique scanner names."""
-        return sorted(set(f["scanner"] for f in self.findings if "scanner" in f))
+        return sorted({f["scanner"] for f in self.findings if "scanner" in f})
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)

@@ -78,7 +78,7 @@ from typing import TYPE_CHECKING
 
 from automated_security_helper.models.workspace import (
     SkippedProject,
-    is_workspace_scan,
+    workspace_of,
 )
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -100,9 +100,10 @@ def skipped_projects(model: AshAggregatedResults) -> list[SkippedProject]:
     of that rule here could disagree with the payload about which projects are in
     the set -- which is the one thing these rows exist to make consistent.
     """
-    if not is_workspace_scan(model):
+    workspace = workspace_of(model)
+    if workspace is None:
         return []
-    return list(model.workspace.skipped_projects)
+    return list(workspace.skipped_projects)
 
 
 def skipped_project_detail(entry: SkippedProject) -> str:

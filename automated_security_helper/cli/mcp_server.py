@@ -58,7 +58,11 @@ from automated_security_helper.cli.mcp.profile_registry import (
 )
 from automated_security_helper.cli.mcp.progress_monitor import monitor_scan_progress
 from automated_security_helper.cli.mcp.sandbox import validate_config_input
-from automated_security_helper.cli.mcp.scan_target import validate_scan_target
+from automated_security_helper.cli.mcp.scan_target import (
+    resolve_scan_target,
+    validate_output_tree,
+    validate_scan_target,
+)
 from automated_security_helper.cli.mcp.session_identity import resolve_session_id
 from automated_security_helper.cli.mcp.source_delivery import (
     delivered_session_count,
@@ -122,6 +126,12 @@ def _resolve_omitted_source_dir(session_id: str) -> _OmittedSourceResolution:
     exactly that rather than papered over -- the count of other delivering
     sessions is the tell, and it names the likely cause in the error.
 
+    The registry record is checked against the filesystem rather than trusted.
+    The two can disagree -- a delivery interrupted mid-swap, or anything outside
+    the server removing the directory -- and a record pointing at a directory
+    that is gone, or at one that is empty, is the same false-negative shape as
+    the fallback above: the scan runs and reports clean.
+
     Args:
         session_id: The session this call resolved to.
 
@@ -135,8 +145,31 @@ def _resolve_omitted_source_dir(session_id: str) -> _OmittedSourceResolution:
     )
 
     delivered = get_session_source_dir(session_id)
-    if delivered is not None:
+    if delivered is not None and delivered.is_dir():
         return _OmittedSourceResolution(source_dir=str(delivered))
+
+    if delivered is not None:
+        # Registered, but the directory is gone. Returning the path anyway would
+        # report "directory not found" for a tree the server said it had, and an
+        # empty-but-present tree would be worse still -- it scans and reports
+        # clean. Naming the state is what makes it actionable, since re-delivering
+        # is the fix and the caller cannot guess that from a missing-path error.
+        return _OmittedSourceResolution(
+            error={
+                "success": False,
+                "error": (
+                    f"The source tree delivered under this session id is no "
+                    f"longer on disk at {delivered}. Deliver it again with "
+                    f"set_source_git or "
+                    f"set_source_zip_chunk/set_source_zip_finalize. Refusing to "
+                    f"scan: the recorded directory cannot be read, and scanning "
+                    f"the server's working directory instead would report on a "
+                    f"tree that is not yours."
+                ),
+                "error_type": "delivered_source_missing",
+                "session_id": session_id,
+            }
+        )
 
     if session_id == DEFAULT_SESSION_ID:
         # No session header at all: a single local client, where the working
@@ -209,6 +242,11 @@ async def run_ash_scan(
     - Poll get_scan_progress(scan_id) every 5 seconds (keeps connection alive)
     - Check progress['is_complete'] or progress['status'] for completion
     - DO NOT sleep for long periods without polling
+
+    A finished scan ends in status 'completed' or 'incomplete'; both set
+    is_complete. 'incomplete' means the run finished and its results are
+    readable, but one or more selected scanners did not complete: treat it as
+    terminal with partial coverage and read incomplete_scanners for which and why.
 
     Example usage:
         result = run_ash_scan(source_dir="/path/to/project")
@@ -298,23 +336,38 @@ async def run_ash_scan(
         # a permitted root. Without it a delivered tree is refused by the very
         # allowlist the operator set to bound the scan surface, since no operator
         # lists a directory the server invented per connection.
-        target_error = validate_scan_target(source_dir, session_id=session_id)
-        if target_error:
-            await ctx.error(str(target_error))
+        target = resolve_scan_target(source_dir, session_id=session_id)
+        if target.error is not None:
+            await ctx.error(str(target.error))
             return {
                 "success": False,
-                "error": str(target_error),
+                "error": str(target.error),
                 "error_type": "scan_target_not_permitted",
                 # Mirrors the category create_error_response sets on the
                 # mcp_tools side, so one key identifies a refusal from any entry
                 # point rather than two depending on which tool was called.
-                "error_category": target_error.context["error_category"],
+                "error_category": target.error.context["error_category"],
+            }
+        resolved_target = target.require()
+
+        # The policy canonicalized the target and nothing beneath it. The
+        # clean_output branch below deletes a file inside <target>/.ash, which
+        # follows a symlinked .ash out of the permitted roots, so the tree is
+        # checked before anything reads or writes through it.
+        output_error = validate_output_tree(resolved_target, ".ash", "ash_output")
+        if output_error is not None:
+            await ctx.error(str(output_error))
+            return {
+                "success": False,
+                "error": str(output_error),
+                "error_type": "output_dir_not_permitted",
+                "error_category": output_error.context["error_category"],
             }
 
         await ctx.info(f"Starting scan for directory: {source_dir}")
 
         directory_path_obj = Path(source_dir)
-        output_dir = directory_path_obj.joinpath(".ash", "ash_output")
+        output_dir = resolved_target.joinpath(".ash", "ash_output")
         aggregated_results_path = output_dir.joinpath("ash_aggregated_results.json")
 
         if clean_output and aggregated_results_path.exists():
@@ -599,7 +652,7 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
     Usage pattern:
         while True:
             progress = get_scan_progress(scan_id=scan_id)
-            if progress.get('is_complete') or progress.get('status') in ['completed', 'failed', 'cancelled']:
+            if progress.get('is_complete') or progress.get('status') in ['completed', 'incomplete', 'failed', 'cancelled']:
                 break
             time.sleep(5)  # Wait 5 seconds before next check
 
@@ -608,10 +661,40 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
 
     Returns:
         Dict with progress info including:
-        - is_complete: Boolean indicating if scan is done
-        - status: Current status (running, completed, failed, cancelled)
-        - progress_percentage: Estimated completion percentage
-        - message: Human-readable status message
+        - success: False when the poll itself failed, in which case `error`
+          describes why and no other key below is populated.
+        - is_complete: True once the run is over and its results are readable:
+          for `completed` and `incomplete` alike. It is not a statement that
+          every scanner ran; `coverage_complete` is.
+        - status: Current status (pending, running, completed, incomplete,
+          failed, cancelled). `incomplete` is terminal: the run finished and
+          produced results, but coverage has a gap -- a selected scanner was
+          MISSING or ERROR or lost targets, no scanner reached a verdict, a
+          converter did not run, a rule could not be evaluated, or a content
+          database was past its declared age bound. Its
+          findings are real and partial. `failed` means the run crashed or
+          produced no readable results.
+        - coverage_complete: True when nothing below names a gap, False when
+          something does, None while running and for failed or cancelled scans.
+          Reported whatever the completeness gate says, so a scan run with
+          `fail_on_incomplete_scanners: false` is `completed` with
+          `coverage_complete: false` when scanners did not run.
+        - incomplete_scanners: Each selected scanner that did not complete, as
+          `scanner`, `status` (MISSING, ERROR, or a status kept despite lost
+          targets), `reason` (`missing_dependencies`, `error`,
+          `partial_coverage`, `unrecognized_status`) and `detail`.
+        - no_scanner_ran: Scanners were expected and none reached a verdict.
+        - incomplete_converters: Converters that should have run and did not,
+          each with `converter` and `reason`.
+        - unevaluated_rules: Rules that raised instead of reaching a verdict.
+        - stale_content_databases: Content databases past their declared age
+          bound under `content_db_staleness: fail`, one record each with `name`,
+          `scanner`, `built`, `age`, `max_age` and `refresh`. Reported with the
+          completeness gate on or off; a scanner listed here only for its
+          database is not also in incomplete_scanners.
+        - completed_scanners / total_scanners: Counts, where "completed" means
+          the scanner ran and reported PASSED. A scanner that failed, errored or
+          never ran is excluded from the first number but not the second.
         - scanner_statuses: Per-scanner status for every scanner ASH considered,
           including ones that never ran. Empty until the scan finishes.
         - skipped_scanners: The subset that did not run, each with a `reason` of
@@ -624,7 +707,14 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
 
         progress_info = await mcp_get_scan_progress(scan_id=scan_id)
 
-        if not progress_info.get("success", False):
+        # Discriminates rather than tests presence. `not
+        # progress_info.get("success")` was true on both branches, because the
+        # producer set the key only on failure: this was an unconditional return
+        # and everything below it -- the scanners walk, the severity totals and
+        # summarize_scanner_statuses -- was dead on a real poll. Both arms are
+        # needed: a producer can report a problem by setting success False, or by
+        # including error without setting success at all.
+        if "error" in progress_info or progress_info.get("success") is False:
             return progress_info
 
         registry = get_scan_registry()
@@ -670,7 +760,12 @@ async def get_scan_progress(ctx: Context, scan_id: str) -> Dict[str, Any]:
                         try:
                             # encoding explicit: see cli/report.py. ASH writes this
                             # file as UTF-8; the locale default is cp1252 on Windows.
-                            with open(result_file, "r", encoding="utf-8") as f:
+                            # Blocking open + json.load on the event loop, which stalls this MCP server for
+                            # every other in-flight request while a scan result is read. A correct fix moves
+                            # both calls into asyncio.to_thread together (reading in a thread and parsing on
+                            # the loop just relocates the stall), so it is a real change to this function
+                            # rather than a lint edit. Deferred deliberately.
+                            with open(result_file, "r", encoding="utf-8") as f:  # noqa: ASYNC230
                                 result_data = json.load(f)
 
                             scanner_results[scanner_name][target_type] = result_data
@@ -722,6 +817,13 @@ async def get_scan_results(
     """
     Get final results for a completed scan with optional filtering.
 
+    Works the same for an `incomplete` scan, whose partial findings are returned
+    in full. The response's `status` is `completed` or `incomplete`, decided by
+    the rule the scan's exit code uses, with `coverage_complete`,
+    `incomplete_scanners`, `no_scanner_ran`, `incomplete_converters`,
+    `unevaluated_rules` and `stale_content_databases` naming any gap, as in
+    get_scan_progress.
+
     Args:
         output_dir: Path to the scan output directory (absolute path recommended)
         filter_level: Filter level for response data. Options:
@@ -768,7 +870,12 @@ async def get_scan_results(
             output_dir=output_dir, session_id=session_id
         )
 
-        if "error" in results or not results.get("success"):
+        # `not results.get("success")` was true on both branches, because the
+        # producer set the key only on failure. Every filter below sat behind
+        # that early return, so filter_level, scanners, severities and
+        # actionable_only were all inert on a real scan while the unit tests --
+        # which stub the producer with a dict that does carry the key -- passed.
+        if "error" in results or results.get("success") is False:
             return results
 
         if actionable_only:
@@ -833,7 +940,17 @@ async def get_scan_summary(
     # via get_scan_summary from one obtained by calling get_scan_results directly.
     # Preserved from the pre-refactor implementation; asserted by
     # tests/unit/cli/test_mcp_server.py::TestGetScanSummary.
-    if isinstance(summary, dict) and summary.get("success"):
+    #
+    # Conditioned on the absence of a failure signal rather than on the presence
+    # of `success`, matching the guards in the two tools above. Requiring the key
+    # to be present and truthy meant the tag was never attached on a real scan:
+    # get_scan_results returned early before filter_summary -- the only thing on
+    # this path that sets the key -- ever ran.
+    if (
+        isinstance(summary, dict)
+        and "error" not in summary
+        and summary.get("success") is not False
+    ):
         summary["_source_function"] = "get_scan_summary"
     return summary
 
@@ -888,7 +1005,8 @@ async def get_scan_result_paths(
 
         await ctx.info(f"Getting scan result paths from: {output_dir}")
 
-        if not output_path.exists():
+        # Blocking stat on the event loop. Deferred with the other MCP-server sites.
+        if not output_path.exists():  # noqa: ASYNC240
             return {
                 "success": False,
                 "error": f"Output directory does not exist: {output_dir}",

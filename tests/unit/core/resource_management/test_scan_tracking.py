@@ -13,7 +13,6 @@ file-based detection, and cleanup scenarios.
 import json
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 

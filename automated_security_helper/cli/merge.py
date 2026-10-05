@@ -139,7 +139,13 @@ from typing import Annotated, Any, Dict, List, Optional, Sequence, Tuple
 
 import typer
 from pydantic import ValidationError
-from rich import print
+
+# `print` shadows the builtin on purpose: this is rich's documented import
+# idiom, so every print() below renders markup and respects the console. The
+# fix A004 wants is an alias, which would mean rewriting every call in this
+# module for no behavior change -- and tests/unit/cli/mcp/test_stdout_jsonrpc_safety.py
+# reasons about this exact import form.
+from rich import print  # noqa: A004
 
 from automated_security_helper.base.plugin_context import PluginContext
 
@@ -151,7 +157,11 @@ from automated_security_helper.base.plugin_context import PluginContext
 # rebuild by side effect of importing resolve_config; relying on an import made
 # for another purpose is what makes this fragile, so the dependency is named here.
 from automated_security_helper.config.ash_config import AshConfig
-from automated_security_helper.core.enums import AshLogLevel, ExportFormat
+from automated_security_helper.core.enums import (
+    AshLogLevel,
+    ExportFormat,
+    ScannerStatus,
+)
 from automated_security_helper.core.exceptions import ShardCoverageError
 from automated_security_helper.core.phases.report_phase import ReportPhase
 from automated_security_helper.core.progress import LiveProgressDisplay
@@ -166,7 +176,7 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.plugins import ash_plugin_manager
 from automated_security_helper.plugins.loader import load_plugins
 from automated_security_helper.utils.atomic_write import write_text_atomically
-from automated_security_helper.utils.log import get_logger
+from automated_security_helper.utils.log import ASH_LOGGER, get_logger
 
 #: The filename every ASH scan writes its aggregated results to. A ``--results``
 #: directory is searched for this name.
@@ -186,6 +196,15 @@ _RESULTS_DIR_CANDIDATES = (
     Path(RESULTS_FILE_NAME),
     Path("ash_output") / RESULTS_FILE_NAME,
     Path(".ash") / "ash_output" / RESULTS_FILE_NAME,
+)
+
+
+#: The two statuses that say a scanner did not run, as opposed to ran and reached a
+#: verdict. An unclaimed row carrying only these is reported through
+#: ``incomplete_scanners`` and the ``fail_on_incomplete_scanners`` gate rather than
+#: refused as a shard-coverage failure -- see :func:`_verify_scanner_union`.
+_NEVER_ATTEMPTED_STATUSES = frozenset(
+    {ScannerStatus.ERROR.value, ScannerStatus.MISSING.value}
 )
 
 
@@ -437,22 +456,100 @@ def _verify_scanner_union(
             owner_by_scanner[_normalized(scanner)] = position
 
     seen: Dict[str, Path] = {}
+    statuses: Dict[str, set[str]] = {}
     for results_file, results, _ in shards:
-        for scanner in results.scanner_results:
-            seen.setdefault(_normalized(scanner), results_file)
+        for scanner, entry in results.scanner_results.items():
+            key = _normalized(scanner)
+            seen.setdefault(key, results_file)
+            status = getattr(entry, "status", None)
+            statuses.setdefault(key, set()).add(str(getattr(status, "value", status)))
 
-    unclaimed = sorted(set(seen) - set(owner_by_scanner))
+    # An unclaimed row is only an offence when it claims its scanner's outcome is
+    # KNOWN, and that narrowing is what keeps this check answering the question it
+    # was written for.
+    #
+    # The harm stated below is that merging "would report them as deliberately
+    # skipped rather than never attempted". A row already recording ERROR or MISSING
+    # says never-attempted outright, so the merged report does not lose that: the
+    # scanner is still listed by `incomplete_scanners`, and the
+    # `fail_on_incomplete_scanners` gate is what turns the listing into a non-zero
+    # exit code. Refusing the merge instead put a correct finding through a channel
+    # no flag reaches, and attributed it to a partitioning disagreement that had not
+    # happened.
+    #
+    # WHAT THE EXEMPTION DOES GIVE UP, stated because the sentence above used to
+    # claim it gave up nothing. The refusal applied whatever flags were passed --
+    # this function is called unconditionally -- and the channel replacing it does
+    # not. `--no-fail-on-incomplete-scanners` removes the exit code as well as the
+    # refusal, and then no automated reader sees that a scanner appeared in the
+    # results which no shard was ever assigned. That is why the exempted names are
+    # emitted at WARNING below instead of being passed over in silence: a disclosure
+    # no flag can switch off is what is left once the refusal is gone.
+    #
+    # Two row shapes reach this, both written by ScanPhase: a scanner whose
+    # constructor raised, keyed by its resolved config name, and a plugin module that
+    # failed to import, keyed by its dotted module path. Neither can be in
+    # `assigned_scanners` -- that list is built from `scanner_instances`, and a module
+    # is not a scanner at all -- so before this narrowing a sharded merge refused on
+    # both.
+    #
+    # A DENYLIST OF THE TWO NEVER-ATTEMPTED STATUSES, and not `_completed()`, even
+    # though that helper is right next door and looks like the same question. It
+    # returns False for a status this version has never heard of, which is fail-CLOSED
+    # where it is used (`_verify_shard_contributions` asks "did any owned scanner
+    # complete") and fail-OPEN here, where False would mean "exempt". Naming the two
+    # statuses keeps an unrecognised one refusing. That asymmetry is invisible from
+    # the helper's own definition and only shows up when you ask what the caller does
+    # with a False.
+    #
+    # Every status a row carries has to qualify, across all shards that mention it: a
+    # name recorded PASSED by one shard and ERROR by another is the original defect,
+    # and taking the ERROR as permission would hide it. A name with no readable status
+    # at all is not exempt either.
+    orphans = set(seen) - set(owner_by_scanner)
+    exempted = sorted(
+        name
+        for name in orphans
+        if statuses.get(name) and statuses[name] <= _NEVER_ATTEMPTED_STATUSES
+    )
+    unclaimed = sorted(orphans - set(exempted))
+
+    # Ahead of the refusal below so the disclosure is emitted whether or not this
+    # call goes on to raise. Both sets are drawn from `orphans`, so a merge can
+    # legitimately produce one, the other, or both.
+    if exempted:
+        exempt_detail = ", ".join(
+            f"{name} ({', '.join(sorted(statuses[name]))}, "
+            f"seen in {seen[name].as_posix()})"
+            for name in exempted
+        )
+        ASH_LOGGER.warning(
+            f"{len(exempted)} scanner(s) appear in shard results that no shard was "
+            f"assigned: {exempt_detail}. Each row records the scanner as never "
+            f"attempted, which is why this is not refused as a partitioning "
+            f"disagreement and the merge continues. The coverage is still short: "
+            f"--fail-on-incomplete-scanners is what turns that into a non-zero exit "
+            f"code, and under --no-fail-on-incomplete-scanners this line is the only "
+            f"record of it."
+        )
+
     if unclaimed:
         listed = ", ".join(
-            f"{name} (seen in {seen[name].as_posix()})" for name in unclaimed
+            f"{name} ({', '.join(sorted(statuses.get(name) or {'no status'}))}, "
+            f"seen in {seen[name].as_posix()})"
+            for name in unclaimed
         )
         raise ShardCoverageError(
             f"These scanners appear in shard results but no shard was assigned "
-            f"them: {listed}. The executors resolved different scanner sets -- one "
-            f"was missing a plugin module, or --python-only or a config override "
-            f"was applied to some jobs and not others. Every shard excluded these "
-            f"scanners, so no shard ran them, and merging would report them as "
-            f"deliberately skipped rather than never attempted."
+            f"them: {listed}. No shard ran them, so merging would report them as "
+            f"deliberately skipped rather than never attempted. The status of each "
+            f"is named above because the cause differs: the executors resolved "
+            f"different scanner sets (one missing a plugin module, or --python-only "
+            f"or a config override applied to some jobs and not others), or a "
+            f"scanner was excluded by every shard's partition. A scanner that failed "
+            f"to construct, or whose plugin module failed to import, is recorded "
+            f"ERROR or MISSING instead and is reported through "
+            f"--fail-on-incomplete-scanners rather than refused here."
         )
 
     missing_from_owner = sorted(
@@ -509,6 +606,63 @@ def _completed(entry: Any) -> bool:
     status = getattr(entry, "status", None)
     status_value = getattr(status, "value", status)
     return status_value in _COMPLETE_SCANNER_STATUSES
+
+
+def _report_scanners_no_shard_selected(
+    shards: Sequence[Tuple[Path, AshAggregatedResults, ShardAssignment]],
+) -> None:
+    """Name the scanners assigned to a shard and intended by none of them.
+
+    A disclosure rather than a refusal, and the distinction is the whole design of
+    this function. Such a scanner ran on no shard, and the merged report presents it
+    as SKIPPED -- which ``_completed`` reads as a known outcome, so nothing above
+    objects. Two quite different causes produce that state and the provenance cannot
+    separate them: a scanner every shard's config disables, which is the operator's
+    choice, and a scanner one job's ``--scanners`` value dropped while the others
+    kept it, which is a coverage hole no existing check can see. A shard knows
+    nothing about scanners it does not own, so no cross-shard comparison can tell
+    which it was.
+
+    Refusing would therefore break merges on any host where a scanner is legitimately
+    disabled, which is the same trap that narrowing ``assigned_scanners`` would have
+    walked into. WARNING is the compromise: the merged report says SKIPPED either way,
+    and this line is the only place that says no shard asked.
+
+    Silent when no shard recorded a selection, which is every results file written
+    before ``selected_scanners`` existed. Inferring a hole from that absence would
+    name every scanner on every merge of an older fan-out's artifacts.
+
+    Args:
+        shards: Verified shard results, with assignments.
+    """
+    if not any(assignment.selected_scanners is not None for _, _, assignment in shards):
+        return
+
+    # _normalized here takes one name, unlike sharding._normalized which takes an
+    # iterable. Two functions, one name, different arities.
+    assigned: dict[str, int] = {}
+    selected: set[str] = set()
+    for _, _, assignment in shards:
+        for scanner in assignment.assigned_scanners:
+            assigned[_normalized(scanner)] = assignment.shard_index
+        for scanner in assignment.selected_scanners or []:
+            selected.add(_normalized(scanner))
+
+    unselected = sorted(set(assigned) - selected)
+    if not unselected:
+        return
+
+    detail = ", ".join(
+        f"{name} (assigned to shard {assigned[name]})" for name in unselected
+    )
+    ASH_LOGGER.warning(
+        f"{len(unselected)} scanner(s) were assigned to a shard but no shard "
+        f"intended to run them: {detail}. The merged report shows them SKIPPED, "
+        f"which is correct if a config disables them everywhere and misleading if "
+        f"one job's --scanners or --exclude-scanners value differed from the others' "
+        f"-- nothing in the shard results can tell those apart. Check that every job "
+        f"in the matrix was given the same scanner selection."
+    )
 
 
 def _verify_shard_contributions(
@@ -581,7 +735,7 @@ def _verify_shard_contributions(
             f"Their scanners contributed no findings because they did not run, not "
             f"because there was nothing to find, so merging would report a partial "
             f"scan as a whole one. Check whether those CI jobs had the scanners' "
-            f"tools available. Drop --fail-on-incomplete-scanners to merge anyway."
+            f"tools available. Pass --no-fail-on-incomplete-scanners to merge anyway."
         )
 
 
@@ -713,6 +867,7 @@ def merge_shard_results(
     # make the output impossible to diff across CI runs.
     shards.sort(key=lambda entry: entry[2].shard_index)
     owner_by_scanner = _verify_scanner_union(shards)
+    _report_scanners_no_shard_selected(shards)
     if require_scanner_completion:
         _verify_shard_contributions(shards)
 
@@ -1015,10 +1170,11 @@ def merge_command(
             help=(
                 "Refuse the merge when a shard completed none of the scanners it "
                 "owned, and exit 1 when any scanner in the union is ERROR or "
-                "MISSING. Without this, a shard whose scanners never ran "
+                "MISSING. Without it, a shard whose scanners never ran "
                 "contributes no findings and the merged report reads as a "
                 "complete, clean scan. Defaults to the scan configuration's "
-                "value, then to false."
+                "value, then to true; pass --no-fail-on-incomplete-scanners to "
+                "merge a partial union anyway."
             ),
         ),
     ] = None,
@@ -1090,7 +1246,7 @@ def merge_command(
         print(f"[red]Refusing to merge: {exc}[/red]")
         raise typer.Exit(1)
 
-    output_dir_path = Path(output_dir)
+    output_dir_path = _relocate_colliding_output_dir(Path(output_dir))
     output_dir_path.mkdir(parents=True, exist_ok=True)
 
     # The scan's own configuration, carried through the shard results, rather
@@ -1148,6 +1304,59 @@ def merge_command(
         raise typer.Exit(exit_code)
 
 
+def _relocate_colliding_output_dir(output_dir: Path) -> Path:
+    """Move *output_dir* out of the way when it contains the directory being reported on.
+
+    ``ash scan`` has done this for its own ``--output-dir`` since before this command
+    existed, and says so loudly (``cli/scan.py``). ``ash merge`` took the operator's
+    value verbatim, and it builds its ``PluginContext`` with
+    ``source_dir=Path.cwd()``, so ``ash merge --output-dir .`` made the two the same
+    directory and ASH wrote its reports into the tree it was treating as the source.
+
+    The consequence is not untidiness. ``utils.sarif_utils.apply_suppressions_to_sarif``
+    excludes findings whose location resolves inside ``output_dir`` and outside its
+    work directory, on the grounds that those are reports ASH wrote rather than
+    findings about the scanned tree. When ``output_dir`` is ``source_dir`` or an
+    ancestor of it, that describes every finding: on three shards carrying five
+    findings between them, the merged report came out ``Findings: 0 | Actionable: 0``
+    at exit 0, which is what a clean scan looks like. To reproduce, disable the
+    ancestor guard in ``apply_suppressions_to_sarif`` and run
+    ``TestMergeCli::test_an_output_dir_equal_to_the_cwd_is_relocated``. That function
+    now declines the exclusion in this configuration and says so, but declining a
+    guard is a second-best outcome -- relocating means the guard keeps working.
+
+    Equal-to OR an ancestor-of, where ``ash scan`` checks only equality.
+    ``--output-dir ..`` from a subdirectory reaches the same state without the paths
+    ever being equal, and an ancestor is worse than equality rather than milder.
+
+    Relocated to ``<given>/.ash/ash_output``, the same move and the same subpath
+    ``ash scan`` uses, which lands strictly inside the given directory and so is an
+    ancestor of nothing. Relocated rather than refused because the operator's intent
+    is unambiguous and recoverable -- they wanted the artifacts here -- and a refusal
+    would fail a pipeline over a path choice.
+
+    Args:
+        output_dir: The ``--output-dir`` value as given.
+
+    Returns:
+        The directory to write to: *output_dir* unchanged in the ordinary case.
+    """
+    resolved = output_dir.resolve()
+    cwd = Path.cwd().resolve()
+    # is_relative_to is true for equal paths, so this covers the collision case as
+    # well as containment.
+    if not cwd.is_relative_to(resolved):
+        return output_dir
+
+    relocated = output_dir.joinpath(".ash", "ash_output")
+    print(
+        f"[bold yellow]output-dir has been adjusted to the following to avoid "
+        f"collisions and potential impact to the reported tree: "
+        f"{Path(relocated).as_posix()}[/bold yellow]"
+    )
+    return relocated
+
+
 def _resolve_require_scanner_completion(
     loaded: Sequence[Tuple[Path, AshAggregatedResults]],
     cli_value: Optional[bool],
@@ -1155,14 +1364,14 @@ def _resolve_require_scanner_completion(
     """Whether to refuse a merge whose shards completed nothing.
 
     The CLI flag wins; otherwise the scan's own ``fail_on_incomplete_scanners``,
-    carried in the shard results; otherwise off, matching
+    carried in the shard results; otherwise on, matching
     ``AshConfig.fail_on_incomplete_scanners``. The same precedence
     ``fail_on_findings`` follows, so an operator does not have to remember which
     of the two knobs reads the config first.
 
     The final fallback agrees with the model default, and that is the whole rule --
-    it tracks the model rather than holding an opinion of its own. It read ``True``
-    while the model default was on, and had to move with it: a merge that gated by
+    it tracks the model rather than holding an opinion of its own. It has now read
+    both values, and each time it had to move with the model: a merge that gated by
     default while a scan of the same tree did not would mean the same shards passed
     or failed depending on which command looked at them.
     ``tests/unit/cli/test_merge.py::TestRequireScannerCompletionResolution`` asserts
@@ -1181,7 +1390,7 @@ def _resolve_require_scanner_completion(
         value = getattr(results.ash_config, "fail_on_incomplete_scanners", None)
         if isinstance(value, bool):
             return value
-    return False
+    return True
 
 
 def _merged_exit_code(

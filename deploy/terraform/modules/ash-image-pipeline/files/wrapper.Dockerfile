@@ -29,5 +29,44 @@ FROM ${ASH_BASE_IMAGE}
 COPY --chmod=0755 ash-container-init /usr/local/bin/ash-container-init
 COPY --chmod=0755 ash-mcp-serve /usr/local/bin/ash-mcp-serve
 
+#
+# Record where this build put the things a scan reads, under names no runtime
+# rewrites.
+#
+# WHY: the Lambda gate in ../../codecommit-gate builds on this image, and Lambda
+# runs a container image with a read-only root filesystem -- only /tmp is
+# writable -- while also replacing PATH with its own. Every scanner path the ASH
+# stage set up therefore points somewhere unwritable at scan time:
+# GRYPE_DB_CACHE_DIR, SEMGREP_RULES_CACHE_DIR and OPENGREP_RULES_CACHE_DIR are
+# under /deps, HOME is under / or /home, and uv writes a lock inside its own
+# tool directory. The gate handler redirects all of them into /tmp and then seeds
+# the writable copies from the locations recorded here.
+#
+# Without these, the redirection alone points the scanners at empty /tmp
+# directories: uv reinstalls its tools from PyPI (which fails with no egress),
+# and an image built with OFFLINE=YES cannot reach the vulnerability database and
+# rulesets its own build proved are present -- so grype scans nothing and reports
+# no findings. See _scan_env in
+# ../../codecommit-gate/files/ash_pr_gate.py, which reads exactly these names.
+#
+# READ OFF THE STAGE, not written out as literals. ash-image-pipeline's
+# ash_image_target selects which ASH stage this wraps, and the stages differ:
+# only the non-root one declares ENV HOME. A literal path would be right for one
+# target and silently wrong for another, and "silently wrong" here means an
+# unseeded cache, which is the defect itself. Docker expands these against the
+# values already present in the stage, so each records what this build produced.
+#
+# The HOME default covers the root-running stages (core, ci), which set no ENV
+# HOME, so ${HOME} alone would expand to nothing. /root is what those stages
+# resolve: the CDK flavor of this same Lambda image bakes
+# ASH_BAKED_UV_TOOL_DIR="/root/.local/share/uv/tools" over the ci stage, and the
+# read-only-filesystem failure recorded in deploy/cdk/lib/ash-container-scripts.ts
+# names /root/.local/share/uv/tools as a measured write path.
+ENV ASH_IMAGE_PATH="${PATH}"
+ENV ASH_BAKED_UV_TOOL_DIR="${HOME:-/root}/.local/share/uv/tools"
+ENV ASH_BAKED_GRYPE_DB_DIR="${GRYPE_DB_CACHE_DIR}"
+ENV ASH_BAKED_SEMGREP_RULES_DIR="${SEMGREP_RULES_CACHE_DIR}"
+ENV ASH_BAKED_OPENGREP_RULES_DIR="${OPENGREP_RULES_CACHE_DIR}"
+
 ENTRYPOINT ["/usr/local/bin/ash-container-init"]
 CMD ["/usr/local/bin/ash-mcp-serve"]

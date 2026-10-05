@@ -12,7 +12,7 @@ from pydantic import AnyUrl, BaseModel, ConfigDict, EmailStr, Field, RootModel, 
 
 class Author(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     name: str
     email: EmailStr | None = None
@@ -21,7 +21,7 @@ class Author(BaseModel):
 
 class Repository(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     type: str
     url: AnyUrl
@@ -29,31 +29,31 @@ class Repository(BaseModel):
 
 class Icon(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     src: str
-    size: constr(pattern=r'^\d+x\d+$')
+    size: constr(pattern=r"^\d+x\d+$")
     theme: constr(min_length=1) | None = None
 
 
 class Localization(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
-    resources: constr(pattern=r'\$\{locale\}')
-    default_locale: constr(pattern=r'^[A-Za-z0-9]{2,8}(?:-[A-Za-z0-9]{1,8})*$')
+    resources: constr(pattern=r"\$\{locale\}")
+    default_locale: constr(pattern=r"^[A-Za-z0-9]{2,8}(?:-[A-Za-z0-9]{1,8})*$")
 
 
 class Type(StrEnum):
-    python = 'python'
-    node = 'node'
-    binary = 'binary'
-    uv = 'uv'
+    python = "python"
+    node = "node"
+    binary = "binary"
+    uv = "uv"
 
 
 class Tool(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     name: str
     description: str | None = None
@@ -61,7 +61,7 @@ class Tool(BaseModel):
 
 class Prompt(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     name: str
     description: str | None = None
@@ -70,14 +70,14 @@ class Prompt(BaseModel):
 
 
 class Platform(StrEnum):
-    darwin = 'darwin'
-    win32 = 'win32'
-    linux = 'linux'
+    darwin = "darwin"
+    win32 = "win32"
+    linux = "linux"
 
 
 class Runtimes(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     python: str | None = None
     node: str | None = None
@@ -85,7 +85,7 @@ class Runtimes(BaseModel):
 
 class Compatibility(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     claude_desktop: str | None = None
     platforms: list[Platform] | None = None
@@ -93,16 +93,16 @@ class Compatibility(BaseModel):
 
 
 class Type1(StrEnum):
-    string = 'string'
-    number = 'number'
-    boolean = 'boolean'
-    directory = 'directory'
-    file = 'file'
+    string = "string"
+    number = "number"
+    boolean = "boolean"
+    directory = "directory"
+    file = "file"
 
 
 class UserConfig(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     type: Type1
     title: str
@@ -129,7 +129,7 @@ class Env(RootModel[dict[str, str]]):
 
 class PlatformOverrides(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     command: Command | None = None
     args: Args | None = None
@@ -138,7 +138,7 @@ class PlatformOverrides(BaseModel):
 
 class McpConfig(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     command: str
     args: list[str] | None = None
@@ -148,7 +148,7 @@ class McpConfig(BaseModel):
 
 class Server(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
     type: Type
     entry_point: str
@@ -157,14 +157,14 @@ class Server(BaseModel):
 
 class Model(BaseModel):
     model_config = ConfigDict(
-        extra='forbid',
+        extra="forbid",
     )
-    field_schema: str | None = Field(default=None, alias='$schema')
-    dxt_version: Literal['0.4'] = '0.4'
+    field_schema: str | None = Field(default=None, alias="$schema")
+    dxt_version: Literal["0.4"] = "0.4"
     """
     @deprecated Use manifest_version instead
     """
-    manifest_version: Literal['0.4'] = '0.4'
+    manifest_version: Literal["0.4"] = "0.4"
     name: str
     display_name: str | None = None
     version: str
@@ -189,4 +189,4 @@ class Model(BaseModel):
     privacy_policies: list[AnyUrl] | None = None
     compatibility: Compatibility | None = None
     user_config: dict[str, UserConfig] | None = None
-    field_meta: dict[str, dict[str, Any]] | None = Field(default=None, alias='_meta')
+    field_meta: dict[str, dict[str, Any]] | None = Field(default=None, alias="_meta")

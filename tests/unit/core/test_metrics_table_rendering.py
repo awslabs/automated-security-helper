@@ -192,7 +192,7 @@ ALL_STATUSES = ["PASSED", "FAILED", "ERROR", "SKIPPED", "MISSING", "PENDING"]
 def test_wide_status_cells_use_rich_markup_strings(wide_console):
     table = _build([_metrics(status=s) for s in ALL_STATUSES], wide_console)
 
-    assert [c for c in _cells(table, ("Result",))] == [
+    assert list(_cells(table, ("Result",))) == [
         "[bold green]PASSED[/bold green]",
         "[bold red]FAILED[/bold red]",
         "[bold red]ERROR[/bold red]",
