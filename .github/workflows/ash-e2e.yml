@@ -21,9 +21,13 @@ name: ASH - End to end
 # PENDING CHANNELS
 #
 # A channel whose job is still a placeholder is listed in E2E_PENDING below and its job
-# carries `if: false`. The gate requires a pending channel to be skipped and every other
-# channel to succeed. A pending channel that starts succeeding fails the gate until it is
-# removed from the list, so the placeholder cannot outlive its reason unnoticed.
+# carries `if: vars.ASH_E2E_RUN_PLACEHOLDERS == 'true'`. No such repository variable is
+# set, so the job is skipped. (A literal `if: false` would do the same, but actionlint
+# rejects a constant condition, and job-level `if:` cannot read `env`.) The gate requires
+# a pending channel to be skipped and every other channel to succeed. A pending channel
+# that runs, whether because it was implemented or because someone set the variable,
+# fails the gate until it is removed from the list, so the placeholder cannot outlive its
+# reason unnoticed.
 
 on:
   push:
@@ -44,7 +48,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  # Channels whose job below is a placeholder (if: false). See PENDING CHANNELS above.
+  # Channels whose job below is a placeholder. See PENDING CHANNELS above.
   E2E_PENDING: container homebrew mcpb
 
 jobs:
@@ -121,7 +125,7 @@ jobs:
   container:
     name: "e2e: container image"
     needs: contract
-    if: false
+    if: vars.ASH_E2E_RUN_PLACEHOLDERS == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -133,7 +137,7 @@ jobs:
   homebrew:
     name: "e2e: Homebrew from head"
     needs: contract
-    if: false
+    if: vars.ASH_E2E_RUN_PLACEHOLDERS == 'true'
     runs-on: macos-latest
     timeout-minutes: 5
     permissions:
@@ -145,7 +149,7 @@ jobs:
   mcpb:
     name: "e2e: MCPB via the MCP inspector"
     needs: contract
-    if: false
+    if: vars.ASH_E2E_RUN_PLACEHOLDERS == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
