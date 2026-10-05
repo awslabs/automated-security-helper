@@ -151,6 +151,7 @@ STACK_CLASSES: dict[str, str] = {
     "AshAgentCore": WITH_PREPOPULATED,
     "AshCodeCommitGate": WITH_PREPOPULATED,
     "AshDistributedPipeline": WITH_PREPOPULATED,
+    "AshEksOperator": WITHOUT_PREPOPULATED,
     "AshFargate": WITH_PREPOPULATED,
     "AshImagePipeline": WITH_PREPOPULATED,
 }

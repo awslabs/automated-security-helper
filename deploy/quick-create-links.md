@@ -24,7 +24,7 @@ ships a committed template that can be launched that way, from a bucket you own.
 > this file, not a gap waiting to be filled.
 >
 > **The links are for you to render.** Copy the templates to a bucket
-> you own, set it in `quick-create-hosting.json`, and re-render — 5
+> you own, set it in `quick-create-hosting.json`, and re-render — 6
 > working links, in your account, for you to use or publish internally.
 > See [Rendering links for your own
 > bucket](#rendering-links-for-your-own-bucket). To launch without any of
@@ -41,6 +41,7 @@ opens with the field blank and stack creation fails until you fill it.
 | `AshAgentCore` | `NO-BUCKET-CONFIGURED` | — |
 | `AshCodeCommitGate` | `NO-BUCKET-CONFIGURED` | `CodeCommitRepositoryArn` |
 | `AshDistributedPipeline` | `NO-BUCKET-CONFIGURED` | — |
+| `AshEksOperator` | `NO-BUCKET-CONFIGURED` | `EksClusterName`, `OperatorImageUri` |
 | `AshFargate` | `NO-BUCKET-CONFIGURED` | — |
 | `AshImagePipeline` | `NO-BUCKET-CONFIGURED` | — |
 
@@ -61,6 +62,7 @@ request, so a value here cannot disagree with the template it launches.
 | `AshAgentCore` | `AshVersion`=`v3.7.0`, `AshOfflineMode`=`NO`, `RebuildSchedule`=`cron(0 6 * * ? *)` |
 | `AshCodeCommitGate` | `AshVersion`=`v3.7.0`, `AshOfflineMode`=`NO`, `RebuildSchedule`=`cron(0 6 * * ? *)` |
 | `AshDistributedPipeline` | `AshVersion`=`v3.7.0`, `AshOfflineMode`=`NO`, `RebuildSchedule`=`cron(0 6 * * ? *)` |
+| `AshEksOperator` | — |
 | `AshFargate` | `AshVersion`=`v3.7.0`, `AshOfflineMode`=`NO`, `RebuildSchedule`=`cron(0 6 * * ? *)` |
 | `AshImagePipeline` | `AshVersion`=`v3.7.0`, `AshOfflineMode`=`NO`, `RebuildSchedule`=`cron(0 6 * * ? *)` |
 

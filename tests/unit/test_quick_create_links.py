@@ -189,6 +189,21 @@ class TestEveryTemplateIsClassified:
             "classification for a missing stack reads as coverage and checks nothing."
         )
 
+    def test_the_eks_operator_is_a_prebuilt_image_consumer(self, renderer):
+        """AshEksOperator deploys an operator image built elsewhere, so it has no link params.
+
+        It arrived on a separate branch from this gate and was the first template that
+        declares none of the prepopulated names. Pin both halves of why it is
+        WITHOUT_PREPOPULATED: it takes the image as a URI, and it declares no build input.
+        """
+        params = renderer.load_templates()["AshEksOperator"]
+        assert renderer.STACK_CLASSES["AshEksOperator"] == renderer.WITHOUT_PREPOPULATED
+        assert "OperatorImageUri" in params
+        assert not set(renderer.PREPOPULATED) & set(params), (
+            "AshEksOperator now declares an image-build parameter; reclassify it as "
+            f"{renderer.WITH_PREPOPULATED!r} so its link carries the value."
+        )
+
     def test_an_unclassified_template_is_rejected(self, renderer):
         """The positive control, stated directly rather than only inside self_test."""
         stacks = renderer.load_templates()
