@@ -116,6 +116,11 @@ def _pinned_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
     for console in _module_level_consoles():
         monkeypatch.setattr(console, "_width", None)
         monkeypatch.setattr(console, "_height", None)
+        # Fixed when the Console was built, by the detect_legacy_windows() pinned just
+        # below, which an import at collection ran unpinned. cli/dependencies.py's
+        # console is built that way, and on windows-latest it drew the installer panel
+        # with square corners in some workers and rounded ones in others.
+        monkeypatch.setattr(console, "legacy_windows", False)
     # On Windows, a console whose stream is not a real console counts as "legacy
     # Windows", and rich then subtracts one from COLUMNS: every rich.print line would
     # wrap at 99 there and 100 everywhere else. The streams under test are capture
