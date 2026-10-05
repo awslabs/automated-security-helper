@@ -61,6 +61,11 @@ def _zip_bytes() -> bytes:
             ("README.md", "# demo\n"),
         ):
             info = zipfile.ZipInfo(name, date_time=(2026, 1, 2, 3, 4, 6))
+            # ZipInfo records the OS that made the archive, 0 on Windows and 3
+            # elsewhere, so the bytes (and the sha256 the mismatch message quotes)
+            # differed on windows-latest. Pinned to 3, Unix, which is also the
+            # system external_attr's permission bits are meaningful for.
+            info.create_system = 3
             info.external_attr = 0o644 << 16
             archive.writestr(info, body)
     return buffer.getvalue()
