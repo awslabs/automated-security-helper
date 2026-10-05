@@ -240,6 +240,30 @@ suite('ASH in a real VS Code', () => {
     }
   });
 
+  test('stops a scan that outruns ash.scanTimeoutSeconds, without blocking the editor', async () => {
+    await arrange('findings');
+    if (MODE === 'stub') {
+      fs.writeFileSync(SCENARIO_FILE, JSON.stringify({ fixture: 'findings', hangSeconds: 120 }));
+    }
+    // In real mode no hang is needed: ASH takes several seconds to start, so a
+    // genuine scan outruns 2s.
+    await setSetting('scanTimeoutSeconds', 2, vscode.ConfigurationTarget.Global);
+    try {
+      const started = Date.now();
+      let ticks = 0;
+      const ticker = setInterval(() => (ticks += 1), 50);
+      const report = await scan().finally(() => clearInterval(ticker));
+
+      assert.strictEqual(report.status, 'scan-failed', report.detail);
+      assert.ok((report.detail ?? '').includes('did not finish within 2s'), report.detail);
+      assert.ok(Date.now() - started < 15_000, 'the timeout did not stop the scan');
+      // The extension host kept running timers while the scan ran.
+      assert.ok(ticks >= 10, `the extension host was blocked: ${ticks} ticks`);
+    } finally {
+      await setSetting('scanTimeoutSeconds', undefined, vscode.ConfigurationTarget.Global);
+    }
+  });
+
   test('runs ashx once it is installed', async () => {
     const ashx = path.join(ASHX_DIR, 'ashx');
     if (MODE === 'stub') {

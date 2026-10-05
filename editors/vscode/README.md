@@ -35,6 +35,18 @@ diagnostics with what the scan found. `ASH: Clear findings` empties them.
 | `ash.executablePath` | empty | Empty runs `ashx` from PATH, and `ash` when no `ashx` is installed. Anything else is run exactly as given, with no fallback. Machine-scoped, so a cloned repository cannot set it. |
 | `ash.outputDirectory` | `.ash/ash_output` | Where the scan writes, relative to the workspace folder. An absolute path is used as given. |
 | `ash.extraArguments` | `[]` | Appended to `ash scan`, for example `--scanners detect-secrets` or `--offline`. |
+| `ash.scanTimeoutSeconds` | `1800` | Seconds before a scan is stopped, with every process it started. `0` waits indefinitely. |
+
+The scan runs as a child process without blocking the editor, under a progress
+notification with a Cancel button. Cancelling, or the timeout firing, stops the
+whole process tree: on POSIX the scan is started as a process-group leader and the
+group gets SIGTERM, then SIGKILL after five seconds, even when ASH itself has
+already exited, because a scanner that ignores SIGTERM outlives it; on Windows
+`taskkill /T /F` walks the tree. Without that, the scanners ASH starts would keep
+running and writing into the output directory after the scan was reported stopped.
+The `--version` probe that runs before the scan is asynchronous too, with a
+one-minute limit, since a cold Python start can take seconds. A second
+`ASH: Scan workspace` while one is running returns the running scan's result.
 
 ## Which executable runs
 
@@ -86,10 +98,11 @@ returns a distinct status for each, and every one of them puts a message on scre
 | `incomplete` | Findings are published, and the scan did not cover everything. See below. |
 | `no-workspace` | No folder is open. |
 | `wrong-executable` | The executable is missing, or answered without naming ASH. |
-| `scan-failed` | ASH exited 1 having written no report (a crash), exited 3 or 4, was killed, or could not be started. |
+| `scan-failed` | ASH exited 1 having written no report (a crash), exited 3 or 4, was killed, could not be started, or outran `ash.scanTimeoutSeconds`. |
 | `no-report` | The scan exited 0 or 2 and wrote no SARIF. There is no evidence the tree is clean. |
 | `stale-report` | The previous run's report could not be deleted and this run did not rewrite it. |
 | `unreadable-report` | A report exists and is not SARIF. |
+| `cancelled` | The scan was cancelled from its progress notification. |
 
 ### The exit-code contract
 

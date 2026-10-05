@@ -35,14 +35,17 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import {
+  AsyncCommandRunner,
   CommandRunner,
   DEFAULT_EXECUTABLE,
+  DEFAULT_SCAN_TIMEOUT_SECONDS,
   LEGACY_EXECUTABLE,
   SARIF_RELATIVE_PATH,
   outputTail,
+  probeRunner,
   resolveExecutable,
   runScan,
-  spawnSyncRunner,
+  spawnAsyncRunner,
 } from './ash-cli';
 import {
   AGGREGATED_RESULTS_FILE,
@@ -70,7 +73,8 @@ export type ScanStatus =
   | 'scan-failed'
   | 'no-report'
   | 'stale-report'
-  | 'unreadable-report';
+  | 'unreadable-report'
+  | 'cancelled';
 
 export interface ScanReport {
   readonly status: ScanStatus;
@@ -97,7 +101,15 @@ export interface ScanReport {
 /** The pieces of the host a scan needs, so a test can supply each one. */
 export interface ScanHost {
   readonly collection: vscode.DiagnosticCollection;
+  /** Runs the `--version` probe. */
   readonly run: CommandRunner;
+  /** Runs the scan without blocking the extension host. */
+  readonly runAsync: AsyncCommandRunner;
+  /**
+   * Runs `task` under a cancellable progress notification. The signal aborts
+   * when the user presses Cancel.
+   */
+  readonly withProgress: <T>(title: string, task: (signal: AbortSignal) => Promise<T>) => Promise<T>;
   readonly readFile: (file: string) => string;
   /** Modification time in milliseconds, or undefined when the file does not exist. */
   readonly mtimeMs: (file: string) => number | undefined;
@@ -117,6 +129,8 @@ export interface ScanSettings {
   readonly executablePath: string;
   readonly outputDirectory: string;
   readonly extraArguments: readonly string[];
+  /** Seconds before the scan is stopped. 0 waits indefinitely. */
+  readonly scanTimeoutSeconds: number;
 }
 
 export function readSettings(): ScanSettings {
@@ -128,7 +142,13 @@ export function readSettings(): ScanSettings {
     executablePath: (config.get<string>('executablePath', '') ?? '').trim(),
     outputDirectory: config.get<string>('outputDirectory', '.ash/ash_output') || '.ash/ash_output',
     extraArguments: config.get<string[]>('extraArguments', []) ?? [],
+    scanTimeoutSeconds: timeoutSetting(config.get<number>('scanTimeoutSeconds', DEFAULT_SCAN_TIMEOUT_SECONDS)),
   };
+}
+
+/** A usable timeout from the raw setting: a negative or non-number falls back to the default. */
+function timeoutSetting(raw: unknown): number {
+  return typeof raw === 'number' && Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_SCAN_TIMEOUT_SECONDS;
 }
 
 /** The message the one-time fallback notice shows. Exported so tests pin it. */
@@ -210,18 +230,18 @@ function readCoverage(host: ScanHost, report: ReportFile): CoverageAssessment | 
  * Exported and dependency-injected rather than closed over `activate`'s locals so
  * the whole of it -- including every failure branch -- is reachable from a test.
  */
-export function runScanCommand(
+export async function runScanCommand(
   host: ScanHost,
   sourceDir: string | undefined,
   settings: ScanSettings,
-): ScanReport {
+): Promise<ScanReport> {
   if (sourceDir === undefined) {
     const detail = 'ASH: open a folder before scanning. There is no workspace folder to scan.';
     host.showError(detail);
     return { status: 'no-workspace', detail };
   }
 
-  const resolved = resolveExecutable(settings.executablePath, host.run, { cwd: sourceDir });
+  const resolved = await resolveExecutable(settings.executablePath, host.run, { cwd: sourceDir });
   if (!resolved.ok) {
     host.log(resolved.message);
     host.showError(`ASH: ${resolved.message}`);
@@ -247,11 +267,32 @@ export function runScanCommand(
   const sarif = prepareReportFile(host, path.join(outputDir, ...SARIF_RELATIVE_PATH.split('/')));
   const aggregated = prepareReportFile(host, path.join(outputDir, AGGREGATED_RESULTS_FILE));
 
-  const outcome = runScan(executable, sourceDir, outputDir, host.run, settings.extraArguments, {
-    cwd: sourceDir,
-  });
+  const timeoutMs = settings.scanTimeoutSeconds * 1000;
+  const outcome = await host.withProgress('ASH: scanning workspace', (signal) =>
+    runScan(executable, sourceDir, outputDir, host.runAsync, settings.extraArguments, {
+      cwd: sourceDir,
+      timeoutMs,
+      signal,
+    }),
+  );
   const exitCode = outcome.result.status;
   const base = { executable, exitCode, fallbackNotice };
+
+  if (outcome.verdict === 'cancelled') {
+    const detail = 'the scan was cancelled, and its process tree was stopped.';
+    host.log(detail);
+    host.showInfo(`ASH: ${detail}`);
+    return { ...base, status: 'cancelled', detail };
+  }
+  if (outcome.verdict === 'timed-out') {
+    const detail =
+      `the scan did not finish within ${settings.scanTimeoutSeconds}s and was stopped, ` +
+      'along with every process it started. Raise ash.scanTimeoutSeconds if large scans ' +
+      `legitimately take longer, or set it to 0 to wait indefinitely.\n${outputTail(outcome.result)}`;
+    host.log(detail);
+    host.showError(`ASH: ${detail.split('\n')[0]}`);
+    return { ...base, status: 'scan-failed', detail };
+  }
 
   if (outcome.verdict === 'failed') {
     // A configuration error (3, 4), a signal, or a process that never started.
@@ -412,7 +453,19 @@ export function createScanHost(
 ): ScanHost {
   return {
     collection,
-    run: spawnSyncRunner,
+    run: probeRunner,
+    runAsync: spawnAsyncRunner,
+    withProgress: (title, task) =>
+      Promise.resolve(
+        vscode.window.withProgress(
+          { location: vscode.ProgressLocation.Notification, title, cancellable: true },
+          (_progress, token) => {
+            const controller = new AbortController();
+            const subscription = token.onCancellationRequested(() => controller.abort());
+            return task(controller.signal).finally(() => subscription.dispose());
+          },
+        ),
+      ),
     readFile: (file) => fs.readFileSync(file, 'utf8'),
     mtimeMs: mtimeOf,
     removeFile: removeIfPresent,
@@ -442,10 +495,16 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const host = createScanHost(collection, channel, context.globalState);
 
+  // One scan at a time. A second invocation while one runs gets the running
+  // scan's result rather than a second process writing the same output directory.
+  let running: Promise<ScanReport> | undefined;
   context.subscriptions.push(
-    vscode.commands.registerCommand(COMMAND_SCAN, () =>
-      runScanCommand(host, currentSourceDir(), readSettings()),
-    ),
+    vscode.commands.registerCommand(COMMAND_SCAN, () => {
+      running ??= runScanCommand(host, currentSourceDir(), readSettings()).finally(() => {
+        running = undefined;
+      });
+      return running;
+    }),
     vscode.commands.registerCommand(COMMAND_CLEAR, () => {
       collection.clear();
       channel.appendLine('Cleared ASH findings.');

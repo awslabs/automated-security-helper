@@ -18,6 +18,7 @@
  *
  *   { "fixture": "findings" }            replay scans/findings
  *   { "fixture": null, "exitCode": 1 }   write nothing and exit 1
+ *   { "fixture": "findings", "hangSeconds": 60 }   hang first, for the timeout
  *
  * Invoked through the wrapper named `crashing-ash` (ASH_STUB_INVOKED_AS=crash), a
  * scan writes nothing and exits 1 whatever the scenario says: the crash half of
@@ -34,6 +35,8 @@ import * as path from 'path';
 interface Scenario {
   readonly fixture: string | null;
   readonly exitCode?: number;
+  /** Hang this long before doing anything, so a timeout can fire. */
+  readonly hangSeconds?: number;
 }
 
 const VERSION = 'awslabs/automated-security-helper v3.7.0';
@@ -51,7 +54,7 @@ function asJsonText(value: string): string {
   return JSON.stringify(value).slice(1, -1);
 }
 
-function main(): number {
+function main(): number | 'hang' {
   const args = process.argv.slice(2);
   const scenarioFile = process.env.ASH_STUB_SCENARIO_FILE;
   const fixtures = process.env.ASH_STUB_FIXTURES;
@@ -79,6 +82,11 @@ function main(): number {
       : (JSON.parse(fs.readFileSync(scenarioFile, 'utf8')) as Scenario);
   const sourceDir = argument(args, '--source-dir');
   const outputDir = argument(args, '--output-dir');
+  if (scenario.hangSeconds !== undefined) {
+    // Keeps the event loop alive; the extension's timeout must stop this.
+    setTimeout(() => undefined, scenario.hangSeconds * 1000);
+    return 'hang';
+  }
   if (scenario.fixture === null) {
     process.stderr.write('ash-stub: simulated crash before any report was written\n');
     return scenario.exitCode ?? 1;
@@ -104,4 +112,7 @@ function main(): number {
   return scenario.exitCode ?? recorded;
 }
 
-process.exitCode = main();
+const outcome = main();
+if (outcome !== 'hang') {
+  process.exitCode = outcome;
+}

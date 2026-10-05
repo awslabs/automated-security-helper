@@ -6,6 +6,15 @@ does not and should not rewrite this file: a changelog gains a section per relea
 rather than having its newest section renamed. A version-numbered heading would sit
 one release behind `package.json` from the first bump onward and read as drift.
 
+## A scan that does not block the editor
+
+- The scan runs asynchronously under a progress notification with Cancel, so the
+  extension host is no longer frozen for the length of the scan. The `--version`
+  probe before it is asynchronous as well, with a one-minute limit.
+- `ash.scanTimeoutSeconds` (default 1800, `0` to wait indefinitely) stops a scan
+  that runs too long. Cancel and the timeout both stop the scan's whole process
+  tree, including a scanner that ignores SIGTERM after ASH has exited.
+
 ## Exit codes, coverage and the ashx entry point
 
 - Exit 1 with results is reported `incomplete` and its findings are published,

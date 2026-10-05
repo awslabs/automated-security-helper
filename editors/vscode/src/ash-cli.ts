@@ -33,7 +33,7 @@
  * and it starts a logging session -- which is why this file uses the long form.
  */
 
-import { spawnSync } from 'child_process';
+import { ChildProcess, spawn } from 'child_process';
 
 /** What a spawned command produced. Modelled on `child_process.SpawnSyncReturns`. */
 export interface CommandResult {
@@ -43,6 +43,8 @@ export interface CommandResult {
   readonly stderr: string;
   /** Set when the process could not be started at all, e.g. ENOENT. */
   readonly error?: Error;
+  /** Set when the process outran its timeout and was stopped. */
+  readonly timedOut?: boolean;
 }
 
 export interface CommandOptions {
@@ -50,45 +52,221 @@ export interface CommandOptions {
   readonly timeoutMs?: number;
 }
 
-/** Injected so tests drive every branch without a real ASH on PATH. */
+/**
+ * Runs the `--version` probe. Injected so tests drive every branch without a real
+ * ASH on PATH. Asynchronous for the same reason the scan is: a cold Python start
+ * can take seconds, and a synchronous wait holds the extension host -- every
+ * extension in the window -- for all of it.
+ */
 export type CommandRunner = (
   executable: string,
   args: readonly string[],
   options: CommandOptions,
-) => CommandResult;
-
-/** How long a scan may run before it is killed, in milliseconds. */
-export const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
+) => Promise<CommandResult>;
 
 /**
- * The real runner, over `child_process.spawnSync`.
+ * How long the `--version` probe may take, in milliseconds. ASH answers in a few
+ * seconds even cold; a minute bounds how long a wedged executable delays the scan.
+ */
+export const DEFAULT_TIMEOUT_MS = 60 * 1000;
+
+/**
+ * The default for `ash.scanTimeoutSeconds`. Generous on purpose: a first scan on a
+ * cold host downloads scanner databases, and a timeout that fires on a healthy
+ * scan teaches people to set it to 0.
+ */
+export const DEFAULT_SCAN_TIMEOUT_SECONDS = 30 * 60;
+
+/** Grace between SIGTERM and SIGKILL when a scan is stopped. */
+export const KILL_GRACE_MS = 5_000;
+
+/** Per-stream cap on captured output. The tail is kept; it holds the reason. */
+const MAX_CAPTURED_CHARS = 4 * 1024 * 1024;
+
+/**
+ * The probe runner: `spawnAsyncRunner` with DEFAULT_TIMEOUT_MS unless the caller
+ * names another limit.
+ */
+export function probeRunner(
+  executable: string,
+  args: readonly string[],
+  options: CommandOptions = {},
+): Promise<CommandResult> {
+  return spawnAsyncRunner(executable, args, {
+    cwd: options.cwd,
+    timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+  });
+}
+
+export interface AsyncCommandOptions {
+  readonly cwd?: string;
+  /** Milliseconds before the process tree is stopped. 0 or less waits indefinitely. */
+  readonly timeoutMs?: number;
+  /** Aborting stops the process tree and resolves with `cancelled: true`. */
+  readonly signal?: AbortSignal;
+}
+
+export interface AsyncCommandResult extends CommandResult {
+  /** The timeout fired and the process tree was stopped. */
+  readonly timedOut: boolean;
+  /** The signal aborted and the process tree was stopped, or it never started. */
+  readonly cancelled: boolean;
+}
+
+export type AsyncCommandRunner = (
+  executable: string,
+  args: readonly string[],
+  options: AsyncCommandOptions,
+) => Promise<AsyncCommandResult>;
+
+/** How to stop a process tree. Injected so both platforms' arms are testable. */
+export interface TreeKiller {
+  readonly platform: NodeJS.Platform;
+  /** `process.kill`. On POSIX a negative pid signals the whole process group. */
+  readonly kill: (pid: number, signal: NodeJS.Signals) => void;
+  /** Runs `taskkill`. Windows has no process groups to signal. */
+  readonly spawnTaskkill: (args: readonly string[]) => void;
+}
+
+const realTreeKiller: TreeKiller = {
+  platform: process.platform,
+  kill: (pid, signal) => process.kill(pid, signal),
+  spawnTaskkill: (args) => {
+    spawn('taskkill', [...args], { windowsHide: true, stdio: 'ignore' }).on('error', () => {
+      // A taskkill that cannot start leaves child.kill() in killProcessTree to
+      // stop the direct child; there is no caller left to report it to.
+    });
+  },
+};
+
+/**
+ * Stops a child and everything it started.
+ *
+ * ASH runs its scanners as subprocesses, so killing only the direct child leaves
+ * semgrep or grype running and writing into the output directory after the scan
+ * was reported stopped. On POSIX the child is started as a process-group leader
+ * (`detached: true` below), so signalling `-pid` reaches the whole group: SIGTERM
+ * first so ASH can stop its children, then SIGKILL after KILL_GRACE_MS. On Windows
+ * `taskkill /T /F` walks the tree.
+ *
+ * Returns the SIGKILL timer, which is unref'd. Callers let it fire even after the
+ * child closes: the rest of the group can outlive the leader.
+ */
+export function killProcessTree(
+  child: Pick<ChildProcess, 'pid' | 'kill'>,
+  killer: TreeKiller = realTreeKiller,
+  graceMs: number = KILL_GRACE_MS,
+): NodeJS.Timeout | undefined {
+  const pid = child.pid;
+  if (pid === undefined) {
+    return undefined;
+  }
+  if (killer.platform === 'win32') {
+    killer.spawnTaskkill(['/pid', String(pid), '/T', '/F']);
+    child.kill();
+    return undefined;
+  }
+  const signalGroup = (signal: NodeJS.Signals): void => {
+    try {
+      killer.kill(-pid, signal);
+    } catch {
+      // ESRCH: the group is already gone, which is the outcome wanted.
+    }
+  };
+  signalGroup('SIGTERM');
+  const timer = setTimeout(() => signalGroup('SIGKILL'), graceMs);
+  timer.unref();
+  return timer;
+}
+
+/** Appends to a capture buffer, keeping the tail when it outgrows the cap. */
+function capture(buffer: string, chunk: string): string {
+  const joined = buffer + chunk;
+  return joined.length > MAX_CAPTURED_CHARS ? joined.slice(-MAX_CAPTURED_CHARS) : joined;
+}
+
+/**
+ * The scan runner, over `child_process.spawn`. Never blocks the extension host.
+ *
+ * Resolves, never rejects: a process that could not start resolves with `error`
+ * set, so the caller has one result type to classify.
  *
  * `shell` is deliberately left off. Passing the executable through a shell would
  * make a workspace path containing a space or a shell metacharacter part of the
  * command line, and on Windows it would reintroduce the very PATH lookup the
  * identity probe exists to constrain.
  */
-export function spawnSyncRunner(
+export function spawnAsyncRunner(
   executable: string,
   args: readonly string[],
-  options: CommandOptions = {},
-): CommandResult {
-  const result = spawnSync(executable, [...args], {
-    cwd: options.cwd,
-    encoding: 'utf8',
-    timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-    // A scan on a large tree can print more than the 1 MiB default, and a
-    // truncated stream raises ENOBUFS, which would be reported as "ASH failed"
-    // on a scan that actually worked.
-    maxBuffer: 64 * 1024 * 1024,
-    windowsHide: true,
+  options: AsyncCommandOptions = {},
+  killer: TreeKiller = realTreeKiller,
+): Promise<AsyncCommandResult> {
+  return new Promise((resolve) => {
+    if (options.signal?.aborted === true) {
+      resolve({ status: null, stdout: '', stderr: '', timedOut: false, cancelled: true });
+      return;
+    }
+
+    const child = spawn(executable, [...args], {
+      cwd: options.cwd,
+      windowsHide: true,
+      // A process-group leader on POSIX, so killProcessTree can signal the group.
+      // Not on Windows, where detached means a new console window.
+      detached: killer.platform !== 'win32',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let stoppedBecause: 'timeout' | 'cancel' | undefined;
+    let settled = false;
+
+    const stop = (why: 'timeout' | 'cancel'): void => {
+      if (stoppedBecause !== undefined || settled) {
+        return;
+      }
+      stoppedBecause = why;
+      killProcessTree(child, killer);
+    };
+    const onAbort = (): void => stop('cancel');
+    const timeoutMs = options.timeoutMs ?? 0;
+    const timer = timeoutMs > 0 ? setTimeout(() => stop('timeout'), timeoutMs) : undefined;
+    options.signal?.addEventListener('abort', onAbort, { once: true });
+
+    const settle = (result: CommandResult): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
+      // The SIGKILL timer is left to fire. 'close' means the direct child and its pipes
+      // are done, not its process group: a scanner that ignored SIGTERM and does
+      // not hold the pipes is still running, and the SIGKILL is what stops it.
+      // The timer is unref'd, and signalling a group that is already gone is a
+      // caught ESRCH.
+      options.signal?.removeEventListener('abort', onAbort);
+      resolve({
+        ...result,
+        timedOut: stoppedBecause === 'timeout',
+        cancelled: stoppedBecause === 'cancel',
+      });
+    };
+
+    // Both streams are drained: an unread pipe fills and blocks the child.
+    child.stdout?.setEncoding('utf8');
+    child.stderr?.setEncoding('utf8');
+    child.stdout?.on('data', (chunk: string) => {
+      stdout = capture(stdout, chunk);
+    });
+    child.stderr?.on('data', (chunk: string) => {
+      stderr = capture(stderr, chunk);
+    });
+    child.on('error', (error) => settle({ status: null, stdout, stderr, error }));
+    child.on('close', (code) => settle({ status: code, stdout, stderr }));
   });
-  return {
-    status: result.status,
-    stdout: result.stdout ?? '',
-    stderr: result.stderr ?? '',
-    error: result.error,
-  };
 }
 
 /**
@@ -169,12 +347,22 @@ function firstNonEmptyLine(text: string): string {
  * action a user on an MSYS2 host has to take, and a message that only said "ash
  * not found" would send them to reinstall something they already have.
  */
-export function probeAshIdentity(
+export async function probeAshIdentity(
   executable: string,
   run: CommandRunner,
   options: CommandOptions = {},
-): IdentityProbe {
-  const result = run(executable, ['--version'], options);
+): Promise<IdentityProbe> {
+  const result = await run(executable, ['--version'], options);
+
+  if (result.timedOut === true) {
+    const limit = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    return {
+      ok: false,
+      message:
+        `"${executable} --version" did not answer within ${Math.round(limit / 1000)}s and ` +
+        'was stopped, so whether it is ASH is unknown. Refusing to scan.',
+    };
+  }
 
   if (result.error !== undefined) {
     const enoent = (result.error as NodeJS.ErrnoException).code === 'ENOENT';
@@ -238,10 +426,22 @@ export const SARIF_RELATIVE_PATH = 'reports/ash.sarif';
  *               did not; the caller decides which by looking.
  *   failed      anything else: 3 and 4 (configuration errors), a signal, or a
  *               process that never started.
+ *   timed-out   the scan outran `ash.scanTimeoutSeconds` and was stopped.
+ *   cancelled   the user cancelled it.
  */
-export type ExitVerdict = 'clean' | 'findings' | 'incomplete' | 'failed';
+export type ExitVerdict = 'clean' | 'findings' | 'incomplete' | 'failed' | 'timed-out' | 'cancelled';
 
-export function classifyExit(result: CommandResult): ExitVerdict {
+export function classifyExit(
+  result: CommandResult & { readonly timedOut?: boolean; readonly cancelled?: boolean },
+): ExitVerdict {
+  // Before the status: a stopped process exits by signal, or with whatever code
+  // ASH chose on SIGTERM, and neither says anything about the tree.
+  if (result.cancelled === true) {
+    return 'cancelled';
+  }
+  if (result.timedOut === true) {
+    return 'timed-out';
+  }
   if (result.error !== undefined) {
     return 'failed';
   }
@@ -263,15 +463,15 @@ export interface ScanOutcome {
   readonly verdict: ExitVerdict;
 }
 
-export function runScan(
+export async function runScan(
   executable: string,
   sourceDir: string,
   outputDir: string,
-  run: CommandRunner,
+  run: AsyncCommandRunner,
   extra: readonly string[] = [],
-  options: CommandOptions = {},
-): ScanOutcome {
-  const result = run(executable, scanArgs(sourceDir, outputDir, extra), {
+  options: AsyncCommandOptions = {},
+): Promise<ScanOutcome> {
+  const result = await run(executable, scanArgs(sourceDir, outputDir, extra), {
     cwd: sourceDir,
     ...options,
   });
@@ -302,20 +502,20 @@ function isNotFound(probe: IdentityProbe): boolean {
  * not a reason to try `ash`: the name resolved to something, and scanning with a
  * different program would hide that.
  */
-export function resolveExecutable(
+export async function resolveExecutable(
   configured: string,
   run: CommandRunner,
   options: CommandOptions = {},
-): ExecutableResolution {
+): Promise<ExecutableResolution> {
   const explicit = configured.trim();
   if (explicit !== '') {
-    const probe = probeAshIdentity(explicit, run, options);
+    const probe = await probeAshIdentity(explicit, run, options);
     return probe.ok
       ? { ok: true, executable: explicit, version: probe.version, fellBack: false }
       : { ok: false, message: probe.message };
   }
 
-  const primary = probeAshIdentity(DEFAULT_EXECUTABLE, run, options);
+  const primary = await probeAshIdentity(DEFAULT_EXECUTABLE, run, options);
   if (primary.ok) {
     return { ok: true, executable: DEFAULT_EXECUTABLE, version: primary.version, fellBack: false };
   }
@@ -323,7 +523,7 @@ export function resolveExecutable(
     return { ok: false, message: primary.message };
   }
 
-  const legacy = probeAshIdentity(LEGACY_EXECUTABLE, run, options);
+  const legacy = await probeAshIdentity(LEGACY_EXECUTABLE, run, options);
   if (legacy.ok) {
     return { ok: true, executable: LEGACY_EXECUTABLE, version: legacy.version, fellBack: true };
   }

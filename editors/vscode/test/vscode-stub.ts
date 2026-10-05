@@ -204,6 +204,8 @@ export function resetState(): void {
   state.channels = [];
   state.collections = [];
   state.commands = new Map();
+  progress.calls = [];
+  progress.cancel = undefined;
 }
 
 export const languages = {
@@ -214,7 +216,39 @@ export const languages = {
   },
 };
 
+export enum ProgressLocation {
+  SourceControl = 1,
+  Window = 10,
+  Notification = 15,
+}
+
+/** What the last withProgress call asked for, and a way to press its Cancel. */
+export const progress = {
+  calls: [] as { title?: string; cancellable?: boolean; location: ProgressLocation }[],
+  cancel: undefined as (() => void) | undefined,
+};
+
 export const window = {
+  withProgress<T>(
+    options: { title?: string; cancellable?: boolean; location: ProgressLocation },
+    task: (
+      reporter: { report(value: unknown): void },
+      token: { onCancellationRequested(listener: () => void): Disposable },
+    ) => Thenable<T>,
+  ): Thenable<T> {
+    progress.calls.push(options);
+    const listeners: (() => void)[] = [];
+    progress.cancel = () => listeners.forEach((listener) => listener());
+    return task(
+      { report: () => undefined },
+      {
+        onCancellationRequested(listener: () => void): Disposable {
+          listeners.push(listener);
+          return { dispose: () => listeners.splice(listeners.indexOf(listener), 1) };
+        },
+      },
+    );
+  },
   createOutputChannel(name: string): OutputChannel {
     const channel = new OutputChannel(name);
     state.channels.push(channel);

@@ -61,6 +61,12 @@
           },
           "default": [],
           "markdownDescription": "Extra arguments appended to `ash scan`, for example `--scanners detect-secrets` or `--offline`."
+        },
+        "ash.scanTimeoutSeconds": {
+          "type": "number",
+          "default": 1800,
+          "minimum": 0,
+          "markdownDescription": "Seconds to wait for a scan before stopping it and every process it started. `0` waits indefinitely. A scan can also be stopped from its progress notification."
         }
       }
     }
