@@ -128,6 +128,12 @@ that on every Job it builds — a guard that is currently impossible to trip, wh
 the point: it is what stands between a future patch making the paths configurable
 and a silently clean scan.
 
+A `configMap` or `secret` source is scanned at `/workspace/src/..data`, not at the
+mount root. The kubelet writes those volumes with its atomic writer: the files sit in
+a timestamped directory that `..data` links to, and each top-level name is a symlink
+through it, so the root holds every file twice. Scanned at the root, the shared e2e
+fixture's three detect-secrets findings came back as six on kind.
+
 ## The CRD is generated from ASH's own models
 
 `spec.config` is derived from `AshConfig.model_json_schema()` by
