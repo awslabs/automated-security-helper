@@ -134,6 +134,11 @@ jobs:
           # The same uv the container legs install (packaging/verify-lib.sh), which is
           # the floor pyproject.toml declares.
           version: "0.12.19"
+          # Stated rather than left out: the default ("auto") turns the cache on for a
+          # push on a GitHub-hosted runner, a cache in this public repository is
+          # readable by anyone, and .github/scripts/assert-publish-surfaces.py refuses
+          # an unallowlisted one, including the default-on kind.
+          enable-cache: false
 
       # The payload checker imports the gate's rules, so the one thing that can drift
       # is its partition of the gate's verdicts into payload and structure. This
