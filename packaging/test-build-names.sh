@@ -107,6 +107,12 @@ for readme in deb/debian/README.Debian rpm/README.rpm; do
   [ -z "$stale" ] || fail "$readme still names the default paths after a rename:"$'\n'"$stale"
   grep -q "/usr/lib/renamedpkg/wheels/" "$out" || fail "$readme does not name /usr/lib/renamedpkg/wheels/"
   grep -q "/usr/bin/renamedcli" "$out" || fail "$readme does not name /usr/bin/renamedcli"
+  # A heading's underline must be as long as the heading, which the substituted name
+  # changes.
+  short="$(awk 'prev != "" && /^(=+|-+)$/ && length($0) >= 3 && length($0) != length(prev) {
+    printf "line %d: %d-character underline under a %d-character heading\n", NR, length($0), length(prev)
+  } { prev = $0 }' "$out")"
+  [ -z "$short" ] || fail "$readme has underlines that do not fit their headings after a rename:"$'\n'"$short"
   echo "   checked $readme"
 done
 

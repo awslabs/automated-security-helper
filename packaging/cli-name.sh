@@ -54,8 +54,23 @@ ash_check_one_name() {
 # Copies file $1 to $2 with @ASH_PKG@ and @ASH_CLI@ replaced by the two names, for the
 # docs the packages ship. Fails if a token survives. Call ash_check_names first: the
 # names go into a sed expression unescaped, which the pattern makes safe.
+#
+# A substituted name changes the length of the heading it is in, so every heading
+# underline (a line of three or more `=` or `-` under a non-empty line) is redrawn at
+# the length of the line above it. The input must not end in blank lines: the command
+# substitution drops them.
 ash_substitute_names() {
-  sed -e "s/@ASH_PKG@/${ASH_PKG_NAME}/g" -e "s/@ASH_CLI@/${ASH_CLI_NAME}/g" "$1" > "$2" || return 1
+  local text line prev="" mark
+  text="$(sed -e "s/@ASH_PKG@/${ASH_PKG_NAME}/g" -e "s/@ASH_CLI@/${ASH_CLI_NAME}/g" "$1")" || return 1
+  while IFS= read -r line; do
+    if [ -n "$prev" ] && [ "${#line}" -ge 3 ] && [[ $line =~ ^(=+|-+)$ ]]; then
+      mark="${line:0:1}"
+      printf -v line '%*s' "${#prev}" ''
+      line="${line// /$mark}"
+    fi
+    printf '%s\n' "$line"
+    prev="$line"
+  done <<<"$text" > "$2" || return 1
   if grep -q '@ASH_PKG@\|@ASH_CLI@' "$2"; then
     echo "error: an @ASH_PKG@ or @ASH_CLI@ token survived substitution in $2" >&2
     return 1
