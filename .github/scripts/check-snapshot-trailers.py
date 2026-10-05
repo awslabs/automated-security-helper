@@ -40,13 +40,20 @@ Between the two, a snapshot that nothing asserts fails CI either way.
 
 HOW THE RANGE IS CHOSEN (one per event; see ``resolve_range``)
 -------------------------------------------------------------
-* pull_request: ``pull_request.base.sha..pull_request.head.sha``. The head sha, not
-  GITHUB_SHA, because GITHUB_SHA is GitHub's synthetic merge commit, whose message
-  carries no trailers. Commits merged in from the base branch are ancestors of base.sha
-  and drop out of the range.
-* merge_group: ``merge_group.base_sha..merge_group.head_sha``. The queue squashes, so
-  each commit here is one pull request's squash commit. See ``message_sections`` for why
-  its message is parsed per section.
+* pull_request: ``<fork point>..pull_request.head.sha``. The head sha, not GITHUB_SHA,
+  because GITHUB_SHA is GitHub's synthetic merge commit, whose message carries no
+  trailers. The fork point is ``git merge-base`` of the head with the base branch, not
+  ``pull_request.base.sha`` itself: that sha is recorded when the event fires and can
+  be older than base-branch commits the pull request has since merged in (a
+  ``synchronize`` after merging main, a re-run of an old event). Used directly, every
+  such main commit would land in the range and be charged to the pull request. So the
+  merge base is taken against both ``base.sha`` and the clone's
+  ``origin/<base.ref>``, and the later of the two starts the range.
+* merge_group: ``merge-base(base_sha, head_sha)..head_sha``. The queue builds the head
+  on the base, so the merge base is normally ``base_sha`` itself; computing it means a
+  queue entry whose base moved is still checked from where it forked. The queue
+  squashes, so each commit here is one pull request's squash commit. See
+  ``message_sections`` for why its message is parsed per section.
 * push: ``before..after``. An all-zero ``before`` (a newly created ref) has no range, so
   only ``after`` itself is checked against its first parent. A ``before`` that is no
   longer in the clone (a force-push that discarded it) gets the same treatment, with a
@@ -389,14 +396,81 @@ class Range:
     note: str
 
 
+def is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
+    proc = subprocess.run(
+        ["git", "-C", str(repo), "merge-base", "--is-ancestor", ancestor, descendant],
+        capture_output=True,
+    )
+    return proc.returncode == 0
+
+
+def fork_point(repo: Path, bases: list[str], head: str) -> str:
+    """The latest ``git merge-base <base> <head>`` over ``bases`` that are present.
+
+    Each candidate base yields the newest commit of that base the head contains; the
+    latest of those (the one every other is an ancestor of) excludes the most
+    base-branch history, which is all history the head did not introduce.
+    """
+    best: str | None = None
+    for base in bases:
+        if not commit_exists(repo, base):
+            continue
+        merge_base = git(repo, "merge-base", base, head, check=False).strip()
+        if not merge_base:
+            continue  # unrelated histories: this base says nothing about the head
+        if best is None or is_ancestor(repo, best, merge_base):
+            best = merge_base
+    if best is None:
+        raise GitError(
+            f"no merge base between {head} and any of {bases}; "
+            f"check out with fetch-depth: 0"
+        )
+    return best
+
+
+def _base_branch_tip(repo: Path, ref: str | None) -> list[str]:
+    """``origin/<ref>`` if the clone has it (fetched once if not), else nothing."""
+    if not ref:
+        return []
+    remote = f"refs/remotes/origin/{ref}"
+    if not commit_exists(repo, remote):
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo),
+                "fetch",
+                "--no-tags",
+                "--quiet",
+                "origin",
+                f"+refs/heads/{ref}:{remote}",
+            ],
+            capture_output=True,
+        )
+    return [remote] if commit_exists(repo, remote) else []
+
+
 def resolve_range(repo: Path, event_name: str, payload: dict) -> Range | None:
     """The commits an event introduces, or None when there are none to check."""
     if event_name in ("pull_request", "pull_request_target"):
         pr = payload["pull_request"]
-        return Range(pr["base"]["sha"], pr["head"]["sha"], "pull request")
+        head = pr["head"]["sha"]
+        if not ensure_commit(repo, head):
+            raise GitError(f"{head} is not in the clone; check out with fetch-depth: 0")
+        ensure_commit(repo, pr["base"]["sha"])
+        bases = [pr["base"]["sha"], *_base_branch_tip(repo, pr["base"].get("ref"))]
+        return Range(fork_point(repo, bases, head), head, "pull request")
     if event_name == "merge_group":
         mg = payload["merge_group"]
-        return Range(mg["base_sha"], mg["head_sha"], "merge queue entry")
+        head = mg["head_sha"]
+        for sha in (mg["base_sha"], head):
+            if not ensure_commit(repo, sha):
+                raise GitError(
+                    f"{sha} is not in the clone; check out with fetch-depth: 0"
+                )
+        return Range(
+            fork_point(repo, [mg["base_sha"]], head), head, "merge queue entry"
+        )
     if event_name == "push":
         before, after = payload.get("before") or ZERO_SHA, payload["after"]
         if after == ZERO_SHA:
@@ -675,6 +749,67 @@ def _self_test_ranges(tmp: Path) -> list[str]:
     got = resolve_range(r.path, "merge_group", mg)
     if not (got and (got.base, got.head) == (first, second)):
         failures.append(f"merge_group: got {got}")
+    failures += _self_test_stale_base(tmp)
+    return failures
+
+
+def _self_test_stale_base(tmp: Path) -> list[str]:
+    """A pull request that merged main after its event recorded ``base.sha``.
+
+    main: B -- M1 -- M2 (M2 changes a snapshot without a trailer, which is main's
+    business, not the pull request's). The branch forks at B, commits F1, merges M2,
+    then commits F2. The event still says ``base.sha = M1``, so ``M1..F2`` would
+    include M2 and blame the pull request for it.
+    """
+    failures = []
+    r = _Repo(tmp / "stale-base")
+    fork = r.base
+    r.write("main.txt", "1\n")
+    m1 = r.commit("chore: m1")
+    r.write(SNAP, "from main\n")
+    m2 = r.commit("test: main changed a snapshot")
+    r._git("checkout", "-q", "-b", "feature", fork)
+    r.write("feature.txt", "1\n")
+    r.commit("feat: f1")
+    r._git("merge", "-q", "--no-edit", m2)
+    r.write("feature.txt", "2\n")
+    f2 = r.commit("feat: f2")
+    # The clone's view of the base branch, as actions/checkout leaves it.
+    r._git("update-ref", "refs/remotes/origin/main", m2)
+    pr = {
+        "pull_request": {
+            "base": {"sha": m1, "ref": "main"},
+            "head": {"sha": f2},
+        }
+    }
+    got = resolve_range(r.path, "pull_request", pr)
+    if not (got and got.base == m2 and got.head == f2):
+        failures.append(f"stale base.sha: expected range {m2}..{f2}, got {got}")
+    elif find_violations(r.path, commits_in_range(r.path, got.base, got.head)):
+        failures.append(
+            "stale base.sha: main's own snapshot commit was charged to the PR"
+        )
+    # The pitfall itself, so the case keeps proving something: M1..F2 includes M2.
+    if not find_violations(r.path, commits_in_range(r.path, m1, f2)):
+        failures.append("stale base.sha: M1..F2 should have included main's M2")
+    # Without origin/main in the clone, the merge base with base.sha alone is used.
+    r._git("update-ref", "-d", "refs/remotes/origin/main")
+    got = resolve_range(r.path, "pull_request", pr)
+    if not (got and got.base == m1):
+        failures.append(f"no origin ref: expected base {m1}, got {got}")
+    # A base.sha newer than the fork point (main moved on, the PR did not merge it)
+    # starts the range at the fork point, not at a commit the head does not contain.
+    r._git("checkout", "-q", "main")
+    r.write("main.txt", "3\n")
+    m3 = r.commit("chore: m3")
+    pr["pull_request"]["base"]["sha"] = m3
+    got = resolve_range(r.path, "pull_request", pr)
+    if not (got and got.base == m2):
+        failures.append(f"base moved on: expected fork point {m2}, got {got}")
+    mg = {"merge_group": {"base_sha": m3, "head_sha": f2}}
+    got = resolve_range(r.path, "merge_group", mg)
+    if not (got and got.base == m2):
+        failures.append(f"merge_group with a moved base: expected {m2}, got {got}")
     return failures
 
 
