@@ -158,16 +158,10 @@ describe('resolveFindingUri: file: URIs', () => {
     expect(fileUriToPath('file://[bad', 'linux')).toBeUndefined();
   });
 
-  it('refuses a UNC host off Windows rather than reading only its pathname', () => {
+  it('refuses a UNC host rather than reading only its pathname', () => {
     // Taking the pathname alone would turn \\server\share\app.py into the local
     // /share/app.py, a different file on this machine.
     expect(resolve('file://server/share/app.py')).toBeUndefined();
-  });
-
-  it('opens a UNC host on Windows', () => {
-    expect(resolve('file://server/share/app.py', { platform: 'win32' })).toBe(
-      '\\\\server\\share\\app.py',
-    );
   });
 
   it('reads a Windows drive URI on Windows, and refuses it elsewhere', () => {
@@ -196,17 +190,89 @@ describe('resolveFindingUri: Windows paths', () => {
     );
   });
 
-  it('opens a UNC path on Windows', () => {
-    expect(resolve('\\\\server\\share\\app.py', { platform: 'win32' })).toBe(
-      '\\\\server\\share\\app.py',
-    );
-  });
-
   it('refuses a Windows path on a POSIX host rather than joining it under the root', () => {
     // path.posix sees `C:\repo\app.py` as a relative filename, and joining it
     // would name /ws/C:\repo\app.py.
     expect(resolve('C:\\repo\\app.py')).toBeUndefined();
     expect(resolve('\\\\server\\share\\app.py')).toBeUndefined();
+  });
+});
+
+describe('resolveFindingUri: UNC and other remote-host paths', () => {
+  // A SARIF report is input from whatever the scanned repository and its
+  // scanners wrote. On Windows, checking whether \\host\share\x exists opens an
+  // SMB connection to `host` and offers the user's NTLM credentials, with no
+  // click. So a remote-host path is never passed to the existence check and never
+  // becomes a diagnostic, on any platform: it is counted as unresolved.
+  const REMOTE_URIS: readonly string[] = [
+    '\\\\host\\share\\a.py',
+    '//host/share/a.py',
+    '\\\\host/share/a.py',
+    '/\\host\\share\\a.py',
+    '\\/host/share/a.py',
+    '\\\\?\\UNC\\host\\share\\a.py',
+    '\\\\.\\UNC\\host\\share\\a.py',
+    'file://host/share/a.py',
+    'file:\\\\host\\share\\a.py',
+    'file:////host/share/a.py',
+    'file://///host/share/a.py',
+    'file://localhost//host/share/a.py',
+    'file:///%2F%2Fhost/share/a.py',
+  ];
+  const REMOTE_BASES: readonly string[] = [
+    'file://host/share/',
+    'file:////host/share/',
+    '//host/share/',
+    '\\\\host\\share\\',
+  ];
+
+  for (const platform of ['linux', 'win32'] as const) {
+    for (const uri of REMOTE_URIS) {
+      it(`neither checks nor places ${JSON.stringify(uri)} on ${platform}`, () => {
+        const asked: string[] = [];
+        const exists: ExistsOracle = (candidate) => {
+          asked.push(candidate);
+          return true;
+        };
+        expect(resolve(uri, { platform, exists })).toBeUndefined();
+        expect(asked).toEqual([]);
+      });
+    }
+    for (const baseUri of REMOTE_BASES) {
+      it(`neither checks nor places a uri under the base ${JSON.stringify(baseUri)} on ${platform}`, () => {
+        const asked: string[] = [];
+        const exists: ExistsOracle = (candidate) => {
+          asked.push(candidate);
+          return true;
+        };
+        expect(resolve('a.py', { baseUri, platform, exists })).toBeUndefined();
+        expect(asked).toEqual([]);
+      });
+    }
+  }
+
+  it('still opens a local file: path and a drive path on Windows', () => {
+    expect(resolve('file:///C:/repo/a.py', { platform: 'win32' })).toBe('C:\\repo\\a.py');
+    expect(resolve('\\repo\\a.py', { platform: 'win32' })).toBe('\\repo\\a.py');
+  });
+
+  it('counts every remote-host finding as unresolved and publishes the local one', () => {
+    const collection = new DiagnosticCollection('ash');
+    const summary = publishFindings(
+      collection as unknown as vscode.DiagnosticCollection,
+      'C:\\ws',
+      parsed([...REMOTE_URIS.map((uri) => finding({ uri })), finding({ uri: 'a.py' })]),
+      () => {
+        throw new Error('the existence check must not run for these findings');
+      },
+      'win32',
+    );
+
+    expect(summary).toMatchObject({
+      files: 1,
+      diagnostics: 1,
+      unresolved: REMOTE_URIS.length,
+    });
   });
 });
 

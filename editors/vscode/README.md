@@ -148,15 +148,22 @@ jest holds `src/coverage.ts` to it and
 
 A result ASH suppressed keeps its `kind` and `level` and gains a `suppressions`
 entry, so it is identified by that entry alone and is counted, not published.
-A suppression hides the result when its `state` is `accepted`, null, absent or
-unreadable. `underReview`, `rejected` and any other string leave it shown, so only
-a recorded decision hides a finding.
-Results whose `kind` is not `fail` are counted the same way. A SARIF location is
-resolved whether it is relative to the scanned folder, relative to a `uriBaseId`
-the run declares (ASH's workspace mode writes `PROJECTROOT`), a `file:` URI, or an
-absolute POSIX or Windows path. One that names no file on this machine -- another
-URI scheme, a UNC share or a Windows path off Windows -- is counted and reported
-rather than attached to the wrong file.
+Results whose `kind` is not `fail` are counted the same way. A suppression hides
+the result when its `state` is `accepted`, null, absent or unreadable.
+`underReview`, `rejected` and any other string leave it shown, so only a recorded
+decision hides a finding.
+
+A SARIF location is resolved whether it is relative to the scanned folder,
+relative to a `uriBaseId` the run declares (ASH's workspace mode writes
+`PROJECTROOT`), a `file:` URI, or an absolute POSIX or Windows path. One that names no file on this machine -- another
+URI scheme, or a Windows path off Windows -- is counted and reported rather than
+attached to the wrong file.
+
+A path on another host is counted the same way on every platform, in each
+spelling: `\\host\share`, `//host/share`, mixed separators, the `\\?\` and `\\.\`
+device forms, `file://host/` and `file:////host/`. The extension never checks
+whether such a file exists, because on Windows that check opens an SMB
+connection to the host named in the report.
 
 ## How the .vsix stays free of third-party code
 

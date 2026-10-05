@@ -31,9 +31,10 @@ export interface PublishSummary {
   /** Findings that named no file and so could not be placed. */
   readonly unlocated: number;
   /**
-   * Findings that named a file this machine has no path for: another URI
-   * scheme, a UNC share off Windows, a Windows path off Windows. Counted and
-   * surfaced, because they are findings the Problems panel cannot show.
+   * Findings that named a file this machine has no path for, or one on another
+   * host: another URI scheme, a UNC or other remote-host path on any platform, a
+   * Windows path off Windows. Counted and surfaced, because they are findings the
+   * Problems panel cannot show.
    */
   readonly unresolved: number;
   /** Results ASH suppressed. Never published. */
@@ -106,10 +107,19 @@ const URI_SCHEME = /^[a-z][a-z0-9+.-]+:/i;
 const WINDOWS_DRIVE_PATH = /^[a-z]:[\\/]/i;
 
 /**
- * `\\server\share\x`. A UNC path, absolute on Windows. Backslashes only: on a
- * POSIX host `//server/share` is an ordinary absolute path.
+ * Two leading separators of either kind: `\\host\share\x`, `//host/share/x`,
+ * `\\host/share`, `/\host\share`, and the `\\?\` and `\\.\` device forms.
+ *
+ * Windows reads every one of these as a path on another machine, and checking
+ * whether such a file exists opens an SMB connection to that host and offers the
+ * user's NTLM credentials. The path comes from a report the scanned repository
+ * can influence, so it is refused before anything touches the filesystem, on
+ * every platform, and the finding is counted as unresolved. POSIX would read
+ * `//host/share` as the local `/host/share`, but no scanner ASH runs writes that
+ * spelling for a local file, and a rule that differs by platform is a rule that
+ * a Windows-only bypass hides in.
  */
-const UNC_PATH = /^\\\\[^\\/]+[\\/]/;
+const REMOTE_PATH = /^[\\/]{2}/;
 
 function pathFor(platform: Platform): path.PlatformPath {
   return platform === 'win32' ? path.win32 : path.posix;
@@ -130,9 +140,12 @@ function pathFor(platform: Platform): path.PlatformPath {
  *     base; an undeclared base id leaves the uri relative to the scanned directory.
  *   - `file:` URIs in every RFC 8089 form (`file:///p`, `file:/p`,
  *     `file://localhost/p`). A Windows drive URI, `file:///C:/x`, becomes `C:/x`.
- *     A real host is a UNC share, which only Windows can open.
+ *     A real host, or a path that itself names one (`file:////host/share`), is
+ *     unresolved: see REMOTE_PATH.
  *   - Absolute paths, POSIX or Windows. A Windows path on a non-Windows host
  *     names no local file and is unresolved rather than joined under the root.
+ *     A UNC or other remote-host path is unresolved everywhere and is never
+ *     passed to the existence check.
  *   - Any other scheme (`https:`, `urn:`, `data:`) has no file and is unresolved.
  *
  * POSIX absolute paths get one heuristic, with an existence check that makes it
@@ -162,10 +175,10 @@ export function resolveFindingUri(
     const fsPath = fileUriToPath(raw, platform);
     return fsPath === undefined ? undefined : vscode.Uri.file(fsPath);
   }
-  if (URI_SCHEME.test(raw)) {
+  if (URI_SCHEME.test(raw) || REMOTE_PATH.test(raw)) {
     return undefined;
   }
-  if (WINDOWS_DRIVE_PATH.test(raw) || UNC_PATH.test(raw)) {
+  if (WINDOWS_DRIVE_PATH.test(raw)) {
     return platform === 'win32' ? vscode.Uri.file(native.normalize(raw)) : undefined;
   }
   if (native.isAbsolute(raw)) {
@@ -179,7 +192,7 @@ function isAbsoluteReference(uri: string, platform: Platform): boolean {
   return (
     URI_SCHEME.test(uri) ||
     WINDOWS_DRIVE_PATH.test(uri) ||
-    UNC_PATH.test(uri) ||
+    REMOTE_PATH.test(uri) ||
     pathFor(platform).isAbsolute(uri)
   );
 }
@@ -201,12 +214,14 @@ export function fileUriToPath(raw: string, platform: Platform): string | undefin
   }
   const host = parsed.hostname;
   if (host !== '' && host.toLowerCase() !== 'localhost') {
-    // A real host is a UNC share. Windows can open `\\server\share\x`; anywhere
-    // else there is no local file it can mean, and taking only the pathname
-    // would name a different file on this machine.
-    return platform === 'win32'
-      ? path.win32.normalize(`\\\\${host}${pathname}`)
-      : undefined;
+    // A real host is a share on another machine (see REMOTE_PATH). Taking only
+    // the pathname would name a different file on this one.
+    return undefined;
+  }
+  // `file:////host/share/x` has an empty host and the pathname `//host/share/x`,
+  // and percent-encoded or backslash separators decode to the same shape.
+  if (REMOTE_PATH.test(pathname)) {
+    return undefined;
   }
   // `file:///C:/x` parses to the pathname `/C:/x`. The leading slash is URI
   // syntax, not part of the Windows path.
@@ -214,6 +229,8 @@ export function fileUriToPath(raw: string, platform: Platform): string | undefin
     const drivePath = pathname.slice(1);
     return platform === 'win32' ? path.win32.normalize(drivePath) : undefined;
   }
+  // A pathname with one leading separator normalizes to one with one, so this
+  // cannot produce a UNC path.
   return platform === 'win32' ? path.win32.normalize(pathname) : pathname;
 }
 
