@@ -478,7 +478,10 @@ class Ash < Formula
   end
 
   test do
-    assert_match "automated-security-helper", shell_output("#{bin}/ash --version")
+    # The console script under test, named once so that renaming it is a one-line
+    # change in this block.
+    ash = bin/"ash"
+    assert_match "automated-security-helper", shell_output("#{ash} --version")
 
     # `ash --version` is not evidence the venv is complete. Because pip ran with
     # `--no-deps`, a missing resource leaves a module absent rather than failing
@@ -506,7 +509,7 @@ class Ash < Formula
       AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
     PYTHON
 
-    system bin/"ash", "scan",
+    system ash, "scan",
            "--source-dir", testpath,
            "--output-dir", testpath/"ash_output",
            "--scanners", "detect-secrets",
