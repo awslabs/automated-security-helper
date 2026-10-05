@@ -177,9 +177,9 @@ decision hides a finding.
 
 A SARIF location is resolved whether it is relative to the scanned folder,
 relative to a `uriBaseId` the run declares (ASH's workspace mode writes
-`PROJECTROOT`), a `file:` URI, or an absolute POSIX or Windows path. One that names no file on this machine -- another
-URI scheme, or a Windows path off Windows -- is counted and reported rather than
-attached to the wrong file.
+`PROJECTROOT`), a `file:` URI, or an absolute POSIX or Windows path. One that
+names no file on this machine -- another URI scheme, or a Windows path off
+Windows -- is counted and reported rather than attached to the wrong file.
 
 A path on another host is counted the same way on every platform, in each
 spelling: `\\host\share`, `//host/share`, mixed separators, the `\\?\` and `\\.\`
