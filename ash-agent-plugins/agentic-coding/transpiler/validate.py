@@ -40,6 +40,7 @@ from __future__ import annotations
 import json
 import re
 import zipfile
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -704,7 +705,28 @@ def validate_mcpb_archive(plugins_root: Path) -> list[Error]:
                 return errors
             inner_manifest_bytes = zf.read("manifest.json")
             inner_manifest = json.loads(inner_manifest_bytes)
-    except (zipfile.BadZipFile, json.JSONDecodeError, KeyError) as e:
+    # zlib.error and UnicodeDecodeError are in this tuple because the three
+    # exceptions originally listed do not cover a damaged archive, which was
+    # found by flipping one byte of the committed ash.mcpb: zipfile validates
+    # the container from the central directory, so a corrupt *deflate stream*
+    # gets past BadZipFile and surfaces from zf.read as
+    # `zlib.error: Error -3 while decompressing data`. That escaped this handler
+    # and killed `agentic-plugins check` with a traceback, replacing the clean
+    # "MCPB archive unreadable" verdict this function promises. Drift detection
+    # still reported the same byte, so nothing shipped -- but the operator saw a
+    # crash instead of a verdict, and any validator added after this one in
+    # validate_all would have been skipped entirely.
+    #
+    # UnicodeDecodeError for the same reason one layer up: json.loads on bytes
+    # decodes as UTF-8 first, and invalid UTF-8 raises UnicodeDecodeError, which
+    # is a ValueError but NOT a json.JSONDecodeError, so it escaped too.
+    except (
+        zipfile.BadZipFile,
+        zlib.error,
+        json.JSONDecodeError,
+        UnicodeDecodeError,
+        KeyError,
+    ) as e:
         errors.append(
             err(archive, f"MCPB archive unreadable: {e}", "Run the transpiler.")
         )
