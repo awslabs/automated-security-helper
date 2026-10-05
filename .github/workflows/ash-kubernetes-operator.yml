@@ -54,7 +54,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # enable-cache: false, stated rather than left out, on every setup-uv step in
+      # this file. The input defaults to "auto", which turns the cache on for a push
+      # on a GitHub-hosted runner, and a cache in this public repository is readable
+      # by anyone. .github/scripts/assert-publish-surfaces.py refuses an
+      # unallowlisted one, including the default-on kind.
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
 
       # The repository's own ruff, from its dev group, so the operator is linted by
       # the same ruff version as everything else. The operator's pyproject.toml
@@ -151,6 +158,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
 
       - name: The committed CRDs match what the generator emits
         working-directory: ${{ env.OPERATOR_DIR }}
@@ -175,6 +184,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
 
       - name: Install kind and kubectl, checksum-verified
         run: |
