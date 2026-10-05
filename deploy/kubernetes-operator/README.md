@@ -392,6 +392,17 @@ an `AshMcpServer`). `ash-scan` has **no rules at all**, and every pod sets
 foreign source has no business holding an API credential, and nothing in the scan
 path calls the API.
 
+The trust boundary is who may create these resources, not the operator's own RBAC.
+An `AshScan` picks `spec.image` and may name any `secret` as its source volume, and
+an `AshMcpServer` picks the image of a Deployment and may name any Secret key as its
+`auth.valueFrom.secretKeyRef`, which reaches the pod as an environment variable. So
+the right to create either one in the operator's namespace is the right to run any
+image there with any Secret in that namespace mounted or in its environment. The
+operator's account never reads a Secret; the kubelet does it on the creator's
+behalf. Grant `create` on `ashscans` and `ashmcpservers` only to principals you
+would already trust with that, and keep Secrets the scans do not need out of the
+namespace.
+
 `readOnlyRootFilesystem` is set on the *operator* container and deliberately **not**
 on the scan pods. It was measured elsewhere in this stack to make scanners report
 clean: a tool that cannot write where it expects to comes back MISSING rather than
