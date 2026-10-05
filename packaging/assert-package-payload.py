@@ -84,11 +84,13 @@ WHAT THIS SCRIPT DOES
      example, the checker script bundled into the package it checks, or a stray
      __pycache__/*.pyc.
 
-  2. REJECT EVERY MEMBER THAT IS NOT A REGULAR FILE OR A DIRECTORY, AND EVERY
-     SETUID OR SETGID MODE. A pin on paths says nothing about what sits at the
-     path; a symlink or a setuid binary at the wrapper's path matches it exactly.
-     Neither package ships a link, so every link is rejected, not only the ones
-     that point outside the payload.
+  2. REJECT EVERY MEMBER THAT IS NOT A REGULAR FILE OR A DIRECTORY, EVERY SETUID
+     OR SETGID MODE, AND EVERY GROUP- OR WORLD-WRITABLE MODE. A pin on paths says
+     nothing about what sits at the path; a symlink, a setuid binary or a 0777
+     wrapper at the wrapper's path matches it exactly. Neither package ships a
+     link, so every link is rejected, not only the ones that point outside the
+     payload. That includes an rpm's hard links, which cpio records as regular
+     files with a link count above 1 rather than as a link type.
 
   3. APPLY THE GATE'S OWN PAYLOAD RULES TO THE UNPACKED PAYLOAD. Not a copy of
      them -- the gate is imported and its `classify_member` is called, with the
@@ -189,7 +191,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import ModuleType
 from typing import Mapping, TextIO
 
@@ -487,6 +489,12 @@ DIRECTORY = "directory"
 # S_ISUID | S_ISGID. Neither package needs either bit on anything it ships.
 SETID_BITS = 0o6000
 
+# S_IWGRP | S_IWOTH. Both packages are installed as root, so a group- or
+# world-writable file or directory is one an unprivileged user can rewrite: the
+# wrapper on root's PATH, or the wheel the post-install step installs as root. That
+# is the same escalation a setuid bit is, reached by editing instead of executing.
+WRITABLE_BITS = 0o022
+
 
 @dataclass(frozen=True)
 class PayloadMember:
@@ -715,6 +723,8 @@ def read_cpio_newc(blob: bytes) -> tuple[list[PayloadMember], list[PayloadMember
     """Parses a `newc`-format cpio stream, which is what rpm payloads use."""
     files: list[PayloadMember] = []
     dirs: list[PayloadMember] = []
+    linked_inodes: dict[int, list[str]] = {}
+    member_inode: dict[str, int] = {}
     offset = 0
 
     while offset + 110 <= len(blob):
@@ -729,7 +739,9 @@ def read_cpio_newc(blob: bytes) -> tuple[list[PayloadMember], list[PayloadMember
             start = offset + 6 + (index * 8)
             return int(blob[start : start + 8], 16)
 
+        inode = field_at(0)
         mode = field_at(1)
+        nlink = field_at(4)
         filesize = field_at(6)
         namesize = field_at(11)
 
@@ -749,11 +761,19 @@ def read_cpio_newc(blob: bytes) -> tuple[list[PayloadMember], list[PayloadMember
         name = normalize_member_name(raw_name)
         file_type = mode & CPIO_TYPE_MASK
         kind = CPIO_KINDS.get(file_type, f"cpio member of type {file_type:#o}")
+        # cpio has no hard-link type. newc records a hard link as a regular file
+        # whose link count is above 1, sharing its inode number with the rest of the
+        # set, so the count is the only thing that tells the two apart. A directory's
+        # count is its subdirectories plus 2 and says nothing about links.
+        if kind == REGULAR_FILE and nlink > 1:
+            kind = "hard link"
+            linked_inodes.setdefault(inode, []).append(name)
         # rpm records directories it owns as cpio entries with S_IFDIR and zero size.
         # A symlink's data is its target, which is what the reader reports.
         if kind == DIRECTORY:
             dirs.append(PayloadMember(name, 0, True, kind=kind, mode=mode & 0o7777))
         else:
+            member_inode[name] = inode
             files.append(
                 PayloadMember(
                     name,
@@ -777,6 +797,15 @@ def read_cpio_newc(blob: bytes) -> tuple[list[PayloadMember], list[PayloadMember
                 f"cpio parse made no progress at offset {offset}; refusing to loop"
             )
         offset = next_offset
+
+    # A hard link's target is the rest of its link set, which is only known once the
+    # whole stream has been read.
+    for index, member in enumerate(files):
+        if member.kind == "hard link":
+            others = [
+                n for n in linked_inodes[member_inode[member.name]] if n != member.name
+            ]
+            files[index] = replace(member, link_target=", ".join(others))
 
     return files, dirs
 
@@ -1163,6 +1192,14 @@ def check_members(
                 "or setgid bit set. Nothing this package installs runs with "
                 "elevated privileges, so the bit can only be a mistake or a plant."
             )
+        # Links are left to the type rule above: a symlink's mode is meaningless, and
+        # tar records every one as 0777.
+        if member.kind in (REGULAR_FILE, DIRECTORY) and member.mode & WRITABLE_BITS:
+            problems.append(
+                f"writable-member: {label} has mode {member.mode:04o}, writable by "
+                "its group or by everyone. The package installs as root, so an "
+                "unprivileged user could rewrite it and have root run the result."
+            )
 
     for member in files:
         if not member.name:
@@ -1499,12 +1536,37 @@ PLANTED_CASES: list[tuple[str, dict[str, bytes | FixtureMember], list[str], str]
     ),
 ]
 
-# Directory modes for the fixture, by case label. A setgid directory is the one
-# planted-mode case that is not a file, and directories are listed separately.
+PLANTED_CASES.extend(
+    [
+        (
+            "a world-writable wrapper",
+            {f"usr/bin/{CLI_NAME}": FixtureMember(data=WRAPPER_FIXTURE, mode=0o777)},
+            [],
+            "writable-member",
+        ),
+        (
+            "a group-writable doc file",
+            {
+                f"usr/share/doc/{PKG_NAME}/copyright": FixtureMember(
+                    data=b"x\n", mode=0o664
+                )
+            },
+            [],
+            "writable-member",
+        ),
+    ]
+)
+
+# Directory modes for the fixture, by case label. These are the planted-mode cases
+# that are not files, and directories are listed separately.
 PLANTED_DIRECTORY_MODES = {
-    "a setgid package directory": {f"usr/lib/{PKG_NAME}": 0o2755}
+    "a setgid package directory": {f"usr/lib/{PKG_NAME}": 0o2755},
+    "a world-writable wheels directory": {f"usr/lib/{PKG_NAME}/wheels": 0o777},
+    "a group-writable package directory": {f"usr/lib/{PKG_NAME}": 0o775},
 }
 PLANTED_CASES.append(("a setgid package directory", {}, [], "setid-member"))
+PLANTED_CASES.append(("a world-writable wheels directory", {}, [], "writable-member"))
+PLANTED_CASES.append(("a group-writable package directory", {}, [], "writable-member"))
 
 # Which planted cases need the gate module. The three malformed-path cases expect a
 # verdict produced by the gate's imported malformed_path_reason, so without the gate
@@ -1556,6 +1618,107 @@ GATE_RULE_CASES = [
         "vendored-scanner",
     ),
 ]
+
+
+def build_fixture_cpio(
+    payload: Mapping[str, bytes],
+    directories: list[str],
+    hard_links: Mapping[str, str] | None = None,
+) -> bytes:
+    """Writes a newc cpio stream, the format inside an rpm payload, in memory.
+
+    Only the cpio layer, not an rpm: the lead and header framing around it are
+    exercised by running this script on the real built .rpm. The cpio layer gets a
+    fixture because it is where a hard link is recorded, and a hard link there looks
+    exactly like a regular file except for its link count.
+
+    `hard_links` maps a member name to the name of the member it is a hard link to.
+    Both are then written with one inode number and a link count of 2, and, as rpm
+    writes a link set, only the last member of the set carries the data.
+
+    Directories are written with a link count of 2, as rpm writes them, so the
+    legitimate stream is also a control on the hard-link rule not firing on a
+    directory's ordinary count.
+    """
+    links = dict(hard_links or {})
+    out = bytearray()
+    inode = 0
+    inode_of: dict[str, int] = {}
+
+    def entry(name: str, mode: int, nlink: int, ino: int, data: bytes) -> None:
+        raw = (name if name == CPIO_TRAILER else f"./{name}").encode() + b"\0"
+        fields = [ino, mode, 0, 0, nlink, 0, len(data), 0, 0, 0, 0, len(raw), 0]
+        out.extend(CPIO_NEWC_MAGIC + b"".join(f"{v:08X}".encode() for v in fields))
+        out.extend(raw)
+        out.extend(b"\0" * ((-len(out)) % 4))
+        out.extend(data)
+        out.extend(b"\0" * ((-len(out)) % 4))
+
+    for name in directories:
+        inode += 1
+        entry(name, 0o040755, 2, inode, b"")
+    linked_targets = set(links.values())
+    for name, data in payload.items():
+        if name in links:
+            continue
+        inode += 1
+        inode_of[name] = inode
+        # The link set's data goes on its last member, which is the target here.
+        nlink = 2 if name in linked_targets else 1
+        if name in linked_targets:
+            for source, target in links.items():
+                if target == name:
+                    entry(source, 0o100755, nlink, inode, b"")
+        entry(name, 0o100644, nlink, inode, data)
+    entry(CPIO_TRAILER, 0, 1, 0, b"")
+    return bytes(out)
+
+
+def run_cpio_self_test(
+    gate: ModuleType | None, stream: TextIO
+) -> tuple[list[str], int]:
+    """Drives the cpio reader and the member rules on a planted hard link.
+
+    Returns (failures, cases run). The legitimate stream must be accepted first, so
+    that a hard-link rule firing on every member cannot pass the planted case.
+    """
+    failures: list[str] = []
+    directories = sorted(ALLOWED_DIRECTORIES)
+    expected = COMMON_FILES | DEB_ONLY_FILES
+
+    files, dirs = read_cpio_newc(build_fixture_cpio(LEGITIMATE_PAYLOAD, directories))
+    problems = check_members(files, dirs, expected, gate)
+    if problems:
+        failures.append(
+            "cpio: the legitimate payload was REJECTED: " + "; ".join(problems)
+        )
+    else:
+        stream.write(
+            f"  cpio: accepted the legitimate payload ({len(files)} files, "
+            f"{len(dirs)} dirs, every directory with a link count of 2)\n"
+        )
+
+    label = "cpio: the wrapper hard-linked to the license file"
+    payload = dict(LEGITIMATE_PAYLOAD)
+    copyright_name = f"usr/share/doc/{PKG_NAME}/copyright"
+    files, dirs = read_cpio_newc(
+        build_fixture_cpio(
+            payload, directories, {f"usr/bin/{CLI_NAME}": copyright_name}
+        )
+    )
+    problems = check_members(files, dirs, expected, gate)
+    # Matched on the member and its kind, not on the verdict alone, so a rule firing
+    # on some other member cannot stand in for this one.
+    verdict = f"non-regular-member: usr/bin/{CLI_NAME} is a hard link"
+    if not problems:
+        failures.append(f"{label}: was ACCEPTED; no rule fired")
+    elif not any(p.startswith(verdict) for p in problems):
+        failures.append(
+            f"{label}: was rejected, but not by {verdict!r} -- got {problems}"
+        )
+    else:
+        stream.write(f"  rejected {label} (non-regular-member)\n")
+    return failures, 1
 
 
 def run_gate_rule_self_test(gate: ModuleType, stream: TextIO) -> list[str]:
@@ -1688,6 +1851,11 @@ def run_self_test(stream: TextIO, gate_path: str | None = None) -> int:
         pin_cases_run += 1
         stream.write(f"  rejected {label} ({expected_verdict})\n")
 
+    cpio_failures, cpio_cases = run_cpio_self_test(
+        load_gate(gate_path) if gate_path is not None else None, stream
+    )
+    failures.extend(cpio_failures)
+
     # The imported rules get their own controls, because the cases above all sit at
     # paths the pin rejects and therefore say nothing about whether the gate's rules
     # are reached at all.
@@ -1709,7 +1877,8 @@ def run_self_test(stream: TextIO, gate_path: str | None = None) -> int:
     stream.write(
         f"self-test OK: the legitimate payload is accepted, {pin_cases_run} of "
         f"{len(PLANTED_CASES)} planted members were run and each was rejected by "
-        f"the intended local rule, and {gate_cases} member(s) planted at ACCEPTED "
+        f"the intended local rule, {cpio_cases} planted cpio member(s) were rejected "
+        f"the same way, and {gate_cases} member(s) planted at ACCEPTED "
         "paths were rejected by the intended imported gate rule.\n"
     )
     if gate_path is None:
@@ -1718,10 +1887,11 @@ def run_self_test(stream: TextIO, gate_path: str | None = None) -> int:
             "Without it this run proves only that the pinned member list works.\n"
         )
     stream.write(
-        "Note the scope: this exercises the ar+tar reader, the pin, and the imported "
-        "rules. The rpm reader has no fixture -- writing a synthetic rpm with this "
-        "file's own notion of the format would only prove the writer and reader "
-        "agree -- so it is exercised by running this script on the real built .rpm.\n"
+        "Note the scope: this exercises the ar+tar reader, the cpio reader, the pin, "
+        "and the imported rules. The rpm framing around the cpio stream has no "
+        "fixture -- writing a synthetic rpm with this file's own notion of the format "
+        "would only prove the writer and reader agree -- so it is exercised by "
+        "running this script on the real built .rpm.\n"
     )
     return 0
 
@@ -1870,7 +2040,8 @@ def main(argv: list[str]) -> int:
     else:
         sys.stdout.write(
             "package payload OK: every payload member is pinned, is a regular file "
-            "or directory, and has no setuid or setgid bit; the gate's content rules "
+            "or directory, and has no setuid, setgid, group-write or world-write "
+            "bit; the gate's content rules "
             "that can fire on a package payload ("
             f"{', '.join(sorted(PAYLOAD_VERDICTS))}) were applied to the unpacked "
             "payload; and the wheel extracted from each package passed "
