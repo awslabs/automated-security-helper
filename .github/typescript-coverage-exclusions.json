@@ -58,6 +58,11 @@
       "reason": "jest's own config -- loaded before instrumentation exists, and collectCoverageFrom ['src/**/*.ts'] cannot match a file at the package root."
     },
     {
+      "path": "editors/vscode/eslint.config.mjs",
+      "kind": "harness-config",
+      "reason": "eslint's own flat config -- loaded by eslint rather than imported by any source or test, and collectCoverageFrom ['src/**/*.ts'] cannot match a file at the package root. Same disposition as the jest configs above."
+    },
+    {
       "path": "ash-agent-plugins/agentic-coding/transpiler/tools/zod_to_json_schema.mjs",
       "kind": "no-harness",
       "reason": "A node helper shelled out to by the Python transpiler's tools/refresh_schemas.py; its tree is a Python package (pyproject.toml, uv.lock) with no package.json, tsconfig, jest or vitest config, so no JS harness exists to measure it."

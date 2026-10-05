@@ -33,6 +33,8 @@
  * and it starts a logging session -- which is why this file uses the long form.
  */
 
+import { spawnSync } from 'child_process';
+
 /** What a spawned command produced. Modelled on `child_process.SpawnSyncReturns`. */
 export interface CommandResult {
   /** Exit status, or null when the process was killed by a signal. */
@@ -71,10 +73,6 @@ export function spawnSyncRunner(
   args: readonly string[],
   options: CommandOptions = {},
 ): CommandResult {
-  // Required here rather than at module load so this file stays importable in a
-  // test environment that stubs the module registry.
-  /* eslint-disable-next-line @typescript-eslint/no-var-requires */
-  const { spawnSync } = require('child_process') as typeof import('child_process');
   const result = spawnSync(executable, [...args], {
     cwd: options.cwd,
     encoding: 'utf8',

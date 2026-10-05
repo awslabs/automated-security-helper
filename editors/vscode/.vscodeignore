@@ -17,6 +17,7 @@ src/**
 test/**
 tsconfig.json
 tsconfig.test.json
+eslint.config.mjs
 *.tsbuildinfo
 
 # Dependencies. This package has no runtime dependencies at all, so `vsce` should
