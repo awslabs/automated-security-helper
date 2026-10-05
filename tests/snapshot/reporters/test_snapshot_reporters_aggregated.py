@@ -21,6 +21,11 @@ from tests.snapshot.support.fixture_model import (
 )
 from tests.snapshot.support.reporter_catalog import reporter_classes
 
+# The aggregated results are built under the pinned clock; their durations are fixed.
+pytestmark = pytest.mark.snapshot_masking(
+    mask_durations=False, mask_duration_keys=False
+)
+
 WORKSPACE_FIXTURES = {
     "workspace": ("fixture_workspace_model", WORKSPACE_FILE),
     "skipped-workspace": ("fixture_skipped_workspace_model", SKIPPED_WORKSPACE_FILE),

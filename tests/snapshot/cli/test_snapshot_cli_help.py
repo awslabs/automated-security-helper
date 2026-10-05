@@ -41,6 +41,11 @@ from automated_security_helper.cli.json_input import CliJsonInputCommand
 from automated_security_helper.cli.main import app
 from tests.snapshot.support.normalize import pinned_terminal_env
 
+# Help text is fixed prose; nothing in it is measured time, so nothing is masked as one.
+pytestmark = pytest.mark.snapshot_masking(
+    mask_durations=False, mask_duration_keys=False
+)
+
 _SNAPSHOT_DIR = Path(__file__).parent / "__snapshots__" / Path(__file__).stem
 
 

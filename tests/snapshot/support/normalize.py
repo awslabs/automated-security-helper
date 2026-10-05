@@ -25,11 +25,23 @@ What is masked, and why each is safe to mask
 - The time column of ASH's console log (rich's ``RichHandler``), which prints each
   record's creation time as ``[MM/DD/YY HH:MM:SS]`` in local time. Only the bracketed
   form is masked; a bare ``10/05/26`` in a message survives.
-- Durations: a number followed by a time unit. Fixtures pin every duration they pass
-  in, so what this masks is wall-clock time ASH measured itself.
-- A bare number under a volatile key (``VOLATILE_KEYS``) in rendered JSON text, such as
-  OCSF's ``"time": 1791220796403`` epoch milliseconds. Structured data already masks these
-  by key; this is the same rule for JSON a command printed rather than returned.
+- Durations: a number followed by a time unit, in prose. Only while ``mask_durations``
+  is on, which is the default: a test whose output holds wall-clock time ASH measured
+  itself (a real scan, a progress bar) keeps it. A test whose inputs pin time fully
+  sets ``mask_durations = False``, because there the rule only hides things: fixed
+  prose ("poll every 5 seconds", "a median of 21.3s" in a schema description) and the
+  duration a reporter renders from the pinned clock, which is how a ``<1ms`` defect in
+  the text and HTML reporters stayed invisible. Turn it off, never on selectively.
+- A number under a duration key (``DURATION_KEYS``: ``duration``, ``elapsed`` ...), in
+  structured data and in JSON text a command printed. Governed by ``mask_duration_keys``
+  (default on), for the same reason and with the same opt-out: under the pinned clock
+  ``"duration_seconds": 0.0`` is a value a user reads, and a wrong one is a defect.
+- A value under an instant key (``INSTANT_KEYS``: ``time``, ``logged_time``,
+  ``start_time`` ...), always, such as OCSF's ``"time": 1791220796403`` epoch
+  milliseconds. An instant is the clock's value, not something ASH computed: under the
+  pinned clock it is the fixture's own constant, and its ISO spelling is masked by the
+  timestamp rule above anyway, so the epoch spelling of the same instant is treated
+  alike. ``VOLATILE_KEYS`` is both sets.
 - UUIDs, the ASH version, the Python version and the hostname.
 - The pydantic minor version in its ``errors.pydantic.dev/<version>/`` help links, which
   a dependency bump changes in every config-error message.
@@ -114,9 +126,10 @@ _DURATION = re.compile(
     r")(?![\w])"
 )
 
-# Durations ASH writes as bare JSON numbers. Masked by key, not by value, because a
-# bare number is only a duration because of the key it sits under.
-VOLATILE_KEYS = frozenset(
+# Time ASH writes as bare values. Masked by key, not by value, because a bare number is
+# only a duration or an instant because of the key it sits under.
+#: Lengths of time ASH measured. Masked unless ``mask_duration_keys`` is off.
+DURATION_KEYS = frozenset(
     {
         "duration",
         "duration_seconds",
@@ -125,6 +138,11 @@ VOLATILE_KEYS = frozenset(
         "execution_time",
         "scan_duration",
         "scan_duration_seconds",
+    }
+)
+#: Points in time, and the report id minted from one. Always masked.
+INSTANT_KEYS = frozenset(
+    {
         "start_time",
         "end_time",
         "generated_at",
@@ -134,6 +152,7 @@ VOLATILE_KEYS = frozenset(
         "time",
     }
 )
+VOLATILE_KEYS = DURATION_KEYS | INSTANT_KEYS
 
 _TRAILING_WS = re.compile(r"[ \t]+$", re.MULTILINE)
 
@@ -167,13 +186,27 @@ def _keep_panel_width(rendered: str, masked: str) -> str:
     return "\n".join(after_lines)
 
 
-# The same keys in JSON text: `"time": 1791220796403`. Numbers only; a string value under
-# one of these keys is an ISO instant or a duration, which the rules above already mask.
-_VOLATILE_JSON_NUMBER = re.compile(
-    r'"('
-    + "|".join(sorted(map(re.escape, VOLATILE_KEYS)))
-    + r')"(\s*:\s*)-?\d+(?:\.\d+)?\b'
-)
+def _json_number_under(keys: frozenset[str]) -> re.Pattern[str]:
+    """``"<key>": <number>`` in JSON text, for one of ``keys``.
+
+    Numbers only; a string value under one of these keys is an ISO instant or a
+    duration in prose, which the text rules already handle.
+    """
+    return re.compile(
+        r'"('
+        + "|".join(sorted(map(re.escape, keys)))
+        + r')"(\s*:\s*)-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?\b'
+    )
+
+
+# The same keys in JSON text: `"time": 1791220796403`.
+_INSTANT_JSON_NUMBER = _json_number_under(INSTANT_KEYS)
+_DURATION_JSON_NUMBER = _json_number_under(DURATION_KEYS)
+
+
+def _mask_json_number(match: re.Match[str]) -> str:
+    return f'"{match.group(1)}"{match.group(2)}"<{match.group(1).upper()}>"'
+
 
 # A rich traceback panel, which ASH's log handler draws for logger.exception(). Its
 # frames quote file paths, line numbers and source lines from wherever the exception
@@ -250,6 +283,10 @@ class SnapshotNormalizer:
 
     roots: list[tuple[PurePath, str]] = field(default_factory=list)
     extra_literals: dict[str, str] = field(default_factory=dict)
+    #: Mask "number + time unit" in prose. Off for a test whose inputs pin time fully.
+    mask_durations: bool = True
+    #: Mask numbers under DURATION_KEYS. Off for a test whose clock is pinned.
+    mask_duration_keys: bool = True
 
     def add_root(self, path: PurePath | str, token: str) -> None:
         """Mask ``path`` (and everything below it) as ``<token>``."""
@@ -313,10 +350,11 @@ class SnapshotNormalizer:
         today = date.today()
         for day in (today - timedelta(days=1), today, today + timedelta(days=1)):
             out = out.replace(day.isoformat(), "<TODAY>")
-        out = _DURATION.sub("<DURATION>", out)
-        out = _VOLATILE_JSON_NUMBER.sub(
-            lambda m: f'"{m.group(1)}"{m.group(2)}"<{m.group(1).upper()}>"', out
-        )
+        if self.mask_durations:
+            out = _DURATION.sub("<DURATION>", out)
+        out = _INSTANT_JSON_NUMBER.sub(_mask_json_number, out)
+        if self.mask_duration_keys:
+            out = _DURATION_JSON_NUMBER.sub(_mask_json_number, out)
         out = _keep_panel_width(rendered, out)
         out = _TRAILING_WS.sub("", out)
         return out
@@ -327,9 +365,14 @@ class SnapshotNormalizer:
         """Normalize a JSON-shaped value: strings by :meth:`text`, volatile keys by name."""
         if (
             _key is not None
-            and _key in VOLATILE_KEYS
             and value not in (None, "", [], {})
+            and (
+                _key in INSTANT_KEYS
+                or (_key in DURATION_KEYS and self.mask_duration_keys)
+            )
         ):
+            # With mask_duration_keys off, a duration is normalized like any other
+            # value: a number is kept, a string still goes through the text rules.
             return f"<{_key.upper()}>"
         if isinstance(value, dict):
             return {
@@ -387,6 +430,8 @@ def pinned_terminal_env() -> dict[str, str]:
 
 
 __all__ = [
+    "DURATION_KEYS",
+    "INSTANT_KEYS",
     "REPO_ROOT",
     "SnapshotNormalizer",
     "VOLATILE_KEYS",

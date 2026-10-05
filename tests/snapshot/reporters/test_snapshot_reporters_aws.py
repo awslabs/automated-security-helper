@@ -36,6 +36,11 @@ from tests.snapshot.support.reporter_catalog import (
     snapshot_extension,
 )
 
+# The AWS reporters render the fixture scan under the pinned clock; durations are fixed.
+pytestmark = pytest.mark.snapshot_masking(
+    mask_durations=False, mask_duration_keys=False
+)
+
 REGION = "us-east-1"
 
 

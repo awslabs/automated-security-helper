@@ -68,7 +68,18 @@ _UNSET_FOR_SNAPSHOTS = (
 )
 
 
+#: Normalizer switches a test or module may turn off with
+#: ``@pytest.mark.snapshot_masking(...)``. See the module docstring of
+#: tests/snapshot/support/normalize.py for what each one masks.
+_MASKING_SWITCHES = frozenset({"mask_durations", "mask_duration_keys"})
+
+
 def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers",
+        "snapshot_masking(mask_durations=..., mask_duration_keys=...): turn off a "
+        "SnapshotNormalizer rule for a test whose inputs pin what it masks.",
+    )
     # Belt and braces with test_snapshot_policy.py, which reads the workflow files: a
     # CI job that somehow passes --snapshot-update would turn every intended diff into
     # a silent rewrite, so the session refuses to start.
@@ -234,14 +245,36 @@ def _log_render_without_clock(self: LogRender, *args: Any, **kwargs: Any) -> Any
 
 @pytest.fixture
 def snapshot_normalizer(
-    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+    tmp_path_factory: pytest.TempPathFactory,
 ) -> SnapshotNormalizer:
     """The shared normalizer, with this test's temp dirs registered.
 
     A test that creates paths elsewhere registers them with ``add_root`` before it
     asserts; a test that learns an id it cannot choose (a scan id) uses ``add_literal``.
+    A test whose inputs pin time fully opts out of duration masking with
+    ``@pytest.mark.snapshot_masking(mask_durations=False, mask_duration_keys=False)``
+    (or a module ``pytestmark``), so a wrong duration shows up as a diff.
     """
-    return default_normalizer(tmp_paths=[tmp_path, tmp_path_factory.getbasetemp()])
+    normalizer = default_normalizer(
+        tmp_paths=[tmp_path, tmp_path_factory.getbasetemp()]
+    )
+    # Closest marker wins, so a test can override its module's ``pytestmark``.
+    for mark in reversed(list(request.node.iter_markers("snapshot_masking"))):
+        if mark.args:
+            raise pytest.UsageError("snapshot_masking takes keyword arguments only")
+        unknown = set(mark.kwargs) - _MASKING_SWITCHES
+        if unknown:
+            raise pytest.UsageError(
+                f"snapshot_masking: unknown switch(es) {sorted(unknown)}; "
+                f"expected {sorted(_MASKING_SWITCHES)}"
+            )
+        for name, value in mark.kwargs.items():
+            if not isinstance(value, bool):
+                raise pytest.UsageError(f"snapshot_masking: {name} must be a bool")
+            setattr(normalizer, name, value)
+    return normalizer
 
 
 @pytest.fixture

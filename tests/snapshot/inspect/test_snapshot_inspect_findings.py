@@ -29,6 +29,11 @@ from automated_security_helper.models.asharp_model import AshAggregatedResults
 from automated_security_helper.schemas.sarif_schema_model import SarifReport
 from tests.snapshot.support.normalize import REPO_ROOT
 
+# The TUI header clock is pinned to _FixedClock; nothing else on screen is a time.
+pytestmark = pytest.mark.snapshot_masking(
+    mask_durations=False, mask_duration_keys=False
+)
+
 FIXTURE = REPO_ROOT / "tests" / "test_data" / "snapshot" / "findings" / "ash.sarif"
 SCREEN_SIZE = (100, 30)
 

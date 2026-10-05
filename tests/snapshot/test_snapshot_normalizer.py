@@ -320,6 +320,64 @@ class TestSurvivesErrorOutputRules:
         assert n.text(text) == text
 
 
+class TestDurationOptOut:
+    """``mask_durations`` and ``mask_duration_keys``: what each turns off, and what stays."""
+
+    def test_prose_durations_survive_with_mask_durations_off(self, normalizer):
+        normalizer.mask_durations = False
+        text = "poll every 5 seconds; bandit <1ms, checkov 12.5s, 0:00:42 elapsed"
+        assert normalizer.text(text) == text
+
+    def test_mask_durations_off_keeps_every_other_rule(self, normalizer):
+        normalizer.mask_durations = False
+        out = normalizer.text(
+            "at 2026-10-05T12:34:56Z run 123e4567-e89b-12d3-a456-426614174000 took 3s"
+        )
+        assert out == "at <TIMESTAMP> run <UUID> took 3s"
+
+    def test_duration_keys_survive_with_mask_duration_keys_off(self, normalizer):
+        normalizer.mask_duration_keys = False
+        data = {"duration": 42.0, "duration_seconds": 0.0, "elapsed": "1.5s"}
+        # A string under a duration key still meets the prose rule, which is on.
+        assert normalizer.data(data) == {
+            "duration": 42.0,
+            "duration_seconds": 0.0,
+            "elapsed": "<DURATION>",
+        }
+        text = json.dumps({"duration": 1.25, "scan_duration_seconds": 7})
+        assert normalizer.text(text) == text
+
+    def test_instant_keys_stay_masked_with_both_switches_off(self, normalizer):
+        normalizer.mask_durations = False
+        normalizer.mask_duration_keys = False
+        data = {"time": 1768478442000, "start_time": "x", "report_id": "r"}
+        assert normalizer.data(data) == {
+            "time": "<TIME>",
+            "start_time": "<START_TIME>",
+            "report_id": "<REPORT_ID>",
+        }
+        text = json.dumps({"logged_time": 1768478442000, "duration": 1.0})
+        assert json.loads(normalizer.text(text)) == {
+            "logged_time": "<LOGGED_TIME>",
+            "duration": 1.0,
+        }
+
+    def test_both_switches_default_on(self, normalizer):
+        assert normalizer.mask_durations and normalizer.mask_duration_keys
+        assert normalizer.text('took 3s {"duration": 1.25}') == (
+            'took <DURATION> {"duration": "<DURATION>"}'
+        )
+
+    @pytest.mark.snapshot_masking(mask_durations=False, mask_duration_keys=False)
+    def test_the_marker_reaches_the_fixture(self, snapshot_normalizer):
+        assert snapshot_normalizer.mask_durations is False
+        assert snapshot_normalizer.mask_duration_keys is False
+
+    def test_the_fixture_defaults_without_the_marker(self, snapshot_normalizer):
+        assert snapshot_normalizer.mask_durations is True
+        assert snapshot_normalizer.mask_duration_keys is True
+
+
 class TestFileUriSpellings:
     """The ``file://`` spelling of a pure path, built without ``PurePath.as_uri()``."""
 

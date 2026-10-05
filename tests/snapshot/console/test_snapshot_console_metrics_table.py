@@ -39,6 +39,12 @@ from tests.snapshot.console.console_inputs import (
     scan_results_model,
 )
 
+# The scanner metrics come from console_inputs.py with fixed durations, including
+# the sub-millisecond ones rendered as "<1ms".
+pytestmark = pytest.mark.snapshot_masking(
+    mask_durations=False, mask_duration_keys=False
+)
+
 WIDTHS = pytest.mark.parametrize("width", [WIDE, NARROW], ids=["wide", "narrow"])
 
 #: What ``platform.system()`` returns on the two families the module distinguishes.

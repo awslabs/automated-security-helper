@@ -139,6 +139,25 @@ it with the normalizer (`add_root`, `add_literal`) or extend the normalizer, tog
 a test in `tests/snapshot/test_snapshot_normalizer.py` showing what it masks and what it
 leaves alone.
 
+Durations are masked by default, because most output that contains one measured it from
+the wall clock. A test whose inputs pin time fully (the pinned clock in the reporter
+tests, fixed scanner metrics, a fixture results document, help text and other fixed
+prose) turns that off, so a wrong duration and a sentence like "poll every 5 seconds"
+show up as written:
+
+```python
+pytestmark = pytest.mark.snapshot_masking(
+    mask_durations=False, mask_duration_keys=False
+)
+```
+
+`mask_durations` is the rule for a number followed by a time unit in text;
+`mask_duration_keys` covers bare numbers under keys such as `duration` and
+`duration_seconds`. Instants (`time`, `start_time`, ISO timestamps) stay masked either way.
+Only opt out after running the test several times, under more than one `TZ`, with no
+diff. The console log's time column is not a normalizer rule: the fixtures draw it as the
+constant `[<LOG_TIME>]`, so the column has one width under any clock, locale or timezone.
+
 ### When a snapshot test fails
 
 1. Run the tests and read the diff syrupy prints:
@@ -151,8 +170,11 @@ leaves alone.
 3. If it is, rewrite the snapshots for the tests you changed:
 
    ```bash
-   uv run pytest tests/snapshot/test_<area>.py --snapshot-update
+   uv run pytest tests/snapshot/test_<area>.py -n 0 --snapshot-update
    ```
+
+   Pass `-n 0`. Under xdist several workers rewrite the same `.ambr` file at once, and
+   the last writer drops the others' snapshots without an error.
 
 4. Review what changed, file by file:
 

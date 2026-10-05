@@ -34,6 +34,11 @@ from automated_security_helper.core.progress import LiveProgressDisplay
 from automated_security_helper.utils.log import ASH_LOGGER
 from tests.snapshot.console.console_inputs import NARROW, recording_console, rendered
 
+# The progress clock is pinned (see the module docstring), so the elapsed column is fixed.
+pytestmark = pytest.mark.snapshot_masking(
+    mask_durations=False, mask_duration_keys=False
+)
+
 PINNED_PROGRESS_TIME = 5_000.0
 
 
