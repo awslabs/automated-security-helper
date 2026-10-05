@@ -78,7 +78,7 @@ Builds the ASH container image then runs a scan with it.
 | `--no-build` | bool | False |  | Skip building the ASH container image; reuse an existing image if present |
 | `--no-run` | bool | False |  | Build the ASH container image but do not run a scan |
 | `--force`, `-f` | bool | False |  | Force rebuild of the ASH container image |
-| `--oci-runner`, `--oci`, `--runner`, `-r` | str |  | OCI_RUNNER | Use the specified OCI runner instead of docker to run the containerized tools. To prefix every OCI command with a wrapper (e.g. sudo), set the OCI_RUNNER_WRAPPER environment variable instead of using this option (e.g. OCI_RUNNER_WRAPPER=sudo ash ...). |
+| `--oci-runner`, `--oci`, `--runner`, `-r` | str |  | OCI_RUNNER | Use the specified OCI runner instead of docker to run the containerized tools. To prefix every OCI command with a wrapper (e.g. sudo), set the OCI_RUNNER_WRAPPER environment variable instead of using this option (e.g. OCI_RUNNER_WRAPPER=sudo ashx ...). |
 | `--container-network` | str | `bridge` |  | Docker network mode for the container run (e.g. 'bridge', 'none', 'host'). Pass 'none' to force offline/airgapped network isolation independently of --offline. |
 | `--build-target` | enum(non-root, ci) | `non-root` |  | Specify the target stage of the ASH image to build |
 | `--offline-semgrep-rulesets` | str | `p/ci` |  | Specify Semgrep rulesets for use in ASH offline mode |
