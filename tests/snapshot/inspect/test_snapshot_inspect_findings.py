@@ -72,17 +72,47 @@ def _frame(app) -> str:
     return console.export_text()
 
 
+#: Pauses to wait for a screen's footer before giving up. Each is one trip through the
+#: app's message queue; a footer normally draws within two.
+_SETTLE_PAUSES = 200
+
+
+async def _settle(pilot, app) -> None:
+    """Pause until the active screen's footer has drawn its key bindings.
+
+    Textual's ``Footer`` composes its keys only after the screen publishes its
+    bindings, from a ``call_after_refresh`` -- a later turn of the event loop than the
+    one ``pilot.pause()`` waits for. On windows-latest under Python 3.10 the first
+    frame was captured before that turn, ending at the status line with no footer.
+    Waiting for the keys to exist, then for one more refresh to draw them, makes the
+    capture independent of how fast the runner is. Bounded, so a footer that never
+    draws fails here instead of hanging the suite.
+    """
+    from textual.widgets import Footer
+    from textual.widgets._footer import FooterKey
+
+    for _ in range(_SETTLE_PAUSES):
+        await pilot.pause()
+        footers = list(app.screen.query(Footer))
+        if footers and all(list(footer.query(FooterKey)) for footer in footers):
+            await pilot.pause()
+            return
+    raise AssertionError(
+        f"the footer had drawn no key bindings after {_SETTLE_PAUSES} pauses"
+    )
+
+
 async def _screens(findings, config_path) -> dict[str, str]:
     app = FindingsExplorerApp(findings, config_path=config_path)
     frames = {}
     async with app.run_test(size=SCREEN_SIZE) as pilot:
-        await pilot.pause()
+        await _settle(pilot, app)
         frames["table"] = _frame(app)
         await pilot.press("h")  # show suppressed findings too
-        await pilot.pause()
+        await _settle(pilot, app)
         frames["table-with-suppressed"] = _frame(app)
         await pilot.press("v")  # open the selected (first) finding
-        await pilot.pause()
+        await _settle(pilot, app)
         frames["detail"] = _frame(app)
     return frames
 
