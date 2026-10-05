@@ -1,0 +1,31 @@
+{
+  "$comment": [
+    "Which S3 bucket the quick-create links in quick-create-links.md point at.",
+    "",
+    "AN EMPTY BUCKET IS THE SHIPPING DEFAULT, NOT AN UNFILLED BLANK. ASH publishes",
+    "these templates to no bucket, for the same reason it publishes no container",
+    "image -- see README.md, 'Hosting the templates for one-click launch', and",
+    "../docs/content/docs/building-your-own-image.md. So the committed document",
+    "carries no URLs, and is expected to keep carrying none.",
+    "",
+    "This file is here for ADOPTERS. Copy the templates to a bucket you own, set it",
+    "below, and run 'python3 scripts/render_quick_create_links.py render' to get",
+    "working links for your own account. quick-create-links.md has the full sequence",
+    "under 'Rendering links for your own bucket'.",
+    "",
+    "Do not commit a bucket you do not control, and do not put a sample bucket name",
+    "here to make the output look complete. The renderer emits an explicit",
+    "NO-BUCKET-CONFIGURED placeholder instead of an example URL precisely so that no",
+    "link in this repository can point somewhere plausible and dead.",
+    "",
+    "JSON rather than TOML so this reads on every Python this repository supports:",
+    "requires-python is >=3.10, tomllib arrived in 3.11, and tomli is not a",
+    "dependency -- so a TOML config would break the 3.10 leg of the unit-test matrix."
+  ],
+  "bucket": "",
+  "bucket_region": "",
+  "key_prefix": "",
+  "launch_regions": [
+    "us-east-1"
+  ]
+}

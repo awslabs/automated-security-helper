@@ -561,6 +561,14 @@ If you're experiencing UV tool installation issues:
 
 For complete documentation, visit the [ASH Documentation](https://awslabs.github.io/automated-security-helper/).
 
+To run ASH as a service in your own AWS account rather than as a CLI, see
+[deploy/README.md](deploy/README.md). It covers four deployment targets — the MCP server on
+Bedrock AgentCore, scheduled scans on ECS Fargate, a CodeCommit push gate on Lambda, and a
+sharded CodePipeline executor — each as a CDK stack with a committed CloudFormation template
+and as a Terraform module. ASH hosts no bucket for those templates, so
+[deploy/quick-create-links.md](deploy/quick-create-links.md) explains how to render
+one-click CloudFormation launch links against a bucket you own.
+
 ## Feedback and Contributing
 
 - Create an issue [here](https://github.com/awslabs/automated-security-helper/issues)
