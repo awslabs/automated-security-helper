@@ -44,7 +44,7 @@ call from the decorator that filled it, so everything between that table and a
 real client is out of scope here: the console-script entry point, the stdio
 transport, the `initialize` exchange, and the serialization of each signature
 into JSON Schema. `.github/actions/validate-mcp/compare_tool_surface.py` covers
-that half -- it drives `ash mcp` through the MCP Inspector as a client would and
+that half -- it drives `ashx mcp` through the MCP Inspector as a client would and
 diffs the full `tools/list` reply, schemas included, against a committed golden.
 The two overlap on exactly one property, the set of names, and neither subsumes
 the other: this module can run in a unit test suite with no Node toolchain, and
@@ -91,7 +91,7 @@ README_TOOL_TABLE_ROW = re.compile(r"^\|\s*`([a-z_][a-z0-9_]*)`\s*\|", re.MULTIL
 # changing nothing. The exemption is gone because the condition it named is gone:
 # ``bind_session_config`` now records a path materialized into the session
 # sandbox, ``resolve_session_config_path`` reads it, and ``run_ash_scan`` plus both
-# workspace tools pass it to the scan. ``ash mcp --profile`` populates the
+# workspace tools pass it to the scan. ``ashx mcp --profile`` populates the
 # registry, without which nothing could be selected in the first place.
 DOCUMENTED_BUT_NOT_REGISTERED_EXEMPTIONS: dict[str, str] = {}
 

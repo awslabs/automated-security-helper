@@ -448,7 +448,7 @@ global_settings:
     # trivy documents that checks which fire on the ABSENCE of something cannot be
     # ignored inline, naming the missing-USER check as its example -- which is
     # DS-0002, one of the rules below. Keeping every one of them in this file also
-    # means `ash config validate` and the unused-suppressions report can see them,
+    # means `ashx config validate` and the unused-suppressions report can see them,
     # which an inline comment would not be.
     #
     # FERRET-SCAN, AT v2.4.5, reports two finding types here, both false positives
@@ -1101,7 +1101,7 @@ global_settings:
         is scanned at its tracked path. Staged into assets/ by hatch_build.py
         because tool_downloads.py imports it.
     # `/**` is load-bearing: without it this pattern matches the directory entry
-    # and nothing inside it, so the ignore did nothing. `ash config validate`
+    # and nothing inside it, so the ignore did nothing. `ashx config validate`
     # rejects it, but only where the directory exists -- tests/pytest-temp/ is
     # gitignored, so a fresh CI checkout has no such directory and the validator
     # stays quiet. It fails for a developer who has run pytest first. .ash/.ash.yaml

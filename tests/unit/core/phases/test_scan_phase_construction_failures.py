@@ -213,7 +213,7 @@ def test_the_exit_code_is_non_zero_end_to_end(tmp_path):
     """The verdict, driven from a real scan phase rather than from mocked metrics.
 
     Every other assertion in this module reads the model. This one runs the phase
-    and hands its output to the function that decides what ``ash scan`` returns, so
+    and hands its output to the function that decides what ``ashx scan`` returns, so
     the chain from "constructor raised" to "non-zero exit" is observed rather than
     inferred. The flag is passed explicitly because it defaults to False -- see the
     field description on ``AshConfig.fail_on_incomplete_scanners``; with it off this

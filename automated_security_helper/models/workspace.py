@@ -119,7 +119,7 @@ one; a project that completed with a scanner at ERROR or MISSING is the other,
 carried on ``WorkspaceProjectResult.scan_incomplete``. They share a code because
 they are the same kind of news -- neither says whether the code is clean -- and
 because collapsing "we could not run it" into 0 is what let a workspace report a
-project clean while ``ash --source-dir P`` on the same project exited 1.
+project clean while ``ashx --source-dir P`` on the same project exited 1.
 
 That the two modes disagree about where the unknown sits is deliberate on both
 sides. Single-project mode checks completeness FIRST and returns 1 even when

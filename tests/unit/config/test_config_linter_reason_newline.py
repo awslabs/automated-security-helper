@@ -10,7 +10,7 @@ The unused-suppressions reporter emits the reason as one markdown bullet
 newline ends the bullet and everything after it renders as loose body text,
 detached from the suppression it belongs to. Nothing caught this:
 `AshSuppression.reason` is a plain `str` with no content validation, and
-`ash config validate` reported "Configuration is valid!".
+`ashx config validate` reported "Configuration is valid!".
 
 The issue describes this as a broken markdown *table* row. That is close but not
 where it happens -- grepping the reporters shows `reason` is never rendered into
@@ -191,7 +191,7 @@ class TestMultilineReasonIsFixed:
         """Applying the fix has to actually clear the warning.
 
         A fix that reports success without changing the loaded value would leave
-        `ash config lint --fix` looping on the same warning forever.
+        `ashx config lint --fix` looping on the same warning forever.
         """
         config_path = _write_config(
             tmp_path,

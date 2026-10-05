@@ -20,7 +20,7 @@ Measured on this tree, one scanner recorded ERROR in ``scanner_results``::
     3 SARIF findings -> metric status FAILED, incomplete_scanners []
 
 FAILED means the scanner ran and found something. So an ERROR scanner whose findings
-reached the SARIF became invisible to the completeness gate, and ``ash scan`` exited 2
+reached the SARIF became invisible to the completeness gate, and ``ashx scan`` exited 2
 -- "there are findings" -- for a run in which a scanner had crashed. Exit 2 tells a
 reviewer that clearing the listed findings clears the scan; here it does not, because
 one scanner's output is partial by definition.
@@ -146,7 +146,7 @@ class TestErrorIsNotMaskedByFindings:
         model = _model(ScannerStatus.ERROR, findings)
         assert incomplete_scanners(model) == [("boom", "ERROR")], (
             "this is what the masking cost: the gate saw FAILED, reported nothing "
-            "incomplete, and ash scan exited 2 for a run in which a scanner crashed"
+            "incomplete, and ashx scan exited 2 for a run in which a scanner crashed"
         )
 
     def test_the_flags_derivation_reports_the_error(self):

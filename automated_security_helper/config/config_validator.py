@@ -291,5 +291,5 @@ class ConfigValidator:
             for i, error in enumerate(errors, 1):
                 error_msg += f"  {i}. {error}\n"
             error_msg += "\nPlease fix these issues and try again."
-            error_msg += "\nTip: Run 'ash config validate' for detailed validation."
+            error_msg += "\nTip: Run 'ashx config validate' for detailed validation."
             raise ConfigValidationError(error_msg)

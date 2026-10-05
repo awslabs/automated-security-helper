@@ -32,7 +32,7 @@ The autofix stays, but it is a narrowing
 Setting ``line_end = line_start`` is still offered, because a single line is
 usually what someone wants. It is no longer described as correcting an omission:
 applying it *changes* which findings are suppressed, and the description has to
-say so or `ash config lint --fix` silently narrows suppressions across a repo.
+say so or `ashx config lint --fix` silently narrows suppressions across a repo.
 """
 
 import textwrap

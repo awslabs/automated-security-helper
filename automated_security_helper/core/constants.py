@@ -52,7 +52,7 @@ def _resolve_default_severity_level(raw: Optional[str]) -> str:
     ------------------------------------
     This module is imported before anything can catch an exception from it, so
     raising would turn one mistyped variable into an ASH that cannot start at all
-    -- ``ash --help`` included -- and report it as an import error rather than as a
+    -- ``ashx --help`` included -- and report it as an import error rather than as a
     configuration problem. The fallback is announced at WARNING instead, which
     reaches stderr through ``logging.lastResort`` even this early in the process.
 

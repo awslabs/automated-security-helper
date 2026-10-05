@@ -423,7 +423,7 @@ def test_the_gate_and_the_exit_code_agree_on_which_statuses_mean_ran():
     """The second set the two implementations share, held together the same way.
 
     ``test_the_gate_still_fails_when_every_scanner_is_skipped`` above drives
-    ``gate.main()``, so it passed throughout the window in which ``ash scan`` answered 0
+    ``gate.main()``, so it passed throughout the window in which ``ashx scan`` answered 0
     on the same results file: the script asserted the set-level condition and
     ``_compute_exit_code`` had no counterpart. It now has one, and the two sets are
     spelled separately -- the script cannot import ASH, because the bash and PowerShell

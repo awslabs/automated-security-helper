@@ -103,7 +103,7 @@ def _validate_shard_options(
             "--shard-index/--shard-count cannot be combined with --workspace. "
             "Both spread one scan over more compute, but along different axes, and "
             "only sharding is recombinable: it partitions the scanners and stamps "
-            "the partition onto the results so 'ash merge' can prove the shards "
+            "the partition onto the results so 'ashx merge' can prove the shards "
             "reconstruct exactly one whole scan. Workspace mode's unified results "
             "file is assembled from the per-project payloads and carries none of "
             "each project's scan metadata, so a sharded workspace run would write "
@@ -452,7 +452,7 @@ def run_ash_scan_cli_command(
         Optional[int],
         typer.Option(
             "--shard-index",
-            help="Zero-based index of this shard when one scan is split across several executors. Requires --shard-count. A 3-way split uses indices 0, 1 and 2. Each shard runs a disjoint subset of the scanners and records which ones in its results; recombine them with 'ash merge'.",
+            help="Zero-based index of this shard when one scan is split across several executors. Requires --shard-count. A 3-way split uses indices 0, 1 and 2. Each shard runs a disjoint subset of the scanners and records which ones in its results; recombine them with 'ashx merge'.",
             envvar="ASH_SHARD_INDEX",
         ),
     ] = None,
@@ -590,7 +590,7 @@ def run_ash_scan_cli_command(
         return
 
     # Below the guard above, not in an option callback. This function is both the
-    # root callback and the `scan` command, so `ash scan ...` parses its
+    # root callback and the `scan` command, so `ashx scan ...` parses its
     # parameters twice; an option callback would warn twice for one invocation.
     warn_deprecated_option_spellings()
 

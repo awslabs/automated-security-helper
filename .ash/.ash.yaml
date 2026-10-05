@@ -514,7 +514,7 @@ global_settings:
     # MSIX verifications were being written in parallel, each in its own branch. So
     # three new files planted the fixture and none of them could add a suppression
     # without conflicting on this block, and the gap only appeared once the
-    # branches were merged: `ash scan` on the merge was red with six actionable
+    # branches were merged: `ashx scan` on the merge was red with six actionable
     # findings that no single branch had introduced. Nothing was wrong with any
     # branch in isolation. If another packaging format arrives, its fixture belongs
     # here in the same commit that merges it.
@@ -573,7 +573,7 @@ global_settings:
     #
     # That count was measured rather than reasoned about, and the first attempt got it wrong.
     # A second entry was written for the committed SARIF fixture beside this file --
-    # editors/jetbrains/src/test/resources/sarif/ash-detect-secrets.sarif, real `ash scan`
+    # editors/jetbrains/src/test/resources/sarif/ash-detect-secrets.sarif, real `ashx scan`
     # output over leak.py -- on the assumption that a report about a secret still reads as a
     # secret. It does not. Scanning that file alone exits 0 with zero results, because ASH
     # masks the value out of its own reports AND its message text names the secret's TYPE
@@ -895,7 +895,7 @@ global_settings:
     - rule_id: B404
       path: tests/integration/cli/test_mcp_stdio_server.py
       reason: >-
-        Launches `ash mcp` as a real child and speaks JSON-RPC over its pipes,
+        Launches `ashx mcp` as a real child and speaks JSON-RPC over its pipes,
         which is the assertion rather than the setup. On the stdio transport
         stdout IS the protocol channel, and the two properties this file covers --
         that every line a running server writes there parses as a frame, and that
@@ -972,7 +972,7 @@ global_settings:
         List argv, shell left at its default of False, and argv[0] is
         `sys.executable`, so there is no PATH resolution for an attacker to
         influence. The file's ISOLATION note records that as deliberate: it starts
-        from `sys.executable` rather than from an `ash` console script "so that the
+        from `sys.executable` rather than from an `ashx` console script "so that the
         test runs against the interpreter running the suite rather than against
         whatever is first on PATH". The rest of the argv is the module-level
         SERVER_ARGV constant, plus the literals `--no-quiet --debug` at the one

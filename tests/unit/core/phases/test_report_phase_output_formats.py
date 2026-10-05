@@ -11,7 +11,7 @@ string: a format name is ``markdown``, an extension is the ``summary.md`` in
 ``ash.summary.md``. They coincide for exactly four reporters -- ``csv``,
 ``html``, ``sarif`` and ``yaml`` -- so for the rest the comparison matched
 nothing, the reporter was skipped, and the run exited 0 having written no report
-at all. ``ash scan --output-formats markdown`` produced an empty ``reports/``
+at all. ``ashx scan --output-formats markdown`` produced an empty ``reports/``
 directory and said nothing, while the closing summary still pointed the operator
 at ``reports/ash.summary.md``.
 
@@ -43,7 +43,7 @@ Driven through the real ``ReportPhase`` and the real plugin registry
 No mocked reporters. The subject is which of the *shipped* reporters a format
 name selects, so a fake reporter with a hand-chosen name and extension would
 assert only that the test's own fixture is self-consistent. These expectations
-were measured against ``ash scan --output-formats <fmt>`` on a real source tree
+were measured against ``ashx scan --output-formats <fmt>`` on a real source tree
 and reproduce it exactly.
 """
 
@@ -593,7 +593,7 @@ def test_mixed_request_writes_what_it_can_and_reports_the_rest(tmp_path, caplog)
 
     Logging rather than raising is a deliberate choice: erroring out on ``asff``
     here would discard the markdown report the same command asked for, and for
-    ``ash scan`` the findings verdict along with it. ERROR is the log level, not an
+    ``ashx scan`` the findings verdict along with it. ERROR is the log level, not an
     exit code -- the exit code stays a verdict about the code under scan.
     """
     with caplog.at_level(logging.ERROR):
@@ -612,8 +612,8 @@ def test_export_format_members_select_as_well_as_strings(tmp_path):
     """``ExportFormat`` members work, not only their ``.value`` strings.
 
     ``ScanExecutionEngine`` threads the enum through unconverted -- pinned by
-    ``tests/unit/cli/test_output_formats_fix.py`` -- while the ``ash scan`` and
-    ``ash merge`` paths convert to ``.value`` first. Both shapes reach the filter,
+    ``tests/unit/cli/test_output_formats_fix.py`` -- while the ``ashx scan`` and
+    ``ashx merge`` paths convert to ``.value`` first. Both shapes reach the filter,
     so both are asserted here; a filter that handled only one would work from the
     CLI and fail from the engine, or the reverse.
     """

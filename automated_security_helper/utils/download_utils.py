@@ -40,8 +40,8 @@ _HASH_CHUNK_BYTES = 1024 * 1024
 # A single transient 5xx used to fail an entire install, and through it an entire
 # container build. Measured on job 104983960003 of this repository: grype's pinned
 # asset returned `HTTP Error 500: Internal Server Error` in the non-root image
-# stage, `ash dependencies install` exited 1, and the podman build died at
-# `RUN ash dependencies install`. The same URL had returned 200 minutes earlier in
+# stage, `ashx dependencies install` exited 1, and the podman build died at
+# `RUN ashx dependencies install`. The same URL had returned 200 minutes earlier in
 # the same build's first stage, so the asset was fine and the request was not.
 #
 # The shell side of the toolchain already had this: assets/with-retry.sh wraps the
@@ -676,7 +676,7 @@ def _already_installed(
 
     Why (5) is not paranoia. ASH's own image does ``chmod -R 777 ${ASH_BIN_PATH}``
     (Dockerfile:243), puts that directory first on PATH (:254), and runs
-    ``ash dependencies install`` into it twice (:253 and :328). Before idempotence
+    ``ashx dependencies install`` into it twice (:253 and :328). Before idempotence
     existed every install re-downloaded, so the second run overwrote anything
     substituted in between -- the redundant download was accidentally a self-healing
     property. Skipping on a receipt alone would have converted that into a persistent
@@ -725,7 +725,7 @@ def install_binary_from_url(
 
     Idempotent: if a receipt shows the same url and digest already produced the
     installed file, the download is skipped. Before this, every
-    ``ash dependencies install`` re-fetched every binary, so re-running the
+    ``ashx dependencies install`` re-fetched every binary, so re-running the
     installer in CI paid for the whole toolchain again and a network blip turned a
     no-op into a failure.
 
@@ -1019,7 +1019,7 @@ def current_bin_path() -> Path:
     """Resolve ASH_BIN_PATH at call time rather than at import time.
 
     ``core.constants.ASH_BIN_PATH`` is computed when that module is first imported.
-    ``ash dependencies install --bin-path`` sets the environment variable *after*
+    ``ashx dependencies install --bin-path`` sets the environment variable *after*
     that import has happened, so a function that closed over the constant would
     install into the default directory while reporting the requested one.
     """
@@ -1072,7 +1072,7 @@ def create_url_download_command(
     #
     # Resolved from the environment rather than from the imported constant. The
     # constant is fixed when core.constants is first imported, which happens before
-    # `ash dependencies install --bin-path X` exports ASH_BIN_PATH -- so opengrep
+    # `ashx dependencies install --bin-path X` exports ASH_BIN_PATH -- so opengrep
     # installed into the default directory while the installer reported the
     # requested one, and the post-install sweep then found nothing there.
     if destination is None:

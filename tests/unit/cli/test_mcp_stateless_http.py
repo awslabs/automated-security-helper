@@ -324,7 +324,7 @@ class TestOptionValidation:
 
 
 def test_wrapper_exposes_the_flag() -> None:
-    """``ash mcp --help`` must list ``--stateless-http``.
+    """``ashx mcp --help`` must list ``--stateless-http``.
 
     The typer wrapper in ``cli/main.py`` duplicates every ``mcp_command``
     parameter, so a parameter added to one and not the other yields ``unknown
@@ -339,5 +339,5 @@ def test_wrapper_exposes_the_flag() -> None:
     plain = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
     flat = " ".join(plain.split())
     assert "--stateless-http" in flat, (
-        f"Missing --stateless-http in `ash mcp --help`:\n{result.output}"
+        f"Missing --stateless-http in `ashx mcp --help`:\n{result.output}"
     )

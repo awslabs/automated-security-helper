@@ -393,7 +393,7 @@ class TestCandidateSetBackwardCompatibility:
         assert "record no candidate scanner set" in str(excinfo.value)
 
     def test_the_field_round_trips_through_json(self):
-        """``ash merge`` reads these back off disk, so serialization is the contract."""
+        """``ashx merge`` reads these back off disk, so serialization is the contract."""
         original = ShardAssignment(
             shard_index=0,
             shard_count=2,
@@ -507,7 +507,7 @@ class TestSelectedScannersIsVerified:
         verify_shard_coverage(shards)
 
     def test_the_field_round_trips_through_json(self):
-        """``ash merge`` reads these back off disk, so serialization is the contract."""
+        """``ashx merge`` reads these back off disk, so serialization is the contract."""
         original = ShardAssignment(
             shard_index=0,
             shard_count=2,

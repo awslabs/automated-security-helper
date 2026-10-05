@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Unit tests for the interactive configuration wizard (ash config wizard)."""
+"""Unit tests for the interactive configuration wizard (ashx config wizard)."""
 
 import yaml
 import pytest

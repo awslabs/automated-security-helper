@@ -731,7 +731,7 @@ def run_cdk_nag_against_cfn_template(
                 hint = (
                     "cdk-nag runs NodeJS through jsii; check that `node` is on PATH."
                     if isinstance(exc, FileNotFoundError)
-                    else "Reinstall the CDK dependencies with: ash dependencies install"
+                    else "Reinstall the CDK dependencies with: ashx dependencies install"
                 )
                 # A response carrying ``failure``, not a bare None. None is this
                 # function's "that file was not a CloudFormation template" answer,

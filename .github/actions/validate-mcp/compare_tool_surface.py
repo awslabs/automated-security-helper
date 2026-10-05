@@ -20,7 +20,7 @@ only fail for reasons unrelated to the code under test is worse than no step --
 it spends the reader's trust and teaches them to re-run red legs.
 
 This script makes the install load-bearing. It speaks the protocol the way a
-client does: the inspector spawns `ash mcp` over stdio, performs the
+client does: the inspector spawns `ashx mcp` over stdio, performs the
 initialization handshake, calls `tools/list`, and prints the server's reply.
 That reply is compared against `tool_surface.golden.json`.
 
@@ -36,7 +36,7 @@ transport, the JSON-RPC framing, the protocol-version negotiation, and the
 server's serialization of every Pydantic model into JSON Schema. A defect in any
 of those is invisible to the unit test and fatal to a client:
 
-* a console-script entry point that no longer resolves, or an `ash mcp` that
+* a console-script entry point that no longer resolves, or an `ashx mcp` that
   exits non-zero before serving -- the registry is still correct in-process
 * a transport that never completes `initialize`, so `tools/list` never returns
 * a model whose JSON Schema serialization changes shape -- the unit test
@@ -429,8 +429,8 @@ def main() -> int:
     )
     parser.add_argument(
         "--ash",
-        default=os.environ.get("ASH_BIN", "ash"),
-        help="ash executable to serve over stdio (default: ash on PATH)",
+        default=os.environ.get("ASH_BIN", "ashx"),
+        help="ASH executable to serve over stdio (default: ashx on PATH)",
     )
     parser.add_argument(
         "--inspector-arg",
@@ -464,7 +464,7 @@ def main() -> int:
             "optional; install it with the pinned version the action uses."
         )
     if not Path(ash).exists():
-        raise SystemExit(f"FAIL: ash executable not found ({args.ash!r}).")
+        raise SystemExit(f"FAIL: ASH executable not found ({args.ash!r}).")
 
     payload, portability_exit, inspector_stderr = capture(
         inspector, ash, args.inspector_args

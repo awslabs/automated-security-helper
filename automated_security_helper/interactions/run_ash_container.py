@@ -34,6 +34,7 @@ from automated_security_helper.core.enums import (
     ExecutionStrategy,
     ExportFormat,
 )
+from automated_security_helper.cli.deprecations import CANONICAL_CLI_NAME
 from automated_security_helper.utils import subprocess_utils
 from automated_security_helper.utils.subprocess_utils import (
     create_completed_process,
@@ -811,9 +812,11 @@ def _assemble_run_command(
     if color and sys.stdout.isatty():
         cmd.append("-t")
 
-    # Image name then ash subcommand
+    # Image name, then the ASH command inside it. The image is built from this
+    # same tree (or from the revision it was installed from), so it carries the
+    # canonical console script.
     cmd.append(image_name)
-    cmd.append("ash")
+    cmd.append(CANONICAL_CLI_NAME)
 
     # Core ASH path arguments. In workspace mode --source-dir is omitted, because
     # it is mutually exclusive with --workspace and the workspace root is already

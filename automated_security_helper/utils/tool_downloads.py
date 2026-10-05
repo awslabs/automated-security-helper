@@ -83,7 +83,7 @@ class ToolAsset:
 
 # Versions are deliberately the same pins the container image already builds with
 # (see the ARG lines in Dockerfile), so a scan run from a container, from nix and
-# from a bare `ash dependencies install` all execute the same tool versions.
+# from a bare `ashx dependencies install` all execute the same tool versions.
 TOOL_VERSIONS: dict[str, str] = {
     "grype": "v0.111.0",
     "syft": "v1.42.4",

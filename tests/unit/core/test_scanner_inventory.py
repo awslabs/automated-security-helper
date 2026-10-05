@@ -4,7 +4,7 @@
 """Tests for automated_security_helper.core.scanner_inventory.
 
 This is the shared source of truth for scanner introspection (issues #606/#626).
-Both the MCP ``list_scanners`` tool and the ``ash plugin list --show-versions``
+Both the MCP ``list_scanners`` tool and the ``ashx plugin list --show-versions``
 CLI command call it, so its correctness is asserted here once, at the seam, and
 the two surfaces are tested for parity in
 ``tests/unit/cli/mcp/test_scanner_inventory_parity.py``.
@@ -481,7 +481,7 @@ class TestProbeToolVersion:
     def test_probe_runs_the_command_at_debug_level(self, monkeypatch):
         # run_command logs "Running command: ..." at its log_level, which defaults
         # to INFO. An inventory listing is not a scan, so a fully successful
-        # `ash plugin list --show-versions` printed one INFO line per probed
+        # `ashx plugin list --show-versions` printed one INFO line per probed
         # scanner. The probe must ask for DEBUG explicitly.
         monkeypatch.setattr(
             "automated_security_helper.utils.subprocess_utils.find_executable",

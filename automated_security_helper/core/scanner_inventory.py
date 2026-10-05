@@ -7,7 +7,7 @@
 This module is the single source of truth for what a scanner reports about
 itself -- the tool version it detects, whether its dependencies are satisfied,
 its offline strategy, and whether it is enabled. Both the MCP ``list_scanners``
-tool (``cli/mcp_tools.py``) and the ``ash plugin list`` CLI command build their
+tool (``cli/mcp_tools.py``) and the ``ashx plugin list`` CLI command build their
 entries by calling :func:`list_scanner_inventory` here, so a fix to the probe is
 a fix to both surfaces at once (issues #606 and #626).
 
@@ -33,10 +33,10 @@ that a scan will not run unless they are separately enabled, trading a
 documentation problem for a behavioral one.
 
 The cost of that choice, stated plainly because it is a real limit rather than a
-nicety: ``ash plugin list --show-versions`` cannot tell an operator whether
+nicety: ``ashx plugin list --show-versions`` cannot tell an operator whether
 trivy, snyk or ferret are reachable, while ``list_scanners`` can. Anyone needing
 that answer should use the MCP tool. Revisiting this means deciding what
-``ash plugin list`` is for, not just adding a loader call.
+``ashx plugin list`` is for, not just adding a loader call.
 
 Everything here is read-only introspection. Scanners are instantiated in a
 throwaway directory and asked about themselves; nothing writes to the working

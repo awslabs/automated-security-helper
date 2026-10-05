@@ -84,10 +84,10 @@ scanners:
 
 ```bash
 # Scan current directory
-uv run ash --scanners snyk-code
+uv run ashx --scanners snyk-code
 
 # Scan specific directory
-uv run ash --scanners snyk-code /path/to/project
+uv run ashx --scanners snyk-code /path/to/project
 ```
 
 ### Run Snyk Code Scan without Configuration File
@@ -96,10 +96,10 @@ If you want to run Snyk code scan without saving a configuration file for ASH:
 
 ```bash
 # Scan current directory only with snyk-code
-uv run ash --scanners snyk-code --config-overrides "ash_plugin_modules+=[\"automated_security_helper.plugin_modules.ash_snyk_plugins\"]"
+uv run ashx --scanners snyk-code --config-overrides "ash_plugin_modules+=[\"automated_security_helper.plugin_modules.ash_snyk_plugins\"]"
 
 # Scan current directory with all available scanners (including snyk-code)
-uv run ash --config-overrides "ash_plugin_modules+=[\"automated_security_helper.plugin_modules.ash_snyk_plugins\"]"
+uv run ashx --config-overrides "ash_plugin_modules+=[\"automated_security_helper.plugin_modules.ash_snyk_plugins\"]"
 ```
 
 ## Configuration Options
@@ -150,17 +150,17 @@ scanners:
 
 ```bash
 # Use Snyk Code alongside other ASH scanners
-uv run ash --scanners snyk-code,bandit,semgrep
+uv run ashx --scanners snyk-code,bandit,semgrep
 
 # Use with community plugins
-uv run ash --scanners snyk-code,trivy-repo --config .ash/.ash_community_plugins.yaml
+uv run ashx --scanners snyk-code,trivy-repo --config .ash/.ash_community_plugins.yaml
 ```
 
 ### CI/CD Integration
 
 ```bash
 # Run in container mode for CI/CD
-uv run ash --mode container --scanners snyk-code
+uv run ashx --mode container --scanners snyk-code
 ```
 
 ## Output Integration
@@ -216,7 +216,7 @@ The plugin will skip scanning if the target directory is empty or doesn't exist,
 Enable verbose logging to troubleshoot issues:
 
 ```bash
-uv run ash --scanners snyk-code --log-level DEBUG
+uv run ashx --scanners snyk-code --log-level DEBUG
 ```
 
 ### Offline Mode
@@ -225,7 +225,7 @@ uv run ash --scanners snyk-code --log-level DEBUG
 
 ```bash
 # Snyk Code will be skipped in offline mode
-uv run ash --offline --scanners snyk-code
+uv run ashx --offline --scanners snyk-code
 ```
 
 ## Integration Examples
@@ -239,7 +239,7 @@ repos:
     hooks:
       - id: ash-snyk-code
         name: ASH Snyk Code Security Scan
-        entry: uv run ash --scanners snyk-code --mode precommit
+        entry: uv run ashx --scanners snyk-code --mode precommit
         language: system
         pass_filenames: false
 ```
@@ -262,7 +262,7 @@ jobs:
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         run: |
-          uv run ash --scanners snyk-code --output-format sarif
+          uv run ashx --scanners snyk-code --output-format sarif
       - name: Upload SARIF results
         uses: github/codeql-action/upload-sarif@v2
         with:
@@ -279,7 +279,7 @@ snyk-security-scan:
   before_script:
     - npm install -g snyk
   script:
-    - uv run ash --scanners snyk-code
+    - uv run ashx --scanners snyk-code
   variables:
     SNYK_TOKEN: $SNYK_TOKEN
   artifacts:

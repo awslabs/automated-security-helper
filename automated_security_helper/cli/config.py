@@ -272,7 +272,7 @@ def update(
     # Check if config file exists
     if config_path is None or not Path(config_path).exists():
         typer.secho(
-            "Config file not found. Use 'ash config init' to create one.",
+            "Config file not found. Use 'ashx config init' to create one.",
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
@@ -547,19 +547,19 @@ def lint(
 
     Examples:
         # Lint the default config
-        ash config lint
+        ashx config lint
 
         # Lint and auto-fix issues
-        ash config lint --fix
+        ashx config lint --fix
 
         # Lint, fix, and remove unused suppressions
-        ash config lint --fix --fix-unused
+        ashx config lint --fix --fix-unused
 
         # Non-interactive mode for pre-commit
-        ash config lint --fix --fix-unused --non-interactive
+        ashx config lint --fix --fix-unused --non-interactive
 
         # Lint a specific config file
-        ash config lint --config path/to/config.yaml
+        ashx config lint --config path/to/config.yaml
     """
     from automated_security_helper.config.config_linter import (
         ConfigLinter,
@@ -723,7 +723,7 @@ def _apply_unused_fixes(
             fg=typer.colors.YELLOW,
         )
         typer.secho(
-            "   Consider running a fresh scan: ash scan",
+            "   Consider running a fresh scan: ashx scan",
             fg=typer.colors.YELLOW,
         )
 
@@ -1074,13 +1074,13 @@ def validate(
 
     Examples:
         # Validate default config
-        ash config validate
+        ashx config validate
 
         # Validate specific config file
-        ash config validate --config path/to/config.yaml
+        ashx config validate --config path/to/config.yaml
 
         # Validate with verbose output
-        ash config validate --verbose
+        ashx config validate --verbose
     """
     # Setup logging
     logger = get_logger(

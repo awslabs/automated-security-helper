@@ -8,7 +8,7 @@ Why these tests exist
 ``_compute_exit_code`` derived the verdict from finding counts alone. A run where
 every selected scanner failed to start therefore exited 0 -- the same code as a
 clean scan -- because zero scanners produced zero findings. Measured on this
-tree: ``ash scan --scanners bandit`` against a one-file fixture reports
+tree: ``ashx scan --scanners bandit`` against a one-file fixture reports
 ``cdk-nag``, ``cfn-nag``, ``grype`` and ``syft`` as MISSING and still exits 0, and
 a deployed run with five of ten scanners MISSING or ERROR exited 0 on a
 repository that a working scan flags at HIGH.
@@ -240,12 +240,12 @@ class TestAScanThatRanNothingIsNotACleanScan:
 
     Reachable from one word, with no sharding and no unusual config. Measured on this
     tree, whose own ``.ash/.ash.yaml`` sets ``semgrep: enabled: true``:
-    ``ash scan --scanners semgrep`` on Windows resolves semgrep against the registered
+    ``ashx scan --scanners semgrep`` on Windows resolves semgrep against the registered
     names, so ``ScannerSelectionError`` does not fire; semgrep declares the platform
     unsupported and lands on SKIPPED; the other nine are not selected and land there
     too; findings are 0; ``_compute_exit_code`` returned 0. The same results file makes
     ``.github/scripts/assert_scanners_completed.py`` exit 1, which is how CI caught it
-    and a user running ``ash scan`` did not.
+    and a user running ``ashx scan`` did not.
 
     Driven through ``_compute_exit_code``, deliberately. The all-SKIPPED case was
     already pinned once, by ``test_the_gate_still_fails_when_every_scanner_is_skipped``
@@ -467,7 +467,7 @@ class TestAScanThatRanNothingIsNotACleanScan:
         """The scope boundary, asserted rather than left implicit.
 
         An empty scanner set is reachable from a legitimate invocation --
-        ``ash scan --phases convert`` records no scanner at all -- so treating "no
+        ``ashx scan --phases convert`` records no scanner at all -- so treating "no
         entries" as "nothing ran" would turn a phase-limited run into an error. The CI
         boundary refuses an empty ``scanner_results`` explicitly and unconditionally
         (see ``assert_scanners_completed.py``), which is where a results file claiming
@@ -834,7 +834,7 @@ class TestReadsTheAuthoritativeSignals:
         Reproduced locally by a different mechanism -- ``UV_CACHE_DIR`` pointed at
         a path whose parent is not a directory, which fails uv tool installs --
         giving ``bandit=ERROR checkov=ERROR`` with
-        ``passed=0 failed=0 missing=0 skipped=8`` and a default ``ash scan`` exit
+        ``passed=0 failed=0 missing=0 skipped=8`` and a default ``ashx scan`` exit
         of 0.
 
         So this model sets ``missing`` to 0 deliberately. A gate keyed on
@@ -998,7 +998,7 @@ class TestStatusClassificationFailsClosed:
     The classification used to be a denylist -- ``status in {ERROR, MISSING}`` --
     which makes every status the list does not name count as complete. That is the
     wrong default for a completeness check, and it is reachable rather than
-    hypothetical: ``ash merge`` reads shard results written by whatever ASH produced
+    hypothetical: ``ashx merge`` reads shard results written by whatever ASH produced
     them, so a mixed-version fan-out can hand this code a status string that is not
     in this version's enum. A denylist reports that shard as complete.
 
@@ -1129,7 +1129,7 @@ class TestConfigFileResolution:
 
 
 class TestConfigModelAndValidator:
-    """The field has to exist on the model and be accepted by ``ash config``."""
+    """The field has to exist on the model and be accepted by ``ashx config``."""
 
     def test_config_field_defaults_to_on(self):
         """On by default, because the failure it prevents is the invisible one.
@@ -1182,8 +1182,8 @@ class TestConfigModelAndValidator:
         assert (
             "fail_on_incomplete_scanners" in ConfigValidator.VALID_TOP_LEVEL_FIELDS
         ), (
-            "an unlisted top-level field makes 'ash config validate' reject a "
-            "config that 'ash scan' accepts"
+            "an unlisted top-level field makes 'ashx config validate' reject a "
+            "config that 'ashx scan' accepts"
         )
 
 

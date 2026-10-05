@@ -91,7 +91,7 @@ echo "     after 'sudo systemctl stop buildkit' and a 'systemctl daemon-reload')
 # true`, which discarded the message and the status together. A runner image with no
 # Docker is a fine place to install nerdctl, so absence must be tolerated -- but a
 # unit that is running and REFUSES to stop means something still holds the containerd
-# socket, and `ash build-image` would then fail a long way from that cause. So the two
+# socket, and `ashx build-image` would then fail a long way from that cause. So the two
 # cases are separated: absence is checked for, and a real failure to stop is left to
 # `set -e`.
 #
@@ -133,7 +133,7 @@ tar -C /usr/local -xzf "${WORKDIR}/${TARBALL}"
 # passes the pattern through literally, cp fails with ENOENT, and `|| true` records
 # that as success. Nothing else in this script reads /opt/cni/bin, so the first
 # symptom is a container with no network interface, roughly forty-five minutes later,
-# inside `ash scan --mode container`.
+# inside `ashx scan --mode container`.
 #
 # Two changes, because dropping `|| true` alone is not enough. `cp -n` exits 0 when it
 # skips a file that already exists, so on a runner whose Docker install already
@@ -276,7 +276,7 @@ nerdctl --version
 
 # `nerdctl --version` only proves the binary is on PATH; it passes even when
 # containerd and buildkit are unreachable. Probe both daemons so a broken runtime
-# surfaces here in under a minute rather than wedging `ash build-image` until the
+# surfaces here in under a minute rather than wedging `ashx build-image` until the
 # job timeout. Both probes are bounded, so this step can never be the thing that
 # hangs.
 echo "=== Verifying the containerd daemon responds ==="
@@ -288,7 +288,7 @@ if ! timeout 60 sh -c 'nerdctl info >/dev/null 2>&1 || nerdctl images >/dev/null
     exit 1
 fi
 
-# buildkit answers a different socket from containerd, and `ash build-image` is
+# buildkit answers a different socket from containerd, and `ashx build-image` is
 # the first thing that needs it. A build is where an unreachable buildkitd would
 # otherwise hang, so it is probed separately rather than assumed from the above.
 #

@@ -24,7 +24,7 @@ default-on gate for them would turn currently-passing runs red without an operat
 having opted in anywhere. With the flag off, which is the shipped default, these
 inputs still exit 0.
 
-``ash merge`` inherits this for free: ``cli.merge._merged_exit_code`` delegates to
+``ashx merge`` inherits this for free: ``cli.merge._merged_exit_code`` delegates to
 ``_compute_exit_code`` precisely so the union is held to the same completeness
 rules as a single scan.
 
@@ -339,7 +339,7 @@ class TestAnUnavailableConverterWithNothingToConvert:
 
         ``None`` covers three real cases at once: a converter that has not implemented
         the count, one whose count raised, and a results file written by a version
-        predating the field -- ``ash merge`` reads shard results from whatever ASH wrote
+        predating the field -- ``ashx merge`` reads shard results from whatever ASH wrote
         each one. All three keep the strict answer, so adding the field cannot have
         quietly relaxed any converter that did not opt in.
         """
@@ -364,7 +364,7 @@ class TestAnUnavailableConverterWithNothingToConvert:
         pydantic coerces ``False`` to ``0`` on validation, which legitimately means "no
         candidates". This measures the un-validated path instead --
         ``incomplete_converters`` reads rows with ``getattr``, so what it is handed is
-        whatever the caller assembled, and ``ash merge`` assembles from shard files.
+        whatever the caller assembled, and ``ashx merge`` assembles from shard files.
 
         An earlier version of this test asserted the bool survived validation. It did
         not, and the test failed for that reason rather than finding a defect, so it is

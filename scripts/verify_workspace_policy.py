@@ -12,7 +12,7 @@ this feature is most exposed to: policy that resolves correctly, appears in the
 plan, and then changes no verdict because the value never reaches the code that
 counts actionable findings. That defect passes every mock-based test.
 
-This runs ``ash --workspace`` for real, twice over the same fixture -- once with
+This runs ``ashx --workspace`` for real, twice over the same fixture -- once with
 no policy and once with a ceiling -- and compares the two verdicts. Only a real
 scan can show the ceiling moved a real finding count.
 

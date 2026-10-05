@@ -16,7 +16,7 @@ runs:
 
     - name: "mcp: verify command"
       shell: bash
-      run: ash mcp --help
+      run: ashx mcp --help
 
     - name: "mcp: test import"
       shell: bash
@@ -26,7 +26,7 @@ runs:
       if: runner.os != 'Windows'
       shell: bash
       run: |
-        sleep 5 | ash mcp &
+        sleep 5 | ashx mcp &
         MCP_PID=$!
         sleep 2
         if kill -0 $MCP_PID; then
@@ -120,7 +120,7 @@ runs:
         done
 
     # The step the install exists for. Uses the same stdio invocation the
-    # start/stop check above uses -- `ash mcp` with no transport flag, which
+    # start/stop check above uses -- `ashx mcp` with no transport flag, which
     # defaults to stdio -- except that here a real client performs the
     # initialization handshake and calls tools/list, and the reply is diffed
     # against .github/actions/validate-mcp/tool_surface.golden.json.
@@ -153,4 +153,4 @@ runs:
     # fetch and a registry blip read as a completeness failure.
     - name: "mcp: self-test scan"
       shell: bash
-      run: ash scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report --scanners detect-secrets
+      run: ashx scan --source-dir /tmp/ash-selftest --output-dir /tmp/ash-selftest/output --simple --phases scan --phases report --scanners detect-secrets

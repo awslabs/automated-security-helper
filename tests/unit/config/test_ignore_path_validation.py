@@ -4,7 +4,7 @@
 """Tests for ignore_path and suppression path validation in config linter and validator.
 
 Covers two bugs:
-1. Invalid ignore_paths pass validation silently (no error from `ash config validate`)
+1. Invalid ignore_paths pass validation silently (no error from `ashx config validate`)
 2. Folder paths without `**` are silently ignored (should warn to add `/**`)
 """
 
@@ -285,12 +285,12 @@ class TestIgnorePathLinting:
 
 
 class TestIgnorePathValidation:
-    """Tests for ignore_path validation in the config validator (ash config validate)."""
+    """Tests for ignore_path validation in the config validator (ashx config validate)."""
 
     def test_validate_warns_on_directory_without_glob(
         self, config_with_dir_ignore_path
     ):
-        """ash config validate should flag directory paths without **."""
+        """ashx config validate should flag directory paths without **."""
         is_valid, errors = ConfigValidator.validate_config_file(
             config_with_dir_ignore_path
         )
@@ -300,7 +300,7 @@ class TestIgnorePathValidation:
         assert any("tests/test_data" in e and "/**" in e for e in errors)
 
     def test_validate_passes_with_valid_paths(self, config_with_valid_ignore_paths):
-        """ash config validate should pass with properly formed paths."""
+        """ashx config validate should pass with properly formed paths."""
         is_valid, errors = ConfigValidator.validate_config_file(
             config_with_valid_ignore_paths
         )
@@ -312,7 +312,7 @@ class TestIgnorePathValidation:
     def test_validate_no_warning_for_nonexistent_path(
         self, config_with_nonexistent_dir_path
     ):
-        """ash config validate should not warn about paths that don't exist as directories."""
+        """ashx config validate should not warn about paths that don't exist as directories."""
         is_valid, errors = ConfigValidator.validate_config_file(
             config_with_nonexistent_dir_path
         )
@@ -323,7 +323,7 @@ class TestIgnorePathValidation:
     def test_validate_warns_on_suppression_directory_path(
         self, config_with_suppression_dir_path
     ):
-        """ash config validate should also flag suppression paths pointing to directories."""
+        """ashx config validate should also flag suppression paths pointing to directories."""
         is_valid, errors = ConfigValidator.validate_config_file(
             config_with_suppression_dir_path
         )
@@ -332,7 +332,7 @@ class TestIgnorePathValidation:
         assert any("docs" in e and "/**" in e for e in errors)
 
     def test_validate_with_source_dir(self, tmp_path):
-        """ash config validate should accept source_dir for path resolution."""
+        """ashx config validate should accept source_dir for path resolution."""
         # Create source with a directory
         source_dir = tmp_path / "project"
         source_dir.mkdir()

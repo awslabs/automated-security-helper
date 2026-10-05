@@ -112,7 +112,7 @@ def _resolve_omitted_source_dir(session_id: str) -> _OmittedSourceResolution:
     fails, so the ambiguous cases are refused with a message naming the cause.
 
     The fallback survives only where it is unambiguous. A transport that carries
-    no session header is a single local client -- stdio, where ``ash mcp`` runs
+    no session header is a single local client -- stdio, where ``ashx mcp`` runs
     in the tree the developer means and the working directory has always been the
     documented default. That case keeps working.
 
@@ -464,7 +464,7 @@ async def resolve_ash_workspace(
 ) -> Dict[str, Any]:
     """Resolve a VS Code workspace file into a scan plan without scanning anything.
 
-    The MCP equivalent of `ash --workspace <file> --dry-run`. Reads the workspace
+    The MCP equivalent of `ashx --workspace <file> --dry-run`. Reads the workspace
     definition and every project's own ASH config, then reports which directories
     became projects, what key each was given, which scanners its config enables,
     which severity threshold it will be judged against, and which projects were
@@ -539,7 +539,7 @@ async def run_ash_workspace_scan(
 ) -> Dict[str, Any]:
     """Scan every project in a VS Code workspace and return the per-project verdict.
 
-    The MCP equivalent of `ash --workspace <file>`. Each project is scanned with
+    The MCP equivalent of `ashx --workspace <file>`. Each project is scanned with
     its own ASH config and its own severity threshold, a workspace policy file can
     impose a ceiling over all of them, and the results are aggregated into one
     workspace payload.
@@ -1582,7 +1582,7 @@ async def list_profiles() -> Dict[str, Any]:
     """List the config profiles the operator registered at server startup.
 
     A profile is a named, pre-validated ASH config, registered with
-    `ash mcp --profile NAME=path/to/ash.yaml`. Only the name and a hash of the
+    `ashx mcp --profile NAME=path/to/ash.yaml`. Only the name and a hash of the
     path are returned; the path itself is an operator deployment detail, and the
     hash is enough for a client to notice that a registration changed underneath
     it.
@@ -1614,7 +1614,7 @@ async def select_profile(
     Every later call in this session that does not name a config of its own runs
     under the bound one: run_ash_scan, resolve_ash_workspace and
     run_ash_workspace_scan all pick it up. Call list_profiles first to see what
-    the operator registered with `ash mcp --profile NAME=path`.
+    the operator registered with `ashx mcp --profile NAME=path`.
 
     Three modes, distinguished by which optional argument you pass:
 
@@ -1758,7 +1758,7 @@ def run_ash_security_scan(source_dir: Optional[str] = None) -> str:
         source_dir = str(Path.cwd().absolute())
     return f"""Please run an ASH security scan of the following directory: {source_dir}
 
-The scan should be done using the `run_ash_scan` MCP tool from the `ash` MCP Server.
+The scan should be done using the `run_ash_scan` MCP tool from the ASH MCP server.
 
 Once the scan has started, an ID will be returned. Using that scan ID, call the
 `get_scan_progress` MCP tool with the scan ID to monitor until completion.

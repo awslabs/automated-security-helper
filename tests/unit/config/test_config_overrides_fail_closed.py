@@ -186,7 +186,7 @@ class TestResolveConfigPropagates:
                 config_overrides=["global_settings.bogus_key=1"],
             )
 
-        assert "ash config lint" not in str(exc_info.value)
+        assert "ashx config lint" not in str(exc_info.value)
 
     def test_config_path_without_source_dir_propagates(self, tmp_path):
         """The shape `report` and `config get` actually use.

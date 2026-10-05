@@ -403,7 +403,7 @@ function Invoke-ASH {
                     # Add image name and ASH command
                     $runCmd += @(
                         $AshImageName
-                        'ash'
+                        'ashx'
                         '--source-dir /src'
                         '--output-dir /out'
                     )

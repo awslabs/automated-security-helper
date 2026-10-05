@@ -213,7 +213,7 @@ _SEVERITY_RANK = {"critical": 3, "high": 3, "medium": 2, "low": 1, "none": 0}
 #
 # That direction is the point. The classification used to be a two-member denylist,
 # which meant every status it did not name -- including one this version has never
-# heard of -- counted as complete. Reachable rather than hypothetical: `ash merge`
+# heard of -- counted as complete. Reachable rather than hypothetical: `ashx merge`
 # reads results files written by whatever ASH produced each shard, so a fan-out whose
 # runners are mid-upgrade can hand this code a status string that is not in this
 # enum, and a denylist reports that shard as a scanner that ran. An allowlist fails
@@ -336,7 +336,7 @@ def no_scanner_ran(
     roster means the scan phase ran; no roster and no scanners means it never did.
 
     Defaults to None so a results file written by a version that recorded no roster
-    -- which ``ash merge`` reads, from whatever ASH produced each shard -- keeps the
+    -- which ``ashx merge`` reads, from whatever ASH produced each shard -- keeps the
     old benign reading rather than becoming a failure on upgrade.
     """
     if not observed:
@@ -483,7 +483,7 @@ def incomplete_scanners(
 
     Filtering here against ``opts.scanners`` was the alternative and is rejected:
     it would make the exit code disagree with the status the report prints for the
-    same scanner, and it has no counterpart in ``ash merge``, which has no scanner
+    same scanner, and it has no counterpart in ``ashx merge``, which has no scanner
     selection to consult. Fixing the recorded status instead makes both agree.
 
     Tested against ``_COMPLETE_SCANNER_STATUSES`` and not against
@@ -509,7 +509,7 @@ def incomplete_scanners(
     # default `content_db_staleness: fail`, is incomplete in the sense this function
     # means: its findings are real, and its silence about anything published since the
     # database was built is not. Listed here so the callers that read only this list --
-    # the workspace layer and `ash merge` -- name it. Under `warn` the record is not
+    # the workspace layer and `ashx merge` -- name it. Under `warn` the record is not
     # enforced and is not listed.
     #
     # The exit code does NOT come from this arm. A stale database fails the scan
@@ -532,7 +532,7 @@ def incomplete_scanners(
         # Against the allowlist, not against _INCOMPLETE_SCANNER_STATUSES, and the
         # two are not interchangeable here even though they partition the enum.
         # `metric.status` is a plain string that may have come from a results file
-        # this version did not write -- `ash merge` reads shard results from
+        # this version did not write -- `ashx merge` reads shard results from
         # whatever ASH produced each one -- and only the allowlist form treats a
         # status outside the enum entirely as incomplete rather than as a scanner
         # that ran. This arm arrived from one side of a merge spelled as
@@ -594,7 +594,7 @@ def incomplete_converters(
     run that turns conversion off, which is a supported configuration.
 
     Read with ``getattr`` because a results file written by an older version carries
-    rows without ``failure``, and ``ash merge`` reads shard results from whatever
+    rows without ``failure``, and ``ashx merge`` reads shard results from whatever
     ASH produced each one.
 
     Args:
@@ -861,7 +861,7 @@ def _resolve_fail_on_incomplete_scanners(
        whatever object the caller supplied, and a partially-built model or a test
        double would otherwise contribute a truthy non-answer.
     3. *config_value* -- read from the config file before the scan, which is what
-       container mode has to fall back on and what ``ash merge`` passes from the
+       container mode has to fall back on and what ``ashx merge`` passes from the
        config carried in the shard results.
     4. On, matching ``AshConfig.fail_on_incomplete_scanners``.
 
@@ -1018,7 +1018,7 @@ def scan_incompleteness(
 
     A stale content database is reported in ``stale_content_databases`` whatever the
     gate says, and ONLY there. ``incomplete_scanners`` also lists its scanner, with
-    the database named in the status, so that the workspace layer and ``ash merge``
+    the database named in the status, so that the workspace layer and ``ashx merge``
     see it; a row that is there for nothing else is dropped from ``scanners`` here.
     Otherwise the one condition would be reported twice with the gate on -- once as
     an incomplete scanner whose reason reads ``partial_coverage`` and whose advice is
@@ -2197,7 +2197,7 @@ def _compute_exit_code(
     # during execution" code, and an incomplete scan is that: the findings that
     # were reported are real but the set is known to be partial. Reporting 2 would
     # tell a reviewer that clearing the listed findings clears the scan, when some
-    # scanners contributed nothing. `ash merge` already uses 1 for its coverage
+    # scanners contributed nothing. `ashx merge` already uses 1 for its coverage
     # refusals on the same reasoning -- the findings are unknown, which is not the
     # same as "no findings".
     #
@@ -2244,7 +2244,7 @@ def _compute_exit_code(
         # Reachable without any sharding and without any operator error beyond a
         # single word. Measured on this tree with the repository's own
         # .ash/.ash.yaml, which sets `semgrep: enabled: true`:
-        # `ash scan --scanners semgrep` on Windows resolves semgrep against the
+        # `ashx scan --scanners semgrep` on Windows resolves semgrep against the
         # registered names, so ScannerSelectionError does not fire; semgrep then
         # declares the platform unsupported and is recorded SKIPPED; the other nine
         # are not selected and are SKIPPED too; findings are 0; exit 0. A scan that
@@ -2254,7 +2254,7 @@ def _compute_exit_code(
         # caught that case in CI, which is the reason it has to be here as well:
         # its docstring states that reading the JSON status means "the guard and
         # ASH's own exit code answer from the same field, so they cannot disagree",
-        # and on this exact input they did. An operator running `ash scan` got 0
+        # and on this exact input they did. An operator running `ashx scan` got 0
         # from the same results file the CI gate exits 1 on.
         #
         # Inside the fail_on_incomplete_scanners gate rather than beside it. The
@@ -2347,7 +2347,7 @@ def _compute_exit_code(
     # the block above states: an operator who turned findings-gating off said "do not
     # fail me for what you find", not "do not tell me part of the scan never ran".
     #
-    # 1 rather than 2, matching the gate above and `ash merge`'s coverage refusals.
+    # 1 rather than 2, matching the gate above and `ashx merge`'s coverage refusals.
     # 2 means "clearing the listed findings clears the scan", which is exactly what
     # is not true here -- the reported set is known to be missing whatever these rules
     # would have said.
@@ -2393,7 +2393,7 @@ def _compute_exit_code(
     #
     # Read from the SARIF notification's level, which the scan set from the policy it ran
     # under, rather than re-resolving the policy here. That keeps the decision with the
-    # results: container mode's host and `ash merge` both arrive here with a results
+    # results: container mode's host and `ashx merge` both arrive here with a results
     # model and no reliable view of the config the inner scan used. The opt-out is
     # `--allow-stale-content-db` or `content_db_staleness: warn`, which writes the same
     # notification at level warning so it reaches the reports without failing the scan.
@@ -2585,10 +2585,10 @@ def _print_summary(
         print(f"    - Markdown summary: '{out_dir_alias}/reports/ash.summary.md'")
         print(f"    - Text summary: '{out_dir_alias}/reports/ash.summary.txt'")
         print(
-            "  2. Use [magenta]ash report[/magenta] to view a short text summary of the scan in your terminal"
+            "  2. Use [magenta]ashx report[/magenta] to view a short text summary of the scan in your terminal"
         )
         print(
-            "  3. Use [magenta]ash inspect findings[/magenta] to explore the findings interactively"
+            "  3. Use [magenta]ashx inspect findings[/magenta] to explore the findings interactively"
         )
         print(
             f"  4. Review scanner-specific reports and outputs in the '{out_dir_alias}/scanners' directory"
@@ -2840,7 +2840,7 @@ def run_ash_scan(
             config_fail_on_findings = _local_config_fof
 
     if opts.workspace_plan is not None:
-        # Container mode ran `ash --workspace` inside the container, so the
+        # Container mode ran `ashx --workspace` inside the container, so the
         # verdict was already computed there by the same code. Re-deriving it on
         # the host from a merged model would answer a different question.
         workspace_payload = getattr(results, "workspace", None)

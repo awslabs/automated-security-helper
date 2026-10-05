@@ -796,7 +796,7 @@ def test_final_report_invocation_describes_the_ash_run(
     report = scanner.scan(target=scanner.context.work_dir, target_type="converted")
 
     invocation = report.runs[0].invocations[0]
-    assert invocation.commandLine == "ash"
+    assert invocation.commandLine == "ashx"
     assert invocation.arguments[:2] == ["--scanner", "cdk-nag"]
     assert invocation.exitCode == 0
     assert invocation.executionSuccessful is True

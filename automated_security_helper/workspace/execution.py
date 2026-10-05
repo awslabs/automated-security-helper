@@ -9,7 +9,7 @@ Phase 1 produced a plan and refused to act on it. This is the part that acts, an
 its whole job is to hold one invariant while doing so:
 
     For any project P, the findings reported for P and the pass/fail verdict for P
-    are identical to what ``ash --source-dir P`` would produce, ABSENT workspace
+    are identical to what ``ashx --source-dir P`` would produce, ABSENT workspace
     policy.
 
 Everything below follows from that. The qualification was added in Phase 3 and is
@@ -24,7 +24,7 @@ Four places, and no others:
   ``project.severity_threshold``, so a workspace severity ceiling decides which
   findings are actionable. This one changes only the JUDGEMENT of findings, never
   their discovery, so a project scanned under a ceiling reports the same findings
-  as ``ash --source-dir P`` and differs only in how many are counted actionable.
+  as ``ashx --source-dir P`` and differs only in how many are counted actionable.
 * :func:`_project_config_with_policy` appends ``workspace.suppressions`` and
   ``workspace.ignore_paths`` to the project's own lists, and switches on each
   scanner in ``workspace.additional_scanners`` that the project had turned off.
@@ -723,7 +723,7 @@ def _scan_one_project(
 
     # The completeness half of the verdict, alongside the threshold half above.
     # Without it a project whose scanners never ran reported zero findings and
-    # SUCCESS, while `ash --source-dir P` on the same project exited 1 -- the
+    # SUCCESS, while `ashx --source-dir P` on the same project exited 1 -- the
     # workspace layer mirrored only the threshold pass.
     incomplete = incomplete_scanners_for_project(results)
     # Two reads of the completeness question, not one, because the second is not
@@ -732,7 +732,7 @@ def _scan_one_project(
     # project in which every entry is SKIPPED clears it having measured nothing.
     # _compute_exit_code asks both, in this order, and the workspace layer asked
     # only the first: such a project reported zero findings and SUCCESS while
-    # `ash --source-dir P` on it exited 1.
+    # `ashx --source-dir P` on it exited 1.
     #
     # No shard exclusion here, unlike _compute_exit_code, which excuses one shard
     # of a split because a shard genuinely can own nothing. A workspace project is
@@ -816,7 +816,7 @@ def _scan_one_project(
         no_scanner_ran=measured_nothing,
         # A stale content database under `content_db_staleness: fail` fails the project
         # whatever fail_on_incomplete says, matching _compute_exit_code's own arm for it:
-        # `ash --source-dir P` exits 1 on it, so P inside a workspace must not pass.
+        # `ashx --source-dir P` exits 1 on it, so P inside a workspace must not pass.
         scan_incomplete=(
             (bool(gating_incomplete) or measured_nothing) and fail_on_incomplete
         )
@@ -916,7 +916,7 @@ def _enable_policy_scanners(config: Any, names: Iterable[str]) -> None:
     The other half, ``enabled_scanners``, is deliberately left alone. It is the
     operator's own ``--scanners`` allowlist, and a policy widening a run they
     narrowed by hand is the one direction they cannot anticipate. The consequence
-    is a real limitation rather than an oversight: ``ash --workspace W --scanners
+    is a real limitation rather than an oversight: ``ashx --workspace W --scanners
     bandit`` runs bandit and nothing else, policy or no policy.
     ``test_an_explicit_scanner_selection_still_bounds_the_run`` pins it so the
     decision has to be changed rather than drifted out of.

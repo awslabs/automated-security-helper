@@ -25,7 +25,7 @@ Install Ferret Scan:
 
 ```bash
 # Recommended: let ASH install the version this plugin is tested against
-ash dependencies install --config .ash/.ash_community_plugins.yaml
+ashx dependencies install --config .ash/.ash_community_plugins.yaml
 
 # Or install by hand. Use the constraint, not a bare `pip install ferret-scan`:
 # the latter resolves to whatever is newest, which is how a release published
@@ -39,7 +39,7 @@ make build
 ```
 
 The supported range is declared in `ferret_scanner.py` (`DEFAULT_VERSION_CONSTRAINT`)
-and is what `ash dependencies install` applies. If the two ever disagree, the
+and is what `ashx dependencies install` applies. If the two ever disagree, the
 constant is correct.
 
 ### Enable the Plugin
@@ -67,7 +67,7 @@ scanners:
 Use the `--ash-plugin-modules` flag when running ASH:
 
 ```bash
-uv run ash scan --source-dir /path/to/code \
+uv run ashx scan --source-dir /path/to/code \
     --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins
 ```
 
@@ -77,10 +77,10 @@ To verify the plugin is properly loaded:
 
 ```bash
 # With config file
-uv run ash plugin list | grep -i ferret
+uv run ashx plugin list | grep -i ferret
 
 # Or with command line flag
-uv run ash plugin list --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins | grep -i ferret
+uv run ashx plugin list --ash-plugin-modules automated_security_helper.plugin_modules.ash_ferret_plugins | grep -i ferret
 ```
 
 You should see `ferret-scan` in the list of scanners.
@@ -389,19 +389,19 @@ Results are written to:
 
 ```bash
 # Run ASH with Ferret Scan enabled
-uv run ash --source-dir /path/to/code
+uv run ashx --source-dir /path/to/code
 
 # Run only Ferret Scan
-uv run ash --source-dir /path/to/code --scanners ferret-scan
+uv run ashx --source-dir /path/to/code --scanners ferret-scan
 
 # Run with ferret-scan's own debug output
-uv run ash --source-dir /path/to/code --scanners ferret-scan -o ferret_debug=true
+uv run ashx --source-dir /path/to/code --scanners ferret-scan -o ferret_debug=true
 
 # Run with ferret-scan's own verbose output
-uv run ash --source-dir /path/to/code --scanners ferret-scan -o ferret_verbose=true
+uv run ashx --source-dir /path/to/code --scanners ferret-scan -o ferret_verbose=true
 
 # Run with a custom config file
-uv run ash --source-dir /path/to/code \
+uv run ashx --source-dir /path/to/code \
     --scanners ferret-scan \
     --config-overrides "scanners.ferret-scan.options.config_file=/path/to/custom.yaml"
 ```

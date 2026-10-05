@@ -171,7 +171,7 @@ def report_command(
     # locale encoding, which on Windows is cp1252. ASH writes this file as UTF-8, and
     # findings routinely carry bytes cp1252 cannot decode -- a snippet from a
     # non-ASCII source file, a tool's smart quotes. Measured on
-    # `scan (python-local, windows-latest)`: `ash report --format text` died with
+    # `scan (python-local, windows-latest)`: `ashx report --format text` died with
     # "'charmap' codec can't decode byte 0x9d", so on Windows this command could not
     # render a report for any scan whose results were not pure cp1252.
     try:
@@ -230,7 +230,7 @@ def report_command(
         if report_content is None:
             # `report` is annotated `-> str | None`, and a reporter returns None
             # when it could not build its artefact at all. Without this guard the
-            # branches below hand None to print()/print_json(), so `ash report`
+            # branches below hand None to print()/print_json(), so `ashx report`
             # writes the literal "None" to stdout and exits 0 -- a caller
             # redirecting stdout to a file gets a four-byte report and a success
             # status. Exit non-zero instead: the reporter already logged why.

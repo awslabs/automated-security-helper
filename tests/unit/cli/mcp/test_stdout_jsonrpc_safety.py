@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""`ash mcp` must never write to stdout.
+"""`ashx mcp` must never write to stdout.
 
 Why this file exists
 --------------------

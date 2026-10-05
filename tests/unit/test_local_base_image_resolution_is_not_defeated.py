@@ -148,7 +148,7 @@ def _build_image_kwargs(dockerfile: Path, **overrides: Any) -> Dict[str, Any]:
 
 
 class TestThePythonEntrypoint:
-    """``_build_image`` -- ``ash build-image`` and ``ash scan --mode container``."""
+    """``_build_image`` -- ``ashx build-image`` and ``ashx scan --mode container``."""
 
     @pytest.fixture
     def dockerfile(self, tmp_path):

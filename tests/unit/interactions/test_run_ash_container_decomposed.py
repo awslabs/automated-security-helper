@@ -196,11 +196,11 @@ def test_assemble_run_command_env_vars():
 
 
 def test_assemble_run_command_image_argument_position():
-    """Image name appears before the 'ash' subcommand."""
+    """Image name appears before the 'ashx' command."""
     image = "automated-security-helper:non-root"
     cmd = _assemble_run_command(**_base_assemble_kwargs(image_name=image))
     img_idx = cmd.index(image)
-    ash_idx = cmd.index("ash")
+    ash_idx = cmd.index("ashx")
     assert img_idx < ash_idx
 
 

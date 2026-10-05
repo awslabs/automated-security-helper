@@ -5,7 +5,7 @@
 
 The failure mode being pinned
 ----------------------------
-``ash dependencies install`` reports success purely by process exit code. So a
+``ashx dependencies install`` reports success purely by process exit code. So a
 resolver that returns ``[]`` produces no pip command, exits 0, and leaves cdk-nag
 MISSING -- a green install that installed nothing. That is the original defect
 this resolver was written to remove, and it came back through a different door:
@@ -28,7 +28,7 @@ The ``[None]`` case is not hypothetical. A ``*.dist-info`` carrying a
 ``importlib.metadata.packages_distributions()`` yield a list containing None, and
 the real ``requires(None)`` raises ``ValueError``, which the resolver's original
 ``except (PackageNotFoundError, OSError)`` did not catch. That was an outright
-crash in ``ash dependencies install``, not a silent no-op.
+crash in ``ashx dependencies install``, not a silent no-op.
 """
 
 from __future__ import annotations

@@ -160,7 +160,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
 
         Measured, not assumed: on windows-latest the gem install reached
         "ERROR: Failed to build gem native extension" and returned 1, which failed
-        `ash dependencies install` outright and took every other scanner's install
+        `ashx dependencies install` outright and took every other scanner's install
         down with it. Checking first turns that into cfn-nag reporting itself as
         unprovisionable on this platform -- named in the installer's output, next to
         npm-audit -- which is a constraint rather than a malfunction.
@@ -242,7 +242,7 @@ class CfnNagScanner(ScannerPluginBase[CfnNagScannerConfig]):
         Declaring it unconditionally was wrong in a way worth recording. `gem`
         missing makes run_command return 1 on FileNotFoundError, which counts as a
         failed install command, which fails the whole run -- so on a machine without
-        Ruby, `ash dependencies install` would exit non-zero for every plugin
+        Ruby, `ashx dependencies install` would exit non-zero for every plugin
         together, before any scan. That is a different and worse outcome than
         cfn-nag being unavailable, and it contradicts how the same condition is
         treated one plugin over: npm-audit needs a Node runtime ASH does not

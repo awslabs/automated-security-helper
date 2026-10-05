@@ -253,7 +253,7 @@ def install_dependencies(
     work_dir = output_dir.joinpath(ASH_WORK_DIR_NAME)
     # config_path is what makes --config/ASH_CONFIG mean anything here. Omitting it
     # made the option accept a path and then quietly ignore it, so
-    # `ash dependencies install --config .ash/.ash_community_plugins.yaml` resolved
+    # `ashx dependencies install --config .ash/.ash_community_plugins.yaml` resolved
     # the default config instead and installed dependencies for the wrong set of
     # plugins.
     resolved_config = resolve_config(
@@ -267,7 +267,7 @@ def install_dependencies(
     # `--config` previously resolved the config's *values* and stopped there. The
     # scanners a config adds through `ash_plugin_modules` were never imported, so
     # their plugin classes never registered, so
-    # `ash dependencies install --config .ash/.ash_community_plugins.yaml` installed
+    # `ashx dependencies install --config .ash/.ash_community_plugins.yaml` installed
     # dependencies for the built-in set and reported success -- and trivy, snyk and
     # ferret had to be installed by hand in CI before the scan.
     #
@@ -326,7 +326,7 @@ def install_dependencies(
                 # what the verdict is computed from, and a plugin that failed to
                 # construct is unrelated to a `--tool` request for a different one --
                 # so folding it in unconditionally made
-                # `ash dependencies install --tool trivy-repo` exit 1 because some
+                # `ashx dependencies install --tool trivy-repo` exit 1 because some
                 # other community plugin would not import, and name that other plugin
                 # in the failure panel.
                 construction_failures.append(

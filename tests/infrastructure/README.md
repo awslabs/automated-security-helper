@@ -57,7 +57,7 @@ Pass parameters via `--context key=value` on the `cdk` command line.
    ```
 2. Upload an ASH bundle to the S3 artifact bucket, then pull it
    from the instance through the S3 VPC endpoint.
-3. Run `ash` against sample repositories already staged on the host.
+3. Run `ashx` against sample repositories already staged on the host.
 
 ### Option B -- CodeBuild (automated)
 

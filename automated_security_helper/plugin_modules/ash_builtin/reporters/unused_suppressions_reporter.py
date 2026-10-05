@@ -31,7 +31,7 @@ def _one_line(text: str | None) -> str:
     Collapsing at the point of rendering fixes the report for every existing
     config, with no edit to anyone's file. The config linter also warns about a
     multi-line reason and offers to collapse it, but that only helps someone who
-    runs the linter and accepts the fix -- and `ash config lint --fix` re-dumps
+    runs the linter and accepts the fix -- and `ashx config lint --fix` re-dumps
     the whole config, dropping every comment in it. A hand-written block-scalar
     reason is a strong signal of a hand-commented config, which is exactly the
     file you least want rewritten.

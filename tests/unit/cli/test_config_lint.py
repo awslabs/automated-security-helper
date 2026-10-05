@@ -783,7 +783,7 @@ scanners:
 
 
 class TestConfigLintCLI:
-    """Integration tests for the `ash config lint` CLI command."""
+    """Integration tests for the `ashx config lint` CLI command."""
 
     def test_lint_valid_config_exits_zero(self, cli_runner, valid_config):
         """Linting a valid config should exit with code 0."""

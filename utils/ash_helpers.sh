@@ -12,7 +12,7 @@ export ASH_ROOT_DIR="$(cd $(dirname "$(dirname "$0")"); pwd)"
 export ASH_UTILS_DIR="${ASH_ROOT_DIR}/utils"
 export ASH_HELPERS_SCRIPT="${ASH_UTILS_DIR}/ash_helpers.sh"
 
-# Function to invoke ash CLI in single container executable form.
+# Function to invoke the ASH CLI in single container executable form.
 #
 # This used to run $ASH_ROOT_DIR/ash, the repository's bash entrypoint. That
 # script is gone: the Python CLI parses its whole flag surface and
@@ -25,5 +25,5 @@ export ASH_HELPERS_SCRIPT="${ASH_UTILS_DIR}/ash_helpers.sh"
 # header above tells people to source this file from their shell profile and
 # removing the function would break that on their next login.
 invoke-ash() {
-  ash --mode container "$@"
+  ashx --mode container "$@"
 }

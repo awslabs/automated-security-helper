@@ -414,7 +414,7 @@ class ReportMetadata(BaseModel):
     # Declared, rather than left to ride on this model's extra="allow". Three
     # things follow from declaring it that an extra key does not give:
     # model_json_schema() carries it, so the committed AshAggregatedResults.json
-    # documents the shape `ash merge` reads; a malformed shard block is refused at
+    # documents the shape `ashx merge` reads; a malformed shard block is refused at
     # model_validate_json time instead of surfacing as an AttributeError inside
     # merge; and it round-trips as a ShardAssignment rather than as a bare dict,
     # so verify_shard_coverage can be handed it directly.

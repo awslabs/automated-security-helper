@@ -151,7 +151,7 @@ class ConfigLinter:
             )
             return result
 
-        # Run validation checks (same as `ash config validate`)
+        # Run validation checks (same as `ashx config validate`)
         cls._check_validation_issues(config_path, config_data, result)
 
         # Run suppression-specific lint checks
@@ -929,7 +929,7 @@ class ConfigLinter:
         through silently.
 
         Each issue is :class:`LintSeverity.WARNING` and ``fixable=True``;
-        ``ash config lint --fix`` renames the key in-place.
+        ``ashx config lint --fix`` renames the key in-place.
         """
         # Lazy import to avoid pulling the full config-segment graph on
         # module import.
@@ -986,7 +986,7 @@ class ConfigLinter:
                                 f"defined. This is ambiguous and would lose "
                                 f"data on auto-fix. Remove or merge one of "
                                 f"the entries by hand before running "
-                                f"`ash config lint --fix`."
+                                f"`ashx config lint --fix`."
                             ),
                             fixable=False,
                         )
@@ -1141,7 +1141,7 @@ class ConfigLinter:
         collapsed = cls._collapse_reason_whitespace(reason)
         if collapsed == reason:
             # Nothing to do. Reporting success here would make
-            # `ash config lint --fix` claim a fix it did not make.
+            # `ashx config lint --fix` claim a fix it did not make.
             return False
 
         suppression["reason"] = collapsed
