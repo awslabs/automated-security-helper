@@ -38,22 +38,17 @@ which does a real `brew install` and `brew test`.
 
 Why the resource list is generated and not hand-maintained
 ----------------------------------------------------------
-`packaging/homebrew/refresh-resources.py` resolves the closure with `uv` and
-reads each sdist URL and sha256 from the PyPI JSON API. The same reasoning as
-the long `[tool.commitizen]` comment block in pyproject.toml applies: a
-hand-maintained second list of what ASH depends on drifts from the first one,
-and the drift is invisible until someone installs it. This test does not
-re-derive the closure -- resolving 78 packages needs a network -- it asserts the
-property that catches the common drift, which is a *new top-level* requirement
-added to pyproject.toml without regenerating the block.
+`packaging/homebrew/refresh-resources.py` generates the block from `uv.lock`.
+The same reasoning as the long `[tool.commitizen]` comment block in
+pyproject.toml applies: a hand-maintained second list of what ASH depends on
+drifts from the first one, and the drift is invisible until someone installs it.
 
-What this test deliberately does not catch
+What this file deliberately does not catch
 ------------------------------------------
 A transitive-only change (a dependency of a dependency gaining a new
 requirement) does not touch `[project.dependencies]`, so nothing here fires.
-That case is caught by the real `brew install` in CI, and by
-`refresh-resources.py --check`, which re-resolves and diffs. Both need a
-network; this file must not.
+tests/unit/test_homebrew_formula_lock_sync.py catches it: it regenerates the
+formula from `uv.lock`, offline, and requires a byte-identical result.
 """
 
 import re
@@ -265,4 +260,43 @@ class TestHomebrewFormulaVendorsItsDependencies:
             f"Formula/ash.rb declares these resource names more than once: "
             f"{duplicates}. Whichever stanza comes last is the version that ends "
             "up installed, so the earlier one is a pin that does nothing."
+        )
+
+
+class TestHandWrittenCommentsTrackTheGeneratedBlock:
+    """The comments above the generated block are written by hand, and the block is
+    regenerated from uv.lock without touching them. A resource count stated there
+    goes stale on the next lock change with nothing to flag it (one said "the other
+    68" when the block held 78), so the comments name packages and never a count."""
+
+    _COUNT = re.compile(
+        r"\b(?:the other|all|another)\s+\d+\b|\b\d+\s+(?:other\s+)?resources\b"
+    )
+
+    def _hand_written_comments(self) -> list[str]:
+        text = _formula_text()
+        before_block = text.split("# BEGIN generated resources", 1)[0]
+        return [
+            line.strip()
+            for line in before_block.splitlines()
+            if line.strip().startswith("#")
+        ]
+
+    def test_no_hand_written_comment_states_a_resource_count(self):
+        stale = [
+            line for line in self._hand_written_comments() if self._COUNT.search(line)
+        ]
+
+        assert not stale, (
+            "Formula/ash.rb states a resource count in a hand-written comment, which "
+            f"refresh-resources.py --write will not update: {stale}"
+        )
+
+    def test_the_rust_extension_resources_the_comment_names_exist(self):
+        resources = {_canonical(name) for name in _resource_names(_formula_text())}
+        named = {"cryptography", "pydantic-core", "rpds-py", "rtoml", "orjson"}
+
+        assert named <= resources, (
+            "The Rust build-dependency comment names resources the formula no longer "
+            f"has: {sorted(named - resources)}"
         )

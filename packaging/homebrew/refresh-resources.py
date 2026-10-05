@@ -1,8 +1,16 @@
 #!/usr/bin/env python3
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
+#
+# PEP 723 inline metadata, so `uv run --script` can run this outside the project
+# environment. Inside it (`uv run python ...`, or the unit tests) `packaging` is
+# already installed.
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["packaging>=24", "tomli>=2; python_version < '3.11'"]
+# ///
 
-"""Regenerate the `resource` block in Formula/ash.rb from pyproject.toml.
+"""Regenerate the `resource` block in Formula/ash.rb from uv.lock.
 
 WHY THIS SCRIPT EXISTS
 
@@ -19,56 +27,77 @@ first `ash` run dies on `ModuleNotFoundError` naming a module the build never
 mentioned. The formula shipped in exactly that state until this script was
 written: `virtualenv_install_with_resources` with zero resources.
 
-WHY IT IS GENERATED RATHER THAN HAND-MAINTAINED
+WHY uv.lock AND NOT A FRESH RESOLUTION
 
-The transitive runtime closure of `[project.dependencies]` is 78 packages. A
-hand-maintained list of 78 names, versions, URLs and hashes is a second copy of
-the dependency set, and the long `[tool.commitizen]` comment block in
-pyproject.toml is about exactly this failure: three separate hand-maintained
-lists of the files that pin ASH's version, and a file absent from all three was
-invisible to every one of them. A stale resource block fails the same way --
-silently, one release later, on a user's machine.
+The first version of this script ran `uv pip compile pyproject.toml` once per
+platform and read each sdist URL and sha256 from the PyPI JSON API. That made the
+block a function of the day it was generated, not of the repository: an upstream
+release inside a declared range moved the resolution, and `--check` reported drift
+on a formula nobody had touched. It was measured doing exactly that against a
+formula generated a few days earlier.
 
-So the closure is re-derived on demand instead. `uv` resolves it, the PyPI JSON
-API supplies each sdist URL and sha256, and `--check` turns drift into a
-non-zero exit.
+uv.lock already pins the closure the project's own CI installs, with each
+package's sdist URL and sha256. Reading it instead gives three properties the
+network version could not have:
 
-WHY NOT `brew update-python-resources`
+- the same uv.lock produces a byte-identical Formula/ash.rb, on any machine,
+  offline;
+- the formula installs the same versions the test suite ran against, rather than
+  whatever PyPI served when the block was regenerated;
+- `--check` is a real gate. It changes answer only when uv.lock or the formula
+  changes, so it can run on every pull request. tests/unit/
+  test_homebrew_formula_lock_sync.py does exactly that.
 
-That is the normal tool and it is the right one to use when Homebrew is
-installed. It was not available on the machine this was written on, and writing
-the block by hand was the alternative being avoided. The PyPI JSON API returns
-the same two fields the brew command writes -- the entry whose
-`packagetype` is `"sdist"`, and its `digests.sha256` -- so the output is
-equivalent, and `brew audit --strict` in CI checks it against Homebrew's own
-rules either way.
+HOW THE CLOSURE IS READ
+
+uv.lock is a universal lock: one file covering every platform and Python version
+the project supports, with PEP 508 markers on the edges. The closure is the
+runtime dependencies of the root package -- no extras, no dependency groups, so
+the optional `cdk` extra (which carries cdk-nag, an actual scanner) is excluded by
+construction -- walked once per Homebrew platform with that platform's marker
+environment, then merged. A package that resolves to two versions across the
+platforms is a hard failure, because one `resource` stanza cannot carry both.
+
+Every Homebrew platform is walked, not only the build machine's. A formula carries
+ONE resource list and Homebrew installs it on all four; a dependency conditional
+on Linux would otherwise be missing from a list generated on macOS. Windows is
+absent because Homebrew does not run there, and including it would pull in pywin32,
+which has no sdist.
+
+THE RESOURCE NAME
+
+Derived from the sdist URL the same way `brew audit --strict` derives the name it
+compares against (Homebrew's resource auditor takes the URL basename up to its last
+hyphen and maps `_` and `.` to `-`, compared case-insensitively), and then checked
+against the lock's own package name. So the block cannot pass this script and fail
+that cop. The earlier PyPI-JSON version wrote `pydantic_core` from PyPI's
+`info.name` and the cop rejected it; this derivation cannot produce that spelling.
 
 WHAT IT DELIBERATELY DOES NOT EMIT
 
 `uv`. It is in `[project.dependencies]` because ASH shells out to the uv
 executable, and `Formula/ash.rb` already carries `depends_on "uv"` for that.
-See EXEMPT below for the full reasoning; the short version is that a uv resource
-would compile a Rust program Homebrew already ships bottled, into a directory
-nothing on PATH points at.
+See EXEMPT below; the short version is that a uv resource would compile a Rust
+program Homebrew already ships bottled, into a directory nothing on PATH points at.
 
 KNOWN LIMITATIONS
 
-- The resolution is pinned to one Python minor version, read from the formula's
-  own `depends_on "python@X.Y"` so the two cannot drift. It is not a universal
-  resolution across Python versions; Homebrew builds against one interpreter.
-
-- `std_pip_args` also passes `--uploaded-prior-to`, a release cooldown. A
-  resource whose version was published inside that window is refused by pip, so
-  regenerating immediately after an upstream release can produce a block that
-  fails to install for a few days. The fix is to wait, not to edit the formula.
+- One Python minor version, read from the formula's `depends_on "python@X.Y"` so
+  the two cannot drift. Markers are evaluated with python_full_version set to
+  "X.Y.0"; a marker that keys on a patch release above .0 would be evaluated
+  against .0. None in the lock does today.
 
 - pip runs with build isolation ON (`Virtualenv#pip_install` defaults to
   `build_isolation: true`), so pip fetches build backends -- maturin for the
   Rust extensions, setuptools for the rest -- from PyPI during the build rather
-  than from a resource. That is un-pinned network access inside a Homebrew
-  build. Pinning it would mean abandoning `virtualenv_install_with_resources`
-  for hand-rolled install code that stages build backends first, which is a
-  larger change than the problem currently justifies.
+  than from a resource. That is un-pinned network access inside a Homebrew build,
+  and it is not something uv.lock can pin, because the lock records runtime
+  dependencies and not PEP 517 backends.
+
+- `std_pip_args` also passes `--uploaded-prior-to`, a release cooldown. A
+  resource whose version was published inside that window is refused by pip.
+  That is now governed by when uv.lock was last updated rather than when this
+  script ran.
 
 USAGE
 
@@ -80,43 +109,56 @@ USAGE
 from __future__ import annotations
 
 import argparse
-import json
 import re
-import shutil
-import subprocess  # nosec B404 - uv is invoked as a subprocess; it is the resolver this script delegates to
 import sys
-import time
-import urllib.error
-import urllib.request
-from pathlib import Path
+from collections.abc import Iterable
+from typing import Any
+from pathlib import Path, PurePosixPath
+from urllib.parse import urlparse
+
+from packaging.markers import Marker
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:  # pragma: no cover - the unit tests import this module on 3.10
+    import tomli as tomllib
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FORMULA_PATH = REPO_ROOT / "Formula" / "ash.rb"
-PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"
+LOCK_PATH = REPO_ROOT / "uv.lock"
+
+# The root package in uv.lock, which is this repository.
+ROOT_PACKAGE = "automated-security-helper"
 
 BEGIN_MARKER = (
     "  # BEGIN generated resources -- packaging/homebrew/refresh-resources.py"
 )
 END_MARKER = "  # END generated resources"
 
-# Every platform Homebrew supports, as uv spells them. The resolution is run
-# once per platform and the results must agree.
-#
-# Resolving on only the build machine would be the obvious shortcut and is
-# wrong: a formula carries ONE resource list and Homebrew installs it on all
-# four of these. A dependency that only appears on Linux would be missing from a
-# list resolved on macOS, and the failure would land on Linux users as a
-# ModuleNotFoundError rather than on whoever regenerated the block.
-#
-# Windows is absent because Homebrew does not run there. Including it would pull
-# in Windows-only requirements (pywin32 and friends) that pip would then refuse
-# to install on the platforms Homebrew does support.
-PLATFORMS = (
-    "aarch64-apple-darwin",
-    "x86_64-apple-darwin",
-    "aarch64-unknown-linux-gnu",
-    "x86_64-unknown-linux-gnu",
-)
+# Every platform Homebrew supports, as the PEP 508 marker variables that differ
+# between them. The rest of the environment comes from base_environment().
+PLATFORMS: dict[str, dict[str, str]] = {
+    "aarch64-apple-darwin": {
+        "sys_platform": "darwin",
+        "platform_system": "Darwin",
+        "platform_machine": "arm64",
+    },
+    "x86_64-apple-darwin": {
+        "sys_platform": "darwin",
+        "platform_system": "Darwin",
+        "platform_machine": "x86_64",
+    },
+    "aarch64-unknown-linux-gnu": {
+        "sys_platform": "linux",
+        "platform_system": "Linux",
+        "platform_machine": "aarch64",
+    },
+    "x86_64-unknown-linux-gnu": {
+        "sys_platform": "linux",
+        "platform_system": "Linux",
+        "platform_machine": "x86_64",
+    },
+}
 
 # Requirement name -> the Homebrew formula that supplies it instead of a
 # resource. tests/unit/test_homebrew_formula_resources.py carries the same map
@@ -126,9 +168,14 @@ EXEMPT = {
     "uv": "uv",
 }
 
-PYPI_JSON = "https://pypi.org/pypi/{name}/{version}/json"
-HTTP_ATTEMPTS = 4
-HTTP_TIMEOUT_SECONDS = 30
+# The only sdist host a resource may point at. uv.lock records whatever index a
+# package came from; a lock that started naming another host would otherwise flow
+# straight into a formula users install from.
+SDIST_HOST = "files.pythonhosted.org"
+SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
+
+# One [[package]] table, or one dependency edge, as tomllib returns it.
+LockPackage = dict[str, Any]
 
 
 class RefreshError(RuntimeError):
@@ -144,200 +191,227 @@ def formula_python_version(formula_text: str) -> str:
     """The Python minor version the formula builds against.
 
     Read from the formula rather than hardcoded so that bumping
-    `depends_on "python@3.12"` to 3.13 changes what gets resolved. A hardcoded
-    version here would resolve a closure for an interpreter the formula does not
-    use, and the mismatch would only show up as a missing conditional
-    dependency at runtime.
+    `depends_on "python@3.12"` to 3.13 changes which markers hold. A hardcoded
+    version here would compute the closure for an interpreter the formula does not
+    use, and the mismatch would only show up as a missing conditional dependency
+    at runtime.
     """
     match = re.search(r'depends_on\s+"python@(?P<version>\d+\.\d+)"', formula_text)
     if match is None:
         raise RefreshError(
-            f'No `depends_on "python@X.Y"` in {FORMULA_PATH}. The resolution needs '
-            "to know which interpreter the venv is built against; add the "
-            "dependency back, or pass the version explicitly by editing "
-            "formula_python_version()."
+            f'No `depends_on "python@X.Y"` in {FORMULA_PATH}. The closure needs to '
+            "know which interpreter the venv is built against; add the dependency "
+            "back."
         )
     return match.group("version")
 
 
-def resolve_closure(python_version: str) -> dict[str, str]:
-    """The transitive runtime closure of `[project.dependencies]`.
+def base_environment(python_version: str) -> dict[str, str]:
+    """The marker variables that are the same on every Homebrew platform."""
+    return {
+        "implementation_name": "cpython",
+        "implementation_version": f"{python_version}.0",
+        "os_name": "posix",
+        "platform_python_implementation": "CPython",
+        "platform_release": "",
+        "platform_version": "",
+        "python_full_version": f"{python_version}.0",
+        "python_version": python_version,
+        "extra": "",
+    }
 
-    Compiled once per Homebrew platform. Compiling `pyproject.toml` directly
-    rather than re-reading the dependency array means the optional `cdk` extra
-    and the `dev` dependency-group are excluded by construction rather than by a
-    filter that could be got wrong -- and getting it wrong would put cdk-nag,
-    an actual scanner, into the formula's build.
+
+def load_lock(lock_path: Path) -> dict[str, list[LockPackage]]:
+    """uv.lock's packages, grouped by canonical name.
+
+    A list per name because a forked resolution can lock one name at two
+    versions (networkx does today, split on python_full_version).
     """
-    if shutil.which("uv") is None:
+    try:
+        with lock_path.open("rb") as handle:
+            data = tomllib.load(handle)
+    except FileNotFoundError as error:
+        raise RefreshError(f"{lock_path} does not exist") from error
+    packages: dict[str, list[LockPackage]] = {}
+    for package in data.get("package", []):
+        packages.setdefault(canonical(package["name"]), []).append(package)
+    if ROOT_PACKAGE not in packages:
         raise RefreshError(
-            "uv is not on PATH. It is the resolver this script delegates to; "
-            "install it (https://docs.astral.sh/uv/) and re-run."
+            f"{lock_path} has no [[package]] named {ROOT_PACKAGE!r}; it is not this "
+            "repository's lock."
         )
+    return packages
 
-    per_platform: dict[str, dict[str, str]] = {}
-    for platform in PLATFORMS:
-        command = [
-            "uv",
-            "pip",
-            "compile",
-            str(PYPROJECT_PATH),
-            "--python-version",
-            python_version,
-            "--python-platform",
-            platform,
-            "--no-header",
-            "--no-annotate",
-            "--quiet",
-        ]
-        completed = subprocess.run(  # nosec B603 - list-form argv, literal "uv" executable, every element built above
-            command, capture_output=True, text=True, cwd=REPO_ROOT
+
+def _edge_applies(edge: LockPackage, environment: dict[str, str]) -> bool:
+    marker = edge.get("marker")
+    return marker is None or Marker(marker).evaluate(environment)
+
+
+def _select(packages: dict[str, list[LockPackage]], edge: LockPackage) -> LockPackage:
+    """The locked package an edge points at.
+
+    uv writes `version` (and `source`) on an edge exactly when the name alone is
+    ambiguous, so an unqualified edge to a name locked twice is a lock this script
+    does not understand, and it stops rather than guessing.
+    """
+    name = canonical(edge["name"])
+    candidates = packages.get(name)
+    if not candidates:
+        raise RefreshError(f"uv.lock references {name!r} but does not lock it")
+    if "version" in edge:
+        candidates = [p for p in candidates if p["version"] == edge["version"]]
+    if len(candidates) != 1:
+        raise RefreshError(
+            f"uv.lock edge {edge} matches {len(candidates)} locked packages; "
+            "expected exactly one"
         )
-        if completed.returncode != 0:
+    return candidates[0]
+
+
+def closure_for(
+    packages: dict[str, list[LockPackage]], environment: dict[str, str]
+) -> dict[str, LockPackage]:
+    """The runtime closure of the root package in one marker environment."""
+    root = packages[ROOT_PACKAGE][0]
+    resolved: dict[str, LockPackage] = {}
+    # (package, extras requested of it). The root contributes its plain
+    # dependencies only: no optional-dependencies and no dev-dependencies.
+    pending: list[tuple[LockPackage, frozenset[str]]] = []
+    for edge in root.get("dependencies", []):
+        if _edge_applies(edge, environment):
+            pending.append((_select(packages, edge), frozenset(edge.get("extra", []))))
+    expanded: set[tuple[str, str, frozenset[str]]] = set()
+    while pending:
+        package, extras = pending.pop()
+        name = canonical(package["name"])
+        key = (name, package["version"], extras)
+        if key in expanded:
+            continue
+        expanded.add(key)
+        previous = resolved.setdefault(name, package)
+        if previous["version"] != package["version"]:
             raise RefreshError(
-                f"`{' '.join(command)}` exited {completed.returncode}:\n"
-                f"{completed.stderr.strip()}"
+                f"{name} is reached at {previous['version']} and {package['version']} "
+                "in the same environment"
             )
-        resolved = {}
-        for line in completed.stdout.splitlines():
-            match = re.match(r"^(?P<name>[A-Za-z0-9._-]+)==(?P<version>[^\s;]+)", line)
-            if match:
-                resolved[canonical(match.group("name"))] = match.group("version")
-        if not resolved:
-            raise RefreshError(
-                f"uv resolved nothing for {platform}. An empty closure would "
-                "generate an empty resource block, which is the defect this "
-                "script exists to fix, so this is a hard failure rather than a "
-                "warning."
-            )
-        per_platform[platform] = resolved
+        edges: list[LockPackage] = list(package.get("dependencies", []))
+        optional = package.get("optional-dependencies", {})
+        for extra in sorted(extras):
+            if extra not in optional:
+                raise RefreshError(
+                    f"uv.lock asks for {name}[{extra}] but {name} locks no such extra"
+                )
+            edges.extend(optional[extra])
+        for edge in edges:
+            if _edge_applies(edge, environment):
+                pending.append(
+                    (_select(packages, edge), frozenset(edge.get("extra", [])))
+                )
+    resolved.pop(ROOT_PACKAGE, None)
+    return resolved
 
-    return _merge_platform_resolutions(per_platform)
 
-
-def _merge_platform_resolutions(
-    per_platform: dict[str, dict[str, str]],
-) -> dict[str, str]:
+def merge_platform_closures(
+    per_platform: dict[str, dict[str, LockPackage]],
+) -> dict[str, LockPackage]:
     """One version per package across all platforms, or a hard failure.
 
-    A Homebrew formula has no way to express "this version on Linux, that one
-    on macOS" inside a single `resource` stanza. If the platforms disagree the
-    block cannot be generated correctly, so say so with the disagreement in
-    hand rather than picking one platform's answer.
+    A Homebrew formula has no way to express "this version on Linux, that one on
+    macOS" inside a single `resource` stanza. If the platforms disagree the block
+    cannot be generated correctly, so say so with the disagreement in hand rather
+    than picking one platform's answer.
     """
-    merged: dict[str, str] = {}
+    merged: dict[str, LockPackage] = {}
     conflicts: list[str] = []
-    for platform, resolved in per_platform.items():
-        for name, version in resolved.items():
-            existing = merged.setdefault(name, version)
-            if existing != version:
+    for platform in sorted(per_platform):
+        for name, package in per_platform[platform].items():
+            existing = merged.setdefault(name, package)
+            if existing["version"] != package["version"]:
                 conflicts.append(
-                    f"{name}: {existing} elsewhere, {version} on {platform}"
+                    f"{name}: {existing['version']} elsewhere, "
+                    f"{package['version']} on {platform}"
                 )
     if conflicts:
         raise RefreshError(
-            "The platforms resolved different versions of the same package, and "
-            "one `resource` stanza cannot carry both:\n  "
-            + "\n  ".join(sorted(conflicts))
-            + "\nNarrow the constraint in pyproject.toml until the resolutions "
-            "agree."
+            "The platforms lock different versions of the same package, and one "
+            "`resource` stanza cannot carry both:\n  " + "\n  ".join(sorted(conflicts))
         )
     return merged
 
 
-def fetch_sdist(name: str, version: str) -> tuple[str, str, str]:
-    """The display name, sdist URL and sha256 PyPI reports for one release.
+def resource_name(url: str) -> str:
+    """The name `brew audit --strict` expects for a resource with this sdist URL.
 
-    The display name is PyPI's own spelling (`GitPython`, not `gitpython`)
-    because that is what `brew update-python-resources` writes, and a reviewer
-    comparing this block against a homebrew-core formula should not have to
-    reconcile two spellings of the same package.
-
-    With one correction to that, which `brew audit --strict` found and nothing
-    here could have: the SEPARATOR is normalized to a hyphen. PyPI reports
-    `info.name` as `pydantic_core` for the project whose canonical name is
-    `pydantic-core` -- measured, both `/pypi/pydantic-core/...` and
-    `/pypi/pydantic_core/...` answer with the underscore -- and the audit cop
-    normalizes before comparing, so it rejected the underscore with
-
-        Stable resource "pydantic_core": `resource` name should be
-        'pydantic-core' to match the PyPI package name
-
-    That was the only finding in 77 resources, and `brew install` and `brew test`
-    had already passed, so the formula worked and only its spelling was wrong.
-
-    Case is deliberately NOT touched. The same cop accepts `GitPython`, because
-    PEP 503 normalization is case-insensitive, so lowercasing would lose the
-    spelling a reviewer matches against homebrew-core for no gain. Separators are
-    safe to rewrite for the same reason the normalization exists: PEP 503 treats
-    `-`, `_` and `.` as equivalent, so no PyPI project can depend on which one
-    appears in its name.
+    Homebrew's resource auditor matches `/(?<package_name>[^/]+)-` against the URL,
+    which on a basename is everything up to its LAST hyphen, then maps `_` and `.`
+    to `-` and compares case-insensitively. Done here the same way, on the
+    basename.
     """
-    url = PYPI_JSON.format(name=name, version=version)
-    payload = _get_json(url)
+    basename = PurePosixPath(urlparse(url).path).name
+    stem, hyphen, _ = basename.rpartition("-")
+    if not hyphen or not stem:
+        raise RefreshError(f"cannot read a package name out of the sdist URL {url}")
+    return re.sub(r"[_.]", "-", stem)
 
-    sdists = [
-        entry
-        for entry in payload.get("urls", [])
-        if entry.get("packagetype") == "sdist"
-    ]
-    if not sdists:
+
+def sdist_of(name: str, package: LockPackage) -> tuple[str, str, str]:
+    """(resource name, url, sha256) for one locked package, from uv.lock alone."""
+    sdist = package.get("sdist")
+    if not sdist or "url" not in sdist or "hash" not in sdist:
         raise RefreshError(
-            f"{name} {version} publishes no sdist. Homebrew installs with "
-            "--no-binary=:all:, so pip will refuse a wheel and there is nothing "
-            "to point a `resource` at. Substituting the wheel would work only by "
-            "removing that flag, which is a deviation from Homebrew convention a "
-            "reviewer has to be told about -- so this fails loudly instead."
+            f"{name} {package['version']} has no sdist url and hash in uv.lock. "
+            "Homebrew installs with --no-binary=:all:, so pip will refuse a wheel "
+            "and there is nothing to point a `resource` at."
         )
-    # Exactly one sdist per release is the norm. If a release somehow has more,
-    # take the .tar.gz, which is what Homebrew expects to unpack.
-    sdists.sort(key=lambda entry: not entry.get("filename", "").endswith(".tar.gz"))
-    chosen = sdists[0]
-
-    sha256 = chosen.get("digests", {}).get("sha256")
-    if not sha256:
+    url = sdist["url"]
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or parsed.netloc != SDIST_HOST:
         raise RefreshError(
-            f"PyPI reported no sha256 for {name} {version}. A resource without a "
-            "hash is an unverified download; refusing to emit one."
+            f"{name} {package['version']}'s sdist is {url}, not an https URL on "
+            f"{SDIST_HOST}. A formula resource is a download every user performs."
         )
-    display = re.sub(r"[_.]+", "-", payload["info"]["name"])
-    return display, chosen["url"], sha256
+    algorithm, _, digest = sdist["hash"].partition(":")
+    if algorithm != "sha256" or not SHA256_HEX.match(digest):
+        raise RefreshError(
+            f"{name} {package['version']}'s sdist hash in uv.lock is "
+            f"{sdist['hash']!r}; a Homebrew resource needs a 64-hex sha256."
+        )
+    display = resource_name(url)
+    if canonical(display) != name:
+        raise RefreshError(
+            f"{name}'s sdist URL {url} names {display!r}. brew audit --strict "
+            "derives the resource name from that URL, so the stanza would fail it."
+        )
+    return display, url, digest
 
 
-def _get_json(url: str) -> dict:
-    # The scheme is checked rather than taken on trust, even though every caller
-    # passes the PYPI_JSON constant. urlopen honors file:// and ftp://, so an edit
-    # that made the index configurable would turn this into a local-file read with
-    # no visible change at the call site. Same reasoning, and same annotations, as
-    # automated_security_helper/utils/download_utils.py.
-    if not url.startswith("https://"):
-        raise RefreshError(f"refusing to fetch a URL that is not https: {url}")
-
-    last_error: Exception | None = None
-    for attempt in range(1, HTTP_ATTEMPTS + 1):
-        try:
-            request = urllib.request.Request(
-                url, headers={"Accept": "application/json"}
+def compute_closure(lock_path: Path, python_version: str) -> dict[str, LockPackage]:
+    packages = load_lock(lock_path)
+    per_platform = {}
+    for platform, variables in PLATFORMS.items():
+        environment = {**base_environment(python_version), **variables}
+        closure = closure_for(packages, environment)
+        if not closure:
+            raise RefreshError(
+                f"uv.lock yields an empty closure for {platform}. An empty resource "
+                "block is the defect this script exists to fix."
             )
-            # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
-            with urllib.request.urlopen(  # nosec B310 - the https scheme is checked at the top of this function
-                request, timeout=HTTP_TIMEOUT_SECONDS
-            ) as response:
-                return json.load(response)
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
-            last_error = error
-            if attempt < HTTP_ATTEMPTS:
-                time.sleep(2**attempt)
-    raise RefreshError(f"GET {url} failed after {HTTP_ATTEMPTS} attempts: {last_error}")
+        per_platform[platform] = closure
+    return merge_platform_closures(per_platform)
 
 
-def render_block(closure: dict[str, str]) -> str:
-    """The Ruby text between the two markers, markers included."""
+def render_block(closure: dict[str, LockPackage]) -> str:
+    """The Ruby text between the two markers, markers included.
+
+    Sorted by canonical name, so the output depends on the lock's contents and not
+    on its ordering.
+    """
     lines = [BEGIN_MARKER]
     for name in sorted(closure):
         if name in EXEMPT:
             continue
-        display, url, sha256 = fetch_sdist(name, closure[name])
+        display, url, sha256 = sdist_of(name, closure[name])
         lines.append(f'  resource "{display}" do')
         lines.append(f'    url "{url}"')
         lines.append(f'    sha256 "{sha256}"')
@@ -366,20 +440,36 @@ def splice(formula_text: str, block: str) -> str:
     return formula_text[:begin] + block + formula_text[end + len(END_MARKER) :]
 
 
-def existing_block(formula_text: str) -> str:
-    begin = formula_text.find(BEGIN_MARKER)
-    end = formula_text.find(END_MARKER)
-    if begin == -1 or end == -1 or end < begin:
-        return ""
-    return formula_text[begin : end + len(END_MARKER)]
+def generate(formula_text: str, lock_path: Path = LOCK_PATH) -> tuple[str, int]:
+    """The formula text with its block regenerated from the lock, and the count.
+
+    Pure: the same formula text and the same lock bytes give the same output.
+    """
+    python_version = formula_python_version(formula_text)
+    closure = compute_closure(lock_path, python_version)
+    emitted = sum(1 for name in closure if name not in EXEMPT)
+    return splice(formula_text, render_block(closure)), emitted
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description=(
-            "Regenerate the Homebrew resource block from pyproject.toml's "
-            "[project.dependencies]."
+def drift(formula_text: str, lock_path: Path = LOCK_PATH) -> list[str]:
+    """Unified-diff lines between the formula and its regeneration; empty if none."""
+    import difflib
+
+    regenerated, _ = generate(formula_text, lock_path)
+    return list(
+        difflib.unified_diff(
+            formula_text.splitlines(),
+            regenerated.splitlines(),
+            "Formula/ash.rb (committed)",
+            f"Formula/ash.rb (from {lock_path.name})",
+            lineterm="",
         )
+    )
+
+
+def main(argv: Iterable[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Regenerate the Homebrew resource block from uv.lock."
     )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
@@ -390,51 +480,43 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument(
         "--check",
         action="store_true",
-        help=(
-            "exit 1 if the checked-in block differs from a fresh resolution, "
-            "without writing anything"
-        ),
+        help="exit 1 if Formula/ash.rb differs from its regeneration from uv.lock",
     )
-    args = parser.parse_args(argv)
+    parser.add_argument(
+        "--lock",
+        type=Path,
+        default=LOCK_PATH,
+        help="the uv.lock to read (default: the repository's)",
+    )
+    args = parser.parse_args(list(argv) if argv is not None else None)
 
     try:
         formula_text = FORMULA_PATH.read_text(encoding="utf-8")
-        python_version = formula_python_version(formula_text)
-        print(
-            f"resolving [project.dependencies] for python {python_version} across "
-            f"{len(PLATFORMS)} platforms",
-            file=sys.stderr,
-        )
-        closure = resolve_closure(python_version)
-        emitted = sorted(name for name in closure if name not in EXEMPT)
-        print(
-            f"{len(closure)} packages resolved, {len(emitted)} emitted "
-            f"({', '.join(sorted(EXEMPT))} covered by a Homebrew dependency)",
-            file=sys.stderr,
-        )
-        block = render_block(closure)
+        if args.check:
+            lines = drift(formula_text, args.lock)
+            if not lines:
+                print("resource block matches uv.lock", file=sys.stderr)
+                return 0
+            print("\n".join(lines), file=sys.stderr)
+            print(
+                "error: Formula/ash.rb's resource block does not match uv.lock. Run "
+                "`uv run python packaging/homebrew/refresh-resources.py --write`.",
+                file=sys.stderr,
+            )
+            return 1
+        regenerated, emitted = generate(formula_text, args.lock)
     except RefreshError as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
 
-    if args.check:
-        if existing_block(formula_text).strip() == block.strip():
-            print("resource block is up to date", file=sys.stderr)
-            return 0
-        print(
-            "error: Formula/ash.rb's resource block does not match a fresh "
-            "resolution of [project.dependencies]. Run "
-            "`python packaging/homebrew/refresh-resources.py --write`.",
-            file=sys.stderr,
-        )
-        return 1
-
     if args.write:
-        FORMULA_PATH.write_text(splice(formula_text, block), encoding="utf-8")
-        print(f"wrote {len(emitted)} resources into {FORMULA_PATH}", file=sys.stderr)
+        FORMULA_PATH.write_text(regenerated, encoding="utf-8")
+        print(f"wrote {emitted} resources into {FORMULA_PATH}", file=sys.stderr)
         return 0
 
-    print(block)
+    begin = regenerated.find(BEGIN_MARKER)
+    end = regenerated.find(END_MARKER) + len(END_MARKER)
+    print(regenerated[begin:end])
     return 0
 
 

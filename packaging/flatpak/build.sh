@@ -29,6 +29,10 @@ command -v flatpak-builder >/dev/null || {
   echo "error: flatpak-builder not found" >&2
   exit 1
 }
+command -v python3 >/dev/null || {
+  echo "error: python3 not found; it runs packaging/assert-package-contents.py" >&2
+  exit 1
+}
 
 # Version comes from the wheel filename, not from pyproject.toml or a git tag. The
 # wheel is the thing being packaged, so reading anything else introduces a way for the
@@ -150,7 +154,20 @@ for name in ash ashv3 automated-security-helper; do
   }
 done
 
-# 4. The sandbox permissions must have landed in the app's metadata. This is the check
+# 4. The package-contents gate, on the tree the bundle is exported from. Checks 1 and 2
+#    count wheels and look for .dist-info; this one closes the tree: every file
+#    must be one the manifest installs (the launcher, byte-identical to ash-launcher.sh,
+#    its symlinks, flatpak-builder's manifest.json and the one wheel), and the wheel is
+#    handed to .github/scripts/assert-artifact-contents.py, the gate the published wheel
+#    passes. The bundle itself is an OSTree delta nothing opens, so this is the last
+#    point at which its contents can be read. stdout goes to stderr because this
+#    script's stdout is the bundle path and nothing else.
+if ! python3 "$HERE/../assert-package-contents.py" --flatpak-tree "$BUILD_DIR/files" >&2; then
+  echo "error: packaging/assert-package-contents.py rejected the built app." >&2
+  exit 1
+fi
+
+# 5. The sandbox permissions must have landed in the app's metadata. This is the check
 #    for the failure this package exists to avoid: a Flatpak whose finish-args were
 #    dropped or narrowed installs perfectly, runs `ash --version` perfectly, and then
 #    cannot read the tree it was asked to scan -- because ASH's default source is the

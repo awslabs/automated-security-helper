@@ -36,7 +36,8 @@ So the key is the site AND what the site publishes:
 
 where `publishes` is built from the inputs that determine which bytes leave the
 runner -- `name` and `path` for an upload, `path` and `key` for a cache, the
-truthy cache inputs for an action with a built-in cache. Consequences:
+truthy cache inputs for an action with a built-in cache, plus the unset control
+input for an action whose cache is on by default (setup-uv). Consequences:
 
   * A new upload inside an already-allowlisted file has a `publishes` nobody
     listed, so it is unexpected and fails.
@@ -134,6 +135,17 @@ CACHE_INPUT_NEGATIVES = frozenset(
 # spells disabled, and it is a string, so a plain truthiness test on the YAML
 # value is not enough on its own.
 FALSEY_INPUT_VALUES = frozenset({"", "false", "no", "none", "off", "0"})
+
+# Actions whose built-in cache is ON when the step says nothing about it, keyed by
+# action, giving the input that controls it and how the census renders the unset
+# case. Without this, a step with no `with:` block reads as "no cache inputs, so no
+# cache", which is the opposite of what the runner does. setup-uv's `enable-cache`
+# defaults to "auto", and auto caches on GitHub-hosted runners for every event
+# except release, tag push, pull_request_target and workflow_run, so an ordinary
+# push or pull request publishes a cache from a step whose YAML shows none.
+DEFAULT_ON_CACHE_INPUTS: dict[str, tuple[str, str]] = {
+    "astral-sh/setup-uv": ("enable-cache", "auto(default)"),
+}
 
 
 @dataclass(frozen=True)
@@ -733,6 +745,12 @@ def _classify(step: dict) -> tuple[str, str] | None:
         for key, value in inputs.items()
         if str(key) != LINE_KEY and _is_cache_input(str(key)) and not _is_falsey(value)
     }
+    default_on = DEFAULT_ON_CACHE_INPUTS.get(lowered)
+    if default_on is not None:
+        control, unset_rendering = default_on
+        # Input names are case-insensitive to the runner, so match them that way.
+        if not any(str(key).strip().lower() == control for key in inputs):
+            cache_inputs[control] = unset_rendering
     if cache_inputs:
         rendered = " ".join(
             f"{key}={_flatten(cache_inputs[key])}" for key in sorted(cache_inputs)
@@ -949,6 +967,11 @@ jobs:
           # would read this empty string as "caching is on" and the fixture would
           # stop being a clean control.
           cache: ''
+      # Explicitly off, so not a cache. The control for the default-on cases below:
+      # a detector that flagged every setup-uv would turn this file red.
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
       - run: echo no publishing here
 """
 
@@ -1068,6 +1091,30 @@ def self_test() -> int:
 """
     )
 
+    # (c3) setup-uv with no `enable-cache` input at all. The input defaults to
+    # "auto", which caches on GitHub-hosted runners for an ordinary push or pull
+    # request, so leaving it out is a cache with nothing in `with:` to see.
+    default_uv_cache = dict(baseline)
+    default_uv_cache[_SELF_TEST_CLEAN_FILE] = (
+        _SELF_TEST_CLEAN_YAML
+        + """
+      - name: Install uv with the default cache setting
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+"""
+    )
+
+    # (c4) the same default, spelled out.
+    auto_uv_cache = dict(baseline)
+    auto_uv_cache[_SELF_TEST_CLEAN_FILE] = (
+        _SELF_TEST_CLEAN_YAML
+        + """
+      - name: Install uv with enable-cache auto
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: auto
+"""
+    )
+
     # (d) an allowed upload repointed at a different path.
     repointed = dict(baseline)
     repointed[_SELF_TEST_ALLOWED_FILE] = _SELF_TEST_ALLOWED_YAML.replace(
@@ -1088,6 +1135,8 @@ def self_test() -> int:
         ("(c) new actions/cache", new_cache, 1, 0),
         ("(c1) new actions/cache/save", new_cache_save, 1, 0),
         ("(c2) built-in cache via cache-to", builtin_cache, 1, 0),
+        ("(c3) setup-uv with enable-cache left out", default_uv_cache, 1, 0),
+        ("(c4) setup-uv with enable-cache auto", auto_uv_cache, 1, 0),
         ("(d) allowed upload repointed", repointed, 1, 1),
         ("(e) allowlisted site deleted", deleted, 0, 2),
     ]
