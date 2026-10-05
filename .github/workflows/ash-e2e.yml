@@ -49,7 +49,7 @@ concurrency:
 
 env:
   # Channels whose job below is a placeholder. See PENDING CHANNELS above.
-  E2E_PENDING: container homebrew mcpb
+  E2E_PENDING: container homebrew
 
 jobs:
   contract:
@@ -145,17 +145,44 @@ jobs:
     steps:
       - run: echo "placeholder; see E2E_PENDING"
 
-  # Placeholder for WP9: the MCPB bundle launched through the MCP inspector.
+  # The .mcpb bundle built from this commit, retargeted from its release ref to the
+  # head wheel and launched through the MCP Inspector: upgrade from N-1, a stdio
+  # handshake, run_ash_scan and get_scan_progress on the three cases, uninstall, and
+  # negative controls. scripts/e2e/mcpb_inspector.py explains why the scans use
+  # streamable HTTP (the Inspector CLI is one-shot and run_ash_scan is asynchronous).
+  # Linux only: the bundle's launch is uvx on every platform, and the script stops
+  # its servers with process groups.
   mcpb:
     name: "e2e: MCPB via the MCP inspector"
     needs: contract
-    if: vars.ASH_E2E_RUN_PLACEHOLDERS == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
-      - run: echo "placeholder; see E2E_PENDING"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # No uv cache. An e2e leg is a fresh install by definition, and a saved Actions cache
+      # is a publish surface (.github/scripts/assert-publish-surfaces.py) this workflow
+      # has no reason to open.
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+
+      # No npm cache, for the same reason. The Inspector is installed by mcpb.sh into
+      # the run's own directory at the version validate-mcp pins.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Unit tests for the MCPB leg's own decisions
+        run: >-
+          uv run --group dev pytest tests/unit/test_e2e_mcpb_inspector.py
+          -p no:cacheprovider -o addopts="" -v
+
+      - name: Build the bundle and wheels, launch through the inspector, scan, upgrade, uninstall
+        run: bash scripts/e2e/mcpb.sh "$RUNNER_TEMP/e2e-mcpb"
 
   e2e-gate:
     name: "e2e: gate"

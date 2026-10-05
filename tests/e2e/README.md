@@ -23,6 +23,16 @@ its own command line has to append them as well.
 | clean | clean/ | detect-secrets | none | none | 0 | 0 |
 | incomplete | findings/ | detect-secrets, opengrep | `--config-overrides scanners.opengrep.enabled=true` | `ASH_OFFLINE=YES`, `OPENGREP_RULES_CACHE_DIR=` (empty) | 1 | 3, and opengrep MISSING |
 
+The MCPB channel has no command line to append to. `run_ash_scan` takes no scanner
+list, so `scripts/e2e/mcpb_inspector.py` writes each case into the config it passes as
+`config_path`: every scanner `list_scanners` names is disabled except the case's own,
+and each `--config-overrides KEY=VALUE` in the case's args is applied to the same file.
+It refuses any other arg. The case's env goes on the server process. MCP has no exit
+code either, so the script derives the CLI's from the server's terminal status and
+actionable count and passes that to `assert_outcome`, after requiring the status
+itself to match the case. The script's docstring records why the scans run over
+streamable HTTP and why `run_ash_workspace_scan` was not used.
+
 `findings/leak.py` plants AWS's published example secret access key, which is
 non-functional by construction. detect-secrets reports three rules on it:
 SECRET-SECRET-KEYWORD, SECRET-BASE64-HIGH-ENTROPY-STRING and SECRET-AWS-ACCESS-KEY. The
