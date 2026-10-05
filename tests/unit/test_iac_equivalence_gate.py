@@ -696,3 +696,111 @@ def test_a_missing_template_is_rejected(tree: Path) -> None:
     result = run_checker(tree)
     assert result.returncode != 0
     assert "could not be compared" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# Comments.
+#
+# The Terraform regexes are anchored at column 0, which already keeps a `#` or
+# `//` line comment from matching. A `/* */` block comment does not: the lines
+# inside it still start at column 0, so before strip_hcl_comments() a resource
+# wrapped in one was counted as present.
+# ---------------------------------------------------------------------------
+def wrap_tf_resource_in_block_comment(text: str, rtype: str) -> str:
+    pattern = re.compile(
+        r'^resource\s+"' + re.escape(rtype) + r'"\s+"[^"]+"\s*\{.*?^\}\n',
+        re.MULTILINE | re.DOTALL,
+    )
+    mutated, count = pattern.subn(lambda m: "/*\n" + m.group(0) + "*/\n", text, 1)
+    if count != 1:
+        raise AssertionError(f'expected to wrap exactly one `resource "{rtype}"`')
+    return mutated
+
+
+def test_a_block_commented_resource_is_not_counted(tree: Path) -> None:
+    path = tf_main(tree, "fargate")
+    before = load_checker(tree).load_tf("fargate")
+    path.write_text(wrap_tf_resource_in_block_comment(path.read_text(), "aws_lb"))
+    after = load_checker(tree).load_tf("fargate")
+
+    assert before.get("aws_lb") == 1
+    assert "aws_lb" not in after
+    # Everything else in the file is still read, so the comment ended where it
+    # should and did not swallow the rest of the module.
+    assert {k: v for k, v in before.items() if k != "aws_lb"} == after
+
+    result = run_checker(tree)
+    assert result.returncode != 0
+    assert "load-balancer" in result.stdout
+    assert "diverges" in result.stdout
+
+
+def test_a_block_commented_module_is_not_composed(tree: Path) -> None:
+    """check_composition() reads examples through the same stripping."""
+    example = tree / "deploy/terraform/modules/agentcore/examples/basic/main.tf"
+    example.write_text(
+        example.read_text()
+        + '\n/*\nmodule "retired" {\n  source = "../../../fargate"\n}\n*/\n'
+    )
+    result = run_checker(tree)
+    assert result.returncode == 0, result.stdout
+    assert "No unrecorded divergence" in result.stdout
+
+
+def test_line_comments_are_not_counted(tree: Path) -> None:
+    path = tf_main(tree, "ash-image-pipeline")
+    before = load_checker(tree).load_tf("ash-image-pipeline")
+    path.write_text(
+        path.read_text()
+        + '\n# resource "aws_sns_topic" "a" {}\n// resource "aws_sqs_queue" "b" {}\n'
+        + 'resource "aws_ecr_repository" "c" {} # resource "aws_sns_topic" "d" {}\n'
+    )
+    after = load_checker(tree).load_tf("ash-image-pipeline")
+    assert "aws_sns_topic" not in after and "aws_sqs_queue" not in after
+    assert after["aws_ecr_repository"] == before["aws_ecr_repository"] + 1
+
+
+def test_comment_markers_inside_strings_and_heredocs_are_kept(tree: Path) -> None:
+    """The tree has ARNs ending in `/*`; a naive stripper would eat resources."""
+    checker = load_checker(tree)
+    text = (
+        'resource "aws_iam_policy" "p" {\n'
+        '  policy = "arn:aws:s3:::bucket/*"\n'
+        '  name   = "${var.prefix}/* and \\"quoted\\" ${lookup(var.m, "k/*")} //"\n'
+        '  lit    = "$${not_a_template} /*"\n'
+        "  doc    = <<-EOT\n"
+        "    # not a comment, /* not a block\n"
+        "    EOT\n"
+        "}\n"
+        'resource "aws_sns_topic" "t" {}\n'
+        "/* a real\n"
+        'resource "aws_sqs_queue" "q" {}\n'
+        "comment */\n"
+        'resource "aws_kms_key" "k" {}\n'
+    )
+    stripped = checker.strip_hcl_comments(text)
+    assert stripped.count("\n") == text.count("\n")
+    assert [t for t, _ in checker.TF_RESOURCE.findall(stripped)] == [
+        "aws_iam_policy",
+        "aws_sns_topic",
+        "aws_kms_key",
+    ]
+    assert '"arn:aws:s3:::bucket/*"' in stripped
+    assert "# not a comment, /* not a block" in stripped
+    assert 'and \\"quoted\\"' in stripped
+
+
+def test_the_real_tree_parses_the_same_with_comments_stripped(tree: Path) -> None:
+    """No committed .tf file loses a resource or module block to the stripper."""
+    checker = load_checker(tree)
+    files = sorted((tree / "deploy/terraform/modules").rglob("*.tf"))
+    assert files
+    for path in files:
+        raw = path.read_text()
+        stripped = checker.strip_hcl_comments(raw)
+        assert checker.TF_RESOURCE.findall(raw) == checker.TF_RESOURCE.findall(
+            stripped
+        ), path
+        assert checker.TF_MODULE_SOURCE.findall(
+            raw
+        ) == checker.TF_MODULE_SOURCE.findall(stripped), path

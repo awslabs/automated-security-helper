@@ -103,7 +103,16 @@ past them. This check is blind to all of the following:
    `count = 0` or a CloudFormation resource behind a false `Condition` still
    counts as present. Presence here means "declared", not "will exist".
 8. TERRAFORM THAT IS NOT A `resource` BLOCK. `data` sources, `locals`,
-   `moved` blocks and provider configuration are not read.
+   `moved` blocks and provider configuration are not read. Comments are
+   stripped first (strip_hcl_comments), so a block commented out with `#`,
+   `//` or `/* */` is not counted.
+9. NESTED DIRECTORIES INSIDE A MODULE. load_tf() reads only the `*.tf` files
+   at a module's root, the same set Terraform loads for that module. A
+   resource in a subdirectory is part of the module only if the root calls
+   that subdirectory as a local `module`, and this check does not follow
+   such calls, so its resources would not be counted. No module here has a
+   nested module directory today; adding one means extending load_tf() or
+   adding the subdirectory to PAIRS as a module of its own.
 
 Closing 1 and 6 means mapping properties across two schemas that disagree
 about shape, which is a materially larger piece of work than this file. It is
@@ -171,6 +180,96 @@ TF_MODULE_SOURCE = re.compile(
     r'^module\s+"[^"]+"\s*\{(?:[^{}]|\{[^{}]*\})*?source\s*=\s*"([^"]+)"',
     re.MULTILINE,
 )
+TF_HEREDOC_START = re.compile(r"<<-?([A-Za-z_][A-Za-z0-9_-]*)[ \t]*\n")
+
+
+def _scan_string_body(text: str, j: int) -> tuple[int, bool]:
+    """Scan a quoted string's body from j to its end or to a template opener.
+
+    Returns (index just past what was consumed, whether a `${` or `%{` template
+    sequence was opened). `$${` and `%%{` are HCL's escapes for a literal
+    opener and do not open one. An unterminated string runs to end of text.
+    """
+    n = len(text)
+    while j < n:
+        c = text[j]
+        if c == "\\":
+            j += 2
+        elif c == '"':
+            return j + 1, False
+        elif text[j : j + 3] in ("$${", "%%{"):
+            j += 3
+        elif text[j : j + 2] in ("${", "%{"):
+            return j + 2, True
+        else:
+            j += 1
+    return n, False
+
+
+def strip_hcl_comments(text: str) -> str:
+    """Remove `#`, `//` and `/* */` comments from HCL, keeping every newline.
+
+    Both regexes above run over the result, so a commented-out `resource` or
+    `module` block is not counted. Before this existed, wrapping a resource in
+    `/* */` left it counted as present.
+
+    The scan is string-aware because a regex that only looks for comment
+    markers is wrong on this tree: IAM resource ARNs such as
+    "arn:...:repository/*" contain `/*` inside a quoted string, and treating
+    that as the start of a block comment would swallow every resource up to
+    the next `*/`. So it tracks quoted strings (with backslash escapes and
+    nested `${ }` / `%{ }` template sequences, which can hold quotes of their
+    own) and heredocs (`<<EOT` / `<<-EOT` up to a line holding only the
+    marker), and only treats a marker as a comment outside both.
+
+    Newlines inside a block comment are kept so that what follows the comment
+    stays on its own line and the column-0 anchor still means what it says.
+    """
+    out: list[str] = []
+    i, n = 0, len(text)
+    # One entry per open template sequence, holding its unmatched `{` count.
+    # Non-empty means we are in code inside a string, not at the top level.
+    interp: list[int] = []
+    while i < n:
+        c = text[i]
+        two = text[i : i + 2]
+        if two == "/*":
+            end = text.find("*/", i + 2)
+            end = n if end == -1 else end + 2
+            out.append("\n" * text.count("\n", i, end))
+            i = end
+        elif c == "#" or two == "//":
+            end = text.find("\n", i)
+            i = n if end == -1 else end
+        elif two == "<<" and (m := TF_HEREDOC_START.match(text, i)):
+            j = m.end()
+            while j < n:
+                eol = text.find("\n", j)
+                eol = n if eol == -1 else eol + 1
+                line = text[j:eol]
+                j = eol
+                if line.strip() == m.group(1):
+                    break
+            out.append(text[i:j])
+            i = j
+        elif c == '"' or (interp and c == "}" and interp[-1] == 0):
+            # Opening a string, or closing a template sequence and so resuming
+            # the string it was opened in.
+            if c == "}":
+                interp.pop()
+            j, opened = _scan_string_body(text, i + 1)
+            if opened:
+                interp.append(0)
+            out.append(text[i:j])
+            i = j
+        else:
+            if interp and c == "{":
+                interp[-1] += 1
+            elif interp and c == "}":
+                interp[-1] -= 1
+            out.append(c)
+            i += 1
+    return "".join(out)
 
 
 # ---------------------------------------------------------------------------
@@ -835,7 +934,7 @@ def load_tf(module: str) -> dict[str, int]:
     counts: dict[str, int] = {}
     found_any = False
     for path in files:
-        for rtype, _name in TF_RESOURCE.findall(path.read_text()):
+        for rtype, _name in TF_RESOURCE.findall(strip_hcl_comments(path.read_text())):
             counts[rtype] = counts.get(rtype, 0) + 1
             found_any = True
     if not found_any:
@@ -922,7 +1021,7 @@ def check_composition(errors: list[str]) -> None:
             )
             continue
 
-        sources = TF_MODULE_SOURCE.findall(main.read_text())
+        sources = TF_MODULE_SOURCE.findall(strip_hcl_comments(main.read_text()))
         if not sources:
             errors.append(
                 f"{stack}: no `module` block with a source was found in {main}. "

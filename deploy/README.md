@@ -254,6 +254,10 @@ narrower than it sounds:
 - **IAM policy content is not read.** A statement granting `*` on one side is invisible.
 - **External modules are not read.** The Fargate network comes from `aws-ia/vpc/aws`;
   its resource kinds are recorded as unverified, not confirmed.
+- **Only a module's root `.tf` files are read.** A resource in a nested directory
+  that the module calls as a local `module` is not counted. No module has one today;
+  adding one means extending the check. Commented-out blocks (`#`, `//`, `/* */`) are
+  not counted.
 - **Property-equivalent Terraform resources are excluded by name**, because
   CloudFormation expresses them as properties — `aws_s3_bucket_versioning`,
   `aws_s3_bucket_server_side_encryption_configuration` and six others. Deleting one of
