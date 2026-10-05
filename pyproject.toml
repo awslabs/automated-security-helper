@@ -191,16 +191,23 @@ Repository = "https://github.com/awslabs/automated-security-helper"
 # sys.stderr is None (a console-less Windows app; see that module's docstring) a
 # failure there exits 1 with both streams empty. These entry points reattach the
 # streams first, then import.
-ash = "automated_security_helper.cli.entrypoint:main"
+ashx = "automated_security_helper.cli.entrypoint:main"
+# Deprecated: `ash` was the v3 command. v4 renamed it because Alpine, BusyBox and
+# MSYS2 ship the Almquist shell as `ash`, so a bare `ash` on PATH is often not ASH.
+# It stays through v4 so existing scripts keep working: `main_ash` prints one
+# deprecation line to stderr and then runs the same app, so arguments, output and
+# exit codes are unchanged. The deb and rpm do not put it on PATH; see
+# packaging/cli-name.sh.
+ash = "automated_security_helper.cli.entrypoint:main_ash"
 # Deprecated: `main_ashv3` warns on stderr and then runs the app. It names a
-# version, so it reads wrong the moment v4 exists. It is a separate entry point
-# from `main` rather than a Typer callback so the warning fires once per process
-# and never for the `ash` name. Routing it through cli.entrypoint too is what
-# lets the warning itself reach a stream on a console-less host.
+# version, so it reads wrong now that v4 exists. Each deprecated name is its own
+# entry point rather than a Typer callback so the warning fires once per process
+# and never for `ashx`. Routing it through cli.entrypoint too is what lets the
+# warning itself reach a stream on a console-less host.
 ashv3 = "automated_security_helper.cli.entrypoint:main_ashv3"
 # Kept indefinitely and deliberately silent. This is the escape hatch for hosts
-# where a bare `ash` resolves to something else -- MSYS2 ships the Almquist shell
-# under that name and has already shadowed this entry point.
+# where a short name resolves to something else -- MSYS2 ships the Almquist shell
+# as `ash` and has already shadowed ASH's v3 entry point.
 automated-security-helper = "automated_security_helper.cli.entrypoint:main"
 
 [tool.commitizen]
