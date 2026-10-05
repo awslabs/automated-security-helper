@@ -732,91 +732,17 @@ runs:
             ;;
         esac
 
-    # WHY THIS REQUIRES NAMED SCANNERS AND NOT JUST A POSITIVE TOTAL
+    # WHY THIS REQUIRES RULE IDS AND NOT JUST A COUNT PER SCANNER
     #
     # A total above zero can be satisfied by one scanner while the other silently
-    # stops matching, and the planted defects are deliberately one per scanner so
-    # that case is distinguishable. Requiring each named scanner to have produced at
-    # least one finding of its own makes a single-scanner regression fail, where a
-    # total would have absorbed it. The floor is one per scanner rather than the
-    # measured 3 and 3, so a rule being split or merged upstream does not fail this
-    # gate for a reason that has nothing to do with the image.
+    # stops matching, so each named scanner is checked on its own. A count per
+    # scanner is still not enough: with shell=True removed from the fixture, bandit
+    # reports B404, B105 and B603 and a floor of one finding stays green while the
+    # plant it claims to require is gone. So bandit must report B602 and
+    # detect-secrets must report a SECRET-* rule, read from the SARIF in the report.
+    # The script's docstring has the measurements and what it does not cover.
     - name: "Assert the image detected the planted defects"
       shell: bash
       run: |
-        python3 <<'PY'
-        import json
-        import pathlib
-        import sys
-
-        results = pathlib.Path("/tmp/ash-detect/output/ash_aggregated_results.json")
-        if not results.exists() or results.stat().st_size == 0:
-            listing = sorted(p.name for p in results.parent.glob("*")) if results.parent.is_dir() else "(no output directory)"
-            sys.exit(f"FAIL: no usable results at {results}; the detection scan produced no report. Output dir holds: {listing}")
-
-        data = json.loads(results.read_text())
-        raw = data.get("scanner_results") or {}
-
-        # Both shapes this key has worn are accepted, and anything else is named
-        # rather than allowed to raise. The lazy `r.get(...)` generator idiom used
-        # elsewhere in this file dies with an AttributeError traceback when the value
-        # is neither -- it does still fail, but it tells the next reader nothing about
-        # why, and "the report changed shape" is the single most useful thing this
-        # check can say.
-        if isinstance(raw, dict):
-            rows = list(raw.items())
-        elif isinstance(raw, list):
-            rows = [(r.get("scanner_name"), r) for r in raw if isinstance(r, dict)]
-        else:
-            sys.exit(
-                f"FAIL: scanner_results is a {type(raw).__name__}, not a mapping or a "
-                "list. The report changed shape, so nothing here was measured."
-            )
-
-        # `suppressed` is excluded from the count deliberately: a suppression rule
-        # that grew to cover the fixture would otherwise keep this green while the
-        # findings stopped reaching anyone. Verified against a mutated report in which
-        # bandit's 3 findings were moved into `suppressed` -- it fails, as it must.
-        actionable = {}
-        for name, res in rows:
-            if not isinstance(res, dict):
-                continue
-            counts = res.get("severity_counts") or {}
-            actionable[name] = sum(
-                v for k, v in counts.items() if isinstance(v, int) and k != "suppressed"
-            )
-
-        if not actionable:
-            sys.exit(
-                "FAIL: the report carried no per-scanner counts. Either the scan "
-                "recorded none, or scanner_results changed shape and this check has "
-                "stopped measuring anything -- both must fail rather than pass."
-            )
-
-        for name in sorted(actionable):
-            print(f"  {name:<18} actionable={actionable[name]}")
-        total = sum(actionable.values())
-        print(f"\ntotal actionable findings: {total}")
-
-        # bandit for the shell=True call, detect-secrets for the credential. Both are
-        # in the image and both are in the participation list checked above, so a
-        # zero here is a detection failure rather than a missing tool.
-        expected = {"bandit": "the shell=True subprocess call", "detect-secrets": "the hardcoded credential"}
-        silent = {n: why for n, why in expected.items() if actionable.get(n, 0) < 1}
-
-        if total < 1:
-            sys.exit(
-                "FAIL: zero actionable findings on a fixture carrying a hardcoded "
-                "credential and a shell=True call. The image scanned and detected "
-                "nothing -- this is the false negative the clean-fixture leg cannot see."
-            )
-        if silent:
-            sys.exit(
-                "FAIL: scanners that should have fired reported nothing: "
-                + ", ".join(f"{n} (expected to flag {why})" for n, why in sorted(silent.items()))
-                + f". Total was {total}, so the image is not wholly blind -- one "
-                "scanner's detection regressed while another absorbed the count."
-            )
-
-        print(f"PASS: {total} actionable findings, and both {sorted(expected)} fired")
-        PY
+        python3 "${{ github.action_path }}/assert_detection.py" \
+          /tmp/ash-detect/output/ash_aggregated_results.json
