@@ -554,6 +554,46 @@ describe('ash.outputDirectory is confined to the workspace folder', () => {
     });
   });
 
+  it('refuses an absolute path even when it names a folder inside the workspace', () => {
+    const result = resolveOutputDirectory(SOURCE_DIR, path.join(SOURCE_DIR, '.ash', 'out'));
+
+    expect(result.ok).toBe(false);
+    expect(result.ok ? '' : result.message).toContain('an absolute path');
+  });
+
+  it('refuses a value containing a NUL character, runs nothing and clears earlier findings', async () => {
+    const { host, invocations, collection } = harness({ sarifFixture: 'planted-secret.sarif' });
+    seedPreviousFinding(collection);
+
+    const report = await runScanCommand(host, SOURCE_DIR, { ...SETTINGS, outputDirectory: 'out\0/x' });
+
+    expect(report.status).toBe('bad-setting');
+    expect(report.detail).toContain('NUL character');
+    expect(invocations).toEqual([]);
+    expect(collection.totalDiagnostics()).toBe(0);
+  });
+
+  describe('under the Windows path rules', () => {
+    // Every path is treated as existing and link-free, so only the rules decide.
+    const win32 = { path: path.win32, realpath: (target: string) => target };
+    const workspace = 'C:\\ws';
+
+    it('accepts a value relative to the workspace drive', () => {
+      expect(resolveOutputDirectory(workspace, 'C:out', win32)).toEqual({ ok: true, dir: 'C:\\ws\\out' });
+      expect(resolveOutputDirectory(workspace, 'out\\ash', win32)).toEqual({
+        ok: true,
+        dir: 'C:\\ws\\out\\ash',
+      });
+    });
+
+    it('refuses a value relative to another drive', () => {
+      const result = resolveOutputDirectory(workspace, 'D:foo', win32);
+
+      expect(result.ok).toBe(false);
+      expect(result.ok ? '' : result.message).toContain('not inside');
+    });
+  });
+
   it('uses the default for an empty or blank setting', () => {
     expect(resolveOutputDirectory(SOURCE_DIR, '  ')).toEqual({ ok: true, dir: OUTPUT_DIR });
     expect(resolveOutputDirectory(SOURCE_DIR, undefined)).toEqual({ ok: true, dir: OUTPUT_DIR });

@@ -172,23 +172,37 @@ function timeoutSetting(raw: unknown): number {
  * not-yet-created directory beneath a symlink would be compared lexically, and
  * the link is exactly what the comparison has to see through.
  */
-function realPathOfNearestAncestor(target: string): string {
-  let current = path.resolve(target);
+function realPathOfNearestAncestor(target: string, platform: PathPlatform): string {
+  const p = platform.path;
+  let current = p.resolve(target);
   const unresolved: string[] = [];
   for (;;) {
     try {
-      return path.join(fs.realpathSync(current), ...unresolved.reverse());
+      return p.join(platform.realpath(current), ...unresolved.reverse());
     } catch {
-      const parent = path.dirname(current);
+      const parent = p.dirname(current);
       if (parent === current) {
         // Nothing on the way up exists, so there is no link to resolve.
-        return path.resolve(target);
+        return p.resolve(target);
       }
-      unresolved.push(path.basename(current));
+      unresolved.push(p.basename(current));
       current = parent;
     }
   }
 }
+
+/**
+ * The path rules and the link resolver resolveOutputDirectory uses.
+ *
+ * Injectable so a test on Linux can run the Windows rules (`path.win32`), where a
+ * drive-relative value such as `D:out` has its own refusal branch.
+ */
+export interface PathPlatform {
+  readonly path: path.PlatformPath;
+  readonly realpath: (target: string) => string;
+}
+
+const NATIVE_PLATFORM: PathPlatform = { path, realpath: (target) => fs.realpathSync(target) };
 
 /**
  * Where the scan writes, or why the setting is refused.
@@ -210,11 +224,26 @@ function realPathOfNearestAncestor(target: string): string {
 export function resolveOutputDirectory(
   sourceDir: string,
   configured: string | undefined,
+  platform: PathPlatform = NATIVE_PLATFORM,
 ): { readonly ok: true; readonly dir: string } | { readonly ok: false; readonly message: string } {
+  const p = platform.path;
   const trimmed = (configured ?? '').trim();
   const relative = trimmed === '' ? DEFAULT_OUTPUT_DIRECTORY : trimmed;
 
-  if (path.isAbsolute(relative)) {
+  // No filesystem call accepts a NUL, so a value carrying one would only fail
+  // later, inside fs or spawn, with an error that does not name the setting.
+  if (relative.includes('\0')) {
+    return {
+      ok: false,
+      message:
+        'ash.outputDirectory contains a NUL character, which no path can hold. Change it, ' +
+        `or clear it to use the default (${DEFAULT_OUTPUT_DIRECTORY}).`,
+    };
+  }
+
+  // Refused even when it names a folder inside the workspace: the rule is "relative
+  // to the workspace folder", and the containment check below is not its only guard.
+  if (p.isAbsolute(relative)) {
     return {
       ok: false,
       message:
@@ -224,16 +253,16 @@ export function resolveOutputDirectory(
     };
   }
 
-  const resolved = realPathOfNearestAncestor(path.resolve(sourceDir, relative));
-  const fromRoot = path.relative(realPathOfNearestAncestor(sourceDir), resolved);
+  const resolved = realPathOfNearestAncestor(p.resolve(sourceDir, relative), platform);
+  const fromRoot = p.relative(realPathOfNearestAncestor(sourceDir, platform), resolved);
   // `..` in front means it escaped. An absolute result means the two share no
   // root at all, which is what a drive-relative value such as `D:out` produces
   // on Windows. An empty one is the workspace folder itself.
   if (
     fromRoot === '' ||
     fromRoot === '..' ||
-    fromRoot.startsWith(`..${path.sep}`) ||
-    path.isAbsolute(fromRoot)
+    fromRoot.startsWith(`..${p.sep}`) ||
+    p.isAbsolute(fromRoot)
   ) {
     return {
       ok: false,
