@@ -93,10 +93,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # N-1 is built from v4-capabilities' tree, so that ref has to exist locally. One
-      # commit is enough: the build reads a tree, not history.
+      # N-1 is built from v4-capabilities' tree, so that ref has to exist locally. Two
+      # commits, not one: on a push to v4-capabilities HEAD is that ref, and wheel.sh then
+      # builds N-1 from HEAD's first parent instead.
       - name: Fetch the N-1 ref
-        run: git fetch --no-tags --depth=1 origin +refs/heads/v4-capabilities:refs/remotes/origin/v4-capabilities
+        run: git fetch --no-tags --depth=2 origin +refs/heads/v4-capabilities:refs/remotes/origin/v4-capabilities
 
       # No uv cache. An e2e leg is a fresh install by definition, and a saved Actions cache
       # is a publish surface (.github/scripts/assert-publish-surfaces.py) this workflow

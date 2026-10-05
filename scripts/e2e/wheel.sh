@@ -7,13 +7,17 @@
 #   scripts/e2e/wheel.sh <work-dir>
 #
 #   E2E_PYTHON    the interpreter version for the venvs (default 3.12)
-#   E2E_PREV_REF  the git ref the N-1 wheel is built from (default origin/v4-capabilities)
+#   E2E_PREV_REF  the git ref the N-1 wheel is built from (default origin/v4-capabilities).
+#                 When it names a commit with HEAD's tree, as on a push to that branch,
+#                 HEAD's first parent is used instead, so the upgrade still crosses a code
+#                 change.
 #
 # 1. Builds the head wheel and an N-1 wheel, from `git archive` exports so the build
 #    hook never writes into the checkout, and gates both with the artifact-contents check.
 #    N-1 is E2E_PREV_REF's tree with its [project] version lowered (3.7.0 -> 3.6.0), the
 #    same derivation packaging/build-test-wheels.sh uses, so the upgrade crosses a real
-#    version change as well as a real code change.
+#    version change as well as a real code change. The lowered version must sort below
+#    head's, or the "upgrade" would be a no-op or a downgrade.
 # 2. Installs the head wheel into a fresh venv with --no-cache, checks the installed
 #    version, and runs the three cases from tests/e2e/fixtures/cases.json through
 #    scripts/e2e/run_case.py: findings (exit 2, 3 findings), clean (exit 0) and
@@ -21,7 +25,7 @@
 # 3. Installs N-1 into a second fresh venv, scans the findings case with it, upgrades to
 #    the head wheel in place, checks the version moved, and scans again.
 # 4. Negative controls, each of which must be seen failing: the findings case scanned
-#    with --no-fail-on-findings must fail the exit-code check; the clean case's real
+#    with --no-fail-on-findings must fail, and on the exit code; the clean case's real
 #    output judged as a findings outcome must fail; and the entry-point-absence check
 #    run before uninstalling must fail.
 # 5. Uninstalls from the first venv and requires every console script gone and the
@@ -113,12 +117,26 @@ harness "$REPO/scripts/e2e/assert_outcome.py" --self-test
 VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' "$REPO/pyproject.toml" | head -n 1)"
 [ -n "$VERSION" ] || fail "no [project] version in pyproject.toml"
 
+HEAD_SHA="$(git -C "$REPO" rev-parse HEAD)"
+PREV_SHA="$(git -C "$REPO" rev-parse --verify --quiet "$PREV_REF^{commit}")" \
+  || fail "E2E_PREV_REF $PREV_REF does not name a commit"
+tree_of() { git -C "$REPO" rev-parse "$1^{tree}"; }
+# On a push to the N-1 branch itself, N-1 and HEAD are the same tree and the upgrade
+# would cross no code change. Step back to HEAD's first parent; the workflow fetches
+# enough history for it to exist.
+if [ "$(tree_of "$PREV_SHA")" = "$(tree_of HEAD)" ]; then
+  say "$PREV_REF has HEAD's tree; using HEAD's first parent as N-1"
+  PREV_REF="HEAD^"
+  PREV_SHA="$(git -C "$REPO" rev-parse --verify --quiet "HEAD^1^{commit}")" \
+    || fail "HEAD has no parent in this clone; fetch at least one more commit of history"
+  [ "$(tree_of "$PREV_SHA")" != "$(tree_of HEAD)" ] \
+    || fail "HEAD's first parent has HEAD's tree too; there is no code change to upgrade across"
+fi
+
 rm -rf "$WORK/src-head" "$WORK/src-prev" "$WORK/dist-head" "$WORK/dist-prev"
 mkdir -p "$WORK/src-head" "$WORK/src-prev"
 git -C "$REPO" archive HEAD | tar -x -C "$WORK/src-head"
-git -C "$REPO" archive "$PREV_REF" | tar -x -C "$WORK/src-prev"
-PREV_SHA="$(git -C "$REPO" rev-parse "$PREV_REF")"
-HEAD_SHA="$(git -C "$REPO" rev-parse HEAD)"
+git -C "$REPO" archive "$PREV_SHA" | tar -x -C "$WORK/src-prev"
 
 PREV_BASE_VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' "$WORK/src-prev/pyproject.toml" | head -n 1)"
 [ -n "$PREV_BASE_VERSION" ] || fail "no [project] version in $PREV_REF's pyproject.toml"
@@ -138,6 +156,20 @@ needle = f'\nversion = "{old}"\n'
 if needle not in text:
     sys.exit(f"no [project] version line {old!r} in {path}")
 open(path, "w", encoding="utf-8", newline="").write(text.replace(needle, f'\nversion = "{new}"\n', 1))
+PY
+# Release segments compared as integers, so 3.10.0 sorts above 3.9.0. A version that is
+# not plain dotted integers is refused rather than guessed at.
+harness - "$PREV_VERSION" "$VERSION" <<'PY' \
+  || fail "N-1 version $PREV_VERSION does not sort below head's $VERSION; the upgrade would not move forward"
+import re, sys
+prev, head = sys.argv[1:]
+for v in (prev, head):
+    if not re.fullmatch(r"[0-9]+(\.[0-9]+)*", v):
+        sys.exit(f"version {v!r} is not dotted integers")
+def key(v):
+    parts = [int(p) for p in v.split(".")]
+    return parts + [0] * (8 - len(parts))
+sys.exit(0 if key(prev) < key(head) else 1)
 PY
 say "N = $VERSION at $HEAD_SHA; N-1 = $PREV_VERSION from $PREV_REF ($PREV_SHA)"
 
@@ -199,9 +231,15 @@ say "upgraded $PREV_VERSION -> $VERSION in place"
 # --------------------------------------------------------------------------
 say "negative control: findings scanned with --no-fail-on-findings must fail the exit-code check"
 rc=0
-run_case "$CLI" findings negative-no-fail-on-findings --no-fail-on-findings || rc=$?
+neg_log="$WORK/negative-no-fail-on-findings.log"
+run_case "$CLI" findings negative-no-fail-on-findings --no-fail-on-findings >"$neg_log" 2>&1 || rc=$?
+cat "$neg_log"
 [ "$rc" -eq 1 ] || fail "NEGATIVE CONTROL: run_case returned $rc for a findings scan that exited 0; expected 1"
-say "   OK: rejected (exit $rc)"
+# rc 1 alone would also come from a missing report or a wrong count. The control only
+# controls anything if the exit-code check is what fired.
+grep -q "exit code 0 (nothing actionable), expected exactly 2" "$neg_log" \
+  || fail "NEGATIVE CONTROL: run_case rejected the --no-fail-on-findings scan, but not for its exit code 0"
+say "   OK: rejected for exit code 0 (exit $rc)"
 
 say "negative control: the clean output judged as a findings outcome must fail"
 rc=0
