@@ -144,15 +144,23 @@ if [ -n "$STRAY" ]; then
   exit 1
 fi
 
-# 3. All three entry-point names must be present. The wheel declares ash, ashv3 and
-#    automated-security-helper, and a package that installs a subset would leave the
-#    escape-hatch name missing on exactly the hosts it exists for.
-for name in ash ashv3 automated-security-helper; do
+# 3. All three exposed entry-point names must be present, and the deprecated `ash` must
+#    not be. The wheel declares ashx, ash, ashv3 and automated-security-helper; this
+#    package exposes every one except `ash`, whose alias is kept only for pip, Homebrew
+#    and the container image. A package that installed a subset would leave the
+#    escape-hatch name missing on exactly the hosts it exists for, and one that
+#    exported bin/ash would claim the name of the Almquist shell.
+for name in ashx ashv3 automated-security-helper; do
   [ -x "$BUILD_DIR/files/bin/$name" ] || {
     echo "error: $BUILD_DIR/files/bin/$name is missing or not executable." >&2
     exit 1
   }
 done
+if [ -e "$BUILD_DIR/files/bin/ash" ] || [ -L "$BUILD_DIR/files/bin/ash" ]; then
+  echo "error: $BUILD_DIR/files/bin/ash exists. The Flatpak exposes ashx; the deprecated" >&2
+  echo "       ash alias is kept only for pip, Homebrew and the container image." >&2
+  exit 1
+fi
 
 # 4. The package-contents gate, on the tree the bundle is exported from. Checks 1 and 2
 #    count wheels and look for .dist-info; this one closes the tree: every file
@@ -169,7 +177,7 @@ fi
 
 # 5. The sandbox permissions must have landed in the app's metadata. This is the check
 #    for the failure this package exists to avoid: a Flatpak whose finish-args were
-#    dropped or narrowed installs perfectly, runs `ash --version` perfectly, and then
+#    dropped or narrowed installs perfectly, runs `ashx --version` perfectly, and then
 #    cannot read the tree it was asked to scan -- because ASH's default source is the
 #    process CWD, which is on the host. Reading it back from metadata catches an edited
 #    manifest here rather than in a bug report.

@@ -120,7 +120,7 @@ WHAT THIS DOES NOT COVER, STATED PLAINLY
     resolve ASH's Python dependencies from PyPI, and that closure DOES contain a
     scanner: `detect-secrets` is a [project] dependency. So a host with this
     package installed has third-party scanner source on it, under
-    /usr/lib/ash/venv. That is not what the rule forbids -- the rule is about what
+    /usr/lib/<package>/venv. That is not what the rule forbids -- the rule is about what
     the ARTIFACT contains -- and it is the reason the dependencies are resolved at
     install time rather than shipped. Nothing here inspects the installed venv,
     and it would be wrong to: the whole design puts that content outside the
@@ -214,8 +214,8 @@ sys.dont_write_bytecode = True
 # --------------------------------------------------------------------------
 # Paths are given without a leading `./` or `/`; both container formats are
 # normalized to that form before comparison, because a .deb's data tarball names
-# members `./usr/bin/ash` and an rpm's cpio names them `./usr/bin/ash` or
-# `/usr/bin/ash` depending on the rpm version that wrote it, and a pin that
+# members `./usr/bin/ashx` and an rpm's cpio names them `./usr/bin/ashx` or
+# `/usr/bin/ashx` depending on the rpm version that wrote it, and a pin that
 # depended on which form arrived would be a pin on the packaging toolchain.
 #
 # ADDING AN ENTRY HERE IS THE INTENDED WAY TO SHIP A NEW FILE. The list is
@@ -302,7 +302,7 @@ WHEEL_PATTERN = re.compile(
 # Directories. Pinned for the same reason the wheel gate pins
 # PACKAGE_SUBDIRECTORIES: a new directory is where a whole tree arrives, and a
 # check that only pinned files would pass a package carrying an empty
-# `usr/lib/ash/vendor/` today and a populated one tomorrow.
+# `usr/lib/<package>/vendor/` today and a populated one tomorrow.
 #
 # Both formats record directory entries in the payload, but which ones they record
 # differs -- dpkg-deb includes every parent, rpm records only what %files lists --
@@ -371,8 +371,8 @@ def load_gate(gate_path: str) -> ModuleType:
 # Measured by running the gate's own classify_member over the real built .deb and
 # .rpm payloads rather than by reading the source:
 #
-#   usr/bin/ash                          -> unpinned-distribution-directory
-#   usr/lib/ash/wheels/...whl            -> nested-archive
+#   usr/bin/ashx                         -> unpinned-distribution-directory
+#   usr/lib/.../wheels/...whl            -> nested-archive
 #   usr/share/doc/.../README.Debian      -> unpinned-distribution-directory
 #
 # `unpinned-distribution-directory` is not a finding about the package. It means
@@ -901,7 +901,7 @@ def apply_gate_payload_rules(
 
     THE WHEEL IS THE SAME PROBLEM ONE LEVEL DOWN, AND IT IS NOT SOLVED BY EXEMPTION
     ------------------------------------------------------------------------------
-    `usr/lib/ash/wheels/automated_security_helper-3.7.0-py3-none-any.whl` is an
+    `usr/lib/<package>/wheels/automated_security_helper-3.7.0-py3-none-any.whl` is an
     archive, and rule 2 is right about it. It is legitimate only because the whole
     design is that the package wraps that wheel -- and the wheel is not taken on
     trust: it is extracted and handed to the gate in full, all 220 members, by

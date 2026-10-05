@@ -31,11 +31,13 @@ if (Test-Path -LiteralPath $shimList) {
 
 # The fallback exists for one case: an install that failed after creating shims but
 # before writing the list, or a list a user deleted. These are the three names
-# [project.scripts] declares, and Uninstall-BinFile on a name that was never shimmed
-# is a no-op, so an over-broad list here cannot damage anything.
+# chocolateyinstall.ps1 shims: the console scripts [project.scripts] declares, minus the
+# deprecated `ash`, which this package never puts on PATH. Uninstall-BinFile on a name
+# that was never shimmed is a no-op. `ash` is left out rather than included "to be safe":
+# a shim by that name is not this package's to remove.
 if ($names.Count -eq 0) {
     Write-Warning "ash: $shimList is missing, so falling back to the known shim names."
-    $names = @('ash', 'ashv3', 'automated-security-helper')
+    $names = @('ashx', 'ashv3', 'automated-security-helper')
 }
 
 foreach ($name in $names) {

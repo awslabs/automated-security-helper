@@ -10,7 +10,7 @@
 #
 # WHAT A PASSING SCAN MEANS HERE
 #
-# `ash scan` exits 0 when it finds nothing and 2 when it finds something, because
+# `ashx scan` exits 0 when it finds nothing and 2 when it finds something, because
 # fail_on_findings defaults to true. On a fixture planted with a secret, 0 is therefore
 # the FAILING outcome, and 1 is an execution error. So the scan must exit exactly 2, the
 # SARIF report and ash_aggregated_results.json must both exist, and
@@ -124,6 +124,78 @@ vl_payload_gate() {
 }
 
 # --------------------------------------------------------------------------
+# The command the package puts on PATH, and the one it must not.
+# --------------------------------------------------------------------------
+#
+# The package ships exactly one command, /usr/bin/$ASH_CLI_NAME, and never /usr/bin/ash.
+# `ash` is the Almquist shell's name: Debian's `ash` package owns /bin/ash, and on a
+# merged-/usr host that is the same file as /usr/bin/ash, so dpkg does not see a second
+# package's /usr/bin/ash as a conflict. A package that installed it would replace the
+# shell. See packaging/cli-name.sh.
+#
+# Reads a package's file list on stdin, one path per line, absolute or `./`-relative,
+# as `dpkg -L`, `rpm -ql`, `rpm -qlp` and the last column of `dpkg-deb -c` print them.
+# $1 labels the list in messages. Returns non-zero rather than exiting, so the negative
+# control can observe it firing.
+vl_check_command_paths() {
+  local label="$1" paths bin_entries rc=0
+  paths="$(sed -e 's|^\./|/|' -e 's|/$||' | grep -v '^\.\?$' || true)"
+  if [ -z "$paths" ]; then
+    printf 'FAIL: %s: the file list is empty, so nothing below could be checked\n' "$label" >&2
+    return 1
+  fi
+  if grep -qxF "/usr/bin/$ASH_CLI_NAME" <<<"$paths"; then :; else
+    printf 'FAIL: %s does not list /usr/bin/%s\n' "$label" "$ASH_CLI_NAME" >&2
+    rc=1
+  fi
+  if grep -xE '/(usr/)?bin/ash' <<<"$paths" >&2; then
+    printf 'FAIL: %s lists the path above; /usr/bin/ash and /bin/ash belong to the Almquist shell\n' "$label" >&2
+    rc=1
+  fi
+  # Exactly one command: anything else under a bin directory is a second name on PATH.
+  bin_entries="$(grep -E '^/(usr/)?s?bin/.' <<<"$paths" | grep -vxF "/usr/bin/$ASH_CLI_NAME" || true)"
+  if [ -n "$bin_entries" ]; then
+    printf 'FAIL: %s puts more than /usr/bin/%s on PATH:\n%s\n' "$label" "$ASH_CLI_NAME" "$bin_entries" >&2
+    rc=1
+  fi
+  [ "$rc" -eq 0 ] && vl_say "   $label: /usr/bin/$ASH_CLI_NAME is the only command; no /usr/bin/ash"
+  return "$rc"
+}
+
+# The distribution's `ash` shell must still be what /usr/bin/ash is: a working shell
+# that runs POSIX arithmetic, not the package's wrapper, and what `ash` on PATH
+# resolves to. $1 names the package that owns the shell. Returns non-zero rather than
+# exiting, so the negative control can observe it firing.
+vl_assert_shell_intact() {
+  local owner="$1" resolved out found
+  [ -e /usr/bin/ash ] || { printf 'FAIL: /usr/bin/ash is missing; %s should have installed it\n' "$owner" >&2; return 1; }
+  resolved="$(readlink -f /usr/bin/ash)"
+  if grep -qF "/usr/lib/$ASH_PKG_NAME" "$resolved"; then
+    printf 'FAIL: /usr/bin/ash (%s) is the %s wrapper, not the %s shell\n' "$resolved" "$ASH_PKG_NAME" "$owner" >&2
+    return 1
+  fi
+  out="$(/usr/bin/ash -c 'x=$((6 * 7)); echo "shell:$x"' 2>&1)" || true
+  if [ "$out" != "shell:42" ]; then
+    printf "FAIL: /usr/bin/ash -c 'echo \$((6 * 7))' printed '%s', so it is not a working shell\n" "$out" >&2
+    return 1
+  fi
+  found="$(command -v ash || true)"
+  case "$found" in
+    /usr/bin/ash | /bin/ash) ;;
+    *) printf 'FAIL: ash on PATH resolves to [%s], not the shell\n' "$found" >&2; return 1 ;;
+  esac
+  vl_say "   /usr/bin/ash -> $resolved ($owner) runs \$((6 * 7)) = 42; ash on PATH is $found"
+}
+
+# The coexistence check: the shell intact AND the package's command working beside it.
+vl_assert_shell_coexists() {
+  vl_assert_shell_intact "$1" || return 1
+  "$ASH_CLI_NAME" --version >/dev/null 2>&1 \
+    || { printf 'FAIL: %s --version failed with the %s shell installed\n' "$ASH_CLI_NAME" "$1" >&2; return 1; }
+  vl_say "   coexistence: $ASH_CLI_NAME --version works with the $1 shell installed"
+}
+
+# --------------------------------------------------------------------------
 # Version checks.
 # --------------------------------------------------------------------------
 
@@ -183,7 +255,7 @@ PY
   fi
 }
 
-# Runs the scan as $SCAN_USER and sets SCAN_RC. Extra arguments go to `ash scan`.
+# Runs the scan as $SCAN_USER and sets SCAN_RC. Extra arguments go to `ashx scan`.
 #
 # --scanners detect-secrets because it is the one default scanner that arrives with ASH
 # itself (a [project] dependency driven in process); the rest are recorded SKIPPED
@@ -296,7 +368,7 @@ vl_lower_version() {
     out = $1; for (i = 2; i <= NF; i++) out = out "." $i; print out }'
 }
 
-# The venv layout: /usr/lib/ash/venv is a symlink to exactly one venv-<id>
+# The venv layout: $ASH_VENV is a symlink to exactly one venv-<id>
 # directory, and nothing an interrupted install would leave is present.
 vl_assert_venv_layout() {
   [ -L "$ASH_VENV" ] || vl_fail "$ASH_VENV is not a symlink"
@@ -317,7 +389,7 @@ vl_assert_venv_layout() {
 }
 
 # Puts the host back on the layout the packages used before the symlink swap: the live
-# venv as a real directory AT /usr/lib/ash/venv, built from the wheel the package
+# venv as a real directory AT $ASH_VENV, built from the wheel the package
 # installed, with the interpreter the current venv uses. The next install has to migrate
 # it, which is the one path through the post-install step that moves a directory.
 vl_make_directory_layout() {
@@ -335,7 +407,7 @@ vl_make_directory_layout() {
 }
 
 # Samples, every 50 ms for as long as an install runs, whether the command and the
-# interpreter behind /usr/lib/ash/venv exist. Any miss is a moment in which the
+# interpreter behind $ASH_VENV exist. Any miss is a moment in which the
 # installed CLI could not have started.
 vl_probe_start() {
   rm -f /tmp/venv-probe.log /tmp/venv-probe.stop

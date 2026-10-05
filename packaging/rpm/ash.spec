@@ -2,15 +2,21 @@
 # ASH's rpm. Built by packaging/rpm/build.sh, which passes ash_version and ash_wheel;
 # this spec does not derive either one itself. It also passes ash_cli and ash_pkg, the
 # command and package names from packaging/cli-name.sh, so neither is written here.
-# Below, /usr/lib/ash and /usr/bin/ash stand for the default names.
+# Below, /usr/lib/automated-security-helper and /usr/bin/ashx stand for those names.
 #
 # Unlike debian/control.in, an rpm spec accepts '#' comments, so the reasoning that the
 # .deb had to displace into packaging/deb/build.sh lines 53-72 lives here instead.
 #
 # The install shape is the .deb's, deliberately, and packaging/README.md documents it as
-# common to both: exactly one wheel under /usr/lib/ash/wheels, a venv built on the target
-# by %%post rather than shipped, and a wrapper at /usr/bin/ash. A bug in one package is a
-# bug in the other, which is only true while the two stay the same shape.
+# common to both: exactly one wheel under /usr/lib/automated-security-helper/wheels, a
+# venv built on the target by %%post rather than shipped, and a wrapper at /usr/bin/ashx.
+# A bug in one package is a bug in the other, which is only true while the two stay the
+# same shape.
+#
+# The wrapper is the only file this package puts in /usr/bin. It does not install
+# /usr/bin/ash, which is the Almquist shell's name, and it carries no Provides,
+# Conflicts or Obsoletes naming `ash`: no package of that name was ever published from
+# this repository, so there is nothing to replace. See packaging/cli-name.sh.
 #
 # Section names are written %%post and %%postun throughout the prose below. A bare %post
 # mid-sentence is a macro rpm tries to expand, and %% is the spec file's escape for a
@@ -173,7 +179,7 @@ CLI=%{ash_cli}
 # The wheel THIS package shipped, by its exact name, not a glob over the directory.
 #
 # A glob was the upgrade bug. rpm runs the new package's %%post BEFORE it removes the old
-# package's files, so on an upgrade /usr/lib/ash/wheels holds both the old and the new
+# package's files, so on an upgrade /usr/lib/<package>/wheels holds both the old and the new
 # wheel when this runs. The glob took the first match, which sorts as the OLD version,
 # so `rpm -q ash` reported the new release while the venv kept running the old one.
 # Measured on amazonlinux:2023 upgrading 3.6.0 to 3.7.0: rpm said 3.7.0, `ash --version`
@@ -297,7 +303,7 @@ if [ "$1" -eq 0 ]; then
   # The link, every venv it could point at, and anything an interrupted %%post left
   # behind. See LAYOUT in %%post.
   rm -rf /usr/lib/%{name}/venv /usr/lib/%{name}/venv-* /usr/lib/%{name}/venv.previous /usr/lib/%{name}/venv.swap-*
-  # rpm removed its own files before this ran, but could not rmdir /usr/lib/ash while the
+  # rpm removed its own files before this ran, but could not rmdir /usr/lib/<package> while the
   # unowned venv was still inside it. Now that the venv is gone, take the parent if it is
   # empty; anything else left there is not this package's to delete.
   if [ -d /usr/lib/%{name} ] && [ -z "$(ls -A /usr/lib/%{name})" ]; then

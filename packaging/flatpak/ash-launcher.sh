@@ -1,9 +1,12 @@
 #!/bin/sh
 #
-# Installed as /app/bin/ash inside the Flatpak, with /app/bin/ashv3 and
+# Installed as /app/bin/ashx inside the Flatpak, with /app/bin/ashv3 and
 # /app/bin/automated-security-helper as symlinks to it. All three names come from the
 # wheel's [project.scripts]; the launcher dispatches on its own basename so one file
-# covers all three and cannot drift between them.
+# covers all three and cannot drift between them. The wheel's fourth script, the
+# deprecated `ash`, is deliberately not exposed: that alias is kept only for pip,
+# Homebrew and the container image, and a bare `ash` is the Almquist shell on many
+# hosts. This file keeps its ash-launcher.sh name; only the installed path changed.
 #
 # WHY A LAUNCHER AND NOT THE WHEEL'S OWN ENTRY POINT
 #
@@ -27,7 +30,7 @@
 #   1. A new ASH version. The .deb's postinst does `rm -rf $VENV` before rebuilding,
 #      because an in-place `pip install --upgrade` leaves a renamed entry point behind.
 #      Nothing runs at Flatpak upgrade time to do that, so a venv keyed only on "venv"
-#      would keep serving the OLD ASH after the app was upgraded, and `ash --version`
+#      would keep serving the OLD ASH after the app was upgraded, and `ashx --version`
 #      would report the old number with no error anywhere. The wheel filename carries
 #      the version, so keying on it makes a stale venv unreachable rather than
 #      undetected.
@@ -170,6 +173,6 @@ fi
 #      that interpreter, which is what a re-exec needs.
 #
 # sys.argv[0] is the console script's path, so its basename still selects the program
-# name typer prints in usage and errors -- "ash", "ashv3" or "automated-security-helper"
+# name typer prints in usage and errors -- "ashx", "ashv3" or "automated-security-helper"
 # rather than a python invocation.
 exec "$VENV/bin/python3" "$VENV/bin/$SELF" "$@"

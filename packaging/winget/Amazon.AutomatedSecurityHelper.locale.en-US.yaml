@@ -26,8 +26,9 @@ PackageUrl: https://github.com/awslabs/automated-security-helper
 License: Apache-2.0
 LicenseUrl: https://github.com/awslabs/automated-security-helper/blob/main/LICENSE
 Copyright: Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# `ash` is the moniker so that `winget install ash` resolves, matching the deb, rpm and
-# Chocolatey package names. A moniker is not required to be unique across the
+# `ash` is the moniker so that `winget install ash` resolves, matching the Chocolatey
+# package id. The moniker is a distribution identifier, not the command: the command the
+# package installs is `ashx`. A moniker is not required to be unique across the
 # repository, which is why it can be this short.
 Moniker: ash
 ShortDescription: Runs many security scanners over a repository and reports the findings as SARIF.
@@ -36,12 +37,13 @@ Description: |-
   report into a single SARIF document, plus text, JSON, and Markdown reports.
 
   ASH drives third-party scanners; it does not contain them. After installing, run
-  `ash dependencies install` to provision the ones ASH can install itself.
+  `ashx dependencies install` to provision the ones ASH can install itself.
 
-  Three commands are installed. `ash` is the one to use. `ashv3` still works and warns
+  Three commands are installed. `ashx` is the one to use. `ashv3` still works and warns
   once that its name pins a major version. `automated-security-helper` is the same
-  program under a name nothing else claims, which matters on Windows because MSYS2
-  ships the Almquist shell as `ash`.
+  program under a name nothing else claims. No `ash` command is installed: on Windows
+  MSYS2 and Git for Windows ship the Almquist shell as `ash`, which is why the v4
+  command is `ashx`.
 Tags:
 - cdk-nag
 - cfn-nag

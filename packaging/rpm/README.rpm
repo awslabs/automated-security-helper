@@ -54,13 +54,23 @@ ASH drives third-party scanners; it does not contain them. After installing:
 Files
 -----
 
-  /usr/lib/@ASH_PKG@/wheels/   ASH's wheel, the package's only payload
-  /usr/lib/@ASH_PKG@/venv      symlink to the live /usr/lib/@ASH_PKG@/venv-<id>/, which %post
-                         creates; %postun removes both on erase only
-  /usr/bin/@ASH_CLI@           wrapper that execs the venv entry point
-  /usr/share/doc/@ASH_PKG@/    this file (installed as README), which %post's failure
-                         message points at
+  /usr/lib/@ASH_PKG@/wheels/
+      ASH's wheel, the package's only payload
+  /usr/lib/@ASH_PKG@/venv
+      symlink to the live /usr/lib/@ASH_PKG@/venv-<id>/, which %post
+      creates; %postun removes both on erase only
+  /usr/bin/@ASH_CLI@
+      wrapper that execs the venv entry point, and the only command the
+      package puts on PATH
+  /usr/share/doc/@ASH_PKG@/
+      this file (installed as README), which %post's failure message
+      points at
   /usr/share/licenses/@ASH_PKG@/LICENSE
+
+The package does not install /usr/bin/ash. That name belongs to the Almquist
+shell, and the package is tested installed beside a package that owns it. The
+wheel's deprecated `ash` console script exists inside the venv, but nothing
+links it onto PATH; use @ASH_CLI@.
 
 The venv is built on the target rather than shipped, because a virtualenv records
 absolute paths and the interpreter ABI of the machine that created it. %postun checks

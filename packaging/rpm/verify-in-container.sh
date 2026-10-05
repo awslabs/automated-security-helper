@@ -9,7 +9,8 @@
 #   verify-in-container.sh [--mode MODE]
 #
 # MODE is one of:
-#   assert             build, gate the payload, install, scan, erase (the default)
+#   assert             build, gate the payload, install beside a package that owns
+#                      /usr/bin/ash, scan, erase (the default)
 #   upgrade            install N-1 built from $PREV_DIST, upgrade to N, require the venv
 #                      to be replaced; then fail an upgrade on purpose and require the
 #                      working install to survive it; then migrate a venv left as a
@@ -18,6 +19,10 @@
 #   negative-scan-rc   a scan exiting 0 with findings must FAIL the exit-code gate
 #   negative-install   a package whose %post fails must FAIL the install step
 #   negative-payload   a package with an empty payload must FAIL the payload gate
+#   negative-shell-path
+#                      a build that also installs /usr/bin/ash must FAIL the command
+#                      path check, and installing it beside the package that owns
+#                      /usr/bin/ash must either be refused or FAIL the coexistence check
 #   version-map        PEP 440 pre/post/dev versions must sort correctly under the
 #                      distribution's own version comparator
 #
@@ -125,7 +130,7 @@ build_variant() {
   cp -r "$REPO/packaging/rpm" "$tree/packaging/rpm"
   cp "$REPO/packaging/cli-name.sh" "$REPO/packaging/version-map.sh" "$tree/packaging/"
   cp "$REPO/LICENSE" "$tree/"
-  vl_gate_python - "$tree/packaging/rpm/ash.spec" "$edit" <<'PY'
+  if vl_gate_python - "$tree/packaging/rpm/ash.spec" "$edit" <<'PY'
 import re, sys
 path, edit = sys.argv[1], sys.argv[2]
 spec = open(path, encoding="utf-8").read()
@@ -133,6 +138,18 @@ if edit == "empty-payload":
     # %install and %files emptied: the package carries no payload at all.
     spec = re.sub(r"(?ms)^%install\n.*?(?=^%files\n)", "%install\n\n", spec)
     spec = re.sub(r"(?ms)^%files\n.*?(?=^# Creates the venv)", "%files\n\n", spec)
+elif edit == "ships-ash-path":
+    # The wrapper also installed as /usr/bin/ash and listed in %files: what a revert to
+    # ASH_CLI_NAME=ash, or an added alias, would produce.
+    install_line = "chmod 0755 %{buildroot}%{_bindir}/%{ash_cli}\n"
+    files_line = "\n%{_bindir}/%{ash_cli}\n"
+    if spec.count(install_line) != 1 or spec.count(files_line) != 1:
+        sys.exit("could not find the wrapper's chmod and %files lines")
+    spec = spec.replace(
+        install_line,
+        install_line + "cp -p %{buildroot}%{_bindir}/%{ash_cli} %{buildroot}%{_bindir}/ash\n",
+    )
+    spec = spec.replace(files_line, files_line + "%{_bindir}/ash\n")
 elif edit == "failing-post":
     # %post's final `exit 0` becomes `exit 1`, after a working venv has been built.
     head, sep, tail = spec.partition("\n%post\n")
@@ -144,6 +161,12 @@ else:
     sys.exit(f"unknown edit {edit}")
 open(path, "w", encoding="utf-8").write(spec)
 PY
+  then :; else
+    # Inside $(...) errexit does not apply, so a failed edit would otherwise go on to
+    # build the unedited spec and hand the caller a correct package as the variant.
+    echo "FAIL: could not apply the $edit edit to the spec" >&2
+    return 1
+  fi
   "$tree/packaging/rpm/build.sh" "$wheel" "$out"
 }
 
@@ -152,7 +175,76 @@ if [ "$MODE" = version-map ]; then
   exec bash "$REPO/packaging/test-version-map.sh" rpm "$WHEEL"
 fi
 
+check_rpm_paths() {
+  rpm -qlp "$1" | vl_check_command_paths "rpm -qlp $(basename "$1")"
+}
+
+# Neither Amazon Linux 2023 nor RHEL 9 ships an Almquist shell: measured with
+#   dnf repoquery --whatprovides '*/bin/ash'
+# which lists nothing on either image. Debian's legs install the real one. Here a
+# minimal package named `ash` stands in for it: it owns /usr/bin/ash, as a script that
+# hands its arguments to /bin/sh, so rpm's own file-conflict detection and dnf's
+# name resolution see exactly what they would see with a real `ash` installed. It is
+# installed before the package under test, so that install is the one that would
+# replace it.
+install_ash_standin() {
+  local top
+  top="$(mktemp -d)"
+  mkdir -p "$top"/{SPECS,BUILD,BUILDROOT,RPMS,SRPMS,SOURCES}
+  cat > "$top/SPECS/ash-standin.spec" <<'SPEC'
+Name:           ash
+Version:        0.0.1
+Release:        1
+Summary:        Stand-in for an Almquist shell that owns /usr/bin/ash (test only)
+License:        Apache-2.0
+BuildArch:      noarch
+
+%description
+Owns /usr/bin/ash, so the package under test is installed beside a package that does.
+
+%install
+install -d -m 0755 %{buildroot}%{_bindir}
+printf '#!/bin/sh\nexec /bin/sh "$@"\n' > %{buildroot}%{_bindir}/ash
+chmod 0755 %{buildroot}%{_bindir}/ash
+
+%files
+%{_bindir}/ash
+SPEC
+  rpmbuild --define "_topdir $top" -bb "$top/SPECS/ash-standin.spec" >/tmp/ash-standin.log 2>&1 \
+    || { tail -n 20 /tmp/ash-standin.log >&2; vl_fail "could not build the ash stand-in"; }
+  rpm_install install "$(find "$top/RPMS" -name 'ash-*.rpm' -print -quit)" >/dev/null \
+    || vl_fail "could not install the ash stand-in"
+  rpm -q ash >/dev/null || vl_fail "the ash stand-in is not installed"
+  vl_say "   installed the ash stand-in $(rpm -q ash), owner of $(rpm -qf /usr/bin/ash --qf '%{NAME}'):/usr/bin/ash"
+}
+
 case "$MODE" in
+  negative-shell-path)
+    echo "== NEGATIVE CONTROL: an .rpm that also installs /usr/bin/ash must FAIL the command path check"
+    VARIANT="$(build_variant ships-ash-path "$WHEEL" "$OUT/with-ash")"
+    rpm -qlp "$VARIANT" | grep '/bin/' | sed 's/^/   listed: /'
+    rc=0
+    check_rpm_paths "$VARIANT" || rc=$?
+    [ "$rc" -ne 0 ] || vl_fail "NEGATIVE CONTROL: the command path check ACCEPTED a package listing /usr/bin/ash"
+    echo "   OK: the command path check rejected the package (exit $rc)"
+    echo "== NEGATIVE CONTROL: installed beside a package owning /usr/bin/ash, it must be refused or caught"
+    install_ash_standin
+    vl_assert_shell_intact "ash stand-in" || vl_fail "the shell is broken before the variant was installed"
+    rc=0
+    rpm_install install "$VARIANT" 2>/tmp/variant-install.err || rc=$?
+    if [ "$rc" -ne 0 ]; then
+      grep -E 'conflicts|Error' /tmp/dnf-install.log | head -n 3 | sed 's/^/   /'
+      echo "   OK: the install was refused (rpm saw the file conflict)"
+    else
+      echo "   rpm installed it without reporting a conflict over /usr/bin/ash"
+      rc=0
+      vl_assert_shell_intact "ash stand-in" || rc=$?
+      [ "$rc" -ne 0 ] || vl_fail "NEGATIVE CONTROL: the coexistence check ACCEPTED a host where the package installed /usr/bin/ash"
+      echo "   OK: the coexistence check rejected the host (exit $rc)"
+    fi
+    echo; echo "RPM NEGATIVE CONTROL (shell path) PASSED"
+    exit 0
+    ;;
   negative-payload)
     echo "== NEGATIVE CONTROL: an empty-payload .rpm must FAIL the payload gate"
     EMPTY="$(build_variant empty-payload "$WHEEL" "$OUT/empty")"
@@ -181,7 +273,16 @@ RPM="$(build_rpm "$WHEEL" "$OUT")"
 echo "   built: $RPM"
 rpm -qp --qf '   Name: %{NAME}\n   Version: %{VERSION}\n   Release: %{RELEASE}\n   Arch: %{ARCH}\n' "$RPM"
 echo "   Requires: $(rpm -qp --requires "$RPM" | grep -v '^rpmlib(' | tr '\n' ' ')"
+# No Provides, Conflicts or Obsoletes may name `ash`, the Almquist shell's package name.
+# rpm adds Provides for the package's own name, so only a dependency on `ash` itself is
+# refused.
+for kind in provides conflicts obsoletes; do
+  if rpm -qp "--$kind" "$RPM" | grep -E '^ash([ (]|$)'; then
+    vl_fail "the package's $kind names ash, the Almquist shell's package name"
+  fi
+done
 vl_payload_gate "$RPM"
+check_rpm_paths "$RPM" || vl_fail "the package's file list must carry /usr/bin/$ASH_CLI_NAME and no other command"
 
 if [ "$MODE" = upgrade ]; then
   PREV_WHEEL="$(one_wheel "$PREV_DIST")"
@@ -253,6 +354,12 @@ if [ "$MODE" = upgrade ]; then
   exit 0
 fi
 
+if [ "$MODE" = assert ]; then
+  echo "== 3a. install a package that owns /usr/bin/ash first, so the package is installed beside it"
+  install_ash_standin
+  vl_assert_shell_intact "ash stand-in" || vl_fail "the ash stand-in does not work before the package is installed"
+fi
+
 echo "== 3. install it with dnf; dnf must resolve the interpreter dependency itself"
 if interpreter_installed; then
   vl_fail "a python3.11+ is already installed, so this run cannot show the package's own Requires works"
@@ -262,6 +369,8 @@ interpreter_installed || vl_fail "no python3.11+ is installed after installing t
 echo "   interpreter dnf pulled in: $(rpm -qa 'python3.1[1-3]' --qf '%{NAME}-%{VERSION} ')"
 echo "   venv built with: $(readlink -f "$ASH_VENV/bin/python3")"
 vl_assert_installed_version "$VERSION"
+rpm -ql "$ASH_PKG_NAME" | vl_check_command_paths "rpm -ql $ASH_PKG_NAME" \
+  || vl_fail "the installed package's file list must carry /usr/bin/$ASH_CLI_NAME and no other command"
 
 case "$MODE" in
   negative-findings)
@@ -282,11 +391,17 @@ case "$MODE" in
   *) vl_fail "unknown mode $MODE" ;;
 esac
 
+echo "== 3b. the package and the package owning /usr/bin/ash work side by side"
+vl_assert_shell_coexists "ash stand-in" || vl_fail "the package and the ash stand-in do not coexist"
+[ "$(rpm -qf /usr/bin/ash --qf '%{NAME}')" = ash ] || vl_fail "/usr/bin/ash is not owned by the ash stand-in"
+
 echo "== 4. scan a fixture with a KNOWN finding"
 vl_scan_and_assert
 
-echo "== 5. erase leaves nothing behind"
+echo "== 5. erase leaves nothing behind, and leaves /usr/bin/ash alone"
 erase_and_check
+rpm -q ash >/dev/null || vl_fail "erasing $ASH_PKG_NAME removed the ash stand-in"
+vl_assert_shell_intact "ash stand-in" || vl_fail "erasing $ASH_PKG_NAME broke /usr/bin/ash"
 
 echo
 echo "RPM VERIFICATION PASSED"

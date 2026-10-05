@@ -91,7 +91,7 @@ is a URL and a sha256, so no dependency source enters the tree. Read
 
 Both packages install the same way, so a bug in one is a bug in the other. Below,
 `<pkgname>` is `ASH_PKG_NAME` and `<cli>` is `ASH_CLI_NAME`, both set in
-`packaging/cli-name.sh` and both `ash` today. The READMEs the packages ship are
+`packaging/cli-name.sh`: `automated-security-helper` and `ashx` today. The READMEs the packages ship are
 written with `@ASH_PKG@` and `@ASH_CLI@` and substituted at build time.
 
 - `/usr/lib/<pkgname>/wheels/` — ASH's wheel, the only payload.
@@ -104,6 +104,16 @@ written with `@ASH_PKG@` and `@ASH_CLI@` and substituted at build time.
 - `/usr/bin/<cli>` — a wrapper execing the venv's entry point. A symlink into the venv
   would work for the command itself but breaks `sys.executable` discovery for the container runner,
   which shells out to itself.
+
+That wrapper is the only command either package puts on PATH. Neither installs
+`/usr/bin/ash`, which is the Almquist shell's name (Debian ships it as the `ash`
+package, and on a merged-`/usr` host `/bin/ash` and `/usr/bin/ash` are one file), and
+neither declares a Provides, Conflicts, Replaces or Obsoletes naming `ash`. The venv
+still holds the wheel's deprecated `ash` console script; nothing links it onto PATH.
+Both `verify-in-container.sh` scripts assert the file list carries no `/usr/bin/ash`,
+install a package owning `/usr/bin/ash` beside the package and require both to work,
+and have a `negative-shell-path` mode that shows both checks failing on a build that
+ships `/usr/bin/ash`.
 
 Removal drops the venv, because `pip` created it after install and no package manager
 tracks files a `postinst` wrote. An upgrade does not: the deb's `prerm` removes it only on
@@ -128,7 +138,7 @@ including the negative controls that show each check failing, is
 
 Flatpak has no post-install hook: an installed app is a read-only OSTree checkout and no
 code runs on the user's machine at install time. So the venv is built on **first run**,
-by a launcher at `/app/bin/ash`, into
+by a launcher at `/app/bin/ashx`, into
 `~/.var/app/io.github.awslabs.automated_security_helper/data/`. The bundled wheel still
 lives inside the app, at `/app/share/ash/wheels/`, and the count is still one.
 
@@ -143,7 +153,7 @@ Two things stop that happening by accident rather than by review: `build.sh` pas
 measured by putting a `pip download requests` in the manifest's build-commands, which fails
 with `Failed to resolve 'pypi.org' ([Errno -3] Temporary failure in name resolution)`.
 
-The Flatpak also cannot put `ash` on the host's PATH — flatpak exports the application ID
+The Flatpak also cannot put `ashx` on the host's PATH — flatpak exports the application ID
 — and it grants `--filesystem=host`, without which it would install and then be unable to
 read the tree it was asked to scan. `packaging/flatpak/README.flatpak` documents both,
 including what the permission gives up and what a user who wants tighter confinement can

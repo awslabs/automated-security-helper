@@ -62,14 +62,17 @@ InstallModes:
 - silent
 - silentWithProgress
 UpgradeBehavior: install
-# The entry-point contract, recorded where winget can see it. `ash` is canonical.
+# The entry-point contract, recorded where winget can see it. `ashx` is canonical.
 # `ashv3` is deprecated and warns once on stderr. `automated-security-helper` is kept
-# indefinitely and silent, and Windows is why it exists: MSYS2 ships the Almquist shell
-# as ash.exe, and when it is earlier on PATH than ASH's entry point a scan reaches the
-# shell and fails with `Illegal option --`. That has already happened in this project's
-# CI. Every one of these three must be an AppExecutionAlias in the MSIX manifest.
+# indefinitely and silent. The wheel also declares `ash`, the v3 command, as a
+# deprecated alias, and the MSIX deliberately does not expose it: MSYS2 ships the
+# Almquist shell as ash.exe, and when it is earlier on PATH than ASH's entry point a
+# scan reaches the shell and fails with `Illegal option --`. That has already happened
+# in this project's CI, and it is why the v4 command is `ashx`. Every one of these three
+# must be an AppExecutionAlias in the MSIX manifest, and `ash` must not be listed
+# (validate-manifests.py, NOT_EXPOSED_SCRIPTS).
 Commands:
-- ash
+- ashx
 - ashv3
 - automated-security-helper
 Platform:

@@ -81,8 +81,8 @@ MSYS2 ships its own `ash`, the Almquist shell, which has already shadowed ASH's 
 point in CI and produced `Illegal option --`.
 
 **This was a dependency of native packaging, not a parallel workstream.** Every package
-declares the console scripts it installs — the deb and rpm here install `/usr/bin/ash` as
-a wrapper onto the venv's entry point — so an entry point that got renamed or dropped
+declares the console scripts it installs — the deb and rpm here install `/usr/bin/ashx`
+(`/usr/bin/ash` when this was written) as a wrapper onto the venv's entry point — so an entry point that got renamed or dropped
 would change those manifests with it. That is why it was settled before the MSIX,
 Chocolatey and winget manifests rather than alongside them.
 
@@ -115,12 +115,19 @@ indefinitely and silent — it is the escape hatch for exactly the MSYS2 collisi
 `ashv3` warns on stderr and stays, because the name pins a version and so reads wrong the
 moment v4 exists.
 
+Later in v4 the same collision decided the canonical name: `ashx` is the command, and
+`ash` became a deprecated alias that prints one warning and runs the same app. The alias
+stays only where a console script is installed as-is (pip, Homebrew and the container
+image). The deb, rpm, MSIX, Chocolatey, winget and Flatpak packages expose `ashx` and
+never `ash`; `packaging/cli-name.sh` records why the deb and rpm carry no
+Replaces/Conflicts/Obsoletes for the old name.
+
 **One thing this removed that was not a flag.** The CI `method: bash` matrix cells existed
 to exercise that script, and went with it — 5 cells across `ubuntu-latest` and
 `ubuntu-24.04-arm`. No platform coverage was lost, because each `bash` cell had a
 `python-container` cell on the same os and oci-runner, so the pair ran the same container
 build from two entrypoints. `utils/ash_helpers.sh`'s `invoke-ash` now calls
-`ash --mode container`; `--mode container` is load-bearing there, since the bash script
+`ash --mode container` (now `ashx --mode container`); `--mode container` is load-bearing there, since the bash script
 always ran in a container while the bare Python CLI defaults to local.
 
 **A guardrail that would have gone quiet.**

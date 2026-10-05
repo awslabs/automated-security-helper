@@ -1,4 +1,4 @@
-ash for Windows, via Chocolatey
+ASH for Windows, via Chocolatey
 ===============================
 
 Why this package needs a Python index at install time
@@ -35,25 +35,29 @@ On a machine with no reachable index, stage one before installing:
   >>%ProgramData%\pip\pip.ini echo no-index = true
   >>%ProgramData%\pip\pip.ini echo find-links = C:\ash-wheels
 
-Three names on PATH, and why the long one exists
+Three names on PATH, and why the command is ashx
 ------------------------------------------------
 
-The package installs a shim for every console script the wheel declares, which is
-currently three:
+The package id is `ash` (`choco install ash`), but the command it installs is
+`ashx`. It shims three of the wheel's console scripts:
 
-  ash                        canonical, and the one to use.
+  ashx                       canonical, and the one to use.
   ashv3                      deprecated. It works and warns once on stderr. The
                              name pins a major version, so it reads wrong the
                              moment v4 exists.
   automated-security-helper  kept indefinitely and silent.
 
-The long name is not redundancy for its own sake, and Windows is the reason it
-exists. MSYS2 ships the Almquist shell as ash.exe. On a machine that has MSYS2,
-Git for Windows with the MSYS tools on PATH, or anything else that provides that
-name earlier in PATH than the Chocolatey bin directory, `ash scan` reaches the
-shell instead of this program and fails with `Illegal option --`. That has already
-happened in this project's CI. When it happens, use automated-security-helper;
-nothing else claims that name.
+The wheel also declares `ash`, the v3 command, as a deprecated alias, and this
+package deliberately does not shim it. Windows is the reason. MSYS2 ships the
+Almquist shell as ash.exe. On a machine that has MSYS2, Git for Windows with the
+MSYS tools on PATH, or anything else that provides that name earlier in PATH than
+the Chocolatey bin directory, a bare `ash` reaches the shell instead of ASH and
+fails with `Illegal option --`. That has already happened in this project's CI,
+and it is why the v4 command is `ashx`. If your scripts call `ash`, change them to
+`ashx`; arguments, output and exit codes are the same.
+
+The long name is the escape hatch for a host where some other program claims a
+short name: nothing else claims automated-security-helper.
 
 Two flags worth knowing because they are easy to get backwards: -V is --version,
 and -v is --verbose. The bash entry point that ASH used to ship had -v for
@@ -66,7 +70,8 @@ Where things are installed
                                               payload. Chocolatey manages it.
   %ProgramData%\ash\venv\                     created by chocolateyinstall.ps1
   %ProgramData%\ash\installed-shims.txt       the shim names, for the uninstaller
-  <ChocolateyInstall>\bin\ash.exe             a shim, plus one per console script
+  <ChocolateyInstall>\bin\ashx.exe            a shim, plus ashv3.exe and
+                                              automated-security-helper.exe
 
 The venv is built on the machine rather than shipped, because a virtualenv records
 absolute paths and the interpreter ABI of the machine that created it. It is
@@ -104,8 +109,8 @@ Scanners are not installed by this package
 
 ASH drives third-party scanners; it does not contain them. After installing:
 
-  ash dependencies install              # everything ASH can provision
-  ash dependencies install --tool grype # or one at a time
+  ashx dependencies install              # everything ASH can provision
+  ashx dependencies install --tool grype # or one at a time
 
 This package is not published anywhere
 --------------------------------------

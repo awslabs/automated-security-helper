@@ -10,16 +10,16 @@ name: ASH - Native Packages (deb, rpm)
 # WHY THIS IS ITS OWN WORKFLOW
 #
 # The deb and rpm jobs used to live in ash-package.yml. They moved here because they
-# grew from two legs to seventeen (four distributions, an upgrade leg on each, six
+# grew from two legs to nineteen (four distributions, an upgrade leg on each, eight
 # negative controls and three version-ordering checks), and because ash-package.yml deliberately has no `push` trigger
 # (its header explains why), while these legs need to run on a pushed branch before
 # a pull request exists. ash-package.yml still owns the wheel and sdist gate; each leg
 # here builds its own copy of the wheel the same way (`uv build`) and runs the same
 # artifact-contents gate on it before anything is packaged. Nothing is uploaded.
 #
-# WHAT IS ASSERTED, AND WHY NOT `ash scan && echo ok`
+# WHAT IS ASSERTED, AND WHY NOT `ashx scan && echo ok`
 #
-# `ash scan` exits 0 when it finds nothing and 2 when it finds something. On a fixture
+# `ashx scan` exits 0 when it finds nothing and 2 when it finds something. On a fixture
 # planted with a secret, 0 is therefore the FAILING outcome. Every assert leg requires
 # exit 2, the SARIF report and ash_aggregated_results.json, and at least one SARIF
 # result attributed to detect-secrets (packaging/assert-scan-findings.py). The shared
@@ -50,7 +50,7 @@ name: ASH - Native Packages (deb, rpm)
 # Each distribution installs N-1 (the same tree with a lower version, built by
 # packaging/build-test-wheels.sh), upgrades to N, and requires the venv to have been
 # REBUILT from the N wheel -- the rpm used to report N while the venv kept running
-# N-1 -- while a probe samples every 50 ms that /usr/lib/ash/venv stays usable
+# N-1 -- while a probe samples every 50 ms that /usr/lib/automated-security-helper/venv stays usable
 # throughout. Each then fails an upgrade on purpose (Python index unreachable) and requires
 # the previous working install to survive, and the deb legs also require prerm to keep
 # the venv on `upgrade` and `failed-upgrade`.
@@ -248,6 +248,8 @@ jobs:
           - { label: "negative control: rpm with a failing %post must fail install", family: rpm, mode: negative-install, image: "public.ecr.aws/amazonlinux/amazonlinux@sha256:12052e9b5d3fd85769abbdd863dd038e1890c9ace31d5fdbe1afa78eda97d061" }
           - { label: "negative control: empty-payload deb must fail the payload gate", family: deb, mode: negative-payload, image: "debian@sha256:f37a335e82bca302e955fa39f9dfe28f1be618f016f8a2b56318e5a5111afc26" }
           - { label: "negative control: empty-payload rpm must fail the payload gate", family: rpm, mode: negative-payload, image: "public.ecr.aws/amazonlinux/amazonlinux@sha256:12052e9b5d3fd85769abbdd863dd038e1890c9ace31d5fdbe1afa78eda97d061" }
+          - { label: "negative control: deb shipping /usr/bin/ash must fail the shell-path checks", family: deb, mode: negative-shell-path, image: "debian@sha256:f37a335e82bca302e955fa39f9dfe28f1be618f016f8a2b56318e5a5111afc26" }
+          - { label: "negative control: rpm shipping /usr/bin/ash must fail the shell-path checks", family: rpm, mode: negative-shell-path, image: "public.ecr.aws/amazonlinux/amazonlinux@sha256:12052e9b5d3fd85769abbdd863dd038e1890c9ace31d5fdbe1afa78eda97d061" }
     steps:
       # Before checkout, because actions/checkout needs git and none of these images
       # ships it; without git it silently falls back to a REST tarball. `shell: bash`

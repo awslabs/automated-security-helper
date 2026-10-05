@@ -8,7 +8,8 @@
 #   verify-in-container.sh [--mode MODE]
 #
 # MODE is one of:
-#   assert             build, gate the payload, install, scan, purge (the default)
+#   assert             build, gate the payload, install beside Debian's `ash` shell,
+#                      scan, purge (the default)
 #   upgrade            install N-1 built from $PREV_DIST, upgrade to N, require the venv
 #                      to be replaced; then fail an upgrade on purpose and require the
 #                      working install to survive it; then migrate a venv left as a
@@ -17,6 +18,10 @@
 #   negative-scan-rc   a scan exiting 0 with findings must FAIL the exit-code gate
 #   negative-install   a package whose postinst fails must FAIL the install step
 #   negative-payload   a package with an empty payload must FAIL the payload gate
+#   negative-shell-path
+#                      a build that also installs /usr/bin/ash must FAIL the command
+#                      path check, and installing it beside the `ash` shell must
+#                      either be refused or FAIL the coexistence check
 #   version-map        PEP 440 pre/post/dev versions must sort correctly under the
 #                      distribution's own version comparator
 #
@@ -56,6 +61,51 @@ wheel_version() {
 
 build_deb() {
   "$REPO/packaging/deb/build.sh" "$1" "$2"
+}
+
+# The command-path check on a built .deb's file list. `dpkg-deb -c` prints tar's long
+# listing, and the path is its sixth column.
+check_deb_paths() {
+  dpkg-deb -c "$1" | awk '{ print $6 }' | vl_check_command_paths "dpkg-deb -c $(basename "$1")"
+}
+
+# Debian's `ash` package, the Almquist shell's name (a compatibility package for
+# dash), which owns /bin/ash. Installed before the package under test, so that
+# install is the one that would replace it.
+install_distro_ash() {
+  apt-get -qq install -y --no-install-recommends ash >/tmp/apt-ash.log 2>&1 \
+    || { tail -n 20 /tmp/apt-ash.log >&2; vl_fail "apt-get install ash failed"; }
+  [ "$(dpkg-query -W -f='${Status}' ash)" = "install ok installed" ] || vl_fail "Debian's ash package is not installed"
+  vl_say "   installed Debian's ash $(dpkg-query -W -f='${Version}' ash), owner of $(dpkg -L ash | grep -E '/bin/ash$')"
+}
+
+# The real build.sh run from a copy of packaging/deb whose build.sh also installs the
+# wrapper as /usr/bin/ash: what a revert to ASH_CLI_NAME=ash, or an added alias,
+# would produce. The edit is planted before the final dpkg-deb --build.
+build_variant_with_ash_path() {
+  local wheel="$1" out="$2" tree
+  tree="$(mktemp -d)"
+  mkdir -p "$tree/packaging"
+  cp -r "$REPO/packaging/deb" "$tree/packaging/deb"
+  cp "$REPO/packaging/cli-name.sh" "$REPO/packaging/version-map.sh" "$tree/packaging/"
+  cp "$REPO/LICENSE" "$tree/"
+  if vl_gate_python - "$tree/packaging/deb/build.sh" <<'PY'
+import sys
+path = sys.argv[1]
+text = open(path, encoding="utf-8").read()
+anchor = 'DEB="$OUTDIR/${PKG}_${DEB_VERSION}_all.deb"\n'
+if text.count(anchor) != 1:
+    sys.exit("could not find the single DEB= line in build.sh")
+plant = 'cp -p "$STAGE/usr/bin/${ASH_CLI_NAME}" "$STAGE/usr/bin/ash"\n'
+open(path, "w", encoding="utf-8").write(text.replace(anchor, plant + anchor))
+PY
+  then :; else
+    # Inside $(...) errexit does not apply, so a failed edit would otherwise go on to
+    # build an unedited package and hand the caller a correct one as the variant.
+    echo "FAIL: could not plant /usr/bin/ash in the copied build.sh" >&2
+    return 1
+  fi
+  "$tree/packaging/deb/build.sh" "$wheel" "$out"
 }
 
 # Installs with apt so Depends is resolved the way a user's install resolves it, and
@@ -125,6 +175,32 @@ if [ "$MODE" = version-map ]; then
 fi
 
 case "$MODE" in
+  negative-shell-path)
+    echo "== NEGATIVE CONTROL: a .deb that also installs /usr/bin/ash must FAIL the command path check"
+    VARIANT="$(build_variant_with_ash_path "$WHEEL" "$OUT/with-ash")"
+    dpkg-deb -c "$VARIANT" | awk '$6 ~ /bin\// { print "   listed: " $6 }'
+    rc=0
+    check_deb_paths "$VARIANT" || rc=$?
+    [ "$rc" -ne 0 ] || vl_fail "NEGATIVE CONTROL: the command path check ACCEPTED a package listing /usr/bin/ash"
+    echo "   OK: the command path check rejected the package (exit $rc)"
+    echo "== NEGATIVE CONTROL: installed beside Debian's ash, that package must be refused or caught"
+    install_distro_ash
+    vl_assert_shell_intact ash || vl_fail "the shell is broken before the variant was installed"
+    rc=0
+    deb_install "$VARIANT" 2>/tmp/variant-install.err || rc=$?
+    if [ "$rc" -ne 0 ]; then
+      tail -n 5 /tmp/variant-install.err | sed 's/^/   /'
+      echo "   OK: the install was refused (dpkg saw the conflict)"
+    else
+      echo "   dpkg installed it without reporting a conflict over /usr/bin/ash"
+      rc=0
+      vl_assert_shell_intact ash || rc=$?
+      [ "$rc" -ne 0 ] || vl_fail "NEGATIVE CONTROL: the coexistence check ACCEPTED a host where the package installed /usr/bin/ash"
+      echo "   OK: the coexistence check rejected the host: the package replaced the shell (exit $rc)"
+    fi
+    echo; echo "DEB NEGATIVE CONTROL (shell path) PASSED"
+    exit 0
+    ;;
   negative-payload)
     echo "== NEGATIVE CONTROL: an empty-payload .deb must FAIL the payload gate"
     STAGE="$(mktemp -d)"
@@ -146,7 +222,15 @@ echo "== 2. build and gate the package"
 DEB="$(build_deb "$WHEEL" "$OUT")"
 echo "   built: $DEB"
 dpkg-deb --field "$DEB" Package Version Architecture Depends | sed 's/^/   /'
+# No relationship field may name `ash`, Debian's package for the Almquist shell's name:
+# Conflicts or Breaks would remove it, Replaces would let this package take its files,
+# and Provides would satisfy a dependency on the shell with a scanner.
+for field in Provides Conflicts Breaks Replaces; do
+  value="$(dpkg-deb --field "$DEB" "$field")"
+  [ -z "$value" ] || vl_fail "the package declares $field: $value; it must carry no $field field"
+done
 vl_payload_gate "$DEB"
+check_deb_paths "$DEB" || vl_fail "the package's file list must carry /usr/bin/$ASH_CLI_NAME and no other command"
 
 if [ "$MODE" = negative-install ]; then
   echo "== NEGATIVE CONTROL: a .deb whose postinst exits 1 must FAIL the install step"
@@ -242,6 +326,12 @@ if [ "$MODE" = upgrade ]; then
   exit 0
 fi
 
+if [ "$MODE" = assert ]; then
+  echo "== 3a. install Debian's ash shell first, so the package is installed beside it"
+  install_distro_ash
+  vl_assert_shell_intact ash || vl_fail "Debian's ash shell does not work before the package is installed"
+fi
+
 echo "== 3. install it with apt; apt must pull in the interpreter itself"
 if key_dependency_installed; then
   vl_fail "python3-venv is already installed, so this run cannot show the package's own Depends works"
@@ -250,6 +340,8 @@ deb_install "$DEB"
 key_dependency_installed || vl_fail "python3-venv is still absent after installing the package"
 echo "   python3-venv was pulled in by the package's Depends"
 vl_assert_installed_version "$VERSION"
+dpkg -L "$ASH_PKG_NAME" | vl_check_command_paths "dpkg -L $ASH_PKG_NAME" \
+  || vl_fail "the installed package's file list must carry /usr/bin/$ASH_CLI_NAME and no other command"
 
 case "$MODE" in
   negative-findings)
@@ -270,11 +362,16 @@ case "$MODE" in
   *) vl_fail "unknown mode $MODE" ;;
 esac
 
+echo "== 3b. the package and Debian's ash shell work side by side"
+vl_assert_shell_coexists ash || vl_fail "the package and Debian's ash shell do not coexist"
+
 echo "== 4. scan a fixture with a KNOWN finding"
 vl_scan_and_assert
 
-echo "== 5. purge leaves nothing behind"
+echo "== 5. purge leaves nothing behind, and leaves the shell alone"
 purge_and_check
+[ "$(dpkg-query -W -f='${Status}' ash)" = "install ok installed" ] || vl_fail "purging $ASH_PKG_NAME removed Debian's ash package"
+vl_assert_shell_intact ash || vl_fail "purging $ASH_PKG_NAME broke Debian's ash shell"
 
 echo
 echo "DEB VERIFICATION PASSED"

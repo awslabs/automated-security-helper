@@ -39,7 +39,7 @@ REAL_MSIX_MEMBERS = sorted(
         "assets/StoreLogo.png",
         "assets/Square44x44Logo.png",
         "assets/Square150x150Logo.png",
-        "ash.exe",
+        "ashx.exe",
         "ashv3.exe",
         "automated-security-helper.exe",
         "AppxManifest.xml",
@@ -63,12 +63,12 @@ REAL_NUPKG_MEMBERS = sorted(
 )
 REAL_FLATPAK_FILES = sorted(
     [
-        "bin/ash",
+        "bin/ashx",
         "manifest.json",
         "share/ash/wheels/automated_security_helper-3.7.0-py3-none-any.whl",
     ]
 )
-REAL_FLATPAK_LINKS = {"bin/ashv3": "ash", "bin/automated-security-helper": "ash"}
+REAL_FLATPAK_LINKS = {"bin/ashv3": "ashx", "bin/automated-security-helper": "ashx"}
 
 ELF = b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 64
 
@@ -190,9 +190,9 @@ class TestMsix:
 
     def test_a_member_altered_after_packing_is_rejected(self, gate, tmp_path):
         members = gate.fixture_msix_members()
-        launcher = bytearray(members["ash.exe"])
+        launcher = bytearray(members["ashx.exe"])
         launcher[-1] ^= 1
-        members["ash.exe"] = bytes(launcher)
+        members["ashx.exe"] = bytes(launcher)
 
         verdict, detail = _verdict(gate, _msix(gate, tmp_path, members))
 
@@ -256,7 +256,7 @@ class TestMsix:
 
     def test_a_native_binary_under_a_launcher_name_is_rejected(self, gate, tmp_path):
         members = gate._rebuild_blockmap(
-            gate.fixture_msix_members(), {"ash.exe": gate.fixture_native_pe()}
+            gate.fixture_msix_members(), {"ashx.exe": gate.fixture_native_pe()}
         )
 
         verdict, detail = _verdict(gate, _msix(gate, tmp_path, members))
@@ -266,7 +266,7 @@ class TestMsix:
     def test_the_launcher_set_comes_from_the_packaged_manifest(self, gate, tmp_path):
         """Drop ashv3 from the manifest and ashv3.exe becomes an undeclared binary."""
         members = gate.fixture_msix_members(
-            executables=("ash.exe", "automated-security-helper.exe")
+            executables=("ashx.exe", "automated-security-helper.exe")
         )
 
         verdict, detail = _verdict(gate, _msix(gate, tmp_path, members))
@@ -290,7 +290,7 @@ class TestMsix:
         members = {
             k: v
             for k, v in gate.fixture_msix_members(
-                executables=("ash.exe", "automated-security-helper.exe")
+                executables=("ashx.exe", "automated-security-helper.exe")
             ).items()
             if k != "ashv3.exe"
         }
@@ -299,6 +299,29 @@ class TestMsix:
         verdict, detail = _verdict(gate, _msix(gate, tmp_path, members))
 
         assert verdict == "rejected" and "no launcher for" in detail
+
+    def test_the_wheels_deprecated_ash_script_needs_no_launcher(self, gate, tmp_path):
+        """The fixture wheel declares `ash` and the MSIX ships no ash.exe: accepted."""
+        assert b"\nash = " in gate.FIXTURE_ENTRY_POINTS
+        assert "ash.exe" not in gate.FIXTURE_LAUNCHERS
+
+        verdict, detail = _verdict(
+            gate, _msix(gate, tmp_path, gate.fixture_msix_members())
+        )
+
+        assert verdict == "accepted", detail
+
+    def test_a_launcher_for_the_deprecated_ash_alias_is_rejected(self, gate, tmp_path):
+        """Declared, managed, a console script of the wheel -- and still refused."""
+        members = gate._rebuild_blockmap(
+            gate.fixture_msix_members(executables=(*gate.FIXTURE_LAUNCHERS, "ash.exe")),
+            {"ash.exe": gate.fixture_managed_pe()},
+        )
+
+        verdict, detail = _verdict(gate, _msix(gate, tmp_path, members))
+
+        assert verdict == "rejected" and "deprecated 'ash'" in detail
+        assert "no launcher for" not in detail
 
     def test_a_bundled_virtualenv_is_rejected(self, gate, tmp_path):
         members = gate.fixture_msix_members(
@@ -412,12 +435,28 @@ class TestFlatpakTree:
         self, gate, tmp_path
     ):
         root = gate.write_flatpak_tree(
-            tmp_path / "files", extra_links={"bin/grype": "ash"}
+            tmp_path / "files", extra_links={"bin/grype": "ashx"}
         )
 
         verdict, detail = _verdict(gate, "tree:" + str(root))
 
         assert verdict == "rejected" and "not a console script" in detail
+
+    def test_a_link_for_the_deprecated_ash_alias_is_rejected(self, gate, tmp_path):
+        root = gate.write_flatpak_tree(
+            tmp_path / "files", extra_links={"bin/ash": "ashx"}
+        )
+
+        verdict, detail = _verdict(gate, "tree:" + str(root))
+
+        assert verdict == "rejected" and "deprecated 'ash'" in detail
+
+    def test_the_clean_tree_exposes_no_ash(self, gate, tmp_path):
+        root = gate.write_flatpak_tree(tmp_path / "files")
+        files, links = gate.read_tree(str(root))
+
+        assert "bin/ash" not in files and "bin/ash" not in links
+        assert _verdict(gate, "tree:" + str(root))[0] == "accepted"
 
     def test_installed_distributions_are_rejected(self, gate, tmp_path):
         root = gate.write_flatpak_tree(

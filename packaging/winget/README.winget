@@ -1,4 +1,4 @@
-ash for Windows, via winget
+ASH for Windows, via winget
 ===========================
 
 This manifest set is NOT submission-ready
@@ -119,23 +119,30 @@ inside the .msix, which is what keeps them in step with packaging/msix/ without 
 hand-maintained copy. The script then runs validate-manifests.py --released against its
 own output, which requires the opposite digest state.
 
-Three names on PATH, and why the long one exists
+Three names on PATH, and why the command is ashx
 ------------------------------------------------
 
-The installer manifest's Commands list records what the package puts on PATH:
+The installer manifest's Commands list records what the package puts on PATH. The
+moniker is `ash` (`winget install ash`), but that is a distribution identifier; the
+command is `ashx`:
 
-  ash                        canonical, and the one to use.
+  ashx                       canonical, and the one to use.
   ashv3                      deprecated. It works and warns once on stderr. The name
                              pins a major version, so it reads wrong the moment v4
                              exists.
   automated-security-helper  kept indefinitely and silent.
 
-Windows is why the long name exists. MSYS2 ships the Almquist shell as ash.exe, and on
-a machine where that is earlier on PATH than ASH's entry point, `ash scan` reaches the
-shell and fails with `Illegal option --`. That has already happened in this project's
-CI. Every one of these three has to be an AppExecutionAlias in the MSIX manifest;
+The wheel also declares `ash`, the v3 command, as a deprecated alias, and the MSIX
+deliberately does not expose it. Windows is the reason. MSYS2 ships the Almquist shell
+as ash.exe, and on a machine where that is earlier on PATH than ASH's entry point, a
+bare `ash` reaches the shell and fails with `Illegal option --`. That has already
+happened in this project's CI, and it is why the v4 command is `ashx`. The long name is
+the escape hatch for a host where some other program claims a short name.
+
+Every one of these three has to be an AppExecutionAlias in the MSIX manifest.
 validate-manifests.py requires the Commands list to match [project.scripts] in
-pyproject.toml exactly, so a fourth console script cannot be added without this list
+pyproject.toml minus the deprecated `ash` (NOT_EXPOSED_SCRIPTS), and refuses a Commands
+list that names `ash`, so a new console script cannot be added without this list
 noticing.
 
 Two flags worth knowing because they are easy to get backwards: -V is --version, and -v
@@ -158,7 +165,8 @@ So the schemas are the check. They are a real one, because they carry every requ
 field, pattern, and enum the client enforces. The script also checks the four things a
 schema cannot: that the three files agree with each other, that the version they declare
 is the version this repository builds, that the installer URL names the matching release
-tag, and that Commands is exactly the console scripts pyproject.toml declares.
+tag, and that Commands is exactly the console scripts pyproject.toml declares, minus
+the deprecated `ash`.
 
 Before it validates anything it corrupts one field per manifest in memory and requires
 each copy to be rejected, and requires the rejection message to name the field that was
