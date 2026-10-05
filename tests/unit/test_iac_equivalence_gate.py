@@ -760,6 +760,39 @@ def test_line_comments_are_not_counted(tree: Path) -> None:
     assert after["aws_ecr_repository"] == before["aws_ecr_repository"] + 1
 
 
+def test_a_line_commented_module_source_is_not_read(tree: Path) -> None:
+    """A `#` or `//` line ahead of the real `source` must not be taken for it.
+
+    TF_MODULE_SOURCE is anchored at the `module` line, not at `source`, so it
+    takes the first `source = "..."` inside the block, indented or not. Only
+    the line-comment branch of strip_hcl_comments() keeps a commented-out
+    source from being that first match.
+    """
+    checker = load_checker(tree)
+    for marker in ("#", "//"):
+        text = f'module "a" {{\n  {marker} source = "../old"\n  source = "../new"\n}}\n'
+        assert checker.TF_MODULE_SOURCE.findall(checker.strip_hcl_comments(text)) == [
+            "../new"
+        ], marker
+
+    # The same through check_composition(): a commented-out sibling module
+    # ahead of the real source would read as composing fargate.
+    example = tree / "deploy/terraform/modules/agentcore/examples/basic/main.tf"
+    text = example.read_text()
+    real = '  source = "../../../ash-image-pipeline"\n'
+    assert text.count(real) == 1
+    example.write_text(
+        text.replace(
+            real,
+            '  # source = "../../../fargate"\n'
+            '  // source = "../../../fargate"\n' + real,
+        )
+    )
+    result = run_checker(tree)
+    assert result.returncode == 0, result.stdout
+    assert "No unrecorded divergence" in result.stdout
+
+
 def test_comment_markers_inside_strings_and_heredocs_are_kept(tree: Path) -> None:
     """The tree has ARNs ending in `/*`; a naive stripper would eat resources."""
     checker = load_checker(tree)
