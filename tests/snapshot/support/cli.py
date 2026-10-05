@@ -159,14 +159,21 @@ def displayed_cwd(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     real working directory, because only ``os.getcwd`` is replaced. Register
     DISPLAYED_CWD with ``snapshot_normalizer.add_root`` so its Windows spelling
     (backslashes) snapshots like the POSIX one.
+
+    ``os.getcwd`` returns the native spelling (``\\workspace\\demo-project`` on
+    Windows), as the real one does. From Python 3.13 ``Path.absolute()`` relies on
+    that: it splits the cwd on the native separator only, so a POSIX-spelled cwd on
+    Windows became one component, ``/workspace/demo-project\\probe``, which compares
+    unequal to the same path parsed normally and failed the probe below.
     """
     import pathlib
 
+    native_cwd = str(pathlib.PurePath(DISPLAYED_CWD))
     with monkeypatch.context() as mp:
-        mp.setattr(os, "getcwd", lambda: DISPLAYED_CWD)
+        mp.setattr(os, "getcwd", lambda: native_cwd)
         accessor = getattr(pathlib, "_NormalAccessor", None)  # Python 3.10 only
         if accessor is not None and hasattr(accessor, "getcwd"):
-            mp.setattr(accessor, "getcwd", staticmethod(lambda: DISPLAYED_CWD))
+            mp.setattr(accessor, "getcwd", staticmethod(lambda: native_cwd))
         probe = pathlib.Path("probe").absolute()
         if pathlib.PurePath(DISPLAYED_CWD, "probe") != probe:
             raise AssertionError(
