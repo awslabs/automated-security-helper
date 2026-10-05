@@ -743,6 +743,8 @@ runs:
     # The script's docstring has the measurements and what it does not cover.
     - name: "Assert the image detected the planted defects"
       shell: bash
+      env:
+        ASSERT_DETECTION: ${{ github.action_path }}/assert_detection.py
       run: |
-        python3 "${{ github.action_path }}/assert_detection.py" \
+        python3 "${ASSERT_DETECTION}" \
           /tmp/ash-detect/output/ash_aggregated_results.json

@@ -28,6 +28,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = (
@@ -168,3 +169,30 @@ def test_a_missing_report_fails(tmp_path, capsys):
 
 def test_usage_error_without_a_path(capsys):
     assert gate.main([]) == 2
+
+
+def test_the_action_passes_the_script_path_through_env():
+    """The assert step reads the script path from env, not an inline `${{ }}`.
+
+    An expression in `run:` is pasted into the shell script before bash parses
+    it. github.action_path is runner-controlled, so this is hygiene rather than
+    an injection fix, but it keeps the step in the same shape as the rest of
+    the repository's actions.
+    """
+    action = yaml.safe_load(
+        (SCRIPT_PATH.parent / "action.yml").read_text(encoding="utf-8")
+    )
+    steps = [
+        s
+        for s in action["runs"]["steps"]
+        if "assert_detection.py" in s.get("run", "")
+        or "assert_detection.py" in str(s.get("env", {}))
+    ]
+    assert len(steps) == 1, steps
+    step = steps[0]
+    assert "${{" not in step["run"], step["run"]
+    env = step.get("env", {})
+    assert env.get("ASSERT_DETECTION") == (
+        "${{ github.action_path }}/assert_detection.py"
+    ), env
+    assert '"${ASSERT_DETECTION}"' in step["run"], step["run"]
