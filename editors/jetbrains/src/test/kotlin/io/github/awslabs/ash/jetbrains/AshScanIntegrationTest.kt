@@ -353,4 +353,20 @@ class AshScanIntegrationTest : BasePlatformTestCase() {
         action.actionPerformed(noProject)
         assertNull(noProject.getData(CommonDataKeys.PROJECT))
     }
+
+    fun testTheActionIsDisabledWhileAScanRuns() {
+        val action = AshScanAction()
+        val event = TestActionEvent.createTestEvent(action, SimpleDataContext.getProjectContext(project))
+        val service = AshScanService.getInstance(project)
+
+        assertTrue(service.tryStartScan())
+        try {
+            action.update(event)
+            assertFalse("disabled while a scan runs", event.presentation.isEnabled)
+        } finally {
+            service.finishScan()
+        }
+        action.update(event)
+        assertTrue("enabled again once it finishes", event.presentation.isEnabled)
+    }
 }

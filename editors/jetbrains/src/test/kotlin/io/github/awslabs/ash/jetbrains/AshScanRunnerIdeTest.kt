@@ -618,4 +618,45 @@ class AshScanRunnerIdeTest : BasePlatformTestCase() {
         assertEquals(NotificationType.WARNING, message.type)
         assertFalse("a cancel is not an exit code: ${message.body}", message.body.contains("exited"))
     }
+
+    fun testASecondScanWhileOneRunsIsRefusedAndTheFirstStillReportsItsResult() {
+        // Two scans would share <project>/.ash/ash_output: the second's freshness guard deletes the
+        // first's report, and either can read the other's file half-written. So the second is
+        // refused, and the user gets the first one's result when it finishes.
+        val source = Files.createDirectories(workdir.resolve("project"))
+        val started = workdir.resolve("started")
+        val release = workdir.resolve("release")
+        val count = workdir.resolve("count")
+        val script = rawStub(
+            "echo run >> '$count'; touch '$started'; while [ ! -f '$release' ]; do sleep 0.05; done\n" +
+                "mkdir -p \"\$out/reports\"\ncat > \"\$out/reports/ash.sarif\" <<'SARIF_EOF'\n" +
+                sarif("app.py", "error", 2) + "\nSARIF_EOF\n" +
+                "echo '{\"scanner_results\": {\"bandit\": {\"status\": \"PASSED\"}}}' > \"\$out/ash_aggregated_results.json\"\n" +
+                "exit 2",
+        )
+        fun scan() = AshScanController.scan(project, script.toString(), sourceDir = source)
+
+        var firstMessages: List<AshScanController.Message>? = null
+        var secondMessages: List<AshScanController.Message>? = null
+        val first = thread { firstMessages = scan() }
+        try {
+            awaitFile(started)
+            val second = thread { secondMessages = scan() }
+            second.join(10_000)
+            assertFalse("a second scan must neither wait on the first nor run beside it", second.isAlive)
+            val refused = secondMessages!!.single()
+            assertEquals("ASH scan already running", refused.title)
+            assertEquals(NotificationType.INFORMATION, refused.type)
+            assertEquals("only one ASH process may have started", 1, Files.readAllLines(count).size)
+        } finally {
+            Files.writeString(release, "go")
+            first.join(30_000)
+        }
+        assertEquals("ASH scan finished", firstMessages!!.single().title)
+
+        // And the guard is released once the first finishes, failure or not.
+        assertEquals("ASH scan finished", scan().single().title)
+        assertEquals(2, Files.readAllLines(count).size)
+        AshScanService.getInstance(project).clear()
+    }
 }

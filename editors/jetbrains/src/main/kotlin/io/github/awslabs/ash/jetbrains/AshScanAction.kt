@@ -25,7 +25,12 @@ class AshScanAction : AnAction() {
         // Disabled rather than hidden when there is no project: a greyed-out entry tells the
         // user the command exists and does not apply, where a missing one reads as a broken
         // install.
-        e.presentation.isEnabled = e.getData(CommonDataKeys.PROJECT) != null
+        //
+        // Also disabled while a scan of the project runs, so a second click does not look like it
+        // started a second scan. AshScanController refuses one regardless.
+        val project = e.getData(CommonDataKeys.PROJECT)
+        e.presentation.isEnabled = project != null && !project.isDisposed &&
+            !AshScanService.getInstance(project).isScanning
     }
 
     override fun actionPerformed(e: AnActionEvent) {

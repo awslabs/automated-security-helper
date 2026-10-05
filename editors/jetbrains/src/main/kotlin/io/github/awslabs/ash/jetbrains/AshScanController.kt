@@ -39,7 +39,26 @@ object AshScanController {
         notice: AshCliLocator.FallbackNotice = AshCliLocator.fallbackNotice,
         sourceDir: Path? = project.basePath?.let { Path.of(it) },
     ): List<Message> {
-        val messages = run(project, sourceDir, configured, pathValue, indicator, notice)
+        // A second scan while one runs is refused, not queued and not run beside it; the running
+        // scan's notification is the answer to both clicks. The action is also disabled while a
+        // scan runs, but that check and a click can race, so this is the one that decides.
+        val service = AshScanService.getInstance(project)
+        val messages = if (service.tryStartScan()) {
+            try {
+                run(project, sourceDir, configured, pathValue, indicator, notice)
+            } finally {
+                service.finishScan()
+            }
+        } else {
+            listOf(
+                Message(
+                    NotificationType.INFORMATION,
+                    "ASH scan already running",
+                    "A scan of this project is already running, so another was not started. " +
+                        "Its result is shown when it finishes.",
+                ),
+            )
+        }
         for (message in messages) {
             AshNotifier.notify(project, message.title, message.body, message.type)
         }

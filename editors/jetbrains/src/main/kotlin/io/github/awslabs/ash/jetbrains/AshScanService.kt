@@ -8,6 +8,7 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -40,6 +41,22 @@ class AshScanService(private val project: Project) {
     }
 
     val current: State get() = state.get()
+
+    /**
+     * Whether a scan of this project is running. One at a time, because two would share
+     * `<project>/.ash/ash_output`: the second's freshness guard deletes the first's report, and
+     * either could read the other's file half-written.
+     */
+    private val scanInFlight = AtomicBoolean(false)
+
+    val isScanning: Boolean get() = scanInFlight.get()
+
+    /** True if this caller may scan, and every later caller false until [finishScan]. */
+    fun tryStartScan(): Boolean = scanInFlight.compareAndSet(false, true)
+
+    fun finishScan() {
+        scanInFlight.set(false)
+    }
 
     /** Findings for one file, or empty. The key must already be normalized. */
     fun findingsFor(absolutePath: String): List<AshFinding> =
