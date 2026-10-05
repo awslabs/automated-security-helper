@@ -9,40 +9,61 @@ any file that wheel is built from changes the packages. The workflow's `paths`
 filters decide whether those legs run at all, and a file missing from them is a
 change that reaches the packages untested: the filter missed the root Dockerfile
 (the hook copies it into the wheel as assets/Dockerfile), README.md (the wheel's
-METADATA) and NOTICE (a license file hatchling adds to dist-info), and nothing
-said so.
+METADATA), NOTICE (a license file hatchling adds to dist-info) and .gitignore
+(hatchling leaves out every file it ignores), and nothing said so.
 
 The inputs are measured rather than listed here, because a second hand-written
-list is the same defect as the first:
+list is the same defect as the first. There are two layers, and a real run takes
+the union of both.
 
-  - the license files are read off the built wheel's dist-info/licenses/, which is
-    what hatchling actually included, not what its default globs are believed to be;
-  - the readme, the build hook and every source the hatch build config names
-    (include, only-include, packages, artifacts, and the source keys of
-    force-include, shared-data, shared-scripts and extra-metadata, at the global and
-    the wheel-target level) come from pyproject.toml;
-  - the paths the hook reaches come from hatch_build.py's own uses of ASH_REPO_ROOT,
-    spelled `.joinpath(...)` or `/`, and from relative `Path("...")` and
-    `open("...")` literals.
+The measured layer builds the wheel in this process with hatchling's own PEP 517
+entry point, the one `uv build` calls, under sys.addaudithook. Every file the build
+opens for reading inside the repository is an input, however the hook spelled the
+path. Every process the build starts must be one this script can attribute (only
+the hook's `git rev-parse --abbrev-ref HEAD`, which reads .git and nothing a paths
+entry can name); any other subprocess, os.system, exec, spawn or fork is an error,
+because what a child process reads cannot be seen from here. The installed build
+backend must satisfy pyproject's [build-system] requires, so the build measured is
+the build `uv build` runs.
 
-It fails closed rather than skipping what it cannot read: a use of ASH_REPO_ROOT
-whose path is not a constant prefix, a second root from __file__, a build option or
-build hook it does not know, and a wheel with no dist-info/licenses/ are errors. A
-path that is a directory, or ends in a non-constant part, must be matched by an
-entry that covers every file below it. GitHub's `!` negations and `paths-ignore`
-are refused, because this check models neither.
+The static layer reads what the measured build cannot show, because the build only
+opens the files this one run reaches: a file the hook only tests for (`.exists()`),
+or reads on a branch this build did not take. It reads:
+
+  - the license files off the built wheel's dist-info/licenses/;
+  - the readme, the build hook, the package's __init__.py, .gitignore, and every
+    source the hatch build config names (include, only-include, packages,
+    artifacts, and the source keys of force-include, shared-data, shared-scripts
+    and extra-metadata, at the global and the wheel-target level) from
+    pyproject.toml;
+  - the paths the hook reaches through ASH_REPO_ROOT, spelled `.joinpath(...)` or
+    `/`, and relative `Path("...")` and `open("...")` literals, from hatch_build.py.
+
+The static layer fails closed rather than skipping what it cannot read: a use of
+ASH_REPO_ROOT whose path is not a constant prefix, a second root from __file__, a
+`..` in any path, a build option or build hook it does not know (ignore-vcs
+included), a .hgignore, and a wheel with no dist-info/licenses/ are errors. A path
+that is a directory, or ends in a non-constant part, must be matched by an entry
+that covers every file below it. GitHub's `!` negations and `paths-ignore` are
+refused, because this check models neither.
 
 It also requires the push and pull_request lists to be identical, which the
 workflow's comment asks for and nothing checked.
 
-Usage: assert-paths-filter.py --wheel <built wheel> [--workflow PATH] [--repo DIR]
+The self-test runs each layer on its own against fixture repositories it builds
+with hatchling, so a deleted measurement in either layer turns it red.
+
+Usage: assert-paths-filter.py [--repo DIR] [--workflow PATH]
        assert-paths-filter.py --self-test
+Both need hatchling importable, e.g. `uv run --no-project --with hatchling`.
 """
 
 from __future__ import annotations
 
 import argparse
 import ast
+import contextlib
+import importlib.metadata
 import os
 import re
 import sys
@@ -51,6 +72,8 @@ import tomllib
 import zipfile
 
 DEFAULT_WORKFLOW = ".github/workflows/ash-native-packages.yml"
+PACKAGE_DIR = "automated_security_helper"
+LAYERS = ("static", "measured")
 
 
 def glob_to_regex(pattern: str) -> re.Pattern[str]:
@@ -138,6 +161,20 @@ class Unresolvable(ValueError):
     """The hook or the build config names a wheel input this script cannot read."""
 
 
+def repo_relative(path: str, where: str) -> str:
+    """A repository-relative path, normalized; refuses absolute paths and `..`.
+
+    A `..` anywhere is refused rather than resolved: `pkg/../CHANGELOG.md` names
+    CHANGELOG.md, and reading only the first component missed it.
+    """
+    if os.path.isabs(path) or "\\" in path:
+        raise Unresolvable(f"{where}: {path!r} is not a relative POSIX path")
+    if ".." in path.split("/"):
+        raise Unresolvable(f"{where}: {path!r} contains `..`")
+    normalized = os.path.normpath(path.strip("/")).replace(os.sep, "/")
+    return "" if normalized == "." else normalized
+
+
 def _string_parts(nodes: list[ast.expr]) -> tuple[list[str], bool]:
     """Leading constant strings of a joinpath argument list, and whether a
     non-constant argument followed them."""
@@ -164,11 +201,12 @@ def hook_root_files(hook_source: str) -> set[str]:
     Anything else (an alias such as `ROOT = ASH_REPO_ROOT`, a non-constant first
     part, the name passed to a function) raises Unresolvable rather than being
     skipped, because a skipped use is an input this check does not see. A second
-    root spelled `Path(__file__)` is refused the same way.
+    root spelled `Path(__file__)` is refused the same way. Spellings this does not
+    model at all, such as `Path(self.root)`, are left to the measured layer.
 
     Returned paths that stand for a directory end in `/<any>/<any>`; the caller
     turns a resolved path into a directory probe when the repository has a
-    directory there (see wheel_inputs).
+    directory there (see static_inputs).
     """
     tree = ast.parse(hook_source)
     parents: dict[ast.AST, ast.AST] = {}
@@ -194,7 +232,9 @@ def hook_root_files(hook_source: str) -> set[str]:
         ):
             # A relative literal is read from the build's working directory, which
             # is the repository root.
-            names.add(node.args[0].value.strip("/"))
+            names.add(
+                repo_relative(node.args[0].value, f"hatch_build.py line {node.lineno}")
+            )
         if not (isinstance(node, ast.Name) and node.id == "ASH_REPO_ROOT"):
             continue
         if isinstance(node.ctx, ast.Store):
@@ -233,7 +273,7 @@ def hook_root_files(hook_source: str) -> set[str]:
                 f"({ast.unparse(parents.get(node, node))!r}); spell it "
                 'ASH_REPO_ROOT.joinpath("<name>") or ASH_REPO_ROOT / "<name>"'
             )
-        path = "/".join(parts)
+        path = repo_relative("/".join(parts), f"hatch_build.py line {node.lineno}")
         names.add(f"{path}/{ANY}/{ANY}" if dynamic else path)
     return names
 
@@ -269,14 +309,14 @@ def _is_cwd(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> bool:
 INPUT_LISTS = ("include", "only-include", "artifacts", "packages")
 INPUT_TABLES = ("force-include", "shared-data", "shared-scripts", "extra-metadata")
 # Options that select among, rename or describe files the options above already
-# name, so they add no input of their own.
+# name, so they add no input of their own. ignore-vcs is deliberately absent: it
+# changes which VCS ignore files are inputs, so it is refused as unknown.
 NON_INPUT_OPTIONS = frozenset(
     {
         "exclude",
         "sources",
         "only-packages",
         "skip-excluded-dirs",
-        "ignore-vcs",
         "reproducible",
         "directory",
         "dev-mode-dirs",
@@ -318,12 +358,7 @@ def build_config_inputs(repo: str, build: dict, where: str) -> set[str]:
         for source in sources:
             if not isinstance(source, str) or source.startswith("!"):
                 raise Unresolvable(f"{where}.{option} entry {source!r} cannot be read")
-            path = source.strip("/")
-            if os.path.isabs(source) or path.split("/")[0] == "..":
-                raise Unresolvable(
-                    f"{where}.{option} entry {source!r} is outside the repository"
-                )
-            found.add(path)
+            found.add(repo_relative(source, f"{where}.{option}"))
     return found
 
 
@@ -334,20 +369,25 @@ def as_probe(repo: str, path: str) -> str:
     return path
 
 
-def wheel_inputs(repo: str, wheel: str) -> set[str]:
-    """The repository files the wheel is built from."""
+def read_pyproject(repo: str) -> dict:
     with open(os.path.join(repo, "pyproject.toml"), "rb") as handle:
-        pyproject = tomllib.load(handle)
+        return tomllib.load(handle)
+
+
+def static_config_inputs(repo: str) -> set[str]:
+    """The inputs pyproject.toml and the hook's source name. Runs before the build,
+    so a config this cannot read is refused without building anything."""
+    pyproject = read_pyproject(repo)
     inputs = {"pyproject.toml"}
     project = pyproject["project"]
     readme = project.get("readme")
     if isinstance(readme, dict):
         readme = readme.get("file")
     if readme:
-        inputs.add(readme)
+        inputs.add(repo_relative(readme, "project.readme"))
     license_ = project.get("license")
     if isinstance(license_, dict) and license_.get("file"):
-        inputs.add(license_["file"])
+        inputs.add(repo_relative(license_["file"], "project.license"))
 
     build = pyproject.get("tool", {}).get("hatch", {}).get("build", {})
     wheel_target = build.get("targets", {}).get("wheel", {})
@@ -362,11 +402,30 @@ def wheel_inputs(repo: str, wheel: str) -> set[str]:
                 "which files it adds to the wheel"
             )
     if hooks:
-        hook = hooks["custom"].get("path", "hatch_build.py")
+        hook = repo_relative(
+            hooks["custom"].get("path", "hatch_build.py"), "hooks.custom.path"
+        )
         inputs.add(hook)
         with open(os.path.join(repo, hook), encoding="utf-8") as handle:
             inputs |= hook_root_files(handle.read())
 
+    # hatchling leaves out every file the root .gitignore ignores (with ignore-vcs
+    # unset, which build_config_inputs enforces), so one line there can drop source
+    # from the wheel. It reads .hgignore the same way; that is not modeled.
+    if os.path.exists(os.path.join(repo, ".hgignore")):
+        raise Unresolvable(
+            ".hgignore exists; hatchling reads it as a second ignore file, and this "
+            "check does not model it"
+        )
+    if os.path.exists(os.path.join(repo, ".gitignore")):
+        inputs.add(".gitignore")
+    # The package tree itself is an input too, and is listed as a directory glob.
+    inputs.add(f"{PACKAGE_DIR}/__init__.py")
+    return inputs
+
+
+def wheel_license_inputs(wheel: str) -> set[str]:
+    """The license files hatchling actually put in the wheel's dist-info."""
     with zipfile.ZipFile(wheel) as archive:
         licenses = [
             n.split("/licenses/", 1)[1]
@@ -378,9 +437,186 @@ def wheel_inputs(repo: str, wheel: str) -> set[str]:
             f"{wheel} has no dist-info/licenses/ member, so the license files cannot "
             "be measured. Refusing to report the filter complete without them."
         )
-    inputs |= set(licenses)
-    # The package tree itself is an input too, and is listed as a directory glob.
-    inputs.add("automated_security_helper/__init__.py")
+    return set(licenses)
+
+
+# The audit events that start another process. What a child reads is invisible to
+# this process's audit hook, so each one must be attributed or the check fails.
+SPAWN_EVENTS = frozenset(
+    {
+        "subprocess.Popen",
+        "os.system",
+        "os.exec",
+        "os.posix_spawn",
+        "os.spawn",
+        "os.fork",
+        "os.forkpty",
+        "os.startfile",
+    }
+)
+
+# Commands the build may run, keyed by (program name, *arguments). Each must read
+# nothing a paths entry could name.
+ATTRIBUTED_COMMANDS = {
+    ("git", "rev-parse", "--abbrev-ref", "HEAD"): (
+        "hatch_build.py records the branch name in ASH_INSTALLED_REVISION; git "
+        "reads only .git, which is not a file in the tree"
+    ),
+}
+
+# Set to a list while a measured build runs; the audit hook appends to it.
+_recording: list[tuple] | None = None
+_hook_installed = False
+
+
+def _audit(event: str, args: tuple) -> None:
+    events = _recording
+    if events is None:
+        return
+    if event == "open":
+        # Resolved later: an audit hook should do as little as it can.
+        events.append(("open", args[0], args[1], args[2], os.getcwd()))
+    elif event in SPAWN_EVENTS:
+        events.append((event, args))
+
+
+def check_build_backend(pyproject: dict) -> None:
+    """The backend this process will run must be the one `uv build` would run."""
+    build_system = pyproject.get("build-system")
+    if not isinstance(build_system, dict):
+        raise Unresolvable("pyproject.toml has no [build-system]")
+    if build_system.get("build-backend") != "hatchling.build":
+        raise Unresolvable(
+            f"build-backend is {build_system.get('build-backend')!r}; this check "
+            "measures only hatchling.build"
+        )
+    try:
+        from packaging.requirements import Requirement
+    except ImportError as error:  # hatchling depends on packaging
+        raise Unresolvable(f"cannot read [build-system] requires: {error}") from error
+    for spec in build_system.get("requires", []):
+        requirement = Requirement(spec)
+        try:
+            installed = importlib.metadata.version(requirement.name)
+        except importlib.metadata.PackageNotFoundError as error:
+            raise Unresolvable(
+                f"build requirement {spec!r} is not installed, so the build measured "
+                "here would not be the build `uv build` runs"
+            ) from error
+        if not requirement.specifier.contains(installed, prereleases=True):
+            raise Unresolvable(
+                f"build requirement {spec!r} is not met by the installed "
+                f"{requirement.name} {installed}"
+            )
+
+
+def measured_build(repo: str, out_dir: str) -> tuple[str, list[tuple]]:
+    """Builds the wheel in-process under the audit hook; returns its path and the
+    open and spawn events recorded while the build ran."""
+    global _recording, _hook_installed
+    check_build_backend(read_pyproject(repo))
+    import hatchling.build
+
+    if not _hook_installed:
+        sys.addaudithook(_audit)
+        _hook_installed = True
+    events: list[tuple] = []
+    cwd = os.getcwd()
+    dont_write_bytecode = sys.dont_write_bytecode
+    # The frontend runs the backend from the project root, so the hook's relative
+    # paths resolve there, as they do under `uv build`.
+    os.chdir(repo)
+    sys.dont_write_bytecode = True
+    try:
+        with contextlib.redirect_stdout(sys.stderr):
+            _recording = events
+            name = hatchling.build.build_wheel(out_dir)
+    finally:
+        _recording = None
+        sys.dont_write_bytecode = dont_write_bytecode
+        os.chdir(cwd)
+    return os.path.join(out_dir, name), events
+
+
+def _opened_for_reading(mode: object, flags: object) -> bool:
+    if isinstance(flags, int):
+        return (flags & os.O_ACCMODE) != os.O_WRONLY
+    if isinstance(mode, str):
+        return "r" in mode or "+" in mode
+    return True
+
+
+def _environment_roots() -> set[str]:
+    return {os.path.realpath(p) for p in (sys.prefix, sys.exec_prefix)}
+
+
+def _repo_path(repo: str, out_dir: str, raw: object, cwd: str) -> str | None:
+    """The repository-relative path an open event names, or None outside it."""
+    if raw is None or isinstance(raw, int):
+        return None  # a descriptor; the open that produced it was recorded
+    path = os.path.realpath(os.path.join(cwd, os.fsdecode(raw)))  # type: ignore[arg-type]
+    # The wheel being written, and the interpreter's own environment when it lives
+    # in the checkout (a .venv): neither is a file the wheel is built from.
+    for skipped in (out_dir, *_environment_roots()):
+        if path == skipped or path.startswith(skipped + os.sep):
+            return None
+    if path != repo and not path.startswith(repo + os.sep):
+        return None
+    rel = os.path.relpath(path, repo).replace(os.sep, "/")
+    parts = rel.split("/")
+    if "__pycache__" in parts:
+        # A cached module is its source file: `x/__pycache__/m.cpython-313.pyc`.
+        at = parts.index("__pycache__")
+        rel = "/".join([*parts[:at], parts[-1].split(".", 1)[0] + ".py"])
+    return rel
+
+
+def measured_inputs(repo: str, out_dir: str, events: list[tuple]) -> set[str]:
+    """Files the build read inside the repository; refuses unattributed processes."""
+    repo = os.path.realpath(repo)
+    out_dir = os.path.realpath(out_dir)
+    found: set[str] = set()
+    unattributed: list[str] = []
+    for event in events:
+        if event[0] == "open":
+            _, raw, mode, flags, cwd = event
+            if not _opened_for_reading(mode, flags):
+                continue
+            rel = _repo_path(repo, out_dir, raw, cwd)
+            if rel is not None:
+                found.add(rel)
+            continue
+        name, args = event
+        if name == "subprocess.Popen":
+            executable, argv = args[0], args[1]
+            if isinstance(argv, (str, bytes, os.PathLike)):
+                argv = [argv]
+            argv = [os.fsdecode(a) for a in argv]
+            program = os.fsdecode(executable) if executable else argv[0]
+            key = (os.path.basename(argv[0]), *argv[1:]) if argv else ()
+            if key in ATTRIBUTED_COMMANDS and os.path.basename(program) == key[0]:
+                continue
+            unattributed.append(f"{name} {argv!r}")
+        else:
+            unattributed.append(f"{name} {args!r}")
+    if unattributed:
+        raise Unresolvable(
+            "the build started a process this check cannot attribute, so what it "
+            "read is not measured: " + "; ".join(unattributed)
+        )
+    return found
+
+
+def wheel_inputs(repo: str, out_dir: str, layers: tuple[str, ...] = LAYERS) -> set[str]:
+    """The repository files the wheel is built from, as the union of the layers."""
+    inputs: set[str] = set()
+    if "static" in layers:
+        inputs |= static_config_inputs(repo)
+    wheel, events = measured_build(repo, out_dir)
+    if "static" in layers:
+        inputs |= wheel_license_inputs(wheel)
+    if "measured" in layers:
+        inputs |= measured_inputs(repo, out_dir, events)
     return {as_probe(repo, path) for path in inputs}
 
 
@@ -422,19 +658,49 @@ def check(filters: dict[str, list[str]], inputs: set[str]) -> list[str]:
     return problems
 
 
-FIXTURE_HOOK = """\
+# A real hatchling hook. stage() is never called, so only the static layer sees
+# what a case puts there (STATIC_EXTRA); initialize() runs in every build, so the
+# measured layer sees what a case puts there (BUILD_EXTRA). The git call in
+# initialize() is the one attributed command, so every build exercises that rule.
+STATIC_EXTRA = "    # static-extra\n"
+BUILD_EXTRA = "        # build-extra\n"
+FIXTURE_HOOK = f"""\
+import os
+import shutil
+import subprocess
 from pathlib import Path
+from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 ASH_REPO_ROOT: Path = Path(__file__).parent
 ASH_ASSETS_PATH: Path = ASH_REPO_ROOT.joinpath("automated_security_helper", "assets")
-def stage(rel, run):
+
+
+def stage(rel, run, name):
     dockerfile = ASH_REPO_ROOT.joinpath("Dockerfile")
     source = ASH_REPO_ROOT.joinpath("automated_security_helper", *rel.split("/"))
     run(["git", "rev-parse"], cwd=ASH_REPO_ROOT.as_posix())
-"""
+{STATIC_EXTRA}
+
+class FixtureHook(BuildHookInterface):
+    def initialize(self, version, build_data):
+        try:
+            subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=ASH_REPO_ROOT.as_posix(),
+                capture_output=True,
+                check=False,
+            )
+        except OSError:
+            pass
+{BUILD_EXTRA}"""
 
 FIXTURE_PYPROJECT = """\
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "automated-security-helper"
+version = "1.0"
 readme = "README.md"
 
 [tool.hatch.build.targets.wheel]
@@ -447,6 +713,34 @@ include = ["automated_security_helper"]
 path = "hatch_build.py"
 """
 
+# No hook and no include: hatchling finds the package by the project name, and
+# nothing in pyproject names the package tree.
+FIXTURE_PYPROJECT_BARE = """\
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "automated-security-helper"
+version = "1.0"
+readme = "README.md"
+"""
+
+# Files every fixture repository has. The ones nothing in the default fixture
+# names are there so a case can name them without the build failing.
+FIXTURE_FILES = {
+    "automated_security_helper/__init__.py": "",
+    "automated_security_helper/assets/Dockerfile": "FROM scratch\n",
+    "Dockerfile": "FROM scratch\n",
+    "README.md": "# fixture\n",
+    ".gitignore": "*.log\n",
+    "CHANGELOG.md": "changes\n",
+    "CONTRIBUTING.md": "contributing\n",
+    "SECURITY.md": "security\n",
+    "VERSION": "1.0\n",
+    "share/data.txt": "data\n",
+}
+
 FIXTURE_FILTER = [
     "automated_security_helper/**",
     "pyproject.toml",
@@ -455,6 +749,7 @@ FIXTURE_FILTER = [
     "README.md",
     "LICENSE",
     "NOTICE",
+    ".gitignore",
 ]
 
 
@@ -468,33 +763,47 @@ def fixture_workflow(entries: list[str], extra: str = "") -> str:
 
 def run_fixture(
     root: str,
+    layers: tuple[str, ...] = LAYERS,
     hook: str = FIXTURE_HOOK,
+    static_extra: str = "",
+    build_extra: str = "",
     pyproject: str = FIXTURE_PYPROJECT,
     workflow: str | None = None,
     licenses: tuple[str, ...] = ("LICENSE", "NOTICE"),
+    files: dict[str, str] | None = None,
 ) -> str:
-    """Builds a fixture repository and wheel under root; returns "ok", "problems"
-    or "error" (Unresolvable)."""
-    os.makedirs(os.path.join(root, "automated_security_helper", "assets"))
-    files = {"pyproject.toml": pyproject, "hatch_build.py": hook}
-    for name, text in files.items():
-        with open(os.path.join(root, name), "w", encoding="utf-8") as handle:
+    """Builds a fixture repository under root and a wheel from it with hatchling;
+    returns "ok", "problems" or "error: <the Unresolvable message>"."""
+    hook = hook.replace(STATIC_EXTRA, f"    {static_extra}\n" if static_extra else "")
+    hook = hook.replace(BUILD_EXTRA, f"        {build_extra}\n" if build_extra else "")
+    tree = {
+        **FIXTURE_FILES,
+        "pyproject.toml": pyproject,
+        "hatch_build.py": hook,
+        **dict.fromkeys(licenses, "license text\n"),
+        **(files or {}),
+    }
+    for name, text in tree.items():
+        path = os.path.join(root, *name.split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
             handle.write(text)
-    wheel = os.path.join(root, "fixture-1.0-py3-none-any.whl")
-    with zipfile.ZipFile(wheel, "w") as archive:
-        archive.writestr("automated_security_helper/__init__.py", "")
-        for name in licenses:
-            archive.writestr(f"fixture-1.0.dist-info/licenses/{name}", "text")
+    out_dir = root + "-dist"
+    os.makedirs(out_dir)
     try:
-        inputs = wheel_inputs(root, wheel)
-    except Unresolvable:
-        return "error"
+        inputs = wheel_inputs(root, out_dir, layers)
+    except Unresolvable as error:
+        return f"error: {error}"
     text = workflow if workflow is not None else fixture_workflow(FIXTURE_FILTER)
     return "problems" if check(read_paths_filters(text), inputs) else "ok"
 
 
-def without(entry: str) -> list[str]:
-    return [e for e in FIXTURE_FILTER if e != entry]
+def without(*entries: str) -> list[str]:
+    return [e for e in FIXTURE_FILTER if e not in entries]
+
+
+STATIC = ("static",)
+MEASURED = ("measured",)
 
 
 def self_test() -> int:
@@ -531,77 +840,327 @@ def self_test() -> int:
     slash_hook = FIXTURE_HOOK.replace(
         'ASH_REPO_ROOT.joinpath("Dockerfile")', 'ASH_REPO_ROOT / "Dockerfile"'
     )
+    copy_changelog = 'shutil.copyfile({}, ASH_ASSETS_PATH / "CL.md")'
     wheel_cases: list[tuple[str, dict, str]] = [
-        ("wheel inputs: the fixture's filter covers them", {}, "ok"),
+        # Each layer on its own. A case names the layer whose measurement it needs,
+        # so deleting that measurement turns it red even where the other layer
+        # would have caught the same file in a real run.
+        ("static: the fixture's filter covers the inputs", {"layers": STATIC}, "ok"),
         (
-            "wheel inputs: the hook's Dockerfile is not listed",
-            {"workflow": fixture_workflow(without("Dockerfile"))},
+            "static: the hook's Dockerfile is not listed",
+            {"layers": STATIC, "workflow": fixture_workflow(without("Dockerfile"))},
             "problems",
         ),
         (
-            "wheel inputs: `ASH_REPO_ROOT / name` is read, and is listed",
-            {"hook": slash_hook},
+            "static: `ASH_REPO_ROOT / name` is read, and is listed",
+            {"layers": STATIC, "hook": slash_hook},
             "ok",
         ),
         (
-            "wheel inputs: `ASH_REPO_ROOT / name` is read, and is not listed",
-            {"hook": slash_hook, "workflow": fixture_workflow(without("Dockerfile"))},
+            "static: `ASH_REPO_ROOT / name` is read, and is not listed",
+            {
+                "layers": STATIC,
+                "hook": slash_hook,
+                "workflow": fixture_workflow(without("Dockerfile")),
+            },
             "problems",
         ),
         (
-            "wheel inputs: a root file in wheel force-include",
+            "static: the readme is not listed",
+            {"layers": STATIC, "workflow": fixture_workflow(without("README.md"))},
+            "problems",
+        ),
+        (
+            "static: the build hook is not listed",
+            {"layers": STATIC, "workflow": fixture_workflow(without("hatch_build.py"))},
+            "problems",
+        ),
+        (
+            "static: the package tree is not listed, and nothing in pyproject names it",
             {
+                "layers": STATIC,
+                "pyproject": FIXTURE_PYPROJECT_BARE,
+                "workflow": fixture_workflow(without("automated_security_helper/**")),
+            },
+            "problems",
+        ),
+        (
+            "static: .gitignore is not listed",
+            {"layers": STATIC, "workflow": fixture_workflow(without(".gitignore"))},
+            "problems",
+        ),
+        (
+            "static: a root file in wheel force-include",
+            {
+                "layers": STATIC,
                 "pyproject": FIXTURE_PYPROJECT.replace(
                     "[tool.hatch.build.targets.wheel.hooks",
                     '"CONTRIBUTING.md" = "automated_security_helper/assets/C.md"\n\n'
                     "[tool.hatch.build.targets.wheel.hooks",
-                )
+                ),
             },
             "problems",
         ),
         (
-            "wheel inputs: a root directory in wheel shared-data",
+            "static: `..` in a force-include source",
             {
+                "layers": STATIC,
+                "pyproject": FIXTURE_PYPROJECT.replace(
+                    "[tool.hatch.build.targets.wheel.hooks",
+                    '"automated_security_helper/../CHANGELOG.md" = '
+                    '"automated_security_helper/assets/C.md"\n\n'
+                    "[tool.hatch.build.targets.wheel.hooks",
+                ),
+            },
+            "error: contains `..`",
+        ),
+        (
+            "static: a root directory in wheel shared-data",
+            {
+                "layers": STATIC,
                 "pyproject": FIXTURE_PYPROJECT
-                + '\n[tool.hatch.build.targets.wheel.shared-data]\n"share" = "share"\n'
+                + '\n[tool.hatch.build.targets.wheel.shared-data]\n"share" = "share"\n',
             },
             "problems",
         ),
         (
-            "wheel inputs: a root file in the global only-include",
+            "static: a root file in the global only-include",
             {
+                "layers": STATIC,
                 "pyproject": FIXTURE_PYPROJECT
-                + '\n[tool.hatch.build]\nonly-include = ["automated_security_helper", "SECURITY.md"]\n'
+                + '\n[tool.hatch.build]\nonly-include = ["automated_security_helper", "SECURITY.md"]\n',
             },
             "problems",
         ),
         (
-            "wheel inputs: a root file in wheel artifacts",
+            "static: a root file in wheel artifacts",
             {
+                "layers": STATIC,
                 "pyproject": FIXTURE_PYPROJECT.replace(
                     'include = ["automated_security_helper"]',
                     'include = ["automated_security_helper"]\nartifacts = ["VERSION"]',
-                )
+                ),
             },
             "problems",
         ),
         (
-            "wheel inputs: a license file in the wheel is not listed",
-            {"workflow": fixture_workflow(without("NOTICE"))},
+            "static: ignore-vcs, which changes what .gitignore removes",
+            {
+                "layers": STATIC,
+                "pyproject": FIXTURE_PYPROJECT.replace(
+                    'include = ["automated_security_helper"]',
+                    'include = ["automated_security_helper"]\nignore-vcs = true',
+                ),
+            },
+            "error: ignore-vcs is a build option",
+        ),
+        (
+            "static: a .hgignore",
+            {"layers": STATIC, "files": {".hgignore": "*.log\n"}},
+            "error: .hgignore exists",
+        ),
+        (
+            "static: a license file in the wheel is not listed",
+            {"layers": STATIC, "workflow": fixture_workflow(without("NOTICE"))},
             "problems",
         ),
         (
-            "wheel inputs: a wheel with no dist-info/licenses/",
-            {"licenses": ()},
-            "error",
+            "static: a wheel with no dist-info/licenses/",
+            {"layers": STATIC, "licenses": ()},
+            "error: no dist-info/licenses/",
         ),
         (
-            "wheel inputs: a `!` negation entry",
+            "static: a dynamic path under a directory needs `**`",
+            {
+                "layers": STATIC,
+                "workflow": fixture_workflow(
+                    [
+                        "automated_security_helper/*",
+                        "automated_security_helper/assets/**",
+                        *without("automated_security_helper/**"),
+                    ]
+                ),
+            },
+            "problems",
+        ),
+        (
+            "static: a variable joined below a directory needs `**`",
+            {
+                "layers": STATIC,
+                "static_extra": 'page = ASH_REPO_ROOT.joinpath("templates", name)',
+                "workflow": fixture_workflow([*FIXTURE_FILTER, "templates"]),
+            },
+            "problems",
+        ),
+        (
+            "static: `..` in an ASH_REPO_ROOT chain",
+            {
+                "layers": STATIC,
+                "static_extra": 'x = ASH_REPO_ROOT / "automated_security_helper/../CHANGELOG.md"',
+            },
+            "error: contains `..`",
+        ),
+        (
+            "static: ASH_REPO_ROOT through an alias",
+            {"layers": STATIC, "static_extra": "ROOT = ASH_REPO_ROOT"},
+            "error: cannot be read",
+        ),
+        (
+            "static: ASH_REPO_ROOT joined with a variable first",
+            {"layers": STATIC, "static_extra": "x = ASH_REPO_ROOT.joinpath(name)"},
+            "error: cannot be read",
+        ),
+        (
+            "static: a second root from __file__",
+            {"layers": STATIC, "static_extra": "OTHER = Path(__file__).parent"},
+            "error: second root",
+        ),
+        (
+            "static: a relative Path literal the build never opens",
+            {
+                "layers": STATIC,
+                "static_extra": 'notes = Path("CHANGELOG.md").exists()',
+            },
+            "problems",
+        ),
+        (
+            "static: a build option this check does not know",
+            {
+                "layers": STATIC,
+                "pyproject": FIXTURE_PYPROJECT.replace(
+                    'include = ["automated_security_helper"]',
+                    'include = ["automated_security_helper"]\nnew-option = ["x"]',
+                ),
+            },
+            "error: new-option is a build option",
+        ),
+        (
+            "static: a build hook other than the custom one",
+            {
+                "layers": STATIC,
+                "pyproject": FIXTURE_PYPROJECT
+                + "\n[tool.hatch.build.targets.wheel.hooks.vcs]\n"
+                + 'version-file = "v.py"\n',
+            },
+            "error: is not the custom hook",
+        ),
+        (
+            "measured: the fixture's filter covers the inputs",
+            {"layers": MEASURED},
+            "ok",
+        ),
+        (
+            "measured: the readme is not listed",
+            {"layers": MEASURED, "workflow": fixture_workflow(without("README.md"))},
+            "problems",
+        ),
+        (
+            "measured: the build hook is not listed",
+            {
+                "layers": MEASURED,
+                "workflow": fixture_workflow(without("hatch_build.py")),
+            },
+            "problems",
+        ),
+        (
+            "measured: .gitignore is not listed",
+            {"layers": MEASURED, "workflow": fixture_workflow(without(".gitignore"))},
+            "problems",
+        ),
+        (
+            "measured: a license file is not listed",
+            {"layers": MEASURED, "workflow": fixture_workflow(without("LICENSE"))},
+            "problems",
+        ),
+        (
+            "measured: the package tree is not listed",
+            {
+                "layers": MEASURED,
+                "workflow": fixture_workflow(without("automated_security_helper/**")),
+            },
+            "problems",
+        ),
+        (
+            "measured: the hook reads a root file through self.root",
+            {
+                "layers": MEASURED,
+                "build_extra": copy_changelog.format(
+                    'Path(self.root) / "CHANGELOG.md"'
+                ),
+            },
+            "problems",
+        ),
+        (
+            "measured: the hook copies a root file by a bare string",
+            {
+                "layers": MEASURED,
+                "build_extra": copy_changelog.format('"CHANGELOG.md"'),
+            },
+            "problems",
+        ),
+        (
+            "measured: the hook reads through ASH_ASSETS_PATH.parent.parent",
+            {
+                "layers": MEASURED,
+                "build_extra": copy_changelog.format(
+                    'ASH_ASSETS_PATH.parent.parent / "CHANGELOG.md"'
+                ),
+            },
+            "problems",
+        ),
+        (
+            "measured: `..` in a force-include source",
+            {
+                "layers": MEASURED,
+                "pyproject": FIXTURE_PYPROJECT.replace(
+                    "[tool.hatch.build.targets.wheel.hooks",
+                    '"automated_security_helper/../CHANGELOG.md" = '
+                    '"automated_security_helper/assets/C.md"\n\n'
+                    "[tool.hatch.build.targets.wheel.hooks",
+                ),
+            },
+            "problems",
+        ),
+        (
+            "measured: the hook copies a root file with a subprocess",
+            {
+                "layers": MEASURED,
+                "build_extra": 'subprocess.run(["cp", "CHANGELOG.md", "CL.md"], '
+                "cwd=ASH_REPO_ROOT, check=True)",
+            },
+            "error: subprocess.Popen ['cp'",
+        ),
+        (
+            "measured: the hook runs os.system",
+            {"layers": MEASURED, "build_extra": 'os.system("true")'},
+            "error: os.system",
+        ),
+        (
+            "measured: the hook runs git with other arguments",
+            {
+                "layers": MEASURED,
+                "build_extra": 'subprocess.run(["git", "show", "HEAD:CHANGELOG.md"], '
+                "capture_output=True, check=False)",
+            },
+            "error: subprocess.Popen ['git', 'show'",
+        ),
+        (
+            "measured: an installed hatchling the build-system does not allow",
+            {
+                "layers": MEASURED,
+                "pyproject": FIXTURE_PYPROJECT.replace(
+                    'requires = ["hatchling"]', 'requires = ["hatchling>=999"]'
+                ),
+            },
+            "error: is not met",
+        ),
+        (
+            "both: a `!` negation entry",
             {"workflow": fixture_workflow([*FIXTURE_FILTER, "!README.md"])},
             "problems",
         ),
         (
-            "wheel inputs: a paths-ignore list",
+            "both: a paths-ignore list",
             {
                 "workflow": fixture_workflow(
                     FIXTURE_FILTER, '    paths-ignore:\n      - "docs/**"\n'
@@ -609,79 +1168,26 @@ def self_test() -> int:
             },
             "problems",
         ),
-        (
-            "wheel inputs: a dynamic path under a directory needs `**`",
-            {
-                "workflow": fixture_workflow(
-                    [
-                        "automated_security_helper/*",
-                        "automated_security_helper/assets/**",
-                        *without("automated_security_helper/**"),
-                    ]
-                )
-            },
-            "problems",
-        ),
-        (
-            "wheel inputs: a variable joined below a directory needs `**`",
-            {
-                "hook": FIXTURE_HOOK
-                + 'page = ASH_REPO_ROOT.joinpath("templates", name)\n',
-                "workflow": fixture_workflow([*FIXTURE_FILTER, "templates"]),
-            },
-            "problems",
-        ),
-        (
-            "wheel inputs: ASH_REPO_ROOT through an alias",
-            {"hook": FIXTURE_HOOK + "ROOT = ASH_REPO_ROOT\n"},
-            "error",
-        ),
-        (
-            "wheel inputs: ASH_REPO_ROOT joined with a variable first",
-            {"hook": FIXTURE_HOOK + "x = ASH_REPO_ROOT.joinpath(name)\n"},
-            "error",
-        ),
-        (
-            "wheel inputs: a second root from __file__",
-            {"hook": FIXTURE_HOOK + "OTHER = Path(__file__).parent\n"},
-            "error",
-        ),
-        (
-            "wheel inputs: a relative Path literal",
-            {
-                "hook": FIXTURE_HOOK + 'notes = Path("CHANGELOG.md").read_text()\n',
-            },
-            "problems",
-        ),
-        (
-            "wheel inputs: a build option this check does not know",
-            {
-                "pyproject": FIXTURE_PYPROJECT.replace(
-                    'include = ["automated_security_helper"]',
-                    'include = ["automated_security_helper"]\nnew-option = ["x"]',
-                )
-            },
-            "error",
-        ),
-        (
-            "wheel inputs: a build hook other than the custom one",
-            {
-                "pyproject": FIXTURE_PYPROJECT
-                + "\n[tool.hatch.build.targets.wheel.hooks.vcs]\n"
-                + 'version-file = "v.py"\n'
-            },
-            "error",
-        ),
+        ("both: the fixture's filter covers the inputs", {}, "ok"),
     ]
     with tempfile.TemporaryDirectory(prefix="paths-filter-") as scratch:
         for index, (label, overrides, expected) in enumerate(wheel_cases):
             root = os.path.join(scratch, str(index))
             got = run_fixture(root, **overrides)
-            if got != expected:
+            # An error case names part of its message, so a case cannot pass on an
+            # error some other rule raised.
+            if not (
+                got == expected
+                or (
+                    expected.startswith("error: ")
+                    and got.startswith("error: ")
+                    and expected[7:] in got
+                )
+            ):
                 failures += 1
                 print(f"  FAILED {label}: expected {expected}, got {got}")
             else:
-                print(f"  ok {label} ({got})")
+                print(f"  ok {label} ({got.split(':', 1)[0]})")
     total = len(cases) + len(wheel_cases)
     print("self-test " + ("FAILED" if failures else f"OK ({total} cases)"))
     return 1 if failures else 0
@@ -689,19 +1195,17 @@ def self_test() -> int:
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--wheel")
     parser.add_argument("--workflow", default=DEFAULT_WORKFLOW)
     parser.add_argument("--repo", default=".")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args(argv[1:])
     if args.self_test:
         return self_test()
-    if not args.wheel:
-        parser.error("--wheel is required")
     try:
         with open(os.path.join(args.repo, args.workflow), encoding="utf-8") as handle:
             filters = read_paths_filters(handle.read())
-        inputs = wheel_inputs(args.repo, args.wheel)
+        with tempfile.TemporaryDirectory(prefix="paths-filter-wheel-") as out_dir:
+            inputs = wheel_inputs(args.repo, out_dir)
     except ValueError as error:  # Unresolvable is a ValueError
         print(f"paths filter check FAILED for {args.workflow}: {error}")
         return 1
@@ -711,10 +1215,11 @@ def main(argv: list[str]) -> int:
         for problem in problems:
             print(f"  - {problem}")
         return 1
+    outside = sorted(i for i in inputs if not i.startswith(f"{PACKAGE_DIR}/"))
     print(
         f"paths filter OK: push and pull_request list the same {len(filters['push'])} "
-        f"entries, and they match all {len(inputs)} wheel inputs "
-        f"({', '.join(sorted(inputs))})."
+        f"entries, and they match all {len(inputs)} wheel inputs; outside "
+        f"{PACKAGE_DIR}/ those are {', '.join(outside)}."
     )
     return 0
 
