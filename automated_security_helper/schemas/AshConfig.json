@@ -341,6 +341,7 @@
                 "offline": false,
                 "scan_timeout": 1800,
                 "severity_threshold": null,
+                "skip_ash_output_dir": true,
                 "skip_frameworks": [],
                 "skip_path": [],
                 "tool_version": null
@@ -1111,6 +1112,7 @@
             "offline": false,
             "scan_timeout": 1800,
             "severity_threshold": null,
+            "skip_ash_output_dir": true,
             "skip_frameworks": [],
             "skip_path": [],
             "tool_version": null
@@ -1257,6 +1259,12 @@
           "default": null,
           "description": "Minimum severity level to consider findings as failures. This is a scanner-level override of the default severity-level within ASH of MEDIUM.",
           "title": "Severity Threshold"
+        },
+        "skip_ash_output_dir": {
+          "default": true,
+          "description": "Skip ASH's own output directory when it sits inside the scanned directory, so Checkov does not parse ASH's previous reports. Defaults to true; set to false to scan it anyway. Has no effect on Windows, where Checkov's --skip-path matching is unreliable.",
+          "title": "Skip Ash Output Dir",
+          "type": "boolean"
         },
         "skip_frameworks": {
           "default": [],
@@ -3162,6 +3170,7 @@
               "offline": false,
               "scan_timeout": 1800,
               "severity_threshold": null,
+              "skip_ash_output_dir": true,
               "skip_frameworks": [],
               "skip_path": [],
               "tool_version": null

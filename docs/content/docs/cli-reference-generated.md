@@ -40,8 +40,8 @@ Runs an ASH scan against the source-dir, outputting results to the output-dir.
 | `--quiet` | bool | False |  | Hide all log output |
 | `--log-level` | enum(QUIET, SIMPLE, ERROR, INFO, ...) | `INFO` |  | Set the log level. |
 | `--config`, `-c` | str |  | ASH_CONFIG | The path to the configuration file. By default, ASH looks for the following config file names in the source directory of a scan: ['.ash.yml', '.ash.yaml', '.ash.json', 'ash.yml', 'ash.yaml', 'ash.json']. Alternatively, the full path to a config file can be provided by setting the ASH_CONFIG environment variable before running ASH. |
-| `--verbose`, `-v` | bool | False |  | Enable verbose logging |
-| `--debug`, `-d` | bool | False |  | Enable debug logging |
+| `--verbose`, `-v` | bool | False | ASH_VERBOSE | Enable verbose logging. Any log flag on the command line overrides ASH_VERBOSE. |
+| `--debug`, `-d` | bool | False | ASH_DEBUG | Enable debug logging. Any log flag on the command line overrides ASH_DEBUG. |
 | `--color` | bool | True |  | Enable/disable colorized output |
 | `--fail-on-findings` | bool |  |  | Enable/disable throwing non-successful exit codes if any actionable findings are found. Defaults to unset, which prefers the configuration value. If this is set directly, it takes precedence over the configuration value. |
 | `--fail-on-incomplete-scanners` | bool |  |  | Exit 1 when a selected scanner did not complete -- ERROR (ran and failed) or MISSING (dependencies unavailable, so it never ran). Without this, a run where nothing ran exits 0, the same code as a clean scan, because no scanner produced any finding. SKIPPED scanners are ones you did not select and never trip it, so --scanners and --exclude-scanners both narrow what is gated. Independent of --fail-on-findings, and takes precedence over it when both would fail: a partial scan's findings are real but its clean bill of health is not. Defaults to unset, which prefers the configuration value and then on. Pass --no-fail-on-incomplete-scanners to accept a partial scan's exit code, or --exclude-scanners for a tool you do not have, which records it SKIPPED and says so in the report. |
