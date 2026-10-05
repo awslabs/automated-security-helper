@@ -531,3 +531,54 @@ class TestRenderedLinksPointAtCommittedTemplates:
         assert renderer.render(write=True) == 1
         assert "My_Bucket" in capsys.readouterr().err
         assert not out.exists()
+
+
+class TestTheHostingAndOutputPathsAreOverridable:
+    """`--hosting` and `--out` render against a bucket without touching the committed
+    files, which is how the e2e leg renders a dotted and an undotted bucket."""
+
+    def test_the_committed_hosting_file_configures_no_bucket(self, renderer):
+        # The shipping default. A bucket here would publish links to a bucket this
+        # repository does not control; see the module docstring of the renderer.
+        assert renderer.load_hosting()["bucket"] == ""
+
+    def test_render_and_check_take_the_paths(self, renderer, tmp_path, capsys):
+        import json
+
+        committed = DOC.read_bytes()
+        config = tmp_path / "hosting.json"
+        config.write_text(
+            json.dumps(
+                {
+                    "bucket": "my.dotted.bucket",
+                    "bucket_region": "us-east-1",
+                    "key_prefix": "",
+                    "launch_regions": ["us-east-1"],
+                }
+            ),
+            encoding="utf-8",
+        )
+        out = tmp_path / "links.md"
+        args = ["--hosting", str(config), "--out", str(out)]
+
+        assert renderer.main(["r", "render", *args]) == 0, capsys.readouterr().err
+        links = renderer.CONSOLE_URL_RE.findall(out.read_text(encoding="utf-8"))
+        assert len(links) == len(list(renderer.TEMPLATE_DIR.glob("*.template.json")))
+        assert all(
+            _template_url_of(link).startswith(
+                "https://s3.us-east-1.amazonaws.com/my.dotted.bucket/"
+            )
+            for link in links
+        )
+        assert "hosting.json" in out.read_text(encoding="utf-8")
+        assert renderer.main(["r", "check", *args]) == 0, capsys.readouterr().err
+        assert DOC.read_bytes() == committed
+
+        # The same render checked against the committed, empty hosting file must fail:
+        # it carries URLs the configuration does not imply.
+        assert renderer.main(["r", "check", "--out", str(out)]) == 1
+
+    def test_print_refuses_out(self, renderer, tmp_path):
+        with pytest.raises(SystemExit) as exc:
+            renderer.main(["r", "print", "--out", str(tmp_path / "x.md")])
+        assert exc.value.code == 2
