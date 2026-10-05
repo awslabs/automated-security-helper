@@ -1,0 +1,177 @@
+# RBAC for the ASH operator.
+#
+# This is a security tool, so a permissive default here is worse than it would be
+# in ordinary software: the operator runs in the same cluster as the code it scans,
+# and a role that can read Secrets or create Roles turns a bug in a controller into
+# a cluster-wide credential leak. Every rule below names its verbs and its
+# resources, there is no `*` anywhere, and each grant has a reason.
+#
+# What is deliberately NOT granted, and why:
+#
+#   secrets            The operator never reads a Secret. AshMcpServer's auth value
+#                      reaches the pod through a secretKeyRef in the pod spec, which
+#                      the kubelet resolves -- the operator only copies the
+#                      reference. So the controller cannot read the value even if it
+#                      wanted to.
+#   pods/log           Would let the operator read scanner output. It gets the
+#                      collector's verdict from the pod's termination message
+#                      instead, which is a field on the pod it already watches. The
+#                      difference matters: a scanner's log contains the source it
+#                      scanned, including any secret the scan found.
+#   pods/exec          Nothing needs a shell in a scan pod.
+#   nodes, namespaces  Only needed for cluster-wide operation. The operator runs
+#                      namespaced (kopf.run(clusterwide=False)).
+#   clusterroles,      No rule can create or bind a role, so a compromised operator
+#   rolebindings       cannot widen its own privileges.
+#   escalate, bind     Never.
+#
+# The scan pods get a separate ServiceAccount with no rules at all, and their
+# tokens are not mounted. A pod running third-party scanners over foreign source
+# has no business holding an API credential.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ash-operator
+  namespace: ash-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ash-scan
+  namespace: ash-system
+# No Role and no RoleBinding for this one, on purpose. It exists so shard,
+# collector and MCP server pods do not run as `default`, whose token an adopter may
+# have bound to something. The operator uses it unless a CR names another account
+# (constants.SCAN_SERVICE_ACCOUNT). automountServiceAccountToken is false on every
+# pod that uses it.
+---
+# Cluster-scoped, because a CustomResourceDefinition is a cluster-scoped object and
+# kopf must read the ones it serves to learn their schema. Read-only, and named:
+# the operator cannot create, patch or delete any CRD, including its own.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ash-operator-crd-reader
+rules:
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ash-operator-crd-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ash-operator-crd-reader
+subjects:
+  - kind: ServiceAccount
+    name: ash-operator
+    namespace: ash-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ash-operator
+  namespace: ash-system
+rules:
+  # The custom resources this operator serves. `patch` and not `update`: a patch
+  # touches the fields named in it, so two controllers writing different parts of
+  # one object do not clobber each other.
+  - apiGroups: ["ash.awslabs.github.io"]
+    resources: ["ashscans", "ashmcpservers"]
+    verbs: ["get", "list", "watch", "patch"]
+  - apiGroups: ["ash.awslabs.github.io"]
+    resources: ["ashscans/status", "ashmcpservers/status"]
+    verbs: ["get", "patch"]
+
+  # The shard Job and the collector Job. `delete` so an adopter deleting an
+  # AshScan while it runs takes its Jobs with it even before the garbage collector
+  # gets there. No `update` and no `patch`: nothing rewrites a running Job, and the
+  # two handlers that watch Jobs are `kopf.on.event` -- stateless, so kopf stores no
+  # progress annotations on them. A stateful handler here was tried and needed
+  # `patch`; the operator logged `cannot patch resource "jobs"` and throttled while
+  # the scan sat in Scanning. Keeping these verbs read-only-plus-create is the point
+  # of choosing the stateless handler.
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+
+  # Pods are read, never written. Two reads specifically: the
+  # batch.kubernetes.io/job-completion-index label, which attributes a pod to a
+  # shard without the operator keeping its own index map, and the collector's
+  # termination message, which carries the verdict.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+
+  # The run's config + entrypoints. Created immutable and content-addressed; the
+  # absence of `patch`/`update` here is the point -- a mounted ConfigMap is
+  # re-synced into running pods, and a config that changed mid-run is how one shard
+  # comes to partition a different scanner roster from its siblings.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+
+  # The results volume, when the CR does not supply its own claim.
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+
+  # kopf posts Events so a refusal is visible in `kubectl describe`.
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create"]
+  - apiGroups: ["events.k8s.io"]
+    resources: ["events"]
+    verbs: ["create"]
+
+  # The AshMcpServer shape. No `delete` on Services: the ownerReference collects
+  # them, and a controller that can delete arbitrary Services in its namespace is a
+  # bigger blast radius than one that cannot.
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "patch"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch", "create", "patch"]
+
+  # NOT granted: coordination.k8s.io/leases.
+  #
+  # kopf uses a Lease for peering, so that two replicas do not both dispatch a run.
+  # The shipped image's ENTRYPOINT is `kopf run --standalone`, which disables peering
+  # outright, so nothing here can ever create one. An earlier version granted it
+  # anyway "so a second replica is a one-line change", which was wrong on a
+  # cluster-admin bootstrap: a permission whose only consumer is switched off in the
+  # same artifact is a standing grant nobody can justify by reading the deployment.
+  #
+  # Measured before removing it: with this rule stripped, a full three-shard scan
+  # completed normally (Failed, 12 actionable, all three indices consumed, collector
+  # ran), `kubectl get leases -n ash-system` returned nothing, and the operator log
+  # contained zero lease-related messages.
+  #
+  # If you ever run more than one replica, you must drop --standalone from the
+  # container command AND add this rule back:
+  #
+  #   - apiGroups: ["coordination.k8s.io"]
+  #     resources: ["leases"]
+  #     verbs: ["get", "list", "watch", "create", "patch"]
+  #
+  # Both, together. --standalone without the grant is what ships today; the grant
+  # without --standalone is a permission with no user.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ash-operator
+  namespace: ash-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ash-operator
+subjects:
+  - kind: ServiceAccount
+    name: ash-operator
+    namespace: ash-system

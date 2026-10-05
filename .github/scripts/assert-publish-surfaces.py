@@ -74,12 +74,23 @@ Then add a Surface to ALLOWLIST below with a `reason` that says which of those i
 is and why it is acceptable. Copy the exact `kind`, `action` and `publishes`
 strings out of the census this script prints; they have to match verbatim.
 
+If the decision depends on WHEN the step runs -- "failure evidence only" -- set
+`required_condition` on the entry too, so the step's `if:` is held to it. See the
+first known limitation below for what that does and does not cover.
+
 KNOWN LIMITATIONS
 
   * The key covers WHAT is published, not WHEN. Flipping `if: failure()` to
-    unconditional widens an accepted upload from red runs to every run and this
-    will not notice, because the bytes are the same bytes and were already
-    accepted as publishable.
+    unconditional widens an accepted upload from red runs to every run, and the
+    key alone will not notice, because the bytes are the same bytes and were
+    already accepted as publishable. An entry whose reason depends on the
+    condition closes that by setting `required_condition`: the matched step's
+    step-level `if:` must then have that exact term as a top-level `&&` conjunct.
+    The parse is deliberately narrow -- any `||`, any parenthesised group other
+    than an empty call such as `failure()`, or a nested `${{` fails the check --
+    so a condition it cannot read is reported rather than trusted. Entries
+    without `required_condition` are still keyed on WHAT only, and a job-level
+    `if:` is not read.
   * Release assets (`softprops/action-gh-release` and friends) are out of scope.
     A release is a deliberate, human-triggered publication with a human on the
     button, which is the opposite of the accidental case this guards.
@@ -101,6 +112,8 @@ KNOWN LIMITATIONS
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import sys
 from collections import Counter
 from dataclasses import dataclass
@@ -171,6 +184,9 @@ class Entry:
     publishes: str
     reason: str
     count: int = 1
+    # When set, every censused step matching this entry must have this term as a
+    # top-level `&&` conjunct of its `if:`. See KNOWN LIMITATIONS.
+    required_condition: str = ""
 
     def as_key(self) -> tuple[str, str, str, str]:
         return (self.file, self.kind, self.action, self.publishes)
@@ -183,6 +199,8 @@ class Found:
     surface: Surface
     step: str
     line: int
+    # The step's `if:` as source text, or "" when it has none.
+    condition: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -428,6 +446,21 @@ ALLOWLIST: tuple[Entry, ...] = (
             "Failure evidence only, and narrowed to named report files inside the "
             "assembly rather than the whole of cdk.out."
         ),
+    ),
+    Entry(
+        file=".github/workflows/ash-kubernetes-operator.yml",
+        kind=KIND_UPLOAD,
+        action=_UPLOAD,
+        publishes="name=ash-operator-e2e-log path=${{ env.OPERATOR_DIR }}/e2e.log",
+        reason=(
+            "Failure evidence only (if: failure()), 7-day retention: the pytest -v "
+            "log of the Kubernetes operator's kind end-to-end run. Test names, "
+            "assertion output and the tail of kubectl and operator logs from a "
+            "throwaway cluster, scanning committed fixtures whose only credential is "
+            "AWS's documentation example key. One text file, not build output; the "
+            "operator and ASH images stay on the runner."
+        ),
+        required_condition="failure()",
     ),
     # -- Standalone caches ----------------------------------------------------
     # The grype database: restored everywhere, saved only from a push to the default
@@ -799,6 +832,7 @@ def scan_text(rel_path: str, text: str) -> list[Found]:
                     ),
                     step=_step_name(step, action),
                     line=int(step.get(LINE_KEY, 1)),
+                    condition=_flatten(step.get("if")),
                 )
             )
     return found
@@ -850,6 +884,43 @@ def evaluate(
     return unexpected, unmatched
 
 
+def _top_level_conjuncts(condition: str) -> list[str] | None:
+    """Split an `if:` into its top-level `&&` terms, or None if it cannot be read.
+
+    Narrow on purpose. `||` anywhere, a parenthesised group, or an expression
+    nested inside the outer `${{ }}` returns None, because splitting those on
+    `&&` would misread them: `failure() && x || always()` is
+    `(failure() && x) || always()`, which runs on green builds. An empty call such
+    as `failure()` or `always()` is the only parenthesis allowed.
+    """
+    text = condition.strip()
+    if text.startswith("${{") and text.endswith("}}"):
+        text = text[3:-2].strip()
+    if not text or "${{" in text or "}}" in text or "||" in text:
+        return None
+    if "(" in text.replace("()", "") or ")" in text.replace("()", ""):
+        return None
+    return [term.strip() for term in text.split("&&")]
+
+
+def check_conditions(
+    found: list[Found], allowlist: tuple[Entry, ...]
+) -> list[tuple[Found, Entry]]:
+    """Return the allowlisted sites whose `if:` does not hold the entry's condition."""
+    required = {
+        entry.as_key(): entry for entry in allowlist if entry.required_condition
+    }
+    violations: list[tuple[Found, Entry]] = []
+    for item in found:
+        entry = required.get(item.surface.as_key())
+        if entry is None:
+            continue
+        terms = _top_level_conjuncts(item.condition)
+        if terms is None or entry.required_condition not in terms:
+            violations.append((item, entry))
+    return violations
+
+
 def _print_census(found: list[Found]) -> None:
     print(f"Publish-surface census over {GITHUB_DIR.relative_to(REPO_ROOT)}/:")
     print(f"  {len(found)} site(s) that can publish bytes to a public store\n")
@@ -862,6 +933,35 @@ def _print_census(found: list[Found]) -> None:
         print(f"    kind      {surface.kind} ({surface.action})")
         print(f"    publishes {surface.publishes}")
     print()
+
+
+def _report_condition_failures(violations: list[tuple[Found, Entry]]) -> None:
+    for item, entry in sorted(
+        violations, key=lambda pair: (pair[0].surface.file, pair[0].line)
+    ):
+        surface = item.surface
+        shown = item.condition or "(none, so it runs whenever the job gets this far)"
+        print(
+            f"::error file={surface.file},line={item.line}::Allowlisted publish surface runs outside its accepted condition: {surface.file} step '{item.step}' must have '{entry.required_condition}' as a top-level && term of its if:, found {shown}"
+        )
+        print(f"CONDITION NOT HELD  {surface.file}:{item.line}")
+        print(f"  step       {item.step}")
+        print(f"  publishes  {surface.publishes}")
+        print(f"  required   {entry.required_condition} (as a top-level && term)")
+        print(f"  found if:  {shown}")
+        print(f"  reason on file  {entry.reason}")
+        print(
+            "  why this failed\n"
+            "    This upload was accepted on the condition that it runs only when\n"
+            "    that term is true, and its step-level if: no longer guarantees it,\n"
+            "    or is written in a form this check cannot read (any ||, or a\n"
+            "    parenthesised group). Either way it may now publish on runs the\n"
+            "    decision did not cover.\n"
+            "  what to do\n"
+            "    Restore the condition. If widening it is intended, that is a new\n"
+            "    decision: change required_condition and the reason in the same\n"
+            "    commit.\n"
+        )
 
 
 def _report_failures(
@@ -946,6 +1046,7 @@ jobs:
         with:
           enable-cache: true
       - name: Upload the wheel
+        if: ${{ failure() && !env.ACT }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: dist
@@ -982,6 +1083,7 @@ _SELF_TEST_ALLOWLIST: tuple[Entry, ...] = (
         action="actions/upload-artifact",
         publishes="name=dist path=dist/",
         reason="self-test fixture",
+        required_condition="failure()",
     ),
     Entry(
         file=_SELF_TEST_ALLOWED_FILE,
@@ -993,12 +1095,13 @@ _SELF_TEST_ALLOWLIST: tuple[Entry, ...] = (
 )
 
 
-def _self_test_case(name: str, files: dict[str, str]) -> tuple[str, int, int]:
+def _self_test_case(name: str, files: dict[str, str]) -> tuple[str, int, int, int]:
     found: list[Found] = []
     for rel, text in files.items():
         found.extend(scan_text(rel, text))
     unexpected, unmatched = evaluate(found, _SELF_TEST_ALLOWLIST)
-    return name, len(unexpected), len(unmatched)
+    ungated = check_conditions(found, _SELF_TEST_ALLOWLIST)
+    return name, len(unexpected), len(unmatched), len(ungated)
 
 
 def self_test() -> int:
@@ -1126,32 +1229,115 @@ def self_test() -> int:
     deleted = dict(baseline)
     deleted[_SELF_TEST_ALLOWED_FILE] = _SELF_TEST_CLEAN_YAML
 
+    # (f) a failure-only upload widened to every run. Same bytes, same key, so
+    # only required_condition can see it.
+    _failure_only = "        if: ${{ failure() && !env.ACT }}\n"
+    widened_always = dict(baseline)
+    widened_always[_SELF_TEST_ALLOWED_FILE] = _SELF_TEST_ALLOWED_YAML.replace(
+        _failure_only, "        if: always()\n"
+    )
+
+    # (f1) the condition dropped altogether.
+    widened_dropped = dict(baseline)
+    widened_dropped[_SELF_TEST_ALLOWED_FILE] = _SELF_TEST_ALLOWED_YAML.replace(
+        _failure_only, ""
+    )
+
+    # (f2) failure() still present and still joined by &&, but an || makes the
+    # whole thing true on green runs. A substring match would pass this.
+    widened_or = dict(baseline)
+    widened_or[_SELF_TEST_ALLOWED_FILE] = _SELF_TEST_ALLOWED_YAML.replace(
+        _failure_only, "        if: ${{ failure() && !env.ACT || always() }}\n"
+    )
+
+    # (f3) failure() negated.
+    widened_negated = dict(baseline)
+    widened_negated[_SELF_TEST_ALLOWED_FILE] = _SELF_TEST_ALLOWED_YAML.replace(
+        _failure_only, "        if: ${{ !failure() }}\n"
+    )
+
+    # (f4) failure() inside a negated group. Every term split on && reads as
+    # failure() unless parenthesised groups are refused, yet the whole is true on
+    # every green run (env.ACT is unset in CI).
+    widened_grouped = dict(baseline)
+    widened_grouped[_SELF_TEST_ALLOWED_FILE] = _SELF_TEST_ALLOWED_YAML.replace(
+        _failure_only, "        if: ${{ !(env.ACT && failure() && true) }}\n"
+    )
+
+    # (g) the bare form, without ${{ }}, is the same condition and must pass.
+    bare_failure = dict(baseline)
+    bare_failure[_SELF_TEST_ALLOWED_FILE] = _SELF_TEST_ALLOWED_YAML.replace(
+        _failure_only, "        if: failure()\n"
+    )
+
     expectations = [
-        # name, files, expect unexpected, expect unmatched
-        ("clean tree matches the allowlist", baseline, 0, 0),
-        ("(a) new upload in a file with none", new_file_upload, 1, 0),
-        ("(b) second upload in an allowed file", second_upload, 1, 0),
-        ("(b2) duplicate of an allowed upload", duplicate_upload, 1, 0),
-        ("(c) new actions/cache", new_cache, 1, 0),
-        ("(c1) new actions/cache/save", new_cache_save, 1, 0),
-        ("(c2) built-in cache via cache-to", builtin_cache, 1, 0),
-        ("(c3) setup-uv with enable-cache left out", default_uv_cache, 1, 0),
-        ("(c4) setup-uv with enable-cache auto", auto_uv_cache, 1, 0),
-        ("(d) allowed upload repointed", repointed, 1, 1),
-        ("(e) allowlisted site deleted", deleted, 0, 2),
+        # name, files, expect unexpected, expect unmatched, expect ungated
+        ("clean tree matches the allowlist", baseline, 0, 0, 0),
+        ("(a) new upload in a file with none", new_file_upload, 1, 0, 0),
+        ("(b) second upload in an allowed file", second_upload, 1, 0, 0),
+        ("(b2) duplicate of an allowed upload", duplicate_upload, 1, 0, 1),
+        ("(c) new actions/cache", new_cache, 1, 0, 0),
+        ("(c1) new actions/cache/save", new_cache_save, 1, 0, 0),
+        ("(c2) built-in cache via cache-to", builtin_cache, 1, 0, 0),
+        ("(c3) setup-uv with enable-cache left out", default_uv_cache, 1, 0, 0),
+        ("(c4) setup-uv with enable-cache auto", auto_uv_cache, 1, 0, 0),
+        ("(d) allowed upload repointed", repointed, 1, 1, 0),
+        ("(e) allowlisted site deleted", deleted, 0, 2, 0),
+        ("(f) failure-only upload widened to always()", widened_always, 0, 0, 1),
+        ("(f1) failure-only upload's if: removed", widened_dropped, 0, 0, 1),
+        ("(f2) failure() kept but || always() added", widened_or, 0, 0, 1),
+        ("(f3) failure() negated", widened_negated, 0, 0, 1),
+        ("(f4) failure() inside a negated group", widened_grouped, 0, 0, 1),
+        ("(g) bare if: failure() still holds", bare_failure, 0, 0, 0),
     ]
 
     failures = 0
     print("Self-test: does this check still detect and still fail?\n")
-    for name, files, want_unexpected, want_unmatched in expectations:
-        _, got_unexpected, got_unmatched = _self_test_case(name, files)
-        ok = got_unexpected == want_unexpected and got_unmatched == want_unmatched
+    for name, files, want_unexpected, want_unmatched, want_ungated in expectations:
+        _, got_unexpected, got_unmatched, got_ungated = _self_test_case(name, files)
+        ok = (
+            got_unexpected == want_unexpected
+            and got_unmatched == want_unmatched
+            and got_ungated == want_ungated
+        )
         status = "ok  " if ok else "FAIL"
         print(
             f"  {status} {name}: "
             f"unexpected={got_unexpected} (want {want_unexpected}), "
-            f"unmatched={got_unmatched} (want {want_unmatched})"
+            f"unmatched={got_unmatched} (want {want_unmatched}), "
+            f"ungated={got_ungated} (want {want_ungated})"
         )
+        if not ok:
+            failures += 1
+
+    # The counts above prove the detectors fire. These prove the verdict main()
+    # returns honors each of them, so dropping one from the exit decision (an
+    # unexpected site, an orphaned entry, or a condition not held) goes red here
+    # rather than only in the next incident.
+    # The orphan case keeps the cache site, so the census is not empty and only the
+    # unmatched upload entry can fail it. `deleted` above empties the census, which
+    # the no-sites guard would fail on its own. The empty census is run against an
+    # empty allowlist for the same reason: with any entry, the orphan check fails it.
+    upload_removed = dict(baseline)
+    upload_removed[_SELF_TEST_ALLOWED_FILE] = _SELF_TEST_ALLOWED_YAML.split(
+        "      - name: Upload the wheel"
+    )[0]
+    verdicts: list[tuple[str, dict[str, str], tuple[Entry, ...], int]] = [
+        # name, files, allowlist, expected exit status of gate()
+        ("verdict: clean tree passes", baseline, _SELF_TEST_ALLOWLIST, 0),
+        ("verdict: no sites censused fails", {}, (), 1),
+        ("verdict: unexpected site fails", new_file_upload, _SELF_TEST_ALLOWLIST, 1),
+        ("verdict: orphaned entry fails", upload_removed, _SELF_TEST_ALLOWLIST, 1),
+        ("verdict: condition not held fails", widened_always, _SELF_TEST_ALLOWLIST, 1),
+        ("verdict: grouped condition fails", widened_grouped, _SELF_TEST_ALLOWLIST, 1),
+    ]
+    for name, files, allowlist, want_status in verdicts:
+        found = [item for rel, text in files.items() for item in scan_text(rel, text)]
+        with contextlib.redirect_stdout(io.StringIO()):
+            got_status = gate(found, allowlist)
+        ok = got_status == want_status
+        status = "ok  " if ok else "FAIL"
+        print(f"  {status} {name}: exit={got_status} (want {want_status})")
         if not ok:
             failures += 1
     print()
@@ -1186,7 +1372,14 @@ def main(argv: list[str] | None = None) -> int:
 
     found = scan_tree(GITHUB_DIR)
     _print_census(found)
+    return gate(found, ALLOWLIST)
 
+
+def gate(found: list[Found], allowlist: tuple[Entry, ...]) -> int:
+    """Return main()'s exit status for a census against an allowlist.
+
+    Separate from main() so the self-test can run the real verdict over fixtures.
+    """
     if not found:
         print(
             "::error::assert-publish-surfaces.py censused zero publishing sites. "
@@ -1195,18 +1388,23 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    unexpected, unmatched = evaluate(found, ALLOWLIST)
-    if not unexpected and not unmatched:
+    unexpected, unmatched = evaluate(found, allowlist)
+    ungated = check_conditions(found, allowlist)
+    gated = sum(1 for entry in allowlist if entry.required_condition)
+    if not unexpected and not unmatched and not ungated:
         print(
             f"OK: all {len(found)} publishing site(s) match the "
-            f"{len(ALLOWLIST)} allowlist entr(ies)."
+            f"{len(allowlist)} allowlist entr(ies); {gated} entr(ies) with a "
+            f"required condition hold it."
         )
         return 0
 
     _report_failures(unexpected, unmatched)
+    _report_condition_failures(ungated)
     print(
         f"FAILED: {len(unexpected)} unexpected publishing site(s), "
-        f"{len(unmatched)} unmatched allowlist entr(ies)."
+        f"{len(unmatched)} unmatched allowlist entr(ies), "
+        f"{len(ungated)} site(s) outside their required condition."
     )
     return 1
 

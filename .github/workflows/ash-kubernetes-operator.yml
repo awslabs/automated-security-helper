@@ -1,0 +1,233 @@
+name: ASH Kubernetes operator
+
+# Three jobs, each of which can fail for a different reason:
+#
+#   lint-and-unit      the operator's own code and its unit suite
+#   crd-drift          the committed CRDs match what the generator emits
+#   e2e-kind           the operator actually works against a real cluster
+#
+# e2e-kind is the one that proves the rest. The other two can be green while the
+# controller never dispatches a Job.
+#
+# No image built here leaves the runner. The operator and ASH images are built
+# locally and handed to the cluster with `kind load docker-image`; there is no
+# registry login and no push, and tests/test_no_image_publish.py fails the unit
+# suite if either appears in this file or in the e2e harness.
+
+on:
+  push:
+    branches:
+      - "**"
+    paths:
+      - "deploy/kubernetes-operator/**"
+      - "automated_security_helper/**"
+      - "pyproject.toml"
+      - ".github/workflows/ash-kubernetes-operator.yml"
+  pull_request:
+    paths:
+      - "deploy/kubernetes-operator/**"
+      - "automated_security_helper/**"
+      - "pyproject.toml"
+      - ".github/workflows/ash-kubernetes-operator.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  OPERATOR_DIR: deploy/kubernetes-operator
+  KIND_VERSION: v0.30.0
+  # The vendor's published digest for kind-linux-amd64 at KIND_VERSION, from
+  # kind-linux-amd64.sha256sum on the release page.
+  KIND_SHA256: 517ab7fc89ddeed5fa65abf71530d90648d9638ef0c4cde22c2c11f8097b8889
+  KUBECTL_VERSION: v1.37.1
+  # The vendor's published digest, from dl.k8s.io/release/<version>/bin/linux/amd64/kubectl.sha256.
+  KUBECTL_SHA256: 65691ff77eb6fa44c908b77a1082c9f092c3b9733b5cefabec0d1104890e21a8
+
+jobs:
+  lint-and-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
+      # The repository's own ruff, from its dev group, so the operator is linted by
+      # the same ruff version as everything else. The operator's pyproject.toml
+      # carries its own [tool.ruff] rule set, which ruff picks up for files under it.
+      - name: ruff check
+        run: |
+          uv run --group dev ruff --version
+          uv run --group dev ruff check "$OPERATOR_DIR"
+
+      - name: ruff format --check
+        run: uv run --group dev ruff format --check "$OPERATOR_DIR"
+
+      - name: Unit tests without ASH, the operator's own runtime shape
+        working-directory: ${{ env.OPERATOR_DIR }}
+        env:
+          PYTHONPATH: .
+        run: |
+          set -o pipefail
+          # ASH is deliberately absent from THIS run. The operator never imports ASH at
+          # runtime, so this is the environment it actually ships into, and it is the
+          # only run that can catch an operator dependency that only works because
+          # ASH happened to pull it in. It also exercises the committed-schema fallback
+          # in crd_schema.py and the collector's scanner-status coverage fallback.
+          #
+          # The ASH-equivalence tests skip here. That is expected and it is NOT where
+          # they are verified -- the next step runs them for real.
+          #
+          # NOT -q: with -q pytest emits no "N passed" line when stdout is not a TTY,
+          # and the guard below needs it.
+          uv run --no-project --python 3.12 --with ".[test]" \
+            python -m pytest tests -rs --tb=short --color=no --ignore=tests/e2e \
+            2>&1 | tee unit.log
+          grep -Eq '[1-9][0-9]* passed' unit.log || {
+            echo "::error::the unit suite reported no passing tests, so it proved nothing"
+            exit 1
+          }
+          if grep -Eq '[0-9]+ error' unit.log; then
+            echo "::error::the unit suite reported collection errors. A test that could not even import is not a skip."
+            exit 1
+          fi
+
+      - name: Unit tests WITH ASH, the equivalence arms
+        working-directory: ${{ env.OPERATOR_DIR }}
+        env:
+          PYTHONPATH: .
+        run: |
+          set -o pipefail
+          # These tests compare the operator against real ASH: shard-selection
+          # acceptance, the committed-vs-live schema digest, schema-source preference,
+          # full exposure of every AshConfig field, the ScannerStatus vocabulary, and
+          # the collector's use of ASH's own coverage rule. They skip when ASH is not
+          # importable, so running them is the point of this step.
+          uv run --no-project --python 3.12 \
+            --with "$GITHUB_WORKSPACE" \
+            --with ".[test]" \
+            python -m pytest tests --ignore=tests/e2e -rs --tb=short --color=no \
+            2>&1 | tee unit-with-ash.log
+
+          grep -Eq '[1-9][0-9]* passed' unit-with-ash.log || {
+            echo "::error::the with-ASH run reported no passing tests."
+            exit 1
+          }
+
+          # Assert the absence of skips AND that each equivalence test was collected,
+          # by node id: a guard that only counted skips would also be satisfied by
+          # deleting the tests.
+          if grep -q 'SKIPPED' unit-with-ash.log; then
+            echo "::error::a test skipped in the with-ASH run. ASH did not import, so the equivalence arms did not execute and this job proves no more than the run above."
+            grep 'SKIPPED' unit-with-ash.log
+            exit 1
+          fi
+          missing=0
+          while read -r node; do
+            [ -z "$node" ] && continue
+            if ! uv run --no-project --python 3.12 \
+                 --with "$GITHUB_WORKSPACE" --with ".[test]" \
+                 python -m pytest "$node" --collect-only -q --color=no >/dev/null 2>&1; then
+              echo "::error::$node did not collect. An ASH-equivalence test was renamed or removed; re-point this guard deliberately rather than dropping it."
+              missing=1
+            fi
+          done <<'NODES'
+          tests/test_contract.py::TestShardSelection::test_agrees_with_ash_on_what_is_acceptable
+          tests/test_crd_schema.py::TestSchemaSource::test_the_committed_schema_matches_the_live_model
+          tests/test_crd_schema.py::TestSchemaSource::test_the_live_model_is_preferred_when_available
+          tests/test_crd_schema.py::TestFullExposure::test_every_top_level_ash_config_field_is_present
+          tests/test_results.py::TestVocabulary::test_the_status_set_matches_ash_exactly
+          tests/test_collect.py::TestCoverageAssessment::test_ash_answers_when_it_is_importable
+          NODES
+          [ "$missing" -eq 0 ] || exit 1
+
+  crd-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
+      - name: The committed CRDs match what the generator emits
+        working-directory: ${{ env.OPERATOR_DIR }}
+        env:
+          PYTHONPATH: .
+        # Compares the generated bytes against the committed bytes in memory and
+        # writes nothing, so it asks no question of git.
+        run: |
+          uv run --no-project --python 3.12 \
+            --with "$GITHUB_WORKSPACE" --with ".[test]" \
+            python -m ash_operator.generate_manifests --check
+
+  e2e-kind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      # Unique per run, so a re-run or a parallel job never shares a cluster or an
+      # image tag with another.
+      ASH_OPERATOR_E2E_CLUSTER: ash-op-e2e-${{ github.run_id }}-${{ github.run_attempt }}
+      ASH_OPERATOR_E2E_IMAGE_TAG: e2e-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
+      - name: Install kind and kubectl, checksum-verified
+        run: |
+          # Under $HOME rather than /usr/local/bin, so the step also works in
+          # container images where /usr/local/bin is not writable.
+          bin="$HOME/.local/bin"
+          mkdir -p "$bin"
+          curl -fsSLo "$bin/kind" \
+            "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64"
+          echo "${KIND_SHA256}  $bin/kind" | sha256sum --check --strict
+          curl -fsSLo "$bin/kubectl" \
+            "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          echo "${KUBECTL_SHA256}  $bin/kubectl" | sha256sum --check --strict
+          chmod +x "$bin/kind" "$bin/kubectl"
+          echo "$bin" >>"$GITHUB_PATH"
+          "$bin/kind" version
+          "$bin/kubectl" version --client
+
+      - name: End to end against kind
+        working-directory: ${{ env.OPERATOR_DIR }}
+        env:
+          PYTHONPATH: .
+          ASH_OPERATOR_E2E: "1"
+        run: |
+          set -o pipefail
+          # The CRDs installed are the committed ones under generated/, which
+          # crd-drift holds equal to what the generator emits, so this tests what an
+          # adopter applies. -v rather than -q, for the count line the guard needs.
+          uv run --no-project --python 3.12 --with ".[test]" \
+            python -m pytest tests/e2e -v --tb=short --color=no 2>&1 | tee e2e.log
+          # The e2e skips itself when ASH_OPERATOR_E2E is unset. It is set above, so a
+          # run reporting only skips means the harness refused to start.
+          grep -Eq '[1-9][0-9]* passed' e2e.log || {
+            echo "::error::the e2e reported no passing tests. It is enabled in this job, so this means it never stood a cluster up."
+            exit 1
+          }
+
+      - name: Delete this run's cluster
+        # Unconditional. The fixture deletes it, and so does this: a kind cluster
+        # outliving its job is a container nobody owns. `kind delete cluster` exits 0
+        # when the cluster is already gone.
+        if: always()
+        run: kind delete cluster --name "$ASH_OPERATOR_E2E_CLUSTER"
+
+      - name: Upload the e2e log
+        # Failure evidence only. A green run's log says nothing the job summary does
+        # not, and the artifact store is public, so it is kept off green runs. It is
+        # allowlisted in .github/scripts/assert-publish-surfaces.py, whose entry
+        # requires failure() as a top-level && term of this if:.
+        if: ${{ failure() && !env.ACT }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ash-operator-e2e-log
+          path: ${{ env.OPERATOR_DIR }}/e2e.log
+          if-no-files-found: warn
+          retention-days: 7

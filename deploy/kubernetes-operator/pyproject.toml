@@ -1,0 +1,80 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ash-kubernetes-operator"
+# Released with ASH and versioned with it: the operator speaks ASH's CLI contract
+# rather than a public API of its own, and is listed in the root pyproject's
+# [tool.commitizen] version_files so a release rewrites this line.
+version = "3.7.0"
+description = "Kubernetes operator for the Automated Security Helper: sharded scans and ASH's MCP server"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+dependencies = [
+  # Pinned exactly. The handler-registration decorators and OperatorSettings
+  # surface are not covered by semver promises kopf makes, and a controller that
+  # silently stops watching is the failure mode a floor would allow.
+  "kopf==1.37.2",
+  "kubernetes>=29,<37",
+  "PyYAML>=6,<7",
+]
+
+[project.optional-dependencies]
+# The generator needs ASH itself, because spec.config is derived from
+# AshConfig.model_json_schema(). The controller does not: it never imports ASH, so
+# a cluster can run this operator against an ASH image whose version differs from
+# whatever generated the CRD.
+generate = ["automated-security-helper"]
+test = ["pytest>=8", "PyYAML>=6"]
+
+[project.scripts]
+ash-operator = "ash_operator.main:run"
+ash-operator-generate = "ash_operator.generate_manifests:main"
+
+[tool.hatch.build.targets.wheel]
+# hatchling already ships every file under the package directory, including the
+# shell and Python entrypoints under ash_operator/entrypoints/. A force-include
+# table for them was tried and is wrong: it adds them a second time and hatchling
+# refuses the build with "A second file is being added to the wheel archive at the
+# same path". The operator reads those files off disk to build each run's ConfigMap,
+# so the Dockerfile asserts they survived the install rather than trusting this.
+packages = ["ash_operator"]
+
+[tool.pytest.ini_options]
+# Declared here, not inherited. Without a [tool.pytest.ini_options] section pytest
+# walks upward looking for one and can pick up a config from outside the
+# repository -- a stray pyproject.toml in a parent directory that sets
+# `addopts = "-n auto"`, for example, turns this suite into an xdist run and changes
+# what a failure looks like.
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+  "e2e: needs a real kind cluster and docker; skipped unless ASH_OPERATOR_E2E=1",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "ISC"]
+ignore = [
+  # Long lines inside the explanatory docstrings, which are the point of those
+  # files rather than an accident.
+  "E501",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+  "S101", # asserts are what a test is
+  "S603", # subprocess with a fixed argv is how kubectl and kind are driven
+  "S607", # ditto, partial executable paths resolved from PATH
+  # The "secrets" in tests/test_auth.py are the literal string "tok" standing in for
+  # a projected ServiceAccount token, and the "credentials" in the e2e fixtures are
+  # AWS's own documentation-only AKIAIOSFODNN7EXAMPLE pair -- planted so a scanner
+  # has something to find.
+  "S105",
+  "S106",
+  "S107",
+]
