@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Gates the JetBrains plugin's Java coverage, and audits what the gate does not cover.
+"""Gates the JetBrains plugin's JVM coverage, and audits what the gate does not cover.
 
 WHY THIS EXISTS
 
@@ -52,7 +52,7 @@ USAGE
   python3 assert-coverage.py \
     --report build/reports/jacoco/test/jacocoTestReport.xml \
     --exclusions coverage-exclusions.json \
-    --source-root src/main/java \
+    --source-root src/main/kotlin \
     --repo-root ../.. \
     --min-line-ratio 0.90 --min-branch-ratio 0.90 \
     --min-classes 9 --min-lines 300
@@ -100,6 +100,11 @@ except ImportError:  # pragma: no cover - the message is the whole point
 # an unknown kind is a failure rather than a pass with no test run.
 KIND_IDE_GLUE = "ide-glue"
 KNOWN_KINDS = {KIND_IDE_GLUE}
+
+# The source files the census holds to the report. Kotlin joined Java when the plugin's runtime
+# was rewritten in it; a suffix missing here would make every file of that language invisible
+# to the census, which is the hole the census exists to close.
+SOURCE_SUFFIXES = (".java", ".kt")
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -278,7 +283,7 @@ def check_coverage(
     # Printed before any verdict, so the number is in the log whether the gate passes or not.
     # It is this tree's own number and is not combined with the Python or TypeScript figures.
     sys.stdout.write(
-        "coverage (JetBrains plugin, Java, gated set only):\n"
+        "coverage (JetBrains plugin, Kotlin and Java, gated set only):\n"
         f"  line   {line_ratio * 100:.2f}%  ({line_covered}/{line_total})\n"
         f"  branch {branch_ratio * 100:.2f}%  "
         f"({branch_covered}/{branch_covered + branch_missed})\n"
@@ -409,12 +414,15 @@ def check_census(
                 )
 
     for tracked in sorted(tracked_files(repo_root)):
-        if not tracked.startswith(prefix) or not tracked.endswith(".java"):
+        if not tracked.startswith(prefix) or not tracked.endswith(SOURCE_SUFFIXES):
             continue
         if tracked in excluded_paths:
             continue
         # The path relative to the source root IS the package path plus the file name, which is
-        # exactly the key built above. That equivalence is what a Java source layout guarantees.
+        # exactly the key built above. A Java source layout guarantees that equivalence. Kotlin
+        # does not -- a .kt file may declare any package -- so a Kotlin file whose directory
+        # disagrees with its package fails here, which is the conservative direction: it reads
+        # as unmeasured rather than as measured on the strength of a different file.
         if tracked[len(prefix) :] not in reported_sources:
             problems.append(
                 f"{tracked} is tracked but appears in neither the coverage report nor "

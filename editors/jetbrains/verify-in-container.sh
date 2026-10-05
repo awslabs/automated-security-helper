@@ -107,7 +107,7 @@ export PYTHONPATH="$VENDOR${PYTHONPATH:+:$PYTHONPATH}"
 python3 -c 'import defusedxml; print("   defusedxml " + defusedxml.__version__ + " ready at " + defusedxml.__file__)'
 
 echo "== 4. build, test, and gate coverage"
-# `check` pulls in unitTest, assertTestsRan and assertCoverage; buildPlugin pulls in the
+# `check` pulls in test, assertTestsRan and assertCoverage; buildPlugin pulls in the
 # distribution and, via finalizedBy, assertDistributionContents. Every gate is a Gradle task
 # rather than a step here, so `./gradlew check` gates on a developer's machine exactly as this
 # script does -- and so there is one place to relax each of them rather than two.
@@ -115,19 +115,20 @@ echo "== 4. build, test, and gate coverage"
 
 echo "== 5. the test count and the annotation assertion, printed from the report"
 # assertTestsRan already ran as part of `check`. Invoked again here, rather than
-# reimplemented, so the numbers appear in this script's own output: the claim "161 tests ran
+# reimplemented, so the numbers appear in this script's own output: the claim "every test ran
 # and none was skipped" should be checkable by reading the log, not only by trusting an exit
 # code. Reimplementing it in this file is the mistake to avoid -- a verification that exists
 # twice drifts, and the copy nobody runs by hand is the one that rots.
 python3 assert-tests-ran.py \
-  --results build/test-results/unitTest \
-  --test-classes build/classes/java/test \
-  --require-suite io.github.awslabs.ash.jetbrains.AnnotationCountTest
+  --results build/test-results/test \
+  --test-classes build/classes/kotlin/test \
+  --require-suite io.github.awslabs.ash.jetbrains.AnnotationCountTest \
+  --require-suite io.github.awslabs.ash.jetbrains.AshScanIntegrationTest
 
 echo "== 6. the fixture still carries the planted secret"
-# Without it, AnnotationCountTest passes vacuously: the SARIF fixture would still have three
-# results, the planner would still place them, and nothing would be verifying that the value
-# a scanner reacts to is present. The same value is planted by
+# Without it, AnnotationCountTest and AshScanIntegrationTest pass vacuously: the SARIF fixtures
+# would still have three results, the inspection would still place them, and nothing would be
+# verifying that the value a scanner reacts to is present. The same value is planted by
 # packaging/deb/verify-in-container.sh, packaging/rpm/verify-in-container.sh and
 # Formula/ash.rb, so the whole branch has one known secret to look for.
 FIXTURE="src/test/resources/fixtures/leak.py"

@@ -11,7 +11,7 @@ doLast that fails on a zero test count.
 The doLast is not sufficient, and this file exists because a negative control proved it. With
 the test sources moved aside, Gradle reported:
 
-    > Task :unitTest NO-SOURCE
+    > Task :test NO-SOURCE
     BUILD SUCCESSFUL
 
 A task Gradle skips as NO-SOURCE never runs its actions, so the in-task guard was never
@@ -27,7 +27,7 @@ not the task ran. It reads two artifacts and compares them:
 
 Comparing them closes the stale-artifact hole as well. A results directory left over from an
 earlier run would satisfy a check that only looked for XML, and after the test sources are
-removed `compileTestJava` removes their .class files -- so a compiled-class count of zero
+removed the test compile task removes their .class files -- so a compiled-class count of zero
 fails even when yesterday's XML is still on disk.
 
 WHAT ELSE IS REFUSED, AND WHY EACH ONE IS NOT PEDANTRY
@@ -46,8 +46,8 @@ WHAT ELSE IS REFUSED, AND WHY EACH ONE IS NOT PEDANTRY
 USAGE
 
   python3 assert-tests-ran.py \
-      --results build/test-results/unitTest \
-      --test-classes build/classes/java/test \
+      --results build/test-results/test \
+      --test-classes build/classes/kotlin/test \
       --require-suite io.github.awslabs.ash.jetbrains.AnnotationCountTest
 
 Exit codes: 0 pass, 1 the suite did not run as expected.
@@ -60,8 +60,8 @@ import pathlib
 import sys
 
 # defusedxml rather than xml.etree, and with no fallback deliberately: if it is not importable
-# this gate must stop rather than parse anyway and report a test count. A gate that still says
-# "161 tests ran" after losing its parser is the silent pass this file exists to remove.
+# this gate must stop rather than parse anyway and report a test count. A gate that still prints
+# a test count after losing its parser is the silent pass this file exists to remove.
 # verify-in-container.sh step 3 provisions it, since gradle:jdk21 ships python3 and no package
 # manager. Only fromstring is needed here, so the stdlib module is no longer imported at all.
 #
@@ -95,7 +95,7 @@ def compiled_test_suites(test_classes: pathlib.Path) -> set[str]:
 
     Nested classes are excluded: JUnit reports a nested test class inside its outer class's
     suite, so counting them would demand result files that never exist. Helper classes without
-    "Test" in the name are excluded for the same reason -- Fixtures.java compiles and reports
+    "Test" in the name are excluded for the same reason -- a helper class compiles and reports
     nothing.
     """
     suites: set[str] = set()
@@ -120,7 +120,7 @@ def main(argv: list[str]) -> int:
     if not compiled:
         problems.append(
             f"no compiled test classes under {test_classes}. Either there are no test sources, "
-            "or compileTestJava did not run. A test task with no sources is skipped as "
+            "or the test compile task did not run. A test task with no sources is skipped as "
             "NO-SOURCE and reports success, which is why this is checked from outside the task."
         )
 
@@ -173,9 +173,9 @@ def main(argv: list[str]) -> int:
     for required in args.require_suite:
         if required not in reported:
             problems.append(
-                f"{required} did not run. That is the class asserting a NON-ZERO number of "
-                "annotations from a planted secret, which is the only assertion here that a "
-                "silent scan cannot satisfy."
+                f"{required} did not run. It was named with --require-suite because it "
+                "asserts a NON-ZERO number of findings reaching the editor from a planted "
+                "secret, which is the kind of assertion a silent scan cannot satisfy."
             )
 
     if problems:

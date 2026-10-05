@@ -257,7 +257,7 @@ cython_debug/
 #
 # `build/` and `lib/` in the Python section above already cover Gradle's output directory
 # and would swallow any directory named lib/, which is why the plugin keeps its sources
-# under src/main/java and has no lib/ of its own. These three are what Gradle adds that
+# under src/main/kotlin and has no lib/ of its own. These three are what Gradle adds that
 # nothing above catches.
 #
 # Deliberately NOT ignored, and this is the sharp one:
