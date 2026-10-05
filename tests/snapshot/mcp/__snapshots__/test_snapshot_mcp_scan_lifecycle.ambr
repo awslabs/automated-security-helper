@@ -1,0 +1,3128 @@
+# serializer version: 1
+# name: test_a_scan_from_start_to_its_terminal_status[completed][final_poll]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting progress for scan: <SCAN_ID>',
+      ]),
+    ]),
+    'result': dict({
+      'completed_scanners': 0,
+      'config_path': None,
+      'coverage_complete': True,
+      'directory_path': '<TMP>/allowed/project',
+      'end_time': '<END_TIME>',
+      'error_message': None,
+      'incomplete_converters': list([
+      ]),
+      'incomplete_scanners': list([
+      ]),
+      'is_complete': True,
+      'no_scanner_ran': False,
+      'operation': 'get_scan_progress',
+      'output_directory': '<TMP>/allowed/project/.ash/ash_output',
+      'scan_id': '<SCAN_ID>',
+      'scanner_statuses': dict({
+        'bandit': dict({
+          'dependencies_satisfied': True,
+          'excluded': False,
+          'status': 'FAILED',
+        }),
+        'detect-secrets': dict({
+          'dependencies_satisfied': True,
+          'excluded': False,
+          'status': 'FAILED',
+        }),
+      }),
+      'scanners': dict({
+        'bandit': dict({
+          'source': dict({
+            'severity_counts': dict({
+              'high': 1,
+              'suppressed': 1,
+            }),
+          }),
+        }),
+        'detect-secrets': dict({
+          'source': dict({
+            'severity_counts': dict({
+              'critical': 1,
+            }),
+          }),
+        }),
+      }),
+      'severity_counts': dict({
+        'critical': 1,
+        'high': 1,
+        'info': 0,
+        'low': 0,
+        'medium': 0,
+        'suppressed': 1,
+      }),
+      'severity_threshold': 'MEDIUM',
+      'skipped_scanners': list([
+      ]),
+      'stale_content_databases': list([
+      ]),
+      'start_time': '<START_TIME>',
+      'status': 'completed',
+      'success': True,
+      'timestamp': '<TIMESTAMP>',
+      'total_findings': 3,
+      'total_scanners': 2,
+      'unevaluated_rules': list([
+      ]),
+      'warnings': list([
+      ]),
+    }),
+    'tool': 'get_scan_progress',
+  })
+# ---
+# name: test_a_scan_from_start_to_its_terminal_status[completed][first_poll]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting progress for scan: <SCAN_ID>',
+      ]),
+    ]),
+    'result': dict({
+      'completed_scanners': 2,
+      'config_path': None,
+      'coverage_complete': None,
+      'directory_path': '<TMP>/allowed/project',
+      'end_time': None,
+      'error_message': None,
+      'incomplete_converters': list([
+      ]),
+      'incomplete_scanners': list([
+      ]),
+      'is_complete': False,
+      'no_scanner_ran': False,
+      'operation': 'get_scan_progress',
+      'output_directory': '<TMP>/allowed/project/.ash/ash_output',
+      'scan_id': '<SCAN_ID>',
+      'scanner_statuses': dict({
+      }),
+      'scanners': dict({
+        'bandit': dict({
+          'source': dict({
+            'severity_counts': dict({
+              'high': 1,
+              'suppressed': 1,
+            }),
+          }),
+        }),
+        'detect-secrets': dict({
+          'source': dict({
+            'severity_counts': dict({
+              'critical': 1,
+            }),
+          }),
+        }),
+      }),
+      'severity_counts': dict({
+        'critical': 1,
+        'high': 1,
+        'info': 0,
+        'low': 0,
+        'medium': 0,
+        'suppressed': 1,
+      }),
+      'severity_threshold': 'MEDIUM',
+      'skipped_scanners': list([
+      ]),
+      'stale_content_databases': list([
+      ]),
+      'start_time': '<START_TIME>',
+      'status': 'pending',
+      'success': True,
+      'timestamp': '<TIMESTAMP>',
+      'total_findings': 0,
+      'total_scanners': 2,
+      'unevaluated_rules': list([
+      ]),
+      'warnings': list([
+      ]),
+    }),
+    'tool': 'get_scan_progress',
+  })
+# ---
+# name: test_a_scan_from_start_to_its_terminal_status[completed][list_active_scans]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Listing active scans',
+      ]),
+    ]),
+    'result': dict({
+      'active_scans': list([
+      ]),
+      'all_scans': list([
+        dict({
+          'config_path': None,
+          'coverage': dict({
+            'incomplete_converters': list([
+            ]),
+            'incomplete_scanners': list([
+            ]),
+            'no_scanner_ran': False,
+            'stale_content_databases': list([
+            ]),
+            'unevaluated_rules': list([
+            ]),
+          }),
+          'directory_path': '<TMP>/allowed/project',
+          'end_time': '<END_TIME>',
+          'error_message': None,
+          'output_directory': '<TMP>/allowed/project/.ash/ash_output',
+          'process_id': None,
+          'scan_id': '<SCAN_ID>',
+          'severity_threshold': 'MEDIUM',
+          'start_time': '<START_TIME>',
+          'status': 'completed',
+          'warnings': list([
+          ]),
+        }),
+      ]),
+      'operation': 'list_active_scans',
+      'stats': dict({
+        'active_scans': 0,
+        'status_counts': dict({
+          'cancelled': 0,
+          'completed': 1,
+          'failed': 0,
+          'incomplete': 0,
+          'pending': 0,
+          'running': 0,
+        }),
+        'total_scans': 1,
+      }),
+      'success': True,
+      'timestamp': '<TIMESTAMP>',
+    }),
+    'tool': 'list_active_scans',
+  })
+# ---
+# name: test_a_scan_from_start_to_its_terminal_status[completed][run_ash_scan]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'run_ash_scan tool called in cwd: <CWD>',
+      ]),
+      list([
+        'info',
+        'Starting scan for directory: <TMP>/allowed/project',
+      ]),
+      list([
+        'info',
+        'Cleaning up existing results file...',
+      ]),
+      list([
+        'debug',
+        'Removed existing results file: <TMP>/allowed/project/.ash/ash_output/ash_aggregated_results.json',
+      ]),
+      list([
+        'info',
+        'Scan started with ID: <SCAN_ID>',
+      ]),
+      list([
+        'report_progress',
+        "message='Scan started, initializing scanners...'",
+        'progress=0.0',
+        'total=1.0',
+      ]),
+    ]),
+    'result': dict({
+      'directory_path': '<TMP>/allowed/project',
+      'important': dict({
+        'connection_management': "CRITICAL: ASH scans take 30-120+ seconds. To prevent MCP connection timeout, poll get_scan_progress(scan_id) every <DURATION> instead of sleeping. Example: while True: progress = get_scan_progress(scan_id); if progress['is_complete']: break; time.sleep(5)",
+        'next_steps': list([
+          '1. Poll get_scan_progress(scan_id) every <DURATION> to keep connection alive',
+          "2. Check progress['is_complete'] or progress['status'] for completion",
+          '3. After completion, use get_scan_results() with filtering for efficient data transfer',
+        ]),
+      }),
+      'message': 'Scan started, initializing scanners. Use get_scan_progress to track progress.',
+      'progress': 0.0,
+      'scan_id': '<SCAN_ID>',
+      'session_id': '__default__',
+      'status': 'running',
+      'success': True,
+    }),
+    'tool': 'run_ash_scan',
+  })
+# ---
+# name: test_a_scan_from_start_to_its_terminal_status[completed][summary]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting results from ASH scan in directory: <TMP>/allowed/project/.ash/ash_output (filter_level=summary)',
+      ]),
+    ]),
+    'result': dict({
+      '_filter': 'summary',
+      '_source_function': 'get_scan_summary',
+      'completion_time': '<TIMESTAMP>',
+      'findings_summary': dict({
+        'by_severity': dict({
+          'actionable': 2,
+          'critical': 0,
+          'high': 0,
+          'info': 0,
+          'low': 0,
+          'medium': 0,
+          'suppressed': 0,
+          'total': 3,
+        }),
+        'scan_stats': dict({
+          'failed': 2,
+          'missing': 0,
+          'passed': 0,
+          'skipped': 0,
+        }),
+      }),
+      'is_complete': True,
+      'metadata': dict({
+        'ash_version': '0.0.0+snapshot-fixture',
+        'generated_at': '<GENERATED_AT>',
+        'scan_duration_seconds': '<SCAN_DURATION_SECONDS>',
+      }),
+      'scan_id': 'scan-<SCAN_TIMESTAMP>',
+      'scanner_summary': dict({
+        'by_scanner': dict({
+          'bandit': dict({
+            'actionable_findings': 1,
+            'by_severity': dict({
+              'critical': 0,
+              'high': 1,
+              'info': 0,
+              'low': 0,
+              'medium': 0,
+              'suppressed': 1,
+            }),
+            'duration': '<DURATION>',
+            'findings_count': 2,
+            'status': 'FAILED',
+            'suppressed_findings': 1,
+          }),
+          'detect-secrets': dict({
+            'actionable_findings': 1,
+            'by_severity': dict({
+              'critical': 1,
+              'high': 0,
+              'info': 0,
+              'low': 0,
+              'medium': 0,
+              'suppressed': 0,
+            }),
+            'duration': '<DURATION>',
+            'findings_count': 1,
+            'status': 'FAILED',
+            'suppressed_findings': 0,
+          }),
+        }),
+        'completed_scanners': 2,
+        'total_scanners': 2,
+      }),
+      'status': 'completed',
+      'success': True,
+    }),
+    'tool': 'get_scan_summary',
+  })
+# ---
+# name: test_a_scan_from_start_to_its_terminal_status[failed_on_exception][final_poll]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting progress for scan: <SCAN_ID>',
+      ]),
+    ]),
+    'result': dict({
+      'completed_scanners': 2,
+      'config_path': None,
+      'coverage_complete': None,
+      'directory_path': '<TMP>/allowed/project',
+      'end_time': '<END_TIME>',
+      'error_message': 'Error executing scan: scanner orchestration crashed',
+      'incomplete_converters': list([
+      ]),
+      'incomplete_scanners': list([
+      ]),
+      'is_complete': False,
+      'no_scanner_ran': False,
+      'operation': 'get_scan_progress',
+      'output_directory': '<TMP>/allowed/project/.ash/ash_output',
+      'scan_id': '<SCAN_ID>',
+      'scanner_statuses': dict({
+      }),
+      'scanners': dict({
+        'bandit': dict({
+          'source': dict({
+            'severity_counts': dict({
+              'high': 1,
+              'suppressed': 1,
+            }),
+          }),
+        }),
+        'detect-secrets': dict({
+          'source': dict({
+            'severity_counts': dict({
+              'critical': 1,
+            }),
+          }),
+        }),
+      }),
+      'severity_counts': dict({
+        'critical': 1,
+        'high': 1,
+        'info': 0,
+        'low': 0,
+        'medium': 0,
+        'suppressed': 1,
+      }),
+      'severity_threshold': 'MEDIUM',
+      'skipped_scanners': list([
+      ]),
+      'stale_content_databases': list([
+      ]),
+      'start_time': '<START_TIME>',
+      'status': 'failed',
+      'success': True,
+      'timestamp': '<TIMESTAMP>',
+      'total_findings': 0,
+      'total_scanners': 2,
+      'unevaluated_rules': list([
+      ]),
+      'warnings': list([
+      ]),
+    }),
+    'tool': 'get_scan_progress',
+  })
+# ---
+# name: test_a_scan_from_start_to_its_terminal_status[failed_on_exception][first_poll]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting progress for scan: <SCAN_ID>',
+      ]),
+    ]),
+    'result': dict({
+      'completed_scanners': 2,
+      'config_path': None,
+      'coverage_complete': None,
+      'directory_path': '<TMP>/allowed/project',
+      'end_time': None,
+      'error_message': None,
+      'incomplete_converters': list([
+      ]),
+      'incomplete_scanners': list([
+      ]),
+      'is_complete': False,
+      'no_scanner_ran': False,
+      'operation': 'get_scan_progress',
+      'output_directory': '<TMP>/allowed/project/.ash/ash_output',
+      'scan_id': '<SCAN_ID>',
+      'scanner_statuses': dict({
+      }),
+      'scanners': dict({
+        'bandit': dict({
+          'source': dict({
+            'severity_counts': dict({
+              'high': 1,
+              'suppressed': 1,
+            }),
+          }),
+        }),
+        'detect-secrets': dict({
+          'source': dict({
+            'severity_counts': dict({
+              'critical': 1,
+            }),
+          }),
+        }),
+      }),
+      'severity_counts': dict({
+        'critical': 1,
+        'high': 1,
+        'info': 0,
+        'low': 0,
+        'medium': 0,
+        'suppressed': 1,
+      }),
+      'severity_threshold': 'MEDIUM',
+      'skipped_scanners': list([
+      ]),
+      'stale_content_databases': list([
+      ]),
+      'start_time': '<START_TIME>',
+      'status': 'pending',
+      'success': True,
+      'timestamp': '<TIMESTAMP>',
+      'total_findings': 0,
+      'total_scanners': 2,
+      'unevaluated_rules': list([
+      ]),
+      'warnings': list([
+      ]),
+    }),
+    'tool': 'get_scan_progress',
+  })
+# ---
+# name: test_a_scan_from_start_to_its_terminal_status[failed_on_exception][list_active_scans]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Listing active scans',
+      ]),
+    ]),
+    'result': dict({
+      'active_scans': list([
+      ]),
+      'all_scans': list([
+        dict({
+          'config_path': None,
+          'coverage': None,
+          'directory_path': '<TMP>/allowed/project',
+          'end_time': '<END_TIME>',
+          'error_message': 'Error executing scan: scanner orchestration crashed',
+          'output_directory': '<TMP>/allowed/project/.ash/ash_output',
+          'process_id': None,
+          'scan_id': '<SCAN_ID>',
+          'severity_threshold': 'MEDIUM',
+          'start_time': '<START_TIME>',
+          'status': 'failed',
+          'warnings': list([
+          ]),
+        }),
+      ]),
+      'operation': 'list_active_scans',
+      'stats': dict({
+        'active_scans': 0,
+        'status_counts': dict({
+          'cancelled': 0,
+          'completed': 0,
+          'failed': 1,
+          'incomplete': 0,
+          'pending': 0,
+          'running': 0,
+        }),
+        'total_scans': 1,
+      }),
+      'success': True,
+      'timestamp': '<TIMESTAMP>',
+    }),
+    'tool': 'list_active_scans',
+  })
+# ---
+# name: test_a_scan_from_start_to_its_terminal_status[failed_on_exception][run_ash_scan]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'run_ash_scan tool called in cwd: <CWD>',
+      ]),
+      list([
+        'info',
+        'Starting scan for directory: <TMP>/allowed/project',
+      ]),
+      list([
+        'info',
+        'Cleaning up existing results file...',
+      ]),
+      list([
+        'debug',
+        'Removed existing results file: <TMP>/allowed/project/.ash/ash_output/ash_aggregated_results.json',
+      ]),
+      list([
+        'info',
+        'Scan started with ID: <SCAN_ID>',
+      ]),
+      list([
+        'report_progress',
+        "message='Scan started, initializing scanners...'",
+        'progress=0.0',
+        'total=1.0',
+      ]),
+    ]),
+    'result': dict({
+      'directory_path': '<TMP>/allowed/project',
+      'important': dict({
+        'connection_management': "CRITICAL: ASH scans take 30-120+ seconds. To prevent MCP connection timeout, poll get_scan_progress(scan_id) every <DURATION> instead of sleeping. Example: while True: progress = get_scan_progress(scan_id); if progress['is_complete']: break; time.sleep(5)",
+        'next_steps': list([
+          '1. Poll get_scan_progress(scan_id) every <DURATION> to keep connection alive',
+          "2. Check progress['is_complete'] or progress['status'] for completion",
+          '3. After completion, use get_scan_results() with filtering for efficient data transfer',
+        ]),
+      }),
+      'message': 'Scan started, initializing scanners. Use get_scan_progress to track progress.',
+      'progress': 0.0,
+      'scan_id': '<SCAN_ID>',
+      'session_id': '__default__',
+      'status': 'running',
+      'success': True,
+    }),
+    'tool': 'run_ash_scan',
+  })
+# ---
+# name: test_a_scan_from_start_to_its_terminal_status[failed_on_exception][summary]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting results from ASH scan in directory: <TMP>/allowed/project/.ash/ash_output (filter_level=summary)',
+      ]),
+    ]),
+    'result': dict({
+      'context': dict({
+        'error_category': 'scan_incomplete',
+        'output_dir': '<TMP>/allowed/project/.ash/ash_output',
+      }),
+      'error': 'Scan of output_dir <TMP>/allowed/project/.ash/ash_output is not complete. Results are not available.',
+      'error_category': 'scan_incomplete',
+      'error_type': 'MCPResourceError',
+      'operation': 'get_scan_results',
+      'success': False,
+      'suggestions': list([
+        'Wait for the scan to complete',
+        'Check if the scan process is still running',
+        'Verify that the scan was started correctly',
+      ]),
+      'timestamp': None,
+    }),
+    'tool': 'get_scan_summary',
+  })
+# ---
+# name: test_a_scan_from_start_to_its_terminal_status[failed_on_exit_code][final_poll]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting progress for scan: <SCAN_ID>',
+      ]),
+    ]),
+    'result': dict({
+      'completed_scanners': 2,
+      'config_path': None,
+      'coverage_complete': None,
+      'directory_path': '<TMP>/allowed/project',
+      'end_time': '<END_TIME>',
+      'error_message': 'ASH exited with code 2',
+      'incomplete_converters': list([
+      ]),
+      'incomplete_scanners': list([
+      ]),
+      'is_complete': False,
+      'no_scanner_ran': False,
+      'operation': 'get_scan_progress',
+      'output_directory': '<TMP>/allowed/project/.ash/ash_output',
+      'scan_id': '<SCAN_ID>',
+      'scanner_statuses': dict({
+      }),
+      'scanners': dict({
+        'bandit': dict({
+          'source': dict({
+            'severity_counts': dict({
+              'high': 1,
+              'suppressed': 1,
+            }),
+          }),
+        }),
+        'detect-secrets': dict({
+          'source': dict({
+            'severity_counts': dict({
+              'critical': 1,
+            }),
+          }),
+        }),
+      }),
+      'severity_counts': dict({
+        'critical': 1,
+        'high': 1,
+        'info': 0,
+        'low': 0,
+        'medium': 0,
+        'suppressed': 1,
+      }),
+      'severity_threshold': 'MEDIUM',
+      'skipped_scanners': list([
+      ]),
+      'stale_content_databases': list([
+      ]),
+      'start_time': '<START_TIME>',
+      'status': 'failed',
+      'success': True,
+      'timestamp': '<TIMESTAMP>',
+      'total_findings': 0,
+      'total_scanners': 2,
+      'unevaluated_rules': list([
+      ]),
+      'warnings': list([
+      ]),
+    }),
+    'tool': 'get_scan_progress',
+  })
+# ---
+# name: test_a_scan_from_start_to_its_terminal_status[failed_on_exit_code][first_poll]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting progress for scan: <SCAN_ID>',
+      ]),
+    ]),
+    'result': dict({
+      'completed_scanners': 2,
+      'config_path': None,
+      'coverage_complete': None,
+      'directory_path': '<TMP>/allowed/project',
+      'end_time': None,
+      'error_message': None,
+      'incomplete_converters': list([
+      ]),
+      'incomplete_scanners': list([
+      ]),
+      'is_complete': False,
+      'no_scanner_ran': False,
+      'operation': 'get_scan_progress',
+      'output_directory': '<TMP>/allowed/project/.ash/ash_output',
+      'scan_id': '<SCAN_ID>',
+      'scanner_statuses': dict({
+      }),
+      'scanners': dict({
+        'bandit': dict({
+          'source': dict({
+            'severity_counts': dict({
+              'high': 1,
+              'suppressed': 1,
+            }),
+          }),
+        }),
+        'detect-secrets': dict({
+          'source': dict({
+            'severity_counts': dict({
+              'critical': 1,
+            }),
+          }),
+        }),
+      }),
+      'severity_counts': dict({
+        'critical': 1,
+        'high': 1,
+        'info': 0,
+        'low': 0,
+        'medium': 0,
+        'suppressed': 1,
+      }),
+      'severity_threshold': 'MEDIUM',
+      'skipped_scanners': list([
+      ]),
+      'stale_content_databases': list([
+      ]),
+      'start_time': '<START_TIME>',
+      'status': 'pending',
+      'success': True,
+      'timestamp': '<TIMESTAMP>',
+      'total_findings': 0,
+      'total_scanners': 2,
+      'unevaluated_rules': list([
+      ]),
+      'warnings': list([
+      ]),
+    }),
+    'tool': 'get_scan_progress',
+  })
+# ---
+# name: test_a_scan_from_start_to_its_terminal_status[failed_on_exit_code][list_active_scans]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Listing active scans',
+      ]),
+    ]),
+    'result': dict({
+      'active_scans': list([
+      ]),
+      'all_scans': list([
+        dict({
+          'config_path': None,
+          'coverage': None,
+          'directory_path': '<TMP>/allowed/project',
+          'end_time': '<END_TIME>',
+          'error_message': 'ASH exited with code 2',
+          'output_directory': '<TMP>/allowed/project/.ash/ash_output',
+          'process_id': None,
+          'scan_id': '<SCAN_ID>',
+          'severity_threshold': 'MEDIUM',
+          'start_time': '<START_TIME>',
+          'status': 'failed',
+          'warnings': list([
+          ]),
+        }),
+      ]),
+      'operation': 'list_active_scans',
+      'stats': dict({
+        'active_scans': 0,
+        'status_counts': dict({
+          'cancelled': 0,
+          'completed': 0,
+          'failed': 1,
+          'incomplete': 0,
+          'pending': 0,
+          'running': 0,
+        }),
+        'total_scans': 1,
+      }),
+      'success': True,
+      'timestamp': '<TIMESTAMP>',
+    }),
+    'tool': 'list_active_scans',
+  })
+# ---
+# name: test_a_scan_from_start_to_its_terminal_status[failed_on_exit_code][run_ash_scan]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'run_ash_scan tool called in cwd: <CWD>',
+      ]),
+      list([
+        'info',
+        'Starting scan for directory: <TMP>/allowed/project',
+      ]),
+      list([
+        'info',
+        'Cleaning up existing results file...',
+      ]),
+      list([
+        'debug',
+        'Removed existing results file: <TMP>/allowed/project/.ash/ash_output/ash_aggregated_results.json',
+      ]),
+      list([
+        'info',
+        'Scan started with ID: <SCAN_ID>',
+      ]),
+      list([
+        'report_progress',
+        "message='Scan started, initializing scanners...'",
+        'progress=0.0',
+        'total=1.0',
+      ]),
+    ]),
+    'result': dict({
+      'directory_path': '<TMP>/allowed/project',
+      'important': dict({
+        'connection_management': "CRITICAL: ASH scans take 30-120+ seconds. To prevent MCP connection timeout, poll get_scan_progress(scan_id) every <DURATION> instead of sleeping. Example: while True: progress = get_scan_progress(scan_id); if progress['is_complete']: break; time.sleep(5)",
+        'next_steps': list([
+          '1. Poll get_scan_progress(scan_id) every <DURATION> to keep connection alive',
+          "2. Check progress['is_complete'] or progress['status'] for completion",
+          '3. After completion, use get_scan_results() with filtering for efficient data transfer',
+        ]),
+      }),
+      'message': 'Scan started, initializing scanners. Use get_scan_progress to track progress.',
+      'progress': 0.0,
+      'scan_id': '<SCAN_ID>',
+      'session_id': '__default__',
+      'status': 'running',
+      'success': True,
+    }),
+    'tool': 'run_ash_scan',
+  })
+# ---
+# name: test_a_scan_from_start_to_its_terminal_status[failed_on_exit_code][summary]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting results from ASH scan in directory: <TMP>/allowed/project/.ash/ash_output (filter_level=summary)',
+      ]),
+    ]),
+    'result': dict({
+      'context': dict({
+        'error_category': 'scan_incomplete',
+        'output_dir': '<TMP>/allowed/project/.ash/ash_output',
+      }),
+      'error': 'Scan of output_dir <TMP>/allowed/project/.ash/ash_output is not complete. Results are not available.',
+      'error_category': 'scan_incomplete',
+      'error_type': 'MCPResourceError',
+      'operation': 'get_scan_results',
+      'success': False,
+      'suggestions': list([
+        'Wait for the scan to complete',
+        'Check if the scan process is still running',
+        'Verify that the scan was started correctly',
+      ]),
+      'timestamp': None,
+    }),
+    'tool': 'get_scan_summary',
+  })
+# ---
+# name: test_a_scan_from_start_to_its_terminal_status[incomplete][final_poll]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting progress for scan: <SCAN_ID>',
+      ]),
+    ]),
+    'result': dict({
+      'completed_scanners': 0,
+      'config_path': None,
+      'coverage_complete': False,
+      'directory_path': '<TMP>/allowed/project',
+      'end_time': '<END_TIME>',
+      'error_message': None,
+      'incomplete_converters': list([
+      ]),
+      'incomplete_scanners': list([
+        dict({
+          'detail': 'MISSING',
+          'reason': 'missing_dependencies',
+          'scanner': 'semgrep',
+          'status': 'MISSING',
+        }),
+      ]),
+      'is_complete': True,
+      'no_scanner_ran': False,
+      'operation': 'get_scan_progress',
+      'output_directory': '<TMP>/allowed/project/.ash/ash_output',
+      'scan_id': '<SCAN_ID>',
+      'scanner_statuses': dict({
+        'bandit': dict({
+          'dependencies_satisfied': True,
+          'excluded': False,
+          'status': 'FAILED',
+        }),
+        'detect-secrets': dict({
+          'dependencies_satisfied': True,
+          'excluded': False,
+          'status': 'FAILED',
+        }),
+        'semgrep': dict({
+          'dependencies_satisfied': False,
+          'excluded': False,
+          'status': 'MISSING',
+        }),
+      }),
+      'scanners': dict({
+        'bandit': dict({
+          'source': dict({
+            'severity_counts': dict({
+              'high': 1,
+              'suppressed': 1,
+            }),
+          }),
+        }),
+        'detect-secrets': dict({
+          'source': dict({
+            'severity_counts': dict({
+              'critical': 1,
+            }),
+          }),
+        }),
+        'semgrep': dict({
+          'source': dict({
+            'severity_counts': dict({
+            }),
+          }),
+        }),
+      }),
+      'severity_counts': dict({
+        'critical': 1,
+        'high': 1,
+        'info': 0,
+        'low': 0,
+        'medium': 0,
+        'suppressed': 1,
+      }),
+      'severity_threshold': 'MEDIUM',
+      'skipped_scanners': list([
+        dict({
+          'reason': 'missing_dependencies',
+          'scanner': 'semgrep',
+          'status': 'MISSING',
+        }),
+      ]),
+      'stale_content_databases': list([
+      ]),
+      'start_time': '<START_TIME>',
+      'status': 'incomplete',
+      'success': True,
+      'timestamp': '<TIMESTAMP>',
+      'total_findings': 3,
+      'total_scanners': 3,
+      'unevaluated_rules': list([
+      ]),
+      'warnings': list([
+      ]),
+    }),
+    'tool': 'get_scan_progress',
+  })
+# ---
+# name: test_a_scan_from_start_to_its_terminal_status[incomplete][first_poll]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting progress for scan: <SCAN_ID>',
+      ]),
+    ]),
+    'result': dict({
+      'completed_scanners': 2,
+      'config_path': None,
+      'coverage_complete': None,
+      'directory_path': '<TMP>/allowed/project',
+      'end_time': None,
+      'error_message': None,
+      'incomplete_converters': list([
+      ]),
+      'incomplete_scanners': list([
+      ]),
+      'is_complete': False,
+      'no_scanner_ran': False,
+      'operation': 'get_scan_progress',
+      'output_directory': '<TMP>/allowed/project/.ash/ash_output',
+      'scan_id': '<SCAN_ID>',
+      'scanner_statuses': dict({
+      }),
+      'scanners': dict({
+        'bandit': dict({
+          'source': dict({
+            'severity_counts': dict({
+              'high': 1,
+              'suppressed': 1,
+            }),
+          }),
+        }),
+        'detect-secrets': dict({
+          'source': dict({
+            'severity_counts': dict({
+              'critical': 1,
+            }),
+          }),
+        }),
+      }),
+      'severity_counts': dict({
+        'critical': 1,
+        'high': 1,
+        'info': 0,
+        'low': 0,
+        'medium': 0,
+        'suppressed': 1,
+      }),
+      'severity_threshold': 'MEDIUM',
+      'skipped_scanners': list([
+      ]),
+      'stale_content_databases': list([
+      ]),
+      'start_time': '<START_TIME>',
+      'status': 'pending',
+      'success': True,
+      'timestamp': '<TIMESTAMP>',
+      'total_findings': 0,
+      'total_scanners': 2,
+      'unevaluated_rules': list([
+      ]),
+      'warnings': list([
+      ]),
+    }),
+    'tool': 'get_scan_progress',
+  })
+# ---
+# name: test_a_scan_from_start_to_its_terminal_status[incomplete][list_active_scans]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Listing active scans',
+      ]),
+    ]),
+    'result': dict({
+      'active_scans': list([
+      ]),
+      'all_scans': list([
+        dict({
+          'config_path': None,
+          'coverage': dict({
+            'incomplete_converters': list([
+            ]),
+            'incomplete_scanners': list([
+              dict({
+                'detail': 'MISSING',
+                'reason': 'missing_dependencies',
+                'scanner': 'semgrep',
+                'status': 'MISSING',
+              }),
+            ]),
+            'no_scanner_ran': False,
+            'stale_content_databases': list([
+            ]),
+            'unevaluated_rules': list([
+            ]),
+          }),
+          'directory_path': '<TMP>/allowed/project',
+          'end_time': '<END_TIME>',
+          'error_message': None,
+          'output_directory': '<TMP>/allowed/project/.ash/ash_output',
+          'process_id': None,
+          'scan_id': '<SCAN_ID>',
+          'severity_threshold': 'MEDIUM',
+          'start_time': '<START_TIME>',
+          'status': 'incomplete',
+          'warnings': list([
+          ]),
+        }),
+      ]),
+      'operation': 'list_active_scans',
+      'stats': dict({
+        'active_scans': 0,
+        'status_counts': dict({
+          'cancelled': 0,
+          'completed': 0,
+          'failed': 0,
+          'incomplete': 1,
+          'pending': 0,
+          'running': 0,
+        }),
+        'total_scans': 1,
+      }),
+      'success': True,
+      'timestamp': '<TIMESTAMP>',
+    }),
+    'tool': 'list_active_scans',
+  })
+# ---
+# name: test_a_scan_from_start_to_its_terminal_status[incomplete][run_ash_scan]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'run_ash_scan tool called in cwd: <CWD>',
+      ]),
+      list([
+        'info',
+        'Starting scan for directory: <TMP>/allowed/project',
+      ]),
+      list([
+        'info',
+        'Cleaning up existing results file...',
+      ]),
+      list([
+        'debug',
+        'Removed existing results file: <TMP>/allowed/project/.ash/ash_output/ash_aggregated_results.json',
+      ]),
+      list([
+        'info',
+        'Scan started with ID: <SCAN_ID>',
+      ]),
+      list([
+        'report_progress',
+        "message='Scan started, initializing scanners...'",
+        'progress=0.0',
+        'total=1.0',
+      ]),
+    ]),
+    'result': dict({
+      'directory_path': '<TMP>/allowed/project',
+      'important': dict({
+        'connection_management': "CRITICAL: ASH scans take 30-120+ seconds. To prevent MCP connection timeout, poll get_scan_progress(scan_id) every <DURATION> instead of sleeping. Example: while True: progress = get_scan_progress(scan_id); if progress['is_complete']: break; time.sleep(5)",
+        'next_steps': list([
+          '1. Poll get_scan_progress(scan_id) every <DURATION> to keep connection alive',
+          "2. Check progress['is_complete'] or progress['status'] for completion",
+          '3. After completion, use get_scan_results() with filtering for efficient data transfer',
+        ]),
+      }),
+      'message': 'Scan started, initializing scanners. Use get_scan_progress to track progress.',
+      'progress': 0.0,
+      'scan_id': '<SCAN_ID>',
+      'session_id': '__default__',
+      'status': 'running',
+      'success': True,
+    }),
+    'tool': 'run_ash_scan',
+  })
+# ---
+# name: test_a_scan_from_start_to_its_terminal_status[incomplete][summary]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting results from ASH scan in directory: <TMP>/allowed/project/.ash/ash_output (filter_level=summary)',
+      ]),
+    ]),
+    'result': dict({
+      '_filter': 'summary',
+      '_source_function': 'get_scan_summary',
+      'completion_time': '<TIMESTAMP>',
+      'findings_summary': dict({
+        'by_severity': dict({
+          'actionable': 2,
+          'critical': 0,
+          'high': 0,
+          'info': 0,
+          'low': 0,
+          'medium': 0,
+          'suppressed': 0,
+          'total': 3,
+        }),
+        'scan_stats': dict({
+          'failed': 2,
+          'missing': 1,
+          'passed': 0,
+          'skipped': 0,
+        }),
+      }),
+      'is_complete': True,
+      'metadata': dict({
+        'ash_version': '0.0.0+snapshot-fixture',
+        'generated_at': '<GENERATED_AT>',
+        'scan_duration_seconds': '<SCAN_DURATION_SECONDS>',
+      }),
+      'scan_id': 'scan-<SCAN_TIMESTAMP>',
+      'scanner_summary': dict({
+        'by_scanner': dict({
+          'bandit': dict({
+            'actionable_findings': 1,
+            'by_severity': dict({
+              'critical': 0,
+              'high': 1,
+              'info': 0,
+              'low': 0,
+              'medium': 0,
+              'suppressed': 1,
+            }),
+            'duration': '<DURATION>',
+            'findings_count': 2,
+            'status': 'FAILED',
+            'suppressed_findings': 1,
+          }),
+          'detect-secrets': dict({
+            'actionable_findings': 1,
+            'by_severity': dict({
+              'critical': 1,
+              'high': 0,
+              'info': 0,
+              'low': 0,
+              'medium': 0,
+              'suppressed': 0,
+            }),
+            'duration': '<DURATION>',
+            'findings_count': 1,
+            'status': 'FAILED',
+            'suppressed_findings': 0,
+          }),
+          'semgrep': dict({
+            'actionable_findings': 0,
+            'by_severity': dict({
+              'critical': 0,
+              'high': 0,
+              'info': 0,
+              'low': 0,
+              'medium': 0,
+              'suppressed': 0,
+            }),
+            'duration': '<DURATION>',
+            'findings_count': 0,
+            'status': 'MISSING',
+            'suppressed_findings': 0,
+          }),
+        }),
+        'completed_scanners': 2,
+        'total_scanners': 3,
+      }),
+      'status': 'incomplete',
+      'success': True,
+    }),
+    'tool': 'get_scan_summary',
+  })
+# ---
+# name: test_get_scan_results[full][result]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting results from ASH scan in directory: <TMP>/allowed/project/.ash/ash_output (filter_level=full)',
+      ]),
+    ]),
+    'result': dict({
+      'actionable_findings': 2,
+      'completion_time': '<TIMESTAMP>',
+      'coverage_complete': True,
+      'incomplete_converters': list([
+      ]),
+      'incomplete_scanners': list([
+      ]),
+      'is_complete': True,
+      'no_scanner_ran': False,
+      'operation': 'get_scan_results',
+      'raw_results': dict({
+        'additional_reports': dict({
+        }),
+        'converter_results': dict({
+        }),
+        'description': 'Automated Security Helper - Aggregated Report',
+        'metadata': dict({
+          'description': 'Automated Security Helper Aggregated Report Post-processor',
+          'execution_discrepancy_report': dict({
+          }),
+          'expected_scanners': list([
+          ]),
+          'generated_at': '<GENERATED_AT>',
+          'plugin_load_errors': dict({
+          }),
+          'project_name': 'snapshot-fixture',
+          'report_id': '<REPORT_ID>',
+          'summary_stats': dict({
+            'actionable': 2,
+            'duration': '<DURATION>',
+            'error': 0,
+            'failed': 2,
+            'missing': 0,
+            'passed': 0,
+            'severity_counts': dict({
+              'critical': 1,
+              'high': 1,
+              'info': 0,
+              'low': 0,
+              'medium': 0,
+              'suppressed': 1,
+            }),
+            'skipped': 0,
+            'total': 3,
+          }),
+          'tool_version': '0.0.0+snapshot-fixture',
+          'validation_summary': dict({
+          }),
+        }),
+        'name': 'ASH Scan Report',
+        'scanner_results': dict({
+          'bandit': dict({
+            'actionable_finding_count': 1,
+            'dependencies_satisfied': True,
+            'excluded': False,
+            'finding_count': 2,
+            'severity_counts': dict({
+              'high': 1,
+              'suppressed': 1,
+            }),
+            'status': 'FAILED',
+            'suppressed_finding_count': 1,
+          }),
+          'detect-secrets': dict({
+            'actionable_finding_count': 1,
+            'dependencies_satisfied': True,
+            'excluded': False,
+            'finding_count': 1,
+            'severity_counts': dict({
+              'critical': 1,
+            }),
+            'status': 'FAILED',
+            'suppressed_finding_count': 0,
+          }),
+        }),
+        'used_suppressions': list([
+        ]),
+        'validation_checkpoints': list([
+        ]),
+      }),
+      'scan_id': 'scan-<SCAN_TIMESTAMP>',
+      'scanner_reports': dict({
+      }),
+      'stale_content_databases': list([
+      ]),
+      'status': 'completed',
+      'success': True,
+      'summary_stats': dict({
+        'actionable': 2,
+        'duration': '<DURATION>',
+        'error': 0,
+        'failed': 2,
+        'missing': 0,
+        'passed': 0,
+        'severity_counts': dict({
+          'critical': 1,
+          'high': 1,
+          'info': 0,
+          'low': 0,
+          'medium': 0,
+          'suppressed': 1,
+        }),
+        'skipped': 0,
+        'total': 3,
+      }),
+      'timestamp': '<TIMESTAMP>',
+      'total_scanners': 2,
+      'unevaluated_rules': list([
+      ]),
+    }),
+    'tool': 'get_scan_results',
+  })
+# ---
+# name: test_get_scan_results[minimal][result]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting results from ASH scan in directory: <TMP>/allowed/project/.ash/ash_output (filter_level=minimal)',
+      ]),
+    ]),
+    'result': dict({
+      '_filter': 'minimal',
+      'completion_time': '<TIMESTAMP>',
+      'is_complete': True,
+      'scan_id': 'scan-<SCAN_TIMESTAMP>',
+      'status': 'completed',
+      'success': True,
+      'summary_stats': dict({
+        'actionable': 2,
+        'duration': '<DURATION>',
+        'error': 0,
+        'failed': 2,
+        'missing': 0,
+        'passed': 0,
+        'severity_counts': dict({
+          'critical': 1,
+          'high': 1,
+          'info': 0,
+          'low': 0,
+          'medium': 0,
+          'suppressed': 1,
+        }),
+        'skipped': 0,
+        'total': 3,
+      }),
+    }),
+    'tool': 'get_scan_results',
+  })
+# ---
+# name: test_get_scan_results[minimal_actionable_only][result]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting results from ASH scan in directory: <TMP>/allowed/project/.ash/ash_output (filter_level=minimal, actionable_only=True)',
+      ]),
+    ]),
+    'result': dict({
+      '_filter': 'minimal',
+      'completion_time': '<TIMESTAMP>',
+      'is_complete': True,
+      'scan_id': 'scan-<SCAN_TIMESTAMP>',
+      'status': 'completed',
+      'success': True,
+      'summary_stats': dict({
+        'actionable': 2,
+        'duration': '<DURATION>',
+        'error': 0,
+        'failed': 2,
+        'missing': 0,
+        'passed': 0,
+        'severity_counts': dict({
+          'critical': 1,
+          'high': 1,
+          'info': 0,
+          'low': 0,
+          'medium': 0,
+          'suppressed': 1,
+        }),
+        'skipped': 0,
+        'suppressed': 0,
+        'total': 2,
+      }),
+    }),
+    'tool': 'get_scan_results',
+  })
+# ---
+# name: test_get_scan_results[summary][result]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting results from ASH scan in directory: <TMP>/allowed/project/.ash/ash_output (filter_level=summary)',
+      ]),
+    ]),
+    'result': dict({
+      '_filter': 'summary',
+      'completion_time': '<TIMESTAMP>',
+      'findings_summary': dict({
+        'by_severity': dict({
+          'actionable': 2,
+          'critical': 0,
+          'high': 0,
+          'info': 0,
+          'low': 0,
+          'medium': 0,
+          'suppressed': 0,
+          'total': 3,
+        }),
+        'scan_stats': dict({
+          'failed': 2,
+          'missing': 0,
+          'passed': 0,
+          'skipped': 0,
+        }),
+      }),
+      'is_complete': True,
+      'metadata': dict({
+        'ash_version': '0.0.0+snapshot-fixture',
+        'generated_at': '<GENERATED_AT>',
+        'scan_duration_seconds': '<SCAN_DURATION_SECONDS>',
+      }),
+      'scan_id': 'scan-<SCAN_TIMESTAMP>',
+      'scanner_summary': dict({
+        'by_scanner': dict({
+          'bandit': dict({
+            'actionable_findings': 1,
+            'by_severity': dict({
+              'critical': 0,
+              'high': 1,
+              'info': 0,
+              'low': 0,
+              'medium': 0,
+              'suppressed': 1,
+            }),
+            'duration': '<DURATION>',
+            'findings_count': 2,
+            'status': 'FAILED',
+            'suppressed_findings': 1,
+          }),
+          'detect-secrets': dict({
+            'actionable_findings': 1,
+            'by_severity': dict({
+              'critical': 1,
+              'high': 0,
+              'info': 0,
+              'low': 0,
+              'medium': 0,
+              'suppressed': 0,
+            }),
+            'duration': '<DURATION>',
+            'findings_count': 1,
+            'status': 'FAILED',
+            'suppressed_findings': 0,
+          }),
+        }),
+        'completed_scanners': 2,
+        'total_scanners': 2,
+      }),
+      'status': 'completed',
+      'success': True,
+    }),
+    'tool': 'get_scan_results',
+  })
+# ---
+# name: test_get_scan_results[summary_bandit_only][result]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting results from ASH scan in directory: <TMP>/allowed/project/.ash/ash_output (filter_level=summary, scanners=bandit)',
+      ]),
+    ]),
+    'result': dict({
+      '_filter': 'summary',
+      'completion_time': '<TIMESTAMP>',
+      'findings_summary': dict({
+        'by_severity': dict({
+          'actionable': 2,
+          'critical': 0,
+          'high': 0,
+          'info': 0,
+          'low': 0,
+          'medium': 0,
+          'suppressed': 0,
+          'total': 3,
+        }),
+        'scan_stats': dict({
+          'failed': 2,
+          'missing': 0,
+          'passed': 0,
+          'skipped': 0,
+        }),
+      }),
+      'is_complete': True,
+      'metadata': dict({
+        'ash_version': '0.0.0+snapshot-fixture',
+        'generated_at': '<GENERATED_AT>',
+        'scan_duration_seconds': '<SCAN_DURATION_SECONDS>',
+      }),
+      'scan_id': 'scan-<SCAN_TIMESTAMP>',
+      'scanner_summary': dict({
+        'by_scanner': dict({
+          'bandit': dict({
+            'actionable_findings': 1,
+            'by_severity': dict({
+              'critical': 0,
+              'high': 1,
+              'info': 0,
+              'low': 0,
+              'medium': 0,
+              'suppressed': 1,
+            }),
+            'duration': '<DURATION>',
+            'findings_count': 2,
+            'status': 'FAILED',
+            'suppressed_findings': 1,
+          }),
+        }),
+        'completed_scanners': 1,
+        'total_scanners': 1,
+      }),
+      'status': 'completed',
+      'success': True,
+    }),
+    'tool': 'get_scan_results',
+  })
+# ---
+# name: test_get_scan_results[summary_critical_only][result]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting results from ASH scan in directory: <TMP>/allowed/project/.ash/ash_output (filter_level=summary, severities=critical)',
+      ]),
+    ]),
+    'result': dict({
+      '_filter': 'summary',
+      'completion_time': '<TIMESTAMP>',
+      'findings_summary': dict({
+        'by_severity': dict({
+          'actionable': 2,
+          'critical': 0,
+          'high': 0,
+          'info': 0,
+          'low': 0,
+          'medium': 0,
+          'suppressed': 0,
+          'total': 3,
+        }),
+        'scan_stats': dict({
+          'failed': 2,
+          'missing': 0,
+          'passed': 0,
+          'skipped': 0,
+        }),
+      }),
+      'is_complete': True,
+      'metadata': dict({
+        'ash_version': '0.0.0+snapshot-fixture',
+        'generated_at': '<GENERATED_AT>',
+        'scan_duration_seconds': '<SCAN_DURATION_SECONDS>',
+      }),
+      'scan_id': 'scan-<SCAN_TIMESTAMP>',
+      'scanner_summary': dict({
+        'by_scanner': dict({
+          'bandit': dict({
+            'actionable_findings': 1,
+            'by_severity': dict({
+              'critical': 0,
+              'high': 0,
+              'info': 0,
+              'low': 0,
+              'medium': 0,
+              'suppressed': 0,
+            }),
+            'duration': '<DURATION>',
+            'findings_count': 2,
+            'status': 'FAILED',
+            'suppressed_findings': 1,
+          }),
+          'detect-secrets': dict({
+            'actionable_findings': 1,
+            'by_severity': dict({
+              'critical': 1,
+              'high': 0,
+              'info': 0,
+              'low': 0,
+              'medium': 0,
+              'suppressed': 0,
+            }),
+            'duration': '<DURATION>',
+            'findings_count': 1,
+            'status': 'FAILED',
+            'suppressed_findings': 0,
+          }),
+        }),
+        'completed_scanners': 2,
+        'total_scanners': 2,
+      }),
+      'status': 'completed',
+      'success': True,
+    }),
+    'tool': 'get_scan_results',
+  })
+# ---
+# name: test_get_scan_results[unknown_filter_level][result]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting results from ASH scan in directory: <TMP>/allowed/project/.ash/ash_output (filter_level=verbose)',
+      ]),
+      list([
+        'warning',
+        "Unknown filter_level 'verbose', returning full results",
+      ]),
+    ]),
+    'result': dict({
+      'actionable_findings': 2,
+      'completion_time': '<TIMESTAMP>',
+      'coverage_complete': True,
+      'incomplete_converters': list([
+      ]),
+      'incomplete_scanners': list([
+      ]),
+      'is_complete': True,
+      'no_scanner_ran': False,
+      'operation': 'get_scan_results',
+      'raw_results': dict({
+        'additional_reports': dict({
+        }),
+        'converter_results': dict({
+        }),
+        'description': 'Automated Security Helper - Aggregated Report',
+        'metadata': dict({
+          'description': 'Automated Security Helper Aggregated Report Post-processor',
+          'execution_discrepancy_report': dict({
+          }),
+          'expected_scanners': list([
+          ]),
+          'generated_at': '<GENERATED_AT>',
+          'plugin_load_errors': dict({
+          }),
+          'project_name': 'snapshot-fixture',
+          'report_id': '<REPORT_ID>',
+          'summary_stats': dict({
+            'actionable': 2,
+            'duration': '<DURATION>',
+            'error': 0,
+            'failed': 2,
+            'missing': 0,
+            'passed': 0,
+            'severity_counts': dict({
+              'critical': 1,
+              'high': 1,
+              'info': 0,
+              'low': 0,
+              'medium': 0,
+              'suppressed': 1,
+            }),
+            'skipped': 0,
+            'total': 3,
+          }),
+          'tool_version': '0.0.0+snapshot-fixture',
+          'validation_summary': dict({
+          }),
+        }),
+        'name': 'ASH Scan Report',
+        'scanner_results': dict({
+          'bandit': dict({
+            'actionable_finding_count': 1,
+            'dependencies_satisfied': True,
+            'excluded': False,
+            'finding_count': 2,
+            'severity_counts': dict({
+              'high': 1,
+              'suppressed': 1,
+            }),
+            'status': 'FAILED',
+            'suppressed_finding_count': 1,
+          }),
+          'detect-secrets': dict({
+            'actionable_finding_count': 1,
+            'dependencies_satisfied': True,
+            'excluded': False,
+            'finding_count': 1,
+            'severity_counts': dict({
+              'critical': 1,
+            }),
+            'status': 'FAILED',
+            'suppressed_finding_count': 0,
+          }),
+        }),
+        'used_suppressions': list([
+        ]),
+        'validation_checkpoints': list([
+        ]),
+      }),
+      'scan_id': 'scan-<SCAN_TIMESTAMP>',
+      'scanner_reports': dict({
+      }),
+      'stale_content_databases': list([
+      ]),
+      'status': 'completed',
+      'success': True,
+      'summary_stats': dict({
+        'actionable': 2,
+        'duration': '<DURATION>',
+        'error': 0,
+        'failed': 2,
+        'missing': 0,
+        'passed': 0,
+        'severity_counts': dict({
+          'critical': 1,
+          'high': 1,
+          'info': 0,
+          'low': 0,
+          'medium': 0,
+          'suppressed': 1,
+        }),
+        'skipped': 0,
+        'total': 3,
+      }),
+      'timestamp': '<TIMESTAMP>',
+      'total_scanners': 2,
+      'unevaluated_rules': list([
+      ]),
+    }),
+    'tool': 'get_scan_results',
+  })
+# ---
+# name: test_list_active_scans_and_cancel_scan[cancel_scan]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Cancelling scan: <RUNNING_SCAN_ID>',
+      ]),
+    ]),
+    'result': dict({
+      'message': 'Scan cancelled successfully',
+      'operation': 'cancel_scan',
+      'scan_id': '<RUNNING_SCAN_ID>',
+      'status': 'cancelled',
+      'success': True,
+      'timestamp': '<TIMESTAMP>',
+    }),
+    'tool': 'cancel_scan',
+  })
+# ---
+# name: test_list_active_scans_and_cancel_scan[cancel_scan_already_cancelled]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Cancelling scan: <RUNNING_SCAN_ID>',
+      ]),
+    ]),
+    'result': dict({
+      'message': 'Scan is already in cancelled state and cannot be cancelled',
+      'operation': 'cancel_scan',
+      'scan_id': '<RUNNING_SCAN_ID>',
+      'status': 'cancelled',
+      'success': False,
+      'suggestions': list([
+        'No action needed as the scan is already completed/incomplete/failed/cancelled',
+        'Use get_scan_results to retrieve results if the scan is completed',
+        'Start a new scan if needed',
+      ]),
+      'timestamp': '<TIMESTAMP>',
+    }),
+    'tool': 'cancel_scan',
+  })
+# ---
+# name: test_list_active_scans_and_cancel_scan[cancel_scan_already_completed]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Cancelling scan: <FINISHED_SCAN_ID>',
+      ]),
+    ]),
+    'result': dict({
+      'message': 'Scan is already in completed state and cannot be cancelled',
+      'operation': 'cancel_scan',
+      'scan_id': '<FINISHED_SCAN_ID>',
+      'status': 'completed',
+      'success': False,
+      'suggestions': list([
+        'No action needed as the scan is already completed/incomplete/failed/cancelled',
+        'Use get_scan_results to retrieve results if the scan is completed',
+        'Start a new scan if needed',
+      ]),
+      'timestamp': '<TIMESTAMP>',
+    }),
+    'tool': 'cancel_scan',
+  })
+# ---
+# name: test_list_active_scans_and_cancel_scan[cancel_scan_empty_scan_id]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Cancelling scan:',
+      ]),
+    ]),
+    'result': dict({
+      'context': dict({
+        'error_category': 'invalid_parameter',
+      }),
+      'error': 'Scan ID cannot be empty',
+      'error_category': 'invalid_parameter',
+      'error_type': 'MCPResourceError',
+      'operation': 'cancel_scan',
+      'success': False,
+      'suggestions': list([
+        'Check that the scan ID is correct',
+        'Verify that the scan exists in the registry',
+        'Ensure the scan ID format is valid',
+      ]),
+      'timestamp': None,
+    }),
+    'tool': 'cancel_scan',
+  })
+# ---
+# name: test_list_active_scans_and_cancel_scan[cancel_scan_unknown_scan_id]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Cancelling scan: no-such-scan',
+      ]),
+    ]),
+    'result': dict({
+      'context': dict({
+        'error_category': 'scan_not_found',
+        'scan_id': 'no-such-scan',
+      }),
+      'error': 'Scan no-such-scan not found',
+      'error_category': 'scan_not_found',
+      'error_type': 'MCPResourceError',
+      'operation': 'cancel_scan',
+      'success': False,
+      'suggestions': list([
+        'Check that the scan ID is correct',
+        'Verify that the scan exists in the registry',
+        'The scan may have been cleaned up if it was completed a long time ago',
+      ]),
+      'timestamp': None,
+    }),
+    'tool': 'cancel_scan',
+  })
+# ---
+# name: test_list_active_scans_and_cancel_scan[list_active_scans]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Listing active scans',
+      ]),
+    ]),
+    'result': dict({
+      'active_scans': list([
+        dict({
+          'config_path': None,
+          'coverage': None,
+          'directory_path': '<TMP>/allowed/running',
+          'end_time': None,
+          'error_message': None,
+          'output_directory': '<TMP>/allowed/running/.ash/ash_output',
+          'process_id': None,
+          'scan_id': '<RUNNING_SCAN_ID>',
+          'severity_threshold': 'MEDIUM',
+          'start_time': '<START_TIME>',
+          'status': 'running',
+          'warnings': list([
+          ]),
+        }),
+      ]),
+      'all_scans': list([
+        dict({
+          'config_path': None,
+          'coverage': None,
+          'directory_path': '<TMP>/allowed/running',
+          'end_time': None,
+          'error_message': None,
+          'output_directory': '<TMP>/allowed/running/.ash/ash_output',
+          'process_id': None,
+          'scan_id': '<RUNNING_SCAN_ID>',
+          'severity_threshold': 'MEDIUM',
+          'start_time': '<START_TIME>',
+          'status': 'running',
+          'warnings': list([
+          ]),
+        }),
+        dict({
+          'config_path': None,
+          'coverage': None,
+          'directory_path': '<TMP>/allowed/finished',
+          'end_time': '<END_TIME>',
+          'error_message': None,
+          'output_directory': '<TMP>/allowed/finished/.ash/ash_output',
+          'process_id': None,
+          'scan_id': '<FINISHED_SCAN_ID>',
+          'severity_threshold': 'MEDIUM',
+          'start_time': '<START_TIME>',
+          'status': 'completed',
+          'warnings': list([
+          ]),
+        }),
+      ]),
+      'operation': 'list_active_scans',
+      'stats': dict({
+        'active_scans': 1,
+        'status_counts': dict({
+          'cancelled': 0,
+          'completed': 1,
+          'failed': 0,
+          'incomplete': 0,
+          'pending': 0,
+          'running': 1,
+        }),
+        'total_scans': 2,
+      }),
+      'success': True,
+      'timestamp': '<TIMESTAMP>',
+    }),
+    'tool': 'list_active_scans',
+  })
+# ---
+# name: test_list_active_scans_and_cancel_scan[list_active_scans_empty]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Listing active scans',
+      ]),
+    ]),
+    'result': dict({
+      'active_scans': list([
+      ]),
+      'all_scans': list([
+      ]),
+      'operation': 'list_active_scans',
+      'stats': dict({
+        'active_scans': 0,
+        'status_counts': dict({
+          'cancelled': 0,
+          'completed': 0,
+          'failed': 0,
+          'incomplete': 0,
+          'pending': 0,
+          'running': 0,
+        }),
+        'total_scans': 0,
+      }),
+      'success': True,
+      'timestamp': '<TIMESTAMP>',
+    }),
+    'tool': 'list_active_scans',
+  })
+# ---
+# name: test_progress_errors[empty_scan_id]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting progress for scan:',
+      ]),
+    ]),
+    'result': dict({
+      'context': dict({
+        'error_category': 'invalid_parameter',
+      }),
+      'error': 'Scan ID cannot be empty',
+      'error_category': 'invalid_parameter',
+      'error_type': 'MCPResourceError',
+      'operation': 'get_scan_progress',
+      'success': False,
+      'suggestions': list([
+        'Check that the scan ID is correct',
+        'Verify that the scan exists in the registry',
+        'Ensure the scan ID format is valid',
+      ]),
+      'timestamp': None,
+    }),
+    'tool': 'get_scan_progress',
+  })
+# ---
+# name: test_progress_errors[removed_between_lookups]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting progress for scan: <SCAN_ID>',
+      ]),
+      list([
+        'error',
+        'Scan <SCAN_ID> not found in registry',
+      ]),
+    ]),
+    'result': dict({
+      'error': 'Scan <SCAN_ID> not found in registry',
+      'error_type': 'scan_not_found',
+      'success': False,
+    }),
+    'tool': 'get_scan_progress',
+  })
+# ---
+# name: test_progress_errors[unknown_scan_id]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting progress for scan: no-such-scan',
+      ]),
+    ]),
+    'result': dict({
+      'context': dict({
+        'error_category': 'scan_not_found',
+        'scan_id': 'no-such-scan',
+        'suggestions': list([
+          'Check that the scan ID is correct',
+          'Verify that the scan exists in the registry',
+          'The scan may have been cleaned up if it was completed a long time ago',
+        ]),
+      }),
+      'error': 'Scan no-such-scan not found in registry',
+      'error_category': 'scan_not_found',
+      'error_type': 'MCPResourceError',
+      'operation': 'get_scan_progress',
+      'success': False,
+      'suggestions': list([
+        'Verify the scan ID is correct',
+        'Check if the scan has been cleaned up or expired',
+        'Ensure the scan was properly registered',
+      ]),
+      'timestamp': '<TIMESTAMP>',
+    }),
+    'tool': 'get_scan_progress',
+  })
+# ---
+# name: test_progress_for_each_status[cancelled][cancel_scan]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Cancelling scan: <SCAN_ID>',
+      ]),
+    ]),
+    'result': dict({
+      'message': 'Scan cancelled successfully',
+      'operation': 'cancel_scan',
+      'scan_id': '<SCAN_ID>',
+      'status': 'cancelled',
+      'success': True,
+      'timestamp': '<TIMESTAMP>',
+    }),
+    'tool': 'cancel_scan',
+  })
+# ---
+# name: test_progress_for_each_status[cancelled][progress]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting progress for scan: <SCAN_ID>',
+      ]),
+    ]),
+    'result': dict({
+      'completed_scanners': 0,
+      'config_path': None,
+      'coverage_complete': None,
+      'directory_path': '<TMP>/allowed/project',
+      'end_time': '<END_TIME>',
+      'error_message': None,
+      'incomplete_converters': list([
+      ]),
+      'incomplete_scanners': list([
+      ]),
+      'is_complete': True,
+      'no_scanner_ran': False,
+      'operation': 'get_scan_progress',
+      'output_directory': '<TMP>/allowed/project/.ash/ash_output',
+      'scan_id': '<SCAN_ID>',
+      'scanner_statuses': dict({
+        'bandit': dict({
+          'dependencies_satisfied': True,
+          'excluded': False,
+          'status': 'FAILED',
+        }),
+        'detect-secrets': dict({
+          'dependencies_satisfied': True,
+          'excluded': False,
+          'status': 'FAILED',
+        }),
+      }),
+      'scanners': dict({
+        'bandit': dict({
+          'source': dict({
+            'severity_counts': dict({
+              'high': 1,
+              'suppressed': 1,
+            }),
+          }),
+        }),
+        'detect-secrets': dict({
+          'source': dict({
+            'severity_counts': dict({
+              'critical': 1,
+            }),
+          }),
+        }),
+      }),
+      'severity_counts': dict({
+        'critical': 1,
+        'high': 1,
+        'info': 0,
+        'low': 0,
+        'medium': 0,
+        'suppressed': 1,
+      }),
+      'severity_threshold': 'MEDIUM',
+      'skipped_scanners': list([
+      ]),
+      'stale_content_databases': list([
+      ]),
+      'start_time': '<START_TIME>',
+      'status': 'cancelled',
+      'success': True,
+      'timestamp': '<TIMESTAMP>',
+      'total_findings': 3,
+      'total_scanners': 2,
+      'unevaluated_rules': list([
+      ]),
+      'warnings': list([
+      ]),
+    }),
+    'tool': 'get_scan_progress',
+  })
+# ---
+# name: test_progress_for_each_status[completed][progress]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting progress for scan: <SCAN_ID>',
+      ]),
+    ]),
+    'result': dict({
+      'completed_scanners': 0,
+      'config_path': None,
+      'coverage_complete': True,
+      'directory_path': '<TMP>/allowed/project',
+      'end_time': '<END_TIME>',
+      'error_message': None,
+      'incomplete_converters': list([
+      ]),
+      'incomplete_scanners': list([
+      ]),
+      'is_complete': True,
+      'no_scanner_ran': False,
+      'operation': 'get_scan_progress',
+      'output_directory': '<TMP>/allowed/project/.ash/ash_output',
+      'scan_id': '<SCAN_ID>',
+      'scanner_statuses': dict({
+        'bandit': dict({
+          'dependencies_satisfied': True,
+          'excluded': False,
+          'status': 'FAILED',
+        }),
+        'detect-secrets': dict({
+          'dependencies_satisfied': True,
+          'excluded': False,
+          'status': 'FAILED',
+        }),
+      }),
+      'scanners': dict({
+        'bandit': dict({
+          'source': dict({
+            'severity_counts': dict({
+              'high': 1,
+              'suppressed': 1,
+            }),
+          }),
+        }),
+        'detect-secrets': dict({
+          'source': dict({
+            'severity_counts': dict({
+              'critical': 1,
+            }),
+          }),
+        }),
+      }),
+      'severity_counts': dict({
+        'critical': 1,
+        'high': 1,
+        'info': 0,
+        'low': 0,
+        'medium': 0,
+        'suppressed': 1,
+      }),
+      'severity_threshold': 'MEDIUM',
+      'skipped_scanners': list([
+      ]),
+      'stale_content_databases': list([
+      ]),
+      'start_time': '<START_TIME>',
+      'status': 'completed',
+      'success': True,
+      'timestamp': '<TIMESTAMP>',
+      'total_findings': 3,
+      'total_scanners': 2,
+      'unevaluated_rules': list([
+      ]),
+      'warnings': list([
+      ]),
+    }),
+    'tool': 'get_scan_progress',
+  })
+# ---
+# name: test_progress_for_each_status[failed][progress]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting progress for scan: <SCAN_ID>',
+      ]),
+    ]),
+    'result': dict({
+      'completed_scanners': 0,
+      'config_path': None,
+      'coverage_complete': None,
+      'directory_path': '<TMP>/allowed/project',
+      'end_time': '<END_TIME>',
+      'error_message': 'ASH exited with code 2',
+      'incomplete_converters': list([
+      ]),
+      'incomplete_scanners': list([
+      ]),
+      'is_complete': True,
+      'no_scanner_ran': False,
+      'operation': 'get_scan_progress',
+      'output_directory': '<TMP>/allowed/project/.ash/ash_output',
+      'scan_id': '<SCAN_ID>',
+      'scanner_statuses': dict({
+        'bandit': dict({
+          'dependencies_satisfied': True,
+          'excluded': False,
+          'status': 'FAILED',
+        }),
+        'detect-secrets': dict({
+          'dependencies_satisfied': True,
+          'excluded': False,
+          'status': 'FAILED',
+        }),
+      }),
+      'scanners': dict({
+        'bandit': dict({
+          'source': dict({
+            'severity_counts': dict({
+              'high': 1,
+              'suppressed': 1,
+            }),
+          }),
+        }),
+        'detect-secrets': dict({
+          'source': dict({
+            'severity_counts': dict({
+              'critical': 1,
+            }),
+          }),
+        }),
+      }),
+      'severity_counts': dict({
+        'critical': 1,
+        'high': 1,
+        'info': 0,
+        'low': 0,
+        'medium': 0,
+        'suppressed': 1,
+      }),
+      'severity_threshold': 'MEDIUM',
+      'skipped_scanners': list([
+      ]),
+      'stale_content_databases': list([
+      ]),
+      'start_time': '<START_TIME>',
+      'status': 'failed',
+      'success': True,
+      'timestamp': '<TIMESTAMP>',
+      'total_findings': 3,
+      'total_scanners': 2,
+      'unevaluated_rules': list([
+      ]),
+      'warnings': list([
+      ]),
+    }),
+    'tool': 'get_scan_progress',
+  })
+# ---
+# name: test_progress_for_each_status[incomplete][progress]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting progress for scan: <SCAN_ID>',
+      ]),
+    ]),
+    'result': dict({
+      'completed_scanners': 0,
+      'config_path': None,
+      'coverage_complete': False,
+      'directory_path': '<TMP>/allowed/project',
+      'end_time': '<END_TIME>',
+      'error_message': None,
+      'incomplete_converters': list([
+      ]),
+      'incomplete_scanners': list([
+        dict({
+          'detail': 'MISSING',
+          'reason': 'missing_dependencies',
+          'scanner': 'semgrep',
+          'status': 'MISSING',
+        }),
+      ]),
+      'is_complete': True,
+      'no_scanner_ran': False,
+      'operation': 'get_scan_progress',
+      'output_directory': '<TMP>/allowed/project/.ash/ash_output',
+      'scan_id': '<SCAN_ID>',
+      'scanner_statuses': dict({
+        'bandit': dict({
+          'dependencies_satisfied': True,
+          'excluded': False,
+          'status': 'FAILED',
+        }),
+        'detect-secrets': dict({
+          'dependencies_satisfied': True,
+          'excluded': False,
+          'status': 'FAILED',
+        }),
+        'semgrep': dict({
+          'dependencies_satisfied': False,
+          'excluded': False,
+          'status': 'MISSING',
+        }),
+      }),
+      'scanners': dict({
+        'bandit': dict({
+          'source': dict({
+            'severity_counts': dict({
+              'high': 1,
+              'suppressed': 1,
+            }),
+          }),
+        }),
+        'detect-secrets': dict({
+          'source': dict({
+            'severity_counts': dict({
+              'critical': 1,
+            }),
+          }),
+        }),
+        'semgrep': dict({
+          'source': dict({
+            'severity_counts': dict({
+            }),
+          }),
+        }),
+      }),
+      'severity_counts': dict({
+        'critical': 1,
+        'high': 1,
+        'info': 0,
+        'low': 0,
+        'medium': 0,
+        'suppressed': 1,
+      }),
+      'severity_threshold': 'MEDIUM',
+      'skipped_scanners': list([
+        dict({
+          'reason': 'missing_dependencies',
+          'scanner': 'semgrep',
+          'status': 'MISSING',
+        }),
+      ]),
+      'stale_content_databases': list([
+      ]),
+      'start_time': '<START_TIME>',
+      'status': 'incomplete',
+      'success': True,
+      'timestamp': '<TIMESTAMP>',
+      'total_findings': 3,
+      'total_scanners': 3,
+      'unevaluated_rules': list([
+      ]),
+      'warnings': list([
+      ]),
+    }),
+    'tool': 'get_scan_progress',
+  })
+# ---
+# name: test_progress_for_each_status[pending_with_results][progress]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting progress for scan: <SCAN_ID>',
+      ]),
+    ]),
+    'result': dict({
+      'completed_scanners': 0,
+      'config_path': None,
+      'coverage_complete': True,
+      'directory_path': '<TMP>/allowed/project',
+      'end_time': '<END_TIME>',
+      'error_message': None,
+      'incomplete_converters': list([
+      ]),
+      'incomplete_scanners': list([
+      ]),
+      'is_complete': True,
+      'no_scanner_ran': False,
+      'operation': 'get_scan_progress',
+      'output_directory': '<TMP>/allowed/project/.ash/ash_output',
+      'scan_id': '<SCAN_ID>',
+      'scanner_statuses': dict({
+        'bandit': dict({
+          'dependencies_satisfied': True,
+          'excluded': False,
+          'status': 'FAILED',
+        }),
+        'detect-secrets': dict({
+          'dependencies_satisfied': True,
+          'excluded': False,
+          'status': 'FAILED',
+        }),
+      }),
+      'scanners': dict({
+        'bandit': dict({
+          'source': dict({
+            'severity_counts': dict({
+              'high': 1,
+              'suppressed': 1,
+            }),
+          }),
+        }),
+        'detect-secrets': dict({
+          'source': dict({
+            'severity_counts': dict({
+              'critical': 1,
+            }),
+          }),
+        }),
+      }),
+      'severity_counts': dict({
+        'critical': 1,
+        'high': 1,
+        'info': 0,
+        'low': 0,
+        'medium': 0,
+        'suppressed': 1,
+      }),
+      'severity_threshold': 'MEDIUM',
+      'skipped_scanners': list([
+      ]),
+      'stale_content_databases': list([
+      ]),
+      'start_time': '<START_TIME>',
+      'status': 'completed',
+      'success': True,
+      'timestamp': '<TIMESTAMP>',
+      'total_findings': 3,
+      'total_scanners': 2,
+      'unevaluated_rules': list([
+      ]),
+      'warnings': list([
+      ]),
+    }),
+    'tool': 'get_scan_progress',
+  })
+# ---
+# name: test_progress_for_each_status[pending_without_results][progress]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting progress for scan: <SCAN_ID>',
+      ]),
+    ]),
+    'result': dict({
+      'completed_scanners': 0,
+      'config_path': None,
+      'coverage_complete': None,
+      'directory_path': '<TMP>/allowed/project',
+      'end_time': None,
+      'error_message': None,
+      'incomplete_converters': list([
+      ]),
+      'incomplete_scanners': list([
+      ]),
+      'is_complete': False,
+      'no_scanner_ran': False,
+      'operation': 'get_scan_progress',
+      'output_directory': '<TMP>/allowed/project/.ash/ash_output',
+      'scan_id': '<SCAN_ID>',
+      'scanner_statuses': dict({
+      }),
+      'scanners': dict({
+      }),
+      'severity_counts': dict({
+        'critical': 0,
+        'high': 0,
+        'info': 0,
+        'low': 0,
+        'medium': 0,
+        'suppressed': 0,
+      }),
+      'severity_threshold': 'MEDIUM',
+      'skipped_scanners': list([
+      ]),
+      'stale_content_databases': list([
+      ]),
+      'start_time': '<START_TIME>',
+      'status': 'pending',
+      'success': True,
+      'timestamp': '<TIMESTAMP>',
+      'total_findings': 0,
+      'total_scanners': 0,
+      'unevaluated_rules': list([
+      ]),
+      'warnings': list([
+      ]),
+    }),
+    'tool': 'get_scan_progress',
+  })
+# ---
+# name: test_progress_for_each_status[running_with_partial_results][progress]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting progress for scan: <SCAN_ID>',
+      ]),
+    ]),
+    'result': dict({
+      'completed_scanners': 0,
+      'config_path': None,
+      'coverage_complete': None,
+      'directory_path': '<TMP>/allowed/project',
+      'end_time': None,
+      'error_message': None,
+      'incomplete_converters': list([
+      ]),
+      'incomplete_scanners': list([
+      ]),
+      'is_complete': False,
+      'no_scanner_ran': False,
+      'operation': 'get_scan_progress',
+      'output_directory': '<TMP>/allowed/project/.ash/ash_output',
+      'scan_id': '<SCAN_ID>',
+      'scanner_statuses': dict({
+        'bandit': dict({
+          'dependencies_satisfied': True,
+          'excluded': False,
+          'status': 'FAILED',
+        }),
+        'detect-secrets': dict({
+          'dependencies_satisfied': True,
+          'excluded': False,
+          'status': 'FAILED',
+        }),
+      }),
+      'scanners': dict({
+        'bandit': dict({
+          'source': dict({
+            'severity_counts': dict({
+              'high': 1,
+              'suppressed': 1,
+            }),
+          }),
+        }),
+        'detect-secrets': dict({
+          'source': dict({
+            'severity_counts': dict({
+              'critical': 1,
+            }),
+          }),
+        }),
+      }),
+      'severity_counts': dict({
+        'critical': 1,
+        'high': 1,
+        'info': 0,
+        'low': 0,
+        'medium': 0,
+        'suppressed': 1,
+      }),
+      'severity_threshold': 'MEDIUM',
+      'skipped_scanners': list([
+      ]),
+      'stale_content_databases': list([
+      ]),
+      'start_time': '<START_TIME>',
+      'status': 'running',
+      'success': True,
+      'timestamp': '<TIMESTAMP>',
+      'total_findings': 3,
+      'total_scanners': 2,
+      'unevaluated_rules': list([
+      ]),
+      'warnings': list([
+      ]),
+    }),
+    'tool': 'get_scan_progress',
+  })
+# ---
+# name: test_result_readers_refuse_and_report[get_scan_result_paths]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting scan result paths from: <TMP>/allowed/project/.ash/ash_output',
+      ]),
+    ]),
+    'result': dict({
+      'files': dict({
+        'aggregated_results': dict({
+          'exists': True,
+          'path': '<TMP>/allowed/project/.ash/ash_output/ash_aggregated_results.json',
+          'size_bytes': 7139,
+        }),
+        'csv': dict({
+          'exists': False,
+          'path': '<TMP>/allowed/project/.ash/ash_output/reports/ash.csv',
+          'size_bytes': 0,
+        }),
+        'cyclonedx': dict({
+          'exists': False,
+          'path': '<TMP>/allowed/project/.ash/ash_output/reports/ash.cdx.json',
+          'size_bytes': 0,
+        }),
+        'flat_json': dict({
+          'exists': True,
+          'path': '<TMP>/allowed/project/.ash/ash_output/reports/ash.flat.json',
+          'size_bytes': 2,
+        }),
+        'gitlab_sast': dict({
+          'exists': False,
+          'path': '<TMP>/allowed/project/.ash/ash_output/reports/ash.gl-sast-report.json',
+          'size_bytes': 0,
+        }),
+        'html': dict({
+          'exists': False,
+          'path': '<TMP>/allowed/project/.ash/ash_output/reports/ash.html',
+          'size_bytes': 0,
+        }),
+        'junit_xml': dict({
+          'exists': False,
+          'path': '<TMP>/allowed/project/.ash/ash_output/reports/ash.junit.xml',
+          'size_bytes': 0,
+        }),
+        'markdown': dict({
+          'exists': True,
+          'path': '<TMP>/allowed/project/.ash/ash_output/reports/ash.summary.md',
+          'size_bytes': 14,
+        }),
+        'ocsf': dict({
+          'exists': False,
+          'path': '<TMP>/allowed/project/.ash/ash_output/reports/ash.ocsf.json',
+          'size_bytes': 0,
+        }),
+        'sarif': dict({
+          'exists': True,
+          'path': '<TMP>/allowed/project/.ash/ash_output/reports/ash.sarif',
+          'size_bytes': 20,
+        }),
+        'text': dict({
+          'exists': False,
+          'path': '<TMP>/allowed/project/.ash/ash_output/reports/ash.summary.txt',
+          'size_bytes': 0,
+        }),
+      }),
+      'output_dir': '<TMP>/allowed/project/.ash/ash_output',
+      'reports_dir': '<TMP>/allowed/project/.ash/ash_output/reports',
+      'scanner_results': dict({
+        'bandit': dict({
+          'source': dict({
+            'exists': True,
+            'path': '<TMP>/allowed/project/.ash/ash_output/scanners/bandit/source/ASH.ScanResults.json',
+            'size_bytes': 49,
+          }),
+        }),
+        'detect-secrets': dict({
+          'source': dict({
+            'exists': True,
+            'path': '<TMP>/allowed/project/.ash/ash_output/scanners/detect-secrets/source/ASH.ScanResults.json',
+            'size_bytes': 36,
+          }),
+        }),
+      }),
+      'scanners_dir': '<TMP>/allowed/project/.ash/ash_output/scanners',
+      'success': True,
+    }),
+    'tool': 'get_scan_result_paths',
+  })
+# ---
+# name: test_result_readers_refuse_and_report[get_scan_result_paths_missing_dir]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting scan result paths from: <TMP>/allowed/never-scanned/.ash/ash_output',
+      ]),
+    ]),
+    'result': dict({
+      'error': 'Output directory does not exist: <TMP>/allowed/never-scanned/.ash/ash_output',
+      'error_type': 'DirectoryNotFound',
+      'success': False,
+    }),
+    'tool': 'get_scan_result_paths',
+  })
+# ---
+# name: test_result_readers_refuse_and_report[get_scan_result_paths_no_reports_dir]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting scan result paths from: <TMP>/allowed/no-reports/.ash/ash_output',
+      ]),
+    ]),
+    'result': dict({
+      'error': 'Reports directory does not exist: <TMP>/allowed/no-reports/.ash/ash_output/reports',
+      'error_type': 'DirectoryNotFound',
+      'success': False,
+    }),
+    'tool': 'get_scan_result_paths',
+  })
+# ---
+# name: test_result_readers_refuse_and_report[get_scan_result_paths_outside_roots]
+  dict({
+    'client_messages': list([
+      list([
+        'error',
+        "Scan target is outside the permitted roots: <TMP>/outside/.ash/ash_output. Set ASH_MCP_ALLOWED_ROOTS to the directories the MCP server may scan, or deliver the tree with set_source_git or set_source_zip_finalize so it lands in this session's sandbox.",
+      ]),
+    ]),
+    'result': dict({
+      'error': "Scan target is outside the permitted roots: <TMP>/outside/.ash/ash_output. Set ASH_MCP_ALLOWED_ROOTS to the directories the MCP server may scan, or deliver the tree with set_source_git or set_source_zip_finalize so it lands in this session's sandbox.",
+      'error_category': 'invalid_path',
+      'error_type': 'scan_target_not_permitted',
+      'success': False,
+    }),
+    'tool': 'get_scan_result_paths',
+  })
+# ---
+# name: test_result_readers_refuse_and_report[get_scan_results_invalid_session_id]
+  dict({
+    'client_messages': list([
+      list([
+        'error',
+        "mcp-session-id must not contain path separators: '../escape'",
+      ]),
+    ]),
+    'result': dict({
+      'error': "mcp-session-id must not contain path separators: '../escape'",
+      'error_type': 'invalid_session_id',
+      'success': False,
+    }),
+    'tool': 'get_scan_results',
+  })
+# ---
+# name: test_result_readers_refuse_and_report[get_scan_results_missing_dir]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting results from ASH scan in directory: <TMP>/allowed/never-scanned/.ash/ash_output (filter_level=full)',
+      ]),
+    ]),
+    'result': dict({
+      'context': dict({
+        'cwd': '<CWD>',
+        'directory_path': '<TMP>/allowed/never-scanned/.ash/ash_output',
+        'error_category': 'file_not_found',
+      }),
+      'error': 'Directory not found or not a directory: <TMP>/allowed/never-scanned/.ash/ash_output',
+      'error_category': 'file_not_found',
+      'error_type': 'MCPResourceError',
+      'operation': 'get_scan_results',
+      'success': False,
+      'suggestions': list([
+        'Check that the output directory exists',
+        'Verify that the path is correct',
+        'Ensure you have appropriate permissions to access the directory',
+      ]),
+      'timestamp': None,
+    }),
+    'tool': 'get_scan_results',
+  })
+# ---
+# name: test_result_readers_refuse_and_report[get_scan_results_outside_roots]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting results from ASH scan in directory: <TMP>/outside/.ash/ash_output (filter_level=full)',
+      ]),
+    ]),
+    'result': dict({
+      'context': dict({
+        'cwd': '<CWD>',
+        'directory_path': '<TMP>/outside/.ash/ash_output',
+        'error_category': 'invalid_path',
+        'resolved_path': '<TMP>/outside/.ash/ash_output',
+      }),
+      'error': "Scan target is outside the permitted roots: <TMP>/outside/.ash/ash_output. Set ASH_MCP_ALLOWED_ROOTS to the directories the MCP server may scan, or deliver the tree with set_source_git or set_source_zip_finalize so it lands in this session's sandbox.",
+      'error_category': 'invalid_path',
+      'error_type': 'MCPResourceError',
+      'operation': 'get_scan_results',
+      'success': False,
+      'suggestions': list([
+        'Add the directory to ASH_MCP_ALLOWED_ROOTS if the MCP server should be able to read results from it',
+        'Verify that the path is correct',
+      ]),
+      'timestamp': None,
+    }),
+    'tool': 'get_scan_results',
+  })
+# ---
+# name: test_result_readers_refuse_and_report[get_scan_results_relative_dir_resolves_against_cwd]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting results from ASH scan in directory: <CWD>/.ash/ash_output (filter_level=full)',
+      ]),
+    ]),
+    'result': dict({
+      'context': dict({
+        'cwd': '<CWD>',
+        'directory_path': '<CWD>/.ash/ash_output',
+        'error_category': 'invalid_path',
+        'resolved_path': '<CWD>/.ash/ash_output',
+      }),
+      'error': "Scan target is outside the permitted roots: <CWD>/.ash/ash_output. Set ASH_MCP_ALLOWED_ROOTS to the directories the MCP server may scan, or deliver the tree with set_source_git or set_source_zip_finalize so it lands in this session's sandbox.",
+      'error_category': 'invalid_path',
+      'error_type': 'MCPResourceError',
+      'operation': 'get_scan_results',
+      'success': False,
+      'suggestions': list([
+        'Add the directory to ASH_MCP_ALLOWED_ROOTS if the MCP server should be able to read results from it',
+        'Verify that the path is correct',
+      ]),
+      'timestamp': None,
+    }),
+    'tool': 'get_scan_results',
+  })
+# ---
+# name: test_result_readers_refuse_and_report[get_scan_results_scan_not_finished]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting results from ASH scan in directory: <TMP>/allowed/unfinished/.ash/ash_output (filter_level=full)',
+      ]),
+    ]),
+    'result': dict({
+      'context': dict({
+        'error_category': 'scan_incomplete',
+        'output_dir': '<TMP>/allowed/unfinished/.ash/ash_output',
+      }),
+      'error': 'Scan of output_dir <TMP>/allowed/unfinished/.ash/ash_output is not complete. Results are not available.',
+      'error_category': 'scan_incomplete',
+      'error_type': 'MCPResourceError',
+      'operation': 'get_scan_results',
+      'success': False,
+      'suggestions': list([
+        'Wait for the scan to complete',
+        'Check if the scan process is still running',
+        'Verify that the scan was started correctly',
+      ]),
+      'timestamp': None,
+    }),
+    'tool': 'get_scan_results',
+  })
+# ---
+# name: test_result_readers_refuse_and_report[get_scan_summary_missing_dir]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'Getting results from ASH scan in directory: <TMP>/allowed/never-scanned/.ash/ash_output (filter_level=summary)',
+      ]),
+    ]),
+    'result': dict({
+      'context': dict({
+        'cwd': '<CWD>',
+        'directory_path': '<TMP>/allowed/never-scanned/.ash/ash_output',
+        'error_category': 'file_not_found',
+      }),
+      'error': 'Directory not found or not a directory: <TMP>/allowed/never-scanned/.ash/ash_output',
+      'error_category': 'file_not_found',
+      'error_type': 'MCPResourceError',
+      'operation': 'get_scan_results',
+      'success': False,
+      'suggestions': list([
+        'Check that the output directory exists',
+        'Verify that the path is correct',
+        'Ensure you have appropriate permissions to access the directory',
+      ]),
+      'timestamp': None,
+    }),
+    'tool': 'get_scan_summary',
+  })
+# ---
+# name: test_run_ash_scan_refusals[config_input_not_permitted]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'run_ash_scan tool called in cwd: <CWD>',
+      ]),
+      list([
+        'error',
+        'Config input is outside the permitted roots: <TMP>/outside/.ash.yaml. Set ASH_MCP_ALLOWED_CONFIG_ROOTS to the directories the MCP server may read config from -- a shared policy file governing several checkouts belongs there -- or keep the config inside a directory already granted by ASH_MCP_ALLOWED_ROOTS.',
+      ]),
+    ]),
+    'result': dict({
+      'error': 'Config input is outside the permitted roots: <TMP>/outside/.ash.yaml. Set ASH_MCP_ALLOWED_CONFIG_ROOTS to the directories the MCP server may read config from -- a shared policy file governing several checkouts belongs there -- or keep the config inside a directory already granted by ASH_MCP_ALLOWED_ROOTS.',
+      'error_category': 'invalid_path',
+      'error_type': 'config_input_not_permitted',
+      'success': False,
+    }),
+    'tool': 'run_ash_scan',
+  })
+# ---
+# name: test_run_ash_scan_refusals[delivered_source_missing]
+  dict({
+    'client_messages': list([
+      list([
+        'error',
+        "The source tree delivered under this session id is no longer on disk at <TMP>/workspaces/session-c/source. Deliver it again with set_source_git or set_source_zip_chunk/set_source_zip_finalize. Refusing to scan: the recorded directory cannot be read, and scanning the server's working directory instead would report on a tree that is not yours.",
+      ]),
+    ]),
+    'result': dict({
+      'error': "The source tree delivered under this session id is no longer on disk at <TMP>/workspaces/session-c/source. Deliver it again with set_source_git or set_source_zip_chunk/set_source_zip_finalize. Refusing to scan: the recorded directory cannot be read, and scanning the server's working directory instead would report on a tree that is not yours.",
+      'error_type': 'delivered_source_missing',
+      'session_id': 'session-c',
+      'success': False,
+    }),
+    'tool': 'run_ash_scan',
+  })
+# ---
+# name: test_run_ash_scan_refusals[invalid_session_id]
+  dict({
+    'client_messages': list([
+      list([
+        'error',
+        "mcp-session-id must not contain path separators: '../escape'",
+      ]),
+    ]),
+    'result': dict({
+      'error': "mcp-session-id must not contain path separators: '../escape'",
+      'error_type': 'invalid_session_id',
+      'success': False,
+    }),
+    'tool': 'run_ash_scan',
+  })
+# ---
+# name: test_run_ash_scan_refusals[no_source_delivered]
+  dict({
+    'client_messages': list([
+      list([
+        'error',
+        "No source has been delivered under this session id, so there is nothing to scan. Deliver a tree first with set_source_git or set_source_zip_chunk/set_source_zip_finalize, or pass source_dir explicitly. Refusing to scan: falling back to the server's working directory holds none of your code, and would complete with no findings and no error.",
+      ]),
+    ]),
+    'result': dict({
+      'error': "No source has been delivered under this session id, so there is nothing to scan. Deliver a tree first with set_source_git or set_source_zip_chunk/set_source_zip_finalize, or pass source_dir explicitly. Refusing to scan: falling back to the server's working directory holds none of your code, and would complete with no findings and no error.",
+      'error_type': 'no_source_delivered',
+      'session_id': 'session-a',
+      'success': False,
+    }),
+    'tool': 'run_ash_scan',
+  })
+# ---
+# name: test_run_ash_scan_refusals[output_dir_not_permitted]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'run_ash_scan tool called in cwd: <CWD>',
+      ]),
+      list([
+        'error',
+        "Scan output directory is not inside the scan target: '.ash' is a symlink; project directories must be real directories",
+      ]),
+    ]),
+    'result': dict({
+      'error': "Scan output directory is not inside the scan target: '.ash' is a symlink; project directories must be real directories",
+      'error_category': 'invalid_path',
+      'error_type': 'output_dir_not_permitted',
+      'success': False,
+    }),
+    'tool': 'run_ash_scan',
+  })
+# ---
+# name: test_run_ash_scan_refusals[scan_start_failure]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'run_ash_scan tool called in cwd: <CWD>',
+      ]),
+      list([
+        'info',
+        'Starting scan for directory: <TMP>/allowed/project',
+      ]),
+      list([
+        'error',
+        "Failed to start scan: Invalid severity threshold: 'SEVERE'. Must be one of: ALL, LOW, MEDIUM, HIGH, CRITICAL",
+      ]),
+    ]),
+    'result': dict({
+      'error': "Failed to start scan: Invalid severity threshold: 'SEVERE'. Must be one of: ALL, LOW, MEDIUM, HIGH, CRITICAL",
+      'error_type': 'scan_start_failure',
+      'success': False,
+    }),
+    'tool': 'run_ash_scan',
+  })
+# ---
+# name: test_run_ash_scan_refusals[scan_target_not_permitted]
+  dict({
+    'client_messages': list([
+      list([
+        'info',
+        'run_ash_scan tool called in cwd: <CWD>',
+      ]),
+      list([
+        'error',
+        "Scan target is outside the permitted roots: <TMP>/outside. Set ASH_MCP_ALLOWED_ROOTS to the directories the MCP server may scan, or deliver the tree with set_source_git or set_source_zip_finalize so it lands in this session's sandbox.",
+      ]),
+    ]),
+    'result': dict({
+      'error': "Scan target is outside the permitted roots: <TMP>/outside. Set ASH_MCP_ALLOWED_ROOTS to the directories the MCP server may scan, or deliver the tree with set_source_git or set_source_zip_finalize so it lands in this session's sandbox.",
+      'error_category': 'invalid_path',
+      'error_type': 'scan_target_not_permitted',
+      'success': False,
+    }),
+    'tool': 'run_ash_scan',
+  })
+# ---
+# name: test_run_ash_scan_refusals[session_source_mismatch]
+  dict({
+    'client_messages': list([
+      list([
+        'error',
+        "No source has been delivered under this session id, but 1 other session(s) currently hold delivered source. This session id is most likely not stable across calls, so the upload and this scan resolved to different workspaces. Pass the source_dir that set_source_git or set_source_zip_finalize returned, rather than omitting it. Refusing to scan: falling back to the server's working directory would report a clean result for a tree that is not yours.",
+      ]),
+    ]),
+    'result': dict({
+      'error': "No source has been delivered under this session id, but 1 other session(s) currently hold delivered source. This session id is most likely not stable across calls, so the upload and this scan resolved to different workspaces. Pass the source_dir that set_source_git or set_source_zip_finalize returned, rather than omitting it. Refusing to scan: falling back to the server's working directory would report a clean result for a tree that is not yours.",
+      'error_type': 'session_source_mismatch',
+      'session_id': 'session-a',
+      'success': False,
+    }),
+    'tool': 'run_ash_scan',
+  })
+# ---

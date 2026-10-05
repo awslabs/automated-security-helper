@@ -1,0 +1,406 @@
+# serializer version: 1
+# name: test_error_response_for_a_plain_exception[response]
+  dict({
+    'context': dict({
+    }),
+    'error': 'not an MCPResourceError',
+    'error_category': 'unexpected_error',
+    'error_type': 'ValueError',
+    'operation': 'example_operation',
+    'success': False,
+    'suggestions': list([
+      'Check logs for additional information',
+      'Verify system stability and resource availability',
+      'Report the issue if it persists',
+    ]),
+    'timestamp': None,
+  })
+# ---
+# name: test_error_response_for_each_category[file_not_found][response]
+  dict({
+    'context': dict({
+      'error_category': 'file_not_found',
+    }),
+    'error': 'example file_not_found error',
+    'error_category': 'file_not_found',
+    'error_type': 'MCPResourceError',
+    'operation': 'example_operation',
+    'success': False,
+    'suggestions': list([
+      'Check that the file or directory exists',
+      'Verify the path is correct',
+      'Ensure the file has not been moved or deleted',
+    ]),
+    'timestamp': None,
+  })
+# ---
+# name: test_error_response_for_each_category[invalid_format][response]
+  dict({
+    'context': dict({
+      'error_category': 'invalid_format',
+    }),
+    'error': 'example invalid_format error',
+    'error_category': 'invalid_format',
+    'error_type': 'MCPResourceError',
+    'operation': 'example_operation',
+    'success': False,
+    'suggestions': list([
+      'Check the file format and structure',
+      'Ensure the file is properly formatted JSON/YAML',
+      'Validate the file against the expected schema',
+    ]),
+    'timestamp': None,
+  })
+# ---
+# name: test_error_response_for_each_category[invalid_parameter][response]
+  dict({
+    'context': dict({
+      'error_category': 'invalid_parameter',
+    }),
+    'error': 'example invalid_parameter error',
+    'error_category': 'invalid_parameter',
+    'error_type': 'MCPResourceError',
+    'operation': 'example_operation',
+    'success': False,
+    'suggestions': list([
+      'Check the parameter values provided',
+      'Ensure all required parameters are provided',
+      'Verify parameter types and formats',
+    ]),
+    'timestamp': None,
+  })
+# ---
+# name: test_error_response_for_each_category[invalid_path][response]
+  dict({
+    'context': dict({
+      'error_category': 'invalid_path',
+    }),
+    'error': 'example invalid_path error',
+    'error_category': 'invalid_path',
+    'error_type': 'MCPResourceError',
+    'operation': 'example_operation',
+    'success': False,
+    'suggestions': list([
+      'Verify the path is correct and properly formatted',
+      'Check for invalid characters or syntax in the path',
+      'Ensure the path points to the correct type (file/directory)',
+    ]),
+    'timestamp': None,
+  })
+# ---
+# name: test_error_response_for_each_category[operation_timeout][response]
+  dict({
+    'context': dict({
+      'error_category': 'operation_timeout',
+    }),
+    'error': 'example operation_timeout error',
+    'error_category': 'operation_timeout',
+    'error_type': 'MCPResourceError',
+    'operation': 'example_operation',
+    'success': False,
+    'suggestions': list([
+      'Check if the operation is still running',
+      'Increase the timeout value if possible',
+      'Verify system performance and resource availability',
+    ]),
+    'timestamp': None,
+  })
+# ---
+# name: test_error_response_for_each_category[permission_denied][response]
+  dict({
+    'context': dict({
+      'error_category': 'permission_denied',
+    }),
+    'error': 'example permission_denied error',
+    'error_category': 'permission_denied',
+    'error_type': 'MCPResourceError',
+    'operation': 'example_operation',
+    'success': False,
+    'suggestions': list([
+      'Check file and directory permissions',
+      'Ensure the user has appropriate access rights',
+      'Verify ownership of the file or directory',
+    ]),
+    'timestamp': None,
+  })
+# ---
+# name: test_error_response_for_each_category[resource_exhausted][response]
+  dict({
+    'context': dict({
+      'error_category': 'resource_exhausted',
+    }),
+    'error': 'example resource_exhausted error',
+    'error_category': 'resource_exhausted',
+    'error_type': 'MCPResourceError',
+    'operation': 'example_operation',
+    'success': False,
+    'suggestions': list([
+      'Check system resources (memory, disk space)',
+      'Reduce the number of concurrent operations',
+      'Wait and try again later',
+    ]),
+    'timestamp': None,
+  })
+# ---
+# name: test_error_response_for_each_category[scan_incomplete][response]
+  dict({
+    'context': dict({
+      'error_category': 'scan_incomplete',
+    }),
+    'error': 'example scan_incomplete error',
+    'error_category': 'scan_incomplete',
+    'error_type': 'MCPResourceError',
+    'operation': 'example_operation',
+    'success': False,
+    'suggestions': list([
+      'Wait for the scan to complete',
+      'Check for errors in the scan process',
+      'Verify the scan is still running',
+    ]),
+    'timestamp': None,
+  })
+# ---
+# name: test_error_response_for_each_category[scan_not_found][response]
+  dict({
+    'context': dict({
+      'error_category': 'scan_not_found',
+    }),
+    'error': 'example scan_not_found error',
+    'error_category': 'scan_not_found',
+    'error_type': 'MCPResourceError',
+    'operation': 'example_operation',
+    'success': False,
+    'suggestions': list([
+      'Verify the scan ID is correct',
+      'Check if the scan has been cleaned up or expired',
+      'Ensure the scan was properly registered',
+    ]),
+    'timestamp': None,
+  })
+# ---
+# name: test_error_response_for_each_category[unexpected_error][response]
+  dict({
+    'context': dict({
+      'error_category': 'unexpected_error',
+    }),
+    'error': 'example unexpected_error error',
+    'error_category': 'unexpected_error',
+    'error_type': 'MCPResourceError',
+    'operation': 'example_operation',
+    'success': False,
+    'suggestions': list([
+      'Check logs for additional information',
+      'Verify system stability and resource availability',
+      'Report the issue if it persists',
+    ]),
+    'timestamp': None,
+  })
+# ---
+# name: test_prompt[defaults_to_cwd-analyze_security_findings][rendered]
+  dict({
+    'description': 'This prompt advises the agent to review an existing ASH scan and provide and overview and opinionated guidance',
+    'messages': list([
+      dict({
+        'content': dict({
+          'text': '''
+            Please analyze these ASH security scan results in the source_dir:
+            <CWD> and provide:
+            
+            1. **Summary**: Brief overview of the security scan results
+            2. **Key Findings**: Most important security issues discovered
+            3. **Risk Assessment**: Categorize findings by severity and potential impact
+            4. **Recommendations**: Specific actions to address the security issues
+            5. **Next Steps**: Prioritized list of what to fix first
+            
+            Scan Result Locations:
+            
+            1. SARIF - Contains raw aggregated vulnerability findings in SARIF format: .ash/ash_output/reports/ash.sarif
+            2. Markdown Summary - Contains a summary of the results in Markdown format with up to 20 findings by default: .ash/ash_output/reports/ash.summary.md
+            
+            Focus on actionable insights and practical remediation steps.
+          ''',
+          'type': 'text',
+        }),
+        'role': 'user',
+      }),
+    ]),
+    'result_type': 'complete',
+  })
+# ---
+# name: test_prompt[defaults_to_cwd-run_ash_security_scan][rendered]
+  dict({
+    'description': 'This prompt invokes an ASH security scan of the source directory, defaulting to the current one',
+    'messages': list([
+      dict({
+        'content': dict({
+          'text': '''
+            Please run an ASH security scan of the following directory: <CWD>
+            
+            The scan should be done using the `run_ash_scan` MCP tool from the `ash` MCP Server.
+            
+            Once the scan has started, an ID will be returned. Using that scan ID, call the
+            `get_scan_progress` MCP tool with the scan ID to monitor until completion.
+            
+            Once the scan is complete and the results are captured via either the
+            `get_scan_progress` or `get_scan_results` MCP tools, the results should be parsed and
+            provided in an actionable summary.
+          ''',
+          'type': 'text',
+        }),
+        'role': 'user',
+      }),
+    ]),
+    'result_type': 'complete',
+  })
+# ---
+# name: test_prompt[explicit_source_dir-analyze_security_findings][rendered]
+  dict({
+    'description': 'This prompt advises the agent to review an existing ASH scan and provide and overview and opinionated guidance',
+    'messages': list([
+      dict({
+        'content': dict({
+          'text': '''
+            Please analyze these ASH security scan results in the source_dir:
+            /work/project and provide:
+            
+            1. **Summary**: Brief overview of the security scan results
+            2. **Key Findings**: Most important security issues discovered
+            3. **Risk Assessment**: Categorize findings by severity and potential impact
+            4. **Recommendations**: Specific actions to address the security issues
+            5. **Next Steps**: Prioritized list of what to fix first
+            
+            Scan Result Locations:
+            
+            1. SARIF - Contains raw aggregated vulnerability findings in SARIF format: .ash/ash_output/reports/ash.sarif
+            2. Markdown Summary - Contains a summary of the results in Markdown format with up to 20 findings by default: .ash/ash_output/reports/ash.summary.md
+            
+            Focus on actionable insights and practical remediation steps.
+          ''',
+          'type': 'text',
+        }),
+        'role': 'user',
+      }),
+    ]),
+    'result_type': 'complete',
+  })
+# ---
+# name: test_prompt[explicit_source_dir-run_ash_security_scan][rendered]
+  dict({
+    'description': 'This prompt invokes an ASH security scan of the source directory, defaulting to the current one',
+    'messages': list([
+      dict({
+        'content': dict({
+          'text': '''
+            Please run an ASH security scan of the following directory: /work/project
+            
+            The scan should be done using the `run_ash_scan` MCP tool from the `ash` MCP Server.
+            
+            Once the scan has started, an ID will be returned. Using that scan ID, call the
+            `get_scan_progress` MCP tool with the scan ID to monitor until completion.
+            
+            Once the scan is complete and the results are captured via either the
+            `get_scan_progress` or `get_scan_results` MCP tools, the results should be parsed and
+            provided in an actionable summary.
+          ''',
+          'type': 'text',
+        }),
+        'role': 'user',
+      }),
+    ]),
+    'result_type': 'complete',
+  })
+# ---
+# name: test_schema_resource[ash_config_schema][mime_types]
+  list([
+    'text/plain',
+  ])
+# ---
+# name: test_schema_resource[ash_suppression_schema][mime_types]
+  list([
+    'text/plain',
+  ])
+# ---
+# name: test_status_resource_when_the_version_lookup_fails[contents]
+  list([
+    dict({
+      'content': '''
+        ASH Status: ❌ ERROR
+        
+        Error: package metadata not found
+        
+        Please check your ASH installation.
+  
+      ''',
+      'mime_type': 'text/plain',
+    }),
+  ])
+# ---
+# name: test_text_resource[exit-codes][contents]
+  list([
+    dict({
+      'content': '{"0": "success", "1": "scan errors / scanner failures", "2": "actionable findings above threshold", "3": "invalid config", "4": "workspace definition or policy error"}',
+      'mime_type': 'text/plain',
+    }),
+  ])
+# ---
+# name: test_text_resource[help][contents]
+  list([
+    dict({
+      'content': '''
+        ASH (Automated Security Helper) Usage Guide
+        
+        ASH is a security scanning orchestrator that runs multiple security tools:
+        
+        🔍 **What ASH Scans For:**
+        • Python security issues (Bandit)
+        • Multi-language security patterns (Semgrep)
+        • Hardcoded secrets and credentials (detect-secrets)
+        • Infrastructure as Code issues (Checkov)
+        • CDK security problems (cdk-nag)
+        
+        📁 **Supported File Types:**
+        • Python (.py)
+        • JavaScript/TypeScript (.js, .ts)
+        • CloudFormation (.yaml, .yml, .json)
+        • Terraform (.tf)
+        • Dockerfile
+        • And many more...
+        
+        ⚙️ **Local Mode Benefits:**
+        • Fast execution (Python-only scanners)
+        • No Docker required
+        • Good for development and CI/CD
+        • Covers most common security issues
+        
+        🎯 **Best Practices:**
+        • Run scans early and often
+        • Review all findings, even low severity
+        • Use in pre-commit hooks for continuous security
+        • Combine with manual security reviews
+  
+      ''',
+      'mime_type': 'text/plain',
+    }),
+  ])
+# ---
+# name: test_text_resource[status][contents]
+  list([
+    dict({
+      'content': '''
+        ASH Status: ✅ READY
+        
+        ASH version <ASH_VERSION>
+        
+        ASH is installed and ready to perform security scans in local mode.
+        Local mode includes these scanners:
+        • Bandit (Python security issues)
+        • Semgrep (Multi-language security patterns)
+        • detect-secrets (Hardcoded secrets detection)
+        • Checkov (Infrastructure as Code security)
+        • cdk-nag (CDK security issues)
+  
+      ''',
+      'mime_type': 'text/plain',
+    }),
+  ])
+# ---
