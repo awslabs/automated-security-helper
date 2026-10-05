@@ -98,6 +98,22 @@ def _fake_machine(monkeypatch: pytest.MonkeyPatch, scenario: Scenario) -> None:
     # constructed. Whether that answers, and how fast, is a fact about the machine:
     # without uv, or under load, each one logs a WARNING into the output.
     monkeypatch.setattr(uv_tool_runner, "get_uv_tool_runner", _FakeUvRunner)
+    # Whether cdk-nag needs installing is decided at import, from the installed
+    # metadata of aws-cdk-lib, cdk-nag and constructs: with ASH's `cdk` extra in the
+    # venv (CI runs `uv sync --extra cdk`) the row reads ALREADY PRESENT and its pip
+    # command is skipped; without it, INSTALLED. Pinned to the extra being absent,
+    # which is the case that prints the pip command a user would run.
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        cdk_nag_scanner,
+    )
+
+    monkeypatch.setattr(cdk_nag_scanner, "_CDK_AVAILABLE", False)
+    monkeypatch.setattr(
+        cdk_nag_scanner,
+        "_CDK_MISSING_DISTRIBUTIONS",
+        list(cdk_nag_scanner._CDK_REQUIRED_DISTRIBUTIONS),
+    )
+    monkeypatch.setattr(cdk_nag_scanner, "_cdk_nag_version", "unavailable")
 
 
 class _FakeUvRunner(UVToolRunner):

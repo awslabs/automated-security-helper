@@ -29,6 +29,11 @@ from tests.snapshot.mcp.mcp_snapshot_support import (
     write_results,
 )
 
+# Built from the fixture results document; no value here is measured time.
+pytestmark = pytest.mark.snapshot_masking(
+    mask_durations=False, mask_duration_keys=False
+)
+
 
 async def _call(tool: str, *args, **kwargs) -> Dict[str, Any]:
     """Call a tool; a Context, if the tool takes one, is passed positionally."""
@@ -286,6 +291,14 @@ async def test_list_scanners(monkeypatch, snapshot, snapshot_normalizer):
     for cls in mcp_tools._loaded_scanner_classes():
         monkeypatch.setattr(cls, "validate_plugin_dependencies", lambda self: True)
     monkeypatch.setattr(scanner_inventory, "_probe_tool_version", lambda _: None)
+    # cdk-nag reads its version from installed metadata at import: present when ASH's
+    # `cdk` extra is in the venv (CI), "unavailable" (reported as None) without it.
+    # Pinned to a present version, as for every other dependency here.
+    from automated_security_helper.plugin_modules.ash_builtin.scanners import (
+        cdk_nag_scanner,
+    )
+
+    monkeypatch.setattr(cdk_nag_scanner, "_cdk_nag_version", "0.0.0-snapshot")
 
     listed = await _call("list_scanners")
     for entry in listed["result"]:
