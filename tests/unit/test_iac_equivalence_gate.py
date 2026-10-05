@@ -347,19 +347,27 @@ def test_a_pair_table_that_disagrees_with_its_example_is_rejected(
 # output, and its resource types never checked against the vocabulary. These
 # tests hold the glob up.
 # ---------------------------------------------------------------------------
-def add_sixth_template(tree: Path, stack: str = "AshEksOperator") -> Path:
-    """A committed template with types that are in no KINDS entry."""
+PLANTED_STACK = "AshPlantedStack"
+
+
+def add_unclassified_template(tree: Path, stack: str = PLANTED_STACK) -> Path:
+    """A committed template, named in neither table, with unmapped types.
+
+    The stack name is invented so it can never collide with a real template.
+    The types are real CloudFormation types that no KINDS entry maps; the
+    tests that use this assert that before relying on it.
+    """
     path = template(tree, stack)
     path.write_text(
         json.dumps(
             {
                 "Resources": {
-                    "AccessEntry": {
-                        "Type": "AWS::EKS::AccessEntry",
+                    "Nodegroup": {
+                        "Type": "AWS::EKS::Nodegroup",
                         "Properties": {},
                     },
-                    "PodIdentity": {
-                        "Type": "AWS::EKS::PodIdentityAssociation",
+                    "Addon": {
+                        "Type": "AWS::EKS::Addon",
                         "Properties": {},
                     },
                 }
@@ -371,29 +379,29 @@ def add_sixth_template(tree: Path, stack: str = "AshEksOperator") -> Path:
 
 
 def test_an_unclassified_template_is_rejected(tree: Path) -> None:
-    """The defect: a sixth template read by nobody, reported as no divergence."""
+    """The defect: a template read by nobody, reported as no divergence."""
     checker = load_checker(tree)
     before = sorted(p.name for p in checker.CFN_DIR.glob("*.template.json"))
-    add_sixth_template(tree)
+    add_unclassified_template(tree)
     after_checker = load_checker(tree)
     after = sorted(p.name for p in after_checker.CFN_DIR.glob("*.template.json"))
 
     # The mutation was real, and it is real in the terms the FIX uses: the glob
     # the checker now performs sees one more template than it did.
     assert len(after) == len(before) + 1
-    assert "AshEksOperator.template.json" in after
-    assert "AshEksOperator.template.json" not in before
+    assert f"{PLANTED_STACK}.template.json" in after
+    assert f"{PLANTED_STACK}.template.json" not in before
     # And it really is unclassified -- neither table names it.
-    assert "AshEksOperator" not in {str(p["stack"]) for p in after_checker.PAIRS}
-    assert "AshEksOperator" not in after_checker.STACKS_WITHOUT_TERRAFORM
+    assert PLANTED_STACK not in {str(p["stack"]) for p in after_checker.PAIRS}
+    assert PLANTED_STACK not in after_checker.STACKS_WITHOUT_TERRAFORM
     # And its types really are outside the vocabulary, so the type-level teeth
     # would have had something to say had the stack been read at all.
     mapped = {t for m in after_checker.KINDS.values() for t in m["cfn"]}
-    assert "AWS::EKS::AccessEntry" not in mapped
+    assert "AWS::EKS::Nodegroup" not in mapped
 
     result = run_checker(tree)
     assert result.returncode != 0
-    assert "AshEksOperator" in result.stdout
+    assert PLANTED_STACK in result.stdout
     assert "classified nowhere" in result.stdout
 
 
@@ -403,7 +411,7 @@ def test_a_declared_uncompared_stack_still_has_its_types_checked(tree: Path) -> 
     If it removed both, STACKS_WITHOUT_TERRAFORM would be a way to make an
     unclassified stack disappear rather than a way to record one.
     """
-    add_sixth_template(tree)
+    add_unclassified_template(tree)
     path = tree / "deploy/tests" / CHECKER_REL.name
     text = path.read_text()
     anchor = "STACKS_WITHOUT_TERRAFORM: dict[str, str] = {"
@@ -411,20 +419,67 @@ def test_a_declared_uncompared_stack_still_has_its_types_checked(tree: Path) -> 
     path.write_text(
         text.replace(
             anchor,
-            anchor + '\n    "AshEksOperator": "planted by a test",',
+            anchor + f'\n    "{PLANTED_STACK}": "planted by a test",',
         )
     )
+    mapped = {t for m in load_checker(tree).KINDS.values() for t in m["cfn"]}
+    assert "AWS::EKS::Nodegroup" not in mapped
 
     result = run_checker(tree)
     # The coverage error is gone -- the stack is classified now.
     assert "classified nowhere" not in result.stdout
     # But the stack is named in the report rather than silently dropped...
-    assert "AshEksOperator" in result.stdout
-    assert "no Terraform counterpart" in result.stdout
+    assert f"=== {PLANTED_STACK}  <->  (no Terraform counterpart)" in result.stdout
     # ...and its unmapped types still fail the run.
     assert result.returncode != 0
-    assert "AWS::EKS::AccessEntry" in result.stdout
+    assert "AWS::EKS::Nodegroup" in result.stdout
     assert "not in this check's vocabulary" in result.stdout
+
+
+def test_the_committed_eks_stack_is_read_and_type_checked(tree: Path) -> None:
+    """AshEksOperator has no Terraform module; it must still be opened.
+
+    The EKS stack and this check arrived on separate branches. Combined, the
+    template was unclassified and its AWS::EKS::* and generic custom-resource
+    types were outside the vocabulary, so the run failed. This holds the
+    resolution: it is declared uncompared, and every one of its types is mapped.
+    """
+    checker = load_checker(tree)
+    assert "AshEksOperator" in checker.STACKS_WITHOUT_TERRAFORM
+    assert (checker.CFN_DIR / "AshEksOperator.template.json").is_file()
+    types = {
+        body["Type"]
+        for body in json.loads(template(tree, "AshEksOperator").read_text())[
+            "Resources"
+        ].values()
+    }
+    mapped = {t for m in checker.KINDS.values() for t in m["cfn"]}
+    excluded = set(checker.CFN_EXCLUDED)
+    assert "AWS::EKS::AccessEntry" in types
+    assert types <= mapped | excluded, types - mapped - excluded
+
+    result = run_checker(tree)
+    assert result.returncode == 0, result.stdout
+    assert "=== AshEksOperator  <->  (no Terraform counterpart)" in result.stdout
+
+
+def test_a_generic_custom_resource_in_a_paired_stack_is_reported(
+    tree: Path,
+) -> None:
+    """AWS::CloudFormation::CustomResource is mapped, not excluded.
+
+    Excluding it would make one added to a paired stack invisible. Mapped to a
+    kind with no Terraform side, it surfaces as an unrecorded cfn-only
+    divergence.
+    """
+    path = template(tree, "AshImagePipeline")
+    add_cfn_resource(path, "PlantedCustom", "AWS::CloudFormation::CustomResource")
+    checker = load_checker(tree)
+    assert "AWS::CloudFormation::CustomResource" in checker.load_cfn("AshImagePipeline")
+
+    result = run_checker(tree)
+    assert result.returncode != 0
+    assert "cfn-generic-custom-resource" in result.stdout
 
 
 def test_a_declared_stack_with_no_template_is_rejected(tree: Path) -> None:

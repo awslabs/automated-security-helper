@@ -309,6 +309,24 @@ KINDS: dict[str, dict[str, tuple[str, ...]]] = {
         "cfn": ("AWS::Lambda::Permission",),
         "tf": ("aws_lambda_permission",),
     },
+    # A custom resource declared with the generic type rather than a Custom::
+    # name. AshEksOperator's OperatorInstall is one: a deploy-time action that
+    # applies the operator's manifests to the cluster. Mapped here rather than
+    # excluded so that one appearing in a paired stack is reported as a
+    # cfn-only divergence instead of being skipped; its provider Lambda is
+    # still removed by provider_functions().
+    "cfn-generic-custom-resource": {
+        "cfn": ("AWS::CloudFormation::CustomResource",),
+        "tf": (),
+    },
+    "eks-access-entry": {
+        "cfn": ("AWS::EKS::AccessEntry",),
+        "tf": ("aws_eks_access_entry",),
+    },
+    "eks-pod-identity-association": {
+        "cfn": ("AWS::EKS::PodIdentityAssociation",),
+        "tf": ("aws_eks_pod_identity_association",),
+    },
     # --- build and delivery ---
     "codebuild-project": {
         "cfn": ("AWS::CodeBuild::Project",),
@@ -593,16 +611,15 @@ PAIRS: tuple[Pair, ...] = (
 # array is what goes stale.
 # ---------------------------------------------------------------------------
 STACKS_WITHOUT_TERRAFORM: dict[str, str] = {
-    # Empty on this ref: all five committed templates have a Terraform
-    # counterpart. An entry looks like:
-    #
-    #   "AshEksOperator": (
-    #       "No Terraform module implements this target. The deploy/terraform "
-    #       "tree ships four targets plus the shared image build, and an EKS "
-    #       "operator is not among them, so there is nothing to compare. "
-    #       "Adopters of this target have only the CloudFormation path."
-    #   ),
-    #
+    "AshEksOperator": (
+        "No Terraform module implements this target. The deploy/terraform "
+        "tree ships four targets plus the shared image build, and an EKS "
+        "cluster running the ASH Kubernetes operator is not among them, so "
+        "there is nothing to compare. Adopters of this target have only the "
+        "CloudFormation path; a Terraform user who wants the operator applies "
+        "its manifests from deploy/kubernetes-operator to a cluster they "
+        "already run."
+    ),
     # Write what an adopter loses, not just that the module is missing -- the
     # point of the entry is that somebody decided this asymmetry is acceptable.
 }

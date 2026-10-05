@@ -381,6 +381,11 @@ reason:
 | `AshDistributedPipeline` | `ash-image-pipeline` + `codepipeline-executor` |
 | `AshFargate` | `ash-image-pipeline` + `fargate` (network from `aws-ia/vpc/aws`) |
 
+`AshEksOperator` has no Terraform counterpart and is recorded in
+`STACKS_WITHOUT_TERRAFORM`: it gets no census, and its resource types are still
+checked against the vocabulary. Adopters of that target have only the
+CloudFormation path.
+
 ### What it checks, and what it does not
 
 It compares **which kinds of resource each side provisions** — a presence census over a
