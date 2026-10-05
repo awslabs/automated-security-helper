@@ -88,6 +88,11 @@ on:
   merge_group:
     types: [checks_requested]
   workflow_dispatch: {}
+  # Called by ash-package-formats.yml, which runs this whole workflow on a push to a
+  # branch that touches packaging. The triggers above, and the reasons given for
+  # having no push trigger here, are unchanged: that file carries the paths filter so
+  # this one does not have to.
+  workflow_call: {}
 
 permissions:
   contents: read
@@ -158,6 +163,19 @@ jobs:
       # a script that needs none.
       - name: Prove the artifact-contents check can fail
         run: uv run --no-project python .github/scripts/assert-artifact-contents.py --self-test
+
+      # The native packages have their own contents gate,
+      # packaging/assert-package-contents.py, and it runs on the real packages inside
+      # the msix, chocolatey and flatpak jobs below (from verify-on-windows.ps1 and
+      # flatpak/build.sh). Its positive control runs HERE, on Linux and before any
+      # build: it plants payload in fixture MSIX, .nupkg and Flatpak trees shaped like
+      # the real ones, requires each to be rejected by the intended check, and requires
+      # the clean fixtures to be accepted. A Windows job that is red for an unrelated
+      # reason would otherwise leave this gate's own control unrun. `uv run --script`
+      # because the MSIX fixtures are parsed with defusedxml, which the script's PEP 723
+      # block declares.
+      - name: Prove the package-contents check can fail
+        run: uv run --script packaging/assert-package-contents.py --self-test
 
       - name: Build wheel and sdist
         run: uv build --out-dir dist

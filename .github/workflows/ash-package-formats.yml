@@ -1,0 +1,91 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: ASH - Package Formats
+# Runs the native packaging checks on a PUSH to any branch that touches packaging,
+# so a packaging branch is exercised end to end before a pull request exists.
+#
+# WHY THIS FILE EXISTS RATHER THAN A push TRIGGER ON ash-package.yml
+#
+# ash-package.yml is the gate: pull_request plus merge_group, with no paths filter,
+# and its header explains at length why it has no push trigger. Those reasons are
+# about main and about gating, and both still hold. What they leave out is a branch
+# being worked on before it has a pull request: MSIX, Chocolatey and winget can only
+# be built and installed on a Windows runner, so nothing short of CI can say whether
+# a change to packaging/ works. This file supplies that by CALLING ash-package.yml
+# (workflow_call) on push, so the jobs that run here are byte-for-byte the jobs the
+# gate runs, rather than a second copy that drifts.
+#
+# The paths filter is safe here and would not be on the gate: this is not a required
+# check, so a push it skips is a push nobody waits on. It names every input the
+# called jobs build from or verify.
+#
+# NO concurrency BLOCK, DELIBERATELY. The called workflow declares
+# `group: ${{ github.workflow }}-${{ github.ref }}`, and in a called workflow
+# `github.workflow` is the CALLER's name. A caller declaring the same group would
+# deadlock with its own callee.
+#
+# The `unit` job is the one thing not in ash-package.yml: the unit tests for the
+# package-contents gate and the Homebrew formula's lock sync, on Linux and Windows.
+# ash-unified-ci.yml runs them too, but only on pull requests.
+
+on:
+  push:
+    branches:
+      - "**"
+    paths:
+      - "packaging/**"
+      - "Formula/**"
+      - "uv.lock"
+      - "pyproject.toml"
+      - ".github/scripts/assert-artifact-contents.py"
+      - ".github/workflows/ash-package.yml"
+      - ".github/workflows/ash-package-formats.yml"
+      - "tests/unit/test_package_contents_gate.py"
+      - "tests/unit/test_homebrew_formula_*.py"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  packages:
+    name: Build, gate and install every native package
+    uses: ./.github/workflows/ash-package.yml
+    # The msix job reads two optional signing secrets and falls back to a throwaway
+    # self-signed certificate when they are empty, so inheriting them changes nothing
+    # on a repository that has not configured them.
+    secrets: inherit
+
+  unit:
+    name: "unit: package-contents gate and Homebrew lock sync (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows because the gate's Flatpak fixtures create symlinks and its zip
+        # reading has to agree with CPython's zipfile on a platform where os.sep is a
+        # backslash.
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # No enable-cache: this job is not worth publishing an Actions cache for (the
+      # repository is public, so a cache is readable by anyone), and
+      # .github/scripts/assert-publish-surfaces.py would rightly refuse an
+      # unallowlisted one.
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
+      # -o addopts= so the repository's default options (coverage thresholds sized for
+      # the whole suite) do not fail a run of four files.
+      - name: Run the unit tests
+        run: >-
+          uv run pytest -o addopts= -p no:cacheprovider
+          tests/unit/test_package_contents_gate.py
+          tests/unit/test_homebrew_formula_lock_sync.py
+          tests/unit/test_homebrew_formula_resources.py
+          tests/unit/test_homebrew_formula_version.py

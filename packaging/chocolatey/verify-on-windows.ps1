@@ -131,6 +131,14 @@ if ($meta.version -ne ($wheel.Name -replace '^automated_security_helper-(.+)-py3
     Fail-Verification "packed version $($meta.version) does not match the wheel $($wheel.Name)"
 }
 
+Write-Host '== 3b. the package-contents gate'
+# packaging/assert-package-contents.py on the packed .nupkg: every member must be one
+# build.ps1 stages or `choco pack` adds, none may be a binary, and the one wheel is handed
+# to the gate the published wheel passes. The .nupkg checks are stdlib-only, so the
+# runner's own python runs it and this job needs no uv.
+& python (Join-Path $Repo 'packaging\assert-package-contents.py') $nupkg
+Assert-NativeSuccess -What 'packaging/assert-package-contents.py' -ExitCode $LASTEXITCODE
+
 Write-Host '== 4. install it, and let Chocolatey resolve the python3 dependency'
 # The local directory first, then the community feed, so the ash package resolves to
 # the one just built and its python3 dependency resolves to the published one. This

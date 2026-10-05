@@ -110,6 +110,18 @@ if ($built.Count -ne 1) {
 $msix = $built[0].FullName
 Write-Host "   built: $(Split-Path -Leaf $msix)"
 
+Write-Step '2b. the package-contents gate, on the signed package'
+# packaging/assert-package-contents.py on the artifact makeappx and signtool produced, the
+# same file a user downloads: every member must be one the MSIX layout names, each
+# launcher must be a managed executable AppxManifest.xml declares, AppxBlockMap.xml must
+# match the payload byte for byte, and the one wheel is handed to the gate the published
+# wheel passes. `uv run --script` because the MSIX checks parse XML with defusedxml, which
+# the script's PEP 723 block declares.
+& uv run --script --python 3.13 (Join-Path $repoRoot 'packaging/assert-package-contents.py') $msix
+if ($LASTEXITCODE -ne 0) {
+    Fail "packaging/assert-package-contents.py exited $LASTEXITCODE on $(Split-Path -Leaf $msix)"
+}
+
 Write-Step '3. package metadata is well formed, read back out of the package'
 # An .msix is a zip. Reading the manifest back from the built artifact rather than from the
 # staged layout is the point: it proves what makeappx actually packed, the way the rpm script

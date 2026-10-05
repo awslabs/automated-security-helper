@@ -42,6 +42,26 @@ highest, because vendoring binaries into `tools/` is the format's own convention
 `packaging/chocolatey/README.chocolatey` says so at the point where someone would be
 tempted.
 
+## The package-contents gate
+
+`.github/scripts/assert-artifact-contents.py` refuses an .msix or a .nupkg at exit 2
+(it cannot judge them), so the packages built here have their own gate,
+`packaging/assert-package-contents.py`. It runs on the real artifact, after the build:
+
+| Format | Where it runs | What it checks beyond the wheel count |
+|---|---|---|
+| MSIX | `msix/verify-on-windows.ps1`, step 2b, on the signed package | every member is in the MSIX layout; the root `.exe` files are exactly the Application/@Executable names in the packaged `AppxManifest.xml` and exactly the wheel's console scripts, each a managed PE under 256 KiB; `AppxBlockMap.xml` matches every payload member's size and block hashes |
+| Chocolatey | `chocolatey/verify-on-windows.ps1`, step 3b, on the packed .nupkg | every member is one `build.ps1` stages or `choco pack` adds; no binaries |
+| Flatpak | `flatpak/build.sh`, check 4, on `build-dir/files` before export | every file is one the manifest installs; `bin/ash` is byte-identical to `ash-launcher.sh`; symlinks point only at it; the names in `bin/` are exactly the wheel's console scripts |
+
+In all three the one ASH wheel is extracted and handed to the wheel gate, and every
+other member goes through the wheel gate's payload rules (native binaries, vendored
+scanners, nested archives, size). The layouts are closed: a new file in a package needs a
+line in the gate in the same commit. `--self-test` plants payload in fixtures shaped like
+the real packages and runs in the `build` job of `ash-package.yml` before anything is
+built; `tests/unit/test_package_contents_gate.py` pins those fixtures to the member
+lists of real builds.
+
 ## Layout
 
 | Directory | Format | Verified by |
