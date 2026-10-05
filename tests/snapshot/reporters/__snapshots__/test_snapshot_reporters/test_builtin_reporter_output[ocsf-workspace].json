@@ -14,7 +14,7 @@
       "labels": [
         "workspace_project:api"
       ],
-      "logged_time": 1768478442000,
+      "logged_time": "<LOGGED_TIME>",
       "product": {
         "name": "Automated Security Helper",
         "vendor_name": "Amazon Web Services",
@@ -25,7 +25,7 @@
     "severity_id": 4,
     "status": "New",
     "status_id": 1,
-    "time": 1768478442000,
+    "time": "<TIME>",
     "type_uid": 200201,
     "vulnerabilities": [
       {
@@ -65,7 +65,7 @@
       "labels": [
         "workspace_project:web"
       ],
-      "logged_time": 1768478442000,
+      "logged_time": "<LOGGED_TIME>",
       "product": {
         "name": "Automated Security Helper",
         "vendor_name": "Amazon Web Services",
@@ -76,7 +76,7 @@
     "severity_id": 4,
     "status": "New",
     "status_id": 1,
-    "time": 1768478442000,
+    "time": "<TIME>",
     "type_uid": 200201,
     "vulnerabilities": [
       {
@@ -116,7 +116,7 @@
       "labels": [
         "workspace_project:web"
       ],
-      "logged_time": 1768478442000,
+      "logged_time": "<LOGGED_TIME>",
       "product": {
         "name": "Automated Security Helper",
         "vendor_name": "Amazon Web Services",
@@ -127,7 +127,7 @@
     "severity_id": 3,
     "status": "New",
     "status_id": 1,
-    "time": 1768478442000,
+    "time": "<TIME>",
     "type_uid": 200201,
     "vulnerabilities": [
       {

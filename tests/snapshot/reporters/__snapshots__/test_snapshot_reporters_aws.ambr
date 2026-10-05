@@ -1300,7 +1300,7 @@
                 'report_id': '<REPORT_ID>',
                 'summary_stats': dict({
                   'actionable': 6,
-                  'duration': '<DURATION>',
+                  'duration': 0.0,
                   'end': None,
                   'error': 1,
                   'failed': 3,
@@ -1324,7 +1324,7 @@
               'scanner_results': dict({
                 'bandit': dict({
                   'actionable_finding_count': 1,
-                  'duration': '<DURATION>',
+                  'duration': 1.25,
                   'finding_count': 2,
                   'severity_counts': dict({
                     'critical': 0,
@@ -1339,7 +1339,7 @@
                 }),
                 'cdk-nag': dict({
                   'actionable_finding_count': 0,
-                  'duration': '<DURATION>',
+                  'duration': 0.0,
                   'finding_count': 0,
                   'severity_counts': dict({
                     'critical': 0,
@@ -1354,7 +1354,7 @@
                 }),
                 'cfn-nag': dict({
                   'actionable_finding_count': 0,
-                  'duration': '<DURATION>',
+                  'duration': 0.25,
                   'finding_count': 0,
                   'severity_counts': dict({
                     'critical': 0,
@@ -1369,7 +1369,7 @@
                 }),
                 'checkov': dict({
                   'actionable_finding_count': 3,
-                  'duration': '<DURATION>',
+                  'duration': 7.5,
                   'finding_count': 4,
                   'severity_counts': dict({
                     'critical': 0,
@@ -1384,7 +1384,7 @@
                 }),
                 'detect-secrets': dict({
                   'actionable_finding_count': 0,
-                  'duration': '<DURATION>',
+                  'duration': 0.5,
                   'finding_count': 0,
                   'severity_counts': dict({
                     'critical': 0,
@@ -1399,7 +1399,7 @@
                 }),
                 'grype': dict({
                   'actionable_finding_count': 2,
-                  'duration': '<DURATION>',
+                  'duration': 3.0,
                   'finding_count': 2,
                   'severity_counts': dict({
                     'critical': 1,
@@ -1414,7 +1414,7 @@
                 }),
                 'npm-audit': dict({
                   'actionable_finding_count': 0,
-                  'duration': '<DURATION>',
+                  'duration': 0.0,
                   'finding_count': 0,
                   'severity_counts': dict({
                     'critical': 0,
@@ -1429,7 +1429,7 @@
                 }),
                 'semgrep': dict({
                   'actionable_finding_count': 0,
-                  'duration': '<DURATION>',
+                  'duration': 4.0,
                   'finding_count': 2,
                   'severity_counts': dict({
                     'critical': 0,
@@ -1444,7 +1444,7 @@
                 }),
                 'syft': dict({
                   'actionable_finding_count': 0,
-                  'duration': '<DURATION>',
+                  'duration': 2.0,
                   'finding_count': 0,
                   'severity_counts': dict({
                     'critical': 0,
@@ -1653,7 +1653,7 @@
             'report_id': '<REPORT_ID>',
             'summary_stats': dict({
               'actionable': 6,
-              'duration': '<DURATION>',
+              'duration': 0.0,
               'end': None,
               'error': 1,
               'failed': 3,
@@ -1677,7 +1677,7 @@
           'scanner_results': dict({
             'bandit': dict({
               'actionable_finding_count': 1,
-              'duration': '<DURATION>',
+              'duration': 1.25,
               'finding_count': 2,
               'severity_counts': dict({
                 'critical': 0,
@@ -1692,7 +1692,7 @@
             }),
             'cdk-nag': dict({
               'actionable_finding_count': 0,
-              'duration': '<DURATION>',
+              'duration': 0.0,
               'finding_count': 0,
               'severity_counts': dict({
                 'critical': 0,
@@ -1707,7 +1707,7 @@
             }),
             'cfn-nag': dict({
               'actionable_finding_count': 0,
-              'duration': '<DURATION>',
+              'duration': 0.25,
               'finding_count': 0,
               'severity_counts': dict({
                 'critical': 0,
@@ -1722,7 +1722,7 @@
             }),
             'checkov': dict({
               'actionable_finding_count': 3,
-              'duration': '<DURATION>',
+              'duration': 7.5,
               'finding_count': 4,
               'severity_counts': dict({
                 'critical': 0,
@@ -1737,7 +1737,7 @@
             }),
             'detect-secrets': dict({
               'actionable_finding_count': 0,
-              'duration': '<DURATION>',
+              'duration': 0.5,
               'finding_count': 0,
               'severity_counts': dict({
                 'critical': 0,
@@ -1752,7 +1752,7 @@
             }),
             'grype': dict({
               'actionable_finding_count': 2,
-              'duration': '<DURATION>',
+              'duration': 3.0,
               'finding_count': 2,
               'severity_counts': dict({
                 'critical': 1,
@@ -1767,7 +1767,7 @@
             }),
             'npm-audit': dict({
               'actionable_finding_count': 0,
-              'duration': '<DURATION>',
+              'duration': 0.0,
               'finding_count': 0,
               'severity_counts': dict({
                 'critical': 0,
@@ -1782,7 +1782,7 @@
             }),
             'semgrep': dict({
               'actionable_finding_count': 0,
-              'duration': '<DURATION>',
+              'duration': 4.0,
               'finding_count': 2,
               'severity_counts': dict({
                 'critical': 0,
@@ -1797,7 +1797,7 @@
             }),
             'syft': dict({
               'actionable_finding_count': 0,
-              'duration': '<DURATION>',
+              'duration': 2.0,
               'finding_count': 0,
               'severity_counts': dict({
                 'critical': 0,

@@ -3,7 +3,7 @@
   reporters.html.options.unknown_key is not a recognized option
 
 
-=== ASH Scan Completed in <DURATION>: Next Steps ===
+=== ASH Scan Completed in 42.5s: Next Steps ===
 View detailed findings...
   - SARIF: '.ash/ash_output/reports/ash.sarif'
   - JUnit: '.ash/ash_output/reports/ash.junit.xml'

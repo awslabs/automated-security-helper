@@ -1,13 +1,13 @@
 
-=== ASH Workspace Scan Completed in <DURATION> ===
+=== ASH Workspace Scan Completed in 42.5s ===
   workspace: <TMP>/repo/dev.code-workspace
   output:    <TMP>/repo/.ash/ash_output
 
   skipped  docs (no-changes)
   failed   legacy: git clone missing
-  FAIL     api -- 2 actionable of 7 at threshold MEDIUM (<DURATION>)
-  pass     web -- 0 actionable of 1 at threshold HIGH (<DURATION>)
-  pass     tools -- 0 actionable of 0 at threshold none (<DURATION>)
+  FAIL     api -- 2 actionable of 7 at threshold MEDIUM (12.2s)
+  pass     web -- 0 actionable of 1 at threshold HIGH (3.5s)
+  pass     tools -- 0 actionable of 0 at threshold none (0.8s)
 
   Aggregated results: <TMP>/repo/.ash/ash_output/ash_aggregated_results.json
   Per-project output: <TMP>/repo/.ash/ash_output/projects

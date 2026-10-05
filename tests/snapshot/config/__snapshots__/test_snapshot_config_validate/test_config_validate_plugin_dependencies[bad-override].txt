@@ -2,5 +2,5 @@ $ ash config validate-plugin-dependencies valid.yaml --config-overrides fail_on_
 Config file '<CWD>/valid.yaml' is not valid: Configuration is invalid after applying the requested overrides ['fail_on_findings=maybe']: 1 validation error for AshConfig
 fail_on_findings
   Input should be a valid boolean, unable to interpret input [type=bool_parsing, input_value='maybe', input_type=str]
-    For further information visit https://errors.pydantic.dev/2.13/v/bool_parsing
+    For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/bool_parsing
 [exit code: 1]

@@ -78,6 +78,6 @@ Community plugin modules
   Add a plugin module (blank to finish): my_org.ash_plugins
   Add a plugin module (blank to finish):
 ╭────────────────────────────────────────────── Done ──────────────────────────────────────────────╮
-│ Config written to <WORKSPACE>/.ash/.ash.yaml                                         │
+│ Config written to <WORKSPACE>/.ash/.ash.yaml                                                     │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 [exit code: 0]

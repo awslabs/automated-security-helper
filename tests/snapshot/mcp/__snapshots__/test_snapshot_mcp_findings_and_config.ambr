@@ -157,7 +157,7 @@
       'error': '''
         Failed to parse result file: 1 validation error for AshAggregatedResults
           Input should be an object [type=model_type, input_value=[], input_type=list]
-            For further information visit https://errors.pydantic.dev/2.13/v/model_type
+            For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/model_type
       ''',
       'success': False,
     }),
@@ -1588,7 +1588,7 @@
         'enabled': True,
         'name': 'cdk_nag',
         'offline_strategy': 'bundled',
-        'version': None,
+        'version': '<CDK_NAG_VERSION>',
       }),
       'cfn_nag': dict({
         'dependencies_satisfied': True,
@@ -1686,7 +1686,7 @@
       'error': '''
         Failed to parse results file: 1 validation error for AshAggregatedResults
           Invalid JSON: key must be a string at line 1 column 2 [type=json_invalid, input_value='{not json', input_type=str]
-            For further information visit https://errors.pydantic.dev/2.13/v/json_invalid
+            For further information visit https://errors.pydantic.dev/<PYDANTIC_VERSION>/v/json_invalid
       ''',
       'success': False,
     }),

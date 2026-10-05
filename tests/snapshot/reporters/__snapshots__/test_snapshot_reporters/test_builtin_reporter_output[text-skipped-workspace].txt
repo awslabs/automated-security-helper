@@ -42,10 +42,10 @@ The table below shows findings by scanner, with status based on severity thresho
 
 Scanner              Suppressed Critical     High   Medium      Low     Info   Duration Actionable Result   Threshold
 -------------------- -------- -------- -------- -------- -------- -------- ---------- ---------- -------- ---------------
-bandit                      0        0        1        0        0        0       <<DURATION>          1 FAILED   MEDIUM (global)
-checkov                     0        0        1        0        0        0       <<DURATION>          1 FAILED   MEDIUM (global)
-npm-audit                   0        0        0        0        0        0       <<DURATION>          0 MISSING  MEDIUM (global)
-semgrep                     0        0        0        1        0        0       <<DURATION>          1 FAILED   MEDIUM (global)
+bandit                      0        0        1        0        0        0       <1ms          1 FAILED   MEDIUM (global)
+checkov                     0        0        1        0        0        0       <1ms          1 FAILED   MEDIUM (global)
+npm-audit                   0        0        0        0        0        0       <1ms          0 MISSING  MEDIUM (global)
+semgrep                     0        0        0        1        0        0       <1ms          1 FAILED   MEDIUM (global)
 
 Top 2 Hotspots:
 Files with the highest number of security findings:

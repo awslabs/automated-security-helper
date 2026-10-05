@@ -1,5 +1,5 @@
 
-=== ASH Scan Completed in <DURATION>: Next Steps ===
+=== ASH Scan Completed in 42.5s: Next Steps ===
 View detailed findings...
   - SARIF: '.ash/ash_output/reports/ash.sarif'
   - JUnit: '.ash/ash_output/reports/ash.junit.xml'

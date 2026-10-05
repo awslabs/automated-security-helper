@@ -1,7 +1,7 @@
 # ASH Security Scan Report
 
 - **Report generated**: <TIMESTAMP>
-- **Time since scan**: <DURATION>
+- **Time since scan**: 0 minutes
 
 ## Scan Metadata
 

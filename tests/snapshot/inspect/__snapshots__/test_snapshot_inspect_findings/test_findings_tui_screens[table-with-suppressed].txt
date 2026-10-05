@@ -1,4 +1,4 @@
- ⭘                                    ASH Security Findings                                <DURATION>
+ ⭘                                    ASH Security Findings                                03:04:05
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
 │ ID  Rule ID                                     Severity  Scanner  File               Line  Messa│
 │ 1   B105                                        high      bandit   src/app.py         12    Possi│

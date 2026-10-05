@@ -1,8 +1,8 @@
 $ ash config update ash.yaml --dry-run --set global_settings.severity_threshold=LOW --set scanners.bandit.enabled=false --set 'global_settings.ignore_paths+={"path": "dist/**", "reason": "build output"}'
 [<LOG_TIME>] INFO     Applied modification: global_settings.severity_threshold=LOW
-                    INFO     Applied modification: scanners.bandit.enabled=false
-                    INFO     Applied modification: global_settings.ignore_paths+={"path": "dist/**",
-                             "reason": "build output"}
+             INFO     Applied modification: scanners.bandit.enabled=false
+             INFO     Applied modification: global_settings.ignore_paths+={"path": "dist/**",
+                      "reason": "build output"}
 # yaml-language-server: $schema=https://example.invalid/AshConfig.json
 project_name: snapshot-demo
 global_settings:

@@ -4,7 +4,7 @@
     "scan_time": "<TIMESTAMP>",
     "report_time": "<TIMESTAMP>",
     "tool_version": "<ASH_VERSION>",
-    "time_delta": "<DURATION>"
+    "time_delta": "0:00:00"
   },
   "scanner_metrics": [
     {
