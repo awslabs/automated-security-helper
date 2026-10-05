@@ -215,10 +215,10 @@ def pinned_console() -> Iterator[None]:
       as legacy and renders one column narrower. CliRunner's stream never is, so that
       is turned off; a simulated Windows host still gets ASH's own explicit
       ``legacy_windows=True`` log console, because that is ASH's choice, not rich's.
-    - Log records are stamped with a frozen clock. RichHandler prints a record's time
-      only when it differs from the previous record's, so with a live clock whether
-      the second line of a run has a time column depends on whether a second ticked
-      between them. The value itself is masked as ``[<LOG_TIME>]`` by the normalizer.
+    - Log records are stamped with a frozen clock, so a log file a run writes into its
+      tmp dir carries one instant. The console's time column does not depend on it:
+      tests/snapshot/conftest.py draws that column as the constant ``[<LOG_TIME>]``
+      for every snapshot test (normalize.py's docstring says why a text rule cannot).
     """
     import logging
 

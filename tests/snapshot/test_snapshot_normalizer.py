@@ -10,13 +10,18 @@ reports it. So every masking rule below has a paired "this survives" case.
 
 from __future__ import annotations
 
+import io
 import json
+import logging
 import sys
+import time
 import warnings
 from datetime import date
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import pytest
+from rich.console import Console
+from rich.logging import RichHandler
 
 from tests.snapshot.support.normalize import (
     REPO_ROOT,
@@ -411,3 +416,66 @@ class TestFileUriSpellings:
 
     def test_a_concrete_path_asks_pathlib(self, tmp_path):
         assert _file_uri(tmp_path) == tmp_path.as_uri()
+
+
+class TestLogTimeColumn:
+    """The console log's time column is drawn as a constant (tests/snapshot/conftest.py).
+
+    These run through rich's real handler, so they assert what the autouse fixture does,
+    not what a text rule would make of it afterwards.
+    """
+
+    @staticmethod
+    def _render(created: list[float]) -> str:
+        console = Console(file=io.StringIO(), width=60, color_system=None)
+        handler = RichHandler(console=console, show_path=False)
+        logger = logging.getLogger("snapshot-normalizer-log-time")
+        logger.handlers = [handler]
+        logger.propagate = False
+        try:
+            for i, when in enumerate(created):
+                record = logger.makeRecord(
+                    logger.name, logging.INFO, __file__, 1, "row %d", (i,), None
+                )
+                record.created = when
+                handler.handle(record)
+        finally:
+            logger.handlers = []
+        # rich pads each row to the console width; the snapshots trim it the same way.
+        return "\n".join(line.rstrip() for line in console.file.getvalue().splitlines())
+
+    def test_a_repeated_second_and_a_new_second_render_identically(self):
+        same_second = self._render([1_900_000_000.1, 1_900_000_000.9])
+        next_second = self._render([1_900_000_000.9, 1_900_000_001.1])
+        far_apart = self._render([0.0, 1_900_000_000.0])
+        assert same_second == next_second == far_apart
+        assert same_second.splitlines() == [
+            "[<LOG_TIME>] INFO     row 0",
+            "             INFO     row 1",
+        ]
+
+    def test_the_column_ignores_the_timezone(self, monkeypatch):
+        rendered = []
+        for tz in ("UTC", "Pacific/Kiritimati", "America/Adak"):
+            monkeypatch.setenv("TZ", tz)
+            if hasattr(time, "tzset"):
+                time.tzset()
+            rendered.append(self._render([1_900_000_000.0, 1_900_000_000.5]))
+        monkeypatch.delenv("TZ")
+        if hasattr(time, "tzset"):
+            time.tzset()
+        assert len(set(rendered)) == 1
+
+    def test_a_date_in_the_message_survives(self):
+        console = Console(file=io.StringIO(), width=80, color_system=None)
+        handler = RichHandler(console=console, show_path=False, markup=False)
+        logger = logging.getLogger("snapshot-normalizer-log-time-msg")
+        logger.handlers = [handler]
+        logger.propagate = False
+        try:
+            logger.info("expires [10/05/31 17:22:49]")
+        finally:
+            logger.handlers = []
+        assert [line.rstrip() for line in console.file.getvalue().splitlines()] == [
+            "[<LOG_TIME>] INFO     expires [10/05/31 17:22:49]"
+        ]

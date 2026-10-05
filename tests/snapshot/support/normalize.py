@@ -22,9 +22,21 @@ What is masked, and why each is safe to mask
   ``scan-YYYYMMDDHHMMSS`` id MCP get_scan_results mints per call, and today's date
   (plus yesterday and tomorrow, so a run that crosses midnight still matches). A date
   a fixture chose, such as a suppression's expiry, is not today and survives.
-- The time column of ASH's console log (rich's ``RichHandler``), which prints each
-  record's creation time as ``[MM/DD/YY HH:MM:SS]`` in local time. Only the bracketed
-  form is masked; a bare ``10/05/26`` in a message survives.
+- The time column of ASH's console log (rich's ``RichHandler``). This one is not
+  masked here but pinned where it is drawn: tests/snapshot/conftest.py makes every
+  ``LogRender`` print the constant ``[<LOG_TIME>]`` instead of the record's time, for
+  every snapshot test. A text rule cannot do that job. rich prints the time only when
+  it differs from the previous row's, so with a real clock whether row two has a time
+  is a race with the second hand; rich's ``[%x %X]`` is 19 characters wide in the C
+  locale and wider in a locale that sets LC_TIME and spells out the year or AM/PM; and
+  the message column is whatever is left of the line, so every wrap point moves with
+  that width. Masking the stamp after the fact fixes none of the indentation or
+  wrapping. With the constant, the first row of each handler shows ``[<LOG_TIME>]``,
+  every later row shows the same 12 blanks, and the message column is the same width
+  under any clock, locale or TZ.
+  ``_LOG_TIME`` below is the backstop for a C-locale stamp drawn some other way (it
+  masks the stamp only, so such output would still fail on its indentation, loudly).
+  A bare or bracketed date in a message survives.
 - Durations: a number followed by a time unit, in prose. Only while ``mask_durations``
   is on, which is the default: a test whose output holds wall-clock time ASH measured
   itself (a real scan, a progress bar) keeps it. A test whose inputs pin time fully

@@ -127,8 +127,11 @@ def _pinned_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(os, "get_terminal_size", _wide_log_terminal)
     # rich's log handler prints the wall-clock time on a line, then leaves the column
     # blank on every following line until the second changes. Whether a slow line
-    # shows a new time is a race with the clock, so the time column renders one
-    # constant token: the first line of each handler shows it, and no later one does.
+    # shows a new time is a race with the clock, and the column's width follows the
+    # locale's %x %X, so the time column renders one constant token instead: the
+    # first line of each handler shows it, and every later one shows as many blanks.
+    # Handlers are built per get_logger() call and _fresh_ash_loggers drops them
+    # between tests, so "first line" is a property of the command, not of test order.
     monkeypatch.setattr(LogRender, "__call__", _log_render_without_clock)
 
 
