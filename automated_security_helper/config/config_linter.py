@@ -1106,6 +1106,10 @@ class ConfigLinter:
                             f"{swapped!r}. {consequence}"
                         ),
                         fixable=True,
+                        fix_description=(
+                            f"Rename {segment_name}.{key!r} to the canonical "
+                            f"form {swapped!r}"
+                        ),
                     )
                 )
 
