@@ -81,6 +81,12 @@ rpm_install() {
   sed -n -E 's/^ *(Installing|Upgrading) *: /   \1: /p' /tmp/dnf-install.log
 }
 
+# Exit 0 when $1 sorts strictly below $2 under rpm's own comparator, the same call
+# packaging/test-version-map.sh makes, rather than a reimplementation of it.
+rpm_sorts_below() {
+  [ "$(rpm --eval "%{lua: print(rpm.vercmp('$1', '$2'))}")" = "-1" ]
+}
+
 interpreter_installed() {
   # The list is captured before it is searched. `rpm -q` on three names exits non-zero
   # whenever any one is absent, and piping `rpm -qa` into `grep -q` lets grep exit on the
@@ -181,6 +187,12 @@ if [ "$MODE" = upgrade ]; then
   PREV_WHEEL="$(one_wheel "$PREV_DIST")"
   PREV_VERSION="$(wheel_version "$PREV_WHEEL")"
   [ -n "$PREV_VERSION" ] || vl_fail "cannot read a version from $(basename "$PREV_WHEEL")"
+  # shellcheck source=packaging/version-map.sh
+  . "$REPO/packaging/version-map.sh"
+  # If N-1 does not sort below N, `dnf upgrade` below is not an upgrade and nothing
+  # after it means what its message says. The deb leg makes the same check.
+  rpm_sorts_below "$(pkg_version "$PREV_VERSION" rpm)" "$(pkg_version "$VERSION" rpm)" \
+    || vl_fail "the N-1 wheel ($PREV_VERSION) does not sort below N ($VERSION)"
   PREV_RPM="$(build_rpm "$PREV_WHEEL" "$OUT/prev")"
   echo "   built N-1: $PREV_RPM"
   vl_payload_gate "$PREV_RPM"
@@ -196,8 +208,6 @@ if [ "$MODE" = upgrade ]; then
   vl_probe_start
   rpm_install upgrade "$RPM"
   vl_probe_stop_and_assert
-  # shellcheck source=packaging/version-map.sh
-  . "$REPO/packaging/version-map.sh"
   [ "$(rpm -q --qf '%{VERSION}' ash)" = "$(pkg_version "$VERSION" rpm)" ] \
     || vl_fail "rpm reports $(rpm -q ash) after the upgrade"
   vl_assert_installed_version "$VERSION"
