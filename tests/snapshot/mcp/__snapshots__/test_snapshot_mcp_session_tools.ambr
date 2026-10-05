@@ -765,6 +765,24 @@
         'Starting ASH workspace scan: <TMP>/allowed/work/dev.code-workspace',
       ]),
       list([
+        'report_progress',
+        "message='Workspace scan started: 0/2 projects complete'",
+        'progress=0.0',
+        'total=2.0',
+      ]),
+      list([
+        'report_progress',
+        "message='api complete (1/2 projects)'",
+        'progress=1.0',
+        'total=2.0',
+      ]),
+      list([
+        'report_progress',
+        "message='web complete (2/2 projects)'",
+        'progress=2.0',
+        'total=2.0',
+      ]),
+      list([
         'info',
         'Workspace scan finished with exit code 0 across 2 project(s)',
       ]),
@@ -952,7 +970,7 @@
     'client_messages': list([
     ]),
     'result': dict({
-      'error': 'invalid base64 payload: Only base64 data is allowed',
+      'error': 'invalid base64 payload: Incorrect padding',
       'session_id': 'session-a',
       'success': False,
     }),

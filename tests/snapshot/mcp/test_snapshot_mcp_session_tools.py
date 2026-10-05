@@ -19,6 +19,7 @@ tests/unit/cli/mcp/test_workspace_registration.py does.
 from __future__ import annotations
 
 import base64
+import functools
 import hashlib
 import io
 import json
@@ -172,7 +173,11 @@ async def test_zip_upload_finalize_and_clear(snapshot):
         "set_source_zip_chunk",
         upload_id="upload-2",
         sequence=0,
-        data_b64="not base64!",
+        # The text after "invalid base64 payload:" is binascii's own message, so the
+        # input is one whose message is the same on Python 3.10 through 3.14;
+        # "not base64!" reads "Non-base64 digit found" on 3.10 and "Only base64
+        # data is allowed" from 3.12.
+        data_b64="abc",
         last=True,
         headers=_SESSION,
     )
@@ -337,7 +342,14 @@ def _workspace(root: Path, folders) -> Path:
 
 @pytest.fixture
 def fake_execute_workspace(monkeypatch):
-    """Return a completed result per planned project; scan nothing."""
+    """Return a completed result per planned project; scan nothing.
+
+    Returns the semaphore the scan's ``report_progress`` must release on each
+    report; see test_workspace_tools.
+    """
+    import threading
+
+    progress_reports = threading.Semaphore(0)
     from automated_security_helper.cli.mcp import workspace as mcp_workspace
     from automated_security_helper.models.workspace import (
         ProjectRunStatus,
@@ -345,9 +357,26 @@ def fake_execute_workspace(monkeypatch):
         WorkspaceResults,
     )
     from automated_security_helper.workspace import execution as execution_module
-    from automated_security_helper.workspace.execution import WorkspaceRunResult
+    from automated_security_helper.workspace.execution import (
+        PROJECTS_DIR_NAME,
+        WorkspaceRunResult,
+    )
+
+    AGGREGATED_RESULTS_FILENAME = mcp_workspace.AGGREGATED_RESULTS_FILENAME
 
     def _execute(plan, settings, **kwargs):
+        # The progress monitor runs beside this on the event loop and reports what
+        # it sees, so its messages depend on timing unless this waits for them:
+        # the initial report first, then one "complete" report per project after
+        # each project's results file appears, as a real run would write it.
+        assert progress_reports.acquire(timeout=60), "no initial progress report"
+        for project in plan.active_projects:
+            output = Path(settings.output_dir) / PROJECTS_DIR_NAME / project.key
+            (output / AGGREGATED_RESULTS_FILENAME).write_text("{}", encoding="utf-8")
+        for project in plan.active_projects:
+            assert progress_reports.acquire(timeout=60), (
+                f"no completion report for {project.key}"
+            )
         projects = [
             WorkspaceProjectResult(
                 project=project.key,
@@ -377,6 +406,14 @@ def fake_execute_workspace(monkeypatch):
 
     monkeypatch.setattr(execution_module, "execute_workspace", _execute)
     monkeypatch.setattr(mcp_workspace, "execute_workspace", _execute)
+    # The monitor's real 5 s poll interval only changes how long this waits, not
+    # what it reports.
+    monkeypatch.setattr(
+        mcp_workspace,
+        "monitor_workspace_progress",
+        functools.partial(mcp_workspace.monitor_workspace_progress, poll_interval=0.01),
+    )
+    return progress_reports
 
 
 @pytest.mark.asyncio
@@ -411,10 +448,14 @@ async def test_workspace_tools(
         "resolve_ash_workspace", workspace_file=str(workspace), profile="nope"
     )
 
-    scanned = await _call(
+    ctx = make_ctx()
+    ctx.report_progress.side_effect = lambda **_: fake_execute_workspace.release()
+    scanned = record(
         "run_ash_workspace_scan",
-        workspace_file=str(workspace),
-        allow_missing_projects=True,
+        await mcp_server.run_ash_workspace_scan(
+            ctx, workspace_file=str(workspace), allow_missing_projects=True
+        ),
+        ctx,
     )
     for scan_id in scanned["result"].get("scan_ids", {}).values():
         snapshot_normalizer.add_literal(scan_id, "PROJECT_SCAN_ID")
