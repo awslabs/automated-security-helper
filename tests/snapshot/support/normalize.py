@@ -18,6 +18,12 @@ What is masked, and why each is safe to mask
   (``<TMP>``, ``<REPO>`` ...) in every spelling ASH can emit: native, POSIX,
   JSON-escaped and ``file://`` URI. After the token, backslashes become ``/``, so a
   Windows path and a POSIX path snapshot identically.
+- The Windows spelling of a registered relative path (``add_relative_path``), which is
+  written in its POSIX form and is otherwise left alone: ``.ash\\.ash.yaml`` becomes
+  ``.ash/.ash.yaml``. ASH prints ``Path(".ash/.ash.yaml")``, the default ``--config``
+  of the ``ash config`` commands, with the native separator, so on Windows every
+  lint message named the file with a backslash. Only registered paths are rewritten,
+  because a backslash in arbitrary text is not known to be a separator.
 - The time column of ASH's console log (rich's ``RichHandler``). This one is not
   masked here but pinned where it is drawn: tests/snapshot/conftest.py makes every
   ``LogRender`` print the constant ``[<LOG_TIME>]`` instead of the record's time, for
@@ -89,7 +95,8 @@ without it.
 ``VOLATILE_KEYS`` is both key sets.
 
 What is deliberately NOT masked: counts, severities, rule ids, messages, relative
-paths, ordering, column layout, box-drawing characters and emoji. Those are what a
+paths (a registered one only has its separators rewritten), ordering, column layout,
+box-drawing characters and emoji. Those are what a
 user reads, so a change to any of them must show up as a snapshot diff.
 """
 
@@ -102,7 +109,7 @@ import socket
 import tempfile
 from dataclasses import dataclass, field
 from datetime import date, timedelta
-from pathlib import Path, PurePath
+from pathlib import Path, PurePath, PurePosixPath
 from typing import Any
 from urllib.parse import quote_from_bytes
 
@@ -310,6 +317,8 @@ class SnapshotNormalizer:
 
     roots: list[tuple[PurePath, str]] = field(default_factory=list)
     extra_literals: dict[str, str] = field(default_factory=dict)
+    #: Relative paths, POSIX-spelled, whose Windows spelling is rewritten to POSIX.
+    relative_paths: list[str] = field(default_factory=list)
     # Off by default: a test opts in only for wall-clock time it cannot pin. See "Time"
     # in the module docstring.
     #: Mask ISO instants, report-id and scan-id stamps, today's date, INSTANT_KEYS.
@@ -329,6 +338,28 @@ class SnapshotNormalizer:
         """Mask one exact string, such as a scan id a test cannot choose."""
         if value:
             self.extra_literals[value] = f"<{token}>"
+
+    def add_relative_path(self, path: str) -> None:
+        """Write the Windows spelling of relative ``path`` (POSIX-spelled) as POSIX."""
+        posix = PurePosixPath(path)
+        if posix.is_absolute() or len(posix.parts) < 2:
+            raise ValueError(
+                f"{path!r}: only a relative path with a separator has a Windows "
+                "spelling to rewrite"
+            )
+        self.relative_paths.append(posix.as_posix())
+
+    def _posix_relative_paths(self, out: str) -> str:
+        for posix in self.relative_paths:
+            # JSON-escaped first: it is the longer spelling, and the single-backslash
+            # one is not a substring of it.
+            for windows in (posix.replace("/", "\\\\"), posix.replace("/", "\\")):
+                out = re.sub(
+                    _ROOT_BEFORE + re.escape(windows) + _ROOT_AFTER,
+                    lambda _m, posix=posix: posix,
+                    out,
+                )
+        return out
 
     # ------------------------------------------------------------------ text --
 
@@ -360,6 +391,7 @@ class SnapshotNormalizer:
                 )
             else:
                 out = out.replace(spelling, token)
+        out = self._posix_relative_paths(out)
         out = _PYDANTIC_ERROR_URL.sub(r"\1<PYDANTIC_VERSION>/", out)
         tokens = sorted({token for _, token in self.roots}, key=len, reverse=True)
         if tokens:
@@ -423,6 +455,10 @@ class SnapshotNormalizer:
         return value
 
 
+#: The default ``--config`` of the ``ash config`` commands, which they print relative.
+ASH_DEFAULT_CONFIG = ".ash/.ash.yaml"
+
+
 def default_normalizer(
     *, tmp_paths: list[Path] | tuple[Path, ...] = ()
 ) -> SnapshotNormalizer:
@@ -443,6 +479,7 @@ def default_normalizer(
     if not (cwd.is_relative_to(repo) or repo.is_relative_to(cwd)):
         normalizer.add_root(cwd, "CWD")
     normalizer.add_root(Path.home(), "HOME")
+    normalizer.add_relative_path(ASH_DEFAULT_CONFIG)
     version = get_ash_version()
     if version:
         normalizer.add_literal(str(version), "ASH_VERSION")

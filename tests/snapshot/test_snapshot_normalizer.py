@@ -78,6 +78,16 @@ class TestMasked:
         payload = json.dumps({"path": r"C:\work\repo\src\app.py"})
         assert json.loads(n.text(payload)) == {"path": "<REPO>/src/app.py"}
 
+    def test_windows_spelling_of_the_default_config_path(self, normalizer):
+        # What `ash config lint` printed on windows-latest, plain and JSON-escaped.
+        out = normalizer.text(
+            "Linting configuration file: .ash\\.ash.yaml\n"
+            + json.dumps({"config": ".ash\\.ash.yaml"})
+        )
+        assert out == (
+            'Linting configuration file: .ash/.ash.yaml\n{"config": ".ash/.ash.yaml"}'
+        )
+
     def test_repo_root(self, normalizer):
         assert normalizer.text(str(REPO_ROOT / "ash")) == "<REPO>/ash"
 
@@ -228,6 +238,21 @@ class TestSurvives:
     def test_counts_severities_rule_ids_and_relative_paths(self, normalizer):
         text = "CRITICAL 2  HIGH 10  B105 src/app.py:12  exit code 2"
         assert normalizer.text(text) == text
+
+    def test_backslashes_outside_a_registered_relative_path(self, normalizer):
+        # An unregistered relative path keeps its spelling, and so does text that
+        # only contains the registered one: a longer name, or a regex escape.
+        text = (
+            "src\\app.py  x.ash\\.ash.yaml  .ash\\.ash.yaml.bak  .ash\\.ash.yamlx  "
+            "pattern \\.ash\\.ash\\.yaml"
+        )
+        assert normalizer.text(text) == text
+
+    def test_add_relative_path_refuses_what_it_cannot_rewrite(self):
+        n = SnapshotNormalizer()
+        for path in ("/etc/ash.yaml", "ash.yaml"):
+            with pytest.raises(ValueError):
+                n.add_relative_path(path)
 
     def test_a_date_that_is_not_today(self, timed):
         assert timed.text("expires 2031-01-31") == "expires 2031-01-31"
