@@ -132,7 +132,15 @@ def docs(applier: dict) -> list:
 
 
 def test_module_defines_the_names_the_handler_uses(applier: dict) -> None:
-    for name in ("documents", "handler", "respond", "call", "request", "CLUSTER", "NAMESPACED"):
+    for name in (
+        "documents",
+        "handler",
+        "respond",
+        "call",
+        "request",
+        "CLUSTER",
+        "NAMESPACED",
+    ):
         assert name in applier, f"the applier defines no {name}"
     assert callable(applier["documents"])
     assert callable(applier["handler"])
@@ -192,7 +200,9 @@ class TestDeleteRule:
             ("/clusterrolebindings/", "the ClusterRoleBinding"),
         ],
     )
-    def test_never_deletes(self, applier: dict, docs: list, fragment: str, what: str) -> None:
+    def test_never_deletes(
+        self, applier: dict, docs: list, fragment: str, what: str
+    ) -> None:
         deleted, _ = self._split(applier, docs)
         offenders = [path for path in deleted if fragment in path]
         assert offenders == [], f"would delete {what}: {offenders}"
@@ -255,7 +265,9 @@ class TestCrds:
             assert set(column) == {"name", "type", "jsonPath"}
 
     @pytest.mark.parametrize("plural", sorted(EXPECTED_CRDS))
-    def test_spec_validates_what_the_operator_needs(self, docs: list, plural: str) -> None:
+    def test_spec_validates_what_the_operator_needs(
+        self, docs: list, plural: str
+    ) -> None:
         version = self._crds(docs)[plural]["spec"]["versions"][0]
         spec_schema = version["schema"]["openAPIV3Schema"]["properties"]["spec"]
         assert spec_schema["required"] == EXPECTED_CRDS[plural]["required"]
@@ -283,7 +295,9 @@ class TestRbac:
             }
         ]
 
-    def test_namespaced_rules_are_set_equal_to_the_operator_table(self, docs: list) -> None:
+    def test_namespaced_rules_are_set_equal_to_the_operator_table(
+        self, docs: list
+    ) -> None:
         """Set equality, so an OVER-grant fails as loudly as a missing grant.
 
         A "contains everything required" assertion passes with an extra verb sitting
@@ -307,18 +321,24 @@ class TestRbac:
         assert got == want
 
     def test_no_rule_is_empty_in_any_field(self, docs: list) -> None:
-        for manifest in self._by_kind(docs, "Role") + self._by_kind(docs, "ClusterRole"):
+        for manifest in self._by_kind(docs, "Role") + self._by_kind(
+            docs, "ClusterRole"
+        ):
             for rule in manifest["rules"]:
                 assert rule["apiGroups"] and rule["resources"] and rule["verbs"]
 
     def test_no_wildcards_anywhere(self, docs: list) -> None:
-        for manifest in self._by_kind(docs, "Role") + self._by_kind(docs, "ClusterRole"):
+        for manifest in self._by_kind(docs, "Role") + self._by_kind(
+            docs, "ClusterRole"
+        ):
             for rule in manifest["rules"]:
                 assert "*" not in rule["apiGroups"] + rule["resources"] + rule["verbs"]
 
     def test_never_asks_for_secrets(self, docs: list) -> None:
         """A scanner able to read every Secret is a far larger target than one that cannot."""
-        for manifest in self._by_kind(docs, "Role") + self._by_kind(docs, "ClusterRole"):
+        for manifest in self._by_kind(docs, "Role") + self._by_kind(
+            docs, "ClusterRole"
+        ):
             for rule in manifest["rules"]:
                 assert "secrets" not in rule["resources"]
 
@@ -451,7 +471,8 @@ class TestResponseBound:
 
         applier["urllib"].request.urlopen = fake_urlopen
         event = {
-            "StackId": "arn:aws:cloudformation:us-east-1:123456789012:stack/s/" + "u" * 36,
+            "StackId": "arn:aws:cloudformation:us-east-1:123456789012:stack/s/"
+            + "u" * 36,
             "RequestId": "r" * 36,
             "LogicalResourceId": "L" * 255,
             "ResponseURL": "https://example.invalid/presigned",
