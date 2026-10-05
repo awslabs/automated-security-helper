@@ -793,6 +793,23 @@ def test_a_line_commented_module_source_is_not_read(tree: Path) -> None:
     assert "No unrecorded divergence" in result.stdout
 
 
+def test_escapes_inside_strings_do_not_end_or_open_them(tree: Path) -> None:
+    """`\\"` does not close a string and `$${` does not open a template.
+
+    Each input puts a comment marker where a stripper that got the escape
+    wrong would be outside the string, so the resource after it is lost.
+    """
+    checker = load_checker(tree)
+    for text in (
+        'x = "a\\"/*"\nresource "aws_sns_topic" "t" {}\n',
+        'x = "$${"\ny = "/*"\nresource "aws_sns_topic" "t" {}\n',
+        'x = "%%{"\ny = "/*"\nresource "aws_sns_topic" "t" {}\n',
+    ):
+        stripped = checker.strip_hcl_comments(text)
+        assert stripped == text, text
+        assert checker.TF_RESOURCE.findall(stripped) == [("aws_sns_topic", "t")]
+
+
 def test_comment_markers_inside_strings_and_heredocs_are_kept(tree: Path) -> None:
     """The tree has ARNs ending in `/*`; a naive stripper would eat resources."""
     checker = load_checker(tree)
