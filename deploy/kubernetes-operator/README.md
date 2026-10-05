@@ -207,8 +207,10 @@ derived from the per-scanner, per-converter and content-database records in it.
 When the scan image's `python3` cannot import ASH (an ASH installed as a `uv tool`,
 say, or one predating that function), the collector falls back to the per-scanner
 statuses, which see ERROR, MISSING and a run where nothing reached a verdict but not
-a converter or rule gap, and `.status.coverageSource` reads `scanner-statuses`
-instead of `ash-coverage-rule`. `.status.coverageGaps` names each gap.
+a converter, rule or content-database gap, and `.status.coverageSource` reads
+`scanner-statuses` instead of `ash-coverage-rule`. Because of that blind spot the
+fallback reports `coverageComplete: false` when it sees a gap and `null` (unknown)
+when it sees none, never `true`. `.status.coverageGaps` names each gap.
 
 Exit 1 is also ASH's code for an error during execution. So `Incomplete` needs the
 merged report to exist **and** to name a gap; exit 1 over a report with no gap is

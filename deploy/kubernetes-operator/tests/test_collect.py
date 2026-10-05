@@ -93,7 +93,34 @@ class TestTheThreeAnswers:
         )
         assert code == 0
         assert summary["phase"] == PHASE_CLEAN
-        assert summary["coverageComplete"] is True
+        # True only from ASH's own rule. Without ASH the collector can see scanner
+        # statuses alone, so it reports coverage as unknown rather than complete.
+        expected = {"ash-coverage-rule": True, "scanner-statuses": None}
+        assert summary["coverageComplete"] is expected[summary["coverageSource"]]
+
+    def test_exit_zero_without_ash_reports_coverage_unknown(self, tmp_path, monkeypatch):
+        block_ash_import(monkeypatch)
+        code, summary = run_collector(
+            tmp_path,
+            monkeypatch,
+            exit_code=0,
+            report=merged_report({"bandit": "PASSED", "detect-secrets": "PASSED"}, actionable=0),
+        )
+        assert code == 0
+        assert summary["phase"] == PHASE_CLEAN
+        assert summary["coverageSource"] == "scanner-statuses"
+        assert summary["coverageComplete"] is None
+
+    def test_exit_one_without_ash_and_no_visible_gap_is_still_refused(self, tmp_path, monkeypatch):
+        block_ash_import(monkeypatch)
+        code, summary = run_collector(
+            tmp_path,
+            monkeypatch,
+            exit_code=1,
+            report=merged_report({"bandit": "PASSED", "detect-secrets": "PASSED"}, actionable=0),
+        )
+        assert code == 1
+        assert summary["phase"] == PHASE_REFUSED
 
     def test_exit_two_is_findings(self, tmp_path, monkeypatch):
         code, summary = run_collector(
@@ -168,6 +195,14 @@ class TestCoverageAssessment:
         assert coverage["source"] == "scanner-statuses"
         assert coverage["complete"] is False
         assert coverage["gaps"] == ["scanner grype: ERROR"]
+
+    def test_the_fallback_never_certifies_complete_coverage(self, monkeypatch):
+        # Scanner statuses cannot see a converter, rule or content-database gap, so
+        # every scanner PASSED is "no gap visible here", not "complete".
+        block_ash_import(monkeypatch)
+        report = json.loads(merged_report({"bandit": "PASSED", "grype": "FAILED"}, actionable=1))
+        coverage = collect.assess_coverage(report)
+        assert coverage == {"complete": None, "source": "scanner-statuses", "gaps": []}
 
     def test_an_unrecognized_status_is_a_gap(self, monkeypatch):
         block_ash_import(monkeypatch)

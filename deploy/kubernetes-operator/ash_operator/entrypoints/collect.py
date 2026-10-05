@@ -157,8 +157,10 @@ def assess_coverage(merged: dict) -> dict:
     ``uv tool`` or ``pipx`` environment, or predate those functions. Then the
     answer falls back to the per-scanner statuses in the report, which see an
     ERROR or MISSING scanner and a run where nothing reached a verdict, but not a
-    converter, rule or content-database gap. ``source`` says which happened, so a
-    weaker answer is visible in ``.status`` rather than presented as ASH's.
+    converter, rule or content-database gap. So the fallback can answer False and
+    never True: with no gap visible it answers None, unknown. ``source`` says which
+    happened, so a weaker answer is visible in ``.status`` rather than presented as
+    ASH's.
     """
     try:
         from automated_security_helper.core.resource_management.scan_tracking import (
@@ -196,7 +198,10 @@ def assess_coverage(merged: dict) -> dict:
     )
     if not gaps and all(status == "SKIPPED" for status in statuses.values()):
         gaps = ["no scanner ran"]
-    return {"complete": not gaps, "source": "scanner-statuses", "gaps": gaps}
+    # A gap seen here is a real gap. No gap seen here is not complete coverage:
+    # statuses cannot show a converter, rule or content-database gap, so the answer
+    # is unknown (None) rather than True. verdict_phase refuses exit 1 over None.
+    return {"complete": False if gaps else None, "source": "scanner-statuses", "gaps": gaps}
 
 
 def verdict_phase(*, exit_code: int | None, coverage_complete: bool | None) -> str:
