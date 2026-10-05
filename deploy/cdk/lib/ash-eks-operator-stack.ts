@@ -798,12 +798,12 @@ def deployment(namespace, image):
         "serviceAccountName": OPERATOR_SA,
         "securityContext": {
             "runAsNonRoot": True,
-            # 1000, NOT AN INVENTED HIGH UID. The image creates one user at uid 1000 and
-            # ends with USER 1000; its own manifest sets runAsUser: 1000 and the
-            # Dockerfile says the uid must match. An earlier 10001 here ran the process
-            # as a uid with no passwd entry and no home, so pwd.getpwuid raises
-            # KeyError.
-            "runAsUser": 1000,
+            # THE IMAGE'S UID, NOT AN INVENTED ONE. deploy/kubernetes-operator/Dockerfile
+            # creates one user at uid 10001 and ends with USER 10001, and its own
+            # manifest sets the same runAsUser. A uid the image does not create runs
+            # the process with no passwd entry and no home, so pwd.getpwuid raises
+            # KeyError; that happened here once, with the numbers the other way round.
+            "runAsUser": 10001,
             "seccompProfile": {"type": "RuntimeDefault"},
         },
         "containers": [container],

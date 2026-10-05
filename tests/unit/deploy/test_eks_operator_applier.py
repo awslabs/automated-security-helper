@@ -529,13 +529,24 @@ class TestDeployment:
         assert "command" not in container
 
     def test_runs_as_the_uid_the_image_has(self, docs: list) -> None:
-        """The image creates one user at uid 1000 and ends with `USER 1000`.
+        """The uid is the one the operator Dockerfile creates and selects with USER.
 
-        An invented high uid runs the process with no passwd entry and no home, so
-        `pwd.getpwuid(os.getuid())` raises `KeyError`.
+        A uid the image does not create runs the process with no passwd entry and no
+        home, so `pwd.getpwuid(os.getuid())` raises `KeyError`. Read from the
+        Dockerfile rather than written here, so changing the image's uid without this
+        stack fails here instead of in a cluster.
         """
+        dockerfile = (
+            REPO_ROOT / "deploy" / "kubernetes-operator" / "Dockerfile"
+        ).read_text()
+        user = re.search(r"^USER\s+(\d+)\s*$", dockerfile, re.MULTILINE)
+        created = re.search(r"useradd\s+--uid\s+(\d+)\b", dockerfile)
+        assert user and created, (
+            "the operator Dockerfile no longer creates a numeric uid"
+        )
+        assert user.group(1) == created.group(1)
         pod = self._deployment(docs)["spec"]["template"]["spec"]
-        assert pod["securityContext"]["runAsUser"] == 1000
+        assert pod["securityContext"]["runAsUser"] == int(user.group(1))
         assert pod["securityContext"]["runAsNonRoot"] is True
         assert pod["serviceAccountName"] == "ash-operator"
 
